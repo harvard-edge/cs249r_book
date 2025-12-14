@@ -12,7 +12,7 @@ Several TinyTorch modules have grown quite large (1000+ lines), making them diff
 
 **Current Complex Modules:**
 - `02_tensor/tensor_dev.py`: 1,578 lines
-- `15_mlops/mlops_dev.py`: 1,667 lines  
+- `15_mlops/mlops_dev.py`: 1,667 lines
 - `13_kernels/kernels_dev.py`: 1,381 lines
 - `05_dense/dense_dev.py`: 907 lines
 
@@ -36,7 +36,7 @@ modules/02_tensor/
 ├── parts/
 │   ├── 01_foundations.py     # Mathematical foundations & tensor theory
 │   ├── 02_creation.py        # Tensor creation & initialization
-│   ├── 03_operations.py      # Core arithmetic operations  
+│   ├── 03_operations.py      # Core arithmetic operations
 │   ├── 04_broadcasting.py    # Broadcasting & shape manipulation
 │   ├── 05_advanced.py        # Advanced operations & edge cases
 │   └── 06_integration.py     # Integration tests & complete examples
@@ -51,7 +51,7 @@ modules/02_tensor/
 ```
 modules/15_mlops/
 ├── mlops_dev.py          # 1,667 lines - entire MLOps pipeline
-├── module.yaml  
+├── module.yaml
 └── README.md
 ```
 
@@ -65,7 +65,7 @@ modules/15_mlops/
 │   ├── 04_registry.py        # Model versioning & registry
 │   ├── 05_alerting.py        # Alert systems & notifications
 │   └── 06_integration.py     # Full MLOps pipeline integration
-├── mlops_dev.py              # Main orchestrator 
+├── mlops_dev.py              # Main orchestrator
 ├── module.yaml
 └── README.md
 ```
@@ -84,7 +84,7 @@ modules/15_mlops/
 
 ### 3. **Educational Benefits**
 - **Easier navigation**: Students can focus on specific concepts
-- **Better debugging**: Smaller files are easier to troubleshoot  
+- **Better debugging**: Smaller files are easier to troubleshoot
 - **Clearer progression**: Natural learning checkpoints within modules
 - **Maintained cohesion**: Everything still works together as intended
 
@@ -139,9 +139,9 @@ __all__ = ['Tensor', 'run_complete_tensor_demo']
 
 1. **`02_tensor`** (1,578 lines) - Foundation module, affects all others
 2. **`15_mlops`** (1,667 lines) - Complex capstone module
-3. **`13_kernels`** (1,381 lines) - Performance engineering module  
+3. **`13_kernels`** (1,381 lines) - Performance engineering module
 4. **`11_training`** (estimated 1,000+ lines) - Core training pipeline
 
 ---
 
-**This enhancement will make TinyTorch more student-friendly while maintaining its educational integrity and systematic learning progression.** 
+**This enhancement will make TinyTorch more student-friendly while maintaining its educational integrity and systematic learning progression.**

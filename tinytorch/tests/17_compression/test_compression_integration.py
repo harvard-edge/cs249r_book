@@ -21,4 +21,3 @@ def test_compression_integration():
 if __name__ == "__main__":
     test_compression_integration()
     print("✅ Compression integration tests (pending implementation)")
-

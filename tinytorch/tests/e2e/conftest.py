@@ -15,4 +15,3 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "full_journey: Complete journey tests (~10min)")
     config.addinivalue_line("markers", "slow: Slow tests that train models")
     config.addinivalue_line("markers", "release: Release validation tests")
-

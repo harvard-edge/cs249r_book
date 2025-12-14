@@ -64,7 +64,7 @@ echo ""
 echo "🚀 Test 3: Testing TITO CLI..."
 if command -v tito &> /dev/null; then
     echo "  ✅ tito command available"
-    
+
     # Test basic commands
     if tito --help &> /dev/null; then
         echo "  ✅ tito --help works"
@@ -72,7 +72,7 @@ if command -v tito &> /dev/null; then
         echo "  ❌ tito --help failed"
         FAILED=$((FAILED + 1))
     fi
-    
+
     if tito --version &> /dev/null; then
         echo "  ✅ tito --version works"
     else
@@ -154,4 +154,3 @@ else
     echo "Some issues detected. Please review the output above."
     exit 1
 fi
-

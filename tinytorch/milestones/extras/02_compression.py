@@ -11,7 +11,7 @@
 - 2018: MLPerf launches - Standardized ML benchmarking
 
 🎯 WHAT YOU'RE BUILDING:
-Using YOUR TinyTorch implementations, you'll build a complete compression
+Using YOUR Tiny🔥Torch implementations, you'll build a complete compression
 pipeline that makes models 8-16× smaller while maintaining accuracy!
 
 This milestone demonstrates systematic model compression:

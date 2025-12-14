@@ -39,7 +39,6 @@ make install
 - **`nbgrader/NBGrader_Quick_Reference.md`** - Daily use commands and workflow
 - **`nbgrader/NBGrader_Text_Response_Technical_Implementation.md`** - Technical implementation details
 
----
 
 **Start here**:
 - **Students**: Read `STUDENT_QUICKSTART.md`

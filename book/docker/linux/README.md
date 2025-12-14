@@ -106,4 +106,4 @@ The container reduces build times significantly:
 
 - **Traditional build**: 45 minutes
 - **Containerized build**: 5-10 minutes
-- **Improvement**: 80-90% time reduction 
+- **Improvement**: 80-90% time reduction

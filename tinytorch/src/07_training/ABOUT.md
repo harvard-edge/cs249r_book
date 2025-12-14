@@ -1,541 +1,673 @@
----
-title: "Training"
-description: "Complete training loops with scheduling, gradient clipping, and checkpointing"
-difficulty: "●●●●"
-time_estimate: "6-8 hours"
-prerequisites: ["tensor", "activations", "layers", "losses", "autograd", "optimizers"]
-next_steps: ["dataloader"]
-learning_objectives:
-  - "Implement complete Trainer class orchestrating forward/backward passes, loss computation, and optimization"
-  - "Build CosineSchedule for adaptive learning rate management during training"
-  - "Create gradient clipping utilities to prevent exploding gradients and training instability"
-  - "Design checkpointing system for saving and resuming training state"
-  - "Understand memory overhead, gradient accumulation, and train/eval mode switching"
----
+# Module 07: Training
 
-# Training
+**FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 5-7 hours | Prerequisites: 01-06
 
-**FOUNDATION TIER** | Difficulty: ●●●● (4/4) | Time: 6-8 hours
+By completing Modules 01-06, you've built all the fundamental components: tensors, activations, layers, losses, autograd, and optimizers. Each piece works perfectly in isolation, but real machine learning requires orchestrating these components into a cohesive training process. This module provides that orchestration.
 
 ## Overview
 
-Build the complete training infrastructure that orchestrates neural network learning end-to-end. This capstone module of the Foundation tier brings together all previous components—tensors, layers, losses, gradients, and optimizers—into production-ready training loops with learning rate scheduling, gradient clipping, and model checkpointing. You'll create the same training patterns that power PyTorch, TensorFlow, and every production ML system.
+Training is where all your previous work comes together. You've built tensors that can store data, layers that transform inputs, loss functions that measure error, autograd that computes gradients, and optimizers that update parameters. But these components don't connect themselves. The training loop is the conductor that orchestrates this symphony: forward passes flow data through layers, loss functions measure mistakes, backward passes compute gradients, and optimizers improve parameters. Repeat this cycle thousands of times and your randomly initialized network learns to solve problems.
+
+Production training systems need more than this basic loop. Learning rates should start high for rapid progress, then decay for stable convergence. Gradients sometimes explode and need clipping. Long training runs require checkpointing to survive crashes. Models need separate train and evaluation modes. This module builds all of this infrastructure into a complete Trainer class that mirrors PyTorch Lightning and Hugging Face training systems.
+
+By the end, you'll have a production-grade training infrastructure ready for the MLP milestone.
 
 ## Learning Objectives
 
-By the end of this module, you will be able to:
+```{tip} By completing this module, you will:
 
-- **Implement complete Trainer class**: Orchestrate forward passes, loss computation, backpropagation, and parameter updates into cohesive training loops with train/eval mode switching
-- **Build CosineSchedule for adaptive learning rates**: Create learning rate schedulers that start fast for quick convergence, then slow down for fine-tuning, following cosine annealing curves
-- **Create gradient clipping utilities**: Implement global norm gradient clipping to prevent exploding gradients and training instability in deep networks
-- **Design checkpointing system**: Build save/load functionality that preserves complete training state—model parameters, optimizer buffers, scheduler state, and training history
-- **Understand training systems architecture**: Master memory overhead (4-6× model size), gradient accumulation strategies, checkpoint management, and the difference between training and evaluation modes
+- **Implement** a complete Trainer class orchestrating forward pass, loss computation, backward pass, and parameter updates
+- **Master** learning rate scheduling with cosine annealing that adapts training speed over time
+- **Understand** gradient clipping by global norm that prevents training instability
+- **Build** checkpointing systems that save and restore complete training state for fault tolerance
+- **Analyze** training memory overhead (4-6× model size) and checkpoint storage costs
+```
 
-## Build → Use → Reflect
-
-This module follows TinyTorch's **Build → Use → Reflect** framework:
-
-1. **Build**: Implement CosineSchedule for learning rate scheduling, clip_grad_norm for gradient stability, and complete Trainer class with checkpointing
-2. **Use**: Train neural networks end-to-end with real optimization dynamics, observe learning rate adaptation, and experiment with gradient accumulation
-3. **Reflect**: Analyze training memory overhead (parameters + gradients + optimizer state), understand when to checkpoint, and compare training strategies across different scenarios
-
-## Implementation Guide
-
-### The Training Loop Cycle
-
-Training orchestrates data, forward pass, loss, gradients, and updates in an iterative cycle:
+## What You'll Build
 
 ```{mermaid}
-graph LR
-    A[Data Batch] --> B[Forward Pass<br/>Model]
-    B --> C[Loss<br/>Compute]
-    C --> D[Backward Pass<br/>Autograd]
-    D --> E[Optimizer Step<br/>Update θ]
-    E --> F[Next Batch]
-    F --> A
+:align: center
+:caption: Training Infrastructure
+flowchart TD
+    subgraph "Training Infrastructure"
+        A["CosineSchedule<br/>Adaptive learning rate"]
+        B["clip_grad_norm()<br/>Gradient stability"]
+        C["Trainer<br/>Complete orchestration"]
+        D["Checkpointing<br/>State persistence"]
+    end
 
-    style A fill:#e3f2fd
-    style B fill:#f3e5f5
-    style C fill:#fff3e0
-    style D fill:#ffe0b2
-    style E fill:#fce4ec
-    style F fill:#f0fdf4
+    subgraph "Training Loop"
+        E["Forward Pass"] --> F["Loss Computation"]
+        F --> G["Backward Pass"]
+        G --> H["Gradient Clipping"]
+        H --> I["Parameter Update"]
+        I --> J["LR Schedule"]
+        J --> E
+    end
+
+    A --> C
+    B --> C
+    C --> E
+    C --> D
+
+    style A fill:#e1f5ff
+    style B fill:#fff3cd
+    style C fill:#f8d7da
+    style D fill:#d4edda
 ```
 
-**Cycle**: Load batch → Forward through model → Compute loss → Backward gradients → Update parameters → Repeat
+**Implementation roadmap:**
 
-### CosineSchedule - Adaptive Learning Rate Management
+| Part | What You'll Implement | Key Concept |
+|------|----------------------|-------------|
+| 1 | `CosineSchedule` class | Learning rate annealing (fast → slow) |
+| 2 | `clip_grad_norm()` function | Global gradient clipping for stability |
+| 3 | `Trainer.train_epoch()` | Complete training loop with scheduling |
+| 4 | `Trainer.evaluate()` | Evaluation mode without gradient updates |
+| 5 | `Trainer.save/load_checkpoint()` | Training state persistence |
 
-Learning rate scheduling is like adjusting driving speed based on road conditions—start fast on the highway, slow down in neighborhoods for precision. Cosine annealing provides smooth transitions from aggressive learning to fine-tuning:
+**The pattern you'll enable:**
+```python
+# Complete training pipeline (modules 01-07 working together)
+trainer = Trainer(model, optimizer, loss_fn, scheduler, grad_clip_norm=1.0)
+for epoch in range(100):
+    train_loss = trainer.train_epoch(train_data)
+    eval_loss, accuracy = trainer.evaluate(val_data)
+    trainer.save_checkpoint(f"checkpoint_{epoch}.pkl")
+```
+
+### What You're NOT Building (Yet)
+
+To keep this module focused, you will **not** implement:
+
+- DataLoader for efficient batching (that's Module 08: DataLoader)
+- Distributed training across multiple GPUs (PyTorch uses `DistributedDataParallel`)
+- Mixed precision training (PyTorch Automatic Mixed Precision requires specialized tensor types)
+- Advanced schedulers like warmup or cyclical learning rates (production frameworks offer dozens of variants)
+
+**You are building the core training orchestration.** Efficient data loading comes next.
+
+## API Reference
+
+This section provides a quick reference for the training infrastructure you'll build. Use this while implementing to understand expected signatures and behavior.
+
+### CosineSchedule
 
 ```python
-class CosineSchedule:
-    """
-    Cosine annealing learning rate schedule.
-
-    Starts at max_lr, decreases following cosine curve to min_lr.
-    Formula: lr = min_lr + (max_lr - min_lr) * (1 + cos(π*epoch/T)) / 2
-    """
-    def __init__(self, max_lr=0.1, min_lr=0.01, total_epochs=100):
-        self.max_lr = max_lr
-        self.min_lr = min_lr
-        self.total_epochs = total_epochs
-
-    def get_lr(self, epoch: int) -> float:
-        """Get learning rate for current epoch."""
-        if epoch >= self.total_epochs:
-            return self.min_lr
-
-        # Cosine annealing: smooth decrease from max to min
-        cosine_factor = (1 + np.cos(np.pi * epoch / self.total_epochs)) / 2
-        return self.min_lr + (self.max_lr - self.min_lr) * cosine_factor
-
-# Usage example
-schedule = CosineSchedule(max_lr=0.1, min_lr=0.001, total_epochs=50)
-print(schedule.get_lr(0))   # 0.1 - fast learning initially
-print(schedule.get_lr(25))  # ~0.05 - gradual slowdown
-print(schedule.get_lr(50))  # 0.001 - fine-tuning at end
+CosineSchedule(max_lr=0.1, min_lr=0.01, total_epochs=100)
 ```
 
-### Gradient Clipping - Preventing Training Explosions
+Cosine annealing learning rate schedule that smoothly decreases from `max_lr` to `min_lr` over `total_epochs`.
 
-Gradient clipping is a speed governor that prevents dangerously large gradients from destroying training progress. Global norm clipping scales all gradients uniformly while preserving their relative magnitudes:
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `get_lr` | `get_lr(epoch: int) -> float` | Returns learning rate for given epoch |
+
+### Gradient Clipping
+
+```python
+clip_grad_norm(parameters: List, max_norm: float = 1.0) -> float
+```
+
+Clips gradients by global norm to prevent exploding gradients. Returns original norm for monitoring.
+
+### Trainer
+
+```python
+Trainer(model, optimizer, loss_fn, scheduler=None, grad_clip_norm=None)
+```
+
+Orchestrates complete training lifecycle with forward pass, loss computation, backward pass, optimization, and checkpointing.
+
+#### Core Methods
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `train_epoch` | `train_epoch(dataloader, accumulation_steps=1) -> float` | Train for one epoch, returns average loss |
+| `evaluate` | `evaluate(dataloader) -> Tuple[float, float]` | Evaluate model, returns (loss, accuracy) |
+| `save_checkpoint` | `save_checkpoint(path: str) -> None` | Save complete training state |
+| `load_checkpoint` | `load_checkpoint(path: str) -> None` | Restore training state from file |
+
+## Core Concepts
+
+This section covers the fundamental ideas behind production training systems. These patterns apply to every ML framework and understanding them deeply will serve you throughout your career.
+
+### The Training Loop
+
+The training loop is a simple pattern repeated thousands of times: push data through the model (forward pass), measure how wrong it is (loss), compute how to improve (backward pass), and update parameters (optimizer step). This cycle transforms random weights into intelligent systems.
+
+Here's the complete training loop from your Trainer implementation:
+
+```python
+def train_epoch(self, dataloader, accumulation_steps=1):
+    """Train for one epoch through the dataset."""
+    self.model.training = True
+    self.training_mode = True
+
+    total_loss = 0.0
+    num_batches = 0
+    accumulated_loss = 0.0
+
+    for batch_idx, (inputs, targets) in enumerate(dataloader):
+        # Forward pass
+        outputs = self.model.forward(inputs)
+        loss = self.loss_fn.forward(outputs, targets)
+
+        # Scale loss for accumulation
+        scaled_loss = loss.data / accumulation_steps
+        accumulated_loss += scaled_loss
+
+        # Backward pass
+        loss.backward()
+
+        # Update parameters every accumulation_steps
+        if (batch_idx + 1) % accumulation_steps == 0:
+            # Gradient clipping
+            if self.grad_clip_norm is not None:
+                params = self.model.parameters()
+                clip_grad_norm(params, self.grad_clip_norm)
+
+            # Optimizer step
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+
+            total_loss += accumulated_loss
+            accumulated_loss = 0.0
+            num_batches += 1
+            self.step += 1
+
+    # Handle remaining accumulated gradients
+    if accumulated_loss > 0:
+        if self.grad_clip_norm is not None:
+            params = self.model.parameters()
+            clip_grad_norm(params, self.grad_clip_norm)
+
+        self.optimizer.step()
+        self.optimizer.zero_grad()
+        total_loss += accumulated_loss
+        num_batches += 1
+
+    avg_loss = total_loss / max(num_batches, 1)
+    self.history['train_loss'].append(avg_loss)
+
+    # Update scheduler
+    if self.scheduler is not None:
+        current_lr = self.scheduler.get_lr(self.epoch)
+        self.optimizer.lr = current_lr
+        self.history['learning_rates'].append(current_lr)
+
+    self.epoch += 1
+    return avg_loss
+```
+
+Each iteration processes one batch: the model transforms inputs into predictions, the loss function compares predictions to targets, backward pass computes gradients, gradient clipping prevents instability, and the optimizer updates parameters. The accumulated loss divided by batch count gives average training loss for monitoring convergence.
+
+The `accumulation_steps` parameter enables a clever memory trick: if you want an effective batch size of 128 but can only fit 32 samples in GPU memory, set `accumulation_steps=4`. Gradients accumulate across 4 batches before the optimizer step, creating the same update as processing all 128 samples at once.
+
+### Epochs and Iterations
+
+Training operates on two timescales: iterations (single batch updates) and epochs (complete passes through the dataset). Understanding this hierarchy helps you reason about training progress and resource requirements.
+
+An iteration processes one batch: forward pass, backward pass, optimizer step. If your dataset has 10,000 samples and batch size is 32, one epoch requires 313 iterations (10,000 ÷ 32, rounded up). Training a model to convergence typically requires dozens or hundreds of epochs, meaning tens of thousands of iterations.
+
+The mathematics is straightforward but the implications are significant. Training ImageNet with 1.2 million images, batch size 256, for 90 epochs requires 421,875 iterations (1,200,000 ÷ 256 × 90). At 250ms per iteration, that's 29 hours of compute. Understanding this arithmetic helps you estimate training costs and debug slow convergence.
+
+Your Trainer tracks both: `self.step` counts total iterations across all epochs, while `self.epoch` counts how many complete dataset passes you've completed. Schedulers typically operate on epoch boundaries (learning rate changes each epoch), while monitoring systems track loss per iteration.
+
+### Train vs Eval Modes
+
+Neural networks behave differently during training versus evaluation. Layers like dropout randomly zero activations during training (for regularization) but keep all activations during evaluation. Batch normalization computes running statistics during training but uses fixed statistics during evaluation. Your Trainer needs to signal which mode the model is in.
+
+The pattern is simple: set `model.training = True` before training, set `model.training = False` before evaluation. This boolean flag propagates through layers, changing their behavior:
+
+```python
+def evaluate(self, dataloader):
+    """Evaluate model without updating parameters."""
+    self.model.training = False
+    self.training_mode = False
+
+    total_loss = 0.0
+    correct = 0
+    total = 0
+
+    for inputs, targets in dataloader:
+        # Forward pass only (no backward!)
+        outputs = self.model.forward(inputs)
+        loss = self.loss_fn.forward(outputs, targets)
+
+        total_loss += loss.data
+
+        # Calculate accuracy (for classification)
+        if len(outputs.data.shape) > 1:  # Multi-class
+            predictions = np.argmax(outputs.data, axis=1)
+            if len(targets.data.shape) == 1:  # Integer targets
+                correct += np.sum(predictions == targets.data)
+            else:  # One-hot targets
+                correct += np.sum(predictions == np.argmax(targets.data, axis=1))
+            total += len(predictions)
+
+    avg_loss = total_loss / len(dataloader) if len(dataloader) > 0 else 0.0
+    accuracy = correct / total if total > 0 else 0.0
+
+    self.history['eval_loss'].append(avg_loss)
+
+    return avg_loss, accuracy
+```
+
+Notice what's missing: no `loss.backward()`, no `optimizer.step()`, no gradient updates. Evaluation measures current model performance without changing parameters. This separation is crucial: if you accidentally left `training = True` during evaluation, dropout would randomly zero activations, giving you noisy accuracy measurements that don't reflect true model quality.
+
+### Learning Rate Scheduling
+
+Learning rate scheduling adapts training speed over time. Early in training, when parameters are far from optimal, high learning rates enable rapid progress. Late in training, when approaching a good solution, low learning rates enable stable convergence without overshooting. Fixed learning rates force you to choose between fast early progress and stable late convergence. Scheduling gives you both.
+
+Cosine annealing uses the cosine function to smoothly transition from maximum to minimum learning rate:
+
+```python
+def get_lr(self, epoch: int) -> float:
+    """Get learning rate for current epoch."""
+    if epoch >= self.total_epochs:
+        return self.min_lr
+
+    # Cosine annealing formula
+    cosine_factor = (1 + np.cos(np.pi * epoch / self.total_epochs)) / 2
+    return self.min_lr + (self.max_lr - self.min_lr) * cosine_factor
+```
+
+The mathematics creates a smooth curve. At epoch 0, `np.cos(0) = 1`, so `cosine_factor = (1+1)/2 = 1.0`, giving `max_lr`. At the final epoch, `np.cos(π) = -1`, so `cosine_factor = (1-1)/2 = 0.0`, giving `min_lr`. Between these extremes, the cosine function creates a smooth descent.
+
+Visualizing the schedule for `max_lr=0.1`, `min_lr=0.01`, `total_epochs=100`:
+
+```
+Epoch   0:  0.100 (aggressive learning)
+Epoch  25:  0.085 (still fast)
+Epoch  50:  0.055 (slowing down)
+Epoch  75:  0.025 (fine-tuning)
+Epoch 100:  0.010 (stable convergence)
+```
+
+Your Trainer applies the schedule automatically after each epoch:
+
+```python
+if self.scheduler is not None:
+    current_lr = self.scheduler.get_lr(self.epoch)
+    self.optimizer.lr = current_lr
+```
+
+This updates the optimizer's learning rate before the next epoch begins, creating adaptive training speed without manual intervention.
+
+### Gradient Clipping
+
+Gradient clipping prevents exploding gradients that destroy training progress. During backpropagation, gradients sometimes become extremely large (thousands or even infinity), causing parameter updates that jump far from the optimal solution or create numerical overflow (NaN values). Clipping rescales large gradients to a safe maximum while preserving their direction.
+
+The key insight is clipping by global norm rather than individual gradients. Computing the norm across all parameters `√(Σ g²)` and scaling uniformly preserves the relative magnitudes between different parameters:
 
 ```python
 def clip_grad_norm(parameters: List, max_norm: float = 1.0) -> float:
-    """
-    Clip gradients by global norm to prevent exploding gradients.
-
-    Computes total_norm = sqrt(sum of all gradient squares).
-    If total_norm > max_norm, scales all gradients by max_norm/total_norm.
-    """
-    if not parameters:
-        return 0.0
-
+    """Clip gradients by global norm to prevent exploding gradients."""
     # Compute global norm across all parameters
     total_norm = 0.0
     for param in parameters:
         if param.grad is not None:
-            grad_data = param.grad.data if hasattr(param.grad, 'data') else param.grad
+            grad_data = param.grad if isinstance(param.grad, np.ndarray) else param.grad.data
             total_norm += np.sum(grad_data ** 2)
 
     total_norm = np.sqrt(total_norm)
 
-    # Clip if necessary - preserves gradient direction
+    # Scale all gradients if norm exceeds threshold
     if total_norm > max_norm:
         clip_coef = max_norm / total_norm
         for param in parameters:
             if param.grad is not None:
-                if hasattr(param.grad, 'data'):
-                    param.grad.data *= clip_coef
+                if isinstance(param.grad, np.ndarray):
+                    param.grad = param.grad * clip_coef
                 else:
-                    param.grad *= clip_coef
+                    param.grad.data = param.grad.data * clip_coef
 
     return float(total_norm)
-
-# Usage example
-params = model.parameters()
-original_norm = clip_grad_norm(params, max_norm=1.0)
-print(f"Gradient norm: {original_norm:.2f} → clipped to 1.0")
 ```
 
-### Trainer Class - Complete Training Orchestration
+Consider gradients `[100, 200, 50]` with global norm `√(100² + 200² + 50²) = 230`. With `max_norm=1.0`, we compute `clip_coef = 1.0 / 230 = 0.00435` and scale all gradients: `[0.435, 0.870, 0.217]`. The new norm is exactly 1.0, but the relative magnitudes are preserved (the second gradient is still twice the first).
 
-The Trainer class conducts the symphony of training—coordinating model, optimizer, loss function, and scheduler into cohesive learning loops with checkpointing and evaluation:
+This uniform scaling is crucial. If we clipped each gradient independently to 1.0, we'd get `[1.0, 1.0, 1.0]`, destroying the information that the second parameter needs larger updates than the first. Global norm clipping prevents explosions while respecting the gradient's message about relative importance.
+
+### Checkpointing
+
+Checkpointing saves complete training state to disk, enabling fault tolerance and experimentation. Training runs take hours or days. Hardware fails. You want to try different hyperparameters after epoch 50. Checkpoints make all of this possible by capturing everything needed to resume training exactly where you left off.
+
+A complete checkpoint includes:
 
 ```python
-class Trainer:
-    """
-    Complete training orchestrator for neural networks.
+def save_checkpoint(self, path: str):
+    """Save complete training state for resumption."""
+    checkpoint = {
+        'epoch': self.epoch,
+        'step': self.step,
+        'model_state': self._get_model_state(),
+        'optimizer_state': self._get_optimizer_state(),
+        'scheduler_state': self._get_scheduler_state(),
+        'history': self.history,
+        'training_mode': self.training_mode
+    }
 
-    Handles training loops, evaluation, scheduling, gradient clipping,
-    checkpointing, and train/eval mode switching.
-    """
-    def __init__(self, model, optimizer, loss_fn, scheduler=None, grad_clip_norm=None):
-        self.model = model
-        self.optimizer = optimizer
-        self.loss_fn = loss_fn
-        self.scheduler = scheduler
-        self.grad_clip_norm = grad_clip_norm
-
-        # Training state
-        self.epoch = 0
-        self.step = 0
-        self.training_mode = True
-
-        # History tracking
-        self.history = {
-            'train_loss': [],
-            'eval_loss': [],
-            'learning_rates': []
-        }
-
-    def train_epoch(self, dataloader, accumulation_steps=1):
-        """
-        Train for one epoch through the dataset.
-
-        Supports gradient accumulation for effective larger batch sizes.
-        """
-        self.model.training = True
-        total_loss = 0.0
-        num_batches = 0
-        accumulated_loss = 0.0
-
-        for batch_idx, (inputs, targets) in enumerate(dataloader):
-            # Forward pass
-            outputs = self.model.forward(inputs)
-            loss = self.loss_fn.forward(outputs, targets)
-
-            # Scale loss for accumulation
-            scaled_loss = loss.data / accumulation_steps
-            accumulated_loss += scaled_loss
-
-            # Backward pass
-            loss.backward()
-
-            # Update every accumulation_steps batches
-            if (batch_idx + 1) % accumulation_steps == 0:
-                # Gradient clipping
-                if self.grad_clip_norm is not None:
-                    clip_grad_norm(self.model.parameters(), self.grad_clip_norm)
-
-                # Optimizer step
-                self.optimizer.step()
-                self.optimizer.zero_grad()
-
-                total_loss += accumulated_loss
-                accumulated_loss = 0.0
-                num_batches += 1
-                self.step += 1
-
-        # Update learning rate
-        if self.scheduler is not None:
-            current_lr = self.scheduler.get_lr(self.epoch)
-            self.optimizer.lr = current_lr
-            self.history['learning_rates'].append(current_lr)
-
-        avg_loss = total_loss / max(num_batches, 1)
-        self.history['train_loss'].append(avg_loss)
-        self.epoch += 1
-
-        return avg_loss
-
-    def evaluate(self, dataloader):
-        """
-        Evaluate model without updating parameters.
-
-        Sets model.training = False for proper evaluation behavior.
-        """
-        self.model.training = False
-        total_loss = 0.0
-        correct = 0
-        total = 0
-
-        for inputs, targets in dataloader:
-            # Forward pass only - no gradients
-            outputs = self.model.forward(inputs)
-            loss = self.loss_fn.forward(outputs, targets)
-            total_loss += loss.data
-
-            # Calculate accuracy for classification
-            if len(outputs.data.shape) > 1:
-                predictions = np.argmax(outputs.data, axis=1)
-                if len(targets.data.shape) == 1:
-                    correct += np.sum(predictions == targets.data)
-                else:
-                    correct += np.sum(predictions == np.argmax(targets.data, axis=1))
-                total += len(predictions)
-
-        avg_loss = total_loss / len(dataloader) if len(dataloader) > 0 else 0.0
-        accuracy = correct / total if total > 0 else 0.0
-
-        self.history['eval_loss'].append(avg_loss)
-        return avg_loss, accuracy
-
-    def save_checkpoint(self, path: str):
-        """Save complete training state for resumption."""
-        checkpoint = {
-            'epoch': self.epoch,
-            'step': self.step,
-            'model_state': {i: p.data.copy() for i, p in enumerate(self.model.parameters())},
-            'optimizer_state': self._get_optimizer_state(),
-            'scheduler_state': self._get_scheduler_state(),
-            'history': self.history,
-            'training_mode': self.training_mode
-        }
-
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, 'wb') as f:
-            pickle.dump(checkpoint, f)
-
-    def load_checkpoint(self, path: str):
-        """Load training state from checkpoint."""
-        with open(path, 'rb') as f:
-            checkpoint = pickle.load(f)
-
-        self.epoch = checkpoint['epoch']
-        self.step = checkpoint['step']
-        self.history = checkpoint['history']
-
-        # Restore model parameters
-        for i, param in enumerate(self.model.parameters()):
-            if i in checkpoint['model_state']:
-                param.data = checkpoint['model_state'][i].copy()
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, 'wb') as f:
+        pickle.dump(checkpoint, f)
 ```
 
-### Complete Training Example
+Model state is straightforward: copy all parameter tensors. Optimizer state is more subtle: SGD with momentum stores velocity buffers (one per parameter), Adam stores two moment buffers (first and second moments). Scheduler state captures current learning rate progression. Training metadata includes epoch counter and loss history.
 
-Bringing all components together into production-ready training:
+Loading reverses the process:
 
 ```python
-from tinytorch.core.training import Trainer, CosineSchedule, clip_grad_norm
-from tinytorch.core.layers import Linear
-from tinytorch.core.losses import MSELoss
-from tinytorch.core.optimizers import SGD
+def load_checkpoint(self, path: str):
+    """Restore training state from checkpoint."""
+    with open(path, 'rb') as f:
+        checkpoint = pickle.load(f)
 
-# Build model
-class SimpleNN:
-    def __init__(self):
-        self.layer1 = Linear(3, 5)
-        self.layer2 = Linear(5, 2)
-        self.training = True
+    self.epoch = checkpoint['epoch']
+    self.step = checkpoint['step']
+    self.history = checkpoint['history']
+    self.training_mode = checkpoint['training_mode']
 
-    def forward(self, x):
-        x = self.layer1.forward(x)
-        x = Tensor(np.maximum(0, x.data))  # ReLU
-        return self.layer2.forward(x)
+    # Restore states (simplified for educational purposes)
+    if 'model_state' in checkpoint:
+        self._set_model_state(checkpoint['model_state'])
+    if 'optimizer_state' in checkpoint:
+        self._set_optimizer_state(checkpoint['optimizer_state'])
+    if 'scheduler_state' in checkpoint:
+        self._set_scheduler_state(checkpoint['scheduler_state'])
+```
 
-    def parameters(self):
-        return self.layer1.parameters() + self.layer2.parameters()
+After loading, training resumes as if the interruption never happened. The next `train_epoch()` call starts at the correct epoch, uses the correct learning rate, and continues optimizing from the exact parameter values where you stopped.
 
-# Configure training
-model = SimpleNN()
+### Computational Complexity
+
+Training complexity depends on model architecture and dataset size. For a simple fully connected network with L layers of size d, each forward pass is O(d² × L) (matrix multiplications dominate). Backward pass has the same complexity (automatic differentiation revisits each operation). With N training samples and batch size B, one epoch requires N/B iterations.
+
+Total training cost for E epochs:
+
+```
+Time per iteration:    O(d² × L) × 2     (forward + backward)
+Iterations per epoch:  N / B
+Total iterations:      (N / B) × E
+Total complexity:      O((N × E × d² × L) / B)
+```
+
+Real numbers make this concrete. Training a 2-layer network (d=512) on 10,000 samples (batch size 32) for 100 epochs:
+
+```
+d² × L = 512² × 2 = 524,288 operations per sample
+Batch operations = 524,288 × 32 = 16.8 million ops
+Iterations per epoch = 10,000 / 32 = 313
+Total iterations = 313 × 100 = 31,300
+Total operations = 31,300 × 16.8M = 525 billion operations
+```
+
+At 1 billion operations per second (typical CPU), that's 525 seconds (9 minutes). This arithmetic explains why GPUs matter: a GPU at 1 trillion ops/second (1000× faster) completes this in 0.5 seconds.
+
+Memory complexity is simpler but just as important:
+
+| Component | Memory |
+|-----------|--------|
+| Model parameters | d² × L × 4 bytes (float32) |
+| Gradients | Same as parameters |
+| Optimizer state (SGD) | Same as parameters (momentum) |
+| Optimizer state (Adam) | 2× parameters (two moments) |
+| Activations | d × B × L × 4 bytes |
+
+Total training memory is typically 4-6× model size, depending on optimizer. This explains GPU memory constraints: a 1GB model requires 4-6GB GPU memory for training, limiting batch size when memory is scarce.
+
+## Production Context
+
+### Your Implementation vs. PyTorch
+
+Your Trainer class and PyTorch's training infrastructure (Lightning, Hugging Face Trainer) share the same architectural patterns. The differences lie in scale: production frameworks support distributed training, mixed precision, complex schedulers, and dozens of callbacks. But the core loop is identical.
+
+| Feature | Your Implementation | PyTorch / Lightning |
+|---------|---------------------|---------------------|
+| **Training Loop** | Manual forward/backward/step | Same pattern, with callbacks |
+| **Schedulers** | Cosine annealing | 20+ schedulers (warmup, cyclic, etc.) |
+| **Gradient Clipping** | Global norm clipping | Same algorithm, GPU-optimized |
+| **Checkpointing** | Pickle-based state saving | Same concept, optimized formats |
+| **Distributed Training** | ✗ Single device | ✓ Multi-GPU, multi-node |
+| **Mixed Precision** | ✗ FP32 only | ✓ Automatic FP16/BF16 |
+
+### Code Comparison
+
+The following comparison shows equivalent training pipelines in TinyTorch and PyTorch. Notice how the conceptual flow is identical: create model, optimizer, loss, trainer, then loop through epochs.
+
+`````{tab-set}
+````{tab-item} Your TinyTorch
+```python
+from tinytorch import Trainer, CosineSchedule, SGD, MSELoss
+
+# Setup
+model = MyModel()
 optimizer = SGD(model.parameters(), lr=0.1, momentum=0.9)
-loss_fn = MSELoss()
-scheduler = CosineSchedule(max_lr=0.1, min_lr=0.001, total_epochs=10)
+scheduler = CosineSchedule(max_lr=0.1, min_lr=0.01, total_epochs=100)
+trainer = Trainer(model, optimizer, MSELoss(), scheduler, grad_clip_norm=1.0)
 
-# Create trainer with gradient clipping
-trainer = Trainer(
-    model=model,
-    optimizer=optimizer,
-    loss_fn=loss_fn,
-    scheduler=scheduler,
-    grad_clip_norm=1.0  # Prevent exploding gradients
-)
-
-# Train for multiple epochs
-for epoch in range(10):
+# Training loop
+for epoch in range(100):
     train_loss = trainer.train_epoch(train_data)
-    eval_loss, accuracy = trainer.evaluate(val_data)
+    eval_loss, acc = trainer.evaluate(val_data)
 
-    print(f"Epoch {epoch}: train_loss={train_loss:.4f}, "
-          f"eval_loss={eval_loss:.4f}, accuracy={accuracy:.4f}")
-
-    # Save checkpoint periodically
-    if epoch % 5 == 0:
-        trainer.save_checkpoint(f'checkpoint_epoch_{epoch}.pkl')
-
-# Restore from checkpoint
-trainer.load_checkpoint('checkpoint_epoch_5.pkl')
-print(f"Resumed training from epoch {trainer.epoch}")
+    if epoch % 10 == 0:
+        trainer.save_checkpoint(f"ckpt_{epoch}.pkl")
 ```
-
-## Getting Started
-
-### Prerequisites
-
-Ensure you have completed all Foundation tier modules:
-
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
-
-# Verify all prerequisites (Training is the Foundation capstone!)
-tito test tensor      # Module 01: Tensor operations
-tito test activations # Module 02: Activation functions
-tito test layers      # Module 03: Neural network layers
-tito test losses      # Module 04: Loss functions
-tito test autograd    # Module 05: Automatic differentiation
-tito test optimizers  # Module 06: Parameter update algorithms
-```
-
-### Development Workflow
-
-1. **Open the development file**: `modules/07_training/training.py`
-2. **Implement CosineSchedule**: Build learning rate scheduler with cosine annealing (smooth max_lr → min_lr transition)
-3. **Create clip_grad_norm**: Implement global norm gradient clipping to prevent exploding gradients
-4. **Build Trainer class**: Orchestrate complete training loop with train_epoch(), evaluate(), and checkpointing
-5. **Add gradient accumulation**: Support effective larger batch sizes with limited memory
-6. **Test end-to-end training**: Validate complete pipeline with real models and data
-7. **Export and verify**: `tito module complete 07 && tito test training`
-
-## Testing
-
-### Comprehensive Test Suite
-
-Run the full test suite to verify complete training infrastructure:
-
-```bash
-# TinyTorch CLI (recommended)
-tito test training
-
-# Direct pytest execution
-python -m pytest tests/ -k training -v
-```
-
-### Test Coverage Areas
-
-- **CosineSchedule Correctness**: Verify cosine annealing produces correct learning rates at start, middle, and end epochs
-- **Gradient Clipping Stability**: Test global norm computation and uniform scaling when gradients exceed threshold
-- **Trainer Orchestration**: Ensure proper coordination of forward pass, backward pass, optimization, and scheduling
-- **Checkpointing Completeness**: Validate save/load preserves model state, optimizer buffers, scheduler state, and training history
-- **Memory Analysis**: Measure training memory overhead (parameters + gradients + optimizer state = 4-6× model size)
-
-### Inline Testing & Training Analysis
-
-The module includes comprehensive validation of training dynamics:
-
-```python
-# CosineSchedule validation
-schedule = CosineSchedule(max_lr=0.1, min_lr=0.01, total_epochs=100)
-print(schedule.get_lr(0))    # 0.1 - aggressive learning initially
-print(schedule.get_lr(50))   # ~0.055 - gradual slowdown
-print(schedule.get_lr(100))  # 0.01 - fine-tuning at end
-
-# Gradient clipping validation
-param.grad = np.array([100.0, 200.0])  # Large gradients
-original_norm = clip_grad_norm([param], max_norm=1.0)
-# original_norm ≈ 223.6 → clipped to 1.0
-assert np.linalg.norm(param.grad.data) ≈ 1.0
-
-# Trainer integration validation
-trainer = Trainer(model, optimizer, loss_fn, scheduler, grad_clip_norm=1.0)
-loss = trainer.train_epoch(train_data)
-eval_loss, accuracy = trainer.evaluate(test_data)
-trainer.save_checkpoint('checkpoint.pkl')
-```
-
-### Manual Testing Examples
-
-```python
-from training import Trainer, CosineSchedule, clip_grad_norm
-from layers import Linear
-from losses import MSELoss
-from optimizers import SGD
-from tensor import Tensor
-
-# Test complete training pipeline
-class SimpleModel:
-    def __init__(self):
-        self.layer = Linear(2, 1)
-        self.training = True
-
-    def forward(self, x):
-        return self.layer.forward(x)
-
-    def parameters(self):
-        return self.layer.parameters()
-
-# Create training system
-model = SimpleModel()
-optimizer = SGD(model.parameters(), lr=0.01)
-loss_fn = MSELoss()
-scheduler = CosineSchedule(max_lr=0.1, min_lr=0.01, total_epochs=10)
-
-trainer = Trainer(model, optimizer, loss_fn, scheduler, grad_clip_norm=1.0)
-
-# Create simple dataset
-train_data = [
-    (Tensor([[1.0, 0.5]]), Tensor([[2.0]])),
-    (Tensor([[0.5, 1.0]]), Tensor([[1.5]]))
-]
-
-# Train and monitor
-for epoch in range(10):
-    loss = trainer.train_epoch(train_data)
-    lr = scheduler.get_lr(epoch)
-    print(f"Epoch {epoch}: loss={loss:.4f}, lr={lr:.4f}")
-
-# Test checkpointing
-trainer.save_checkpoint('test_checkpoint.pkl')
-trainer.load_checkpoint('test_checkpoint.pkl')
-print(f"Restored from epoch {trainer.epoch}")
-```
-
-## Systems Thinking Questions
-
-### Real-World Applications
-
-- **Production Training Pipelines**: PyTorch Lightning, Hugging Face Transformers, TensorFlow Estimators all use similar Trainer architectures with checkpointing and scheduling
-- **Large-Scale Model Training**: GPT, BERT, and vision models rely on gradient clipping and learning rate scheduling for stable convergence across billions of parameters
-- **Research Experimentation**: Academic ML uses checkpointing for long experiments with periodic evaluation and model selection
-- **Fault-Tolerant Training**: Cloud training systems use checkpoints to resume after infrastructure failures or spot instance interruptions
-
-### Training System Architecture
-
-- **Memory Breakdown**: Training requires parameters (1×) + gradients (1×) + optimizer state (2-3×) = 4-6× model memory footprint
-- **Gradient Accumulation**: Enables effective batch size of accumulation_steps × actual_batch_size with fixed memory—trades time for memory efficiency
-- **Train/Eval Modes**: Different layer behaviors during training (dropout active, batch norm updates) vs evaluation (dropout off, fixed batch norm)
-- **Checkpoint Components**: Must save model parameters, optimizer buffers (momentum, Adam m/v), scheduler state, epoch counter, and training history for exact resumption
-
-### Training Dynamics
-
-- **Learning Rate Scheduling**: Cosine annealing starts fast (quick convergence when far from optimum) then slows (stable fine-tuning near solution)
-- **Exploding Gradients**: Occur in deep networks and RNNs when gradient magnitudes grow exponentially through backpropagation—gradient clipping prevents training collapse
-- **Gradient Accumulation Trade-offs**: Reduces memory by processing small batches but increases training time linearly with accumulation steps
-- **Checkpointing Strategy**: Balance disk space (1GB+ per checkpoint) vs fault tolerance (more frequent = less lost work) and evaluation frequency (save best model)
-
-### Performance Characteristics
-
-- **Training Memory Scaling**: Adam optimizer uses 4× parameter memory (params + grads + m + v) vs SGD with momentum at 3× (params + grads + momentum)
-- **Checkpoint Overhead**: Pickle serialization adds 10-30% overhead beyond raw parameter data—use compression for large models
-- **Learning Rate Impact**: Too high causes instability/divergence, too low causes slow convergence—scheduling adapts automatically
-- **Global Norm vs Individual Clipping**: Global norm preserves gradient direction while preventing explosion—individual clipping can distort optimization trajectory
-
-## Ready to Build?
-
-You're about to complete the Foundation tier by building the training infrastructure that brings neural networks to life! This is where all your work on tensors, activations, layers, losses, gradients, and optimizers comes together into a cohesive system that actually learns from data.
-
-Training is the heart of machine learning—the process that transforms random initialization into intelligent models. You're implementing the same patterns used to train GPT, BERT, ResNet, and every production AI system. Understanding how scheduling, gradient clipping, checkpointing, and mode switching work together gives you mastery over the training process.
-
-This module is the culmination of everything you've built. Take your time understanding how each piece fits into the bigger picture, and enjoy creating a complete ML training system from scratch!
-
-Choose your preferred way to engage with this module:
-
-````{grid} 1 2 3 3
-
-```{grid-item-card}  Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/07_training/training.ipynb
-:class-header: bg-light
-
-Run this module interactively in your browser. No installation required!
-```
-
-```{grid-item-card}  Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/07_training/training.ipynb
-:class-header: bg-light
-
-Use Google Colab for GPU access and cloud compute power.
-```
-
-```{grid-item-card}  View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/07_training/training.py
-:class-header: bg-light
-
-Browse the Python source code and understand the implementation.
-```
-
 ````
 
-```{admonition}  Save Your Progress
-:class: tip
-**Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
+````{tab-item} ⚡ PyTorch
+```python
+import torch
+from torch.optim.lr_scheduler import CosineAnnealingLR
+from pytorch_lightning import Trainer
 
+# Setup (nearly identical!)
+model = MyModel()
+optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+scheduler = CosineAnnealingLR(optimizer, T_max=100, eta_min=0.01)
+trainer = Trainer(max_epochs=100, gradient_clip_val=1.0)
+
+# Training (abstracted by Lightning)
+trainer.fit(model, train_dataloader, val_dataloader)
+# Lightning handles the loop, checkpointing, and callbacks automatically
+```
+````
+`````
+
+Let's walk through the key similarities and differences:
+
+- **Line 1-2 (Imports)**: TinyTorch exposes classes directly; PyTorch uses module hierarchy. Same concepts, different organization.
+- **Line 4-5 (Model and Optimizer)**: Identical pattern. Both frameworks pass model parameters to optimizer for tracking.
+- **Line 6 (Scheduler)**: TinyTorch uses `CosineSchedule` class; PyTorch uses `CosineAnnealingLR`. Same mathematics (cosine annealing), same purpose.
+- **Line 7 (Trainer Setup)**: TinyTorch takes explicit model, optimizer, loss, and scheduler; PyTorch Lightning abstracts these into the model definition. Both support gradient clipping.
+- **Line 9-13 (Training Loop)**: TinyTorch makes the epoch loop explicit; Lightning hides it inside `trainer.fit()`. Under the hood, Lightning runs the exact same loop you implemented.
+- **Checkpointing**: TinyTorch requires manual `save_checkpoint()` calls; Lightning checkpoints automatically based on validation metrics.
+
+```{tip} What's Identical
+
+The core training loop pattern: forward pass → loss → backward → gradient clipping → optimizer step → learning rate scheduling. When debugging PyTorch training, you'll understand exactly what's happening because you built it yourself.
 ```
 
----
+### Why Training Infrastructure Matters at Scale
 
-<div class="prev-next-area">
-<a class="left-prev" href="06_optimizers_ABOUT.html" title="previous page">← Module 06: Optimizers</a>
-<a class="right-next" href="08_dataloader_ABOUT.html" title="next page">Module 08: DataLoader →</a>
-</div>
+To appreciate the engineering behind training systems, consider production scale:
+
+- **GPT-3 training**: 175 billion parameters, trained on 300 billion tokens, cost ~$4.6 million in compute time. A single checkpoint is **350 GB** (larger than most hard drives). Checkpoint frequency must balance fault tolerance against storage costs.
+
+- **ImageNet training**: 1.2 million images, 90 epochs standard. At 250ms per iteration (batch size 256), that's **29 hours** on one GPU. Learning rate scheduling is the difference between 75% accuracy (poor) and 76.5% accuracy (state-of-the-art).
+
+- **Training instability**: Without gradient clipping, 1 in 50 training runs randomly diverges (gradients explode, model outputs NaN, all progress lost). Production systems can't tolerate 2% failure rates when runs cost thousands of dollars.
+
+The infrastructure you built handles these challenges at educational scale. The same patterns scale to production: checkpointing every N epochs, cosine schedules for stable convergence, gradient clipping for reliability.
+
+## Check Your Understanding
+
+Test yourself with these systems thinking questions. They build intuition for the performance characteristics and trade-offs you'll encounter in production ML.
+
+**Q1: Training Memory Calculation**
+
+You have a model with 10 million parameters (float32) and use Adam optimizer. Estimate total training memory required: parameters + gradients + optimizer state. Then compare with SGD optimizer.
+
+```{admonition} Answer
+:class: dropdown
+
+**Adam optimizer:**
+- Parameters: 10M × 4 bytes = **40 MB**
+- Gradients: 10M × 4 bytes = **40 MB**
+- Adam state (two moments): 10M × 2 × 4 bytes = **80 MB**
+- **Total: 160 MB** (4× parameter size)
+
+**SGD with momentum:**
+- Parameters: 10M × 4 bytes = **40 MB**
+- Gradients: 10M × 4 bytes = **40 MB**
+- Momentum buffer: 10M × 4 bytes = **40 MB**
+- **Total: 120 MB** (3× parameter size)
+
+**Key insight:** Optimizer choice affects memory by 33%. For large models near GPU memory limits, SGD may be the only option.
+```
+
+**Q2: Gradient Accumulation Trade-off**
+
+You want batch size 128 but your GPU can only fit 32 samples. You use gradient accumulation with `accumulation_steps=4`. How does this affect:
+(a) Memory usage?
+(b) Training time?
+(c) Gradient noise?
+
+```{admonition} Answer
+:class: dropdown
+
+**(a) Memory:** No change. Only one batch (32 samples) in GPU memory at a time. Gradients accumulate in parameter `.grad` buffers which already exist.
+
+**(b) Training time:** **4× slower per update**. You process 4 batches sequentially (forward + backward) before optimizer step. Total iterations stays the same, but wall-clock time increases linearly with accumulation steps.
+
+**(c) Gradient noise:** **Reduced** (same as true batch_size=128). Averaging gradients over 128 samples gives more accurate gradient estimate than 32 samples, leading to more stable training.
+
+**Trade-off summary:** Gradient accumulation exchanges compute time for effective batch size when memory is limited. You get better gradients (less noise) but slower training (more time per update).
+```
+
+**Q3: Learning Rate Schedule Analysis**
+
+Training with fixed `lr=0.1` converges quickly initially but oscillates around the optimum, never quite reaching it. Training with cosine schedule (0.1 → 0.01) converges slower initially but reaches better final accuracy. Explain why, and suggest when fixed LR might be better.
+
+```{admonition} Answer
+:class: dropdown
+
+**Why fixed LR oscillates:**
+High learning rate (0.1) enables large parameter updates. Early in training (far from optimum), large updates accelerate convergence. Near the optimum, large updates overshoot, causing oscillation: update jumps past the optimum, then jumps back, repeatedly.
+
+**Why cosine schedule reaches better accuracy:**
+Starting high (0.1) provides fast early progress. Gradual decay (0.1 → 0.01) allows the model to take progressively smaller steps as it approaches the optimum. By the final epochs, lr=0.01 enables fine-tuning without overshooting.
+
+**When fixed LR is better:**
+- **Short training runs** (< 10 epochs): Scheduling overhead not worth it
+- **Learning rate tuning**: Finding optimal LR is easier with fixed values
+- **Transfer learning**: When fine-tuning pre-trained models, fixed low LR (0.001) often works best
+
+**Rule of thumb:** For training from scratch over 50+ epochs, scheduling almost always improves final accuracy by 1-3%.
+```
+
+**Q4: Checkpoint Storage Strategy**
+
+You're training for 100 epochs. Each checkpoint is 1 GB. Checkpointing every epoch creates 100 GB of storage. Checkpointing every 10 epochs risks losing 10 epochs of work if training crashes. Design a checkpointing strategy that balances fault tolerance and storage costs.
+
+```{admonition} Answer
+:class: dropdown
+
+**Strategy: Keep last N + best + milestones**
+
+1. **Keep last N=3 checkpoints** (rolling window): `epoch_98.pkl`, `epoch_99.pkl`, `epoch_100.pkl` (3 GB)
+2. **Keep best checkpoint** (lowest validation loss): `best_epoch_72.pkl` (1 GB)
+3. **Keep milestone checkpoints** (every 25 epochs): `epoch_25.pkl`, `epoch_50.pkl`, `epoch_75.pkl` (3 GB)
+
+**Total storage: 7 GB** (vs 100 GB for every epoch)
+
+**Fault tolerance:**
+- Last 3 checkpoints: Lose at most 1 epoch of work
+- Best checkpoint: Can always restart from best validation performance
+- Milestones: Can restart experiments from quarter-points
+
+**Implementation:**
+```python
+if epoch % 25 == 0:  # Milestone
+    save_checkpoint(f"milestone_epoch_{epoch}.pkl")
+elif epoch >= last_3_start:  # Last 3
+    save_checkpoint(f"recent_epoch_{epoch}.pkl")
+if is_best_validation:  # Best
+    save_checkpoint(f"best_epoch_{epoch}.pkl")
+```
+
+**Production systems** use this strategy plus cloud storage for off-site backup.
+```
+
+**Q5: Global Norm Clipping Analysis**
+
+Two training runs: (A) clips each gradient individually to max 1.0, (B) clips by global norm (max_norm=1.0). Both encounter gradients `[50, 100, 5]` with global norm `√(50² + 100² + 5²) ≈ 112`. What are the clipped gradients in each case? Which preserves gradient direction better?
+
+```{admonition} Answer
+:class: dropdown
+
+**(A) Individual clipping** (clip each to max 1.0):
+- Original: `[50, 100, 5]`
+- Clipped: `[1.0, 1.0, 1.0]`
+- **Result:** All parameters get equal updates (destroys relative importance information)
+
+**(B) Global norm clipping** (scale uniformly):
+- Original: `[50, 100, 5]`, global norm ≈ 112
+- Scale factor: `1.0 / 112 ≈ 0.0089`
+- Clipped: `[0.45, 0.89, 0.04]`
+- New global norm: **1.0** (exactly max_norm)
+- **Result:** Relative magnitudes preserved (second parameter still gets 2× update of first)
+
+**Why (B) is better:**
+Gradients encode relative importance: parameter 2 needs larger updates than parameter 1. Global norm clipping prevents explosion while respecting this information. Individual clipping destroys it, effectively treating all parameters as equally important.
+
+**Verification:** `√(0.45² + 0.89² + 0.04²) ≈ 1.0` ✓
+```
+
+## Further Reading
+
+For students who want to understand the academic foundations and advanced training techniques:
+
+### Seminal Papers
+
+- **Cyclical Learning Rates for Training Neural Networks** - Smith (2017). Introduced cyclical learning rate schedules and the learning rate finder technique. Cosine annealing is a variant of these ideas. [arXiv:1506.01186](https://arxiv.org/abs/1506.01186)
+
+- **On the Difficulty of Training Recurrent Neural Networks** - Pascanu et al. (2013). Analyzed the exploding and vanishing gradient problem, introducing gradient clipping as a solution. The global norm clipping you implemented comes from this work. [arXiv:1211.5063](https://arxiv.org/abs/1211.5063)
+
+- **Accurate, Large Minibatch SGD: Training ImageNet in 1 Hour** - Goyal et al. (2017). Showed how to scale batch size and learning rate together, introducing linear warmup and gradient accumulation techniques for distributed training. [arXiv:1706.02677](https://arxiv.org/abs/1706.02677)
+
+### Additional Resources
+
+- **PyTorch Lightning Documentation**: [Training Loop Documentation](https://pytorch-lightning.readthedocs.io/en/stable/common/trainer.html) - See how production frameworks implement the same training patterns you built
+- **Weights & Biases Tutorial**: "Hyperparameter Tuning" - Excellent guide on learning rate scheduling and gradient clipping in practice
+
+## What's Next
+
+```{seealso} Coming Up: Module 08 - DataLoader
+
+Implement efficient data loading with batching, shuffling, and iteration. Your Trainer currently requires pre-batched data. Module 08 adds automatic batching from raw datasets, completing the training infrastructure needed for the MLP milestone.
+```
+
+**Preview - How Your Training Infrastructure Gets Used:**
+
+| Module | What It Does | Your Trainer In Action |
+|--------|--------------|------------------------|
+| **08: DataLoader** | Efficient batching and shuffling | `trainer.train_epoch(dataloader)` with automatic batching |
+| **09: Spatial** | Convolutional layers for images | Train CNNs with same `trainer.train_epoch()` loop |
+| **Milestone: MLP** | Complete MNIST digit recognition | `trainer` orchestrates full training pipeline |
+
+## Get Started
+
+```{tip} Interactive Options
+
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/07_training/07_training.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/07_training/07_training.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/07_training/07_training.py)** - Browse the implementation code
+```
+
+```{warning} Save Your Progress
+
+Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
+```

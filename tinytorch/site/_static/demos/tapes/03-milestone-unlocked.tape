@@ -125,4 +125,3 @@ Sleep 60s  # Watch the training recreate history (training takes ~30s)
 
 Type "# You recreated Rumelhart's 1986 breakthrough! 🎉"
 Sleep 3s
-

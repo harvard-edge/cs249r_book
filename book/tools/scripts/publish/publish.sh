@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 📚 MLSysBook Manual Publisher 
+# 📚 MLSysBook Manual Publisher
 # ═══════════════════════════════════════════════════════════════════════════
 # A comprehensive manual publishing tool for the MLSysBook textbook
 # Usage: ./publish.sh [options]
-# 
+#
 # Features:
 # - Interactive rich UI with validation
 # - Manual GitHub release creation
@@ -71,13 +71,13 @@ show_progress() {
     local percentage=$((current * 100 / total))
     local completed=$((current * width / total))
     local remaining=$((width - completed))
-    
+
     printf "\r${BLUE}[${GREEN}"
     printf "%*s" $completed | tr ' ' '█'
     printf "${BLUE}"
     printf "%*s" $remaining | tr ' ' '░'
     printf "${BLUE}] ${WHITE}%d%% ${CYAN}%s${NC}" $percentage "$description"
-    
+
     if [ $current -eq $total ]; then
         echo ""
     fi
@@ -92,7 +92,7 @@ get_git_status() {
     local current_branch=$(git branch --show-current 2>/dev/null || echo "unknown")
     local has_changes=$(git status --porcelain 2>/dev/null | wc -l)
     local is_clean=$([[ $has_changes -eq 0 ]] && echo "true" || echo "false")
-    
+
     echo "$current_branch|$is_clean|$has_changes"
 }
 
@@ -106,18 +106,18 @@ get_latest_version() {
 calculate_next_version() {
     local current_version=$1
     local release_type=$2
-    
+
     # Remove 'v' prefix
     local version_num=${current_version#v}
-    
+
     # Split version into components
     IFS='.' read -r major minor patch <<< "$version_num"
-    
+
     # Handle empty or invalid versions
     major=${major:-0}
     minor=${minor:-0}
     patch=${patch:-0}
-    
+
     case "$release_type" in
         "major")
             new_version="v$((major + 1)).0.0"
@@ -133,7 +133,7 @@ calculate_next_version() {
             exit 1
             ;;
     esac
-    
+
     echo "$new_version"
 }
 
@@ -154,13 +154,13 @@ check_gh_cli() {
 get_repo_info() {
     local remote_url=$(git remote get-url origin 2>/dev/null || echo "")
     local repo_name=""
-    
+
     if [[ $remote_url =~ github\.com[:/]([^/]+)/([^/]+)(\.git)?$ ]]; then
         local owner="${BASH_REMATCH[1]}"
         local name="${BASH_REMATCH[2]}"
         repo_name="$owner/$name"
     fi
-    
+
     echo "$repo_name"
 }
 
@@ -174,21 +174,21 @@ get_user_input() {
     local default=$2
     local validation_pattern=$3
     local input=""
-    
+
     while true; do
         if [ -n "$default" ]; then
             echo -e -n "${WHITE}$prompt ${CYAN}[$default]${WHITE}: ${NC}"
         else
             echo -e -n "${WHITE}$prompt: ${NC}"
         fi
-        
+
         read -r input
-        
+
         # Use default if empty
         if [ -z "$input" ] && [ -n "$default" ]; then
             input="$default"
         fi
-        
+
         # Validate input
         if [ -z "$validation_pattern" ] || [[ $input =~ $validation_pattern ]]; then
             echo "$input"
@@ -203,10 +203,10 @@ get_user_input() {
 confirm_action() {
     local message=$1
     local default=${2:-"n"}
-    
+
     echo -e -n "${YELLOW}$message ${CYAN}[y/N]${WHITE}: ${NC}"
     read -r response
-    
+
     response=${response:-$default}
     case "$response" in
         [yY][eE][sS]|[yY])
@@ -224,16 +224,16 @@ select_from_menu() {
     shift
     local options=("$@")
     local selection
-    
+
     echo -e "\n${BOLD}${WHITE}$title${NC}"
     for i in "${!options[@]}"; do
         echo -e "${CYAN}  $((i + 1)). ${WHITE}${options[$i]}${NC}"
     done
-    
+
     while true; do
         echo -e -n "${WHITE}Select option [1-${#options[@]}]: ${NC}"
         read -r selection
-        
+
         if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le "${#options[@]}" ]; then
             echo "${options[$((selection - 1))]}"
             return 0
@@ -263,7 +263,7 @@ clean_builds() {
 build_html() {
     print_step "Building HTML version..."
     show_progress 1 3 "Initializing HTML build"
-    
+
     if ./binder build - html >/dev/null 2>&1; then
         show_progress 3 3 "HTML build completed"
         print_success "HTML build completed successfully"
@@ -279,11 +279,11 @@ build_html() {
 build_pdf() {
     print_step "Building PDF version..."
     show_progress 1 4 "Initializing PDF build"
-    
+
     if ./binder build - pdf >/dev/null 2>&1; then
         show_progress 4 4 "PDF build completed"
         print_success "PDF build completed successfully"
-        
+
         # Check if PDF was created
         local pdf_path="build/pdf/Machine-Learning-Systems.pdf"
         if [ -f "$pdf_path" ]; then
@@ -305,27 +305,27 @@ build_pdf() {
 compress_pdf() {
     local pdf_path="build/pdf/Machine-Learning-Systems.pdf"
     local compressed_path="build/pdf/Machine-Learning-Systems-compressed.pdf"
-    
+
     print_step "Compressing PDF with Ghostscript..."
-    
+
     # Check if Ghostscript is available
     if ! command -v gs >/dev/null 2>&1; then
         print_warning "Ghostscript not found - skipping compression"
         print_info "Install with: brew install ghostscript (macOS) or apt-get install ghostscript (Linux)"
         return 0
     fi
-    
+
     if [ ! -f "$pdf_path" ]; then
         print_error "PDF not found for compression: $pdf_path"
         return 1
     fi
-    
+
     # Get original file size
     local original_size=$(ls -lh "$pdf_path" | awk '{print $5}')
     print_info "Original PDF size: $original_size"
-    
+
     show_progress 1 3 "Compressing with Ghostscript"
-    
+
     # Use Ghostscript with ebook settings for optimal compression
     if gs -sDEVICE=pdfwrite \
           -dCompatibilityLevel=1.4 \
@@ -335,22 +335,22 @@ compress_pdf() {
           -dBATCH \
           -sOutputFile="$compressed_path" \
           "$pdf_path" >/dev/null 2>&1; then
-        
+
         show_progress 2 3 "Compression completed"
-        
+
         # Get compressed file size
         local compressed_size=$(ls -lh "$compressed_path" | awk '{print $5}')
-        
+
         # Calculate compression ratio
         local original_bytes=$(stat -f%z "$pdf_path" 2>/dev/null || stat -c%s "$pdf_path" 2>/dev/null)
         local compressed_bytes=$(stat -f%z "$compressed_path" 2>/dev/null || stat -c%s "$compressed_path" 2>/dev/null)
         local compression_ratio=$(( (original_bytes - compressed_bytes) * 100 / original_bytes ))
-        
+
         show_progress 3 3 "Replacing original PDF"
-        
+
         # Replace original with compressed version
         mv "$compressed_path" "$pdf_path"
-        
+
         print_success "PDF compressed successfully"
         print_info "Compressed size: $compressed_size (saved ${compression_ratio}%)"
         return 0
@@ -369,7 +369,7 @@ compress_pdf() {
 # Deploy to GitHub Pages
 deploy_to_github_pages() {
     print_step "Deploying to GitHub Pages..."
-    
+
     if quarto publish gh-pages --no-render >/dev/null 2>&1; then
         print_success "Successfully deployed to GitHub Pages"
         return 0
@@ -385,13 +385,13 @@ create_github_release() {
     local description=$2
     local pdf_path=$3
     local gh_status=$(check_gh_cli)
-    
+
     print_step "Creating GitHub release $version..."
-    
+
     case "$gh_status" in
         "authenticated")
             print_info "Using GitHub CLI to create release"
-            
+
             # Create release notes
             local release_notes="# Release $version
 
@@ -498,7 +498,7 @@ show_detailed_release_info() {
 
 main() {
     print_header
-    
+
     # Comprehensive Publishing Overview
     print_section "Publishing Overview"
     echo -e "${WHITE}🎯 What this will do:${NC}"
@@ -528,7 +528,7 @@ main() {
     echo -e "   ${CYAN}• GitHub deployment: 1-2 minutes${NC}"
     echo -e "   ${CYAN}• Total: 6-10 minutes${NC}"
     echo ""
-    
+
     # Initial confirmation
     echo -e "${BOLD}${RED}🚨 PRODUCTION RELEASE CONFIRMATION${NC}"
     echo -e "${RED}This will create a formal release with versioning and make it publicly available.${NC}"
@@ -541,33 +541,33 @@ main() {
     echo ""
     echo -e -n "${YELLOW}Create formal release? [y/N/info] [default: N]: ${NC}"
     read -r initial_choice
-    
+
     if [ "$initial_choice" = "info" ]; then
         show_detailed_release_info
         echo ""
         echo -e -n "${YELLOW}Create formal release? [y/N] [default: N]: ${NC}"
         read -r initial_choice
     fi
-    
+
     if [ "$initial_choice" != "y" ] && [ "$initial_choice" != "yes" ]; then
         print_info "Release creation cancelled"
         exit 0
     fi
-    
+
     echo -e "${GREEN}✅ Release creation confirmed${NC}"
     echo ""
-    
+
     # Check git status
     print_section "Git Status Check"
     IFS='|' read -r current_branch is_clean changes_count <<< "$(get_git_status)"
-    
+
     print_info "Current branch: $current_branch"
     print_info "Uncommitted changes: $changes_count"
-    
+
     # Handle git status
     if [ "$current_branch" != "main" ]; then
         print_warning "You are not on the main branch"
-        
+
         if confirm_action "Switch to main branch and merge dev?"; then
             if [ "$is_clean" != "true" ]; then
                 if confirm_action "Commit current changes first?"; then
@@ -577,7 +577,7 @@ main() {
                     print_success "Changes committed"
                 fi
             fi
-            
+
             print_step "Switching to main and merging dev..."
             git checkout main
             git pull origin main
@@ -590,7 +590,7 @@ main() {
         fi
     elif [ "$is_clean" != "true" ]; then
         print_warning "You have uncommitted changes"
-        
+
         if confirm_action "Commit changes before continuing?"; then
             local commit_msg=$(get_user_input "Commit message" "fix: update before publishing")
             git add .
@@ -604,24 +604,24 @@ main() {
     else
         print_success "Git status is clean"
     fi
-    
+
     # Version management
     print_section "Version Management"
     local current_version=$(get_latest_version)
     print_info "Current version: $current_version"
-    
+
     local release_types=("patch" "minor" "major" "custom")
     local release_type=$(select_from_menu "Select release type:" "${release_types[@]}")
-    
+
     local new_version
     if [ "$release_type" = "custom" ]; then
         new_version=$(get_user_input "Enter version (e.g., v1.0.0)" "" "^v[0-9]+\.[0-9]+\.[0-9]+$")
     else
         new_version=$(calculate_next_version "$current_version" "$release_type")
     fi
-    
+
     print_info "New version will be: $new_version"
-    
+
     # Check if version already exists
     if git tag -l "$new_version" | grep -q "$new_version"; then
         print_warning "Version $new_version already exists"
@@ -634,10 +634,10 @@ main() {
             exit 1
         fi
     fi
-    
+
     # Get release description
     local description=$(get_user_input "Release description" "Content updates and improvements")
-    
+
     # Confirmation
     print_section "Publishing Summary"
     echo -e "${WHITE}📋 Publishing Details:${NC}"
@@ -646,49 +646,49 @@ main() {
     echo -e "   Description: ${CYAN}$description${NC}"
     echo -e "   Branch: ${PURPLE}$current_branch${NC}"
     echo -e "   Repository: ${YELLOW}$(get_repo_info)${NC}"
-    
+
     if ! confirm_action "Proceed with publishing?"; then
         print_info "Publishing cancelled"
         exit 0
     fi
-    
+
     # Building phase
     print_section "Building Phase"
-    
+
     # Clean builds
     if ! clean_builds; then
         print_error "Failed to clean builds"
         exit 1
     fi
-    
+
     # Build PDF first (more important, takes longer)
     if ! build_pdf; then
         print_error "PDF build failed"
         exit 1
     fi
-    
+
     # Compress PDF with Ghostscript
     if ! compress_pdf; then
         print_warning "PDF compression failed, continuing with uncompressed PDF"
     fi
-    
+
     # Build HTML (faster, after PDF is ready)
     if ! build_html; then
         print_error "HTML build failed"
         exit 1
     fi
-    
+
     # Publishing phase
     print_section "Publishing Phase"
-    
+
     local pdf_path="build/pdf/Machine-Learning-Systems.pdf"
-    
+
     # Create git tag
     print_step "Creating git tag $new_version..."
     git tag -a "$new_version" -m "Release $new_version: $description"
     git push origin "$new_version"
     print_success "Git tag created and pushed"
-    
+
     # GitHub Pages deployment
     if confirm_action "Deploy to GitHub Pages?"; then
         if deploy_to_github_pages; then
@@ -697,12 +697,12 @@ main() {
             print_success "Deployed to: $pages_url"
         fi
     fi
-    
+
     # GitHub release creation
     if confirm_action "Create GitHub release?"; then
         create_github_release "$new_version" "$description" "$pdf_path"
     fi
-    
+
     # Success summary
     print_section "Publication Complete"
     print_success "🎉 Publication successful!"
@@ -712,7 +712,7 @@ main() {
     echo -e "   ✅ PDF build completed and compressed ($(ls -lh "$pdf_path" | awk '{print $5}'))"
     echo -e "   ✅ HTML build completed"
     echo -e "   ✅ Git tag created and pushed"
-    
+
     local repo_info=$(get_repo_info)
     if [ -n "$repo_info" ]; then
         echo ""
@@ -721,7 +721,7 @@ main() {
         echo -e "   📦 Releases: https://github.com/$repo_info/releases"
         echo -e "   📄 PDF: https://github.com/$repo_info/releases/download/$new_version/Machine-Learning-Systems.pdf"
     fi
-    
+
     print_success "Ready for distribution! 🚀"
 }
 

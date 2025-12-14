@@ -101,4 +101,3 @@ If a milestone fails:
 2. Run the module tests: `tito test <module_number>`
 3. Look at the specific error message for debugging hints
 4. Review the milestone's docstring for implementation requirements
-

@@ -12,7 +12,7 @@ This directory contains regression tests that ensure TinyTorch's core functional
 **What it tests**: Convolution output dimensions match Linear layer expectations
 **Why it matters**: Students shouldn't debug dimension mismatches in their CNNs
 
-### Tensor Reshaping Tests  
+### Tensor Reshaping Tests
 **File**: `test_transformer_reshaping.py`
 **What it tests**: Transformer 3D outputs work with Linear 2D layers
 **Why it matters**: Language model architectures should "just work"
@@ -73,7 +73,7 @@ PREVENTION:
 
 3. **Write Specific Test**: Test the EXACT scenario that failed
 
-4. **Verify Test Catches Bug**: 
+4. **Verify Test Catches Bug**:
    - Test should FAIL without the fix
    - Test should PASS with the fix
 

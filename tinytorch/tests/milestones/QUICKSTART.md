@@ -200,4 +200,3 @@ tests/milestones/
 # Verify TinyTorch implements neural network history correctly
 pytest tests/milestones/ -v && echo "✅ 60+ years of ML history verified!"
 ```
-

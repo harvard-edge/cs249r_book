@@ -19,7 +19,7 @@ from .modules import (
 __all__ = [
     'get_console',
     'TinyTorchCLIError',
-    'ValidationError', 
+    'ValidationError',
     'ExecutionError',
     'CLIConfig',
     # Module utilities
@@ -31,4 +31,4 @@ __all__ = [
     'get_total_modules',
     'module_exists',
     'clear_cache',
-] 
+]

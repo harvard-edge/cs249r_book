@@ -31,7 +31,6 @@ If you've ever wondered "why does my model OOM?" or "how does autograd actually 
 
 You control the pace. Some students complete it in intensive 8-week sprints, others spread it across a semester.
 
----
 
 ## Why TinyTorch vs. Alternatives?
 
@@ -129,7 +128,6 @@ We love micrograd and nanoGPT! They're excellent educational resources. Here's h
 
 You learn the *concepts* in TinyTorch, then understand how PyTorch optimizes them for production.
 
----
 
 ## Technical Questions
 
@@ -178,7 +176,6 @@ You learn the *concepts* in TinyTorch, then understand how PyTorch optimizes the
 - Understand performance characteristics
 - Make better architectural decisions
 
----
 
 ## Course Structure Questions
 
@@ -226,7 +223,6 @@ Each milestone proves your framework works by running actual ML experiments.
 
 ** See [Module Workflow](tito/modules.md)** for the core development cycle.
 
----
 
 ## Practical Questions
 
@@ -288,7 +284,6 @@ python rosenblatt_forward.py  # Uses YOUR implementation!
 - **GitHub Issues**: Report bugs or ask questions
 - **Community**: (Coming soon) Discord/forum for peer support
 
----
 
 ## Philosophy Questions
 
@@ -334,7 +329,6 @@ model = nn.Sequential(nn.Linear(784, 128), nn.ReLU(), nn.Linear(128, 10))
 
 You use the same tools, but with systems-level understanding.
 
----
 
 ## Community Questions
 
@@ -365,7 +359,6 @@ TinyTorch is developed at the intersection of academia and education:
 - Community feedback integration
 - Regular updates and improvements
 
----
 
 ## Still Have Questions?
 

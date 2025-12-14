@@ -64,25 +64,25 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 def create_causal_mask(seq_len: int) -> Tensor:
     """
     Create a causal (autoregressive) attention mask.
-    
+
     This mask ensures that position i can only attend to positions j where j ≤ i.
     Essential for autoregressive language models like GPT.
-    
+
     Args:
         seq_len: Length of the sequence
-        
+
     Returns:
         Tensor of shape (1, seq_len, seq_len) with:
         - 1.0 for positions that CAN be attended to (lower triangle)
         - 0.0 for positions that CANNOT be attended to (upper triangle)
-        
+
     Example:
         For seq_len=4, creates:
         [[1, 0, 0, 0],
          [1, 1, 0, 0],
          [1, 1, 1, 0],
          [1, 1, 1, 1]]
-         
+
     Usage:
         >>> from tinytorch.core.transformer import create_causal_mask
         >>> mask = create_causal_mask(seq_len=10)

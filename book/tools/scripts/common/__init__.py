@@ -20,7 +20,7 @@ from .logging_config import setup_logging, get_logger
 __version__ = "1.0.0"
 __all__ = [
     "MLSysBookError",
-    "ConfigurationError", 
+    "ConfigurationError",
     "ValidationError",
     "get_config",
     "Config",

@@ -4,17 +4,15 @@
 
 **See yourself on the TinyTorch Globe!** Create an account and join the global community to track your progress and connect with other builders.
 
-```{image} _static/images/diagram_tiny-commununity.png
-:alt: TinyTorch Community Ecosystem
-:width: 100%
-:align: center
-```
+<p align="center">
+<img src="_static/images/diagram_tiny-commununity.png" alt="TinyTorch Community Ecosystem" width="100%">
+</p>
 
 **Learn together, build together, grow together.**
 
 TinyTorch is more than a course—it's a growing community of students, educators, and ML engineers learning systems engineering from first principles.
 
-### Community Dashboard (Available Now ✓)
+### Community Dashboard (Available Now )
 
 Join the global TinyTorch community and see your progress:
 
@@ -33,9 +31,9 @@ There are two primary ways to join and engage with the TinyTorch community:
 You can explore the interactive TinyTorch Community Dashboard directly in your browser:
 
 <p align="center">
-    <a href="community/community.html" target="_blank" class="btn btn-primary btn-lg" style="background-color: #ff6600; color: white; padding: 15px 30px; text-align: center; text-decoration: none; display: inline-block; font-size: 20px; margin: 10px 2px; cursor: pointer; border-radius: 8px; border: none;">
-        Explore Dashboard <span class="badge badge-light">🌎</span>
-    </a>
+ <a href="community/community.html" target="_blank" class="btn btn-primary btn-lg" style="background-color: #ff6600; color: white; padding: 15px 30px; text-align: center; text-decoration: none; display: inline-block; font-size: 20px; margin: 10px 2px; cursor: pointer; border-radius: 8px; border: none;">
+ Explore Dashboard <span class="badge badge-light"></span>
+ </a>
 </p>
 
 ### Option 2: Join via TinyTorch CLI
@@ -68,7 +66,6 @@ tito community map
 
 **Privacy:** All fields are optional. We use anonymous UUIDs (no personal names). Data is stored locally in your project directory. See [Privacy Policy](PRIVACY_DATA_RETENTION.md) for details.
 
----
 
 ## Connect Now
 Validate your setup and track performance improvements:
@@ -100,7 +97,6 @@ tito benchmark capstone
 
 See [TITO CLI Reference](tito/overview.md) for complete command documentation.
 
----
 
 ## For Educators
 
@@ -112,7 +108,6 @@ Teaching TinyTorch in your classroom?
 - Assignment generation and distribution
 - Student progress tracking and classroom management
 
----
 
 ## Recognition & Showcase
 
@@ -128,7 +123,6 @@ Built something impressive with TinyTorch?
 - In course examples
 - As reference implementations
 
----
 
 ## Stay Updated
 
@@ -136,6 +130,5 @@ Built something impressive with TinyTorch?
 
 **Follow Development**: Check [GitHub Issues](https://github.com/mlsysbook/TinyTorch/issues) for roadmap and upcoming features
 
----
 
 **Build ML systems. Learn together. Grow the community.**

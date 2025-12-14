@@ -40,7 +40,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/09_spatial/spatial_dev.py`  
+**Learning Side:** You work in `modules/09_spatial/spatial_dev.py`
 **Building Side:** Code exports to `tinytorch.core.spatial`
 
 ```python
@@ -301,16 +301,16 @@ This reveals why convolution is expensive: O(B×C_out×H×W×K_h×K_w×C_in) ope
 class Conv2dBackward(Function):
     """
     Gradient computation for 2D convolution.
-    
+
     Computes gradients for Conv2d backward pass:
     - grad_input: gradient w.r.t. input (for backprop to previous layer)
     - grad_weight: gradient w.r.t. filters (for weight updates)
     - grad_bias: gradient w.r.t. bias (for bias updates)
-    
+
     This uses explicit loops to show the gradient computation, matching
     the educational approach of the forward pass.
     """
-    
+
     def __init__(self, x, weight, bias, stride, padding, kernel_size, padded_shape):
         # Register all tensors that need gradients with autograd
         if bias is not None:
@@ -324,22 +324,22 @@ class Conv2dBackward(Function):
         self.padding = padding
         self.kernel_size = kernel_size
         self.padded_shape = padded_shape
-    
+
     def apply(self, grad_output):
         """
         Compute gradients for convolution inputs and parameters.
-        
+
         Args:
             grad_output: Gradient flowing back from next layer
                         Shape: (batch_size, out_channels, out_height, out_width)
-        
+
         Returns:
             Tuple of (grad_input, grad_weight, grad_bias)
         """
         batch_size, out_channels, out_height, out_width = grad_output.shape
         _, in_channels, in_height, in_width = self.x.shape
         kernel_h, kernel_w = self.kernel_size
-        
+
         # Apply padding to input if needed (for gradient computation)
         if self.padding > 0:
             padded_input = np.pad(self.x.data,
@@ -347,12 +347,12 @@ class Conv2dBackward(Function):
                                 mode='constant', constant_values=0)
         else:
             padded_input = self.x.data
-        
+
         # Initialize gradients
         grad_input_padded = np.zeros_like(padded_input)
         grad_weight = np.zeros_like(self.weight.data)
         grad_bias = None if self.bias is None else np.zeros_like(self.bias.data)
-        
+
         # Compute gradients using explicit loops (educational approach)
         for b in range(batch_size):
             for out_ch in range(out_channels):
@@ -361,10 +361,10 @@ class Conv2dBackward(Function):
                         # Position in input
                         in_h_start = out_h * self.stride
                         in_w_start = out_w * self.stride
-                        
+
                         # Gradient value flowing back to this position
                         grad_val = grad_output[b, out_ch, out_h, out_w]
-                        
+
                         # Distribute gradient to weight and input
                         for k_h in range(kernel_h):
                             for k_w in range(kernel_w):
@@ -372,30 +372,30 @@ class Conv2dBackward(Function):
                                     # Input position
                                     in_h = in_h_start + k_h
                                     in_w = in_w_start + k_w
-                                    
+
                                     # Gradient w.r.t. weight
                                     grad_weight[out_ch, in_ch, k_h, k_w] += (
                                         padded_input[b, in_ch, in_h, in_w] * grad_val
                                     )
-                                    
+
                                     # Gradient w.r.t. input
                                     grad_input_padded[b, in_ch, in_h, in_w] += (
                                         self.weight.data[out_ch, in_ch, k_h, k_w] * grad_val
                                     )
-        
+
         # Compute gradient w.r.t. bias (sum over batch and spatial dimensions)
         if grad_bias is not None:
             for out_ch in range(out_channels):
                 grad_bias[out_ch] = grad_output[:, out_ch, :, :].sum()
-        
+
         # Remove padding from input gradient
         if self.padding > 0:
-            grad_input = grad_input_padded[:, :, 
-                                          self.padding:-self.padding, 
+            grad_input = grad_input_padded[:, :,
+                                          self.padding:-self.padding,
                                           self.padding:-self.padding]
         else:
             grad_input = grad_input_padded
-        
+
         # Return gradients as numpy arrays (autograd system handles storage)
         # Following TinyTorch protocol: return (grad_input, grad_weight, grad_bias)
         return grad_input, grad_weight, grad_bias
@@ -560,7 +560,7 @@ class Conv2d:
 
         # Return Tensor with gradient tracking enabled
         result = Tensor(output, requires_grad=(x.requires_grad or self.weight.requires_grad))
-        
+
         # Attach backward function for gradient computation (following TinyTorch protocol)
         if result.requires_grad:
             result._grad_fn = Conv2dBackward(
@@ -568,7 +568,7 @@ class Conv2d:
                 self.stride, self.padding, self.kernel_size,
                 padded_input.shape
             )
-        
+
         return result
         ### END SOLUTION
 
@@ -802,11 +802,11 @@ For input (1, 64, 224, 224) with 2×2 pooling:
 class MaxPool2dBackward(Function):
     """
     Gradient computation for 2D max pooling.
-    
+
     Max pooling gradients flow only to the positions that were selected
     as the maximum in the forward pass.
     """
-    
+
     def __init__(self, x, output_shape, kernel_size, stride, padding):
         super().__init__(x)
         self.x = x
@@ -816,21 +816,21 @@ class MaxPool2dBackward(Function):
         self.padding = padding
         # Store max positions for gradient routing
         self.max_positions = {}
-    
+
     def apply(self, grad_output):
         """
         Route gradients back to max positions.
-        
+
         Args:
             grad_output: Gradient from next layer
-        
+
         Returns:
             Gradient w.r.t. input
         """
         batch_size, channels, in_height, in_width = self.x.shape
         _, _, out_height, out_width = self.output_shape
         kernel_h, kernel_w = self.kernel_size
-        
+
         # Apply padding if needed
         if self.padding > 0:
             padded_input = np.pad(self.x.data,
@@ -840,7 +840,7 @@ class MaxPool2dBackward(Function):
         else:
             padded_input = self.x.data
             grad_input_padded = np.zeros_like(self.x.data)
-        
+
         # Route gradients to max positions
         for b in range(batch_size):
             for c in range(channels):
@@ -848,7 +848,7 @@ class MaxPool2dBackward(Function):
                     for out_w in range(out_width):
                         in_h_start = out_h * self.stride
                         in_w_start = out_w * self.stride
-                        
+
                         # Find max position in this window
                         max_val = -np.inf
                         max_h, max_w = 0, 0
@@ -860,18 +860,18 @@ class MaxPool2dBackward(Function):
                                 if val > max_val:
                                     max_val = val
                                     max_h, max_w = in_h, in_w
-                        
+
                         # Route gradient to max position
                         grad_input_padded[b, c, max_h, max_w] += grad_output[b, c, out_h, out_w]
-        
+
         # Remove padding
         if self.padding > 0:
-            grad_input = grad_input_padded[:, :, 
+            grad_input = grad_input_padded[:, :,
                                           self.padding:-self.padding,
                                           self.padding:-self.padding]
         else:
             grad_input = grad_input_padded
-        
+
         # Return as tuple (following Function protocol)
         return (grad_input,)
 
@@ -1002,13 +1002,13 @@ class MaxPool2d:
 
         # Return Tensor with gradient tracking
         result = Tensor(output, requires_grad=x.requires_grad)
-        
+
         # Attach backward function for gradient computation
         if result.requires_grad:
             result._grad_fn = MaxPool2dBackward(
                 x, output.shape, self.kernel_size, self.stride, self.padding
             )
-        
+
         return result
         ### END SOLUTION
 
@@ -1273,77 +1273,77 @@ current batch                      consistent inference
 class BatchNorm2d:
     """
     Batch Normalization for 2D spatial inputs (images).
-    
+
     Normalizes activations across batch and spatial dimensions for each channel,
     then applies learnable scale (gamma) and shift (beta) parameters.
-    
+
     Key behaviors:
     - Training: Uses batch statistics, updates running statistics
     - Eval: Uses frozen running statistics for consistent inference
-    
+
     Args:
         num_features: Number of channels (C in NCHW format)
         eps: Small constant for numerical stability (default: 1e-5)
         momentum: Momentum for running statistics update (default: 0.1)
     """
-    
+
     def __init__(self, num_features, eps=1e-5, momentum=0.1):
         """
         Initialize BatchNorm2d layer.
-        
+
         TODO: Initialize learnable and running parameters
-        
+
         APPROACH:
         1. Store hyperparameters (num_features, eps, momentum)
         2. Initialize gamma (scale) to ones - identity at start
-        3. Initialize beta (shift) to zeros - no shift at start  
+        3. Initialize beta (shift) to zeros - no shift at start
         4. Initialize running_mean to zeros
         5. Initialize running_var to ones
         6. Set training mode to True initially
-        
+
         EXAMPLE:
         >>> bn = BatchNorm2d(64)  # For 64-channel feature maps
         >>> print(bn.gamma.shape)  # (64,)
         >>> print(bn.training)     # True
         """
         super().__init__()
-        
+
         ### BEGIN SOLUTION
         self.num_features = num_features
         self.eps = eps
         self.momentum = momentum
-        
+
         # Learnable parameters (requires_grad=True for training)
         # gamma (scale): initialized to 1 so output = normalized input initially
         self.gamma = Tensor(np.ones(num_features), requires_grad=True)
-        # beta (shift): initialized to 0 so no shift initially  
+        # beta (shift): initialized to 0 so no shift initially
         self.beta = Tensor(np.zeros(num_features), requires_grad=True)
-        
+
         # Running statistics (not trained, accumulated during training)
         # These are used during evaluation for consistent normalization
         self.running_mean = np.zeros(num_features)
         self.running_var = np.ones(num_features)
-        
+
         # Training mode flag
         self.training = True
         ### END SOLUTION
-    
+
     def train(self):
         """Set layer to training mode."""
         self.training = True
         return self
-    
+
     def eval(self):
         """Set layer to evaluation mode."""
         self.training = False
         return self
-    
+
     def forward(self, x):
         """
         Forward pass through BatchNorm2d.
-        
+
         TODO: Implement batch normalization forward pass
-        
+
         APPROACH:
         1. Validate input shape (must be 4D: batch, channels, height, width)
         2. If training:
@@ -1354,13 +1354,13 @@ class BatchNorm2d:
            a. Use running mean and variance
            b. Normalize using frozen statistics
         4. Apply scale (gamma) and shift (beta)
-        
+
         EXAMPLE:
         >>> bn = BatchNorm2d(16)
         >>> x = Tensor(np.random.randn(2, 16, 8, 8))  # batch=2, channels=16, 8x8
         >>> y = bn(x)
         >>> print(y.shape)  # (2, 16, 8, 8) - same shape
-        
+
         HINTS:
         - Compute mean/var over axes (0, 2, 3) to get per-channel statistics
         - Reshape gamma/beta to (1, C, 1, 1) for broadcasting
@@ -1370,22 +1370,22 @@ class BatchNorm2d:
         # Input validation
         if len(x.shape) != 4:
             raise ValueError(f"Expected 4D input (batch, channels, height, width), got {x.shape}")
-        
+
         batch_size, channels, height, width = x.shape
-        
+
         if channels != self.num_features:
             raise ValueError(f"Expected {self.num_features} channels, got {channels}")
-        
+
         if self.training:
             # Compute batch statistics per channel
             # Mean over batch and spatial dimensions: axes (0, 2, 3)
             batch_mean = np.mean(x.data, axis=(0, 2, 3))  # Shape: (C,)
             batch_var = np.var(x.data, axis=(0, 2, 3))    # Shape: (C,)
-            
+
             # Update running statistics (exponential moving average)
             self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * batch_mean
             self.running_var = (1 - self.momentum) * self.running_var + self.momentum * batch_var
-            
+
             # Use batch statistics for normalization
             mean = batch_mean
             var = batch_var
@@ -1393,31 +1393,31 @@ class BatchNorm2d:
             # Use running statistics (frozen during eval)
             mean = self.running_mean
             var = self.running_var
-        
+
         # Normalize: (x - mean) / sqrt(var + eps)
         # Reshape mean and var for broadcasting: (C,) -> (1, C, 1, 1)
         mean_reshaped = mean.reshape(1, channels, 1, 1)
         var_reshaped = var.reshape(1, channels, 1, 1)
-        
+
         x_normalized = (x.data - mean_reshaped) / np.sqrt(var_reshaped + self.eps)
-        
+
         # Apply scale (gamma) and shift (beta)
         # Reshape for broadcasting: (C,) -> (1, C, 1, 1)
         gamma_reshaped = self.gamma.data.reshape(1, channels, 1, 1)
         beta_reshaped = self.beta.data.reshape(1, channels, 1, 1)
-        
+
         output = gamma_reshaped * x_normalized + beta_reshaped
-        
+
         # Return Tensor with gradient tracking
         result = Tensor(output, requires_grad=x.requires_grad or self.gamma.requires_grad)
-        
+
         return result
         ### END SOLUTION
-    
+
     def parameters(self):
         """Return learnable parameters (gamma and beta)."""
         return [self.gamma, self.beta]
-    
+
     def __call__(self, x):
         """Enable model(x) syntax."""
         return self.forward(x)
@@ -1437,24 +1437,24 @@ This test validates batch normalization implementation.
 def test_unit_batchnorm2d():
     """🔬 Test BatchNorm2d implementation."""
     print("🔬 Unit Test: BatchNorm2d...")
-    
+
     # Test 1: Basic forward pass shape
     print("  Testing basic forward pass...")
     bn = BatchNorm2d(num_features=16)
     x = Tensor(np.random.randn(4, 16, 8, 8))  # batch=4, channels=16, 8x8
     y = bn(x)
-    
+
     assert y.shape == x.shape, f"Output shape should match input, got {y.shape}"
-    
+
     # Test 2: Training mode normalization
     print("  Testing training mode normalization...")
     bn2 = BatchNorm2d(num_features=8)
     bn2.train()  # Ensure training mode
-    
+
     # Create input with known statistics per channel
     x2 = Tensor(np.random.randn(32, 8, 4, 4) * 10 + 5)  # Mean~5, std~10
     y2 = bn2(x2)
-    
+
     # After normalization, each channel should have mean≈0, std≈1
     # (before gamma/beta are applied, since gamma=1, beta=0)
     for c in range(8):
@@ -1462,52 +1462,52 @@ def test_unit_batchnorm2d():
         channel_std = np.std(y2.data[:, c, :, :])
         assert abs(channel_mean) < 0.1, f"Channel {c} mean should be ~0, got {channel_mean:.3f}"
         assert abs(channel_std - 1.0) < 0.1, f"Channel {c} std should be ~1, got {channel_std:.3f}"
-    
+
     # Test 3: Running statistics update
     print("  Testing running statistics update...")
     initial_running_mean = bn2.running_mean.copy()
-    
+
     # Forward pass updates running stats
     x3 = Tensor(np.random.randn(16, 8, 4, 4) + 3)  # Offset mean
     _ = bn2(x3)
-    
+
     # Running mean should have moved toward batch mean
     assert not np.allclose(bn2.running_mean, initial_running_mean), \
         "Running mean should update during training"
-    
+
     # Test 4: Eval mode uses running statistics
     print("  Testing eval mode behavior...")
     bn3 = BatchNorm2d(num_features=4)
-    
+
     # Train on some data to establish running stats
     for _ in range(10):
         x_train = Tensor(np.random.randn(8, 4, 4, 4) * 2 + 1)
         _ = bn3(x_train)
-    
+
     saved_running_mean = bn3.running_mean.copy()
     saved_running_var = bn3.running_var.copy()
-    
+
     # Switch to eval mode
     bn3.eval()
-    
+
     # Process different data - running stats should NOT change
     x_eval = Tensor(np.random.randn(2, 4, 4, 4) * 5)  # Different distribution
     _ = bn3(x_eval)
-    
+
     assert np.allclose(bn3.running_mean, saved_running_mean), \
         "Running mean should not change in eval mode"
     assert np.allclose(bn3.running_var, saved_running_var), \
         "Running var should not change in eval mode"
-    
+
     # Test 5: Parameter counting
     print("  Testing parameter counting...")
     bn4 = BatchNorm2d(num_features=64)
     params = bn4.parameters()
-    
+
     assert len(params) == 2, f"Should have 2 parameters (gamma, beta), got {len(params)}"
     assert params[0].shape == (64,), f"Gamma shape should be (64,), got {params[0].shape}"
     assert params[1].shape == (64,), f"Beta shape should be (64,), got {params[1].shape}"
-    
+
     print("✅ BatchNorm2d works correctly!")
 
 if __name__ == "__main__":
@@ -2097,7 +2097,7 @@ def test_module():
     x = bn1(x)               # (4, 8, 32, 32) - normalized
     x = Tensor(np.maximum(0, x.data))  # ReLU
     x = pool1(x)             # (4, 8, 16, 16)
-    
+
     x = conv2(x)             # (4, 16, 16, 16)
     x = bn2(x)               # (4, 16, 16, 16) - normalized
     x = Tensor(np.maximum(0, x.data))  # ReLU
@@ -2113,28 +2113,28 @@ def test_module():
     all_params.extend(bn1.parameters())
     all_params.extend(conv2.parameters())
     all_params.extend(bn2.parameters())
-    
+
     # Pooling has no parameters
     assert len(pool1.parameters()) == 0
     assert len(pool2.parameters()) == 0
-    
+
     # BatchNorm has 2 params each (gamma, beta)
     assert len(bn1.parameters()) == 2, f"BatchNorm should have 2 parameters, got {len(bn1.parameters())}"
-    
+
     # Total: Conv1 (2) + BN1 (2) + Conv2 (2) + BN2 (2) = 8 parameters
     assert len(all_params) == 8, f"Expected 8 parameter tensors total, got {len(all_params)}"
-    
+
     # Test train/eval mode switching
     print("🔬 Integration Test: Train/Eval mode switching...")
     bn1.eval()
     bn2.eval()
-    
+
     # Run inference with single sample (would fail with batch stats)
     single_image = Tensor(np.random.randn(1, 3, 32, 32))
     x = conv1(single_image)
     x = bn1(x)  # Uses running stats, not batch stats
     assert x.shape == (1, 8, 32, 32), f"Single sample inference should work in eval mode"
-    
+
     print("✅ CNN pipeline with BatchNorm works correctly!")
 
     # Test memory efficiency comparison
@@ -2272,20 +2272,20 @@ def demo_spatial():
     """🎯 See Conv2d process spatial data."""
     print("🎯 AHA MOMENT: Convolution Extracts Features")
     print("=" * 45)
-    
+
     # Create a simple 8x8 "image" with 1 channel
     image = Tensor(np.random.randn(1, 1, 8, 8))
-    
+
     # Conv2d: 1 input channel → 4 feature maps
     conv = Conv2d(in_channels=1, out_channels=4, kernel_size=3)
-    
+
     output = conv(image)
-    
+
     print(f"Input:  {image.shape}  ← 1 image, 1 channel, 8×8")
     print(f"Output: {output.shape}  ← 1 image, 4 features, 6×6")
     print(f"\nConv kernel: 3×3 sliding window")
     print(f"Output smaller: 8 - 3 + 1 = 6 (no padding)")
-    
+
     print("\n✨ Conv2d detects spatial patterns in images!")
 
 # %%

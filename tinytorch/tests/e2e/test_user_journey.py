@@ -143,7 +143,7 @@ class TestQuickVerification:
             capture_output=True,
             text=True
         ).returncode, "", ""
-        
+
         result = subprocess.run(
             [sys.executable, "-c", "import tinytorch; print('OK')"],
             cwd=PROJECT_ROOT,
@@ -427,4 +427,3 @@ class TestInstallationPaths:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

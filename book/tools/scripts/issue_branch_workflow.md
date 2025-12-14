@@ -108,7 +108,7 @@ gh pr create --title "Fix #960: Duplicate Efficiency Trade-offs Heading" \
 - Improved content flow and eliminated redundancy
 
 ## Testing
-- [x] Chapter builds successfully  
+- [x] Chapter builds successfully
 - [x] No linting errors
 - [x] All feedback points addressed
 
@@ -136,7 +136,7 @@ git push origin --delete issue-{number}-{description}
 
 ### Issue Linking (in commits and PRs)
 - `Addresses #123` - Links to issue without closing
-- `Relates to #123` - Links to issue without closing  
+- `Relates to #123` - Links to issue without closing
 - `References #123` - Links to issue without closing
 
 ### Issue Closing (in commits and PRs)
@@ -156,7 +156,7 @@ Relates to #958
 ### When to Create Issue Branches
 ✅ **Always create for:**
 - Bug fixes from GitHub issues
-- Feature requests from GitHub issues  
+- Feature requests from GitHub issues
 - Content improvements from feedback
 - Structural changes affecting multiple files
 - Any work that addresses a specific GitHub issue
@@ -182,7 +182,7 @@ type(scope): short description
 
 Longer description if needed explaining:
 - What was changed
-- Why it was changed  
+- Why it was changed
 - How it addresses the issue
 
 Addresses #issue_number
@@ -263,7 +263,7 @@ gh pr create --title "Fix #1005: Missing Code Examples in Chapter 8" \
 
 ## Changes Made
 - Added complete PyTorch training loop example
-- Added distributed training setup example  
+- Added distributed training setup example
 - Added validation and metrics tracking
 - Included best practices documentation
 
@@ -285,7 +285,7 @@ Closes #1005" \
 - [ ] Branch name follows convention
 - [ ] Branching from latest dev
 
-### During Development  
+### During Development
 - [ ] Commits reference issue number
 - [ ] Commit messages are descriptive
 - [ ] Changes are focused and related

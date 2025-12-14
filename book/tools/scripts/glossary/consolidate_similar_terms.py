@@ -30,19 +30,19 @@ def find_consolidation_rules() -> Dict[str, str]:
         # Singular/plural consolidations (use singular form)
         "adversarial examples": "adversarial example",
         "foundation models": "foundation model",
-        
+
         # Add acronym to term
         "application-specific integrated circuit": "application-specific integrated circuit (asic)",
         "field-programmable gate array": "field-programmable gate array (fpga)",
         "graphics processing unit": "graphics processing unit (gpu)",
         "neural processing unit": "neural processing unit (npu)",
         "tensor processing unit": "tensor processing unit (tpu)",
-        
+
         # Remove redundant prefixes
         "cloud machine learning": "machine learning",
         "edge machine learning": "machine learning",
         "ml benchmarking": "benchmarking",
-        
+
         # Keep more specific term
         "autoregressive": "autoregressive model",
         "bandwidth": "memory bandwidth",
@@ -52,11 +52,11 @@ def find_consolidation_rules() -> Dict[str, str]:
         "pruning": "dynamic pruning",
         "quantization": "dynamic quantization",
         "model theft": "exact model theft",
-        
+
         # Remove duplicates with different capitalization
         "generative ai": "generative AI",
         "responsible ai": "responsible AI",
-        
+
         # Fix inconsistent naming
         "co design": "co-design",
         "moores law": "Moore's law",
@@ -84,26 +84,26 @@ def consolidate_chapter_glossaries():
     chapters_dir = Path('quarto/contents/core')
     consolidation_rules = find_consolidation_rules()
     total_consolidated = 0
-    
+
     for json_file in chapters_dir.glob('*/*_glossary.json'):
         with open(json_file, 'r') as f:
             data = json.load(f)
-        
+
         original_count = len(data['terms'])
         consolidated_terms = {}
         terms_to_remove = set()
-        
+
         # First pass: apply consolidation rules
         for term_entry in data['terms']:
             term = term_entry['term']
-            
+
             # Check if this term should be consolidated
             if term in consolidation_rules:
                 canonical_term = consolidation_rules[term]
                 print(f"{json_file.parent.name}: Consolidating '{term}' → '{canonical_term}'")
                 term_entry['term'] = canonical_term
                 term = canonical_term
-            
+
             # Check for duplicates after consolidation
             if term in consolidated_terms:
                 # Merge definitions if they're different
@@ -115,28 +115,28 @@ def consolidate_chapter_glossaries():
                     print(f"{json_file.parent.name}: Duplicate '{term}' found, keeping better definition")
             else:
                 consolidated_terms[term] = term_entry
-        
+
         # Update the terms list
         data['terms'] = list(consolidated_terms.values())
-        
+
         if len(data['terms']) < original_count:
             consolidated_count = original_count - len(data['terms'])
             total_consolidated += consolidated_count
             print(f"{json_file.parent.name}: Consolidated {consolidated_count} terms ({original_count} → {len(data['terms'])})")
-            
+
             # Save the updated file
             with open(json_file, 'w') as f:
                 json.dump(data, f, indent=2)
-    
+
     return total_consolidated
 
 def main():
     """Main function to consolidate similar terms."""
     print("🔧 Consolidating Similar Terms in Glossaries")
     print("=" * 60)
-    
+
     total = consolidate_chapter_glossaries()
-    
+
     print(f"\n✅ Consolidation complete!")
     print(f"  → Total terms consolidated: {total}")
     print("\nNext steps:")

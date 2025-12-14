@@ -25,13 +25,13 @@ def remove_footnote_definitions(lines: List[str]) -> List[str]:
     """Remove footnote definitions from a list of lines."""
     cleaned_lines = []
     skip_mode = False
-    
+
     for i, line in enumerate(lines):
         # Check if this line starts a footnote definition
         if re.match(r'^\[\^[^\]]+\]:', line):
             skip_mode = True
             continue
-        
+
         # If we're in skip mode, check if this line is a continuation
         if skip_mode:
             # Continuation lines start with whitespace (indented)
@@ -48,17 +48,17 @@ def remove_footnote_definitions(lines: List[str]) -> List[str]:
             else:
                 # Non-indented, non-empty line means footnote is done
                 skip_mode = False
-        
+
         # Keep this line
         cleaned_lines.append(line)
-    
+
     return cleaned_lines
 
 
 def process_qmd_file(file_path: Path) -> Tuple[bool, int, int]:
     """
     Process a single .qmd file to remove footnotes.
-    
+
     Returns:
         Tuple of (was_modified, inline_refs_removed, definitions_removed)
     """
@@ -66,21 +66,21 @@ def process_qmd_file(file_path: Path) -> Tuple[bool, int, int]:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
             lines = content.splitlines()
-        
+
         # Count footnotes before processing
         inline_refs_before = len(re.findall(r'\[\^[^\]]+\]', content))
         definitions_before = len([l for l in lines if re.match(r'^\[\^[^\]]+\]:', l)])
-        
+
         # Remove inline references
         content_no_inline = remove_inline_footnotes(content)
-        
+
         # Remove definitions (work with lines)
         lines_no_inline = content_no_inline.splitlines()
         cleaned_lines = remove_footnote_definitions(lines_no_inline)
-        
+
         # Reconstruct content
         cleaned_content = '\n'.join(cleaned_lines)
-        
+
         # Only write if there were changes
         if cleaned_content != content:
             with open(file_path, 'w', encoding='utf-8') as f:
@@ -89,9 +89,9 @@ def process_qmd_file(file_path: Path) -> Tuple[bool, int, int]:
                 if cleaned_content and not cleaned_content.endswith('\n'):
                     f.write('\n')
             return True, inline_refs_before, definitions_before
-        
+
         return False, 0, 0
-        
+
     except Exception as e:
         print(f"Error processing {file_path}: {e}")
         return False, 0, 0
@@ -110,32 +110,32 @@ def main():
     else:
         # Default to quarto directory
         root_dir = Path('/Users/VJ/GitHub/MLSysBook/quarto')
-    
+
     if not root_dir.exists():
         print(f"Error: Directory {root_dir} does not exist")
         sys.exit(1)
-    
+
     print(f"Scanning for .qmd files in: {root_dir}")
-    
+
     # Find all .qmd files
     qmd_files = find_qmd_files(root_dir)
-    
+
     if not qmd_files:
         print("No .qmd files found")
         return
-    
+
     print(f"Found {len(qmd_files)} .qmd files")
     print("-" * 60)
-    
+
     # Process each file
     total_modified = 0
     total_inline_refs = 0
     total_definitions = 0
-    
+
     for qmd_file in qmd_files:
         relative_path = qmd_file.relative_to(root_dir.parent)
         was_modified, inline_refs, definitions = process_qmd_file(qmd_file)
-        
+
         if was_modified:
             total_modified += 1
             total_inline_refs += inline_refs
@@ -145,7 +145,7 @@ def main():
             print(f"  - Removed {definitions} footnote definitions")
         else:
             print(f"  {relative_path} (no footnotes found)")
-    
+
     # Summary
     print("-" * 60)
     print(f"\nSummary:")
@@ -153,7 +153,7 @@ def main():
     print(f"  Files modified: {total_modified}")
     print(f"  Total inline references removed: {total_inline_refs}")
     print(f"  Total footnote definitions removed: {total_definitions}")
-    
+
     if total_modified > 0:
         print(f"\n✓ Successfully removed all footnotes from {total_modified} files")
     else:

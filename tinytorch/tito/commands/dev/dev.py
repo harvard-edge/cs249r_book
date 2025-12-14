@@ -75,4 +75,3 @@ class DevCommand(BaseCommand):
                 border_style="red"
             ))
             return 1
-

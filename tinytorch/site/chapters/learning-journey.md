@@ -1,48 +1,32 @@
 # The Learning Journey: From Atoms to Intelligence
 
-**Understand the pedagogical narrative connecting modules 01-20 into a complete learning story from atomic components to production AI systems.**
+This page tells the **pedagogical story** behind TinyTorch's module progression—why modules flow the way they do, and how 20 individual modules transform into a coherent journey from mathematical foundations to production AI systems.
 
----
+If you're just starting, read this to understand the complete arc before diving in. If you're mid-journey, return here when wondering "Why am I building this now?" If you're teaching TinyTorch, share this narrative to help students see the big picture.
 
-## What This Page Is About
-
-This page tells the **pedagogical story** behind TinyTorch's module progression. While other pages explain:
-- **WHAT you'll build** ([Three-Tier Structure](00-introduction.md)) - organized module breakdown
-- **WHEN in history** ([Milestones](milestones.md)) - recreating ML breakthroughs
-- **WHERE you are** ([Student Workflow](../student-workflow.md)) - development workflow and progress
-
-This page explains **WHY modules flow this way** - the learning narrative that transforms 20 individual modules into a coherent journey from mathematical foundations to production AI systems.
-
-### How to Use This Narrative
-
-- **Starting TinyTorch?** Read this to understand the complete arc before diving into modules
-- **Mid-journey?** Return here when wondering "Why am I building DataLoader now?"
-- **Planning your path?** Use this to understand how modules build on each other pedagogically
-- **Teaching TinyTorch?** Share this narrative to help students see the big picture
-
----
 
 ## The Six-Act Learning Story
 
 TinyTorch's 20 modules follow a carefully crafted six-act narrative arc. Each act represents a fundamental shift in what you're learning and what you can build.
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 graph LR
-    Act1["Act I: Foundation<br/>01-04<br/>Atomic Components"] --> Act2["Act II: Learning<br/>05-07<br/>Gradient Revolution"]
-    Act2 --> Act3["Act III: Data & Scale<br/>08-09<br/>Real Complexity"]
-    Act3 --> Act4["Act IV: Language<br/>10-13<br/>Sequential Data"]
-    Act4 --> Act5["Act V: Production<br/>14-19<br/>Optimization"]
-    Act5 --> Act6["Act VI: Integration<br/>20<br/>Complete Systems"]
+ Act1["Act I: Foundation<br/>01-04<br/>Atomic Components"] --> Act2["Act II: Learning<br/>05-07<br/>Gradient Revolution"]
+ Act2 --> Act3["Act III: Data & Scale<br/>08-09<br/>Real Complexity"]
+ Act3 --> Act4["Act IV: Language<br/>10-13<br/>Sequential Data"]
+ Act4 --> Act5["Act V: Production<br/>14-19<br/>Optimization"]
+ Act5 --> Act6["Act VI: Integration<br/>20<br/>Complete Systems"]
 
-    style Act1 fill:#e3f2fd
-    style Act2 fill:#fff8e1
-    style Act3 fill:#e8f5e9
-    style Act4 fill:#f3e5f5
-    style Act5 fill:#fce4ec
-    style Act6 fill:#fff3e0
+ style Act1 fill:#e3f2fd
+ style Act2 fill:#fff8e1
+ style Act3 fill:#e8f5e9
+ style Act4 fill:#f3e5f5
+ style Act5 fill:#fce4ec
+ style Act6 fill:#fff3e0
 ```
 
----
 
 ### Act I: Foundation (Modules 01-04) - Building the Atomic Components
 
@@ -76,11 +60,10 @@ How do you know if your model is learning? Loss functions measure the gap betwee
 
 **Systems Insight**: Loss functions shape the optimization landscape - understanding their properties explains why some problems train easily while others struggle.
 
-**🎯 Act I Achievement**: You've built the atomic components. But they're static - they can compute forward passes but cannot learn. You're ready for the revolution...
+** Act I Achievement**: You've built the atomic components. But they're static - they can compute forward passes but cannot learn. You're ready for the revolution...
 
 **Connection to Act II**: Static components are useful, but the real power comes when they can LEARN from data. That requires gradients.
 
----
 
 ### Act II: Learning (Modules 05-07) - The Gradient Revolution
 
@@ -111,11 +94,10 @@ You assemble everything into the training loop - the heartbeat of machine learni
 
 **Systems Insight**: The training loop reveals how all components interact - a systems view that's invisible when just calling model.fit().
 
-**🎯 Act II Achievement**: You can now train neural networks to learn from data! MLPs achieve 95%+ accuracy on MNIST using 100% your own implementations.
+** Act II Achievement**: You can now train neural networks to learn from data! MLPs achieve 95%+ accuracy on MNIST using 100% your own implementations.
 
 **Connection to Act III**: Your learning system works beautifully on clean datasets that fit in memory. But real ML means messy data at scale.
 
----
 
 ### Act III: Data & Scale (Modules 08-09) - Handling Real-World Complexity
 
@@ -139,11 +121,10 @@ Neural networks need specialized operations for spatial data. Conv2D applies lea
 
 **Systems Insight**: Convolutions exploit weight sharing and local connectivity - architectural choices that reduce parameters 100× compared to fully connected layers while improving performance.
 
-**🎯 Act III Achievement**: CNNs achieve 75%+ accuracy on CIFAR-10 natural images - real computer vision with YOUR spatial operations!
+** Act III Achievement**: CNNs achieve 75%+ accuracy on CIFAR-10 natural images - real computer vision with YOUR spatial operations!
 
 **Connection to Act IV**: You've mastered vision. But the most exciting ML breakthroughs are happening in language. Time to understand sequential data.
 
----
 
 ### Act IV: Language (Modules 10-13) - Understanding Sequential Data
 
@@ -179,11 +160,10 @@ You assemble attention, embeddings, and feed-forward layers into the Transformer
 
 **Systems Insight**: Transformers are highly parallelizable (unlike RNNs) but memory-intensive - architectural trade-offs that shaped the modern ML landscape.
 
-**🎯 Act IV Achievement**: Your transformer generates coherent text! You've implemented the architecture powering ChatGPT, GPT-4, and the modern AI revolution.
+** Act IV Achievement**: Your transformer generates coherent text! You've implemented the architecture powering ChatGPT, GPT-4, and the modern AI revolution.
 
 **Connection to Act V**: Your transformer works, but it's slow and memory-hungry. Time to optimize for production.
 
----
 
 ### Act V: Production (Modules 14-19) - Optimization & Deployment
 
@@ -227,11 +207,10 @@ You build comprehensive benchmarking tools with precise timing, statistical anal
 
 **Systems Insight**: Benchmarking is a science - proper methodology (warmup, statistical significance, controlling variables) matters as much as the measurements themselves.
 
-**🎯 Act V Achievement**: Production-ready systems competitive in Torch Olympics benchmarks! Models achieve <100ms inference latency with 4× memory reduction.
+** Act V Achievement**: Production-ready systems competitive in Torch Olympics benchmarks! Models achieve <100ms inference latency with 4× memory reduction.
 
 **Connection to Act VI**: You have all the pieces - foundation, learning, data, language, optimization. Time to assemble them into a complete AI system.
 
----
 
 ### Act VI: Integration (Module 20) - Building Real AI Systems
 
@@ -258,9 +237,8 @@ Using all 19 previous modules, you build TinyGPT - a complete language model wit
 
 **Pedagogical Note**: The capstone isn't about learning new techniques - it's about synthesis. Students discover that they've built something real, not just completed exercises.
 
-**🎯 Act VI Achievement**: You've built a complete AI framework and deployed a real language model - entirely from scratch, from tensors to text generation!
+** Act VI Achievement**: You've built a complete AI framework and deployed a real language model - entirely from scratch, from tensors to text generation!
 
----
 
 ## How This Journey Connects to Everything Else
 
@@ -276,24 +254,23 @@ Using all 19 previous modules, you build TinyGPT - a complete language model wit
 **Mapping Acts to Tiers**:
 
 ```
-🏗️ FOUNDATION TIER (Modules 01-07)
-  ├─ Act I: Foundation (01-04) - Atomic components
-  └─ Act II: Learning (05-07) - Gradient revolution
+️ FOUNDATION TIER (Modules 01-07)
+ ├─ Act I: Foundation (01-04) - Atomic components
+ └─ Act II: Learning (05-07) - Gradient revolution
 
-🏛️ ARCHITECTURE TIER (Modules 08-13)
-  ├─ Act III: Data & Scale (08-09) - Real-world complexity
-  └─ Act IV: Language (10-13) - Sequential understanding
+️ ARCHITECTURE TIER (Modules 08-13)
+ ├─ Act III: Data & Scale (08-09) - Real-world complexity
+ └─ Act IV: Language (10-13) - Sequential understanding
 
-⚡ OPTIMIZATION TIER (Modules 14-20)
-  ├─ Act V: Production (14-19) - Deployment optimization
-  └─ Act VI: Integration (20) - Complete systems
+ OPTIMIZATION TIER (Modules 14-20)
+ ├─ Act V: Production (14-19) - Deployment optimization
+ └─ Act VI: Integration (20) - Complete systems
 ```
 
 **When to use Tiers**: Navigating the website, planning your study schedule, understanding time commitment.
 
 **When to use Acts**: Understanding why you're learning something now, seeing how modules connect, maintaining motivation through the narrative arc.
 
----
 
 ### Journey vs. Milestones: Two Dimensions of Progress
 
@@ -319,78 +296,76 @@ As you progress through TinyTorch, you advance along **two dimensions simultaneo
 
 | Learning Act | Unlocked Milestone | Proof of Mastery |
 |--------------|-------------------|------------------|
-| **Act I: Foundation** | 🧠 1957 Perceptron | Your Linear layer recreates history |
-| **Act II: Learning** | ⚡ 1969 XOR + 🔢 1986 MLP | Your autograd enables training (95%+ MNIST) |
-| **Act III: Data & Scale** | 🖼 1998 CNN | Your Conv2d achieves 75%+ on CIFAR-10 |
-| **Act IV: Language** | 🤖 2017 Transformers | Your attention generates coherent text |
-| **Act V: Production** | ⚡ 2024 Systems Age | Your optimizations compete in benchmarks |
-| **Act VI: Integration** | 🏆 TinyGPT Capstone | Your complete framework works end-to-end |
+| **Act I: Foundation** | 1957 Perceptron | Your Linear layer recreates history |
+| **Act II: Learning** | 1969 XOR + 1986 MLP | Your autograd enables training (95%+ MNIST) |
+| **Act III: Data & Scale** | 1998 CNN | Your Conv2d achieves 75%+ on CIFAR-10 |
+| **Act IV: Language** | 2017 Transformers | Your attention generates coherent text |
+| **Act V: Production** | 2024 Systems Age | Your optimizations compete in benchmarks |
+| **Act VI: Integration** | TinyGPT Capstone | Your complete framework works end-to-end |
 
 **Understanding Both Dimensions**: The **Acts** explain WHY you're building each component (pedagogical progression). The **Milestones** prove WHAT you've built actually works (historical validation).
 
 ** See [Journey Through ML History](milestones.md)** for complete milestone details and how to run them.
 
----
 
 ### Journey vs. Capabilities: Tracking Your Skills
 
-The learning journey also maps to **21 capability checkpoints** you can track:
+The learning journey maps to **20 module capabilities** you can track:
 
 **Foundation Capabilities (Act I-II)**:
-- Checkpoint 01: Tensor manipulation ✓
-- Checkpoint 02: Nonlinearity ✓
-- Checkpoint 03: Network layers ✓
-- Checkpoint 04: Loss measurement ✓
-- Checkpoint 05: Gradient computation ✓
-- Checkpoint 06: Parameter optimization ✓
-- Checkpoint 07: Model training ✓
+- Module 01: Tensor manipulation
+- Module 02: Nonlinearity
+- Module 03: Network layers
+- Module 04: Loss measurement
+- Module 05: Gradient computation
+- Module 06: Parameter optimization
+- Module 07: Model training
 
 **Architecture Capabilities (Act III-IV)**:
-- Checkpoint 08: Image processing ✓
-- Checkpoint 09: Data loading ✓
-- Checkpoint 10: Text processing ✓
-- Checkpoint 11: Embeddings ✓
-- Checkpoint 12: Attention mechanisms ✓
-- Checkpoint 13: Transformers ✓
+- Module 08: Data loading
+- Module 09: Image processing
+- Module 10: Text processing
+- Module 11: Embeddings
+- Module 12: Attention mechanisms
+- Module 13: Transformers
 
 **Production Capabilities (Act V-VI)**:
-- Checkpoint 14: Performance profiling ✓
-- Checkpoint 15: Model quantization ✓
-- Checkpoint 16: Network compression ✓
-- Checkpoint 17: Computation caching ✓
-- Checkpoint 18: Algorithm acceleration ✓
-- Checkpoint 19: Competitive benchmarking ✓
-- Checkpoint 20: Complete systems ✓
+- Module 14: Performance profiling
+- Module 15: Model quantization
+- Module 16: Network compression
+- Module 17: Computation caching
+- Module 18: Algorithm acceleration
+- Module 19: Competitive benchmarking
+- Module 20: Complete systems
 
 See [Student Workflow](../student-workflow.md) for the development workflow and progress tracking.
 
----
 
 ## Visualizing Your Complete Journey
 
 Here's how the three views work together:
 
 ```
-    PEDAGOGICAL NARRATIVE (6 Acts)
-    ↓
+ PEDAGOGICAL NARRATIVE (6 Acts)
+ ↓
 Act I → Act II → Act III → Act IV → Act V → Act VI
-01-04   05-07    08-09     10-13    14-19    20
-  │       │        │         │        │       │
-  └───────┴────────┴─────────┴────────┴───────┘
-          │                  │                │
-    STRUCTURE (3 Tiers)      │                │
-    Foundation Tier ─────────┘                │
-    Architecture Tier ────────────────────────┘
-    Optimization Tier ────────────────────────┘
-          │
-    VALIDATION (Historical Milestones)
-    │
-    ├─ 1957 Perceptron (after Act I)
-    ├─ 1969 XOR + 1986 MLP (after Act II)
-    ├─ 1998 CNN 75%+ CIFAR-10 (after Act III)
-    ├─ 2017 Transformers (after Act IV)
-    ├─ 2024 Systems Age (after Act V)
-    └─ TinyGPT Capstone (after Act VI)
+01-04 05-07 08-09 10-13 14-19 20
+ │ │ │ │ │ │
+ └───────┴────────┴─────────┴────────┴───────┘
+ │ │ │
+ STRUCTURE (3 Tiers) │ │
+ Foundation Tier ─────────┘ │
+ Architecture Tier ────────────────────────┘
+ Optimization Tier ────────────────────────┘
+ │
+ VALIDATION (Historical Milestones)
+ │
+ ├─ 1957 Perceptron (after Act I)
+ ├─ 1969 XOR + 1986 MLP (after Act II)
+ ├─ 1998 CNN 75%+ CIFAR-10 (after Act III)
+ ├─ 2017 Transformers (after Act IV)
+ ├─ 2024 Systems Age (after Act V)
+ └─ TinyGPT Capstone (after Act VI)
 ```
 
 **Use all three views**:
@@ -398,7 +373,6 @@ Act I → Act II → Act III → Act IV → Act V → Act VI
 - **Acts** help you understand and stay motivated
 - **Milestones** help you validate and celebrate
 
----
 
 ## Using This Journey: Student Guidance
 
@@ -435,7 +409,6 @@ As you work through modules, ask yourself:
 - Stay motivated through challenging modules (see where it's going)
 - Appreciate the pedagogical design (not arbitrary order)
 
----
 
 ## The Pedagogical Arc: Why This Progression Works
 
@@ -445,15 +418,15 @@ TinyTorch follows a **bottom-up progression** - you build foundational component
 
 ```
 Act I: Atoms (Tensor, Activations, Layers, Losses)
-  ↓
+ ↓
 Act II: Learning (Autograd, Optimizers, Training)
-  ↓
+ ↓
 Act III: Scale (DataLoader, Spatial)
-  ↓
+ ↓
 Act IV: Intelligence (Tokenization, Embeddings, Attention, Transformers)
-  ↓
+ ↓
 Act V: Production (Profiling, Quantization, Compression, Acceleration)
-  ↓
+ ↓
 Act VI: Systems (Complete integration)
 ```
 
@@ -490,7 +463,6 @@ Each act teaches **systems thinking** - how components interact to create emerge
 
 **By Act VI, you think like a systems engineer** - not just "How do I implement this?" but "How does this affect memory? Compute? Training time? Accuracy?"
 
----
 
 ## FAQ: Understanding the Journey
 
@@ -545,7 +517,6 @@ Typical time estimates (varies by background):
 
 ** See [Milestones](milestones.md)** for details.
 
----
 
 ## What's Next?
 
@@ -554,18 +525,17 @@ Typical time estimates (varies by background):
 <div style="background: #f8f9fa; padding: 2rem; border-radius: 0.5rem; margin: 2rem 0; text-align: center;">
 <h3 style="margin: 0 0 1rem 0; color: #495057;">Start Your Learning Journey</h3>
 <p style="margin: 0 0 1.5rem 0; color: #6c757d;">Begin with Act I: Foundation - build the atomic components</p>
-<a href="../quickstart-guide.html" style="display: inline-block; background: #007bff; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500; margin-right: 1rem;">15-Minute Quick Start →</a>
-<a href="00-introduction.html" style="display: inline-block; background: #28a745; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">View Course Structure →</a>
+<a href="../getting-started.html" style="display: inline-block; background: #007bff; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500; margin-right: 1rem;">15-Minute Quick Start →</a>
+<a href="../tiers/foundation.html" style="display: inline-block; background: #28a745; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">Start Foundation Tier →</a>
 </div>
 
 **Related Resources**:
-- **[Three-Tier Structure](00-introduction.md)** - Organized module breakdown with time estimates
+- **[Foundation Tier](../tiers/foundation.md)** - Modules 01-07 breakdown
 - **[Journey Through ML History](milestones.md)** - Historical milestones you'll recreate
 - **[Student Workflow](../student-workflow.md)** - Development workflow and progress tracking
-- **[Quick Start Guide](../quickstart-guide.md)** - Hands-on setup and first module
+- **[Quick Start](../getting-started.md)** - Hands-on setup and first module
 
----
 
 **Remember**: You're not just learning ML algorithms. You're building ML systems - from mathematical foundations to production deployment. This journey transforms you from a framework user into a systems engineer who truly understands how modern AI works.
 
-**Welcome to the learning journey. Let's build something amazing together.** 
+**Welcome to the learning journey. Let's build something amazing together.**

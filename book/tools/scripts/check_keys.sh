@@ -19,4 +19,4 @@ else
     echo "💡 Run this script again after fixing the issues"
 fi
 
-exit $exit_code 
+exit $exit_code

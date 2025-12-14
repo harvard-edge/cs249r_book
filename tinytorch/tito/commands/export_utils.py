@@ -299,4 +299,3 @@ def ensure_writable_target(export_target: str) -> None:
         except Exception:
             # Best effort; ignore permission errors
             pass
-

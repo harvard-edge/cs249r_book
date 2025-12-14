@@ -756,18 +756,18 @@ in real ML workflows for rapid iteration and debugging.
 def quick_profile(model, input_tensor, profiler=None):
     """
     Quick profiling function for immediate insights.
-    
+
     Provides a simplified interface for profiling that displays key metrics
     in a student-friendly format.
-    
+
     Args:
         model: Model to profile
         input_tensor: Input data for profiling
         profiler: Optional Profiler instance (creates new one if None)
-    
+
     Returns:
         dict: Profile results with key metrics
-    
+
     Example:
         >>> model = Linear(128, 64)
         >>> input_data = Tensor(np.random.randn(16, 128))
@@ -776,9 +776,9 @@ def quick_profile(model, input_tensor, profiler=None):
     """
     if profiler is None:
         profiler = Profiler()
-    
+
     profile = profiler.profile_forward_pass(model, input_tensor)
-    
+
     # Display formatted results
     print("🔬 Quick Profile Results:")
     print(f"   Parameters: {profile['parameters']:,}")
@@ -795,17 +795,17 @@ def quick_profile(model, input_tensor, profiler=None):
 def analyze_weight_distribution(model, percentiles=[10, 25, 50, 75, 90]):
     """
     Analyze weight distribution for compression insights.
-    
+
     Helps understand which weights are small and might be prunable.
     Used by Module 17 (Compression) to motivate pruning.
-    
+
     Args:
         model: Model to analyze
         percentiles: List of percentiles to compute
-    
+
     Returns:
         dict: Weight distribution statistics
-    
+
     Example:
         >>> model = Linear(512, 512)
         >>> stats = analyze_weight_distribution(model)
@@ -820,10 +820,10 @@ def analyze_weight_distribution(model, percentiles=[10, 25, 50, 75, 90]):
         weights.extend(model.weight.data.flatten().tolist())
     else:
         return {'error': 'No weights found'}
-    
+
     weights = np.array(weights)
     abs_weights = np.abs(weights)
-    
+
     # Calculate statistics
     stats = {
         'total_weights': len(weights),
@@ -832,16 +832,16 @@ def analyze_weight_distribution(model, percentiles=[10, 25, 50, 75, 90]):
         'min': float(np.min(abs_weights)),
         'max': float(np.max(abs_weights)),
     }
-    
+
     # Percentile analysis
     for p in percentiles:
         stats[f'percentile_{p}'] = float(np.percentile(abs_weights, p))
-    
+
     # Threshold analysis (useful for pruning)
     for threshold in [0.001, 0.01, 0.1]:
         below = np.sum(abs_weights < threshold) / len(weights) * 100
         stats[f'below_threshold_{str(threshold).replace(".", "")}'] = below
-    
+
     return stats
 
 # %% [markdown]
@@ -1506,7 +1506,7 @@ def benchmark_operation_efficiency():
     class ElementwiseModel:
         def forward(self, x):
             return x + x  # Simple elementwise operation
-    
+
     elementwise_model = ElementwiseModel()
     elementwise_latency = profiler.measure_latency(elementwise_model, input_tensor, iterations=20)
     elementwise_flops = size * 32  # One operation per element
@@ -1539,7 +1539,7 @@ def benchmark_operation_efficiency():
     class ReductionModel:
         def forward(self, x):
             return x.sum()  # Sum reduction operation
-    
+
     reduction_model = ReductionModel()
     reduction_latency = profiler.measure_latency(reduction_model, input_tensor, iterations=20)
     reduction_flops = size * 32  # Sum reduction
@@ -1601,7 +1601,7 @@ def analyze_profiling_overhead():
     class TestModel:
         def forward(self, x):
             return x + 1.0
-    
+
     test_model = TestModel()
     start_time = time.perf_counter()
     for _ in range(iterations):

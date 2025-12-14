@@ -68,7 +68,7 @@ Let's get started!
 """
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/10_tokenization/tokenization_dev.py`  
+**Learning Side:** You work in `modules/10_tokenization/tokenization_dev.py`
 **Building Side:** Code exports to `tinytorch.text.tokenization`
 
 ```python
@@ -202,13 +202,13 @@ Different tokenization approaches make different trade-offs between vocabulary s
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Pros**: 
+**Pros**:
 - Small vocabulary (~100 chars)
 - Handles any text perfectly
 - No unknown tokens (every character can be mapped)
 - Simple implementation
 
-**Cons**: 
+**Cons**:
 - Long sequences (1 character = 1 token)
 - Limited semantic understanding (no word boundaries)
 - More compute (longer sequences to process)

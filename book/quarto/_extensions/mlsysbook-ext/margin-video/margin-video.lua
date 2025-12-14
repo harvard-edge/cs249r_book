@@ -27,7 +27,7 @@ return {
     -- Shortcode is disabled - returns nothing
     return pandoc.Null()
   end,
-  
+
   ['margin-video-DISABLED'] = function(args, kwargs, meta)
     -- Original implementation (disabled)
     -- Validate arguments
@@ -35,24 +35,24 @@ return {
       log_error("No URL argument provided")
       error("ERROR: margin-video requires at least a URL argument.\nUsage: {{< margin-video \"URL\" \"Title\" \"Author\" >}}")
     end
-    
+
     local url = pandoc.utils.stringify(args[1]) or ""
     local title = pandoc.utils.stringify(args[2]) or "Video"
     local author = pandoc.utils.stringify(args[3]) or ""
-    
+
     log_info("URL: " .. url)
     log_info("Title: " .. title)
     log_info("Author: " .. author)
-    
+
     -- Optional configuration via kwargs
     local aspect_ratio = pandoc.utils.stringify(kwargs["aspect-ratio"]) or "16/9"
     local autoplay = pandoc.utils.stringify(kwargs["autoplay"]) == "true"
     local start_time = pandoc.utils.stringify(kwargs["start"]) or nil
-    
+
     log_info("Aspect ratio: " .. aspect_ratio)
     log_info("Autoplay: " .. tostring(autoplay))
     log_info("Start time: " .. (start_time or "none"))
-    
+
     -- Validate URL is not empty
     if url == "" then
       log_error("URL is empty")
@@ -67,15 +67,15 @@ return {
 
     -- Extract YouTube video ID (handles various URL formats and parameters)
     local video_id = nil
-    
+
     log_info("Extracting video ID from URL...")
-    
+
     -- Handle youtube.com/watch?v=ID format (with optional additional parameters)
     video_id = string.match(url, "youtube%.com/watch%?.*v=([%w_-]+)")
     if video_id then
       log_success("Extracted video ID from youtube.com/watch format: " .. video_id)
     end
-    
+
     -- Handle youtu.be/ID format (with optional parameters)
     if not video_id then
       video_id = string.match(url, "youtu%.be/([%w_-]+)")
@@ -83,7 +83,7 @@ return {
         log_success("Extracted video ID from youtu.be format: " .. video_id)
       end
     end
-    
+
     -- Handle youtube.com/embed/ID format
     if not video_id then
       video_id = string.match(url, "youtube%.com/embed/([%w_-]+)")
@@ -105,23 +105,23 @@ return {
         caption = caption .. " - " .. author
       end
       log_info("Caption: " .. caption)
-      
+
       -- Build iframe URL with optional parameters
       local iframe_url = "https://www.youtube.com/embed/" .. video_id
       local url_params = {}
-      
+
       if autoplay then
         table.insert(url_params, "autoplay=1")
       end
-      
+
       if start_time then
         table.insert(url_params, "start=" .. start_time)
       end
-      
+
       if #url_params > 0 then
         iframe_url = iframe_url .. "?" .. table.concat(url_params, "&")
       end
-      
+
       local html_output = [[
 <div class="column-margin">
   <div class="margin-video">

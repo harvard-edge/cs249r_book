@@ -10,7 +10,7 @@ Production ML systems require rigorous performance measurement. This milestone
 teaches scientific profiling - the foundation of all optimization work.
 
 🎯 WHAT YOU'RE BUILDING:
-Using YOUR TinyTorch implementations, you'll profile KV caching to see how it
+Using YOUR Tiny🔥Torch implementations, you'll profile KV caching to see how it
 transforms O(n²) generation to O(n) - measuring the 6-10× speedup scientifically!
 
 ✅ REQUIRED MODULES:

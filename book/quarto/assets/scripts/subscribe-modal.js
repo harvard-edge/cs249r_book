@@ -103,11 +103,11 @@
       }
 
       @keyframes slideUp {
-        from { 
+        from {
           opacity: 0;
           transform: translateY(20px) scale(0.98);
         }
-        to { 
+        to {
           opacity: 1;
           transform: translateY(0) scale(1);
         }
@@ -217,11 +217,11 @@
         grid-template-columns: 1fr 1fr;
         gap: 0.75rem;
       }
-      
+
       .form-row .form-group {
         min-width: 0;
       }
-      
+
       .form-row .form-group input {
         width: 100%;
         box-sizing: border-box;
@@ -485,7 +485,7 @@
     window.openModal = function() {
       modal.style.display = 'flex';
       document.body.style.overflow = 'hidden';
-      
+
       // Focus first input
       setTimeout(() => {
         const firstInput = document.getElementById('modal-first-name');
@@ -497,7 +497,7 @@
     window.closeModal = function() {
       modal.style.display = 'none';
       document.body.style.overflow = '';
-      
+
       // Reset form after closing
       setTimeout(() => {
         form.style.display = 'flex';
@@ -532,7 +532,7 @@
       setTimeout(() => {
         form.style.display = 'none';
         success.style.display = 'block';
-        
+
         // Close modal after 5 seconds
         setTimeout(closeModal, 5000);
       }, 100);

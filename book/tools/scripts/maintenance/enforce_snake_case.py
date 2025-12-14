@@ -22,7 +22,7 @@ def find_non_compliant_items(root_dir):
     """
     non_compliant_files = []
     image_extensions = ['.png', '.jpg', '.jpeg', '.svg', '.gif']
-    
+
     search_dirs = [root_dir]
     if os.path.isdir('quarto/_build'):
         search_dirs.append('quarto/_build')
@@ -33,20 +33,20 @@ def find_non_compliant_items(root_dir):
         for subdir, _, files in os.walk(s_dir):
             if 'mediabag' in subdir:
                 continue
-                
+
             for file in files:
                 file_path = Path(subdir) / file
                 if file_path.suffix.lower() in image_extensions:
                     stem = file_path.stem
                     snake_case_stem = to_snake_case(stem)
-                    
+
                     if stem != snake_case_stem or not stem.islower():
                         new_filename = f"{snake_case_stem}{file_path.suffix}"
                         non_compliant_files.append({
                             "original_path": str(file_path),
                             "new_filename": new_filename
                         })
-                        
+
     return non_compliant_files
 
 def find_references(root_dir, filenames):
@@ -55,7 +55,7 @@ def find_references(root_dir, filenames):
     """
     references = {filename: [] for filename in filenames}
     search_extensions = ['.qmd', '.py', '.yml', '.yaml', '.html', '.tex']
-    
+
     for subdir, _, files in os.walk(root_dir):
         for file in files:
             file_path = Path(subdir) / file
@@ -82,11 +82,11 @@ def update_references(references, original_basename, new_filename):
 
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            
+
             # Case-insensitive replacement
             pattern = re.compile(re.escape(original_basename), re.IGNORECASE)
             content = pattern.sub(new_filename, content)
-            
+
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
         except Exception as e:
@@ -104,8 +104,8 @@ def clean_backups(root_dir):
 def main():
     parser = argparse.ArgumentParser(description="Enforce snake_case for filenames.")
     parser.add_argument(
-        "--root-dir", 
-        type=str, 
+        "--root-dir",
+        type=str,
         default=".",
         help="The root directory to scan."
     )
@@ -146,7 +146,7 @@ def main():
     elif args.execute:
         original_filenames = [item['original_path'] for item in non_compliant_items]
         references = find_references(args.root_dir, original_filenames)
-        
+
         for item in non_compliant_items:
             original_path = Path(item['original_path'])
             new_filename = item['new_filename']
@@ -165,7 +165,7 @@ def main():
 
             except Exception as e:
                 print(f"Could not rename {original_path}: {e}", file=sys.stderr)
-        
+
         print("\nFixes complete. Remember to delete the .bak files after verifying the changes.")
     else:
         print("Found non-compliant filenames. Use --check for pre-commit or --execute to fix them.")

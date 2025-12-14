@@ -12,7 +12,7 @@ required_packages <- c(
   "knitr",      # Needed for Quarto rendering
   "png",        # PNG support
   "rmarkdown",  # Markdown rendering in R
-  "tidyverse",  # 
+  "tidyverse",  #
   "reshape2",   #
   "reticulate", #
   "rsvg",       #

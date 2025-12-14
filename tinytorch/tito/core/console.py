@@ -52,20 +52,20 @@ def print_compact_banner():
 def print_ascii_logo(compact: bool = False):
     """Print the clean, minimal ASCII art TinyTorch logo."""
     console = get_console()
-    
+
     if compact:
         print_compact_ascii_logo()
         return
-    
+
     # Create styled logo text with proper Rich formatting
     logo_text = Text()
-    
+
     # ============================================
     # TINYTORCH LOGO - EDIT HERE!
     # ============================================
     # To edit: Change the ASCII characters in logo_lines
     # Add/remove spaces at the beginning of each line to adjust positioning
-    
+
     logo_lines = [
         # Flames positioned above T and H
         "    🔥                                     🔥",
@@ -76,7 +76,7 @@ def print_ascii_logo(compact: bool = False):
         "     Y ██║   ╚██████╔╝██║  ██║╚██████╗██║  ██║",
         "       ╚═╝    ╚═════╝ ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝"
     ]
-    
+
     # ============================================
     # COLOR CONFIGURATION - Uses Theme constants
     # ============================================
@@ -84,7 +84,7 @@ def print_ascii_logo(compact: bool = False):
     TINY_COLOR = Theme.BRAND_ACCENT     # Color for "tiny" text
     TORCH_COLOR = Theme.BRAND_PRIMARY   # Color for "TORCH" text
     TAGLINE_COLOR = Theme.BRAND_ACCENT  # Color for tagline
-    
+
     # Process and apply colors to each line
     for i, line in enumerate(logo_lines):
         if i == 0:  # Flame line
@@ -99,15 +99,15 @@ def print_ascii_logo(compact: bool = False):
         else:  # Pure TORCH lines
             logo_text.append(line, style=TORCH_COLOR)
         logo_text.append("\n")
-    
+
     # Add tagline with flame (aligned under TORCH)
     logo_text.append("\n           🔥 Don't import it. Build it.", style=TAGLINE_COLOR)
     logo_text.append("\n")
-        
+
     # Combine logo and tagline
     full_content = Text()
     full_content.append(logo_text)
-    
+
     # Display centered with rich styling
     console.print()
     console.print(Panel(
@@ -140,4 +140,4 @@ def print_warning(message: str, title: str = "Warning"):
 def print_info(message: str, title: str = "Info"):
     """Print an info message with consistent formatting."""
     console = get_console()
-    console.print(Panel(f"[{Theme.INFO}]ℹ️ {message}[/{Theme.INFO}]", title=title, border_style=Theme.BORDER_INFO)) 
+    console.print(Panel(f"[{Theme.INFO}]ℹ️ {message}[/{Theme.INFO}]", title=title, border_style=Theme.BORDER_INFO))

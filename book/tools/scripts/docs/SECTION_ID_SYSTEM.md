@@ -45,7 +45,7 @@ The inclusion of the file path in the hash generation ensures that sections with
 
 ## Introduction {#sec-getting-started-introduction-d212}
 
-# File: contents/chapter2.qmd  
+# File: contents/chapter2.qmd
 # Getting Started
 
 ## Introduction {#sec-getting-started-introduction-8435}
@@ -114,7 +114,7 @@ Consider a document with this structure:
 The three "Data Considerations" sections will get different IDs:
 
 - `sec-introduction-data-considerations-d32a` (under Symbolic AI Era)
-- `sec-introduction-data-considerations-8ae1` (under Expert Systems Era)  
+- `sec-introduction-data-considerations-8ae1` (under Expert Systems Era)
 - `sec-introduction-data-considerations-fdab` (under Deep Learning Era)
 
 ## Benefits Over Counter-Based Approach
@@ -205,4 +205,4 @@ def generate_section_id(title, file_path, chapter_title, section_counter, parent
 
 - Use `--list` to see all current IDs
 - Use `--verify` to check for missing or malformed IDs
-- Check backup files if you need to revert changes 
+- Check backup files if you need to revert changes

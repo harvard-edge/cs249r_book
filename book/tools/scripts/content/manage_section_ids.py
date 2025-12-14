@@ -138,20 +138,20 @@ Typical Usage:
     # Add missing IDs
     python section_id_manager.py -d contents/
     python section_id_manager.py -f contents/chapter.qmd
-    
+
     # Repair existing IDs (stable across multiple runs)
     python section_id_manager.py -d contents/ --repair --backup
     python section_id_manager.py -d contents/ --repair --force
-    
+
     # Verify all IDs including chapters (skips unnumbered headers and code blocks)
     python section_id_manager.py -d contents/ --verify
-    
+
     # List all IDs (skips code blocks)
     python section_id_manager.py -d contents/ --list
-    
+
     # Remove all IDs (dangerous!)
     python section_id_manager.py -d contents/ --remove --backup
-    
+
     # Preview changes
     python section_id_manager.py -d contents/ --repair --dry-run
 
@@ -206,37 +206,37 @@ def initialize_block_tracking():
 def update_block_state(line, state):
     """
     Update block tracking state based on the current line.
-    
+
     Args:
         line: The current line being processed
         state: Dictionary with 'inside_skip_div' and 'inside_code_block' keys
-    
+
     Returns:
         Updated state dictionary
     """
     line_stripped = line.strip()
-    
+
     # Check for code block boundaries
     if CODE_BLOCK_PATTERN.match(line_stripped):
         state['inside_code_block'] = not state['inside_code_block']
         return state
-        
+
     # Check for div boundaries
     if DIV_START_PATTERN.match(line_stripped):
         state['inside_skip_div'] = True
     elif DIV_END_PATTERN.match(line_stripped):
         state['inside_skip_div'] = False
-    
+
     return state
 
 def should_process_header(line, state):
     """
     Determine if a header should be processed based on current block state.
-    
+
     Args:
         line: The current line
         state: Block tracking state dictionary
-    
+
     Returns:
         True if the header should be processed, False otherwise
     """
@@ -249,10 +249,10 @@ def simple_slugify(text):
     """Convert header text to a slug format, removing stopwords."""
     # Get English stopwords
     stop_words = set(stopwords.words('english'))
-    
+
     # Convert to lowercase and split into words
     words = text.lower().split()
-    
+
     # Remove stopwords and non-alphanumeric characters
     filtered_words = []
     for word in words:
@@ -261,7 +261,7 @@ def simple_slugify(text):
         # Skip if word is empty or a stopword
         if word and word not in stop_words:
             filtered_words.append(word)
-    
+
     # Join with hyphens
     return '-'.join(filtered_words)
 
@@ -269,81 +269,81 @@ def clean_text_for_id(text):
     """Clean text for use in section IDs."""
     # Convert to lowercase
     text = text.lower()
-    
+
     # Replace spaces and special characters with hyphens
     text = re.sub(r'[^a-z0-9]+', '-', text)
-    
+
     # Remove leading/trailing hyphens
     text = text.strip('-')
-    
+
     # Replace multiple hyphens with single hyphen
     text = re.sub(r'-+', '-', text)
-    
+
     return text
 
 def normalize_content_for_hash(content):
     """
     Normalize content for hashing to reduce noise from minor formatting changes.
-    
+
     This function removes or normalizes formatting that doesn't change the semantic meaning
     of the content, so that minor formatting changes don't cause section IDs to change.
-    
+
     Args:
         content: Raw content string from the section
-    
+
     Returns:
         Normalized content string suitable for hashing
     """
     if not content:
         return ""
-    
+
     # Remove extra whitespace and normalize
     normalized = re.sub(r'\s+', ' ', content.strip())
-    
+
     # Remove basic markdown formatting that doesn't change meaning
     normalized = re.sub(r'[*_`]', '', normalized)  # Remove emphasis markers
     normalized = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', normalized)  # Convert links to text
     normalized = re.sub(r'!\[([^\]]*)\]\([^)]+\)', r'\1', normalized)  # Convert images to alt text
-    
+
     # Remove HTML tags (basic)
     normalized = re.sub(r'<[^>]+>', '', normalized)
-    
+
     # Remove code block markers (multiline)
     normalized = re.sub(r'```[^`]*```', '', normalized, flags=re.DOTALL)
     normalized = re.sub(r'`[^`]+`', '', normalized)
-    
+
     # Remove blockquote markers (multiline)
     normalized = re.sub(r'^>\s*', '', normalized, flags=re.MULTILINE)
-    
+
     # Remove list markers (multiline)
     normalized = re.sub(r'^[\s]*[-*+]\s+', '', normalized, flags=re.MULTILINE)
     normalized = re.sub(r'^[\s]*\d+\.\s+', '', normalized, flags=re.MULTILINE)
-    
+
     # Clean up any remaining extra whitespace
     normalized = re.sub(r'\s+', ' ', normalized).strip()
-    
+
     return normalized
 
 def normalize_section_id(section_id):
     """Normalize a section ID to ensure consistent format."""
     if not section_id:
         return None
-        
+
     # Ensure the ID starts with sec-
     if not section_id.startswith('sec-'):
         return None
-        
+
     # Split into parts
     parts = section_id.split('-')
     if len(parts) < 3:  # Need at least: sec, chapter, section
         return None
-        
+
     # Clean each part
     cleaned_parts = [clean_text_for_id(part) for part in parts]
-    
+
     # Rejoin with hyphens
     normalized = '-'.join(cleaned_parts)
-    
+
     return normalized
 
 def is_properly_formatted_id(section_id, title, file_path, chapter_title, section_counter):
@@ -351,27 +351,27 @@ def is_properly_formatted_id(section_id, title, file_path, chapter_title, sectio
     # Check if the ID has the required parts
     if not section_id.startswith('sec-'):
         return False, None
-    
+
     # Split into parts
     parts = section_id.split('-')
     if len(parts) < 4:  # Need at least: sec, chapter, section, hash
         return False, None
-    
+
     # Check if it has a hash part (4 hex chars)
     if not re.search(r'-[a-f0-9]{4}$', section_id):
         return False, None
-    
+
     # If it passes all format checks, it's properly formatted
     return True, section_id
 
 def generate_section_id(title, file_path, chapter_title, section_counter, parent_sections=None, section_content=None, is_chapter=False):
     """
     Generate a unique section ID based on the section title and hierarchy.
-    
+
     The hash includes file path, chapter title, section title, and parent section hierarchy
     to ensure uniqueness across the entire book project. Content is NOT included in the hash
     to ensure IDs remain stable when content changes (e.g., when quizzes are added/removed).
-    
+
     Args:
         title: The section title
         file_path: The file path (included in hash for location tracking)
@@ -379,24 +379,24 @@ def generate_section_id(title, file_path, chapter_title, section_counter, parent
         section_counter: Counter for this section (not used in hash)
         parent_sections: List of parent section titles (included in hash)
         section_content: The content of the section (ignored - not used in hash)
-    
+
     Returns:
         For chapters: sec-{chapter-slug}
         For sections: sec-{chapter-slug}-{section-slug}-{4-char-hash}
-        
+
     Example:
         Chapter: "Introduction" → sec-introduction
         Section: "Getting Started" in "Introduction" → sec-introduction-getting-started-d212
     """
     clean_title = simple_slugify(title)
-    
+
     # For chapter-level headers, use simple format
     if is_chapter:
         return f"sec-{clean_title}"
-    
+
     # For subsections, use the full format with chapter prefix and hash
     clean_chapter_title = simple_slugify(chapter_title)
-    
+
     # Build hierarchy string from parent sections
     hierarchy = ""
     if parent_sections:
@@ -405,7 +405,7 @@ def generate_section_id(title, file_path, chapter_title, section_counter, parent
         for parent in parent_sections:
             hierarchy_parts.append(simple_slugify(parent))
         hierarchy = "|".join(hierarchy_parts)
-    
+
     # Hash includes file path, chapter title, section title, and parent hierarchy only
     # Content is excluded to ensure IDs remain stable when content changes
     hash_input = f"{file_path}|{chapter_title}|{title}|{hierarchy}".encode('utf-8')
@@ -416,17 +416,17 @@ def list_section_ids(filepath):
     """List all section IDs found in a single file."""
     logging.info(f"\n📋 Section IDs in: {filepath}")
     logging.info(f"{'='*60}")
-    
+
     with open(filepath, 'r', encoding='utf-8') as file:
         lines = file.readlines()
-    
+
     state = initialize_block_tracking()
     section_count = 0
-    
+
     for i, line in enumerate(lines, 1):
         # Update block state
         state = update_block_state(line, state)
-        
+
         # Check if we should process this header
         should_process, match = should_process_header(line, state)
         if should_process:
@@ -442,7 +442,7 @@ def list_section_ids(filepath):
             # Skip headers with {.unnumbered}
             if ".unnumbered" in existing_attrs:
                 continue  # Skip this header
-            
+
             section_count += 1
             existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
             if existing_id_matches:
@@ -451,7 +451,7 @@ def list_section_ids(filepath):
                 logging.info(f"      ID: #{section_id}")
             else:
                 logging.info(f"  {section_count:2d}. {title.strip()} (NO ID)")
-    
+
     if section_count == 0:
         logging.info("  No sections found")
     else:
@@ -471,19 +471,19 @@ def list_all_section_ids(directory):
 
     total_sections = 0
     total_with_ids = 0
-    
+
     for file_path in all_files:
         with open(file_path, 'r', encoding='utf-8') as file:
             lines = file.readlines()
-        
+
         state = initialize_block_tracking()
         file_sections = 0
         file_with_ids = 0
-        
+
         for line in lines:
             # Update block state
             state = update_block_state(line, state)
-            
+
             # Check if we should process this header
             should_process, match = should_process_header(line, state)
             if should_process:
@@ -492,12 +492,12 @@ def list_all_section_ids(directory):
                     file_sections += 1
                     if re.search(r'\{#sec-[^}]+\}', line):
                         file_with_ids += 1
-        
+
         if file_sections > 0:
             logging.info(f"📄 {file_path}: {file_with_ids}/{file_sections} sections have IDs")
             total_sections += file_sections
             total_with_ids += file_with_ids
-    
+
     logging.info(f"\n📊 SUMMARY:")
     logging.info(f"  Total files: {len(all_files)}")
     logging.info(f"  Total sections: {total_sections}")
@@ -507,12 +507,12 @@ def list_all_section_ids(directory):
 def extract_section_content(lines, section_start_index, header_level):
     """
     Extract the content of a section from the markdown file.
-    
+
     Args:
         lines: List of lines in the file
         section_start_index: Index of the section header line
         header_level: Level of the section header (2-6)
-    
+
     Returns:
         String containing the section content (normalized)
     """
@@ -524,7 +524,7 @@ def extract_section_content(lines, section_start_index, header_level):
         line = lines[i]
         state = update_block_state(line, state)
         line_stripped = line.strip()
-        
+
         # Only treat ## as section end if not inside a code or div block
         if not state['inside_code_block'] and not state['inside_skip_div']:
             if line_stripped.startswith('#'):
@@ -534,21 +534,21 @@ def extract_section_content(lines, section_start_index, header_level):
                 # If this is a header, strip attributes after '{'
                 if '{' in line_stripped:
                     line_stripped = line_stripped[:line_stripped.find('{')].strip()
-        
+
         # Stop if we hit a div boundary (but only if not inside code/div block)
         # (This is now handled by block tracking)
         # Stop if we hit a code block boundary (also handled by block tracking)
-        
+
         # For all lines, if '{' is present, strip everything after it
         if '{' in line_stripped:
             line_stripped = line_stripped[:line_stripped.find('{')].strip()
-        
+
         # Add non-empty lines to content
         if line_stripped:
             content_lines.append(line_stripped)
-        
+
         i += 1
-    
+
     return ' '.join(content_lines)
 
 def create_backup(file_path):
@@ -563,11 +563,11 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
     """Process a single Markdown file."""
     global id_replacements
     logging.info(f"\n📄 Processing: {file_path}")
-    
+
     # Create backup if requested
     if backup_mode and not dry_run:
         create_backup(file_path)
-    
+
     path = Path(file_path)
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
 
@@ -577,10 +577,10 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
     section_counter = 0
     chapter_title = None
     existing_sections = []
-    
+
     # Track section hierarchy
     section_hierarchy = []  # Stack of parent sections
-    
+
     file_summary = {
         'file_path': file_path,
         'added_ids': [],
@@ -606,24 +606,24 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
     for i, line in enumerate(lines):
         # Update block state
         state = update_block_state(line, state)
-        
+
         # Check if we should process this header
         should_process, match = should_process_header(line, state)
         if should_process:
             hashes, title = match.groups()
             header_level = len(hashes)
-            
+
             # Process all headers (including chapter headers) unless they have {.unnumbered}
             # Update section hierarchy based on header level
             while len(section_hierarchy) >= header_level:
                 section_hierarchy.pop()
-            
+
             # Add current section to hierarchy (will be used for next section)
             section_hierarchy.append(title.strip())
-            
+
             # Get parent sections for current section (exclude the current section itself)
             parent_sections = section_hierarchy[:-1] if len(section_hierarchy) > 1 else []
-            
+
             # Extract existing attributes if any
             existing_attrs = ""
             if "{" in line:
@@ -662,7 +662,7 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
                 existing_id = existing_id_matches[0]
                 existing_sections.append((title.strip(), existing_id))
                 file_summary['existing_sections'].append((title.strip(), existing_id))
-                
+
                 if remove_mode:
                     # Remove the section ID
                     if auto_yes or force or input(f"\n🗑️  Remove ID for '{title}': {existing_id}? [Y/n]: ").lower() != 'n':
@@ -684,19 +684,19 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
                 else:
                     # Extract section content for content-aware ID generation
                     section_content = extract_section_content(lines, i, header_level)
-                    
+
                     # Generate the new ID in the standard format with parent hierarchy and content
                     is_chapter = (header_level == 1)
                     new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections, section_content, is_chapter)
                     section_counter += 1
-                        
+
                     # Check if the existing ID needs to be repaired/updated
                     is_proper, expected_id = is_properly_formatted_id(existing_id, title, file_path, chapter_title, section_counter)
-                    
+
                     # In repair mode, always update to the new format
                     # In normal mode, only update if the format is improper
                     should_update = repair_mode or not is_proper
-                    
+
                     if should_update:
                         if existing_id == new_id:
                             continue  # No change needed, skip
@@ -718,7 +718,7 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
                 if not remove_mode:  # Only add IDs if not in remove mode
                     # Extract section content for content-aware ID generation
                     section_content = extract_section_content(lines, i, header_level)
-                    
+
                     # Generate the new ID in the standard format with parent hierarchy and content
                     is_chapter = (header_level == 1)
                     new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections, section_content, is_chapter)
@@ -780,10 +780,10 @@ def process_directory(directory, auto_yes=False, force=False, dry_run=False, rep
     for i, file_path in enumerate(all_files, 1):
         logging.info(f"\n📄 [{i}/{len(all_files)}] Processing: {file_path}")
         logging.info(f"{'-'*60}")
-        
+
         file_summary = process_markdown_file(file_path, auto_yes=auto_yes, force=force, dry_run=dry_run, repair_mode=repair_mode, remove_mode=remove_mode, backup_mode=backup_mode)
         all_summaries.append(file_summary)
-        
+
         # Add a separator between files
         if i < len(all_files):
             logging.info(f"{'-'*60}")
@@ -813,14 +813,14 @@ def print_summary(all_summaries):
     if total_added > 0 or total_updated > 0 or total_removed > 0:
         logging.info(f"\n FILES WITH CHANGES:")
         logging.info(f"{'-'*60}")
-        
+
         for summary in all_summaries:
             if summary['added_ids'] or summary['updated_ids'] or summary['removed_ids']:
                 logging.info(f"\n📄 {summary['file_path']}:")
-                
+
                 if summary['added_ids']:
                     logging.info(f"  ➕ Added {len(summary['added_ids'])} section IDs")
-                
+
                 if summary['updated_ids']:
                     logging.info(f"  🔄 Updated {len(summary['updated_ids'])} section IDs")
                     # Show first few updates as examples
@@ -839,12 +839,12 @@ def verify_section_ids(filepath):
     missing_ids = []
     with open(filepath, 'r', encoding='utf-8') as file:
         lines = file.readlines()
-    
+
     state = initialize_block_tracking()
     for i, line in enumerate(lines, 1):
         # Update block state
         state = update_block_state(line, state)
-        
+
         # Check if we should process this header
         should_process, match = should_process_header(line, state)
         if should_process:
@@ -865,27 +865,27 @@ def verify_section_ids(filepath):
                     'line': i,
                     'title': title.strip()
                 })
-    
+
     return missing_ids
 
 def update_cross_references(file_path, id_map):
     """Update cross-references in a file using the ID mapping."""
     global id_replacements
-    
+
     logging.info(f"\n🔍 Checking references in: {file_path}")
     path = Path(file_path)
-    
+
     # Handle JSON files differently
     if path.suffix.lower() == '.json':
         return update_quiz_json(file_path, id_map)
-    
+
     # Handle text files (QMD, MD, etc.)
     content = path.read_text(encoding="utf-8")
-    
+
     # Track changes
     changes = []
     modified = False
-    
+
     # Update each reference
     for old_id, new_id in id_map.items():
         # Update both @ and # references with word boundary
@@ -895,7 +895,7 @@ def update_cross_references(file_path, id_map):
             content = new_content
             changes.append((old_id, new_id))
             modified = True
-    
+
     if modified:
         path.write_text(content, encoding="utf-8")
         logging.info(f"✅ Updated {len(changes)} references:")
@@ -904,13 +904,13 @@ def update_cross_references(file_path, id_map):
         return True
     else:
         logging.info(f"  ✓ No references found to update")
-    
+
     return False
 
 def update_quiz_json(file_path, id_map):
     """Update section IDs in a quiz JSON file."""
     global id_replacements
-    
+
     logging.info(f"\n🔍 Checking quiz JSON in: {file_path}")
     path = Path(file_path)
     try:
@@ -919,11 +919,11 @@ def update_quiz_json(file_path, id_map):
     except json.JSONDecodeError as e:
         logging.error(f"Error decoding JSON from {file_path}: {e}")
         return False
-    
+
     # Track changes
     changes = []
     modified = False
-    
+
     # First, update section_id fields in the structure
     for section in quiz_data.get('sections', []):
         old_section_id = section.get('section_id')
@@ -932,12 +932,12 @@ def update_quiz_json(file_path, id_map):
             section['section_id'] = new_section_id
             changes.append((old_section_id, new_section_id))
             modified = True
-    
+
     # Then, search for any other occurrences of old IDs in the entire JSON content
     # Convert to string, replace, then parse back
     json_str = json.dumps(quiz_data, indent=2)
     original_json_str = json_str
-    
+
     for old_id, new_id in id_map.items():
         if old_id in json_str:
             json_str = json_str.replace(old_id, new_id)
@@ -946,7 +946,7 @@ def update_quiz_json(file_path, id_map):
                 # Only add to changes if not already added from section_id field
                 if (old_id, new_id) not in changes:
                     changes.append((old_id, new_id))
-    
+
     if modified:
         # Parse back to JSON to ensure it's valid
         try:
@@ -962,7 +962,7 @@ def update_quiz_json(file_path, id_map):
             return False
     else:
         logging.info(f"  ✓ No section IDs found to update in {file_path}")
-    
+
     return False
 
 def main():
@@ -970,7 +970,7 @@ def main():
     global id_replacements
     # Reset id_replacements at the start of each run
     id_replacements = {}
-    
+
     parser = argparse.ArgumentParser(
         description="Comprehensive Section ID Management for Quarto/Markdown Book Projects",
         epilog="""
@@ -1045,7 +1045,7 @@ MODE EXAMPLES:
         if not (args.yes or args.force) and input("Continue with format-agnostic verification? [Y/n]: ").lower() == 'n':
             logging.info("Verification cancelled.")
             sys.exit(0)
-            
+
         if args.file:
             missing_ids = verify_section_ids(args.file)
             if missing_ids:
@@ -1088,13 +1088,13 @@ MODE EXAMPLES:
             file_summary = process_markdown_file(args.file, args.yes, args.force, args.dry_run, args.repair, args.remove, args.backup)
             # Print summary for single file
             print_summary([file_summary])
-            
+
             # Update cross-references in the same directory
             if not args.dry_run and id_replacements:
                 logging.info("\n📝 Found the following ID replacements:")
                 for old_id, new_id in id_replacements.items():
                     logging.info(f"  {old_id} → {new_id}")
-                
+
                 if args.yes or args.force or input("\n🔄 Would you like to update cross-references with these new IDs? [Y/n]: ").lower() != 'n':
                     logging.info("\n🔍 Searching for cross-references...")
                     file_dir = Path(args.file).parent
@@ -1103,26 +1103,26 @@ MODE EXAMPLES:
                     for other_file in file_dir.glob("*.qmd"):
                         if other_file != Path(args.file):
                             update_cross_references(str(other_file), id_replacements)
-                    
+
                     # Update all quiz JSON files in the same directory
                     for quiz_file in file_dir.glob("*_quizzes.json"):
                         update_cross_references(str(quiz_file), id_replacements)
         elif args.directory:
             # Process all files with summary
             process_directory(args.directory, args.yes, args.force, args.dry_run, args.repair, args.remove, args.backup)
-            
+
             # Then update cross-references if we have replacements
             if not args.dry_run and id_replacements:
                 logging.info("\n📝 Found the following ID replacements:")
                 for old_id, new_id in id_replacements.items():
                     logging.info(f"  {old_id} → {new_id}")
-                
+
                 if args.yes or args.force or input("\n🔄 Would you like to update cross-references with these new IDs? [Y/n]: ").lower() != 'n':
                     logging.info("\n🔍 Searching for cross-references...")
                     # Update all files in the directory
                     for filepath in glob.glob(os.path.join(args.directory, "**/*.qmd"), recursive=True):
                         update_cross_references(filepath, id_replacements)
-                    
+
                     # Update all quiz JSON files in the directory
                     logging.info("\n📝 Updating quiz JSON files...")
                     for quiz_file in glob.glob(os.path.join(args.directory, "**/*_quizzes.json"), recursive=True):

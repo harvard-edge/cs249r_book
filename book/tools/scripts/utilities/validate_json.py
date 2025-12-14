@@ -17,4 +17,3 @@ for filepath in sys.argv[1:]:
         exit_code = 1
 
 sys.exit(exit_code)
-

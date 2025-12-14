@@ -130,7 +130,7 @@ class PreflightCommand(BaseCommand):
         console = self.console
         project_root = Path.cwd()
         start_time = time.time()
-        
+
         # Setup log file for debugging
         log_dir = project_root / ".tito" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -215,7 +215,7 @@ class PreflightCommand(BaseCommand):
             self._output_json(categories, all_passed, duration)
         else:
             self._output_rich(categories, all_passed, duration, total_passed, total_failed, total_warned, total_checks, level, is_ci, verbose)
-            
+
             # Show log location on failure
             if not all_passed:
                 console.print(f"\n[dim]📋 Debug log: {self.log_file}[/dim]")
@@ -237,10 +237,10 @@ class PreflightCommand(BaseCommand):
         """Run a command and return (exit_code, stdout, stderr)."""
         cmd_str = " ".join(cmd)
         self._log(f"Running: {cmd_str}")
-        
+
         if verbose:
             self.console.print(f"[dim]  $ {cmd_str}[/dim]")
-        
+
         try:
             result = subprocess.run(
                 cmd,
@@ -249,7 +249,7 @@ class PreflightCommand(BaseCommand):
                 text=True,
                 timeout=timeout
             )
-            
+
             # Log output
             if result.stdout.strip():
                 for line in result.stdout.strip().split('\n')[:20]:  # First 20 lines
@@ -258,7 +258,7 @@ class PreflightCommand(BaseCommand):
                 for line in result.stderr.strip().split('\n')[:10]:  # First 10 lines
                     self._log(f"  stderr: {line}")
             self._log(f"  exit code: {result.returncode}")
-            
+
             return result.returncode, result.stdout, result.stderr
         except subprocess.TimeoutExpired:
             self._log(f"  TIMEOUT after {timeout}s")
@@ -423,7 +423,7 @@ class PreflightCommand(BaseCommand):
     def _check_imports(self, project_root: Path, verbose: bool = False) -> CheckCategory:
         """Check that key imports work."""
         category = CheckCategory(name="Package Imports", emoji="📦")
-        
+
         if verbose:
             self.console.print(f"\n[bold]📦 Package Imports[/bold]")
 
@@ -520,7 +520,7 @@ class PreflightCommand(BaseCommand):
     def _check_module_tests(self, project_root: Path, quick: bool = True, verbose: bool = False) -> CheckCategory:
         """Run module tests."""
         category = CheckCategory(name="Module Tests", emoji="🧪")
-        
+
         if verbose:
             self.console.print(f"\n[bold]🧪 Module Tests[/bold]")
 
@@ -601,7 +601,7 @@ class PreflightCommand(BaseCommand):
     def _check_milestones(self, project_root: Path, verbose: bool = False) -> CheckCategory:
         """Check milestone scripts exist and are runnable."""
         category = CheckCategory(name="Milestones", emoji="🏆")
-        
+
         if verbose:
             self.console.print(f"\n[bold]🏆 Milestones[/bold]")
 
@@ -647,7 +647,7 @@ class PreflightCommand(BaseCommand):
     def _check_e2e(self, project_root: Path, verbose: bool = False) -> CheckCategory:
         """Run E2E tests."""
         category = CheckCategory(name="E2E Tests", emoji="🔄")
-        
+
         if verbose:
             self.console.print(f"\n[bold]🔄 E2E Tests[/bold]")
 
@@ -663,7 +663,7 @@ class PreflightCommand(BaseCommand):
         start = time.time()
         cmd = [sys.executable, "-m", "pytest", str(e2e_dir), "-v", "-k", "quick", "--tb=short"]
         cmd_str = "pytest tests/e2e/ -v -k quick --tb=short"
-        
+
         code, stdout, stderr = self._run_command(cmd, project_root, timeout=120, verbose=verbose)
         duration = int((time.time() - start) * 1000)
 
@@ -803,7 +803,7 @@ class PreflightCommand(BaseCommand):
 
             console.print(f"\n[bold]{category.emoji} {category.name}[/bold] {status_summary}")
             console.print(table)
-            
+
             # Show failure details (always show for failures, not just verbose)
             for check in category.checks:
                 if check.status == CheckStatus.FAIL and (check.stdout or check.stderr):
@@ -852,4 +852,3 @@ class PreflightCommand(BaseCommand):
                     console.print("\n[dim]💡 For release validation: tito dev preflight --release[/dim]")
             else:
                 console.print("\n[dim]💡 Fix issues and re-run: tito dev preflight[/dim]")
-

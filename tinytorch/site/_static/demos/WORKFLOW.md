@@ -30,7 +30,7 @@ This will:
 
 **Output:**
 ```
-🔥 TinyTorch Demo Validation
+Tiny🔥Torch Demo Validation
 ========================================
 
 📋 Demo 01: Zero to Ready
@@ -210,4 +210,3 @@ The validation script can run in CI to catch breaking changes:
 - name: Validate demos
   run: ./docs/_static/demos/scripts/validate_demos.sh
 ```
-

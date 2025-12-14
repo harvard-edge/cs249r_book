@@ -32,7 +32,7 @@ from tinytorch.core.layers import Linear
 
 class TestBenchmarkBasics:
     """Test basic benchmarking functionality."""
-    
+
     def test_benchmark_import(self):
         """Verify Benchmark can be imported."""
         try:
@@ -41,7 +41,7 @@ class TestBenchmarkBasics:
             assert TinyMLPerf is not None
         except ImportError as e:
             pytest.skip(f"Benchmark not yet exported: {e}")
-    
+
     def test_benchmark_can_instantiate(self):
         """Verify Benchmark can be created."""
         try:
@@ -59,7 +59,7 @@ class TestBenchmarkBasics:
             assert bench is not None
         except ImportError:
             pytest.skip("Benchmark not yet exported")
-    
+
     def test_measure_throughput(self):
         """
         WHAT: Verify throughput measurement works.
@@ -95,21 +95,21 @@ class TestBenchmarkBasics:
 
 class TestTinyMLPerf:
     """Test TinyMLPerf benchmark suite."""
-    
+
     def test_tiny_mlperf_can_run(self):
         """
         WHAT: Verify TinyMLPerf benchmark suite can execute.
-        
+
         WHY: This is the capstone benchmarking tool students build.
         """
         try:
             from tinytorch.bench import TinyMLPerf
         except ImportError:
             pytest.skip("TinyMLPerf not yet exported")
-        
+
         # Create and run minimal benchmark
         mlperf = TinyMLPerf()
-        
+
         # Should at least be able to list available benchmarks
         if hasattr(mlperf, 'list_benchmarks'):
             benchmarks = mlperf.list_benchmarks()
@@ -120,33 +120,33 @@ class TestTinyMLPerf:
 
 class TestBenchmarkMetrics:
     """Test that benchmark metrics are computed correctly."""
-    
+
     def test_latency_is_positive(self):
         """Latency must always be positive."""
         try:
             from tinytorch.bench import Benchmark
         except ImportError:
             pytest.skip("Benchmark not yet exported")
-        
+
         class SimpleModel:
             def forward(self, x):
                 return x * 2
-        
+
         model = SimpleModel()
         x = Tensor(np.random.randn(10))
         datasets = [[(x, None)]]
-        
+
         bench = Benchmark([model], datasets)
         results = bench.run_latency_benchmark(input_shape=(10,))
-        
+
         assert len(results) > 0, "Should produce results"
         for name, result in results.items():
             assert result.mean > 0, "Latency must be positive"
-    
+
     def test_multiple_runs_are_consistent(self):
         """
         WHAT: Verify benchmark results are reasonably consistent.
-        
+
         WHY: Benchmarks should be reproducible. Large variance
         means we can't trust the measurements.
         """
@@ -154,21 +154,21 @@ class TestBenchmarkMetrics:
             from tinytorch.bench import Benchmark
         except ImportError:
             pytest.skip("Benchmark not yet exported")
-        
+
         class SimpleModel:
             def __init__(self):
                 self.layer = Linear(10, 10)
-            
+
             def forward(self, x):
                 return self.layer.forward(x)
-        
+
         model = SimpleModel()
         x = Tensor(np.random.randn(1, 10))
         datasets = [[(x, None)]]
-        
+
         bench = Benchmark([model], datasets, measurement_runs=10)
         results = bench.run_latency_benchmark(input_shape=(1, 10))
-        
+
         # Check that we get results with reasonable variance
         for name, result in results.items():
             # Coefficient of variation should be reasonable (std/mean < 100%)
@@ -183,4 +183,3 @@ class TestBenchmarkMetrics:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

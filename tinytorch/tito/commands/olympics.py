@@ -30,13 +30,13 @@ class OlympicsCommand(BaseCommand):
             help='Olympics operations',
             metavar='COMMAND'
         )
-        
+
         # Logo subcommand
         subparsers.add_parser(
             'logo',
             help='Display the Neural Networks Olympics logo'
         )
-        
+
         # Status/info subcommand
         subparsers.add_parser(
             'status',
@@ -46,7 +46,7 @@ class OlympicsCommand(BaseCommand):
     def run(self, args: Namespace) -> int:
         """Show coming soon message with Olympics branding."""
         console = self.console
-        
+
         # Handle subcommands
         if hasattr(args, 'olympics_command') and args.olympics_command == 'logo':
             print_olympics_logo(console)

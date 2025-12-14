@@ -31,7 +31,7 @@ class HealthCommand(BaseCommand):
         console.print(Panel("💚 TinyTorch Environment Health Check",
                            title="System Health", border_style="bright_green"))
         console.print()
-        
+
         # Environment checks table - STATUS ONLY (no version numbers)
         env_table = Table(title="Environment Check", show_header=True, header_style="bold blue")
         env_table.add_column("Component", style="cyan", width=30)
@@ -85,32 +85,32 @@ class HealthCommand(BaseCommand):
                 env_table.add_row(f"{display_name} (optional)", "[green]✅ Installed[/green]")
             except ImportError:
                 env_table.add_row(f"{display_name} (optional)", "[dim]○ Not installed[/dim]")
-        
+
         console.print(env_table)
         console.print()
-        
+
         # Module structure table
         struct_table = Table(title="Module Structure", show_header=True, header_style="bold magenta")
         struct_table.add_column("Path", style="cyan", width=25)
         struct_table.add_column("Status", justify="left")
         struct_table.add_column("Type", style="dim", width=25)
-        
+
         required_paths = [
             ('src/', 'Source modules directory (student workspace)'),
             ('tests/', 'Test suite directory'),
             ('tito/', 'CLI infrastructure'),
             ('requirements.txt', 'Dependencies file')
         ]
-        
+
         for path, desc in required_paths:
             if Path(path).exists():
                 struct_table.add_row(path, "[green]✅ Found[/green]", desc)
             else:
                 struct_table.add_row(path, "[red]❌ Missing[/red]", desc)
-        
+
         console.print(struct_table)
         console.print()
-        
+
         # Module implementations
         console.print(Panel("📋 Implementation Status",
                            title="Module Status", border_style="bright_blue"))

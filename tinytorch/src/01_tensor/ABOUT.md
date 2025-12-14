@@ -1,176 +1,385 @@
----
-title: "Tensor"
-description: "Build the fundamental N-dimensional array data structure that powers all machine learning"
-difficulty: "●"
-time_estimate: "4-6 hours"
-prerequisites: []
-next_steps: ["02_activations"]
-learning_objectives:
-  - "Understand tensors as N-dimensional arrays and their memory/performance implications in ML systems"
-  - "Implement a complete Tensor class with arithmetic, shape operations, and efficient data handling"
-  - "Master broadcasting rules and understand how they enable efficient computations without data copying"
-  - "Recognize how tensor operations form the foundation of PyTorch/TensorFlow architecture"
-  - "Analyze computational complexity, memory usage, and view-vs-copy trade-offs in tensor operations"
----
+# Module 01: Tensor
 
-# Tensor
+**FOUNDATION TIER** | Difficulty: ● (1/4) | Time: 4-6 hours | Prerequisites: None
 
-**FOUNDATION TIER** | Difficulty: ● (1/4) | Time: 4-6 hours
+**Prerequisites: None** means exactly that. This module assumes:
+- Basic Python (lists, classes, methods)
+- Basic math (matrix multiplication from linear algebra)
+- No machine learning background required
+
+If you can multiply two matrices by hand and write a Python class, you're ready.
 
 ## Overview
 
-The Tensor class is the foundational data structure of machine learning - every neural network, from simple linear models to GPT and Stable Diffusion, operates on tensors. You'll build N-dimensional arrays from scratch with arithmetic operations, broadcasting, and shape manipulation. This module gives you deep insight into how PyTorch and TensorFlow work under the hood, understanding the memory and performance implications that matter in production ML systems.
+The Tensor class is the foundational data structure of machine learning. Every neural network, from recognizing handwritten digits to translating languages, operates on tensors. These networks process millions of numbers per second, and tensors are the data structure that makes this possible. In this module, you'll build N-dimensional arrays from scratch, gaining deep insight into how PyTorch works under the hood.
+
+By the end, your tensor will support arithmetic, broadcasting, matrix multiplication, and shape manipulation - exactly like `torch.Tensor`.
 
 ## Learning Objectives
 
-By the end of this module, you will be able to:
+```{tip} By completing this module, you will:
 
-- **Understand memory and performance implications**: Recognize how tensor operations dominate compute time and memory usage in ML systems - a single matrix multiplication can consume 90% of forward pass time in production frameworks like PyTorch
-- **Implement core tensor functionality**: Build a complete Tensor class with arithmetic (`+`, `-`, `*`, `/`), matrix multiplication, shape manipulation (`reshape`, `transpose`), and reductions (`sum`, `mean`, `max`) with proper error handling and validation
-- **Master broadcasting semantics**: Understand NumPy broadcasting rules that enable efficient computations across different tensor shapes without data copying - critical for batch processing and efficient neural network operations
-- **Connect to production frameworks**: See how your implementation mirrors PyTorch's `torch.Tensor` and TensorFlow's `tf.Tensor` design patterns, understanding the architectural decisions that power real ML systems
-- **Analyze performance trade-offs**: Understand computational complexity (O(n³) for matrix multiplication), memory usage patterns (contiguous vs. strided), and when to copy data vs. create views for optimization
-
-## Build → Use → Reflect
-
-This module follows TinyTorch's **Build → Use → Reflect** framework:
-
-1. **Build**: Implement the Tensor class from scratch using NumPy as the underlying array library - creating `__init__`, operator overloading (`__add__`, `__mul__`, etc.), shape manipulation methods, and reduction operations
-2. **Use**: Apply your Tensor to real problems like matrix multiplication for neural network layers, data normalization with broadcasting, and statistical computations across various shapes and dimensions
-3. **Reflect**: Understand systems-level implications - why tensor operations dominate training time, how memory layout (row-major vs. column-major) affects cache performance, and how broadcasting eliminates redundant data copying
+- **Implement** a complete Tensor class with arithmetic, matrix multiplication, shape manipulation, and reductions
+- **Master** broadcasting semantics that enable efficient computation without data copying
+- **Understand** computational complexity (O(n³) for matmul) and memory trade-offs (views vs copies)
+- **Connect** your implementation to production PyTorch patterns and design decisions
+```
 
 ## What You'll Build
 
-By completing this module, you'll create a production-ready Tensor class with:
+```{mermaid}
+:align: center
+:caption: Your Tensor Class
+flowchart LR
+    subgraph "Your Tensor Class"
+        A["Properties<br/>shape, size, dtype"]
+        B["Arithmetic<br/>+, -, *, /"]
+        C["Matrix Ops<br/>matmul()"]
+        D["Shape Ops<br/>reshape, transpose"]
+        E["Reductions<br/>sum, mean, max"]
+    end
 
-**Core Data Structure:**
-- N-dimensional array wrapper around NumPy with clean API
-- Properties for shape, size, dtype, and data access
-- Dormant gradient tracking attributes (activated in Module 05)
+    A --> B --> C --> D --> E
 
-**Arithmetic Operations:**
-- Element-wise operations: `+`, `-`, `*`, `/`, `**`
-- Full broadcasting support for Tensor-Tensor and Tensor-scalar operations
-- Automatic shape alignment following NumPy broadcasting rules
+    style A fill:#e1f5ff
+    style B fill:#fff3cd
+    style C fill:#f8d7da
+    style D fill:#d4edda
+    style E fill:#e2d5f1
+```
 
-**Matrix Operations:**
-- `matmul()` for matrix multiplication with shape validation
-- Support for matrix-matrix, matrix-vector multiplication
-- Clear error messages for dimension mismatches
+**Implementation roadmap:**
 
-**Shape Manipulation:**
-- `reshape()` with -1 inference for automatic dimension calculation
-- `transpose()` for dimension swapping
-- View vs. copy semantics understanding
+| Part | What You'll Implement | Key Concept |
+|------|----------------------|-------------|
+| 1 | `__init__`, `shape`, `size`, `dtype` | Tensor as NumPy wrapper |
+| 2 | `__add__`, `__sub__`, `__mul__`, `__truediv__` | Operator overloading + broadcasting |
+| 3 | `matmul()` | Matrix multiplication with shape validation |
+| 4 | `reshape()`, `transpose()` | Shape manipulation, views vs copies |
+| 5 | `sum()`, `mean()`, `max()` | Reductions along axes |
 
-**Reduction Operations:**
-- `sum()`, `mean()`, `max()`, `min()` with axis parameter
-- Global reductions (entire tensor) and axis-specific reductions
-- `keepdims` support for maintaining dimensionality
+**The pattern you'll enable:**
+```python
+# Computing predictions from data
+output = x.matmul(W) + b  # Matrix multiplication + bias (used in every neural network)
+```
 
-**Real-World Usage Pattern:**
-Your Tensor enables the fundamental neural network forward pass: `output = x.matmul(W) + b` - exactly how PyTorch and TensorFlow work internally.
+### What You're NOT Building (Yet)
+
+To keep this module focused, you will **not** implement:
+
+- GPU support (NumPy runs on CPU only)
+- Automatic differentiation (that's Module 05: Autograd)
+- Hundreds of tensor operations (PyTorch has 2000+, you'll build ~15 core ones)
+- Memory optimization tricks (PyTorch uses lazy evaluation, memory pools, etc.)
+
+**You are building the conceptual foundation.** Speed optimizations come later.
+
+## API Reference
+
+This section provides a quick reference for the Tensor class you'll build. Think of it as your cheat sheet while implementing and debugging. Each method is documented with its signature and expected behavior.
+
+### Constructor
+
+```python
+Tensor(data, requires_grad=False)
+```
+- `data`: list, numpy array, or scalar
+- `requires_grad`: enables gradient tracking (activated in Module 05)
+
+### Properties
+
+Your Tensor wraps a NumPy array and exposes several properties that describe its structure. These properties are read-only and computed from the underlying data.
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `data` | `np.ndarray` | Underlying NumPy array |
+| `shape` | `tuple` | Dimensions, e.g., `(2, 3)` |
+| `size` | `int` | Total number of elements |
+| `dtype` | `np.dtype` | Data type (float32) |
+| `grad` | `Tensor` | Gradient storage (Module 05) |
+
+### Arithmetic Operations
+
+Python lets you override operators like `+` and `*` by implementing special methods. When you write `x + y`, Python calls `x.__add__(y)`. Your implementations should handle both Tensor-Tensor operations and Tensor-scalar operations, letting NumPy's broadcasting do the heavy lifting.
+
+| Operation | Method | Example |
+|-----------|--------|---------|
+| Addition | `__add__` | `x + y` or `x + 2` |
+| Subtraction | `__sub__` | `x - y` |
+| Multiplication | `__mul__` | `x * y` |
+| Division | `__truediv__` | `x / y` |
+
+### Matrix & Shape Operations
+
+These methods transform tensors without changing their data (for views) or perform mathematical operations that produce new data (for matmul).
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `matmul` | `matmul(other) -> Tensor` | Matrix multiplication |
+| `reshape` | `reshape(*shape) -> Tensor` | Change shape (-1 to infer) |
+| `transpose` | `transpose(dim0=None, dim1=None) -> Tensor` | Swap dimensions (defaults to last two) |
+
+### Reductions
+
+Reduction operations collapse one or more dimensions by aggregating values. The `axis` parameter controls which dimension gets collapsed. If `axis=None`, all dimensions collapse to a single scalar.
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `sum` | `sum(axis=None, keepdims=False) -> Tensor` | Sum elements |
+| `mean` | `mean(axis=None, keepdims=False) -> Tensor` | Average elements |
+| `max` | `max(axis=None, keepdims=False) -> Tensor` | Maximum element |
 
 ## Core Concepts
 
-### Tensors as Multidimensional Arrays
+This section covers the fundamental ideas you need to understand tensors deeply. These concepts apply to every ML framework, not just TinyTorch, so mastering them here will serve you throughout your career.
 
-A tensor is a generalization of scalars (0D), vectors (1D), and matrices (2D) to N dimensions:
+### Tensor Dimensionality
 
-- **Scalar**: `Tensor(5.0)` - shape `()`
-- **Vector**: `Tensor([1, 2, 3])` - shape `(3,)`
-- **Matrix**: `Tensor([[1, 2], [3, 4]])` - shape `(2, 2)`
-- **3D Tensor**: Image batch `(batch, height, width)` - shape `(32, 224, 224)`
-- **4D Tensor**: CNN features `(batch, channels, height, width)` - shape `(32, 3, 224, 224)`
+Tensors generalize the familiar concepts you already know. A scalar is just a single number, like a temperature reading of 72.5 degrees. Stack scalars into a list and you get a vector, like a series of temperature measurements throughout the day. Arrange vectors into rows and you get a matrix, like a spreadsheet where each row is a different day's measurements. Keep stacking and you reach 3D and 4D tensors that can represent video frames or collections of images.
 
-**Why tensors matter**: They provide a unified interface for all ML data - images, text embeddings, audio spectrograms, and model parameters are all tensors with different shapes.
+The beauty of the Tensor abstraction is that your single class handles all of these cases. The same code that adds two scalars can add two 4D tensors, thanks to broadcasting.
 
-### Broadcasting: Efficient Shape Alignment
+| Rank | Name | Shape | Concrete Example |
+|------|------|-------|------------------|
+| 0D | Scalar | `()` | Temperature reading: `72.5` |
+| 1D | Vector | `(768,)` | Audio sample: 768 measurements |
+| 2D | Matrix | `(128, 768)` | Spreadsheet: 128 rows × 768 columns |
+| 3D | 3D Tensor | `(32, 224, 224)` | Video frames: 32 grayscale images |
+| 4D | 4D Tensor | `(32, 3, 224, 224)` | Video frames: 32 color (RGB) images |
 
-Broadcasting automatically expands smaller tensors to match larger ones without copying data:
+### Broadcasting
+
+When you add a vector to a matrix, the shapes don't match. Should this fail? In most programming contexts, yes. But many computations need to apply the same operation across rows or columns. For example, if you want to adjust all values in a spreadsheet by adding a different offset to each column, you need to add a vector to a matrix. NumPy and PyTorch implement broadcasting to handle this: automatically expanding smaller tensors to match larger ones without actually copying data.
+
+Consider adding a bias vector `[10, 20, 30]` to every row of a matrix. Without broadcasting, you'd need to manually tile the vector into a matrix first, wasting memory. With broadcasting, the operation just works, and the framework handles alignment internally.
+
+Here's how your `__add__` implementation handles this elegantly:
 
 ```python
-# Matrix (2,2) + Vector (2,) → broadcasts to (2,2)
-matrix = Tensor([[1, 2], [3, 4]])
-vector = Tensor([10, 20])
-result = matrix + vector  # [[11, 22], [13, 24]]
+def __add__(self, other):
+    """Add two tensors element-wise with broadcasting support."""
+    if isinstance(other, Tensor):
+        return Tensor(self.data + other.data)  # NumPy handles broadcasting!
+    else:
+        return Tensor(self.data + other)  # Scalar broadcast
 ```
 
-**Broadcasting rules** (NumPy-compatible):
-1. Align shapes from right to left
-2. Dimensions are compatible if they're equal or one is 1
-3. Missing dimensions are treated as size 1
+The elegance is that NumPy's broadcasting rules apply automatically when you write `self.data + other.data`. NumPy aligns the shapes from right to left and expands dimensions where needed, all without copying data.
 
-**Why broadcasting matters**: Eliminates redundant data copying. Adding a bias vector to 1000 feature maps broadcasts once instead of copying the vector 1000 times - saving memory and enabling vectorization.
+```{mermaid}
+:align: center
+:caption: Broadcasting Example
+flowchart LR
+    subgraph "Broadcasting Example"
+        M["Matrix (2,3)<br/>[[1,2,3], [4,5,6]]"]
+        V["Vector (3,)<br/>[10,20,30]"]
+        R["Result (2,3)<br/>[[11,22,33], [14,25,36]]"]
+    end
 
-### Views vs. Copies: Memory Efficiency
+    M --> |"+"| R
+    V --> |"expands"| R
 
-Some operations return **views** (sharing memory) vs. **copies** (duplicating data):
+    style M fill:#e1f5ff
+    style V fill:#fff3cd
+    style R fill:#d4edda
+```
 
-- **Views** (O(1)): `reshape()`, `transpose()` when possible - no data movement
-- **Copies** (O(n)): Arithmetic operations, explicit `.copy()` - duplicate storage
+The rules are simpler than they look. Compare shapes from right to left. At each position, dimensions are compatible if they're equal or if one of them is 1. Missing dimensions on the left are treated as 1. If any position fails this check, broadcasting fails.
 
-**Why this matters**: A view of a 1GB tensor is free (just metadata). A copy allocates another 1GB. Understanding view semantics prevents memory blowup in production systems.
+| Shape A | Shape B | Result | Valid? |
+|---------|---------|--------|--------|
+| `(3, 4)` | `(4,)` | `(3, 4)` | ✓ |
+| `(3, 4)` | `(3, 1)` | `(3, 4)` | ✓ |
+| `(3, 4)` | `(3,)` | Error | ✗ (3 ≠ 4) |
+| `(2, 3, 4)` | `(3, 4)` | `(2, 3, 4)` | ✓ |
+
+The memory savings are dramatic. Adding a `(768,)` vector to a `(32, 512, 768)` tensor would require copying the vector 32×512 times without broadcasting, allocating 50 MB of redundant data (12.5 million float32 numbers). With broadcasting, you store just the original 3 KB vector.
+
+### Views vs. Copies
+
+When you reshape a tensor, does it allocate new memory or just create a different view of the same data? The answer has huge implications for both performance and correctness.
+
+A view shares memory with its source. Reshaping a 1 GB tensor is instant because you're just changing the metadata that describes how to interpret the bytes, not copying the bytes themselves. But this creates an important gotcha: modifying a view modifies the original.
+
+```python
+x = Tensor([1, 2, 3, 4])
+y = x.reshape(2, 2)  # y is a VIEW of x
+y.data[0, 0] = 99    # This also changes x!
+```
+
+Arithmetic operations like addition always create copies because they compute new values. This is safer but uses more memory. Production code carefully manages views to avoid both memory blowup (too many copies) and silent bugs (unexpected mutations through views).
+
+| Operation | Type | Memory | Time |
+|-----------|------|--------|------|
+| `reshape()` | View* | Shared | O(1) |
+| `transpose()` | View* | Shared | O(1) |
+| `+ - * /` | Copy | New allocation | O(n) |
+
+*When data is contiguous in memory
+
+### Matrix Multiplication
+
+Matrix multiplication is the computational workhorse of neural networks. Every linear layer, every attention head, every embedding lookup involves matmul. Understanding its mechanics and cost is essential.
+
+The operation is simple in concept: for each output element, compute a dot product of a row from the first matrix with a column from the second. But this simplicity hides cubic complexity. Multiplying two n×n matrices requires n³ multiplications and n³ additions.
+
+Here's how the educational implementation in your module works:
+
+```python
+def matmul(self, other):
+    """Matrix multiplication of two tensors."""
+    if not isinstance(other, Tensor):
+        raise TypeError(f"Expected Tensor for matrix multiplication, got {type(other)}")
+
+    # Shape validation: inner dimensions must match
+    if len(self.shape) >= 2 and len(other.shape) >= 2:
+        if self.shape[-1] != other.shape[-2]:
+            raise ValueError(
+                f"Cannot perform matrix multiplication: {self.shape} @ {other.shape}. "
+                f"Inner dimensions must match: {self.shape[-1]} ≠ {other.shape[-2]}"
+            )
+
+    a = self.data
+    b = other.data
+
+    # Handle 2D matrices with explicit loops (educational)
+    if len(a.shape) == 2 and len(b.shape) == 2:
+        M, K = a.shape
+        K2, N = b.shape
+        result_data = np.zeros((M, N), dtype=a.dtype)
+
+        # Each output element is a dot product
+        for i in range(M):
+            for j in range(N):
+                result_data[i, j] = np.dot(a[i, :], b[:, j])
+    else:
+        # For batched operations, use np.matmul
+        result_data = np.matmul(a, b)
+
+    return Tensor(result_data)
+```
+
+The explicit loops in the 2D case are intentionally slower than `np.matmul` because they reveal exactly what matrix multiplication does: each output element requires K operations, and there are M×N outputs, giving O(M×K×N) total operations. For square matrices, this is O(n³).
+
+### Shape Manipulation
+
+Shape manipulation operations change how data is interpreted without changing the values themselves. Understanding when data is copied versus viewed is crucial for both correctness and performance.
+
+The `reshape` method reinterprets the same data with different dimensions:
+
+```python
+def reshape(self, *shape):
+    """Reshape tensor to new dimensions."""
+    if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
+        new_shape = tuple(shape[0])
+    else:
+        new_shape = shape
+
+    # Handle -1 for automatic dimension inference
+    if -1 in new_shape:
+        known_size = 1
+        unknown_idx = new_shape.index(-1)
+        for i, dim in enumerate(new_shape):
+            if i != unknown_idx:
+                known_size *= dim
+        unknown_dim = self.size // known_size
+        new_shape = list(new_shape)
+        new_shape[unknown_idx] = unknown_dim
+        new_shape = tuple(new_shape)
+
+    # Validate total elements match
+    if np.prod(new_shape) != self.size:
+        raise ValueError(
+            f"Total elements must match: {self.size} ≠ {int(np.prod(new_shape))}"
+        )
+
+    reshaped_data = np.reshape(self.data, new_shape)
+    return Tensor(reshaped_data, requires_grad=self.requires_grad)
+```
+
+The `-1` syntax is particularly useful: it tells NumPy to infer one dimension automatically. When flattening a batch of images, `x.reshape(batch_size, -1)` lets NumPy calculate the feature dimension.
 
 ### Computational Complexity
 
-Different operations have vastly different costs:
+Not all tensor operations are equal. Element-wise operations like addition visit each element once: O(n) time where n is the total number of elements. Reductions like sum also visit each element once. But matrix multiplication is fundamentally different.
 
-- **Element-wise** (`+`, `-`, `*`): O(n) - linear in tensor size
-- **Reductions** (`sum`, `mean`): O(n) - must visit every element
-- **Matrix multiply** (`matmul`): O(n³) for square matrices - dominates training time
+Multiplying two n×n matrices requires n³ operations: for each of the n² output elements, you compute a dot product of n values. This cubic scaling is why a 2000×2000 matmul takes 8x longer than a 1000×1000 matmul, not 4x. In neural networks, matrix multiplications consume over 90% of compute time. This is precisely why GPUs exist for ML: a modern GPU has thousands of cores that can compute thousands of dot products simultaneously, turning an 800ms CPU operation into an 8ms GPU operation.
 
-**Why this matters**: In a neural network forward pass, matrix multiplications consume 90%+ of compute time. Optimizing matmul is critical - hence specialized hardware (GPUs, TPUs) and libraries (cuBLAS, MKL).
+| Operation | Complexity | Notes |
+|-----------|------------|-------|
+| Element-wise (`+`, `-`, `*`) | O(n) | Linear in tensor size |
+| Reductions (`sum`, `mean`) | O(n) | Must visit every element |
+| Matrix multiply (`matmul`) | O(n³) | Dominates training time |
 
-## Architecture Overview
+### Axis Semantics
 
-### Tensor Class Design
+The `axis` parameter in reductions specifies which dimension to collapse. Think of it as "sum along this axis" or "average out this dimension." The result has one fewer dimension than the input.
 
-```
-┌─────────────────────────────────────────┐
-│         Tensor Class                    │
-├─────────────────────────────────────────┤
-│  Properties:                            │
-│  - data: np.ndarray (underlying storage)│
-│  - shape: tuple (dimensions)            │
-│  - size: int (total elements)           │
-│  - dtype: np.dtype (data type)          │
-│  - requires_grad: bool (autograd flag)  │
-│  - grad: Tensor (gradient - Module 05)  │
-├─────────────────────────────────────────┤
-│  Operator Overloading:                  │
-│  - __add__, __sub__, __mul__, __truediv__│
-│  - __pow__ (exponentiation)             │
-│  - Returns new Tensor instances         │
-├─────────────────────────────────────────┤
-│  Methods:                               │
-│  - matmul(other): Matrix multiplication │
-│  - reshape(*shape): Shape manipulation  │
-│  - transpose(): Dimension swap          │
-│  - sum/mean/max/min(axis): Reductions   │
-└─────────────────────────────────────────┘
+For a 2D tensor with shape `(rows, columns)`, summing along axis 0 collapses the rows, giving you column totals. Summing along axis 1 collapses the columns, giving you row totals. Summing with `axis=None` collapses everything to a single scalar.
+
+Your reduction implementations simply pass the axis to NumPy:
+
+```python
+def sum(self, axis=None, keepdims=False):
+    """Sum tensor along specified axis."""
+    result = np.sum(self.data, axis=axis, keepdims=keepdims)
+    return Tensor(result)
 ```
 
-### Data Flow Architecture
+The `keepdims=True` option preserves the reduced dimension as size 1, which is useful for broadcasting the result back.
 
 ```
-Python Interface (your code)
-         ↓
-    Tensor Class
-         ↓
-   NumPy Backend (vectorized operations)
-         ↓
-  C/Fortran Libraries (BLAS, LAPACK)
-         ↓
-    Hardware (CPU SIMD, cache)
+For shape (rows, columns) = (32, 768):
+
+sum(axis=0) → collapse rows    → shape (768,)  - column totals
+sum(axis=1) → collapse columns → shape (32,)   - row totals
+sum(axis=None) → collapse all  → scalar
+
+Visual:
+[[1, 2, 3],      sum(axis=0)     sum(axis=1)
+ [4, 5, 6]]  →   [5, 7, 9]   or  [6, 15]
+                 (down cols)     (across rows)
 ```
 
-**Your implementation**: Python wrapper → NumPy
-**PyTorch/TensorFlow**: Python wrapper → C++ engine → GPU kernels
+## Architecture
 
-The architecture is identical in concept - you're learning the same design patterns used in production, just with NumPy instead of custom CUDA kernels.
+Your Tensor sits at the top of a stack that reaches down to hardware. When you call `x + y`, Python calls your `__add__` method, which delegates to NumPy, which calls optimized BLAS libraries written in C and Fortran, which use CPU SIMD instructions that process multiple numbers in a single clock cycle.
+
+```{mermaid}
+:align: center
+:caption: Your Code
+flowchart TB
+    subgraph "Your Code"
+        A["Python Interface<br/>x = Tensor([[1,2],[3,4]])"]
+    end
+
+    subgraph "TinyTorch"
+        B["Tensor Class<br/>shape, data, operations"]
+    end
+
+    subgraph "Backend"
+        C["NumPy<br/>Vectorized operations"]
+        D["BLAS/LAPACK<br/>C/Fortran libraries"]
+    end
+
+    subgraph "Hardware"
+        E["CPU SIMD<br/>Cache optimization"]
+    end
+
+    A --> B --> C --> D --> E
+
+    style A fill:#e1f5ff
+    style B fill:#fff3cd
+    style C fill:#d4edda
+    style E fill:#f8d7da
+```
+
+This is the same architecture used by PyTorch and TensorFlow, just with different backends. PyTorch replaces NumPy with a C++ engine and BLAS with CUDA kernels running on GPUs. But the Python interface and the abstractions are identical. When you understand TinyTorch's Tensor, you understand PyTorch's Tensor.
 
 ### Module Integration
+
+Your Tensor is the foundation for everything that follows in TinyTorch. Every subsequent module builds on the work you do here.
 
 ```
 Module 01: Tensor (THIS MODULE)
@@ -184,553 +393,238 @@ Module 05: Autograd (adds .grad attribute to Tensors)
 Module 06: Optimizers (updates Tensor parameters)
 ```
 
-Your Tensor is the universal foundation - every subsequent module builds on what you create here.
+## Common Errors & Debugging
 
-## Prerequisites
+These are the errors you'll encounter most often when working with tensors. Understanding why they happen will save you hours of debugging, both in this module and throughout your ML career.
 
-This is the first module - no prerequisites! Verify your environment is ready:
+### Shape Mismatch in matmul
 
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
+**Error**: `ValueError: shapes (2,3) and (2,2) not aligned`
 
-# Check system health
-tito system health
-```
+Matrix multiplication requires the inner dimensions to match. If you're multiplying `(M, K)` by `(K, N)`, both K values must be equal. The error above happens when trying to multiply a (2,3) matrix by a (2,2) matrix: 3 ≠ 2.
 
-All checks should pass (Python 3.8+, NumPy, pytest installed) before starting.
+**Fix**: Check your shapes. The rule is `a.shape[-1]` must equal `b.shape[-2]`.
 
-## Getting Started
+### Broadcasting Failures
 
-### Development Workflow
+**Error**: `ValueError: operands could not be broadcast together`
 
-1. **Open the development notebook**: `modules/01_tensor/tensor_dev.ipynb` in Jupyter or your preferred editor
-2. **Implement Tensor.__init__**: Create constructor that converts data to NumPy array, stores shape/size/dtype, initializes gradient attributes
-3. **Build arithmetic operations**: Implement `__add__`, `__sub__`, `__mul__`, `__truediv__` with broadcasting support for both Tensor-Tensor and Tensor-scalar operations
-4. **Add matrix multiplication**: Implement `matmul()` with shape validation and clear error messages for dimension mismatches
-5. **Create shape manipulation**: Implement `reshape()` (with -1 support) and `transpose()` for dimension swapping
-6. **Implement reductions**: Build `sum()`, `mean()`, `max()` with axis parameter and keepdims support
-7. **Export and verify**: Run `tito export 01` to export to package, then `tito test 01` to validate all tests pass
+Broadcasting fails when shapes can't be aligned according to the rules. Remember: compare right to left, and dimensions must be equal or one must be 1.
 
-## Implementation Guide
+**Examples**:
+- `(2,3) + (3,)` ✓ works - 3 matches 3, and the missing dimension becomes 1
+- `(2,3) + (2,)` ✗ fails - comparing right to left: 3 ≠ 2
 
-### Tensor Class Foundation
+**Fix**: Reshape to make dimensions compatible: `vector.reshape(-1, 1)` or `vector.reshape(1, -1)`
 
-Your Tensor class wraps NumPy arrays and provides ML-specific functionality:
+### Reshape Size Mismatch
 
-```python
-from tinytorch.core.tensor import Tensor
+**Error**: `ValueError: cannot reshape array of size X into shape Y`
 
-# Create tensors from Python lists or NumPy arrays
-x = Tensor([[1.0, 2.0], [3.0, 4.0]])
-y = Tensor([[0.5, 1.5], [2.5, 3.5]])
+Reshape only rearranges elements; it can't create or destroy them. If you have 12 elements, you can reshape to (3, 4) or (2, 6) or (2, 2, 3), but not to (5, 5).
 
-# Properties provide clean API access
-print(x.shape)    # (2, 2)
-print(x.size)     # 4
-print(x.dtype)    # float32
-```
+**Fix**: Ensure `np.prod(old_shape) == np.prod(new_shape)`
 
-**Implementation details**: You'll implement `__init__` to convert input data to NumPy arrays, store shape/size/dtype as properties, and initialize dormant gradient attributes (`requires_grad`, `grad`) that activate in Module 05.
+### Missing Attributes
 
-### Arithmetic Operations
+**Error**: `AttributeError: 'Tensor' has no attribute 'shape'`
 
-Implement operator overloading for element-wise operations with broadcasting:
+Your `__init__` method needs to set all required attributes. If you forget to set `self.shape`, any code that accesses `tensor.shape` will fail.
 
-```python
-# Element-wise operations via operator overloading
-z = x + y         # Addition: [[1.5, 3.5], [5.5, 7.5]]
-w = x * y         # Element-wise multiplication
-p = x ** 2        # Exponentiation
-s = x - y         # Subtraction
-d = x / y         # Division
+**Fix**: Add `self.shape = self.data.shape` in your constructor
 
-# Broadcasting: scalar operations automatically expand
-scaled = x * 2    # [[2.0, 4.0], [6.0, 8.0]]
-shifted = x + 10  # [[11.0, 12.0], [13.0, 14.0]]
+### Type Errors in Arithmetic
 
-# Broadcasting: vector + matrix
-matrix = Tensor([[1, 2], [3, 4]])
-vector = Tensor([10, 20])
-result = matrix + vector  # [[11, 22], [13, 24]]
-```
+**Error**: `TypeError: unsupported operand type(s) for +: 'Tensor' and 'int'`
 
-**Systems insight**: These operations vectorize automatically via NumPy, achieving ~100x speedup over Python loops. This is why all ML frameworks use tensors - the performance difference between `for i in range(n): result[i] = a[i] + b[i]` and `result = a + b` is dramatic at scale.
+Your arithmetic methods need to handle both Tensor and scalar operands. When someone writes `x + 2`, your `__add__` receives the integer 2, not a Tensor.
 
-### Matrix Multiplication
-
-Matrix multiplication is the heart of neural networks - every layer performs it:
-
-```python
-# Matrix multiplication (the @ operator)
-a = Tensor([[1, 2], [3, 4]])  # 2×2
-b = Tensor([[5, 6], [7, 8]])  # 2×2
-c = a.matmul(b)               # 2×2 result: [[19, 22], [43, 50]]
-
-# Neural network forward pass pattern: y = xW + b
-x = Tensor([[1, 2, 3], [4, 5, 6]])     # Input: (batch=2, features=3)
-W = Tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]])  # Weights: (3, 2)
-b = Tensor([0.1, 0.2])                 # Bias: (2,)
-output = x.matmul(W) + b               # (2, 2)
-```
-
-**Computational complexity**: For matrices `(M,K) @ (K,N)`, the cost is `O(M×K×N)` floating-point operations. A 1000×1000 matrix multiplication requires 2 billion FLOPs - this dominates training time in production systems.
-
-### Shape Manipulation
-
-Neural networks constantly reshape tensors to match layer requirements:
-
-```python
-# Reshape: change interpretation of same data (O(1) operation)
-tensor = Tensor([1, 2, 3, 4, 5, 6])
-reshaped = tensor.reshape(2, 3)  # [[1, 2, 3], [4, 5, 6]]
-flat = reshaped.reshape(-1)      # [1, 2, 3, 4, 5, 6]
-
-# Transpose: swap dimensions (data rearrangement)
-matrix = Tensor([[1, 2, 3], [4, 5, 6]])  # (2, 3)
-transposed = matrix.transpose()          # (3, 2): [[1, 4], [2, 5], [3, 6]]
-
-# CNN data flow example
-images = Tensor(np.random.rand(32, 3, 224, 224))  # (batch, channels, H, W)
-features = images.reshape(32, -1)                 # (batch, 3*224*224) - flatten for MLP
-```
-
-**Memory consideration**: `reshape` often returns *views* (no data copying) when possible - an O(1) operation. `transpose` may require data rearrangement depending on memory layout. Understanding views vs. copies is crucial: views share memory (efficient), copies duplicate data (expensive for large tensors).
-
-### Reduction Operations
-
-Aggregation operations collapse dimensions for statistics and loss computation:
-
-```python
-# Reduce along different axes
-total = x.sum()             # Scalar: sum all elements
-col_sums = x.sum(axis=0)    # Sum columns: [4, 6]
-row_sums = x.sum(axis=1)    # Sum rows: [3, 7]
-
-# Statistical reductions
-means = x.mean(axis=0)      # Column-wise mean
-minimums = x.min(axis=1)    # Row-wise minimum
-maximums = x.max()          # Global maximum
-
-# Batch loss averaging (common pattern)
-losses = Tensor([0.5, 0.3, 0.8, 0.2])  # Per-sample losses
-avg_loss = losses.mean()                # 0.45 - batch average
-```
-
-**Production pattern**: Every loss function uses reductions. Cross-entropy loss computes per-sample losses then averages: `loss = -log(predictions[correct_class]).mean()`. Understanding axis semantics prevents bugs in multi-dimensional operations.
-
-## Testing
-
-### Comprehensive Test Suite
-
-Run the full test suite to verify tensor functionality:
-
-```bash
-# TinyTorch CLI (recommended - runs all 01_tensor tests)
-tito test 01
-
-# Direct pytest execution (more verbose output)
-python -m pytest tests/01_tensor/ -v
-
-# Run specific test class
-python -m pytest tests/01_tensor/test_tensor_core.py::TestTensorCreation -v
-```
-
-Expected output: All tests pass with green checkmarks showing your Tensor implementation works correctly.
-
-### Test Coverage Areas
-
-Your implementation is validated across these dimensions:
-
-- **Initialization** (`test_tensor_from_list`, `test_tensor_from_numpy`, `test_tensor_shapes`): Creating tensors from Python lists, NumPy arrays, and nested structures with correct shape/dtype handling
-- **Arithmetic Operations** (`test_tensor_addition`, `test_tensor_multiplication`): Element-wise addition, subtraction, multiplication, division with both Tensor-Tensor and Tensor-scalar combinations
-- **Broadcasting** (`test_scalar_broadcasting`, `test_vector_broadcasting`): Automatic shape alignment for different tensor shapes, scalar expansion, matrix-vector broadcasting
-- **Matrix Multiplication** (`test_matrix_multiplication`): Matrix-matrix, matrix-vector multiplication with shape validation and error handling for incompatible dimensions
-- **Shape Manipulation** (`test_tensor_reshape`, `test_tensor_transpose`, `test_tensor_flatten`): Reshape with -1 inference, transpose with dimension swapping, validation for incompatible sizes
-- **Reductions** (`test_sum`, `test_mean`, `test_max`): Aggregation along various axes (None, 0, 1, multiple), keepdims behavior, global vs. axis-specific reduction
-- **Memory Management** (`test_tensor_data_access`, `test_tensor_copy_semantics`, `test_tensor_memory_efficiency`): Data access patterns, copy vs. view semantics, memory usage validation
-
-### Inline Testing & Validation
-
-The development notebook includes comprehensive inline tests with immediate feedback:
-
-```python
-# Example inline test output
- Unit Test: Tensor Creation...
- Tensor created from list
- Shape property correct: (2, 2)
- Size property correct: 4
- dtype is float32
- Progress: Tensor initialization ✓
-
- Unit Test: Arithmetic Operations...
- Addition: [[6, 8], [10, 12]]
- Multiplication works element-wise
- Broadcasting: scalar + tensor
- Broadcasting: matrix + vector
- Progress: Arithmetic operations ✓
-
- Unit Test: Matrix Multiplication...
- 2×2 @ 2×2 = [[19, 22], [43, 50]]
- Shape validation catches 2×2 @ 3×1 error
- Error message shows: "2 ≠ 3"
- Progress: Matrix operations ✓
-```
-
-### Manual Testing Examples
-
-Validate your implementation interactively:
-
-```python
-from tinytorch.core.tensor import Tensor
-import numpy as np
-
-# Test basic operations
-x = Tensor([[1, 2], [3, 4]])
-y = Tensor([[5, 6], [7, 8]])
-
-assert x.shape == (2, 2)
-assert (x + y).data.tolist() == [[6, 8], [10, 12]]
-assert x.sum().data == 10
-print("✓ Basic operations working")
-
-# Test broadcasting
-small = Tensor([1, 2])
-result = x + small
-assert result.data.tolist() == [[2, 4], [4, 6]]
-print("✓ Broadcasting functional")
-
-# Test reductions
-col_means = x.mean(axis=0)
-assert np.allclose(col_means.data, [2.0, 3.0])
-print("✓ Reductions working")
-
-# Test neural network pattern: y = xW + b
-batch = Tensor([[1, 2, 3], [4, 5, 6]])  # (2, 3)
-weights = Tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]])  # (3, 2)
-bias = Tensor([0.1, 0.2])
-output = batch.matmul(weights) + bias
-assert output.shape == (2, 2)
-print("✓ Neural network forward pass pattern works!")
-```
+**Fix**: Check for scalars: `if isinstance(other, (int, float)): ...`
 
 ## Production Context
 
-### Your Implementation vs. Production Frameworks
+### Your Implementation vs. PyTorch
 
-Understanding what you're building vs. what production frameworks provide:
+Your TinyTorch Tensor and PyTorch's `torch.Tensor` share the same conceptual design. The differences are in implementation: PyTorch uses a C++ backend for speed, supports GPUs for massive parallelism, and implements thousands of specialized operations. But the Python API, broadcasting rules, and shape semantics are identical.
 
-| Feature | Your Tensor (Module 01) | PyTorch torch.Tensor | TensorFlow tf.Tensor |
-|---------|------------------------|---------------------|---------------------|
-| **Backend** | NumPy (CPU-only) | C++/CUDA (CPU/GPU/TPU) | C++/CUDA/XLA |
-| **Dtype Support** | float32 (primary) | float16/32/64, int8/16/32/64, bool, complex | Same + bfloat16 |
-| **Operations** | Arithmetic, matmul, reshape, transpose, reductions | 1000+ operations | 1000+ operations |
-| **Broadcasting** | ✓ Full NumPy rules | ✓ Same rules | ✓ Same rules |
-| **Autograd** | Dormant (activates Module 05) | ✓ Full computation graph | ✓ GradientTape |
-| **GPU Support** | ✗ CPU-only | ✓ CUDA, Metal, ROCm | ✓ CUDA, TPU |
-| **Memory Pooling** | ✗ Python GC | ✓ Caching allocator | ✓ Memory pools |
-| **JIT Compilation** | ✗ Interpreted | ✓ TorchScript, torch.compile | ✓ XLA, TF Graph |
-| **Distributed** | ✗ Single process | ✓ DDP, FSDP | ✓ tf.distribute |
+| Feature | Your Implementation | PyTorch |
+|---------|---------------------|---------|
+| **Backend** | NumPy (Python) | C++/CUDA |
+| **Speed** | 1x (baseline) | 10-100x faster |
+| **GPU** | ✗ CPU only | ✓ CUDA, Metal, ROCm |
+| **Autograd** | Dormant (Module 05) | Full computation graph |
+| **Operations** | ~15 core ops | 2000+ operations |
 
-**Educational focus**: Your implementation prioritizes clarity and understanding over performance. The core concepts (broadcasting, shape manipulation, reductions) are identical - you're learning the same patterns used in production, just with simpler infrastructure.
+### Code Comparison
 
-**Line count**: Your implementation is ~1927 lines in the notebook (including tests and documentation). PyTorch's tensor implementation spans 50,000+ lines across multiple C++ files - your simplified version captures the essential concepts.
+The following comparison shows equivalent operations in TinyTorch and PyTorch. Notice how closely the APIs mirror each other. This is intentional: by learning TinyTorch's patterns, you're simultaneously learning PyTorch's patterns.
 
-### Side-by-Side Code Comparison
-
-**Your implementation:**
+`````{tab-set}
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.core.tensor import Tensor
 
-# Create tensors
 x = Tensor([[1, 2], [3, 4]])
-w = Tensor([[0.5, 0.6], [0.7, 0.8]])
-
-# Forward pass
-output = x.matmul(w)  # (2,2) @ (2,2) → (2,2)
-loss = output.mean()  # Scalar loss
+y = x + 2
+z = x.matmul(w)
+loss = z.mean()
 ```
+````
 
-**Equivalent PyTorch (production):**
+````{tab-item} ⚡ PyTorch
 ```python
 import torch
 
-# Create tensors (GPU-enabled)
-x = torch.tensor([[1, 2], [3, 4]], dtype=torch.float32).cuda()
-w = torch.tensor([[0.5, 0.6], [0.7, 0.8]], dtype=torch.float32).cuda()
-
-# Forward pass (automatic gradient tracking)
-output = x @ w        # Uses cuBLAS for GPU acceleration
-loss = output.mean()  # Builds computation graph for backprop
-loss.backward()       # Automatic differentiation
-```
-
-**Key differences:**
-1. **GPU Support**: PyTorch tensors can move to GPU (`.cuda()`) for 10-100x speedup via parallel processing
-2. **Autograd**: PyTorch automatically tracks operations and computes gradients - you'll build this in Module 05
-3. **Memory Pooling**: PyTorch reuses GPU memory via caching allocator - avoids expensive malloc/free calls
-4. **Optimized Kernels**: PyTorch uses cuBLAS/cuDNN (GPU) and Intel MKL (CPU) - hand-tuned assembly for max performance
-
-### Real-World Production Usage
-
-**Meta (Facebook AI)**: PyTorch was developed at Meta and powers their recommendation systems, computer vision models, and LLaMA language models. Their production infrastructure processes billions of tensor operations per second.
-
-**Tesla**: Uses PyTorch tensors for Autopilot neural networks. Each camera frame (6-9 cameras) is converted to tensors, processed through vision models (millions of parameters stored as tensors), and outputs driving decisions in real-time at 36 FPS.
-
-**OpenAI**: GPT-4 training involved tensors with billions of parameters distributed across thousands of GPUs. Each training step performs matrix multiplications on tensors larger than single GPU memory.
-
-**Google**: TensorFlow powers Google Search, Translate, Photos, and Assistant. Google's TPUs (Tensor Processing Units) are custom hardware designed specifically for accelerating tensor operations.
-
-### Performance Characteristics at Scale
-
-**Memory usage**: GPT-3 scale models (175B parameters) require ~350GB memory just for weights stored as float16 tensors (175B × 2 bytes). Mixed precision training (float16/float32) reduces memory by 2x while maintaining accuracy.
-
-**Computational bottlenecks**: In production training, tensor operations consume 95%+ of runtime. A single linear layer's matrix multiplication might take 100ms of a 110ms forward pass - optimizing tensor operations is critical.
-
-**Cache efficiency**: Modern CPUs have ~32KB L1 cache, ~256KB L2, ~8MB L3. Accessing memory in tensor-friendly patterns (contiguous, row-major) can be 10-100x faster than cache-unfriendly patterns (strided, column-major).
-
-### Package Integration
-
-After export, your Tensor implementation becomes the foundation of TinyTorch:
-
-**Package Export**: Code exports to `tinytorch.core.tensor`
-
-```python
-# When students install tinytorch, they import YOUR work:
-from tinytorch.core.tensor import Tensor  # Your implementation!
-
-# Future modules build on YOUR tensor:
-from tinytorch.core.activations import ReLU  # Module 02 - operates on your Tensors
-from tinytorch.core.layers import Linear     # Module 03 - uses your Tensor for weights
-from tinytorch.core.autograd import backward # Module 05 - adds gradients to your Tensor
-from tinytorch.core.optimizers import SGD    # Module 06 - updates your Tensor parameters
-```
-
-**Package structure:**
-```
-tinytorch/
-├── core/
-│   ├── tensor.py          ← YOUR implementation exports here
-│   ├── activations.py     ← Module 02 builds on your Tensor
-│   ├── layers.py          ← Module 03 builds on your Tensor
-│   ├── losses.py          ← Module 04 builds on your Tensor
-│   ├── autograd.py        ← Module 05 adds gradients to your Tensor
-│   ├── optimizers.py      ← Module 06 updates your Tensor weights
-│   └── ...
-```
-
-Your Tensor class is the universal foundation - every subsequent module depends on what you build here.
-
-### How Your Implementation Maps to PyTorch
-
-**What you just built:**
-```python
-# Your TinyTorch Tensor implementation
-from tinytorch.core.tensor import Tensor
-
-# Create a tensor
-x = Tensor([[1, 2], [3, 4]])
-
-# Core operations you implemented
-y = x + 2              # Broadcasting
-z = x.matmul(other)    # Matrix multiplication
-mean = x.mean(axis=0)  # Reductions
-reshaped = x.reshape(-1)  # Shape manipulation
-```
-
-**How PyTorch does it:**
-```python
-# PyTorch equivalent
-import torch
-
-# Create a tensor
 x = torch.tensor([[1, 2], [3, 4]], dtype=torch.float32)
+y = x + 2
+z = x @ w
+loss = z.mean()
+loss.backward()  # You'll build this in Module 05!
+```
+````
+`````
 
-# Same operations, identical semantics
-y = x + 2              # Broadcasting (same rules)
-z = x @ other          # Matrix multiplication (@ operator)
-mean = x.mean(dim=0)   # Reductions (dim instead of axis)
-reshaped = x.reshape(-1)  # Shape manipulation (same API)
+Let's walk through each line to understand the comparison:
+
+- **Line 1 (Import)**: Both frameworks use a simple import. TinyTorch exposes `Tensor` from `core.tensor`; PyTorch uses `torch.tensor()` as a factory function.
+- **Line 3 (Creation)**: TinyTorch infers dtype from input; PyTorch requires explicit `dtype=torch.float32` for floating-point operations. This explicitness matters for performance tuning in production.
+- **Line 4 (Broadcasting)**: Both handle `x + 2` identically, broadcasting the scalar across all elements. Same semantics, same result.
+- **Line 5 (Matrix multiply)**: TinyTorch uses `.matmul()` method; PyTorch supports both `.matmul()` and the `@` operator. The operation is identical.
+- **Line 6 (Reduction)**: Both use `.mean()` to reduce the tensor to a scalar. Reductions like this are fundamental to computing loss values.
+- **Line 7 (Autograd)**: PyTorch includes `.backward()` for automatic differentiation. You'll implement this yourself in Module 05, gaining deep insight into how gradients flow through computation graphs.
+
+```{tip} What's Identical
+
+Broadcasting rules, shape semantics, and API design patterns. When you debug PyTorch shape errors, you'll understand exactly what's happening because you built the same abstractions.
 ```
 
-**Key Insight**: Your implementation uses the **same mathematical operations and design patterns** that PyTorch uses internally. The `@` operator is syntactic sugar for matrix multiplication—the actual computation is identical. Broadcasting rules, shape semantics, and reduction operations all follow the same NumPy conventions.
+### Why Tensors Matter at Scale
 
-**What's the SAME?**
-- Tensor abstraction and API design
-- Broadcasting rules and memory layout principles
-- Shape manipulation semantics (`reshape`, `transpose`)
-- Reduction operation behavior (`sum`, `mean`, `max`)
-- Conceptual architecture: data + operations + metadata
+To appreciate why tensor operations matter, consider the scale of modern ML systems:
 
-**What's different in production PyTorch?**
-- **Backend**: C++/CUDA for 10-100× speed vs. NumPy
-- **GPU support**: `.cuda()` moves tensors to GPU for parallel processing
-- **Autograd integration**: `requires_grad=True` enables automatic differentiation (you'll build this in Module 05)
-- **Memory optimization**: Caching allocator reuses GPU memory, avoiding expensive malloc/free
+- **Large language models**: 175 billion numbers stored as tensors = **350 GB** (like storing 70,000 full-resolution photos)
+- **Image processing**: A batch of 128 images = **77 MB** of tensor data
+- **Self-driving cars**: Process tensor operations at **36 FPS** across multiple cameras (each frame = millions of operations in 28 milliseconds)
 
-**Why this matters**: When you debug PyTorch code, you'll understand what's happening under tensor operations because you implemented them yourself. Shape mismatch errors, broadcasting bugs, memory issues—you know exactly how they work internally, not just how to call the API.
+A single matrix multiplication can consume **90% of computation time** in neural networks. Understanding tensor operations isn't just academic; it's essential for building and debugging real ML systems.
 
-**Production usage example**:
-```python
-# PyTorch production code (after TinyTorch)
-import torch.nn as nn
+## Check Your Understanding
 
-class MLPLayer(nn.Module):
-    def __init__(self, in_features, out_features):
-        super().__init__()
-        self.linear = nn.Linear(in_features, out_features)  # Uses torch.Tensor internally
+Test yourself with these systems thinking questions. They're designed to build intuition for the performance characteristics you'll encounter in production ML.
 
-    def forward(self, x):
-        return self.linear(x)  # Matrix multiply + bias (same as your Tensor.matmul)
+**Q1: Memory Calculation**
+
+A batch of 32 RGB images (224×224 pixels) stored as float32. How much memory?
+
+```{admonition} Answer
+:class: dropdown
+
+32 × 3 × 224 × 224 × 4 = **77,070,336 bytes ≈ 77 MB**
+
+This is why batch size matters - double the batch, double the memory!
 ```
 
-After building your own Tensor class, you understand that `nn.Linear(in_features, out_features)` is essentially creating weight and bias tensors, then performing `x @ weights + bias` with your same broadcasting and matmul operations—just optimized in C++/CUDA.
+**Q2: Broadcasting Savings**
 
-## Common Pitfalls
+Adding a vector `(768,)` to a 3D tensor `(32, 512, 768)`. How much memory does broadcasting save?
 
-### Shape Mismatch Errors
+```{admonition} Answer
+:class: dropdown
 
-**Problem**: Matrix multiplication fails with cryptic errors like "shapes (2,3) and (2,2) not aligned"
+Without broadcasting: 32 × 512 × 768 × 4 = **50.3 MB**
 
-**Solution**: Always verify inner dimensions match: `(M,K) @ (K,N)` requires K to be equal. Add shape validation with clear error messages:
-```python
-if a.shape[1] != b.shape[0]:
-    raise ValueError(f"Cannot multiply ({a.shape[0]},{a.shape[1]}) @ ({b.shape[0]},{b.shape[1]}): {a.shape[1]} ≠ {b.shape[0]}")
+With broadcasting: 768 × 4 = **3 KB**
+
+Savings: **~50 MB per operation** - this adds up across hundreds of operations in a neural network!
 ```
 
-### Broadcasting Confusion
+**Q3: Matmul Scaling**
 
-**Problem**: Expected `(2,3) + (3,)` to broadcast but got error
+If a 1000×1000 matmul takes 100ms, how long will 2000×2000 take?
 
-**Solution**: Broadcasting aligns shapes *from the right*. `(2,3) + (3,)` works (broadcasts to `(2,3)`), but `(2,3) + (2,)` fails. Add dimension with reshape if needed: `tensor.reshape(2,1)` to make `(2,1)` broadcastable with `(2,3)`.
+```{admonition} Answer
+:class: dropdown
 
-### View vs Copy Confusion
+Matmul is O(n³). Doubling n → 2³ = **8x longer** → ~800ms
 
-**Problem**: Modified a reshaped tensor and original changed unexpectedly
-
-**Solution**: `reshape()` returns a *view* when possible - they share memory. Changes to the view affect the original. Use `.copy()` if you need independent data:
-```python
-view = tensor.reshape(2, 3)      # Shares memory
-copy = tensor.reshape(2, 3).copy()  # Independent storage
+This is why matrix size matters so much for transformer scaling!
 ```
 
-### Axis Parameter Mistakes
+**Q4: Shape Prediction**
 
-**Problem**: `sum(axis=1)` on `(batch, features)` returned wrong shape
+What's the output shape of `(32, 1, 768) + (512, 768)`?
 
-**Solution**: Axis semantics: `axis=0` reduces over first dimension (batch), `axis=1` reduces over second (features). For `(32, 128)` tensor, `sum(axis=0)` gives `(128,)`, `sum(axis=1)` gives `(32,)`. Visualize which dimension you're collapsing.
+```{admonition} Answer
+:class: dropdown
 
-### Dtype Issues
+Broadcasting aligns right-to-left:
+- `(32,   1, 768)`
+- `(    512, 768)`
 
-**Problem**: Lost precision after operations, or got integer division instead of float
+Result: **(32, 512, 768)**
 
-**Solution**: NumPy defaults to preserving dtype. Integer tensors do integer division (`5 / 2 = 2`). Always create tensors with float dtype explicitly: `Tensor([[1, 2]], dtype=np.float32)` or convert: `tensor.astype(np.float32)`.
-
-### Memory Leaks with Large Tensors
-
-**Problem**: Memory usage grows unbounded during training loop
-
-**Solution**: Clear intermediate results in loops. Don't accumulate tensors in lists unnecessarily. Use in-place operations when safe. Example:
-```python
-# Bad: accumulates memory
-losses = []
-for batch in data:
-    loss = model(batch)
-    losses.append(loss)  # Keeps all tensors in memory
-
-# Good: extract values
-losses = []
-for batch in data:
-    loss = model(batch)
-    losses.append(loss.data.item())  # Store scalar, release tensor
+The 1 broadcasts to 512, and 32 is prepended.
 ```
 
-## Systems Thinking Questions
+**Q5: Views vs Copies**
 
-### Real-World Applications
+You reshape a 1GB tensor, then modify one element in the reshaped version. What happens to the original tensor? What if you had used `x + 0` instead of reshape?
 
-- **Deep Learning Training**: All neural network layers operate on tensors - Linear layers perform matrix multiplication, Conv2d applies tensor convolutions, Attention mechanisms compute tensor dot products. How would doubling model size affect memory and compute requirements?
-- **Computer Vision**: Images are 3D tensors (height × width × channels), and every transformation (resize, crop, normalize) is a tensor operation. What's the memory footprint of a batch of 32 images at 224×224 resolution with 3 color channels in float32?
-- **Natural Language Processing**: Text embeddings are 2D tensors (sequence_length × embedding_dim), and Transformer models manipulate these through attention. For BERT with 512 sequence length and 768 hidden dimension, how many elements per sample?
-- **Scientific Computing**: Tensors represent multidimensional data in climate models, molecular simulations, physics engines. What makes tensors more efficient than nested Python lists for these applications?
+```{admonition} Answer
+:class: dropdown
 
-### Mathematical Foundations
+**Reshape (view)**: The original tensor IS modified. Reshape creates a view that shares memory with the original. Changing `y.data[0,0] = 99` also changes `x.data[0]`.
 
-- **Linear Algebra**: Tensors generalize matrices to arbitrary dimensions. How does broadcasting relate to outer products? When is `(M,K) @ (K,N)` more efficient than `(K,M).T @ (K,N)`?
-- **Numerical Stability**: Operations like softmax require careful implementation to avoid overflow/underflow. Why does `exp(x - max(x))` prevent overflow in softmax computation?
-- **Broadcasting Semantics**: NumPy's broadcasting rules enable elegant code but require understanding shape compatibility. Can you predict the output shape of `(32, 1, 10) + (1, 5, 10)`?
-- **Computational Complexity**: Matrix multiplication is O(n³) while element-wise operations are O(n). For large models, which dominates training time and why?
+**Addition (copy)**: The original tensor is NOT modified. `x + 0` creates a new tensor with freshly allocated memory. The values are identical but stored in different locations.
 
-### Performance Characteristics
+This distinction matters enormously for:
+- **Memory**: Views use 0 extra bytes; copies use n extra bytes
+- **Performance**: Views are O(1); copies are O(n)
+- **Correctness**: Unexpected mutations through views are a common source of bugs
+```
 
-- **Memory Contiguity**: Contiguous memory enables SIMD vectorization and cache efficiency. How much can non-contiguous tensors slow down operations (10x? 100x?)?
-- **View vs Copy**: Views are O(1) with shared memory, copies are O(n) with duplicated storage. When might a view cause unexpected behavior (e.g., in-place operations)?
-- **Operation Fusion**: Frameworks optimize `(a + b) * c` by fusing operations to reduce memory reads. How many memory passes does unfused require vs. fused?
-- **Batch Processing**: Processing 32 images at once is much faster than 32 sequential passes. Why? (Hint: GPU parallelism, cache reuse, reduced Python overhead)
+## Further Reading
+
+For students who want to understand the academic foundations and mathematical underpinnings of tensor operations:
+
+### Seminal Papers
+
+- **NumPy: Array Programming** - Harris et al. (2020). The definitive reference for NumPy, which underlies your Tensor implementation. Explains broadcasting, views, and the design philosophy. [Nature](https://doi.org/10.1038/s41586-020-2649-2)
+
+- **BLAS (Basic Linear Algebra Subprograms)** - Lawson et al. (1979). The foundation of all high-performance matrix operations. Your `np.matmul` ultimately calls BLAS routines optimized over 40+ years. Understanding BLAS levels (1, 2, 3) explains why matmul is special. [ACM TOMS](https://doi.org/10.1145/355841.355847)
+
+- **Automatic Differentiation in ML** - Baydin et al. (2018). Survey of automatic differentiation techniques that will become relevant in Module 05. [JMLR](https://www.jmlr.org/papers/v18/17-468.html)
+
+### Additional Resources
+
+- **Textbook**: "Deep Learning" by Goodfellow, Bengio, and Courville - Chapter 2 covers linear algebra foundations including tensor operations
+- **Documentation**: [PyTorch Tensor Tutorial](https://pytorch.org/tutorials/beginner/basics/tensorqs_tutorial.html) - See how production frameworks implement similar concepts
 
 ## What's Next
 
-After mastering tensors, you're ready to build the computational layers of neural networks:
+```{seealso} Coming Up: Module 02 - Activations
 
-**Module 02: Activations** - Implement ReLU, Sigmoid, Tanh, and Softmax activation functions that introduce non-linearity. You'll operate on your Tensor class and understand why activation functions are essential for learning complex patterns.
-
-**Module 03: Layers** - Build Linear (fully-connected) and convolutional layers using tensor operations. See how weight matrices and bias vectors (stored as Tensors) transform inputs through matrix multiplication and broadcasting.
-
-**Module 05: Autograd** - Add automatic differentiation to your Tensor class, enabling gradient computation for training. Your tensors will track operations and compute gradients automatically - the magic behind `loss.backward()`.
-
-**Preview of tensor usage ahead:**
-- Activations: `output = ReLU()(input_tensor)` - element-wise operations on tensors
-- Layers: `output = Linear(in_features=128, out_features=64)(input_tensor)` - matmul with weight tensors
-- Loss: `loss = MSELoss()(predictions, targets)` - tensor reductions for error measurement
-- Training: `optimizer.step()` updates parameter tensors using gradients
-
-Every module builds on your Tensor foundation - understanding tensors deeply means understanding how neural networks actually compute.
-
-## Ready to Build?
-
-You're about to implement the foundation of all machine learning systems! The Tensor class you'll build is the universal data structure that powers everything from simple neural networks to GPT, Stable Diffusion, and AlphaFold.
-
-This is where mathematical abstraction meets practical implementation. You'll see how N-dimensional arrays enable elegant representations of complex data, how operator overloading makes tensor math feel natural like `z = x + y`, and how careful memory management (views vs. copies) enables working with massive models. Every decision you make - from how to handle broadcasting to when to validate shapes - reflects trade-offs that production ML engineers face daily.
-
-Take your time with this module. Understand each operation deeply. Test your implementations thoroughly. The Tensor foundation you build here will support every subsequent module - if you understand tensors from first principles, you'll understand how neural networks actually work, not just how to use them.
-
-Every neural network you've ever used - ResNet, BERT, GPT, Stable Diffusion - is fundamentally built on tensor operations. Understanding tensors means understanding the computational substrate of modern AI.
-
-Choose your preferred way to engage with this module:
-
-````{grid} 1 2 3 3
-
-```{grid-item-card}  Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/01_tensor/tensor_dev.ipynb
-:class-header: bg-light
-
-Run this module interactively in your browser. No installation required!
+Implement ReLU, Sigmoid, Tanh, and Softmax. You'll apply element-wise operations to your Tensor and learn why these functions are essential for neural networks to learn complex patterns.
 ```
 
-```{grid-item-card}  Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/01_tensor/tensor_dev.ipynb
-:class-header: bg-light
+**Preview - How Your Tensor Gets Used in Future Modules:**
 
-Use Google Colab for GPU access and cloud compute power.
+| Module | What It Does | Your Tensor In Action |
+|--------|--------------|----------------------|
+| **02: Activations** | Element-wise functions | `ReLU()(x)` transforms your tensor |
+| **03: Layers** | Neural network building blocks | `Linear(784, 128)` stores weights as YOUR Tensor |
+| **05: Autograd** | Automatic gradients | `y.backward()` computes gradients into `x.grad` |
+
+## Get Started
+
+```{tip} Interactive Options
+
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/01_tensor/01_tensor.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/01_tensor/01_tensor.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/01_tensor/01_tensor.py)** - Browse the implementation code
 ```
 
-```{grid-item-card}  View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/01_tensor/tensor_dev.ipynb
-:class-header: bg-light
+```{warning} Save Your Progress
 
-Browse the Jupyter notebook and understand the implementation.
+Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```
-
-````
-
-```{admonition}  Save Your Progress
-:class: tip
-**Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
-
-```
-
----
-
-<div class="prev-next-area">
-<a class="right-next" href="02_activations_ABOUT.html" title="next page">Module 02: Activations →</a>
-</div>

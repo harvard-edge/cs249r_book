@@ -47,14 +47,14 @@ for epoch in range(epochs):
     out = output(h_act)
     pred = sigmoid_output(out)  # Sigmoid in output layer
     loss = loss_fn(pred, y)
-    
+
     # Backward
     loss.backward()
-    
+
     # Update
     optimizer.step()
     optimizer.zero_grad()
-    
+
     if (epoch + 1) % 400 == 0:
         accuracy = ((pred.data > 0.5).astype(float) == y.data).mean()
         print(f"Epoch {epoch+1:4d}/{epochs}  Loss: {loss.data:.4f}  Accuracy: {accuracy:.1%}")

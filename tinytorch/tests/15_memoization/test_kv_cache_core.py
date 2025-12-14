@@ -31,11 +31,11 @@ from tinytorch.core.tensor import Tensor
 
 class TestKVCacheBasics:
     """Test basic KV cache functionality."""
-    
+
     def test_kv_cache_import(self):
         """
         WHAT: Verify KVCache can be imported.
-        
+
         WHY: Basic sanity check.
         """
         try:
@@ -43,7 +43,7 @@ class TestKVCacheBasics:
             assert KVCache is not None
         except ImportError as e:
             pytest.skip(f"KVCache not yet exported: {e}")
-    
+
     def test_kv_cache_can_instantiate(self):
         """
         WHAT: Verify KVCache can be created.
@@ -55,7 +55,7 @@ class TestKVCacheBasics:
             assert cache is not None
         except ImportError:
             pytest.skip("KVCache not yet exported")
-    
+
     def test_kv_cache_stores_and_retrieves(self):
         """
         WHAT: Verify cache can store and retrieve K,V tensors.
@@ -89,4 +89,3 @@ class TestKVCacheBasics:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

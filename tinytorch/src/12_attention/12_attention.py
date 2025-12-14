@@ -302,16 +302,16 @@ def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor, mask: Optional
     # Note: Q, K, V can be 3D (batch, seq, dim) or 4D (batch, heads, seq, dim)
     # We use shape[-1] for d_model to handle both cases
     d_model = Q.shape[-1]
-    
+
     # Step 2: Compute attention scores using matrix multiplication
     # Q: (..., seq_len, d_model)
     # K: (..., seq_len, d_model) -> K.T: (..., d_model, seq_len)
     # scores = Q @ K.T -> (..., seq_len, seq_len)
-    
+
     # Transpose K for matrix multiplication
     # For 3D/4D tensors, transpose swaps the last two dimensions
     K_t = K.transpose(-2, -1)
-    
+
     scores = Q.matmul(K_t)
 
     # Step 3: Scale by 1/√d_k for numerical stability
@@ -323,7 +323,7 @@ def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor, mask: Optional
         # Mask values of 0 indicate positions to mask out (set to -inf)
         # We use (1 - mask) * MASK_VALUE to add large negative values to masked positions
         # mask is expected to be 0 for masked, 1 for unmasked
-        
+
         # Ensure mask is broadcastable
         mask_data = mask.data
         adder_mask = (1.0 - mask_data) * MASK_VALUE
@@ -353,7 +353,7 @@ def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor, mask: Optional
     #
     # batch_size, n_heads, seq_len, d_k = Q.shape
     # scores = Tensor(np.zeros((batch_size, n_heads, seq_len, seq_len)), requires_grad=True)
-    # 
+    #
     # for b in range(batch_size):
     #     for h in range(n_heads):
     #         for i in range(seq_len):
@@ -362,7 +362,7 @@ def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor, mask: Optional
     #                 dot_product = 0.0
     #                 for k in range(d_k):
     #                     dot_product += Q.data[b, h, i, k] * K.data[b, h, j, k]
-    #                 
+    #
     #                 # Scale and store
     #                 scores.data[b, h, i, j] = dot_product / math.sqrt(d_k)
     #
@@ -640,7 +640,7 @@ class MultiHeadAttention:
         # Step 5: Apply attention
         # We can apply attention to all heads at once because scaled_dot_product_attention
         # supports broadcasting or 4D tensors if implemented correctly.
-        
+
         # Reshape mask if necessary to broadcast over heads
         mask_reshaped = mask
         if mask is not None and len(mask.shape) == 3:
@@ -664,7 +664,7 @@ class MultiHeadAttention:
 
         return output
         ### END SOLUTION
-    
+
     def __call__(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
         """Make MultiHeadAttention callable like attention(x)."""
         return self.forward(x, mask)
@@ -1199,23 +1199,23 @@ def demo_attention():
     """🎯 See attention compute relationships."""
     print("🎯 AHA MOMENT: Attention Finds Relationships")
     print("=" * 45)
-    
+
     # Create Q, K, V for 4 tokens with 8-dim embeddings
     Q = Tensor(np.random.randn(1, 4, 8))
     K = Tensor(np.random.randn(1, 4, 8))
     V = Tensor(np.random.randn(1, 4, 8))
-    
+
     # Compute attention
     output, weights = scaled_dot_product_attention(Q, K, V)
-    
+
     print(f"Sequence length: 4 tokens")
     print(f"Embedding dim:   8")
     print(f"\nAttention weights shape: {weights.shape}")
     print(f"Each token attends to all 4 positions!")
-    
+
     print(f"\nToken 0 attention: {weights.data[0, 0, :].round(2)}")
     print("(sums to 1.0 - it's a probability distribution)")
-    
+
     print("\n✨ Attention lets tokens communicate!")
 
 # %%

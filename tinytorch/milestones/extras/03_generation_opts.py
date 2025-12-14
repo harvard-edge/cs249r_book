@@ -11,7 +11,7 @@
 - 2020: Production deployment demands inference optimization at scale
 
 🎯 WHAT YOU'RE BUILDING:
-Using YOUR TinyTorch implementations, you'll build a complete generation
+Using YOUR Tiny🔥Torch implementations, you'll build a complete generation
 optimization pipeline that makes inference 12-40× faster!
 
 This milestone demonstrates generation-specific optimizations:

@@ -204,7 +204,7 @@ Examples:
    ```bash
    # Test validation manually
    pre-commit run validate-part-keys --all-files
-   
+
    # Or test a single file
    quarto render quarto/contents/core/example.qmd --to pdf
    ```
@@ -244,4 +244,4 @@ The validation is configured in `.pre-commit-config.yaml`:
 
 *Last updated: $(date)*
 *Validation script: `scripts/validate_part_keys.py`*
-*Lua filter: `config/lua/inject-parts.lua`* 
+*Lua filter: `config/lua/inject-parts.lua`*

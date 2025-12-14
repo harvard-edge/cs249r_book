@@ -34,7 +34,7 @@ def get_files_to_check(root_dir: str) -> list[Path]:
     for subdir, dirs, files in os.walk(root_dir):
         # Modify dirs in-place to prune the search
         dirs[:] = [d for d in dirs if d not in ignored_dirs]
-        
+
         for file in files:
             file_path = Path(subdir) / file
             if file_path.suffix.lower() in image_extensions:
@@ -48,7 +48,7 @@ def find_all_text_files(root_dir: str) -> list[Path]:
     all_files = []
     ignored_dirs = ['.git', '.quarto', '_build']
     allowed_extensions = ['.qmd', '.md', '.txt', '.py', '.yml', '.yaml', '.html', '.tex']
-    
+
     for subdir, dirs, files in os.walk(root_dir):
         dirs[:] = [d for d in dirs if d not in ignored_dirs]
         for file in files:
@@ -70,12 +70,12 @@ def main():
 
     root_dir = Path('.')
     image_files = get_files_to_check(str(root_dir))
-    
+
     files_to_rename = {}
     for path in image_files:
         original_stem = path.stem
         correct_stem = to_snake_case(original_stem)
-        
+
         if original_stem != correct_stem:
             correct_filename = f"{correct_stem}{path.suffix}"
             new_path = path.with_name(correct_filename)
@@ -88,7 +88,7 @@ def main():
     print("The following files will be renamed:")
     for old, new in files_to_rename.items():
         print(f"  - {old} -> {new}")
-    
+
     if not args.execute:
         print("\nThis was a dry run. Run with --execute to apply these changes.")
         return
@@ -96,13 +96,13 @@ def main():
     print("\nStarting replacement and renaming...")
 
     all_text_files = find_all_text_files(str(root_dir))
-    
+
     total_updates = 0
     # Process replacements for all files
     for old_path, new_path in files_to_rename.items():
         old_filename = old_path.name
         new_filename = new_path.name
-        
+
         for text_file in all_text_files:
             try:
                 # Read file content
@@ -135,7 +135,7 @@ def main():
             # This can happen if a parent directory was renamed.
             # The logic doesn't handle directory renames, so this shouldn't be an issue for now.
             print(f"  Skipping rename for {old_path}, as it no longer exists.", file=sys.stderr)
-            
+
     print(f"\nProcess complete. Found {len(files_to_rename)} files to rename.")
     print(f"Updated {total_updates} references across the project.")
 

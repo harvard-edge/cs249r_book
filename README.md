@@ -18,7 +18,7 @@
 
   <!-- Reader Navigation -->
   **[📖 Read Online](https://mlsysbook.ai)** •
-  **[🔥 TinyTorch](https://mlsysbook.ai/tinytorch)** •
+  **[Tiny🔥Torch](https://mlsysbook.ai/tinytorch)** •
   **[📄 Download PDF](https://mlsysbook.ai/pdf)** •
   **[📓 Download EPUB](https://mlsysbook.ai/epub)** •
   **[🌐 Explore Ecosystem](https://mlsysbook.org)**
@@ -44,7 +44,7 @@ This repository contains an **open source textbook** and **hands-on framework** 
 | Component                      | Description                                                                                                                                               | Getting Started                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
 | **[📖 Book](book/)**           | The Machine Learning Systems textbook that walks through design, optimization, deployment, edge computing, and responsible AI in a clear, end-to-end way  | [book/README.md](book/README.md)           |
-| **[🔥 TinyTorch](tinytorch/)** | A from-scratch ML framework that lets you build the full stack yourself, piece by piece, and learn how real systems work under the hood                   | [tinytorch/README.md](tinytorch/README.md) |
+| **[Tiny🔥Torch](tinytorch/)** | A from-scratch ML framework that lets you build the full stack yourself, piece by piece, and learn how real systems work under the hood                   | [tinytorch/README.md](tinytorch/README.md) |
 | **[🔮 Collabs](collabs/)**           | Hands-on Colab simulations that let you experiment with ML systems, explore tradeoffs, and see how design decisions ripple through a working microchamber | *Coming Summer 2026*                              |
 
 ---

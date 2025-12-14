@@ -27,26 +27,26 @@ def _find_project_root() -> Path:
 def _discover_modules() -> Dict[str, str]:
     """
     Auto-discover modules from src/ directory.
-    
+
     Scans for directories matching pattern: NN_name (e.g., 01_tensor, 15_quantization)
     Returns: {"01": "01_tensor", "02": "02_activations", ...}
     """
     project_root = _find_project_root()
     src_dir = project_root / 'src'
-    
+
     if not src_dir.exists():
         return {}
-    
+
     mapping = {}
     pattern = re.compile(r'^(\d{2})_(\w+)$')
-    
+
     for entry in sorted(src_dir.iterdir()):
         if entry.is_dir():
             match = pattern.match(entry.name)
             if match:
                 num = match.group(1)  # "01", "15", etc.
                 mapping[num] = entry.name
-    
+
     return mapping
 
 
@@ -75,12 +75,12 @@ def get_module_display_name(module_input: str) -> str:
 def get_next_module(current_module: str) -> Optional[Tuple[str, str, str]]:
     """
     Get the next module after the current one.
-    
+
     Returns: (module_number, folder_name, display_name) or None if no next module.
     """
     mapping = _discover_modules()
     normalized = normalize_module_number(current_module)
-    
+
     try:
         current_num = int(normalized)
         next_num = f"{current_num + 1:02d}"
@@ -96,7 +96,7 @@ def get_next_module(current_module: str) -> Optional[Tuple[str, str, str]]:
 def normalize_module_number(module_input: str) -> str:
     """
     Normalize module input to 2-digit format.
-    
+
     Examples:
         "1" -> "01"
         "15" -> "15"

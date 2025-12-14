@@ -176,7 +176,7 @@ python3 tools/scripts/glossary/rule_based_consolidation.py  # Apply fixes
 python3 tools/scripts/glossary/smart_consolidation.py
 
 # Apply academic best practices
-python3 tools/scripts/glossary/rule_based_consolidation.py  
+python3 tools/scripts/glossary/rule_based_consolidation.py
 
 # Rebuild after fixes
 python3 tools/scripts/glossary/build_global_glossary.py
@@ -265,7 +265,7 @@ quarto preview # Development server
 
 ---
 
-**Last Updated**: September 2024  
-**System Version**: 1.0  
-**Total Terms**: 611  
+**Last Updated**: September 2024
+**System Version**: 1.0
+**Total Terms**: 611
 **Coverage**: Complete for all 22 chapters

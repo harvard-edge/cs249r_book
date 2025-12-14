@@ -71,14 +71,14 @@ def get_file_size_mb(file_path):
 def categorize_image(filename):
     """Categorize image based on filename keywords."""
     filename_lower = filename.lower()
-    
+
     for category, config in IMAGE_TYPES.items():
         if category == 'general':
             continue
         for keyword in config['keywords']:
             if keyword in filename_lower:
                 return category, config
-    
+
     return 'general', IMAGE_TYPES['general']
 
 def get_size_category(size_mb):
@@ -93,21 +93,21 @@ def get_size_category(size_mb):
 def analyze_images(directory='book/contents'):
     """Analyze all images in the textbook."""
     print('🔍 Analyzing textbook images...\n')
-    
+
     # Find all image files
     image_extensions = ['*.png', '*.jpg', '*.jpeg', '*.gif', '*.webp']
     image_files = []
-    
+
     for ext in image_extensions:
         pattern = os.path.join(directory, '**', ext)
         image_files.extend(glob.glob(pattern, recursive=True))
-    
+
     if not image_files:
         print('❌ No image files found')
         return
-    
+
     print(f'📸 Found {len(image_files)} images\n')
-    
+
     # Analyze each image
     analysis_results = {
         'large': [],
@@ -116,15 +116,15 @@ def analyze_images(directory='book/contents'):
         'total_size': 0,
         'recommendations': []
     }
-    
+
     for image_path in sorted(image_files):
         size_mb = get_file_size_mb(image_path)
         analysis_results['total_size'] += size_mb
-        
+
         filename = os.path.basename(image_path)
         category, config = categorize_image(filename)
         size_category = get_size_category(size_mb)
-        
+
         result = {
             'path': image_path,
             'filename': filename,
@@ -135,16 +135,16 @@ def analyze_images(directory='book/contents'):
             'max_size': config['max_size'],
             'needs_compression': size_mb > config['max_size']
         }
-        
+
         analysis_results[size_category].append(result)
-        
+
         if result['needs_compression']:
             analysis_results['recommendations'].append(result)
-    
+
     # Print analysis
     print('📊 IMAGE ANALYSIS RESULTS')
     print('=' * 50)
-    
+
     for category in ['large', 'medium', 'small']:
         images = analysis_results[category]
         if images:
@@ -152,14 +152,14 @@ def analyze_images(directory='book/contents'):
             for img in images:
                 status = '⚠️ NEEDS COMPRESSION' if img['needs_compression'] else '✅ OK'
                 print(f'  {status} {img["filename"]} ({img["size_mb"]:.1f}MB) - {img["category"]}')
-    
+
     print(f'\n📈 SUMMARY:')
     print(f'  Total images: {len(image_files)}')
     print(f'  Total size: {analysis_results["total_size"]:.1f}MB')
     print(f'  Large images: {len(analysis_results["large"])}')
     print(f'  Medium images: {len(analysis_results["medium"])}')
     print(f'  Small images: {len(analysis_results["small"])}')
-    
+
     if analysis_results['recommendations']:
         print(f'\n🎯 COMPRESSION RECOMMENDATIONS:')
         print('=' * 50)
@@ -169,7 +169,7 @@ def analyze_images(directory='book/contents'):
             print(f'     Target: {img["target_size"]} (max {img["max_size"]:.1f}MB)')
             print(f'     Type: {img["category"]}')
             print()
-    
+
     return analysis_results
 
 def print_guidelines():
@@ -178,7 +178,7 @@ def print_guidelines():
     print('=' * 50)
     print('Based on best practices for academic textbooks:')
     print()
-    
+
     for category, config in IMAGE_TYPES.items():
         print(f'📸 {category.upper()}:')
         print(f'   Target size: {config["target_size"]}')
@@ -186,7 +186,7 @@ def print_guidelines():
         print(f'   Description: {config["description"]}')
         print(f'   Keywords: {", ".join(config["keywords"]) if config["keywords"] else "general"}')
         print()
-    
+
     print('💡 GENERAL RECOMMENDATIONS:')
     print('  • Use PNG for diagrams and screenshots with text')
     print('  • Use JPEG for photographs and complex images')
@@ -201,17 +201,17 @@ def main():
         print('Usage: python3 analyze_image_sizes.py [directory]')
         print('       python3 analyze_image_sizes.py --guidelines')
         return
-    
+
     if len(sys.argv) > 1 and sys.argv[1] == '--guidelines':
         print_guidelines()
         return
-    
+
     directory = sys.argv[1] if len(sys.argv) > 1 else 'book/contents'
-    
+
     try:
         results = analyze_images(directory)
         print_guidelines()
-        
+
         if results['recommendations']:
             print(f'\n🚀 NEXT STEPS:')
             print('=' * 50)
@@ -223,10 +223,10 @@ def main():
             print('Or compress all at once:')
             files = [f'"{img["path"]}"' for img in results['recommendations']]
             print(f'python3 tools/scripts/maintenance/compress_images.py {" ".join(files)} --apply')
-    
+
     except Exception as e:
         print(f'❌ Error: {e}')
 
 if __name__ == "__main__":
     import sys
-    main() 
+    main()

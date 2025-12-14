@@ -174,7 +174,7 @@ class TestCommandFiles:
             'grade.py', 'logo.py',
             # Known internal/subcommand files (not top-level)
             'login.py',  # Subcommand of community
-            'clean_workspace.py', 'version.py', 'check.py', 'view.py', 
+            'clean_workspace.py', 'version.py', 'check.py', 'view.py',
             'protect.py', 'report.py'
         }
 

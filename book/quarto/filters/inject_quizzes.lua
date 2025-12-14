@@ -49,7 +49,7 @@ end
 local function register_sections(data, file_path)
   local secs = {}
   local sections_found = 0
-  
+
   if data.sections then
     for _, s in ipairs(data.sections) do
       if s.quiz_data
@@ -67,7 +67,7 @@ local function register_sections(data, file_path)
       end
     end
   end
-  
+
   return secs, sections_found
 end
 
@@ -140,7 +140,7 @@ end
 -- 5) Meta phase: read one or more paths from meta.quiz
 local function handle_meta(meta)
   local raw = meta.quiz
-  
+
   -- Try to get the current document filename
   if PANDOC_DOCUMENT and PANDOC_DOCUMENT.meta and PANDOC_DOCUMENT.meta.filename then
     current_document_file = utils.stringify(PANDOC_DOCUMENT.meta.filename)
@@ -153,7 +153,7 @@ local function handle_meta(meta)
   if PANDOC_STATE and PANDOC_STATE.input_files and #PANDOC_STATE.input_files > 1 then
     is_pdf_build = true
   end
-  
+
   -- Alternative PDF detection: check if we're in a PDF format
   if FORMAT and (FORMAT:lower():match("pdf") or FORMAT:lower():match("latex")) then
     is_pdf_build = true
@@ -164,20 +164,20 @@ local function handle_meta(meta)
   local file_pattern = quiz_config["file-pattern"] or "*_quizzes.json"
   local scan_directory = quiz_config["scan-directory"] or "contents/core"
   local auto_discover_pdf = quiz_config["auto-discover-pdf"] ~= false -- default to true
-  
+
   -- Convert Meta objects to strings if needed
   if type(file_pattern) == "table" and file_pattern.t == "MetaString" then
     file_pattern = file_pattern.text
   elseif type(file_pattern) == "table" then
     file_pattern = utils.stringify(file_pattern)
   end
-  
+
   if type(scan_directory) == "table" and scan_directory.t == "MetaString" then
     scan_directory = scan_directory.text
   elseif type(scan_directory) == "table" then
     scan_directory = utils.stringify(scan_directory)
   end
-  
+
   if type(auto_discover_pdf) == "table" and auto_discover_pdf.t == "MetaBool" then
     auto_discover_pdf = auto_discover_pdf.bool
   elseif type(auto_discover_pdf) == "table" then
@@ -191,7 +191,7 @@ local function handle_meta(meta)
       -- For PDF builds, auto-discover quiz files from the input files (silently)
       local files = {}
       local total_sections_loaded = 0
-      
+
       -- Since Quarto combines files into a temporary document, we need to scan the directory directly
 
 local function scan_for_quiz_files()
@@ -218,7 +218,7 @@ local function scan_for_quiz_files()
 end
 
       files = scan_for_quiz_files()
-      
+
       if #files > 0 then
         for i, path in ipairs(files) do
           local data = load_quiz_data(path)
@@ -257,7 +257,7 @@ end
 
   -- load each file silently
   local total_sections_loaded = 0
-  
+
   for i, path in ipairs(files) do
     local data = load_quiz_data(path)
     if data then
@@ -300,15 +300,15 @@ end
 
 local function insert_quizzes(doc)
   if not next(quiz_sections) then return doc end
-  
+
   -- Check if this document has any quiz sections
   has_quizzes = document_has_quizzes(doc, quiz_sections)
-  
+
   if not has_quizzes then
     -- No quizzes for this document, process silently
     return doc
   end
-  
+
   -- Document has quizzes, show clean processing info
   io.stderr:write("📝 [Quiz Filter] 📚 Document has quizzes - processing...\n")
 
@@ -466,4 +466,4 @@ end
 return {
   { Meta   = handle_meta   },
   { Pandoc = insert_quizzes }
-} 
+}

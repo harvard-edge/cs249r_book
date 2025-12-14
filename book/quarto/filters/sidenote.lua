@@ -5,7 +5,7 @@ function Note (note)
     -- We need to construct this carefully to preserve citation processing
     local sidenote_content = {}
     table.insert(sidenote_content, pandoc.RawInline('latex', '\\sidenote{'))
-    
+
     -- Add the note content directly as inlines (not converted to latex yet)
     -- This allows citations to be processed by citeproc later
     for _, block in ipairs(note.content) do
@@ -17,7 +17,7 @@ function Note (note)
         table.insert(sidenote_content, pandoc.Space())
       end
     end
-    
+
     table.insert(sidenote_content, pandoc.RawInline('latex', '}'))
     return sidenote_content
   end

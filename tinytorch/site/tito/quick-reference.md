@@ -1,4 +1,4 @@
-# ⚡ Quick Reference
+# Quick Reference
 
 **One-page cheatsheet for experienced developers**
 
@@ -139,32 +139,32 @@ python benchmark.py
 
 ```
 TinyTorch/
-├── modules/           # Source notebooks (edit these)
-│   ├── 01_tensor/
-│   │   └── 01_tensor.ipynb
-│   └── ...
-├── tinytorch/         # Exported package (auto-generated)
-│   ├── core/
-│   ├── nn/
-│   └── ...
-├── milestones/        # Validation scripts (run these)
-│   ├── 01_1957_perceptron/
-│   ├── 02_1969_xor/
-│   └── ...
-└── tito/              # CLI tool
+├── modules/ # Source notebooks (edit these)
+│ ├── 01_tensor/
+│ │ └── 01_tensor.ipynb
+│ └── ...
+├── tinytorch/ # Exported package (auto-generated)
+│ ├── core/
+│ ├── nn/
+│ └── ...
+├── milestones/ # Validation scripts (run these)
+│ ├── 01_1957_perceptron/
+│ ├── 02_1969_xor/
+│ └── ...
+└── tito/ # CLI tool
 ```
 
 ## Import Patterns
 
 ```python
 # After exporting modules
-from tinytorch.core.tensor import Tensor           # M01
+from tinytorch.core.tensor import Tensor # M01
 from tinytorch.nn.activations import ReLU, Softmax # M02
-from tinytorch.nn.layers import Linear             # M03
-from tinytorch.nn.losses import CrossEntropyLoss   # M04
-from tinytorch.autograd import backward            # M05
-from tinytorch.optim import SGD, Adam              # M06
-from tinytorch.training import Trainer             # M07
+from tinytorch.nn.layers import Linear # M03
+from tinytorch.nn.losses import CrossEntropyLoss # M04
+from tinytorch.autograd import backward # M05
+from tinytorch.optim import SGD, Adam # M06
+from tinytorch.training import Trainer # M07
 ```
 
 ## Troubleshooting Quick Fixes
@@ -211,6 +211,5 @@ from tinytorch.training import Trainer             # M07
 - **Need detailed docs?** See [CLI Documentation](overview.md)
 - **Teaching a course?** See [For Instructors & TAs](../for-instructors.md)
 
----
 
-**💡 Pro Tip**: Bookmark this page for quick command reference while building!
+** Pro Tip**: Bookmark this page for quick command reference while building!

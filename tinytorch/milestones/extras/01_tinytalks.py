@@ -123,7 +123,7 @@ def main():
     # IMPORT YOUR IMPLEMENTATIONS
     # ========================================================================
 
-    console.print("\n[bold cyan]📦 Loading YOUR TinyTorch...[/bold cyan]\n")
+    console.print("\n[bold cyan]📦 Loading YOUR Tiny🔥Torch...[/bold cyan]\n")
 
     try:
         from tinytorch import Tensor, Linear, ReLU, CrossEntropyLoss

@@ -1,6 +1,6 @@
 # 🛡️ CUSTOM EXTENSIONS - PROTECTED BY MLSYSBOOK-EXT NAMESPACE
 
-This directory contains extensions that have been **heavily customized** for the MLSysBook project. 
+This directory contains extensions that have been **heavily customized** for the MLSysBook project.
 
 ## ✅ **PROTECTION STRATEGY: MLSYSBOOK-EXT NAMESPACE**
 
@@ -10,14 +10,14 @@ Our custom extensions are **protected by organizing them under the `mlsysbook-ex
 
 ### ✅ **Safe to Reinstall** (Standard Extensions)
 - `pandoc-ext/diagram` - Standard Pandoc extension
-- `quarto-ext/lightbox` - Standard Quarto extension  
+- `quarto-ext/lightbox` - Standard Quarto extension
 
 ### 🛡️ **PROTECTED** (Custom Extensions in MLSysBook-Ext Namespace)
 
-#### `mlsysbook-ext/custom-numbered-blocks` 
+#### `mlsysbook-ext/custom-numbered-blocks`
 - **Status**: Heavily modified for MLSysBook
 - **Protection**: `mlsysbook-ext/` namespace prevents any accidental overwrites
-- **Customizations**: 
+- **Customizations**:
   - Modified CSS styling
   - Custom block types
   - Enhanced PDF rendering
@@ -26,7 +26,7 @@ Our custom extensions are **protected by organizing them under the `mlsysbook-ex
 - **Last Updated**: Reorganized into mlsysbook-ext namespace
 
 #### `mlsysbook-ext/titlepage`
-- **Status**: Customized for MLSysBook  
+- **Status**: Customized for MLSysBook
 - **Protection**: `mlsysbook-ext/` namespace prevents any accidental overwrites
 - **Customizations**:
   - Custom fonts and styling
@@ -35,7 +35,7 @@ Our custom extensions are **protected by organizing them under the `mlsysbook-ex
 - **Original**: `nmfs-opensci/titlepage` (https://github.com/nmfs-opensci/quarto_titlepages)
 - **Last Updated**: Reorganized into mlsysbook-ext namespace
 
-#### `mlsysbook-ext/margin-video` 
+#### `mlsysbook-ext/margin-video`
 - **Status**: 100% Custom Extension
 - **Protection**: `mlsysbook-ext/` namespace (no external equivalent exists)
 - **Purpose**: YouTube video embedding as margin notes with auto-numbering
@@ -47,12 +47,12 @@ Our custom extensions are **protected by organizing them under the `mlsysbook-ex
 
 ## 🔒 **How Protection Works**
 
-**Namespace Strategy**: 
+**Namespace Strategy**:
 All our custom extensions live in `mlsysbook-ext/` directory.
 
 When someone runs `quarto add ute/custom-numbered-blocks`, it will:
 - ✅ **NOT** affect our `mlsysbook-ext/custom-numbered-blocks` directory
-- ✅ Create a new `ute/custom-numbered-blocks` directory 
+- ✅ Create a new `ute/custom-numbered-blocks` directory
 - ✅ Leave our customizations completely intact
 
 **No conflicts possible** - the `mlsysbook-ext/` namespace is exclusive to this project!

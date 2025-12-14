@@ -6,18 +6,15 @@
 
 **A Comprehensive Course in Machine Learning Systems Engineering**
 
----
 
 **Prof. Vijay Janapa Reddi**
 Harvard University
 
----
 
 **2025 Edition**
 
 </div>
 
----
 
 ## About This Book
 
@@ -45,6 +42,5 @@ For the latest updates, interactive exercises, and community resources, visit:
 
 This work is licensed under a Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License.
 
----
 
 © 2025 Vijay Janapa Reddi. All rights reserved.

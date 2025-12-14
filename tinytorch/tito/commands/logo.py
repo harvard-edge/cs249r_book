@@ -21,32 +21,32 @@ class LogoCommand(BaseCommand):
         return "Learn about the TinyTorch logo and its meaning"
 
     def add_arguments(self, parser: ArgumentParser) -> None:
-        parser.add_argument("--image", action="store_true", 
+        parser.add_argument("--image", action="store_true",
                           help="Show path to the actual logo image file")
 
     def run(self, args: Namespace) -> int:
         console = self.console
-        
+
         # Display the ASCII logo first
         from ..core.console import print_ascii_logo
         print_ascii_logo()
-        
+
         # Create the explanation text
         explanation = Text()
-        
+
         # Title
         explanation.append("\n🔥 The TinyTorch Story\n\n", style="bold yellow")
-        
+
         # The flame and sparks
         explanation.append("The Flame 🔥\n", style="bold orange1")
         explanation.append(
             "The flame represents the spark of understanding - how learning ML systems "
             "starts with a small flame that can grow into mastery. Just as a torch "
             "lights the way in darkness, TinyTorch illuminates the path to understanding "
-            "neural networks from first principles.\n\n", 
+            "neural networks from first principles.\n\n",
             style="dim"
         )
-        
+
         # The sparks
         explanation.append("The Sparks ✨\n", style="bold orange1")
         explanation.append(
@@ -55,7 +55,7 @@ class LogoCommand(BaseCommand):
             "in other areas. What starts small can catch fire and grow into something powerful.\n\n",
             style="dim"
         )
-        
+
         # The "tiny" philosophy
         explanation.append("Why 'Tiny'? \n", style="bold cyan")
         explanation.append(
@@ -66,7 +66,7 @@ class LogoCommand(BaseCommand):
             "and simple operations.\n\n",
             style="dim"
         )
-        
+
         # The "Torch" connection
         explanation.append("Why 'Torch'? \n", style="bold cyan")
         explanation.append(
@@ -77,7 +77,7 @@ class LogoCommand(BaseCommand):
             "you're building one.\n\n",
             style="dim"
         )
-        
+
         # The neural network in the flame
         explanation.append("The Hidden Network 🔥\n", style="bold orange1")
         explanation.append(
@@ -87,7 +87,7 @@ class LogoCommand(BaseCommand):
             "just as understanding contains mastery.\n\n",
             style="dim"
         )
-        
+
         # The philosophy
         explanation.append("The Philosophy 💡\n", style="bold yellow")
         explanation.append(
@@ -128,7 +128,7 @@ class LogoCommand(BaseCommand):
             border_style="orange1",
             padding=(1, 2)
         ))
-        
+
         # Show logo file path if requested
         if args.image:
             logo_path = Path(__file__).parent.parent.parent / "logo" / "logo.png"
@@ -137,8 +137,8 @@ class LogoCommand(BaseCommand):
                 console.print("[dim]Open this file to see the full logo with sparks[/dim]")
             else:
                 console.print(f"\n[yellow]Logo image not found at expected location[/yellow]")
-        
+
         # Final inspiring message
         console.print("\n[yellow]🔥 [/yellow][italic]Start tiny. Go deep. Build big.[/italic]\n")
-        
+
         return 0

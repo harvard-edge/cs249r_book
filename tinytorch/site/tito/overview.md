@@ -31,7 +31,6 @@
 
 </div>
 
----
 
 ##  Commands by User Role
 
@@ -121,7 +120,6 @@ tito milestone run 03
 
 </div>
 
----
 
 ## Complete Command Reference
 
@@ -220,7 +218,6 @@ modules/          ← Students use these (generated notebooks)
 tinytorch/        ← Package code (auto-generated)
 ```
 
----
 
 ## Command Groups by Task
 
@@ -291,7 +288,6 @@ tito module status
 tito milestone status
 ```
 
----
 
 ## Typical Session Flow
 
@@ -331,7 +327,6 @@ tito milestone status      # See milestone achievements
 
 </div>
 
----
 
 ## Command Help
 
@@ -350,7 +345,6 @@ tito module complete --help
 tito milestone run --help
 ```
 
----
 
 ## Detailed Guides
 
@@ -359,7 +353,6 @@ tito milestone run --help
 - **[Progress & Data](data.md)** - Managing your learning journey
 - **[Troubleshooting](troubleshooting.md)** - Common issues and solutions
 
----
 
 ## Related Resources
 
@@ -367,6 +360,5 @@ tito milestone run --help
 - **[Module Workflow](modules.md)** - Day-to-day development cycle
 - **[Datasets Guide](../datasets.md)** - Understanding TinyTorch datasets
 
----
 
 *Master these commands and you'll build ML systems with confidence. Every command is designed to accelerate your learning and keep you focused on what matters: building production-quality ML frameworks from scratch.*

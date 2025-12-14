@@ -2,7 +2,6 @@
 
 **TinyTorch + NBGrader Essential Commands for Instructors**
 
----
 
 ##  **One-Time Setup**
 ```bash
@@ -17,7 +16,6 @@ pip install -r requirements.txt
 ./bin/tito system health
 ```
 
----
 
 ## 📝 **Weekly Assignment Workflow**
 
@@ -41,7 +39,6 @@ pip install -r requirements.txt
 # Return assignments/feedback/ files to students
 ```
 
----
 
 ## 🔧 **Essential Commands**
 
@@ -66,7 +63,6 @@ pip install -r requirements.txt
 ./bin/tito clean                            # Clean temp files
 ```
 
----
 
 ## 📁 **Directory Structure**
 ```
@@ -78,7 +74,6 @@ assignments/
 └── feedback/      # Student feedback (git ignored)
 ```
 
----
 
 ## 🆘 **Quick Troubleshooting**
 ```bash
@@ -94,16 +89,14 @@ ls modules/                          # Check available modules
 # Students have unimplemented functions = expected behavior
 ```
 
----
 
 ## 📚 **Course Planning17 TinyTorch Modules:**
 - **00-02**: Foundation (intro, setup, tensors)
-- **03-07**: Building Blocks (activations, layers, dense, spatial, attention)  
+- **03-07**: Building Blocks (activations, layers, dense, spatial, attention)
 - **08-11**: Training (dataloader, autograd, optimizers, training)
 - **12-16**: Production (compression, kernels, benchmarking, mlops, capstone)
 
 **Recommended Pacing:** 1 module per week = 16-week semester
 
----
 
 ** For complete details: See [Instructor Guide](book/instructor-guide.md)**

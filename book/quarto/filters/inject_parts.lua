@@ -108,16 +108,16 @@ end
 -- 📄 Read summaries.yml into a Lua table
 local function read_summaries(path)
   local summaries = {}
-  
+
   local file = io.open(path, "r")
-  if not file then 
+  if not file then
     log_warning("Failed to open part summaries file: " .. path)
-    return summaries 
+    return summaries
   end
 
   local content = file:read("*all")
   file:close()
-  
+
   -- Parse YAML manually for the new structure with parts array
   local entries_loaded = 0
   local current_key = nil
@@ -127,7 +127,7 @@ local function read_summaries(path)
   local description_lines = {}
   local in_parts_section = false
   local in_description = false
-  
+
   for line in content:gmatch("[^\r\n]+") do
     if line:match('^parts:') then
       in_parts_section = true
@@ -169,7 +169,7 @@ local function read_summaries(path)
       end
     end
   end
-  
+
   -- Handle the last entry
   if current_key and current_title then
     local description = table.concat(description_lines, " "):gsub("^%s+", ""):gsub("%s+$", "")
@@ -182,7 +182,7 @@ local function read_summaries(path)
     entries_loaded = entries_loaded + 1
     log_info("📝 Loaded: '" .. current_key .. "' → '" .. current_title .. "' (type: " .. (current_type or "part") .. ", numbered: " .. tostring(current_numbered or false) .. ")")
   end
-  
+
   log_success("Successfully loaded " .. entries_loaded .. " part summaries")
   return summaries
 end
@@ -194,22 +194,22 @@ local summaries = {}
 -- Validation function to check all keys in the document
 local function validate_all_keys()
   if not has_part_summaries then return end
-  
+
   local used_keys = {}
   local invalid_keys = {}
-  
+
   -- Collect all keys used in the document
   for key, _ in pairs(summaries) do
     used_keys[key] = true
   end
-  
+
   -- Check if any keys are missing from part_summaries.yml
   for key, _ in pairs(used_keys) do
     if not summaries[key] then
       table.insert(invalid_keys, key)
     end
   end
-  
+
   -- If there are invalid keys, report them all at once
   if #invalid_keys > 0 then
     log_error("❌ CRITICAL ERROR: Multiple undefined keys found:")
@@ -225,13 +225,13 @@ end
 -- Pre-scan function to validate all keys before processing
 local function prescan_document_keys(doc)
   if not has_part_summaries then return end
-  
+
   log_info("🔍 Pre-scanning document for part keys...")
-  
+
   local found_keys = {}
   local invalid_keys = {}
   local key_locations = {}
-  
+
   -- Scan all RawBlocks for \part{key:xxx} patterns
   local function scan_blocks(blocks)
     for i, block in ipairs(blocks) do
@@ -240,7 +240,7 @@ local function prescan_document_keys(doc)
         if key then
           local normalized_key = normalize(key)
           found_keys[normalized_key] = true
-          
+
           -- Check if key is valid
           if not summaries[normalized_key] then
             table.insert(invalid_keys, normalized_key)
@@ -248,17 +248,17 @@ local function prescan_document_keys(doc)
           end
         end
       end
-      
+
       -- Recursively scan nested blocks
       if block.content then
         scan_blocks(block.content)
       end
     end
   end
-  
+
   -- Scan the document
   scan_blocks(doc.blocks)
-  
+
   -- Report findings
   if next(found_keys) then
     log_info("📋 Found keys in document:")
@@ -272,13 +272,13 @@ local function prescan_document_keys(doc)
   else
     log_info("📋 No part keys found in document")
   end
-  
+
   -- Report available keys for reference
   log_info("📚 Available keys in part_summaries.yml:")
   for key, _ in pairs(summaries) do
     log_info("   - '" .. key .. "'")
   end
-  
+
   -- If there are invalid keys, stop the build
   if #invalid_keys > 0 then
     log_error("❌ CRITICAL ERROR: Invalid keys found during pre-scan:")
@@ -298,7 +298,7 @@ local function debug_key_source(key, el)
   log_error("🔍 DEBUG: Key '" .. key .. "' found in RawBlock")
   log_error("📍 RawBlock content: " .. (el.text or "nil"))
   log_error("📍 RawBlock format: " .. (el.format or "nil"))
-  
+
   -- Try to extract more context about where this key came from
   if el.text then
     local context = string.sub(el.text, 1, 200) -- First 200 chars for context
@@ -312,7 +312,7 @@ end
 function RawBlock(el)
   if not has_part_summaries then return nil end
   if el.format ~= "latex" then return nil end
-  
+
   local key = extract_key_from_latex(el.text)
   if key then
     local normalized_key = normalize(key)
@@ -323,12 +323,12 @@ function RawBlock(el)
       local part_type = part_entry.type or "part"
       local numbered = part_entry.numbered or false
       local formatted_title = format_part_title(normalized_key, title, numbered)
-      
+
       local setpartsummary_cmd = "\\setpartsummary{" .. description .. "}"
       local part_cmd
-      
+
       -- ROUTING LOGIC: Transform based on type field from YAML
-      
+
       -- 1. BOOK DIVISIONS: Major book structure sections
       if part_type == "division" then
         part_cmd = "\\division{" .. formatted_title .. "}"
@@ -340,7 +340,7 @@ function RawBlock(el)
           pandoc.RawBlock("latex", line_cmd),
           pandoc.RawBlock("latex", part_cmd)
         }
-      
+
       -- 2. LAB PLATFORMS: Circuit-style neural network design
       elseif part_type == "lab" then
         part_cmd = "\\labdivision{" .. formatted_title .. "}"
@@ -350,16 +350,16 @@ function RawBlock(el)
           pandoc.RawBlock("latex", toc_cmd),
           pandoc.RawBlock("latex", part_cmd)
         }
-      
+
       -- 3. NUMBERED PARTS: Main content sections (type: "part")
       elseif part_type == "part" then
         -- Reset counter if we're in a new division
         reset_part_counter(part_entry.division or "mainmatter")
-        
+
         -- Get next part number and convert to Roman numeral
         local part_number = get_next_part_number()
         local roman_numeral = to_roman(part_number)
-        
+
         part_cmd = "\\numberedpart{" .. formatted_title .. "}"  -- Use custom command instead
         local toc_cmd = "\\addtocontents{toc}{\\par\\addvspace{12pt}\\noindent\\hfil\\bfseries\\color{crimson}Part~" .. roman_numeral .. "~" .. formatted_title .. "\\color{black}\\hfil\\par\\addvspace{6pt}}"
         log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' (Part " .. roman_numeral .. ", division: " .. (part_entry.division or "mainmatter") .. ")")
@@ -373,14 +373,14 @@ function RawBlock(el)
       -- Enhanced error reporting with more context
       log_error("❌ CRITICAL ERROR: UNDEFINED KEY '" .. key .. "' not found in part_summaries.yml")
       log_error("📍 Location: RawBlock processing")
-      
+
       -- Add debug information to help identify the source
       debug_key_source(key, el)
-      
+
       log_error("🔍 Available keys: frontmatter, main_content, foundations, principles, optimization, deployment, trustworthy, futures, labs, arduino, xiao, grove, raspberry, shared, backmatter")
       log_error("💡 Check your .qmd files for \\part{key:" .. key .. "} commands")
       log_error("🛑 Build stopped to prevent incorrect part titles.")
-      
+
       -- Force immediate exit with detailed error
       local error_msg = string.format(
         "Part summary filter failed: undefined key '%s' in \\part{key:%s}. " ..
@@ -402,11 +402,11 @@ function Meta(meta)
       local config = filter_metadata["part-summaries"]
       local file_path = pandoc.utils.stringify(config.file or "")
       local enabled = pandoc.utils.stringify(config.enabled or "true"):lower() == "true"
-      
+
       if enabled and file_path ~= "" then
         log_info("🚀 Initializing Part Summary Filter")
         log_info("📂 Loading part summaries from: " .. file_path)
-        
+
         -- Add error handling for file loading
         local success, result = pcall(read_summaries, file_path)
         if success then

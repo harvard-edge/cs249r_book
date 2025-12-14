@@ -6,7 +6,7 @@ These tests verify optimization techniques for faster inference.
 
 WHY THESE TESTS MATTER:
 -----------------------
-Acceleration techniques (SIMD, parallel execution, memory layout) 
+Acceleration techniques (SIMD, parallel execution, memory layout)
 can provide significant speedups. These tests verify:
 - Optimizations produce correct results
 - Performance actually improves
@@ -123,7 +123,7 @@ class TestMemoryOptimization:
     def test_contiguous_memory_check(self):
         """
         WHAT: Verify we can check if tensor memory is contiguous.
-        
+
         WHY: Contiguous memory enables SIMD and cache-friendly access.
         Non-contiguous tensors are slower.
         """
@@ -136,4 +136,3 @@ class TestMemoryOptimization:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

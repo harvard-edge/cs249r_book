@@ -12,7 +12,6 @@ Unlike traditional CS courses, ML systems education requires students to:
 - **Handle uncertainty** (ML is probabilistic, not deterministic)
 - **Consider real-world constraints** (memory, speed, scale)
 
----
 
 ## 📏 The "Rule of 3s" Framework
 
@@ -32,7 +31,6 @@ Unlike traditional CS courses, ML systems education requires students to:
 - **30 lines ≈ 1 screen** on most devices (no scrolling needed)
 - **Break larger implementations** into multiple scaffolded steps
 
----
 
 ##  Progressive Implementation Ladder Pattern
 
@@ -54,16 +52,16 @@ def forward(self, x):
 def forward_single(self, x):
     """
     TODO: Implement forward pass for ONE example
-    
+
     APPROACH:
     1. Multiply input by weights: result = x * self.weights
     2. Add bias: result = result + self.bias
     3. Return result
-    
+
     EXAMPLE:
     Input: [1, 2] with weights [[0.5, 0.3], [0.2, 0.8]] and bias [0.1, 0.1]
     Expected: [1*0.5 + 2*0.2 + 0.1, 1*0.3 + 2*0.8 + 0.1] = [1.0, 2.0]
-    
+
     REAL-WORLD CONNECTION:
     This is exactly what happens in one neuron of ChatGPT!
     """
@@ -74,12 +72,12 @@ def forward_single(self, x):
 def forward_batch(self, x):
     """
     TODO: Extend to handle multiple examples at once
-    
+
     APPROACH:
     1. Use your forward_single as inspiration
     2. Think: How can we apply this to many examples?
     3. Hint: NumPy's @ operator handles this automatically!
-    
+
     WHY BATCHES MATTER:
     - GPUs are optimized for parallel computation
     - Processing 100 examples together is much faster than 100 separate calls
@@ -92,13 +90,13 @@ def forward_batch(self, x):
 def forward(self, x):
     """
     TODO: Add error checking and optimization
-    
+
     APPROACH:
     1. Start with your forward_batch implementation
     2. Add input validation (shape, type checking)
     3. Add helpful error messages
     4. Consider edge cases (empty input, wrong dimensions)
-    
+
     PRODUCTION CONSIDERATIONS:
     - What happens if someone passes the wrong shape?
     - How do we give helpful error messages?
@@ -108,7 +106,6 @@ def forward(self, x):
     pass
 ```
 
----
 
 ## 🌉 Concept Bridge Pattern
 
@@ -155,7 +152,6 @@ inputs @ weights + bias
 - **Recommendation Systems**: User preferences × item features = recommendations
 ```
 
----
 
 ## 🎯 Confidence Builder Pattern
 
@@ -168,16 +164,16 @@ Build student confidence through early wins before tackling harder challenges.
 def test_tensor_creation_confidence():
     """
     🎉 Confidence Builder: Can you create a tensor?
-    
+
     This test is designed to make you feel successful!
     Even a basic implementation should pass this.
     """
     t = Tensor([1, 2, 3])
-    
+
     # Very forgiving checks
     assert t is not None, "🎉 Great! Your Tensor class exists!"
     assert hasattr(t, 'data'), "🎉 Perfect! Your tensor stores data!"
-    
+
     print("🎊 SUCCESS! You've created your first tensor!")
     print("🚀 This is the foundation of all ML systems!")
 
@@ -187,7 +183,7 @@ def test_basic_math_confidence():
     """
     a = Tensor([1])
     b = Tensor([2])
-    
+
     try:
         result = a + b
         print("🎉 AMAZING! Your tensor can do addition!")
@@ -206,7 +202,6 @@ def test_basic_math_confidence():
 - [ ] **Provides specific hints** if something goes wrong
 - [ ] **Builds momentum** for harder challenges ahead
 
----
 
 ## 📚 Educational Progression Pattern
 
@@ -254,7 +249,6 @@ By the end of this module, you will:
 - **Next steps**: How this prepares for upcoming modules
 ```
 
----
 
 ## ▶ Student-Friendly Testing Guidelines
 
@@ -268,15 +262,15 @@ By the end of this module, you will:
 ```python
 def test_with_educational_message(self):
     """Educational test description"""
-    
+
     # Setup with clear explanation
     print(f"\n📚 Testing: {concept_name}")
     print(f"💡 Why this matters: {real_world_connection}")
-    
+
     # The actual test
     result = student_implementation()
     expected = correct_answer()
-    
+
     # Educational feedback
     if result == expected:
         print("🎉 Perfect! You understand {concept}!")
@@ -287,11 +281,10 @@ def test_with_educational_message(self):
         print(f"   You got: {result}")
         print(f"💡 Hint: {specific_guidance}")
         print(f"🔍 Common issue: {common_mistake}")
-    
+
     assert result == expected, f"See the guidance above to fix this!"
 ```
 
----
 
 ## 🎨 Visual Learning Integration
 
@@ -313,7 +306,7 @@ def demonstrate_tensor_addition():
     print()
     print("🧠 Think of it like combining shopping lists:")
     print("   List A: 1 apple, 2 bananas, 3 oranges")
-    print("   List B: 4 apples, 5 bananas, 6 oranges") 
+    print("   List B: 4 apples, 5 bananas, 6 oranges")
     print("   Total:  5 apples, 7 bananas, 9 oranges")
 ```
 
@@ -323,13 +316,13 @@ def show_learning_progress():
     """Show student progress through the module"""
     completed_concepts = count_completed_concepts()
     total_concepts = count_total_concepts()
-    
+
     progress_bar = "█" * completed_concepts + "░" * (total_concepts - completed_concepts)
     percentage = (completed_concepts / total_concepts) * 100
-    
+
     print(f"\n🎯 Your Progress: [{progress_bar}] {percentage:.0f}%")
     print(f"📚 Concepts mastered: {completed_concepts}/{total_concepts}")
-    
+
     if percentage >= 80:
         print("🎊 Excellent! You're ready for the next module!")
     elif percentage >= 60:
@@ -338,7 +331,6 @@ def show_learning_progress():
         print("🌱 Good start! Take your time with each concept.")
 ```
 
----
 
 ## ⚖ Balancing Challenge and Support
 
@@ -351,23 +343,23 @@ def show_learning_progress():
 ```python
 def adaptive_hint_system(student_attempts, time_spent):
     """Provide hints based on student struggle level"""
-    
+
     if student_attempts == 1:
         return "💡 Take your time! Think about the problem step by step."
-    
+
     elif student_attempts <= 3:
         return "🤔 Try breaking the problem into smaller pieces. What's the first step?"
-    
+
     elif time_spent > 15:  # minutes
         return """
         🆘 Let's work through this together:
         1. First, understand what the function should do
         2. Then, think about the inputs and expected outputs
         3. Finally, implement step by step
-        
+
         Would you like a more detailed hint?
         """
-    
+
     else:
         return "🎯 You're on the right track! Keep experimenting."
 ```
@@ -379,7 +371,6 @@ def adaptive_hint_system(student_attempts, time_spent):
 4. **Worked example**: Show a similar problem solved
 5. **Direct help**: Provide partial implementation
 
----
 
 ## 🔄 Iteration and Feedback Loops
 
@@ -391,26 +382,26 @@ def adaptive_hint_system(student_attempts, time_spent):
 # ✅ Immediate feedback after each step
 def guided_implementation():
     """Guide students through implementation with immediate feedback"""
-    
+
     print("🎯 Let's implement tensor addition step by step!")
-    
+
     # Step 1: Basic structure
     print("\n📝 Step 1: Create the basic method structure")
     print("💡 Hint: def __add__(self, other):")
     input("Press Enter when you've written the method signature...")
-    
+
     # Quick check
     if hasattr(Tensor, '__add__'):
         print("✅ Great! Method signature looks good!")
     else:
         print("🤔 Make sure you've defined __add__ in your Tensor class")
         return
-    
+
     # Step 2: Implementation
     print("\n📝 Step 2: Implement the addition logic")
     print("💡 Hint: Use np.add() or simple + operator")
     input("Press Enter when you've implemented the logic...")
-    
+
     # Test immediately
     try:
         result = Tensor([1, 2]) + Tensor([3, 4])
@@ -421,7 +412,6 @@ def guided_implementation():
         print("💡 Debug tip: Check that you're returning a new Tensor")
 ```
 
----
 
 ## 📊 Assessment and Success Metrics
 
@@ -443,7 +433,6 @@ def guided_implementation():
 - **Application**: Students can use their implementations effectively
 - **Connection**: Students see how this fits into the bigger ML picture
 
----
 
 ##  Implementation Checklist
 
@@ -477,7 +466,6 @@ def guided_implementation():
 - [ ] **Celebration** of success
 - [ ] **Learning opportunity** when failing
 
----
 
 ## 💡 Key Insights for ML Systems Education
 
@@ -505,4 +493,4 @@ Students who can:
 - **Learn** new ML concepts independently
 - **Connect** theory to practice seamlessly
 
-This scaffolding framework transforms ML systems education from an intimidating obstacle course into a supportive learning journey that builds both competence and confidence. 
+This scaffolding framework transforms ML systems education from an intimidating obstacle course into a supportive learning journey that builds both competence and confidence.

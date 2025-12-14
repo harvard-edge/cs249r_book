@@ -276,6 +276,5 @@ tito module start 01
 4. **Schedule training**: Intensive or distributed
 5. **Track progress**: Use checkpoint system or custom metrics
 
----
 
 **For Questions**: See `INSTRUCTOR.md` or contact TinyTorch maintainers

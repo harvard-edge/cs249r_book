@@ -13,7 +13,7 @@ from .testing import (
 
 __all__ = [
     'ModuleTestRunner',
-    'create_test_runner', 
+    'create_test_runner',
     'run_module_tests_auto',
     'run_module_tests'
-] 
+]

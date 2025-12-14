@@ -24,7 +24,7 @@ class PackageCommand(BaseCommand):
             help='Package subcommands',
             metavar='SUBCOMMAND'
         )
-        
+
         # Reset subcommand
         reset_parser = subparsers.add_parser(
             'reset',
@@ -32,7 +32,7 @@ class PackageCommand(BaseCommand):
         )
         reset_cmd = ResetCommand(self.config)
         reset_cmd.add_arguments(reset_parser)
-        
+
         # Nbdev subcommand
         nbdev_parser = subparsers.add_parser(
             'nbdev',
@@ -43,7 +43,7 @@ class PackageCommand(BaseCommand):
 
     def run(self, args: Namespace) -> int:
         console = self.console
-        
+
         if not hasattr(args, 'package_command') or not args.package_command:
             console.print(Panel(
                 "[bold cyan]Package Commands[/bold cyan]\n\n"
@@ -58,7 +58,7 @@ class PackageCommand(BaseCommand):
                 border_style="bright_cyan"
             ))
             return 0
-        
+
         # Execute the appropriate subcommand
         if args.package_command == 'reset':
             cmd = ResetCommand(self.config)
@@ -72,4 +72,4 @@ class PackageCommand(BaseCommand):
                 title="Error",
                 border_style="red"
             ))
-            return 1 
+            return 1

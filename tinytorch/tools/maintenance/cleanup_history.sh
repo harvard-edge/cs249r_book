@@ -116,4 +116,3 @@ echo "   git push origin --force --tags"
 echo ""
 echo -e "${YELLOW}Backup location: $BACKUP_DIR${NC}"
 echo -e "${YELLOW}Clean repo location: $CLEAN_REPO_DIR${NC}"
-

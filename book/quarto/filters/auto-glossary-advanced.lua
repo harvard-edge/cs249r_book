@@ -13,12 +13,12 @@ local config = {
   skip_in_headings = true,
   skip_in_captions = true,
   min_word_length = 3,  -- Don't mark very short terms
-  
+
   -- Format-specific rendering
   render_mode = {
     html = "tooltip",      -- Options: tooltip, popup, link
     pdf = "sidenote",      -- Options: sidenote, footnote, link, none
-    latex = "sidenote",    -- Options: sidenote, footnote, link, none  
+    latex = "sidenote",    -- Options: sidenote, footnote, link, none
     epub = "link"          -- Options: link, inline, none
   }
 }
@@ -33,20 +33,20 @@ end
 -- Load and parse YAML glossary
 local function load_glossary()
   if glossary_loaded then return true end
-  
+
   local file = io.open(config.glossary_file, "r")
   if not file then
     log("Warning: Cannot open glossary file: " .. config.glossary_file)
     glossary_loaded = true
     return false
   end
-  
+
   local yaml_content = file:read("*a")
   file:close()
-  
+
   -- Parse YAML using Pandoc's built-in YAML parser
   local doc = pandoc.read("---\n" .. yaml_content .. "\n---\n", "markdown")
-  
+
   if doc.meta and doc.meta.glossary then
     -- Parse the hierarchical glossary structure
     for category, terms in pairs(doc.meta.glossary) do
@@ -55,7 +55,7 @@ local function load_glossary()
           if type(term_data) == "table" then
             local term = pandoc.utils.stringify(term_data.term or term_key)
             local definition = pandoc.utils.stringify(term_data.definition or "")
-            
+
             -- Store both the term and its lowercase version for matching
             glossary_data[term:lower()] = {
               display = term,
@@ -63,7 +63,7 @@ local function load_glossary()
               category = pandoc.utils.stringify(category),
               see_also = term_data.see_also or {}
             }
-            
+
             -- Also store acronyms and variants
             if term_data.acronym then
               local acronym = pandoc.utils.stringify(term_data.acronym)
@@ -74,7 +74,7 @@ local function load_glossary()
       end
     end
   end
-  
+
   glossary_loaded = true
   log("Loaded " .. #glossary_data .. " glossary terms")
   return true
@@ -83,27 +83,27 @@ end
 -- Check if we should process this element
 local function should_process_element(elem)
   -- Skip if in code
-  if elem.classes and (elem.classes:includes("code") or 
+  if elem.classes and (elem.classes:includes("code") or
                        elem.classes:includes("sourceCode")) then
     return false
   end
-  
+
   -- Skip if in heading (optional)
   if config.skip_in_headings and elem.t == "Header" then
     return false
   end
-  
+
   return true
 end
 
 -- Create format-specific output
 local function render_glossary_term(term_text, term_data, format)
   local mode = config.render_mode[format] or "none"
-  
+
   if mode == "none" then
     return pandoc.Str(term_text)
   end
-  
+
   if format == "html" then
     if mode == "tooltip" then
       -- Bootstrap tooltip style
@@ -114,7 +114,7 @@ local function render_glossary_term(term_text, term_data, format)
         term_text
       )
       return pandoc.RawInline("html", html)
-      
+
     elseif mode == "popup" then
       -- Clickable popup style
       local html = string.format(
@@ -124,7 +124,7 @@ local function render_glossary_term(term_text, term_data, format)
         term_text
       )
       return pandoc.RawInline("html", html)
-      
+
     elseif mode == "link" then
       -- Link to glossary
       return pandoc.Link(
@@ -132,7 +132,7 @@ local function render_glossary_term(term_text, term_data, format)
         "#glossary-" .. term_data.display:lower():gsub("%s+", "-")
       )
     end
-    
+
   elseif format == "latex" or format == "pdf" then
     if mode == "sidenote" then
       -- Use existing sidenote infrastructure
@@ -143,7 +143,7 @@ local function render_glossary_term(term_text, term_data, format)
         term_data.definition
       )
       return pandoc.RawInline("latex", latex)
-      
+
     elseif mode == "footnote" then
       -- Footnote with definition
       local latex = string.format(
@@ -153,7 +153,7 @@ local function render_glossary_term(term_text, term_data, format)
         term_data.definition
       )
       return pandoc.RawInline("latex", latex)
-      
+
     elseif mode == "link" then
       -- Hyperlink to glossary section
       local latex = string.format(
@@ -163,7 +163,7 @@ local function render_glossary_term(term_text, term_data, format)
       )
       return pandoc.RawInline("latex", latex)
     end
-    
+
   elseif format == "epub" then
     if mode == "link" then
       return pandoc.Link(
@@ -173,14 +173,14 @@ local function render_glossary_term(term_text, term_data, format)
     elseif mode == "inline" then
       -- Inline definition in parentheses
       return pandoc.Span(
-        {pandoc.Str(term_text), 
-         pandoc.Str(" ("), 
-         pandoc.Emph(term_data.definition), 
+        {pandoc.Str(term_text),
+         pandoc.Str(" ("),
+         pandoc.Emph(term_data.definition),
          pandoc.Str(")")}
       )
     end
   end
-  
+
   -- Fallback
   return pandoc.Str(term_text)
 end
@@ -188,15 +188,15 @@ end
 -- Scan text for glossary terms
 local function process_text(elem)
   if elem.t ~= "Str" then return nil end
-  
+
   local text = elem.text
   local text_lower = text:lower()
-  
+
   -- Check if any glossary term matches
   for term_key, term_data in pairs(glossary_data) do
     -- Simple word boundary check (can be improved)
     local pattern = "%f[%a]" .. term_key:gsub("%-", "%%-") .. "%f[%A]"
-    
+
     if text_lower:match(pattern) then
       -- Check if we should mark this occurrence
       if config.mark_first_occurrence then
@@ -205,13 +205,13 @@ local function process_text(elem)
         end
         marked_terms[term_key] = true
       end
-      
+
       -- Determine output format
       local format = FORMAT:match("html") and "html" or
                     FORMAT:match("latex") and "latex" or
                     FORMAT:match("pdf") and "pdf" or
                     FORMAT:match("epub") and "epub" or "other"
-      
+
       -- Find the actual term in the original text (preserve case)
       local start_pos, end_pos = text_lower:find(pattern)
       if start_pos then
@@ -220,7 +220,7 @@ local function process_text(elem)
       end
     end
   end
-  
+
   return nil
 end
 
@@ -240,7 +240,7 @@ return {
   {
     -- Second pass: Process text
     Str = process_text,
-    
+
     -- Don't process these elements
     Code = function() return nil end,
     CodeBlock = function() return nil end,

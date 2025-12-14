@@ -17,7 +17,7 @@ Checks:
     - Headings
     - List items
     - Callout content
-    
+
 Ignores:
     - YAML frontmatter
     - Code blocks (```...```)
@@ -38,13 +38,13 @@ from typing import List, Tuple, Set
 def extract_yaml_frontmatter(content: str) -> Tuple[int, int]:
     """
     Find the start and end positions of YAML frontmatter.
-    
+
     Returns:
         Tuple of (start_pos, end_pos) or (0, 0) if no frontmatter
     """
     if not content.startswith('---'):
         return (0, 0)
-    
+
     # Find the closing ---
     lines = content.split('\n')
     for i, line in enumerate(lines[1:], 1):
@@ -53,36 +53,36 @@ def extract_yaml_frontmatter(content: str) -> Tuple[int, int]:
             start = 0
             end = sum(len(lines[j]) + 1 for j in range(i + 1))
             return (start, end)
-    
+
     return (0, 0)
 
 
 def extract_code_blocks(content: str) -> List[Tuple[int, int]]:
     """
     Find all code blocks (```...``` and TikZ blocks).
-    
+
     Returns:
         List of (start_pos, end_pos) tuples
     """
     blocks = []
-    
+
     # Find ``` code blocks
     pattern = r'```.*?```'
     for match in re.finditer(pattern, content, re.DOTALL):
         blocks.append((match.start(), match.end()))
-    
+
     # Find TikZ blocks specifically (in case they're not in ```)
     tikz_pattern = r'\\begin\{tikzpicture\}.*?\\end\{tikzpicture\}'
     for match in re.finditer(tikz_pattern, content, re.DOTALL):
         blocks.append((match.start(), match.end()))
-    
+
     return blocks
 
 
 def extract_inline_code(content: str) -> List[Tuple[int, int]]:
     """
     Find all inline code spans (`...`).
-    
+
     Returns:
         List of (start_pos, end_pos) tuples
     """
@@ -96,34 +96,34 @@ def extract_inline_code(content: str) -> List[Tuple[int, int]]:
 def extract_math_blocks(content: str) -> List[Tuple[int, int]]:
     """
     Find all LaTeX math blocks ($...$, $$...$$).
-    
+
     Returns:
         List of (start_pos, end_pos) tuples
     """
     blocks = []
-    
+
     # Display math $$...$$
     pattern = r'\$\$.*?\$\$'
     for match in re.finditer(pattern, content, re.DOTALL):
         blocks.append((match.start(), match.end()))
-    
+
     # Inline math $...$
     pattern = r'(?<!\$)\$(?!\$)[^\$]+?\$(?!\$)'
     for match in re.finditer(pattern, content):
         blocks.append((match.start(), match.end()))
-    
+
     return blocks
 
 
 def extract_links_and_urls(content: str) -> List[Tuple[int, int]]:
     """
     Find all markdown links and URLs.
-    
+
     Returns:
         List of (start_pos, end_pos) tuples
     """
     spans = []
-    
+
     # Markdown links [text](url)
     pattern = r'\[([^\]]+)\]\([^\)]+\)'
     for match in re.finditer(pattern, content):
@@ -131,39 +131,39 @@ def extract_links_and_urls(content: str) -> List[Tuple[int, int]]:
         url_start = match.group(0).find('](') + match.start() + 1
         url_end = match.end() - 1
         spans.append((url_start, url_end))
-    
+
     # Reference-style links [@ref], {#id}, @sec-name
     pattern = r'(\[@[^\]]+\]|\{#[^\}]+\}|@[a-z]+-[a-z0-9-]+)'
     for match in re.finditer(pattern, content):
         spans.append((match.start(), match.end()))
-    
+
     # Plain URLs
     pattern = r'https?://[^\s\)>]+'
     for match in re.finditer(pattern, content):
         spans.append((match.start(), match.end()))
-    
+
     return spans
 
 
 def extract_quarto_syntax(content: str) -> List[Tuple[int, int]]:
     """
     Find Quarto-specific syntax to exclude.
-    
+
     Returns:
         List of (start_pos, end_pos) tuples
     """
     spans = []
-    
+
     # Quarto divs ::: {.classname}
     pattern = r':::\s*\{[^\}]+\}'
     for match in re.finditer(pattern, content):
         spans.append((match.start(), match.end()))
-    
+
     # Quarto shortcodes {{< ... >}}
     pattern = r'\{\{<.*?>\}\}'
     for match in re.finditer(pattern, content, re.DOTALL):
         spans.append((match.start(), match.end()))
-    
+
     return spans
 
 
@@ -178,23 +178,23 @@ def should_exclude_position(pos: int, exclude_ranges: List[Tuple[int, int]]) -> 
 def extract_prose_text(content: str) -> List[Tuple[str, int]]:
     """
     Extract only prose text from QMD content.
-    
+
     Returns:
         List of (text, line_number) tuples
     """
     # Build exclude ranges
     exclude_ranges = []
-    
+
     yaml_start, yaml_end = extract_yaml_frontmatter(content)
     if yaml_end > 0:
         exclude_ranges.append((yaml_start, yaml_end))
-    
+
     exclude_ranges.extend(extract_code_blocks(content))
     exclude_ranges.extend(extract_inline_code(content))
     exclude_ranges.extend(extract_math_blocks(content))
     exclude_ranges.extend(extract_links_and_urls(content))
     exclude_ranges.extend(extract_quarto_syntax(content))
-    
+
     # Sort and merge overlapping ranges
     exclude_ranges.sort()
     merged = []
@@ -203,16 +203,16 @@ def extract_prose_text(content: str) -> List[Tuple[str, int]]:
             merged[-1] = (merged[-1][0], max(merged[-1][1], end))
         else:
             merged.append((start, end))
-    
+
     # Extract prose text
     prose_segments = []
     lines = content.split('\n')
     pos = 0
-    
+
     for line_num, line in enumerate(lines, 1):
         line_start = pos
         line_end = pos + len(line)
-        
+
         # Check if any part of this line is prose
         if not should_exclude_position(line_start, merged):
             # Extract prose parts from this line
@@ -225,22 +225,22 @@ def extract_prose_text(content: str) -> List[Tuple[str, int]]:
                     if prose_text.strip():
                         prose_segments.append((prose_text.strip(), line_num))
                         prose_text = ""
-            
+
             if prose_text.strip():
                 prose_segments.append((prose_text.strip(), line_num))
-        
+
         pos = line_end + 1  # +1 for newline
-    
+
     return prose_segments
 
 
 def clean_prose_text(text: str) -> str:
     """
     Clean prose text of markdown formatting while keeping words.
-    
+
     Args:
         text: Raw prose text with markdown
-    
+
     Returns:
         Cleaned text for spell checking
     """
@@ -249,20 +249,20 @@ def clean_prose_text(text: str) -> str:
     text = re.sub(r'\*([^\*]+)\*', r'\1', text)      # Italic
     text = re.sub(r'_([^_]+)_', r'\1', text)          # Italic
     text = re.sub(r'~~([^~]+)~~', r'\1', text)        # Strikethrough
-    
+
     # Remove remaining markdown symbols
     text = re.sub(r'[#\*_~]', '', text)
-    
+
     # Remove special characters but keep apostrophes in words
     text = re.sub(r'[^\w\s\'-]', ' ', text)
-    
+
     return text.strip()
 
 
 def check_with_aspell(text: str, ignore_terms: Set[str]) -> List[str]:
     """
     Check text with aspell.
-    
+
     Returns:
         List of misspelled words
     """
@@ -288,7 +288,7 @@ def check_with_aspell(text: str, ignore_terms: Set[str]) -> List[str]:
 def check_file(filepath: Path) -> List[dict]:
     """
     Check a single QMD file for spelling errors.
-    
+
     Returns:
         List of error dictionaries
     """
@@ -303,7 +303,7 @@ def check_file(filepath: Path) -> List[dict]:
         'github', 'gitlab', 'bitbucket',
         'ai', 'ml', 'dl', 'cv', 'nlp', 'iot', 'rl', 'gan',
         'lstm', 'gru', 'rnn', 'cnn', 'vgg', 'resnet', 'bert',
-        
+
         # ML systems and techniques
         'tinyml', 'microcontroller', 'microcontrollers', 'preprocessing',
         'convolutional', 'latencies', 'dns', 'dennard', 'triadic',
@@ -315,19 +315,19 @@ def check_file(filepath: Path) -> List[dict]:
         'cnns', 'rnns', 'mlps', 'dnn', 'translational', 'invariance',
         'parallelizable', 'uat', 'discriminative', 'fpgas', 'asics',
         'topologies', 'reconceptualization', 'orchestrators', 'bfloat',
-        
+
         # Product and project names
         'plantvillage', 'nuru', 'farmbeats', 'respira', 'colabs', 'edgeml',
         'mlperf', 'linpack', 'specpowerssj', 'datahub', 'kubeflow',
         'mobilenets', 'efficientnets', 'gpt', 'palm',
-        
+
         # Company and organization names
         'mckinsey', 'espressif', 'hortonworks', 'linkedin', 'uber', 'cloudtrail',
-        
+
         # Acronyms and abbreviations
         'cmd', 'cbsd', 'mw', 'sram', 'sox', 'sdg', 'sdgs', 'agi', 'tco',
         'gpus', 'mlops', 'gigaflops', 'eniac', 'cpus', 'tpus', 'fp', 'nist',
-        
+
         # Legitimate English words often flagged
         'underserved', 'sociotechnical', 'ebola', 'forecasted', 'unmonitored',
         'transformative', 'microclimates', 'microclimate', 'responders',
@@ -338,25 +338,25 @@ def check_file(filepath: Path) -> List[dict]:
         'degradations', 'natively', 'detections', 'observability', 'exfiltration',
         'auditable', 'cryptographic', 'curation', 'engineerable', 'subfield',
         'misrouted', 'tradeoff', 'tradeoffs', 'pre',
-        
+
         # People names (for attributions)
         'vijay', 'janapa', 'reddi', 'yann', 'lecun', 'corinna', 'burges',
         'cybenko', 'hornik', 'augereau',
-        
+
         # Image filename patterns (without extensions)
-        'covermlsystems', 'coveraigood', 'coveraibenchmarking', 
+        'covermlsystems', 'coveraigood', 'coveraibenchmarking',
         'coverconclusion', 'coverdataengineering', 'covernnprimer',
         'coverdlarch',
-        
+
         # LaTeX commands
         'noindent',
-        
+
         # AI tools
         'dall', 'dalle',
-        
+
         # Short codes/patterns
         'fn',
-        
+
         # Additional comprehensive technical terms (auto-generated from book content)
         'accelerometers', 'acm', 'adamw', 'additionality', 'adreno', 'aes', 'agentic', 'aiops',
         'airbnb', 'aitraining', 'akida', 'al', 'alexa', 'alexnet', 'algorithmically', 'alphafold',
@@ -406,21 +406,21 @@ def check_file(filepath: Path) -> List[dict]:
         'vectornet', 'virusbokbok', 'vitis', 'von', 'vr', 'vtune', 'vulkan', 'waymo', 'wearables',
         'wellbeing', 'wi', 'xla', 'zero',
     }
-    
+
     try:
         content = filepath.read_text(encoding='utf-8')
     except Exception as e:
         print(f"Error reading {filepath}: {e}", file=sys.stderr)
         return []
-    
+
     prose_segments = extract_prose_text(content)
     errors = []
-    
+
     for text, line_num in prose_segments:
         cleaned = clean_prose_text(text)
         if not cleaned:
             continue
-        
+
         misspelled = check_with_aspell(cleaned, ignore_terms)
         if misspelled:
             errors.append({
@@ -429,7 +429,7 @@ def check_file(filepath: Path) -> List[dict]:
                 'text': text[:100] + ('...' if len(text) > 100 else ''),
                 'misspelled': misspelled
             })
-    
+
     return errors
 
 
@@ -441,36 +441,36 @@ def main():
     except (FileNotFoundError, subprocess.CalledProcessError):
         print("Error: aspell not found. Install it with: brew install aspell", file=sys.stderr)
         return 1
-    
+
     # Get directory to check
     repo_root = Path(__file__).resolve().parents[3]
-    
+
     if len(sys.argv) > 1:
         target_dir = Path(sys.argv[1])
     else:
         target_dir = repo_root / 'quarto' / 'contents' / 'core'
-    
+
     if not target_dir.exists():
         print(f"Error: Directory not found: {target_dir}", file=sys.stderr)
         return 1
-    
+
     # Find all QMD files
     qmd_files = list(target_dir.rglob('*.qmd'))
     print(f"Checking {len(qmd_files)} .qmd files for prose spelling errors...\n")
-    
+
     all_errors = []
     files_with_errors = 0
-    
+
     for qmd_file in sorted(qmd_files):
         errors = check_file(qmd_file)
         if errors:
             files_with_errors += 1
             all_errors.extend(errors)
-    
+
     # Print results
     if all_errors:
         print(f"Found {len(all_errors)} potential spelling errors in {files_with_errors} files:\n")
-        
+
         current_file = None
         for error in sorted(all_errors, key=lambda e: (str(e['file']), e['line'])):
             if error['file'] != current_file:
@@ -481,10 +481,10 @@ def main():
                     rel_path = error['file']
                 print(f"\n{rel_path}")
                 print("=" * len(str(rel_path)))
-            
+
             print(f"  Line {error['line']}: {error['text']}")
             print(f"    → Misspelled: {', '.join(error['misspelled'])}")
-        
+
         print(f"\n\nSummary: {len(all_errors)} potential errors in {files_with_errors} files")
         return 1
     else:
@@ -494,4 +494,3 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
-

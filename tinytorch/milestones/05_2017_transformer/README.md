@@ -9,7 +9,7 @@ In 2017, Vaswani et al. published **"Attention Is All You Need,"** showing that 
 - Scaled to massive datasets and model sizes
 - Launched the era of GPT, BERT, and modern LLMs
 
-Transformers didn't just improve NLP - they unified vision, language, and multimodal AI. Now it's your turn to build one from scratch using YOUR TinyTorch!
+Transformers didn't just improve NLP - they unified vision, language, and multimodal AI. Now it's your turn to build one from scratch using YOUR Tiny🔥Torch!
 
 ## What You're Building
 

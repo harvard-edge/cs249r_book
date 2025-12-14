@@ -54,9 +54,9 @@ export function injectStyles() {
             font-family: 'Verdana', sans-serif;
             font-size: 0.95rem;
             font-weight: bold;
-            color: rgba(30, 30, 30, 0.8); 
+            color: rgba(30, 30, 30, 0.8);
             background: transparent;
-            border: 2px solid rgba(30, 30, 30, 0.8); 
+            border: 2px solid rgba(30, 30, 30, 0.8);
             text-decoration: none;
             transition: all 0.2s ease;
             cursor: pointer;
@@ -66,7 +66,7 @@ export function injectStyles() {
             align-items: center;
             gap: 10px;
         }
-        
+
         .login-btn:hover {
             background: rgba(0, 0, 0, 0.05);
             color: #000;
@@ -202,7 +202,7 @@ export function injectStyles() {
             visibility: hidden;
             transition: opacity 0.3s ease, visibility 0.3s;
         }
-        
+
         .auth-overlay.active {
             opacity: 1;
             visibility: visible;
@@ -285,7 +285,7 @@ export function injectStyles() {
             cursor: pointer;
             font-size: 0.9rem;
         }
-        
+
         .auth-error {
             color: #d32f2f;
             font-size: 0.9rem;
@@ -452,16 +452,16 @@ export function injectStyles() {
                 height: auto;
                 transform: translateY(100%);
                 border-radius: 24px 24px 0 0;
-                padding: 40px 20px 80px 20px; 
+                padding: 40px 20px 80px 20px;
                 box-shadow: 0 -5px 20px rgba(0,0,0,0.15);
-                align-items: center; 
-                padding-left: 0;     
+                align-items: center;
+                padding-left: 0;
             }
 
             .sidebar.active {
                 transform: translateY(0);
             }
-            
+
             .login-btn.logged-in {
                 padding: 0;
                 width: 45px;
@@ -472,7 +472,7 @@ export function injectStyles() {
                 border: 1px solid rgba(0,0,0,0.1);
                 box-shadow: 0 2px 10px rgba(0,0,0,0.05);
             }
-            
+
             .login-btn.logged-in .btn-text {
                 display: none;
             }
@@ -482,31 +482,31 @@ export function injectStyles() {
                 height: 24px;
                 margin: 0;
             }
-            
+
             .menu-btn {
                 top: auto;
                 bottom: 0;
                 left: 50%;
                 transform: translateX(-50%);
-                width: 100px; 
-                height: 25px; 
+                width: 100px;
+                height: 25px;
                 background: rgba(255, 255, 255, 0.95);
                 border-radius: 16px 16px 0 0;
                 box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
-                padding: 0; 
-                justify-content: center; 
-                align-items: center; 
+                padding: 0;
+                justify-content: center;
+                align-items: center;
                 border: 1px solid rgba(0,0,0,0.05);
                 border-bottom: none;
                 backdrop-filter: blur(5px);
             }
 
             .menu-btn span {
-                width: 40px; 
-                height: 4px; 
+                width: 40px;
+                height: 4px;
                 background: #ccc;
                 border-radius: 2px;
-                margin: 0; 
+                margin: 0;
             }
 
             .menu-btn span:nth-child(2),
@@ -516,9 +516,9 @@ export function injectStyles() {
 
             .menu-btn.active span:nth-child(1) {
                 transform: none;
-                background: #ff6600; 
+                background: #ff6600;
             }
-            
+
             .top-right-actions {
                 top: 20px;
                 right: 20px;

@@ -37,15 +37,15 @@ from ...core.modules import (
 
 class ModuleWorkflowCommand(BaseCommand):
     """Enhanced module command with natural workflow."""
-    
+
     @property
     def name(self) -> str:
         return "module"
-    
+
     @property
     def description(self) -> str:
         return "Module development workflow - open, work, complete"
-    
+
     def add_arguments(self, parser: ArgumentParser) -> None:
         """Add module workflow arguments."""
         # Add subcommands - clean lifecycle workflow
@@ -53,7 +53,7 @@ class ModuleWorkflowCommand(BaseCommand):
             dest='module_command',
             help='Module lifecycle operations'
         )
-        
+
         # START command - begin working on a module
         start_parser = subparsers.add_parser(
             'start',
@@ -63,7 +63,7 @@ class ModuleWorkflowCommand(BaseCommand):
             'module_number',
             help='Module number to start (01, 02, 03, etc.)'
         )
-        
+
         # VIEW command - just open the notebook
         view_parser = subparsers.add_parser(
             'view',
@@ -84,7 +84,7 @@ class ModuleWorkflowCommand(BaseCommand):
             nargs='?',
             help='Module number to resume (01, 02, 03, etc.) - defaults to last worked'
         )
-        
+
         # COMPLETE command - finish and validate a module
         complete_parser = subparsers.add_parser(
             'complete',
@@ -174,15 +174,15 @@ class ModuleWorkflowCommand(BaseCommand):
             'status',
             help='Show module completion status and progress'
         )
-        
+
         # LIST command - show available modules
         list_parser = subparsers.add_parser(
             'list',
             help='List all available modules'
         )
-    
+
     # Module mapping and normalization now imported from core.modules
-    
+
     def start_module(self, module_number: str) -> int:
         """Start working on a module with prerequisite checking and visual feedback."""
         from rich import box
@@ -370,11 +370,11 @@ class ModuleWorkflowCommand(BaseCommand):
                 return (mid, mname, required)
 
         return None
-    
+
     def resume_module(self, module_number: Optional[str] = None) -> int:
         """Resume working on a module (continue previous work)."""
         module_mapping = get_module_mapping()
-        
+
         # If no module specified, resume last worked
         if not module_number:
             last_worked = self.get_last_worked_module()
@@ -383,32 +383,32 @@ class ModuleWorkflowCommand(BaseCommand):
                 self.console.print("💡 Start with: [bold cyan]tito module start 01[/bold cyan]")
                 return 1
             module_number = last_worked
-        
+
         normalized = normalize_module_number(module_number)
-        
+
         if normalized not in module_mapping:
             self.console.print(f"[red]❌ Module {normalized} not found[/red]")
             max_module = max(module_mapping.keys()) if module_mapping else "??"
             self.console.print(f"💡 Available modules: 01-{max_module}")
             return 1
-        
+
         module_name = module_mapping[normalized]
-        
+
         # Check if module was started
         if not self.is_module_started(normalized):
             self.console.print(f"[yellow]⚠️  Module {normalized} not started yet[/yellow]")
             self.console.print(f"💡 Start with: [bold cyan]tito module start {normalized}[/bold cyan]")
             return 1
-        
+
         # Update last worked
         self.update_last_worked(normalized)
-        
+
         self.console.print(f"🔄 Resuming Module {normalized}: {module_name}")
         self.console.print("💡 Continue your work, then run:")
         self.console.print(f"   [bold cyan]tito module complete {normalized}[/bold cyan]")
-        
+
         return self._open_jupyter(module_name)
-    
+
     def _open_jupyter(self, module_name: str) -> int:
         """Open Jupyter Lab for a module."""
         import time
@@ -448,7 +448,7 @@ class ModuleWorkflowCommand(BaseCommand):
         except Exception as e:
             self.console.print(f"[red]❌ Failed to launch Jupyter: {e}[/red]")
             return 1
-    
+
     def complete_module(self, module_number: Optional[str] = None, skip_tests: bool = False, skip_export: bool = False) -> int:
         """Complete a module with enhanced visual feedback and celebration."""
         from rich import box
@@ -590,11 +590,11 @@ class ModuleWorkflowCommand(BaseCommand):
 
 
         return 0 if success else 1
-    
+
     def _trigger_submission(self):
         """Asks the user to submit their progress if they are logged in."""
         self.console.print()  # Add a blank line for spacing
-        
+
         if auth.is_logged_in():
             should_submit = Confirm.ask(
                 "[bold yellow]Would you like to sync your progress with the TinyTorch website?[/bold yellow]",
@@ -879,25 +879,25 @@ class ModuleWorkflowCommand(BaseCommand):
                     return line.strip()
 
         return "Test failed (see output for details)"
-    
+
     def export_module(self, module_name: str) -> int:
         """Export module to the TinyTorch package."""
         try:
             # Use the new source command for exporting
             from ..src import SrcCommand
-            
+
             fake_args = Namespace()
             fake_args.src_command = 'export'  # Subcommand
             fake_args.modules = [module_name]     # List of modules to export
             fake_args.test_checkpoint = False
-            
+
             src_command = SrcCommand(self.config)
             return src_command.run(fake_args)
-            
+
         except Exception as e:
             self.console.print(f"[red]Error exporting module: {e}[/red]")
             return 1
-    
+
     def get_progress_data(self) -> dict:
         """Get current progress data from .tito/progress.json."""
         tito_dir = self.config.project_root / ".tito"
@@ -934,41 +934,41 @@ class ModuleWorkflowCommand(BaseCommand):
                 json.dump(progress, f, indent=2)
         except Exception as e:
             self.console.print(f"[yellow]⚠️  Could not save progress: {e}[/yellow]")
-    
+
     def is_module_started(self, module_number: str) -> bool:
         """Check if a module has been started."""
         progress = self.get_progress_data()
         return module_number in progress.get('started_modules', [])
-    
+
     def is_module_completed(self, module_number: str) -> bool:
         """Check if a module has been completed."""
         progress = self.get_progress_data()
         return module_number in progress.get('completed_modules', [])
-    
+
     def mark_module_started(self, module_number: str) -> None:
         """Mark a module as started."""
         progress = self.get_progress_data()
-        
+
         if 'started_modules' not in progress:
             progress['started_modules'] = []
-        
+
         if module_number not in progress['started_modules']:
             progress['started_modules'].append(module_number)
-        
+
         progress['last_worked'] = module_number
         self.save_progress_data(progress)
-    
+
     def update_last_worked(self, module_number: str) -> None:
         """Update the last worked module."""
         progress = self.get_progress_data()
         progress['last_worked'] = module_number
         self.save_progress_data(progress)
-    
+
     def get_last_worked_module(self) -> Optional[str]:
         """Get the last worked module."""
         progress = self.get_progress_data()
         return progress.get('last_worked')
-    
+
     def update_progress(self, module_number: str, module_name: str) -> None:
         """Update user progress tracking."""
         progress = self.get_progress_data()
@@ -988,13 +988,13 @@ class ModuleWorkflowCommand(BaseCommand):
         self.save_progress_data(progress)
 
         self.console.print(f"📈 Progress updated: {len(progress['completed_modules'])} modules completed")
-    
+
     def show_next_steps(self, completed_module: str) -> None:
         """Show next steps after completing a module."""
         module_mapping = get_module_mapping()
         completed_num = int(completed_module)
         next_num = f"{completed_num + 1:02d}"
-        
+
         if next_num in module_mapping:
             next_module = module_mapping[next_num]
             self.console.print(Panel(
@@ -1013,15 +1013,15 @@ class ModuleWorkflowCommand(BaseCommand):
                 title="All Modules Complete!",
                 border_style="gold1"
             ))
-    
+
     def list_modules(self) -> int:
         """List all available modules with descriptions (auto-discovered)."""
         from rich.table import Table
         from rich import box
-        
+
         # Auto-discover modules from filesystem
         module_mapping = get_module_mapping()
-        
+
         # Build table
         table = Table(
             title="📚 TinyTorch Modules",
@@ -1032,20 +1032,20 @@ class ModuleWorkflowCommand(BaseCommand):
         table.add_column("#", style="cyan", width=3)
         table.add_column("Module", style="bold")
         table.add_column("Folder")
-        
+
         for num, folder_name in sorted(module_mapping.items()):
             display_name = get_module_display_name(num)
             table.add_row(num, display_name, folder_name)
-        
+
         self.console.print()
         self.console.print(table)
         self.console.print()
         self.console.print("[dim]Start a module: [bold]tito module start 01[/bold][/dim]")
         self.console.print("[dim]Check progress: [bold]tito module status[/bold][/dim]")
         self.console.print()
-        
+
         return 0
-    
+
     def show_status(self) -> int:
         """Show module completion status with enhanced visuals."""
         from rich.table import Table
@@ -1218,7 +1218,7 @@ class ModuleWorkflowCommand(BaseCommand):
                 result.append((mid, name, "ready"))
 
         return result
-    
+
     def run(self, args: Namespace) -> int:
         """Execute the module workflow command."""
         # Handle subcommands
@@ -1247,7 +1247,7 @@ class ModuleWorkflowCommand(BaseCommand):
                 return self.show_status()
             elif args.module_command == 'list':
                 return self.list_modules()
-        
+
         # Show help if no valid command
         self.console.print(Panel(
             "[bold cyan]Module Lifecycle Commands[/bold cyan]\n\n"
@@ -1276,9 +1276,9 @@ class ModuleWorkflowCommand(BaseCommand):
             title="Module Development Workflow",
             border_style="bright_cyan"
         ))
-        
+
         return 0
-    
+
     def _check_milestone_unlocks(self, module_name: str) -> None:
         """Check if completing this module unlocks any milestones."""
         try:
@@ -1288,12 +1288,12 @@ class ModuleWorkflowCommand(BaseCommand):
             milestone_tracker_path = PathLib(__file__).parent.parent.parent / "tests" / "milestones"
             if str(milestone_tracker_path) not in sys.path:
                 sys.path.insert(0, str(milestone_tracker_path))
-            
+
             from milestone_tracker import check_module_export
-            
+
             # Let milestone tracker handle everything
             check_module_export(module_name, console=self.console)
-        
+
         except ImportError:
             # Milestone tracker not available, skip silently
             pass

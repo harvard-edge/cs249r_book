@@ -29,11 +29,11 @@ def correct_image_references(file_path: Path):
         # This regex is designed to find Markdown image syntaxes like `![...](...)` or `![](...)`.
         # It is intentionally broad to capture various forms of image links.
         img_ref_pattern = re.compile(r'!\[(.*?)\]\((.*?)\)')
-        
+
         def replacer(match):
             alt_text = match.group(1)
             path_str = match.group(2)
-            
+
             # Skip http links
             if path_str.startswith('http'):
                 return match.group(0)
@@ -46,11 +46,11 @@ def correct_image_references(file_path: Path):
 
             path = Path(path_str)
             original_filename = path.name
-            
+
             # Deconstruct the filename to apply snake_case to the stem only.
             stem = path.stem
             suffix = path.suffix
-            
+
             # Convert the stem to snake_case and then to lowercase.
             correct_stem = to_snake_case(stem)
             correct_filename = f"{correct_stem}{suffix}"
@@ -75,7 +75,7 @@ def correct_image_references(file_path: Path):
 def main():
     root_dir = '.'
     files_to_process = get_files_to_check(root_dir)
-    
+
     for file_path in files_to_process:
         correct_image_references(file_path)
 

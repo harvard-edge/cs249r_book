@@ -48,7 +48,7 @@ Individual Optimizations (M14-18) → Benchmarking (M19) → TorchPerf Olympics 
 
 The TorchPerf Olympics is your capstone competition! Choose your event:
 - 🏃 **Latency Sprint**: Minimize inference time (fastest model wins)
-- 🏋️ **Memory Challenge**: Minimize model size (smallest footprint wins)  
+- 🏋️ **Memory Challenge**: Minimize model size (smallest footprint wins)
 - 🎯 **Accuracy Contest**: Maximize accuracy within constraints
 - 🏋️‍♂️ **All-Around**: Best balanced performance across all metrics
 - 🚀 **Extreme Push**: Most aggressive optimization while staying viable
@@ -236,7 +236,7 @@ from enum import Enum
 class OlympicEvent(Enum):
     """
     TorchPerf Olympics event categories.
-    
+
     Each event optimizes for different objectives with specific constraints.
     Students choose their event and compete for medals!
     """
@@ -617,7 +617,7 @@ class Benchmark:
         self.warmup_runs = warmup_runs
         self.measurement_runs = measurement_runs
         self.results = {}
-        
+
         # Use Profiler from Module 14 for measurements
         self.profiler = Profiler()
 
@@ -637,19 +637,19 @@ class Benchmark:
 
         for i, model in enumerate(self.models):
             model_name = getattr(model, 'name', f'model_{i}')
-            
+
             # Create input tensor for profiling
             from tinytorch.core.tensor import Tensor
             input_tensor = Tensor(np.random.randn(*input_shape).astype(np.float32))
 
             # Use Profiler to measure latency with proper warmup and iterations
             latency_ms = self.profiler.measure_latency(
-                model, 
+                model,
                 input_tensor,
                 warmup=self.warmup_runs,
                 iterations=self.measurement_runs
             )
-            
+
             # Profiler returns single median value
             # For BenchmarkResult, we need multiple measurements
             # Run additional measurements for statistical analysis
@@ -715,7 +715,7 @@ class Benchmark:
                 memory_stats = self.profiler.measure_memory(model, input_shape)
                 # Use peak_memory_mb as the primary metric
                 memory_used = memory_stats['peak_memory_mb']
-                
+
                 # If no significant memory change detected, estimate from parameters
                 if memory_used < 1.0:
                     param_count = self.profiler.count_parameters(model)
@@ -969,7 +969,7 @@ class BenchmarkSuite:
         if not self.results:
             print("No results to plot. Run benchmark first.")
             return
-        
+
         if not MATPLOTLIB_AVAILABLE:
             print("⚠️ matplotlib not available - skipping plots. Install with: pip install matplotlib")
             return
@@ -1028,7 +1028,7 @@ class BenchmarkSuite:
         if not MATPLOTLIB_AVAILABLE:
             print("⚠️ matplotlib not available - skipping plots. Install with: pip install matplotlib")
             return
-            
+
         if x_metric not in self.results or y_metric not in self.results:
             print(f"Missing data for {x_metric} or {y_metric}")
             return

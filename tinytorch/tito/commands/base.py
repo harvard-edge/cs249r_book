@@ -61,21 +61,21 @@ class BaseCommand(ABC):
     def description(self) -> str:
         """Return the command description."""
         pass
-    
+
     @abstractmethod
     def add_arguments(self, parser: ArgumentParser) -> None:
         """Add command-specific arguments to the parser."""
         pass
-    
+
     @abstractmethod
     def run(self, args: Namespace) -> int:
         """Execute the command and return exit code."""
         pass
-    
+
     def validate_args(self, args: Namespace) -> None:
         """Validate command arguments. Override in subclasses if needed."""
         pass
-    
+
     def execute(self, args: Namespace) -> int:
         """Execute the command with error handling."""
         try:
@@ -88,4 +88,4 @@ class BaseCommand(ABC):
         except Exception as e:
             logger.exception(f"Unexpected error in command {self.name}")
             self.console.print(f"[red]❌ Unexpected error: {e}[/red]")
-            return 1 
+            return 1

@@ -1,6 +1,6 @@
 # Machine Learning Systems: Two-Volume Structure
 
-**Proposal for MIT Press**  
+**Proposal for MIT Press**
 *Draft: December 2024*
 
 ---
@@ -137,7 +137,7 @@ Ending on "AI for Good" leaves students with a positive vision of what they can 
 - Everything can be learned and practiced on one machine
 - Ends positively with societal impact
 
-**Volume 2 (Distributed Systems)**  
+**Volume 2 (Distributed Systems)**
 - Builds on Volume 1 foundations
 - Addresses what changes at scale
 - Organized around timeless constraints, not current technologies
@@ -212,5 +212,5 @@ Volume 2's new chapters are candidates for collaborative authorship:
 
 ---
 
-*Document Version: December 2024*  
+*Document Version: December 2024*
 *For discussion with MIT Press and potential collaborators*

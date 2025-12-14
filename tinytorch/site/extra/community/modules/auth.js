@@ -2,7 +2,7 @@ import { NETLIFY_URL, getBasePath } from './config.js';
 import { updateNavState } from './ui.js';
 import { openProfileModal, closeProfileModal, handleProfileUpdate } from './profile.js';
 
-let currentMode = 'signup'; 
+let currentMode = 'signup';
 
 export function setMode(mode) {
     const emailInput = document.getElementById('authEmail');
@@ -16,21 +16,21 @@ export function setMode(mode) {
 
     if (!emailInput) return; // Guard if DOM not ready
 
-    const previousEmail = emailInput.value; 
+    const previousEmail = emailInput.value;
     currentMode = mode;
-    
+
     authForm.reset();
     authError.style.display = 'none';
     authError.textContent = '';
     if (mode === 'forgot') {
-        emailInput.value = ''; 
+        emailInput.value = '';
     } else {
          emailInput.value = previousEmail;
     }
 
     if (mode === 'login') {
         authTitle.textContent = 'Login';
-        
+
         // Check for confirmed_email param
         const params = new URLSearchParams(window.location.search);
         if (params.get('confirmed_email') === 'true') {
@@ -88,19 +88,19 @@ export async function handleAuth(e) {
 
     try {
         let endpoint, body;
-        
+
         if (currentMode === 'forgot') {
             endpoint = '/api/auth/reset-password';
             body = { email };
         } else {
             endpoint = currentMode === 'login' ? '/api/auth/login' : '/api/auth/signup';
-            body = { 
-                email, 
-                password, 
+            body = {
+                email,
+                password,
                 redirect_to: window.location.origin + basePath + '/index.html?action=login&confirmed_email=true'
             };
         }
-        
+
         const url = `${NETLIFY_URL}${endpoint}`;
 
         const response = await fetch(url, {
@@ -117,7 +117,7 @@ export async function handleAuth(e) {
         if (currentMode === 'forgot') {
                 if (response.ok) {
                     alert(data.message || 'If an account exists, a reset link has been sent.');
-                    setMode('login'); 
+                    setMode('login');
                 } else {
                     throw new Error(data.error || 'Failed to send reset link');
                 }
@@ -131,14 +131,14 @@ export async function handleAuth(e) {
                     localStorage.setItem("tinytorch_token", data.access_token);
                     if (data.refresh_token) localStorage.setItem("tinytorch_refresh_token", data.refresh_token);
                     localStorage.setItem("tinytorch_user", JSON.stringify(data.user));
-                    updateNavState(); 
-                    
+                    updateNavState();
+
                     window.location.href = basePath + '/dashboard.html';
                 }
             } else {
                 alert('Account created successfully! Please check your email to confirm before logging in.');
                 window.location.href = basePath + '/dashboard.html';
-            }            
+            }
         }
 
     } catch (error) {

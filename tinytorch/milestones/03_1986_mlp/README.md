@@ -7,7 +7,7 @@ The 1969 XOR crisis had killed neural network research. Then in 1986, **Rumelhar
 2. Backpropagation makes them trainable
 3. They work on REAL-WORLD data (not just toy problems)
 
-This paper **ended the AI Winter** and launched modern deep learning. Now it's your turn to recreate that breakthrough using YOUR TinyTorch!
+This paper **ended the AI Winter** and launched modern deep learning. Now it's your turn to recreate that breakthrough using YOUR Tiny🔥Torch!
 
 ## What You're Building
 

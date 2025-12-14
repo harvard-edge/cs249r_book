@@ -64,23 +64,23 @@ local function get_chapter_name(doc)
     log_info("Detected chapter from headers: " .. chapter)
     return chapter
   end
-  
+
   -- Fallback to input file detection
   local input_file = quarto.doc.input_file
   if not input_file then
     log_warning("Could not determine input file")
     return nil
   end
-  
+
   log_info("Input file: " .. input_file)
-  
+
   -- Extract chapter name from path like "contents/core/introduction/introduction.qmd"
   chapter = string.match(input_file, "contents/core/([^/]+)/")
   if not chapter then
     -- Try pattern for when running from quarto directory
     chapter = string.match(input_file, "([^/]+)/[^/]+%.qmd$")
   end
-  
+
   -- If still no match, try to extract from filename
   if not chapter then
     local filename = string.match(input_file, "([^/]+)%.qmd$")
@@ -88,7 +88,7 @@ local function get_chapter_name(doc)
       chapter = filename
     end
   end
-  
+
   return chapter
 end
 
@@ -98,30 +98,30 @@ local function load_chapter_xrefs(chapter_name)
     log_info("Could not determine chapter name - skipping cross-references")
     return nil
   end
-  
+
   -- Construct path to chapter's xrefs file
   local xrefs_path = "contents/core/" .. chapter_name .. "/" .. chapter_name .. "_xrefs.json"
-  
+
   log_info("Loading cross-references from: " .. xrefs_path)
-  
+
   local json_content = read_file(xrefs_path)
   if not json_content then
     -- Try alternative path if running from different directory
     xrefs_path = "quarto/contents/core/" .. chapter_name .. "/" .. chapter_name .. "_xrefs.json"
     json_content = read_file(xrefs_path)
   end
-  
+
   if not json_content then
     log_warning("Cross-references file not found for chapter: " .. chapter_name)
     return nil
   end
-  
+
   local ok, data = pcall(quarto.json.decode, json_content)
   if not ok then
     log_error("Could not parse " .. xrefs_path .. " - invalid JSON format")
     return nil
   end
-  
+
   -- Count total references
   local total_refs = 0
   if data and data.cross_references then
@@ -131,9 +131,9 @@ local function load_chapter_xrefs(chapter_name)
       end
     end
   end
-  
+
   log_success("Loaded " .. total_refs .. " cross-references for " .. chapter_name)
-  
+
   return data
 end
 
@@ -144,9 +144,9 @@ local function is_xrefs_enabled(meta)
     log_info("No filter-metadata.cross-references configuration - filter disabled")
     return false
   end
-  
+
   local xref_config = meta["filter-metadata"]["cross-references"]
-  
+
   -- Check if enabled
   local enabled = xref_config.enabled
   if enabled ~= nil then
@@ -156,7 +156,7 @@ local function is_xrefs_enabled(meta)
       return false
     end
   end
-  
+
   return true
 end
 
@@ -214,13 +214,13 @@ local chapter_names = {
 local function format_xref_entry(ref)
   -- Build the reference text (no arrows, cleaner format)
   local ref_text = ""
-  
+
   -- Add chapter name with proper capitalization
   if ref.target_chapter then
     local display_name = chapter_names[ref.target_chapter] or ref.target_chapter
     ref_text = ref_text .. "**" .. display_name .. "**: "
   end
-  
+
   -- Add section reference with ?? for unbuilt chapters
   if ref.target_section then
     -- Check if this is PDF format
@@ -231,7 +231,7 @@ local function format_xref_entry(ref)
       ref_text = ref_text .. "(§??)"
     end
   end
-  
+
   -- Clean up and format explanation
   if ref.explanation and ref.explanation ~= "" then
     -- Remove redundant prefixes
@@ -240,7 +240,7 @@ local function format_xref_entry(ref)
     clean_explanation = string.gsub(clean_explanation, "^Essential prerequisite covering: ", "")
     clean_explanation = string.gsub(clean_explanation, "^Extends into: ", "")
     clean_explanation = string.gsub(clean_explanation, "^Foundation for: ", "")
-    
+
     -- Extract just the key concepts if it's a list
     local concepts = string.match(clean_explanation, "^([^~]+~[^,]+)")
     if concepts and string.find(clean_explanation, "~") then
@@ -263,10 +263,10 @@ local function format_xref_entry(ref)
         clean_explanation = string.sub(clean_explanation, 1, 77) .. "..."
       end
     end
-    
+
     ref_text = ref_text .. " — " .. clean_explanation
   end
-  
+
   return ref_text
 end
 
@@ -275,18 +275,18 @@ local function create_connection_box(refs)
   if not refs or #refs == 0 then
     return nil
   end
-  
+
   -- Filter and sort references by priority
   local filtered_refs = {}
   for _, ref in ipairs(refs) do
     -- Include high-priority references or those with strong connections
-    if (ref.priority and ref.priority <= 2) or 
+    if (ref.priority and ref.priority <= 2) or
        (ref.strength and ref.strength > 0.2) or
        (ref.quality and ref.quality > 0.8) then
       table.insert(filtered_refs, ref)
     end
   end
-  
+
   -- Limit to top 5 references
   if #filtered_refs > 5 then
     -- Sort by strength or quality
@@ -302,14 +302,14 @@ local function create_connection_box(refs)
     end
     filtered_refs = top_refs
   end
-  
+
   if #filtered_refs == 0 then
     return nil
   end
-  
+
   -- Build content blocks
   local content_blocks = {}
-  
+
   for _, ref in ipairs(filtered_refs) do
     local ref_text = format_xref_entry(ref)
     local ref_doc = pandoc.read(ref_text, "markdown")
@@ -317,13 +317,13 @@ local function create_connection_box(refs)
       table.insert(content_blocks, ref_doc.blocks[1])
     end
   end
-  
+
   -- Create a div with callout-chapter-connection class
   local callout_div = pandoc.Div(
     content_blocks,
     pandoc.Attr("", {"callout", "callout-chapter-connection"}, {})
   )
-  
+
   return callout_div
 end
 
@@ -344,46 +344,46 @@ return {
       if not is_xrefs_enabled(doc.meta) then
         return doc
       end
-      
+
       log_info("🚀 Initializing Cross-Reference Injection Filter")
-      
+
       -- Get current chapter
       local chapter_name = get_chapter_name(doc)
       if not chapter_name then
         log_warning("Could not determine chapter - skipping")
         return doc
       end
-      
+
       log_info("📖 Processing chapter: " .. chapter_name)
-      
+
       -- Load cross-references for this chapter
       local xrefs_data = load_chapter_xrefs(chapter_name)
       if not xrefs_data or not xrefs_data.cross_references then
         log_info("No cross-references found for chapter: " .. chapter_name)
         return doc
       end
-      
+
       -- Check if this is PDF output
       local is_pdf = quarto.doc.isFormat("pdf")
-      
+
       -- Process document blocks
       local new_blocks = {}
-      
+
       for _, block in ipairs(doc.blocks) do
         -- Check if this is a header with cross-references
         if block.t == "Header" and block.identifier and block.identifier ~= "" then
           local section_refs = xrefs_data.cross_references[block.identifier]
-          
+
           if section_refs and #section_refs > 0 then
             -- For PDF: ensure minimum lines before section
             if is_pdf then
               table.insert(new_blocks, needspace_block())
             end
-            
+
             -- Insert the header
             table.insert(new_blocks, block)
             stats.sections_found = stats.sections_found + 1
-            
+
             -- Create and insert the connection box
             local connection_box = create_connection_box(section_refs)
             if connection_box then
@@ -400,15 +400,15 @@ return {
           table.insert(new_blocks, block)
         end
       end
-      
+
       -- Summary
       if stats.injections_made > 0 then
-        log_success("📊 SUMMARY: " .. stats.injections_made .. " connection boxes injected into " .. 
+        log_success("📊 SUMMARY: " .. stats.injections_made .. " connection boxes injected into " ..
                    stats.sections_found .. " sections")
       else
         log_info("No cross-references injected for this chapter")
       end
-      
+
       return pandoc.Pandoc(new_blocks, doc.meta)
     end
   }

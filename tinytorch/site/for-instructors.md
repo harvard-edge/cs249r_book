@@ -240,7 +240,6 @@ tito module status
 - Incomplete module submissions
 - Late milestone completions
 
----
 
 ## For Teaching Assistants: Student Support
 
@@ -369,7 +368,6 @@ While auto-grading handles 70%, focus manual review on:
 3. **Make Systems Visible** - Profile memory, analyze complexity together
 4. **Build Confidence** - Acknowledge progress and validate understanding
 
----
 
 ## Troubleshooting Common Issues
 
@@ -407,18 +405,16 @@ tito grade setup
 ls submitted/*/MODULE/
 ```
 
----
 
 ## Additional Resources
 
-- **[Complete Course Structure](chapters/00-introduction.md)** - Full curriculum overview
+- **[Learning Journey](chapters/learning-journey.md)** - Full curriculum overview
 - **[Student Getting Started](getting-started.md)** - Send this to students
 - **[CLI Documentation](tito/overview.md)** - Detailed command reference
 - **[Troubleshooting Guide](tito/troubleshooting.md)** - Common issues and solutions
 - **[GitHub Discussions](https://github.com/mlsysbook/TinyTorch/discussions)** - Community support
 - **[Issue Tracker](https://github.com/mlsysbook/TinyTorch/issues)** - Report bugs
 
----
 
 ## Contact & Support
 
@@ -432,7 +428,6 @@ ls submitted/*/MODULE/
 - Teaching material improvements
 - Bug fixes and enhancements
 
----
 
 <div style="background: #d4edda; border: 1px solid #28a745; padding: 1.5rem; border-radius: 0.5rem; margin: 2rem 0;">
 <h3 style="margin: 0 0 0.5rem 0; color: #155724;">✓ You're Ready to Teach!</h3>

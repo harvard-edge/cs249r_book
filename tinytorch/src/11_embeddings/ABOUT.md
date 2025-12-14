@@ -1,489 +1,628 @@
----
-title: "Embeddings - Token to Vector Representations"
-description: "Build embedding layers that convert discrete tokens to dense, learnable vector representations powering modern NLP"
-difficulty: "●●"
-time_estimate: "4-5 hours"
-prerequisites: ["Tensor", "Tokenization"]
-next_steps: ["Attention"]
-learning_objectives:
-  - "Implement embedding layers with efficient lookup table operations and proper initialization"
-  - "Design both learned and sinusoidal positional encodings to capture sequence order information"
-  - "Understand memory scaling relationships with vocabulary size and embedding dimensions"
-  - "Optimize embedding lookups for cache efficiency and sparse gradient updates"
-  - "Apply dimensionality principles to semantic vector space design and trade-offs"
----
+# Module 11: Embeddings
 
-# Embeddings - Token to Vector Representations
+**ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01, 10
 
-**ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 4-5 hours
+**Prerequisites: Modules 01 and 10** means you should already understand:
+- Tensor operations (shape manipulation, matrix operations, broadcasting)
+- Tokenization (converting text to token IDs, vocabularies, BPE)
+- Basic Python (classes, methods, indexing)
+
+If you can explain how a tokenizer converts "hello" to token IDs and how to multiply matrices, you're ready.
 
 ## Overview
 
-Build the embedding systems that transform discrete token IDs into dense, learnable vector representations - the bridge between symbolic text and neural computation. This module implements lookup tables, positional encodings, and the optimization techniques that power every modern language model from word2vec to GPT-4's input layers.
+Embeddings are the crucial bridge between discrete tokens and continuous neural network operations. Your tokenizer from Module 10 converts text into token IDs like `[42, 7, 15]`, but neural networks operate on dense vectors of real numbers. Embeddings transform each integer token ID into a learned dense vector that captures semantic meaning. By the end of this module, you'll implement the embedding systems that power modern language models, from basic lookup tables to sophisticated positional encodings.
 
-You'll discover why embeddings aren't just "lookup tables" but sophisticated parameter spaces where semantic meaning emerges through training. By implementing both token embeddings and positional encodings from scratch, you'll understand the architectural choices that shape how transformers process language and why certain design decisions (sinusoidal vs learned positions, embedding dimensions, initialization strategies) have profound implications for model capacity, memory usage, and inference performance.
+Every transformer model, from BERT to GPT-4, relies on embeddings to convert language into learnable representations. You'll build the exact patterns used in production, understanding not just how they work but why they're designed this way.
 
 ## Learning Objectives
 
-By the end of this module, you will be able to:
+```{tip} By completing this module, you will:
 
-- **Implement embedding layers**: Build efficient lookup tables for token-to-vector conversion with proper Xavier initialization and gradient flow
-- **Design positional encodings**: Create both sinusoidal (Transformer-style) and learned (GPT-style) position representations with different extrapolation capabilities
-- **Understand memory scaling**: Analyze how vocabulary size and embedding dimensions impact parameter count, memory bandwidth, and serving costs
-- **Optimize embedding lookups**: Implement sparse gradient updates that avoid computing gradients for 99% of vocabulary during training
-- **Apply dimensionality principles**: Balance semantic expressiveness with computational efficiency in vector space design and initialization
-
-## Build → Use → Reflect
-
-This module follows TinyTorch's **Build → Use → Reflect** framework:
-
-1. **Build**: Implement embedding lookup tables with trainable parameters, sinusoidal positional encodings using mathematical patterns, learned position embeddings, and complete token+position combination systems
-2. **Use**: Convert tokenized text sequences to dense vectors, add positional information for sequence order awareness, and prepare embeddings for attention mechanisms
-3. **Reflect**: Analyze memory scaling with vocabulary size (why GPT-3's embeddings use 2.4GB), understand sparse gradient efficiency for large vocabularies, and explore semantic geometry in learned embedding spaces
-
-```{admonition} Systems Reality Check
-:class: tip
-
-**Production Context**: GPT-3's embedding table contains 50,257 vocabulary × 12,288 dimensions = 617M parameters (about 20% of the model's 175B total). Every token lookup requires reading 48KB of memory - making embedding access a major bandwidth bottleneck during inference, especially for long sequences.
-
-**Performance Note**: During training, only ~1% of vocabulary appears in each batch. Sparse gradient updates avoid computing gradients for the other 99% of embedding parameters, saving massive computation and memory bandwidth. This is why frameworks like PyTorch implement specialized sparse gradient operations for embeddings.
+- **Implement** embedding layers that convert token IDs to dense vectors through efficient table lookup
+- **Master** positional encoding strategies including learned and sinusoidal approaches
+- **Understand** memory scaling for embedding tables and the trade-offs between vocabulary size and embedding dimension
+- **Connect** your implementation to production transformer architectures used in GPT and BERT
 ```
 
-## Implementation Guide
+## What You'll Build
 
-### Embedding Layer - The Token Lookup Table
+```{mermaid}
+:align: center
+:caption: Your Embedding System
+flowchart LR
+    subgraph "Your Embedding System"
+        A["Embedding<br/>Token → Vector"]
+        B["PositionalEncoding<br/>Learned Positions"]
+        C["Sinusoidal PE<br/>Math Patterns"]
+        D["EmbeddingLayer<br/>Complete System"]
+    end
 
-The fundamental building block that maps discrete token IDs to continuous dense vectors. This is where semantic meaning will eventually be learned through training.
+    A --> D
+    B --> D
+    C --> D
 
-**Core Implementation Pattern:**
+    style A fill:#e1f5ff
+    style B fill:#fff3cd
+    style C fill:#f8d7da
+    style D fill:#d4edda
+```
+
+**Implementation roadmap:**
+
+| Part | What You'll Implement | Key Concept |
+|------|----------------------|-------------|
+| 1 | `Embedding` class | Token ID to vector lookup via indexing |
+| 2 | `PositionalEncoding` class | Learnable position embeddings |
+| 3 | `create_sinusoidal_embeddings()` | Mathematical position encoding |
+| 4 | `EmbeddingLayer` class | Complete token + position system |
+
+**The pattern you'll enable:**
+```python
+# Converting tokens to position-aware dense vectors
+embed_layer = EmbeddingLayer(vocab_size=50000, embed_dim=512)
+tokens = Tensor([[1, 42, 7]])  # Token IDs from tokenizer
+embeddings = embed_layer(tokens)  # (1, 3, 512) dense vectors ready for attention
+```
+
+### What You're NOT Building (Yet)
+
+To keep this module focused, you will **not** implement:
+
+- Attention mechanisms (that's Module 12: Attention)
+- Full transformer architectures (that's Module 13: Transformers)
+- Word2Vec or GloVe pretrained embeddings (you're building learnable embeddings)
+- Subword embedding composition (PyTorch handles this at the tokenization level)
+
+**You are building the foundation for sequence models.** Context-aware representations come next.
+
+## API Reference
+
+This section documents the embedding components you'll build. Use this as your reference while implementing and debugging.
+
+### Embedding Class
 
 ```python
-class Embedding:
-    """Learnable embedding layer for token-to-vector conversion.
+Embedding(vocab_size, embed_dim)
+```
 
-    Implements efficient lookup table that maps token IDs to dense vectors.
-    The foundation of all language models and sequence processing.
+Learnable embedding layer that maps token indices to dense vectors through table lookup.
 
-    Args:
-        vocab_size: Size of vocabulary (e.g., 50,000 for GPT-2)
-        embedding_dim: Dimension of dense vectors (e.g., 768 for BERT-base)
+**Constructor Parameters:**
+- `vocab_size` (int): Size of vocabulary (number of unique tokens)
+- `embed_dim` (int): Dimension of embedding vectors
 
-    Memory Cost: vocab_size × embedding_dim parameters
-    Example: 50K vocab × 768 dim = 38.4M parameters (153MB at FP32)
-    """
-    def __init__(self, vocab_size, embedding_dim):
-        self.vocab_size = vocab_size
-        self.embedding_dim = embedding_dim
+**Core Methods:**
 
-        # Xavier/Glorot initialization for stable gradients
-        limit = math.sqrt(6.0 / (vocab_size + embedding_dim))
-        self.weight = Tensor(
-            np.random.uniform(-limit, limit, (vocab_size, embedding_dim)),
-            requires_grad=True
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `forward` | `forward(indices: Tensor) -> Tensor` | Lookup embeddings for token indices |
+| `parameters` | `parameters() -> List[Tensor]` | Return weight matrix for optimization |
+
+**Properties:**
+- `weight`: Tensor of shape `(vocab_size, embed_dim)` containing learnable embeddings
+
+### PositionalEncoding Class
+
+```python
+PositionalEncoding(max_seq_len, embed_dim)
+```
+
+Learnable positional encoding that adds trainable position-specific vectors to embeddings.
+
+**Constructor Parameters:**
+- `max_seq_len` (int): Maximum sequence length to support
+- `embed_dim` (int): Embedding dimension (must match token embeddings)
+
+**Core Methods:**
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `forward` | `forward(x: Tensor) -> Tensor` | Add positional encodings to input embeddings |
+| `parameters` | `parameters() -> List[Tensor]` | Return position embedding matrix |
+
+### Sinusoidal Embeddings Function
+
+```python
+create_sinusoidal_embeddings(max_seq_len, embed_dim) -> Tensor
+```
+
+Creates fixed sinusoidal positional encodings using trigonometric functions. No parameters to learn.
+
+**Mathematical Formula:**
+```
+PE(pos, 2i)   = sin(pos / 10000^(2i/embed_dim))
+PE(pos, 2i+1) = cos(pos / 10000^(2i/embed_dim))
+```
+
+### EmbeddingLayer Class
+
+```python
+EmbeddingLayer(vocab_size, embed_dim, max_seq_len=512,
+               pos_encoding='learned', scale_embeddings=False)
+```
+
+Complete embedding system combining token embeddings and positional encoding.
+
+**Constructor Parameters:**
+- `vocab_size` (int): Size of vocabulary
+- `embed_dim` (int): Embedding dimension
+- `max_seq_len` (int): Maximum sequence length for positional encoding
+- `pos_encoding` (str): Type of positional encoding ('learned', 'sinusoidal', or None)
+- `scale_embeddings` (bool): Whether to scale by sqrt(embed_dim) (transformer convention)
+
+**Core Methods:**
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `forward` | `forward(tokens: Tensor) -> Tensor` | Complete embedding pipeline |
+| `parameters` | `parameters() -> List[Tensor]` | All trainable parameters |
+
+## Core Concepts
+
+This section explores the fundamental ideas behind embeddings and positional encoding. These concepts apply to every modern language model, from small research experiments to production systems.
+
+### From Indices to Vectors
+
+Neural networks operate on continuous vectors, but language consists of discrete tokens. After your tokenizer converts "the cat sat" to token IDs `[1, 42, 7]`, you need a way to represent these discrete integers as dense vectors that can capture semantic meaning.
+
+The embedding layer solves this through a simple but powerful idea: maintain a learnable table where each token ID maps to a vector. For a vocabulary of 50,000 tokens with 512-dimensional embeddings, you create a matrix of shape `(50000, 512)` initialized with small random values. During training, these vectors adjust to capture semantic relationships: similar words learn similar vectors.
+
+Here's the core implementation showing how efficiently this works:
+
+```python
+def forward(self, indices: Tensor) -> Tensor:
+    """Forward pass: lookup embeddings for given indices."""
+    # Validate indices are in range
+    if np.any(indices.data >= self.vocab_size) or np.any(indices.data < 0):
+        raise ValueError(
+            f"Index out of range. Expected 0 <= indices < {self.vocab_size}, "
+            f"got min={np.min(indices.data)}, max={np.max(indices.data)}"
         )
 
-    def forward(self, indices):
-        """Look up embeddings for token IDs.
+    # Perform embedding lookup using advanced indexing
+    # This is equivalent to one-hot multiplication but much more efficient
+    embedded = self.weight.data[indices.data.astype(int)]
 
-        Args:
-            indices: (batch_size, seq_len) tensor of token IDs
+    # Create result tensor with gradient tracking
+    result = Tensor(embedded, requires_grad=self.weight.requires_grad)
 
-        Returns:
-            embeddings: (batch_size, seq_len, embedding_dim) dense vectors
-        """
-        # Advanced indexing: O(1) per token lookup
-        embedded = self.weight.data[indices.data.astype(int)]
+    if result.requires_grad:
+        result._grad_fn = EmbeddingBackward(self.weight, indices)
 
-        result = Tensor(embedded, requires_grad=self.weight.requires_grad)
-
-        # Attach gradient computation (sparse updates during backward)
-        if self.weight.requires_grad:
-            result._grad_fn = EmbeddingBackward(self.weight, indices)
-
-        return result
+    return result
 ```
 
-**Why This Design Works:**
-- **Xavier initialization** ensures gradients don't explode or vanish during early training
-- **Advanced indexing** provides O(1) lookup complexity regardless of vocabulary size
-- **Sparse gradients** mean only embeddings for tokens in the current batch receive updates
-- **Trainable weights** allow the model to learn semantic relationships through backpropagation
+The beauty is in the simplicity: `self.weight.data[indices.data.astype(int)]` uses NumPy's advanced indexing (also called fancy indexing) to look up multiple embeddings simultaneously. For input indices `[1, 42, 7]`, this single operation retrieves rows 1, 42, and 7 from the weight matrix in one efficient step, automatically handling batched inputs of any shape. While conceptually equivalent to creating one-hot vectors and matrix multiplication, direct indexing is orders of magnitude faster and requires no intermediate allocations.
 
-### Sinusoidal Positional Encoding (Transformer-Style)
+### Embedding Table Mechanics
 
-Fixed mathematical encodings that capture position without learned parameters. The original "Attention is All You Need" approach that enables extrapolation to longer sequences.
+The embedding table is a learnable parameter matrix initialized with small random values. For vocabulary size V and embedding dimension D, the table has shape `(V, D)`. Each row represents one token's learned representation.
 
-**Mathematical Foundation:**
+Initialization matters for training stability. The implementation uses Xavier initialization:
 
 ```python
-def create_sinusoidal_embeddings(max_seq_len, embedding_dim):
-    """Create sinusoidal positional encodings from Vaswani et al. (2017).
-
-    Uses sine/cosine functions of different frequencies to encode position.
-
-    Formula:
-        PE(pos, 2i)   = sin(pos / 10000^(2i/embed_dim))  # Even indices
-        PE(pos, 2i+1) = cos(pos / 10000^(2i/embed_dim))  # Odd indices
-
-    Where:
-        pos = position in sequence (0, 1, 2, ...)
-        i = dimension pair index
-        10000 = base frequency (creates wavelengths from 2π to 10000·2π)
-
-    Advantages:
-        - Zero parameters (no memory overhead)
-        - Generalizes to sequences longer than training
-        - Smooth transitions (nearby positions similar)
-        - Rich frequency spectrum across dimensions
-    """
-    # Position indices: [0, 1, 2, ..., max_seq_len-1]
-    position = np.arange(max_seq_len, dtype=np.float32)[:, np.newaxis]
-
-    # Frequency term for each dimension pair
-    div_term = np.exp(
-        np.arange(0, embedding_dim, 2, dtype=np.float32) *
-        -(math.log(10000.0) / embedding_dim)
-    )
-
-    # Initialize positional encoding matrix
-    pe = np.zeros((max_seq_len, embedding_dim), dtype=np.float32)
-
-    # Apply sine to even indices (0, 2, 4, ...)
-    pe[:, 0::2] = np.sin(position * div_term)
-
-    # Apply cosine to odd indices (1, 3, 5, ...)
-    pe[:, 1::2] = np.cos(position * div_term)
-
-    return Tensor(pe)
+# Xavier initialization for better gradient flow
+limit = math.sqrt(6.0 / (vocab_size + embed_dim))
+self.weight = Tensor(
+    np.random.uniform(-limit, limit, (vocab_size, embed_dim)),
+    requires_grad=True
+)
 ```
 
-**Why Sinusoidal Patterns Work:**
-- **Different frequencies** per dimension: high frequencies change rapidly between positions, low frequencies change slowly
-- **Unique signatures** for each position through combination of frequencies
-- **Linear combinations** allow the model to learn relative position offsets through attention
-- **No length limit** - can compute encodings for any sequence length at inference time
+This initialization scale ensures gradients neither explode nor vanish at the start of training. The limit is computed from both vocabulary size and embedding dimension, balancing the fan-in and fan-out of the embedding layer.
 
-### Learned Positional Encoding (GPT-Style)
+During training, gradients flow back through the lookup operation to update only the embeddings that were accessed. If your batch contains tokens `[5, 10, 10, 5]`, only rows 5 and 10 of the embedding table receive gradient updates. This sparse gradient pattern is handled by the `EmbeddingBackward` gradient function, making embedding updates extremely efficient even for vocabularies with millions of tokens.
 
-Trainable position embeddings that can adapt to task-specific patterns. Used in GPT models and other architectures where positional patterns may be learnable.
+### Learned vs Fixed Embeddings
 
-**Implementation Pattern:**
+Positional information can be added to token embeddings in two fundamentally different ways: learned position embeddings and fixed sinusoidal encodings.
+
+**Learned positional encoding** treats each position as a trainable parameter, just like token embeddings. For maximum sequence length M and embedding dimension D, you create a second embedding table of shape `(M, D)`:
 
 ```python
-class PositionalEncoding:
-    """Learnable positional encoding layer.
-
-    Trainable position-specific vectors added to token embeddings.
-
-    Args:
-        max_seq_len: Maximum sequence length to support
-        embedding_dim: Dimension matching token embeddings
-
-    Advantages:
-        - Can learn task-specific position patterns
-        - May capture regularities like sentence structure
-        - Often performs slightly better than sinusoidal
-
-    Disadvantages:
-        - Requires additional parameters (max_seq_len × embedding_dim)
-        - Cannot extrapolate beyond training sequence length
-        - Needs sufficient training data to learn position patterns
-    """
-    def __init__(self, max_seq_len, embedding_dim):
-        self.max_seq_len = max_seq_len
-        self.embedding_dim = embedding_dim
-
-        # Smaller initialization than token embeddings (additive combination)
-        limit = math.sqrt(2.0 / embedding_dim)
-        self.position_embeddings = Tensor(
-            np.random.uniform(-limit, limit, (max_seq_len, embedding_dim)),
-            requires_grad=True
-        )
-
-    def forward(self, x):
-        """Add positional encodings to input embeddings.
-
-        Args:
-            x: (batch_size, seq_len, embedding_dim) input embeddings
-
-        Returns:
-            Position-aware embeddings of same shape
-        """
-        batch_size, seq_len, embedding_dim = x.shape
-
-        # Get position embeddings for this sequence length
-        pos_embeddings = self.position_embeddings.data[:seq_len]
-
-        # Broadcast to batch dimension: (1, seq_len, embedding_dim)
-        pos_embeddings = pos_embeddings[np.newaxis, :, :]
-
-        # Element-wise addition combines token and position information
-        result = x + Tensor(pos_embeddings, requires_grad=True)
-
-        return result
+# Initialize position embedding matrix
+# Smaller initialization than token embeddings since these are additive
+limit = math.sqrt(2.0 / embed_dim)
+self.position_embeddings = Tensor(
+    np.random.uniform(-limit, limit, (max_seq_len, embed_dim)),
+    requires_grad=True
+)
 ```
 
-**Design Rationale:**
-- **Learned parameters** can capture task-specific patterns (e.g., sentence beginnings, clause boundaries)
-- **Smaller initialization** because positions add to token embeddings (not replace them)
-- **Fixed max length** is a limitation but acceptable for many production use cases
-- **Element-wise addition** preserves both token semantics and position information
-
-### Complete Embedding System
-
-Production-ready integration of token and positional embeddings used in real transformer implementations.
-
-**Full Pipeline:**
+During forward pass, you slice position embeddings and add them to token embeddings:
 
 ```python
-class EmbeddingLayer:
-    """Complete embedding system combining token and positional embeddings.
+def forward(self, x: Tensor) -> Tensor:
+    """Add positional encodings to input embeddings."""
+    batch_size, seq_len, embed_dim = x.shape
 
-    Production component matching PyTorch/HuggingFace transformer patterns.
-    """
-    def __init__(self, vocab_size, embed_dim, max_seq_len=512,
-                 pos_encoding='learned', scale_embeddings=False):
-        self.vocab_size = vocab_size
-        self.embed_dim = embed_dim
-        self.scale_embeddings = scale_embeddings
+    # Slice position embeddings for this sequence length
+    # Tensor slicing preserves gradient flow (from Module 01's __getitem__)
+    pos_embeddings = self.position_embeddings[:seq_len]
 
-        # Token embedding table
-        self.token_embedding = Embedding(vocab_size, embed_dim)
+    # Reshape to add batch dimension: (1, seq_len, embed_dim)
+    pos_data = pos_embeddings.data[np.newaxis, :, :]
+    pos_embeddings_batched = Tensor(pos_data, requires_grad=pos_embeddings.requires_grad)
 
-        # Positional encoding strategy
-        if pos_encoding == 'learned':
-            self.pos_encoding = PositionalEncoding(max_seq_len, embed_dim)
-        elif pos_encoding == 'sinusoidal':
-            self.pos_encoding = create_sinusoidal_embeddings(max_seq_len, embed_dim)
-        elif pos_encoding is None:
-            self.pos_encoding = None
+    # Copy gradient function to preserve backward connection
+    if hasattr(pos_embeddings, '_grad_fn') and pos_embeddings._grad_fn is not None:
+        pos_embeddings_batched._grad_fn = pos_embeddings._grad_fn
 
-    def forward(self, tokens):
-        """Convert tokens to position-aware embeddings.
-
-        Args:
-            tokens: (batch_size, seq_len) token indices
-
-        Returns:
-            (batch_size, seq_len, embed_dim) position-aware vectors
-        """
-        # Token lookup
-        token_embeds = self.token_embedding.forward(tokens)
-
-        # Optional scaling (Transformer convention: √embed_dim)
-        if self.scale_embeddings:
-            token_embeds = Tensor(token_embeds.data * math.sqrt(self.embed_dim))
-
-        # Add positional information
-        if self.pos_encoding is not None:
-            output = self.pos_encoding.forward(token_embeds)
-        else:
-            output = token_embeds
-
-        return output
+    # Add positional information - gradients flow through both x and pos_embeddings!
+    result = x + pos_embeddings_batched
+    return result
 ```
 
-**Integration Benefits:**
-- **Flexible positional encoding** supports learned, sinusoidal, or none
-- **Embedding scaling** (multiply by √d) is Transformer convention for gradient stability
-- **Batch processing** handles variable sequence lengths efficiently
-- **Parameter management** tracks all trainable components for optimization
+The slicing operation `self.position_embeddings[:seq_len]` preserves gradient tracking because TinyTorch's Tensor `__getitem__` (from Module 01) maintains the connection to the original parameter. This allows backpropagation to update only the position embeddings actually used in the forward pass.
 
-## Getting Started
+The advantage is flexibility: the model can learn task-specific positional patterns. The disadvantage is memory cost and a hard maximum sequence length.
 
-### Prerequisites
-
-Before starting this module, ensure you have completed:
-
-- **Module 01 (Tensor)**: Provides the foundational Tensor class with gradient tracking and operations
-- **Module 10 (Tokenization)**: Required for converting text to token IDs that embeddings consume
-
-Verify your prerequisites:
-
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
-
-# Verify prerequisite modules
-tito test tensor
-tito test tokenization
-```
-
-### Development Workflow
-
-1. **Open the development notebook**: `modules/11_embeddings/embeddings_dev.ipynb`
-2. **Implement Embedding class**: Create lookup table with Xavier initialization and efficient indexing
-3. **Build sinusoidal encodings**: Compute sine/cosine position representations using mathematical formula
-4. **Create learned positions**: Add trainable position embedding table with proper initialization
-5. **Integrate complete system**: Combine token and position embeddings with flexible encoding strategies
-6. **Export and verify**: `tito module complete 11 && tito test embeddings`
-
-## Testing
-
-### Comprehensive Test Suite
-
-Run the full test suite to verify embedding functionality:
-
-```bash
-# TinyTorch CLI (recommended)
-tito test embeddings
-
-# Direct pytest execution
-python -m pytest tests/ -k embeddings -v
-```
-
-### Test Coverage Areas
-
-- ✓ **Embedding lookup correctness**: Verify token IDs map to correct vector rows in weight table
-- ✓ **Gradient flow verification**: Ensure sparse gradient updates accumulate properly during backpropagation
-- ✓ **Positional encoding math**: Validate sinusoidal formula implementation with correct frequencies
-- ✓ **Shape broadcasting**: Test token + position combination across batch dimensions
-- ✓ **Memory efficiency profiling**: Verify parameter count and lookup performance characteristics
-
-### Inline Testing & Validation
-
-The module includes comprehensive unit tests during development:
+**Fixed sinusoidal encoding** uses mathematical patterns requiring no parameters. The formula creates unique position signatures using sine and cosine at different frequencies:
 
 ```python
-# Example inline test output
- Unit Test: Embedding layer...
- Lookup table created: 10K vocab × 256 dims = 2.56M parameters
- Forward pass shape correct: (32, 20, 256) for batch of 32 sequences
- Backward pass sparse gradients accumulate correctly
- Xavier initialization keeps variance stable
- Progress: Embedding Layer ✓
+# Create position indices [0, 1, 2, ..., max_seq_len-1]
+position = np.arange(max_seq_len, dtype=np.float32)[:, np.newaxis]
 
- Unit Test: Sinusoidal positional encoding...
- Encodings computed for 512 positions × 256 dimensions
- Sine/cosine patterns verified (pos 0: [0, 1, 0, 1, ...])
- Different positions have unique signatures
- Frequency spectrum correct (high to low across dimensions)
- Progress: Sinusoidal Positions ✓
+# Create dimension indices for calculating frequencies
+div_term = np.exp(
+    np.arange(0, embed_dim, 2, dtype=np.float32) *
+    -(math.log(10000.0) / embed_dim)
+)
 
- Unit Test: Learned positional encoding...
- Trainable position embeddings initialized
- Addition with token embeddings preserves gradients
- Batch broadcasting handled correctly
- Progress: Learned Positions ✓
+# Initialize the positional encoding matrix
+pe = np.zeros((max_seq_len, embed_dim), dtype=np.float32)
 
- Unit Test: Complete embedding system...
- Token + position combination works for all strategies
- Embedding scaling (√d) applied correctly
- Variable sequence lengths handled gracefully
- Parameter counting correct for each configuration
- Progress: Complete System ✓
+# Apply sine to even indices, cosine to odd indices
+pe[:, 0::2] = np.sin(position * div_term)
+pe[:, 1::2] = np.cos(position * div_term)
 ```
 
-### Manual Testing Examples
+This creates a unique vector for each position where low-index dimensions oscillate rapidly (high frequency) and high-index dimensions change slowly (low frequency). The pattern allows the model to learn relative positions through dot products, and crucially, can extrapolate to sequences longer than seen during training.
 
-Test your embedding implementation interactively:
+### Positional Encodings
+
+Without positional information, embeddings have no notion of order. The sentence "cat sat on mat" would have identical representation to "mat on sat cat" because you'd sum or average the same four token embeddings regardless of order.
+
+Positional encodings solve this by adding position-specific information to each token's embedding. After embedding lookup, token 42 at position 0 gets different positional information than token 42 at position 5, making the model position-aware.
+
+The Transformer paper introduced sinusoidal positional encoding with a clever mathematical structure. For position `pos` and dimension `i`:
+
+```
+PE(pos, 2i)   = sin(pos / 10000^(2i/embed_dim))  # Even dimensions
+PE(pos, 2i+1) = cos(pos / 10000^(2i/embed_dim))  # Odd dimensions
+```
+
+The `10000` base creates different wavelengths across dimensions. Dimension 0 oscillates rapidly (frequency ≈ 1), while dimension 510 changes extremely slowly (frequency ≈ 1/10000). This multi-scale structure gives each position a unique "fingerprint" and enables the model to learn relative position through simple vector arithmetic.
+
+At position 0, all sine terms equal 0 and all cosine terms equal 1: `[0, 1, 0, 1, 0, 1, ...]`. At position 1, the pattern shifts based on each dimension's frequency. The combination of many frequencies creates distinct encodings where nearby positions have similar (but not identical) vectors, providing smooth positional gradients.
+
+The trigonometric identity enables learning relative positions: `PE(pos+k)` can be expressed as a linear function of `PE(pos)` using sine and cosine addition formulas. This allows attention mechanisms to implicitly learn positional offsets (like "the token 3 positions ahead") through learned weights on the position encodings, without the model needing separate relative position parameters.
+
+### Embedding Dimension Trade-offs
+
+The embedding dimension D controls the capacity of your learned representations. Larger D provides more expressiveness but costs memory and compute. The choice involves several interacting factors.
+
+**Memory scaling**: Embedding tables scale as `vocab_size × embed_dim × 4 bytes` (for float32). A vocabulary of 50,000 tokens with 512-dimensional embeddings requires 100 MB. Double the dimension to 1024, and memory doubles to 200 MB. For large vocabularies, the embedding table often dominates total model memory. GPT-3's 50,257 token vocabulary with 12,288-dimensional embeddings uses approximately 2.4 GB just for token embeddings.
+
+**Semantic capacity**: Higher dimensions allow finer-grained semantic distinctions. With 64 dimensions, you might capture basic categories (animals, actions, objects). With 512 dimensions, you can encode subtle relationships (synonyms, antonyms, part-of-speech, contextual variations). With 1024+ dimensions, you have capacity for highly nuanced semantic features discovered through training.
+
+**Computational cost**: Every attention head in transformers performs operations over the embedding dimension. Memory bandwidth becomes the bottleneck: transferring embedding vectors from RAM to cache dominates the time to process them. Larger embeddings mean more memory traffic per token, reducing throughput.
+
+**Typical scales in production**:
+
+| Model | Vocabulary | Embed Dim | Embedding Memory |
+|-------|-----------|-----------|------------------|
+| Small BERT | 30,000 | 768 | 92 MB |
+| GPT-2 | 50,257 | 1,024 | 206 MB |
+| GPT-3 | 50,257 | 12,288 | 2,471 MB |
+| Large Transformer | 100,000 | 1,024 | 410 MB |
+
+The embedding dimension typically matches the model's hidden dimension since embeddings feed directly into the first transformer layer. You rarely see models with embedding dimension different from hidden dimension (though it's technically possible with a projection layer).
+
+## Common Errors
+
+These are the errors you'll encounter most often when working with embeddings. Understanding why they happen will save you hours of debugging.
+
+### Index Out of Range
+
+**Error**: `ValueError: Index out of range. Expected 0 <= indices < 50000, got max=50001`
+
+Embedding lookup expects token IDs in the range `[0, vocab_size-1]`. If your tokenizer produces an ID of 50001 but your embedding layer has `vocab_size=50000`, the lookup fails.
+
+**Cause**: Mismatch between tokenizer vocabulary size and embedding layer vocabulary size. This often happens when you train a tokenizer separately and forget to sync the vocabulary size when creating the embedding layer.
+
+**Fix**: Ensure `embed_layer.vocab_size` matches your tokenizer's vocabulary size exactly:
 
 ```python
-from tinytorch.core.embeddings import Embedding, PositionalEncoding, create_sinusoidal_embeddings
+tokenizer = Tokenizer(vocab_size=50000)
+embed = Embedding(vocab_size=tokenizer.vocab_size, embed_dim=512)
+```
+
+### Sequence Length Exceeds Maximum
+
+**Error**: `ValueError: Sequence length 1024 exceeds maximum 512`
+
+Learned positional encodings have a fixed maximum sequence length set during initialization. If you try to process a sequence longer than this maximum, the forward pass fails because there are no position embeddings for those positions.
+
+**Cause**: Input sequences longer than `max_seq_len` parameter used when creating the positional encoding layer.
+
+**Fix**: Either increase `max_seq_len` during initialization, truncate your sequences, or use sinusoidal positional encoding which can handle arbitrary lengths:
+
+```python
+# Option 1: Increase max_seq_len
+pos_enc = PositionalEncoding(max_seq_len=2048, embed_dim=512)
+
+# Option 2: Use sinusoidal (no length limit)
+embed_layer = EmbeddingLayer(vocab_size=50000, embed_dim=512,
+                             pos_encoding='sinusoidal')
+```
+
+### Embedding Dimension Mismatch
+
+**Error**: `ValueError: Embedding dimension mismatch: expected 512, got 768`
+
+When adding positional encodings to token embeddings, the dimensions must match exactly. If your token embeddings are 512-dimensional but your positional encoding expects 768-dimensional inputs, element-wise addition fails.
+
+**Cause**: Creating embedding components with inconsistent `embed_dim` values.
+
+**Fix**: Use the same `embed_dim` for all embedding components:
+
+```python
+embed_dim = 512
+token_embed = Embedding(vocab_size=50000, embed_dim=embed_dim)
+pos_enc = PositionalEncoding(max_seq_len=512, embed_dim=embed_dim)
+```
+
+### Shape Errors with Batching
+
+**Error**: `ValueError: Expected 3D input (batch, seq, embed), got shape (128, 512)`
+
+Positional encoding expects 3D tensors with batch dimension. If you pass a 2D tensor (sequence, embedding), the forward pass fails.
+
+**Cause**: Forgetting to add batch dimension when processing single sequences, or using raw embedding output without reshaping.
+
+**Fix**: Ensure inputs have batch dimension, even for single sequences:
+
+```python
+# Wrong: 2D input
+tokens = Tensor([1, 2, 3])
+embeddings = embed(tokens)  # Shape: (3, 512) - missing batch dim
+
+# Right: 3D input
+tokens = Tensor([[1, 2, 3]])  # Added batch dimension
+embeddings = embed(tokens)  # Shape: (1, 3, 512) - correct
+```
+
+## Production Context
+
+### Your Implementation vs. PyTorch
+
+Your TinyTorch embedding system and PyTorch's `torch.nn.Embedding` share the same conceptual design and API patterns. The differences are in scale, optimization, and device support.
+
+| Feature | Your Implementation | PyTorch |
+|---------|---------------------|---------|
+| **Backend** | NumPy (CPU only) | C++/CUDA (CPU/GPU) |
+| **Lookup Speed** | 1x (baseline) | 10-100x faster on GPU |
+| **Max Vocabulary** | Limited by RAM | Billions (with techniques) |
+| **Positional Encoding** | Learned + sinusoidal | Must implement yourself* |
+| **Sparse Gradients** | Via custom backward | Native sparse gradient support |
+| **Memory Optimization** | Standard | Quantization, pruning, sharing |
+
+*PyTorch provides building blocks but you implement positional encoding patterns yourself (as you did here)
+
+### Code Comparison
+
+The following comparison shows equivalent embedding operations in TinyTorch and PyTorch. Notice how the APIs mirror each other closely.
+
+`````{tab-set}
+````{tab-item} Your TinyTorch
+```python
+from tinytorch.core.embeddings import Embedding, EmbeddingLayer
 
 # Create embedding layer
-vocab_size, embed_dim = 10000, 256
-token_emb = Embedding(vocab_size, embed_dim)
+embed = Embedding(vocab_size=50000, embed_dim=512)
 
-# Test token lookup
-token_ids = Tensor([[1, 5, 23], [42, 7, 19]])  # (2, 3) - batch of 2 sequences
-embeddings = token_emb.forward(token_ids)      # (2, 3, 256)
-print(f"Token embeddings shape: {embeddings.shape}")
+# Token lookup
+tokens = Tensor([[1, 42, 7, 99]])
+embeddings = embed(tokens)  # (1, 4, 512)
 
-# Add learned positional encodings
-pos_emb = PositionalEncoding(max_seq_len=512, embed_dim=256)
-token_embeddings_3d = embeddings  # Already (batch, seq, embed)
-pos_aware = pos_emb.forward(token_embeddings_3d)
-print(f"Position-aware shape: {pos_aware.shape}")  # (2, 3, 256)
-
-# Try sinusoidal encodings
-sin_pe = create_sinusoidal_embeddings(max_seq_len=512, embed_dim=256)
-sin_positions = sin_pe.data[:3][np.newaxis, :, :]  # (1, 3, 256)
-combined = Tensor(embeddings.data + sin_positions)
-print(f"Sinusoidal combined: {combined.shape}")  # (2, 3, 256)
-
-# Verify position 0 pattern (should be [0, 1, 0, 1, ...])
-print(f"Position 0 pattern: {sin_pe.data[0, :8]}")
-# Expected: [~0.0, ~1.0, ~0.0, ~1.0, ~0.0, ~1.0, ~0.0, ~1.0]
+# Complete system with position encoding
+embed_layer = EmbeddingLayer(
+    vocab_size=50000,
+    embed_dim=512,
+    max_seq_len=2048,
+    pos_encoding='learned'
+)
+position_aware = embed_layer(tokens)
 ```
-
-## Systems Thinking Questions
-
-### Real-World Applications
-
-- **Large Language Models (GPT-4, Claude, Llama)**: Embedding tables often contain 20-40% of total model parameters. GPT-3's 50K vocab × 12K dims = 617M embedding parameters alone (2.4GB at FP32). This makes embeddings a major memory consumer in serving infrastructure.
-
-- **Recommendation Systems (YouTube, Netflix, Spotify)**: Billion-scale item embeddings for personalized content retrieval. YouTube's embedding space contains hundreds of millions of video embeddings, enabling fast nearest-neighbor search for recommendations in milliseconds.
-
-- **Multilingual Models (Google Translate, mBERT)**: Shared embedding spaces across 100+ languages enable zero-shot cross-lingual transfer. Words with similar meanings across languages cluster together in the learned vector space, allowing translation without parallel data.
-
-- **Search Engines (Google, Bing)**: Query and document embeddings power semantic search beyond keyword matching. BERT-style embeddings capture meaning, letting "how to fix a leaky faucet" match "plumbing repair for dripping tap" even with no shared words.
-
-### Mathematical Foundations
-
-- **Embedding Geometry**: Why do word embeddings exhibit linear relationships like "king - man + woman ≈ queen"? The training objective (predicting context words in word2vec, or next tokens in language models) creates geometric structure where semantic relationships become linear vector operations. This emerges without explicit supervision.
-
-- **Dimensionality Trade-offs**: Higher dimensions increase expressiveness (more capacity to separate distinct concepts) but require more memory and computation. BERT-base uses 768 dimensions, BERT-large uses 1024 - carefully chosen based on performance-cost Pareto analysis. Doubling dimensions doubles memory but may only improve accuracy by a few percentage points.
-
-- **Positional Encoding Mathematics**: Sinusoidal encodings use different frequencies (wavelengths from 2π to 10,000·2π) so each position gets a unique pattern. The model can learn relative positions through attention: the dot product of position encodings at offsets k captures periodic patterns the attention mechanism learns to use.
-
-- **Sparse Gradient Efficiency**: During training with vocabulary size V and batch containing b unique tokens, dense gradients would update all V embeddings. Sparse gradients only update b embeddings - when b << V (typical: 1000 tokens vs 50K vocab), this saves ~98% of gradient computation and memory bandwidth.
-
-### Performance Characteristics
-
-- **Memory Scaling**: Embedding tables grow as O(vocab_size × embedding_dim). At FP32 (4 bytes per parameter): 50K vocab × 768 dims = 153MB, 100K vocab × 1024 dims = 410MB. Mixed precision (FP16) cuts this in half, but vocabulary size dominates scaling for large models.
-
-- **Bandwidth Bottleneck**: Every token lookup reads embedding_dim × sizeof(dtype) bytes from memory. With 768 dims at FP32, that's 3KB per token. Processing a 2048-token context requires reading 6MB from the embedding table - memory bandwidth becomes the bottleneck, not compute.
-
-- **Cache Efficiency**: Sequential token access has poor cache locality because tokens are typically non-sequential in the embedding table (token IDs [1, 42, 7, 99] means random jumps through the weight matrix). Batching improves throughput by amortizing cache misses, but embedding access remains memory-bound, not compute-bound.
-
-- **Inference Optimization**: Embedding quantization (INT8 or even INT4) reduces memory footprint and bandwidth by 2-4×, critical for deployment. KV-caching in transformers makes embedding lookup happen only once per token (not per layer), so optimizing this cold start is important for latency-sensitive applications.
-
-## Ready to Build?
-
-You're about to implement the embedding systems that power modern AI language understanding. These lookup tables and positional encodings are the bridge between discrete tokens (words, subwords, characters) and the continuous vector spaces where neural networks operate. What seems like a simple "array lookup" is actually the foundation of how language models represent meaning.
-
-What makes this module special is understanding not just *how* embeddings work, but *why* certain design choices matter. Why do we need positional encodings when embeddings already contain token information? Why sparse gradients instead of dense updates? How does embedding dimension affect model capacity versus memory footprint? These aren't just implementation details - they're fundamental design principles that shape every production language model's architecture.
-
-By building embeddings from scratch, you'll gain intuition for memory-computation trade-offs in deep learning systems. You'll understand why GPT-3's embedding table consumes 2.4GB of memory, and why that matters for serving costs at scale (more memory = more expensive GPUs = higher operational costs). You'll see how sinusoidal encodings allow transformers to process sequences longer than training data, while learned positions might perform better on specific tasks with known maximum lengths.
-
-This is where theory meets the economic realities of deploying AI at scale. Every architectural choice - vocabulary size, embedding dimension, positional encoding strategy - has both technical implications (accuracy, generalization) and business implications (memory costs, inference latency, serving throughput). Understanding these trade-offs is what separates machine learning researchers from machine learning systems engineers.
-
-Choose your preferred way to engage with this module:
-
-````{grid} 1 2 3 3
-
-```{grid-item-card}  Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/11_embeddings/embeddings_dev.ipynb
-:class-header: bg-light
-
-Run this module interactively in your browser. No installation required!
-```
-
-```{grid-item-card}  Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/11_embeddings/embeddings_dev.ipynb
-:class-header: bg-light
-
-Use Google Colab for GPU access and cloud compute power.
-```
-
-```{grid-item-card}  View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/11_embeddings/embeddings_dev.ipynb
-:class-header: bg-light
-
-Browse the Jupyter notebook source and understand the implementation.
-```
-
 ````
 
-```{admonition}  Save Your Progress
-:class: tip
-**Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
+````{tab-item} PyTorch
+```python
+import torch
+import torch.nn as nn
+
+# Create embedding layer
+embed = nn.Embedding(num_embeddings=50000, embedding_dim=512)
+
+# Token lookup
+tokens = torch.tensor([[1, 42, 7, 99]])
+embeddings = embed(tokens)  # (1, 4, 512)
+
+# Complete system (you implement positional encoding yourself)
+class EmbeddingWithPosition(nn.Module):
+    def __init__(self, vocab_size, embed_dim, max_seq_len):
+        super().__init__()
+        self.token_embed = nn.Embedding(vocab_size, embed_dim)
+        self.pos_embed = nn.Embedding(max_seq_len, embed_dim)
+
+    def forward(self, tokens):
+        seq_len = tokens.shape[1]
+        positions = torch.arange(seq_len).unsqueeze(0)
+        return self.token_embed(tokens) + self.pos_embed(positions)
+
+embed_layer = EmbeddingWithPosition(50000, 512, 2048)
+position_aware = embed_layer(tokens)
+```
+````
+`````
+
+Let's walk through each section to understand the comparison:
+
+- **Line 1-2 (Import)**: Both frameworks provide dedicated embedding modules. TinyTorch packages everything in `embeddings`; PyTorch uses `nn.Embedding` as the base class.
+- **Line 4-5 (Embedding Creation)**: Your `Embedding` class closely mirrors PyTorch's `nn.Embedding`. The parameter names differ (`vocab_size` vs `num_embeddings`) but the concept is identical.
+- **Line 7-9 (Token Lookup)**: Both use identical calling patterns. The embedding layer acts as a function, taking token IDs and returning dense vectors. Shape semantics are identical.
+- **Line 11-20 (Complete System)**: Your `EmbeddingLayer` provides a complete system in one class. In PyTorch, you implement this pattern yourself by composing `nn.Embedding` layers for tokens and positions. The HuggingFace Transformers library implements this exact pattern for BERT, GPT, and other models.
+- **Line 22-24 (Forward Pass)**: Both systems add token and position embeddings element-wise. Your implementation handles this internally; PyTorch requires you to manage position indices explicitly.
+
+```{tip} What's Identical
+
+Embedding lookup semantics, gradient flow patterns, and the addition of positional information. When you debug PyTorch transformer models, you'll recognize these exact patterns because you built them yourself.
 ```
 
----
+### Why Embeddings Matter at Scale
 
-<div class="prev-next-area">
-<a class="left-prev" href="10_tokenization_ABOUT.html" title="previous page">← Module 10: Tokenization</a>
-<a class="right-next" href="12_attention_ABOUT.html" title="next page">Module 12: Attention →</a>
-</div>
+To appreciate embedding systems, consider the scale of modern language models:
+
+- **GPT-3 embeddings**: 50,257 token vocabulary × 12,288 dimensions = **618 million parameters** = 2.4 GB of memory (just for token embeddings, not counting position embeddings)
+- **Lookup throughput**: Processing 32 sequences of 2048 tokens requires **65,536 embedding lookups** per batch. At 1000 batches per second (typical training), that's 65 million lookups per second.
+- **Memory bandwidth**: Each lookup transfers 512-1024 dimensions × 4 bytes = **2-4 KB from RAM to cache**. At scale, memory bandwidth (not compute) becomes the bottleneck.
+- **Gradient sparsity**: In a batch with 65,536 tokens, only a small fraction of the 50,257 vocabulary is accessed. Efficient training exploits this sparsity, updating only the accessed embeddings' gradients.
+
+Modern transformer training spends approximately **10-15% of total time** in embedding operations (lookup + position encoding). The remaining 85-90% goes to attention and feedforward layers. However, embeddings consume **30-40% of model memory** for models with large vocabularies, making them critical for deployment.
+
+## Check Your Understanding
+
+Test yourself with these systems thinking questions. They're designed to build intuition for the performance and memory characteristics you'll encounter in production.
+
+**Q1: Memory Calculation**
+
+An embedding layer has `vocab_size=50000` and `embed_dim=512`. How much memory does the embedding table use (in MB)?
+
+```{admonition} Answer
+:class: dropdown
+
+50,000 × 512 × 4 bytes = **102,400,000 bytes = 97.7 MB**
+
+Calculation breakdown:
+- Parameters: 50,000 × 512 = 25,600,000
+- Memory: 25,600,000 × 4 bytes (float32) = 102,400,000 bytes
+- In MB: 102,400,000 / (1024 × 1024) = 97.7 MB
+
+This is why vocabulary size matters for model deployment!
+```
+
+**Q2: Positional Encoding Memory**
+
+Compare memory requirements for learned vs sinusoidal positional encoding with `max_seq_len=2048` and `embed_dim=512`.
+
+```{admonition} Answer
+:class: dropdown
+
+**Learned PE**: 2,048 × 512 × 4 = **4,194,304 bytes = 4.0 MB** (1,048,576 parameters)
+
+**Sinusoidal PE**: **0 bytes** (0 parameters - computed mathematically)
+
+For large models, learned PE adds significant memory. GPT-3 uses learned PE with 2048 positions × 12,288 dimensions = 100 MB additional memory. Some models use sinusoidal to save this memory.
+```
+
+**Q3: Lookup Complexity**
+
+What is the time complexity of looking up embeddings for a batch of 32 sequences, each with 128 tokens?
+
+```{admonition} Answer
+:class: dropdown
+
+**O(1) per token**, or **O(batch_size × seq_len)** = O(32 × 128) = O(4096) total
+
+The lookup operation is constant time per token because it's just array indexing: `weight[token_id]`. For 4,096 tokens, you perform 4,096 constant-time lookups.
+
+Importantly, vocabulary size does NOT affect lookup time. Looking up tokens from a 1,000 word vocabulary is the same speed as from a 100,000 word vocabulary (assuming cache effects are comparable). The memory access is direct indexing, not search.
+```
+
+**Q4: Embedding Dimension Scaling**
+
+You have an embedding layer with `vocab_size=50000, embed_dim=512` using 100 MB. If you double `embed_dim` to 1024, what happens to memory?
+
+```{admonition} Answer
+:class: dropdown
+
+Memory **doubles to 200 MB**
+
+Embedding memory scales linearly with embedding dimension:
+- Original: 50,000 × 512 × 4 = 100 MB
+- Doubled: 50,000 × 1,024 × 4 = 200 MB
+
+This is why you can't arbitrarily increase embedding dimensions. Each doubling doubles memory and memory bandwidth requirements. Large models carefully balance embedding dimension against available memory.
+```
+
+**Q5: Sinusoidal Extrapolation**
+
+You trained a model with sinusoidal positional encoding and `max_seq_len=512`. Can you process sequences of length 1024 at inference time? What about with learned positional encoding?
+
+```{admonition} Answer
+:class: dropdown
+
+**Sinusoidal PE: Yes** - can extrapolate to length 1024 (or any length)
+
+The mathematical formula creates unique encodings for any position. You simply compute:
+```python
+pe_1024 = create_sinusoidal_embeddings(max_seq_len=1024, embed_dim=512)
+```
+
+**Learned PE: No** - cannot handle sequences longer than training maximum
+
+Learned PE creates a fixed embedding table of shape `(max_seq_len, embed_dim)`. For positions beyond 512, there are no learned embeddings. You must either:
+- Retrain with larger `max_seq_len`
+- Interpolate position embeddings (advanced technique)
+- Truncate sequences to 512 tokens
+
+This is why many production models use sinusoidal or relative positional encodings that can handle variable lengths.
+```
+
+## Further Reading
+
+For students who want to understand the academic foundations and mathematical underpinnings of embeddings and positional encoding:
+
+### Seminal Papers
+
+- **Word2Vec** - Mikolov et al. (2013). Introduced efficient learned word embeddings through context prediction. Though your implementation learns embeddings end-to-end, Word2Vec established the idea that similar words should have similar vectors. [arXiv:1301.3781](https://arxiv.org/abs/1301.3781)
+
+- **Attention Is All You Need** - Vaswani et al. (2017). Introduced sinusoidal positional encoding and demonstrated that learned embeddings combined with positional information enable powerful sequence models. Section 3.5 explains the positional encoding formula you implemented. [arXiv:1706.03762](https://arxiv.org/abs/1706.03762)
+
+- **BERT: Pre-training of Deep Bidirectional Transformers** - Devlin et al. (2018). Shows how embeddings combine with positional and segment encodings for language understanding tasks. BERT uses learned positional embeddings rather than sinusoidal. [arXiv:1810.04805](https://arxiv.org/abs/1810.04805)
+
+### Additional Resources
+
+- **Blog Post**: "The Illustrated Word2Vec" by Jay Alammar - Visual explanation of learned word embeddings and semantic relationships
+- **Documentation**: [PyTorch nn.Embedding](https://pytorch.org/docs/stable/generated/torch.nn.Embedding.html) - See production embedding implementation
+- **Paper**: "GloVe: Global Vectors for Word Representation" - Pennington et al. (2014) - Alternative embedding approach based on co-occurrence statistics
+
+## What's Next
+
+```{seealso} Coming Up: Module 12 - Attention
+
+Implement attention mechanisms that let embeddings interact with each other. You'll build the scaled dot-product attention that enables transformers to learn which tokens should influence each other, creating context-aware representations.
+```
+
+**Preview - How Your Embeddings Get Used in Future Modules:**
+
+| Module | What It Does | Your Embeddings In Action |
+|--------|--------------|--------------------------|
+| **12: Attention** | Context-aware representations | `attention(embed_layer(tokens))` creates query, key, value |
+| **13: Transformers** | Complete sequence-to-sequence | `transformer(embed_layer(src), embed_layer(tgt))` |
+
+## Get Started
+
+```{tip} Interactive Options
+
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/11_embeddings/11_embeddings.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/11_embeddings/11_embeddings.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/11_embeddings/11_embeddings.py)** - Browse the implementation code
+```
+
+```{warning} Save Your Progress
+
+Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
+```

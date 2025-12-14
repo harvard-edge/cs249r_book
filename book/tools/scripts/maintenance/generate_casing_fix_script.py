@@ -16,7 +16,7 @@ def generate_rename_script(output_script_path):
 
     for file_path in git_files:
         directory, filename = os.path.split(file_path)
-        
+
         # Check if the filename has any uppercase characters and is an image
         if any(char.isupper() for char in filename) and os.path.splitext(filename)[1].lower() in image_extensions:
             lowercase_filename = filename.lower()
@@ -24,7 +24,7 @@ def generate_rename_script(output_script_path):
                 new_path = os.path.join(directory, lowercase_filename)
                 # Use a temporary name to handle systems that are case-insensitive
                 temp_path = os.path.join(directory, f"temp_{lowercase_filename}")
-                
+
                 commands.append(f'git mv -f "{file_path}" "{temp_path}"')
                 commands.append(f'git mv -f "{temp_path}" "{new_path}"')
 

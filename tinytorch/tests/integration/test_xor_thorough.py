@@ -39,13 +39,13 @@ for lr in [1.0, 0.5, 0.1]:
     print(f"\n{'='*70}")
     print(f"🔥 Training with learning rate: {lr}")
     print('='*70)
-    
+
     # Reset network
     hidden = Linear(2, hidden_size)
     output = Linear(hidden_size, 1)
-    
+
     optimizer = SGD([p for p in hidden.parameters()] + [p for p in output.parameters()], lr=lr)
-    
+
     epochs = 1000
     for epoch in range(epochs):
         # Forward
@@ -54,18 +54,18 @@ for lr in [1.0, 0.5, 0.1]:
         out = output(h_act)
         pred = sigmoid(out)
         loss = loss_fn(pred, y)
-        
+
         # Backward
         loss.backward()
-        
+
         # Update
         optimizer.step()
         optimizer.zero_grad()
-        
+
         if (epoch + 1) % 200 == 0:
             accuracy = ((pred.data > 0.5).astype(float) == y.data).mean()
             print(f"Epoch {epoch+1:4d}/{epochs}  Loss: {loss.data:.4f}  Accuracy: {accuracy:.1%}")
-    
+
     # Final evaluation
     print("\n✅ Final Predictions:")
     final_accuracy = ((pred.data > 0.5).astype(float) == y.data).mean()
@@ -76,10 +76,10 @@ for lr in [1.0, 0.5, 0.1]:
         y_pred = int(y_pred_prob > 0.5)
         status = "✅" if y_pred == y_true else "❌"
         print(f"  Input: {x_in}  →  Pred: {y_pred} (prob: {y_pred_prob:.3f})  True: {y_true}  {status}")
-    
+
     print(f"\n📊 Final Accuracy: {final_accuracy:.1%}")
     print(f"📊 Final Loss: {loss.data:.4f}")
-    
+
     if final_accuracy >= 0.95:
         print("🎉 SUCCESS! XOR is properly solved!")
         break

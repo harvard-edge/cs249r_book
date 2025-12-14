@@ -6,7 +6,7 @@ export function getSession() {
     const userStr = localStorage.getItem("tinytorch_user");
     let user = null;
     try { user = JSON.parse(userStr); } catch(e) {}
-    
+
     // Allow window.USER_EMAIL to override or serve as fallback if no local storage (legacy support)
     const email = user ? user.email : (window.USER_EMAIL || null);
     return { token, email, isLoggedIn: !!token };

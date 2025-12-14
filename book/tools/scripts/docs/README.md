@@ -93,7 +93,7 @@ The project uses pre-commit hooks for code quality checks. The hooks run automat
    ```bash
    # Run on all files
    pre-commit run --all-files
-   
+
    # Run on specific files
    pre-commit run --files path/to/file.qmd
    ```
@@ -107,4 +107,4 @@ The project uses pre-commit hooks for code quality checks. The hooks run automat
   nltk.download('punkt')
   ```
 
-- **Python environment**: The hooks use isolated Python environments with the specified dependencies, so they should work regardless of your local Python setup. 
+- **Python environment**: The hooks use isolated Python environments with the specified dependencies, so they should work regardless of your local Python setup.

@@ -19,7 +19,7 @@ perceptron = Linear(2, 1)  # 2 inputs → 1 output
 
 **What it learns**: Linearly separable patterns (AND, OR gates)
 
-**Key innovation**: 
+**Key innovation**:
 - Automatic weight updates via gradient descent
 - Proof that machines can learn from data
 

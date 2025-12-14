@@ -43,7 +43,7 @@ class SrcCommand(BaseCommand):
             dest='src_command',
             help='Source file operations'
         )
-        
+
         # EXPORT command - convert src/ to modules/ to tinytorch/
         export_parser = subparsers.add_parser(
             'export',
@@ -64,7 +64,7 @@ class SrcCommand(BaseCommand):
             action='store_true',
             help='Run checkpoint test after successful export'
         )
-        
+
         # TEST command - run tests on modules
         test_parser = subparsers.add_parser(
             'test',
@@ -90,10 +90,10 @@ class SrcCommand(BaseCommand):
     def _show_next_steps(self, completed_module: str) -> None:
         """Show next steps after successful module completion."""
         console = self.console
-        
+
         # Get next module suggestion (auto-discovered from filesystem)
         next_info = get_next_module(completed_module)
-        
+
         if next_info:
             next_num, next_folder, next_display = next_info
             console.print(f"\n[bold cyan]🎯 Continue Your Journey[/bold cyan]")
@@ -106,7 +106,7 @@ class SrcCommand(BaseCommand):
             console.print(f"\n[bold green]🏆 Congratulations![/bold green]")
             console.print(f"[green]You've completed all TinyTorch modules![/green]")
             console.print(f"[dim]Run 'tito checkpoint status' to see your full progress[/dim]")
-        
+
         # General next steps
         console.print(f"\n[bold]Continue your ML systems journey:[/bold]")
         console.print(f"[dim]  tito checkpoint status    - View overall progress[/dim]")
@@ -119,7 +119,7 @@ class SrcCommand(BaseCommand):
         """Show detailed export information including where each module exports to."""
         exports_text = Text()
         exports_text.append("📦 Export Details:\n", style="bold cyan")
-        
+
         if module_name:
             # Single module export
             module_path = Path(f"modules/{module_name}")
@@ -127,7 +127,7 @@ class SrcCommand(BaseCommand):
             if export_target != "unknown":
                 target_file = export_target.replace('.', '/') + '.py'
                 exports_text.append(f"  🔄 {module_name} → tinytorch/{target_file}\n", style="green")
-                
+
                 # Extract the short name for display
                 short_name = module_name[3:] if module_name.startswith(tuple(f"{i:02d}_" for i in range(100))) else module_name
                 exports_text.append(f"     Source: modules/{module_name}/{short_name}.py\n", style="dim")
@@ -143,7 +143,7 @@ class SrcCommand(BaseCommand):
                 if export_target != "unknown":
                     target_file = export_target.replace('.', '/') + '.py'
                     exports_text.append(f"  🔄 {module_name} → tinytorch/{target_file}\n", style="green")
-        
+
         # Show what was actually created
         exports_text.append("\n📁 Generated Files:\n", style="bold cyan")
         tinytorch_path = Path("tinytorch")
@@ -152,12 +152,12 @@ class SrcCommand(BaseCommand):
                 if py_file.name != "__init__.py" and py_file.stat().st_size > 100:  # Non-empty files
                     rel_path = py_file.relative_to(tinytorch_path)
                     exports_text.append(f"  ✅ tinytorch/{rel_path}\n", style="green")
-        
+
         exports_text.append("\n💡 Next steps:\n", style="bold yellow")
         exports_text.append("  • Run: tito test --all\n", style="white")
         exports_text.append("  • Or: tito test <module_name>\n", style="white")
         exports_text.append("  • Or: tito export <module> --test-checkpoint\n", style="white")
-        
+
         console.print(Panel(exports_text, title="Export Summary", border_style="bright_green"))
 
     def _validate_notebook_integrity(self, notebook_path: Path) -> Dict:
@@ -165,14 +165,14 @@ class SrcCommand(BaseCommand):
 
     def _convert_py_to_notebook(self, module_path: Path) -> bool:
         return convert_py_to_notebook(module_path, self.venv_path, self.console)
-    
+
     def _convert_all_modules(self) -> list:
         return convert_all_modules(self.venv_path, self.console)
 
     def run(self, args: Namespace) -> int:
         console = self.console
         logger.info("Starting source command")
-        
+
         # Handle subcommands
         if not hasattr(args, 'src_command') or args.src_command is None:
             console.print(Panel("[yellow]Please specify a subcommand: export or test[/yellow]\n\n"
@@ -182,7 +182,7 @@ class SrcCommand(BaseCommand):
                               "[dim]  tito source test 01_tensor[/dim]",
                               title="Missing Subcommand", border_style="yellow"))
             return 1
-        
+
         if args.src_command == 'export':
             return self._handle_export(args, console)
         elif args.src_command == 'test':
@@ -190,7 +190,7 @@ class SrcCommand(BaseCommand):
         else:
             console.print(f"[red]Unknown subcommand: {args.src_command}[/red]")
             return 1
-    
+
     def _handle_export(self, args: Namespace, console) -> int:
         """Handle the export subcommand."""
         logger.info("Handling export subcommand")
@@ -218,20 +218,20 @@ class SrcCommand(BaseCommand):
             logger.info(f"Exporting specific modules: {args.modules}")
             # Export multiple specific modules
             modules_to_export = args.modules
-            
-            console.print(Panel(f"🔄 Exporting Modules: {', '.join(modules_to_export)}", 
+
+            console.print(Panel(f"🔄 Exporting Modules: {', '.join(modules_to_export)}",
                                title="Complete Export Workflow", border_style="bright_cyan"))
-            
+
             exported_notebooks = []
-            
+
             # Process each module
             for module_name in modules_to_export:
                 logger.debug(f"Processing module: {module_name}")
                 module_path = Path(f"src/{module_name}")
                 if not module_path.exists():
-                    console.print(Panel(f"[red]❌ Module '{module_name}' not found in src/[/red]", 
+                    console.print(Panel(f"[red]❌ Module '{module_name}' not found in src/[/red]",
                                       title="Module Not Found", border_style="red"))
-                    
+
                     # Show available modules
                     available_modules = self._discover_modules()
                     if available_modules:
@@ -240,9 +240,9 @@ class SrcCommand(BaseCommand):
                         for module in available_modules:
                             help_text.append(f"  • {module}\n", style="white")
                         console.print(Panel(help_text, title="Available Modules", border_style="yellow"))
-                    
+
                     return 1
-                
+
                 # Always convert Python file to notebook (Python file is source of truth)
                 # Notebook will be created in modules/ directory with SHORT name (e.g., tensor.ipynb)
                 # Note: convert_py_to_notebook uses short_name = module_name.split("_", 1)[1]
@@ -254,9 +254,9 @@ class SrcCommand(BaseCommand):
                     logger.error(f"Failed to convert .py file to notebook for {module_name}")
                     return 1
                 exported_notebooks.append(str(notebook_file))
-            
+
             logger.info(f"Exporting {len(exported_notebooks)} notebooks to tinytorch package")
-            
+
             # Export all notebooks
             success_count = 0
             for notebook_path_str in exported_notebooks:
@@ -270,10 +270,10 @@ class SrcCommand(BaseCommand):
                     export_target = self._get_export_target(module_path)
                     if export_target != "unknown":
                         ensure_writable_target(export_target)
-                    
+
                     cmd = ["nbdev_export", "--path", notebook_path_str]
                     console.print(f"[dim]⚙️  Running: nbdev_export --path {notebook_name}[/dim]")
-                    
+
                     result = subprocess.run(cmd, capture_output=True, text=True, cwd=Path.cwd())
                     if result.returncode == 0:
                         success_count += 1
@@ -289,41 +289,41 @@ class SrcCommand(BaseCommand):
                             console.print(f"   Output: {result.stdout.strip()}")
                 except Exception as e:
                     console.print(f"❌ Error exporting {Path(notebook_path).name}: {e}")
-            
+
             if success_count == len(exported_notebooks):
                 logger.info("All notebooks exported successfully")
                 # ALWAYS add auto-generated warnings immediately after export
                 self._add_autogenerated_warnings(console)
-                
+
                 # 🛡️ AUTOMATIC PROTECTION: Enable protection after export
                 self._auto_enable_protection(console)
-                
-                console.print(Panel(f"[green]✅ Successfully exported {success_count}/{len(exported_notebooks)} modules to tinytorch package![/green]", 
+
+                console.print(Panel(f"[green]✅ Successfully exported {success_count}/{len(exported_notebooks)} modules to tinytorch package![/green]",
                               title="Export Success", border_style="green"))
                 return 0
             else:
                 logger.warning(f"Exported {success_count}/{len(exported_notebooks)} modules. Some exports failed.")
-                console.print(Panel(f"[yellow]⚠️ Exported {success_count}/{len(exported_notebooks)} modules. Some exports failed.[/yellow]", 
+                console.print(Panel(f"[yellow]⚠️ Exported {success_count}/{len(exported_notebooks)} modules. Some exports failed.[/yellow]",
                               title="Partial Success", border_style="yellow"))
                 return 1
         elif hasattr(args, 'all') and args.all:
             logger.info("Exporting all modules")
-            console.print(Panel("🔄 Exporting All Modules to Package", 
+            console.print(Panel("🔄 Exporting All Modules to Package",
                                title="Complete Export Workflow", border_style="bright_cyan"))
-            
+
             # Step 1: Convert all .py files to .ipynb
             console.print("📝 Converting all Python files to notebooks...")
             converted = self._convert_all_modules()
             if not converted:
                 logger.error("No modules converted. Check if jupytext is installed and .py files exist.")
-                console.print(Panel("[red]❌ No modules converted. Check if jupytext is installed and .py files exist.[/red]", 
+                console.print(Panel("[red]❌ No modules converted. Check if jupytext is installed and .py files exist.[/red]",
                                   title="Conversion Error", border_style="red"))
                 return 1
-            
+
             console.print(f"✅ Converted {len(converted)} modules: {', '.join(converted)}")
             console.print("🔄 Exporting all notebook code to tinytorch package...")
-            
-            # Step 2: Use nbdev_export for all modules  
+
+            # Step 2: Use nbdev_export for all modules
             cmd = ["nbdev_export"]
         else:
             logger.error("Must specify either module names or --all")
@@ -331,37 +331,37 @@ class SrcCommand(BaseCommand):
                               "[dim]Examples:[/dim]\n"
                               "[dim]  tito source export 01_tensor[/dim]\n"
                               "[dim]  tito source export 01_tensor 02_activations[/dim]\n"
-                              "[dim]  tito source export --all[/dim]", 
+                              "[dim]  tito source export --all[/dim]",
                               title="Missing Arguments", border_style="red"))
             return 1
-        
+
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, cwd=Path.cwd())
-            
+
             if result.returncode == 0:
                 logger.info("Export command completed successfully")
                 # ALWAYS add auto-generated warnings immediately after export
                 self._add_autogenerated_warnings(console)
-                
+
                 # 🛡️ AUTOMATIC PROTECTION: Enable protection after export
                 self._auto_enable_protection(console)
-                
-                console.print(Panel("[green]✅ Successfully exported notebook code to tinytorch package![/green]", 
+
+                console.print(Panel("[green]✅ Successfully exported notebook code to tinytorch package![/green]",
                                   title="Export Success", border_style="green"))
-                
+
                 # Show detailed export information
                 module_names = args.modules if hasattr(args, 'modules') and args.modules else None
                 if module_names and len(module_names) == 1:
                     self._show_export_details(console, module_names[0])
                 else:
                     self._show_export_details(console, None)
-                
+
             else:
                 logger.error(f"Export failed with return code {result.returncode}")
                 error_msg = result.stderr.strip() if result.stderr else "Unknown error"
-                console.print(Panel(f"[red]❌ Export failed:\n{error_msg}[/red]", 
+                console.print(Panel(f"[red]❌ Export failed:\n{error_msg}[/red]",
                                   title="Export Error", border_style="red"))
-                
+
                 # Helpful error guidance
                 help_text = Text()
                 help_text.append("💡 Common issues:\n", style="bold yellow")
@@ -369,18 +369,18 @@ class SrcCommand(BaseCommand):
                 help_text.append("  • Syntax errors in exported code\n", style="white")
                 help_text.append("  • Missing settings.ini configuration\n", style="white")
                 help_text.append("\n🔧 Run 'tito system health' for detailed diagnosis", style="cyan")
-                
+
                 console.print(Panel(help_text, title="Troubleshooting", border_style="yellow"))
-                
+
             return result.returncode
-            
+
         except FileNotFoundError:
             logger.exception("nbdev not found. Install with: pip install nbdev")
             return 1
         except Exception as e:
             logger.exception(f"Unexpected error during export: {e}")
             return 1
-    
+
     def _auto_enable_protection(self, console):
         """🛡️ Automatically enable basic file protection after export.
 

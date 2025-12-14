@@ -12,19 +12,21 @@
 TinyTorch uses a clean, simple approach to track your ML systems engineering journey:
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 graph LR
-    A[Build Modules] --> B[Complete 01-20]
-    B --> C[Export to Package]
-    C --> D[Unlock Milestones]
-    D --> E[Achieve 1957-2018]
-    E --> F[Track Progress]
+ A[Build Modules] --> B[Complete 01-20]
+ B --> C[Export to Package]
+ C --> D[Unlock Milestones]
+ D --> E[Achieve 1957-2018]
+ E --> F[Track Progress]
 
-    style A fill:#e3f2fd
-    style B fill:#fffbeb
-    style C fill:#f0fdf4
-    style D fill:#fef3c7
-    style E fill:#f3e5f5
-    style F fill:#e8eaf6
+ style A fill:#e3f2fd
+ style B fill:#fffbeb
+ style C fill:#f0fdf4
+ style D fill:#fef3c7
+ style E fill:#f3e5f5
+ style F fill:#e8eaf6
 ```
 
 ### The Two Systems
@@ -32,7 +34,7 @@ graph LR
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 2rem 0;">
 
 <div style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3;">
-<h4 style="margin: 0 0 0.5rem 0; color: #1976d2;">📦 Module Progress</h4>
+<h4 style="margin: 0 0 0.5rem 0; color: #1976d2;"> Module Progress</h4>
 <p style="margin: 0.5rem 0; font-size: 0.95rem; color: #37474f;">What you BUILD (01-20)</p>
 <ul style="margin: 0.5rem 0 0 0; padding-left: 1.5rem; font-size: 0.9rem; color: #546e7a;">
 <li>Tensor, Autograd, Optimizers</li>
@@ -43,7 +45,7 @@ graph LR
 </div>
 
 <div style="background: #f3e5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #9c27b0;">
-<h4 style="margin: 0 0 0.5rem 0; color: #7b1fa2;">🏆 Milestone Achievements</h4>
+<h4 style="margin: 0 0 0.5rem 0; color: #7b1fa2;"> Milestone Achievements</h4>
 <p style="margin: 0.5rem 0; font-size: 0.95rem; color: #37474f;">What you ACHIEVE (01-06)</p>
 <ul style="margin: 0.5rem 0 0 0; padding-left: 1.5rem; font-size: 0.9rem; color: #546e7a;">
 <li>Perceptron (1957)</li>
@@ -61,7 +63,6 @@ graph LR
 - Complete modules → Unlock milestones → Achieve historical ML recreations
 - Build capabilities → Validate with history → Track achievements
 
----
 
 ## Where Your Data Lives
 
@@ -69,16 +70,16 @@ All your progress is stored in the `.tito/` folder:
 
 ```
 TinyTorch/
-├── .tito/                    ← Your progress data
-│   ├── config.json           ← User preferences
-│   ├── progress.json         ← Module completion (01-20)
-│   ├── milestones.json       ← Milestone achievements (01-06)
-│   └── backups/              ← Automatic safety backups
-│       ├── 01_tensor_YYYYMMDD_HHMMSS.py
-│       ├── 02_activations_YYYYMMDD_HHMMSS.py
-│       └── ...
-├── modules/                  ← Where you edit
-├── tinytorch/                ← Where code exports
+├── .tito/ ← Your progress data
+│ ├── config.json ← User preferences
+│ ├── progress.json ← Module completion (01-20)
+│ ├── milestones.json ← Milestone achievements (01-06)
+│ └── backups/ ← Automatic safety backups
+│ ├── 01_tensor_YYYYMMDD_HHMMSS.py
+│ ├── 02_activations_YYYYMMDD_HHMMSS.py
+│ └── ...
+├── modules/ ← Where you edit
+├── tinytorch/ ← Where code exports
 └── ...
 ```
 
@@ -89,7 +90,7 @@ TinyTorch/
 **`config.json`** - User Preferences
 ```json
 {
-  "logo_theme": "standard"
+ "logo_theme": "standard"
 }
 ```
 - UI preferences
@@ -99,13 +100,13 @@ TinyTorch/
 **`progress.json`** - Module Completion
 ```json
 {
-  "version": "1.0",
-  "completed_modules": [1, 2, 3, 4, 5, 6, 7],
-  "completion_dates": {
-    "1": "2025-11-16T10:00:00",
-    "2": "2025-11-16T11:00:00",
-    ...
-  }
+ "version": "1.0",
+ "completed_modules": [1, 2, 3, 4, 5, 6, 7],
+ "completion_dates": {
+ "1": "2025-11-16T10:00:00",
+ "2": "2025-11-16T11:00:00",
+ ...
+ }
 }
 ```
 - Tracks which modules (01-20) you've completed
@@ -115,11 +116,11 @@ TinyTorch/
 **`milestones.json`** - Milestone Achievements
 ```json
 {
-  "version": "1.0",
-  "completed_milestones": ["03"],
-  "completion_dates": {
-    "03": "2025-11-16T15:00:00"
-  }
+ "version": "1.0",
+ "completed_milestones": ["03"],
+ "completion_dates": {
+ "03": "2025-11-16T15:00:00"
+ }
 }
 ```
 - Tracks which milestones (01-06) you've achieved
@@ -134,7 +135,6 @@ TinyTorch/
 
 </div>
 
----
 
 ## Progress Views
 
@@ -149,35 +149,35 @@ tito module status
 **Shows your module completion progress**:
 
 ```
-╭─────────────── 📊 TinyTorch Progress ────────────────╮
-│                                                      │
-│  📦 Modules Completed: 7/20 (35%)                    │
-│  🏆 Milestones Achieved: 1/6 (17%)                   │
-│  📍 Last Activity: Module 07 (2 hours ago)           │
-│                                                      │
-│  Next Steps:                                         │
-│    • Complete modules 08-09 to unlock Milestone 04   │
-│                                                      │
+╭─────────────── TinyTorch Progress ────────────────╮
+│ │
+│ Modules Completed: 7/20 (35%) │
+│ Milestones Achieved: 1/6 (17%) │
+│ Last Activity: Module 07 (2 hours ago) │
+│ │
+│ Next Steps: │
+│ • Complete modules 08-09 to unlock Milestone 04 │
+│ │
 ╰──────────────────────────────────────────────────────╯
 
 Module Progress:
-  ✅ 01 Tensor
-  ✅ 02 Activations
-  ✅ 03 Layers
-  ✅ 04 Losses
-  ✅ 05 Autograd
-  ✅ 06 Optimizers
-  ✅ 07 Training
-  🔒 08 DataLoader
-  🔒 09 Convolutions
-  🔒 10 Normalization
-  ...
+ 01 Tensor
+ 02 Activations
+ 03 Layers
+ 04 Losses
+ 05 Autograd
+ 06 Optimizers
+ 07 Training
+ 08 DataLoader
+ 09 Convolutions
+ 10 Normalization
+ ...
 
 Milestone Achievements:
-  ✅ 03 - MLP Revival (1986)
-  🎯 04 - CNN Revolution (1998) [Ready after modules 08-09]
-  🔒 05 - Transformer Era (2017)
-  🔒 06 - MLPerf (2018)
+ 03 - MLP Revival (1986)
+ 04 - CNN Revolution (1998) [Ready after modules 08-09]
+ 05 - Transformer Era (2017)
+ 06 - MLPerf (2018)
 ```
 
 **Use this to**:
@@ -202,7 +202,6 @@ tito milestone status
 
 </div>
 
----
 
 ## Data Management Commands
 
@@ -231,21 +230,21 @@ tito module reset 03
 
 **Example output**:
 ```
-⚠️  Warning: This will reset Module 03 (Layers)
+️ Warning: This will reset Module 03 (Layers)
 
 This will:
-  • Backup current implementation
-  • Reset module to clean state
-  • Clear module completion status
+ • Backup current implementation
+ • Reset module to clean state
+ • Clear module completion status
 
 Your code will be backed up to .tito/backups/
 
 Continue? [y/N]: y
 
-✅ Creating backup at .tito/backups/03_layers_20251116_143000.py
-✅ Resetting module to clean state
+ Creating backup at .tito/backups/03_layers_20251116_143000.py
+ Resetting module to clean state
 
-🔄 Reset Complete!
+ Reset Complete!
 
 You're ready to start fresh on Module 03.
 Run: tito module start 03
@@ -261,7 +260,6 @@ Before any reset, TinyTorch automatically:
 
 </div>
 
----
 
 ## Data Safety & Recovery
 
@@ -318,7 +316,6 @@ tito system health
 
 </div>
 
----
 
 ## Data Health Checks
 
@@ -333,38 +330,37 @@ tito system health
 **Now includes data health checks**:
 
 ```
-╭────────── 🔍 TinyTorch System Check ──────────╮
-│                                               │
-│  ✅ Environment setup                         │
-│  ✅ Dependencies installed                    │
-│  ✅ TinyTorch in development mode             │
-│  ✅ Data files intact                         │
-│    ✓ .tito/progress.json valid               │
-│    ✓ .tito/milestones.json valid             │
-│    ✓ .tito/config.json valid                 │
-│  ✅ Backups directory exists                  │
-│                                               │
+╭────────── TinyTorch System Check ──────────╮
+│ │
+│ Environment setup │
+│ Dependencies installed │
+│ TinyTorch in development mode │
+│ Data files intact │
+│ .tito/progress.json valid │
+│ .tito/milestones.json valid │
+│ .tito/config.json valid │
+│ Backups directory exists │
+│ │
 ╰───────────────────────────────────────────────╯
 
-All systems ready! 🚀
+All systems ready!
 ```
 
 **If data is corrupted**:
 ```
-❌ Data files corrupted
-  ✗ .tito/progress.json is malformed
+ Data files corrupted
+ .tito/progress.json is malformed
 
 Fix by removing and recreating:
-  rm .tito/progress.json
-  tito system health  # Recreates the file
+ rm .tito/progress.json
+ tito system health # Recreates the file
 
 Or restore from backup:
-  cp .tito_backup_YYYYMMDD/.tito/progress.json .tito/
+ cp .tito_backup_YYYYMMDD/.tito/progress.json .tito/
 ```
 
 </div>
 
----
 
 ## Best Practices
 
@@ -375,37 +371,36 @@ Or restore from backup:
 **Good habits**:
 
 1. **Check status regularly**:
-   ```bash
-   tito module status
-   tito milestone status
-   ```
-   See where you are, what's next
+ ```bash
+ tito module status
+ tito milestone status
+ ```
+ See where you are, what's next
 
 2. **Verify environment before work**:
-   ```bash
-   tito system health
-   ```
-   Catch issues early
+ ```bash
+ tito system health
+ ```
+ Catch issues early
 
 3. **Let automatic backups work**:
-   - Don't disable them
-   - They're your safety net
-   - Cleanup happens automatically
+ - Don't disable them
+ - They're your safety net
+ - Cleanup happens automatically
 
 4. **Reset modules when needed**:
-   ```bash
-   tito module reset XX  # Reset a specific module
-   ```
+ ```bash
+ tito module reset XX # Reset a specific module
+ ```
 
 5. **Version control for code**:
-   ```bash
-   git commit -m "Completed Module 05: Autograd"
-   ```
-   `.tito/` is gitignored - use git for code versions
+ ```bash
+ git commit -m "Completed Module 05: Autograd"
+ ```
+ `.tito/` is gitignored - use git for code versions
 
 </div>
 
----
 
 ## Understanding What Gets Tracked
 
@@ -451,7 +446,6 @@ Or restore from backup:
 
 </div>
 
----
 
 ## Common Data Scenarios
 
@@ -515,7 +509,6 @@ cp -r .tito/ ~/Desktop/my-tinytorch-progress/
 
 </div>
 
----
 
 ## FAQ
 
@@ -543,7 +536,6 @@ cp -r .tito/ ~/Desktop/my-tinytorch-progress/
 
 **A**: No. TinyTorch is completely local. No data leaves your machine. No tracking, no analytics, no cloud sync.
 
----
 
 ## Next Steps
 
@@ -554,6 +546,5 @@ cp -r .tito/ ~/Desktop/my-tinytorch-progress/
 <a href="milestones.html" style="display: inline-block; background: #9c27b0; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">Milestone System →</a>
 </div>
 
----
 
 *Your progress is tracked, your data is safe, and your journey is yours. TinyTorch keeps track of what you've built and achieved - you focus on learning ML systems engineering.*

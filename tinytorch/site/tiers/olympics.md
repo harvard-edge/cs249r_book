@@ -1,4 +1,4 @@
-#  Torch Olympics (Module 20)
+# Torch Olympics (Module 20)
 
 ```{image} ../_static/images/tito_olympics.png
 :alt: TinyTorch Olympics
@@ -8,7 +8,6 @@
 
 **The ultimate test: Build a complete, competition-ready ML system.**
 
----
 
 ## What Is the Torch Olympics?
 
@@ -24,40 +23,38 @@ This isn't a traditional homework assignment. It's a **systems engineering compe
 
 **Think of it as**: MLPerf meets academic research meets systems engineering—all using the framework YOU built.
 
----
 
 ## What You'll Build
 
 ```{mermaid}
 graph TB
-    FOUNDATION[🏗 Foundation<br/>Tensor, Autograd, Training]
-    ARCHITECTURE[🏛️ Architecture<br/>CNNs, Transformers]
-    OPTIMIZATION[⏱️ Optimization<br/>Quantization, Acceleration]
+ FOUNDATION[ Foundation<br/>Tensor, Autograd, Training]
+ ARCHITECTURE[️ Architecture<br/>CNNs, Transformers]
+ OPTIMIZATION[⏱️ Optimization<br/>Quantization, Acceleration]
 
-    FOUNDATION --> SYSTEM[🏅 Production System]
-    ARCHITECTURE --> SYSTEM
-    OPTIMIZATION --> SYSTEM
+ FOUNDATION --> SYSTEM[ Production System]
+ ARCHITECTURE --> SYSTEM
+ OPTIMIZATION --> SYSTEM
 
-    SYSTEM --> CHALLENGES[Competition Challenges]
+ SYSTEM --> CHALLENGES[Competition Challenges]
 
-    CHALLENGES --> C1[Vision: CIFAR-10<br/>Goal: 80%+ accuracy]
-    CHALLENGES --> C2[Language: TinyTalks<br/>Goal: Coherent generation]
-    CHALLENGES --> C3[Optimization: Speed<br/>Goal: 100 tokens/sec]
-    CHALLENGES --> C4[Compression: Size<br/>Goal: <10MB model]
+ CHALLENGES --> C1[Vision: CIFAR-10<br/>Goal: 80%+ accuracy]
+ CHALLENGES --> C2[Language: TinyTalks<br/>Goal: Coherent generation]
+ CHALLENGES --> C3[Optimization: Speed<br/>Goal: 100 tokens/sec]
+ CHALLENGES --> C4[Compression: Size<br/>Goal: <10MB model]
 
-    C1 --> LEADERBOARD[🏆 TinyTorch Leaderboard]
-    C2 --> LEADERBOARD
-    C3 --> LEADERBOARD
-    C4 --> LEADERBOARD
+ C1 --> LEADERBOARD[ TinyTorch Leaderboard]
+ C2 --> LEADERBOARD
+ C3 --> LEADERBOARD
+ C4 --> LEADERBOARD
 
-    style FOUNDATION fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    style ARCHITECTURE fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    style OPTIMIZATION fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-    style SYSTEM fill:#fef3c7,stroke:#f59e0b,stroke-width:4px
-    style LEADERBOARD fill:#c8e6c9,stroke:#388e3c,stroke-width:4px
+ style FOUNDATION fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+ style ARCHITECTURE fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+ style OPTIMIZATION fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+ style SYSTEM fill:#fef3c7,stroke:#f59e0b,stroke-width:4px
+ style LEADERBOARD fill:#c8e6c9,stroke:#388e3c,stroke-width:4px
 ```
 
----
 
 ## Competition Tracks
 
@@ -78,7 +75,6 @@ graph TB
 
 **Current record**: 82% accuracy (can you beat it?)
 
----
 
 ### Track 2: Language Generation Quality
 
@@ -101,7 +97,6 @@ graph TB
 - Training stability
 - Generation sampling techniques
 
----
 
 ### Track 3: Inference Speed Championship
 
@@ -126,7 +121,6 @@ graph TB
 - Systems-level optimization
 - Performance benchmarking
 
----
 
 ### Track 4: Model Compression Masters
 
@@ -151,7 +145,6 @@ graph TB
 - Accuracy-efficiency trade-offs
 - Edge deployment considerations
 
----
 
 ## How It Works
 
@@ -168,20 +161,20 @@ Pick one or more competition tracks based on your interests:
 Use all 19 modules you've completed:
 
 ```python
-from tinytorch import Tensor, Linear, Conv2d, Attention  # YOUR code
-from tinytorch import Adam, CrossEntropyLoss             # YOUR optimizers
-from tinytorch import DataLoader, train_loop             # YOUR infrastructure
+from tinytorch import Tensor, Linear, Conv2d, Attention # YOUR code
+from tinytorch import Adam, CrossEntropyLoss # YOUR optimizers
+from tinytorch import DataLoader, train_loop # YOUR infrastructure
 
 # Design your architecture
-model = YourCustomArchitecture()  # Your design choices matter!
+model = YourCustomArchitecture() # Your design choices matter!
 
 # Train with YOUR framework
 optimizer = Adam(model.parameters(), lr=0.001)
 train_loop(model, train_loader, optimizer, epochs=50)
 
 # Optimize for production
-quantized_model = quantize(model)  # YOUR quantization
-pruned_model = prune(quantized_model, sparsity=0.5)  # YOUR pruning
+quantized_model = quantize(model) # YOUR quantization
+pruned_model = prune(quantized_model, sparsity=0.5) # YOUR pruning
 ```
 
 ### 3. Benchmark Rigorously
@@ -212,7 +205,6 @@ tito olympics logo
 
 *Submission commands will be available in a future release.*
 
----
 
 ## Leaderboard Dimensions
 
@@ -228,7 +220,6 @@ Your submission is evaluated across **multiple dimensions**:
 
 **Final score**: Weighted combination of all dimensions. This mirrors real-world ML where you optimize for multiple objectives simultaneously.
 
----
 
 ## Learning Objectives
 
@@ -252,7 +243,6 @@ The Torch Olympics integrates everything you've learned:
 - **Innovation**: Trying new ideas and combinations
 - **Communication**: Writing clear technical reports
 
----
 
 ## Grading (For Classroom Use)
 
@@ -271,7 +261,6 @@ Instructors can use the Torch Olympics as a capstone project:
 - 60-69%: Partial completion
 - <60%: Incomplete submission
 
----
 
 ## Timeline
 
@@ -289,7 +278,6 @@ Instructors can use the Torch Olympics as a capstone project:
 - Days 8-10: Benchmarking
 - Days 11-14: Documentation and submission
 
----
 
 ## Support and Resources
 
@@ -312,22 +300,20 @@ Starter code will be provided for each track.
 - **[Benchmarking Guide](../modules/19_benchmarking_ABOUT)**: Measurement methodology
 - **[Optimization Techniques](../tiers/optimization)**: Compression and acceleration strategies
 
----
 
 ## Prerequisites
 
 **Required**:
-- ✓ **All 19 modules completed** (Foundation + Architecture + Optimization)
-- ✓ Experience training models on real datasets
-- ✓ Understanding of profiling and benchmarking
-- ✓ Comfort with YOUR TinyTorch codebase
+- **All 19 modules completed** (Foundation + Architecture + Optimization)
+- Experience training models on real datasets
+- Understanding of profiling and benchmarking
+- Comfort with YOUR TinyTorch codebase
 
 **Highly recommended**:
 - Complete all 6 historical milestones (1957-2018)
 - Review optimization tier (Modules 14-19)
 - Practice with profiling tools
 
----
 
 ## Time Commitment
 
@@ -339,7 +325,6 @@ Starter code will be provided for each track.
 
 This is a capstone project—expect it to be challenging and rewarding!
 
----
 
 ## What You'll Take Away
 
@@ -353,7 +338,6 @@ By completing the Torch Olympics, you'll have:
 
 **This is what sets TinyTorch apart**: You didn't just learn to use ML frameworks—you built one, optimized it, and competed with it.
 
----
 
 ## Next Steps
 
@@ -375,6 +359,5 @@ tito olympics logo
 - **[ Architecture Tier](architecture)** (Modules 08-13)
 - **[ Optimization Tier](optimization)** (Modules 14-19)
 
----
 
 **[← Back to Home](../intro)**

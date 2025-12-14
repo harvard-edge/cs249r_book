@@ -22,29 +22,29 @@ LAB_STRUCTURE = None
 def load_lab_structure(quarto_file="quarto/config/_quarto-html.yml"):
     """Load lab structure from quarto HTML config file."""
     global LAB_STRUCTURE
-    
+
     if not os.path.exists(quarto_file):
         print(f"⚠️ Quarto config file not found: {quarto_file}")
         return None
-    
+
     try:
         with open(quarto_file, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
-        
+
         # Extract lab sections from the sidebar structure
         lab_sections = {}
-        
+
         if 'website' in config and 'sidebar' in config['website']:
             for i, section in enumerate(config['website']['sidebar']):
                 if isinstance(section, dict):
                     # Look for lab-related sections
                     section_id = section.get('id', '')
                     section_title = section.get('section', '')
-                    
+
                     # Check if this is a lab section or contains lab sections
                     if any(keyword in section_id.lower() for keyword in ['arduino', 'seeed', 'grove', 'raspberry', 'shared', 'labs']):
                         lab_sections[section_title] = []
-                        
+
                         # Extract file paths from contents
                         if 'contents' in section:
                             for item in section['contents']:
@@ -54,18 +54,18 @@ def load_lab_structure(quarto_file="quarto/config/_quarto-html.yml"):
                                     if file_path.startswith('contents/'):
                                         file_path = f"book/{file_path}"
                                     lab_sections[section_title].append(file_path)
-                    
+
                     # Also check if this section contains nested lab sections
                     elif 'contents' in section:
                         for item in section['contents']:
                             if isinstance(item, dict):
                                 item_id = item.get('id', '')
                                 item_title = item.get('section', '')
-                                
+
                                 # Check if this nested item is a lab section
                                 if any(keyword in item_id.lower() for keyword in ['arduino', 'seeed', 'grove', 'raspberry', 'shared', 'labs']):
                                     lab_sections[item_title] = []
-                                    
+
                                     # Extract file paths from nested contents
                                     if 'contents' in item:
                                         for nested_item in item['contents']:
@@ -75,11 +75,11 @@ def load_lab_structure(quarto_file="quarto/config/_quarto-html.yml"):
                                                 if file_path.startswith('contents/'):
                                                     file_path = f"book/{file_path}"
                                                 lab_sections[item_title].append(file_path)
-        
+
         LAB_STRUCTURE = lab_sections
         print(f"✅ Loaded lab structure with {len(lab_sections)} groups")
         return lab_sections
-        
+
     except Exception as e:
         print(f"❌ Error loading lab structure: {e}")
         import traceback
@@ -90,19 +90,19 @@ def get_lab_group_for_file(file_path):
     """Determine which lab group a file belongs to based on the structure."""
     if not LAB_STRUCTURE:
         return None
-    
+
     # Normalize the file path for comparison
     normalized_path = file_path.replace('book/', '')
-    
+
     for group_name, files in LAB_STRUCTURE.items():
         for group_file in files:
             # Convert group file path to normalized format
             group_file_normalized = group_file.replace('book/', '')
-            
+
             # Check if the file matches this group
             if normalized_path == group_file_normalized:
                 return group_name
-    
+
     return None
 
 def organize_labs_by_structure(lab_entries):
@@ -110,16 +110,16 @@ def organize_labs_by_structure(lab_entries):
     if not LAB_STRUCTURE:
         # Fallback to flat list if no structure loaded
         return lab_entries
-    
+
     # Check if entries use AI summaries (don't have "X changes" pattern)
     # If AI mode, skip organization and return flat list
     if lab_entries and not re.search(r'(\d+) changes', lab_entries[0]):
         # AI-generated summaries - return as-is without organization
         return lab_entries
-    
+
     # Group lab entries by their hardware platform
     lab_groups = defaultdict(list)
-    
+
     for entry in lab_entries:
         # Extract file path from the entry (assuming format: "**Title**: Updated content...")
         # We need to match this with the actual file paths
@@ -139,20 +139,20 @@ def organize_labs_by_structure(lab_entries):
         else:
             # Default to a general labs group
             lab_groups["Other Labs"].append(entry)
-    
+
     # Sort each group by impact level and build the organized output
     organized_labs = []
-    
+
     # Use the order from the quarto config
     for group_name in LAB_STRUCTURE.keys():
         if group_name in lab_groups:
             sorted_entries = sort_by_impact_level(lab_groups[group_name])
             if sorted_entries:
                 # Calculate total changes for this group
-                total_changes = sum(int(re.search(r'(\d+) changes', entry).group(1)) 
-                                  for entry in sorted_entries 
+                total_changes = sum(int(re.search(r'(\d+) changes', entry).group(1))
+                                  for entry in sorted_entries
                                   if re.search(r'(\d+) changes', entry))
-                
+
                 organized_labs.append(f"- **{group_name}**: Updated content with {total_changes} changes")
                 for entry in sorted_entries:
                     # Extract just the title and changes, remove the group prefix
@@ -161,7 +161,7 @@ def organize_labs_by_structure(lab_entries):
                         title = title_match.group(1)
                         changes = title_match.group(2)
                         organized_labs.append(f"  - {title}: Updated content with {changes} changes")
-    
+
     return organized_labs
 
 
@@ -171,38 +171,38 @@ def extract_latest_changelog_section(changelog_file="CHANGELOG.md"):
     if not os.path.exists(changelog_file):
         print(f"❌ Changelog file not found: {changelog_file}")
         return None
-    
+
     try:
         with open(changelog_file, 'r', encoding='utf-8') as f:
             content = f.read()
-        
+
         # Find the most recent section (after the last "## YYYY Updates" header)
         sections = re.split(r'## \d{4} Updates', content)
         if len(sections) < 2:
             print("❌ No changelog sections found")
             return None
-        
+
         # Get the most recent section (last one)
         latest_section = sections[-1].strip()
-        
+
         # Extract the first entry (most recent) from this section
         # Look for the first "### 📅" entry
         entries = re.split(r'### 📅', latest_section)
         if len(entries) < 2:
             print("❌ No changelog entries found in latest section")
             return None
-        
+
         # Get the most recent entry (first one after the split)
         latest_entry = entries[1].strip()
-        
+
         # Clean up the entry - remove any trailing content
         # Stop at the next "### 📅" or end of content
         if "### 📅" in latest_entry:
             latest_entry = latest_entry.split("### 📅")[0].strip()
-        
+
         print(f"✅ Extracted latest changelog entry ({len(latest_entry)} characters)")
         return latest_entry
-        
+
     except Exception as e:
         print(f"❌ Error reading changelog: {e}")
         return None
@@ -210,14 +210,14 @@ def extract_latest_changelog_section(changelog_file="CHANGELOG.md"):
 
 def generate_release_notes_from_changelog(version, previous_version, description, changelog_entry, verbose=False):
     """Generate release notes using actual changelog data with intelligent categorization."""
-    
+
     if verbose:
         print(f"📝 Generating release notes...")
         print(f"📋 Version: {version}")
         print(f"📋 Previous: {previous_version}")
         print(f"📋 Description: {description}")
         print(f"📋 Changelog entry length: {len(changelog_entry)} characters")
-    
+
     # Parse the changelog entry to extract structured data
     sections = {
         'frontmatter': [],
@@ -225,14 +225,14 @@ def generate_release_notes_from_changelog(version, previous_version, description
         'labs': [],
         'appendix': []
     }
-    
+
     # Extract sections from changelog
     current_section = None
     for line in changelog_entry.split('\n'):
         line = line.strip()
         if not line:
             continue
-            
+
         # Detect section headers
         if '**📄 Frontmatter**' in line:
             current_section = 'frontmatter'
@@ -246,36 +246,36 @@ def generate_release_notes_from_changelog(version, previous_version, description
             # Extract the content (remove impact bars if present)
             clean_line = re.sub(r'`[█░]+`\s*', '', line[2:])  # Remove "- " and impact bars
             sections[current_section].append(clean_line)
-    
+
     if verbose:
         print(f"📊 Extracted: {len(sections['frontmatter'])} frontmatter, {len(sections['chapters'])} chapters, "
               f"{len(sections['labs'])} labs, {len(sections['appendix'])} appendix items")
-    
+
     # Categorize changes by type
     content_improvements = []
     infrastructure_changes = []
     bug_fixes = []
-    
+
     for section_name, items in sections.items():
         for item in items:
             lower_item = item.lower()
-            
+
             # Categorize by keywords
             if any(word in lower_item for word in ['fix', 'typo', 'correct', 'resolved', 'bug']):
                 bug_fixes.append(item)
-            elif any(word in lower_item for word in ['workflow', 'build', 'infrastructure', 'ci/cd', 'deploy', 
+            elif any(word in lower_item for word in ['workflow', 'build', 'infrastructure', 'ci/cd', 'deploy',
                                                       'compression', 'script', 'automation']):
                 infrastructure_changes.append(item)
             else:
                 content_improvements.append(item)
-    
+
     # Build the release notes with actual data
     # Note: Don't include H1 title - GitHub release UI already shows it
     release_notes = f"""This release focuses on {'content quality improvements, infrastructure enhancements, and addressing community feedback' if len(content_improvements) > len(infrastructure_changes) else 'infrastructure improvements and content refinements'}.
 
 ## 🎯 Key Highlights
 """
-    
+
     # Add content improvements section
     if content_improvements:
         # Sample up to 8 most important items
@@ -283,24 +283,24 @@ def generate_release_notes_from_changelog(version, previous_version, description
         release_notes += "\n### 📖 Content Improvements\n"
         for item in top_content:
             release_notes += f"* {item}\n"
-    
+
     # Add infrastructure section
     if infrastructure_changes:
         release_notes += "\n### 🛠️ Infrastructure Enhancements\n"
         top_infra = infrastructure_changes[:6]
         for item in top_infra:
             release_notes += f"* {item}\n"
-    
+
     # Add bug fixes section
     if bug_fixes:
         release_notes += "\n### 🐛 Bug Fixes\n"
         top_bugs = bug_fixes[:6]
         for item in top_bugs:
             release_notes += f"* {item}\n"
-    
+
     # Add summary statistics
     total_changes = len(sections['frontmatter']) + len(sections['chapters']) + len(sections['labs']) + len(sections['appendix'])
-    
+
     release_notes += f"""
 ### 📊 Change Summary
 * **Total Updates**: {total_changes} items across all sections
@@ -330,32 +330,32 @@ def generate_release_notes_from_changelog(version, previous_version, description
 
 This release represents continuous improvements to the MLSysBook, incorporating feedback from educators, students, and community contributors.
 """
-    
+
     return release_notes
 
 
 def generate_release_notes(version, previous_version, description, verbose=False):
     """Generate release notes from changelog data with proper error handling."""
-    
+
     print(f"📝 Generating release notes for version {version}...")
-    
+
     # First, ensure we have a changelog
     if not os.path.exists(CHANGELOG_FILE):
         print(f"❌ Error: Changelog not found at {CHANGELOG_FILE}")
         print(f"💡 Run: python tools/scripts/maintenance/changelog-releasenotes.py --changelog --incremental")
         raise FileNotFoundError(f"Changelog file not found: {CHANGELOG_FILE}")
-    
+
     # Extract changelog data
     changelog_entry = extract_latest_changelog_section(CHANGELOG_FILE)
-    
+
     if not changelog_entry:
         print("❌ Error: No changelog entries found in latest section")
         print(f"💡 The changelog file exists but appears empty or improperly formatted")
         raise ValueError("Cannot generate release notes without changelog data")
-    
+
     print(f"✅ Found changelog data ({len(changelog_entry)} characters)")
     print("📝 Parsing changelog and generating release notes...")
-    
+
     # Generate release notes from actual changelog data
     release_notes = generate_release_notes_from_changelog(
         version=version,
@@ -364,19 +364,19 @@ def generate_release_notes(version, previous_version, description, verbose=False
         changelog_entry=changelog_entry,
         verbose=verbose
     )
-    
+
     if not release_notes or len(release_notes) < 100:
         print("❌ Error: Generated release notes are too short or empty")
         raise ValueError("Release notes generation failed to produce valid output")
-    
+
     # Save release notes to file
     filename = RELEASE_NOTES_FILE.format(version=version)
     with open(filename, 'w', encoding='utf-8') as f:
         f.write(release_notes)
-    
+
     print(f"✅ Release notes saved to: {filename}")
     print(f"📊 Generated {len(release_notes)} characters of content")
-    
+
     return filename
 
 QUARTO_YML_FILE = "quarto/config/_quarto-pdf.yml"  # Default to PDF config which has chapters structure
@@ -409,39 +409,39 @@ chapter_lookup = [
     ("contents/core/ai_for_good/ai_for_good.qmd", "AI for Good", 19),
     ("contents/core/frontiers/frontiers.qmd", "Frontiers", 20),
     ("contents/core/conclusion/conclusion.qmd", "Conclusion", 21),
-    
+
     # LAB sections
     ("contents/labs/overview.qmd", "Labs Overview", 100),
     ("contents/labs/getting_started.qmd", "Lab Setup", 101),
-    
+
     # Arduino Nicla Vision Labs
     ("contents/labs/arduino/nicla_vision/setup/setup.qmd", "Arduino Setup", 102),
     ("contents/labs/arduino/nicla_vision/image_classification/image_classification.qmd", "Arduino Image Classification", 103),
     ("contents/labs/arduino/nicla_vision/object_detection/object_detection.qmd", "Arduino Object Detection", 104),
     ("contents/labs/arduino/nicla_vision/kws/kws.qmd", "Arduino Keyword Spotting", 105),
     ("contents/labs/arduino/nicla_vision/motion_classification/motion_classification.qmd", "Arduino Motion Classification", 106),
-    
+
     # Seeed XIAO ESP32S3 Labs
     ("contents/labs/seeed/xiao_esp32s3/setup/setup.qmd", "XIAO Setup", 107),
     ("contents/labs/seeed/xiao_esp32s3/image_classification/image_classification.qmd", "XIAO Image Classification", 108),
     ("contents/labs/seeed/xiao_esp32s3/object_detection/object_detection.qmd", "XIAO Object Detection", 109),
     ("contents/labs/seeed/xiao_esp32s3/kws/kws.qmd", "XIAO Keyword Spotting", 110),
     ("contents/labs/seeed/xiao_esp32s3/motion_classification/motion_classification.qmd", "XIAO Motion Classification", 111),
-    
+
     # Raspberry Pi Labs
     ("contents/labs/raspi/setup/setup.qmd", "Raspberry Pi Setup", 112),
     ("contents/labs/raspi/image_classification/image_classification.qmd", "Pi Image Classification", 113),
     ("contents/labs/raspi/object_detection/object_detection.qmd", "Pi Object Detection", 114),
     ("contents/labs/raspi/llm/llm.qmd", "Pi Large Language Models", 115),
     ("contents/labs/raspi/vlm/vlm.qmd", "Pi Vision Language Models", 116),
-    
+
     # Frontmatter
     ("contents/frontmatter/foreword.qmd", "Foreword", 200),
     ("contents/frontmatter/about/about.qmd", "About", 201),
     ("contents/frontmatter/changelog/changelog.qmd", "Changelog", 202),
     ("contents/frontmatter/acknowledgements/acknowledgements.qmd", "Acknowledgements", 203),
     ("contents/frontmatter/socratiq/socratiq.qmd", "SocratiQ", 204),
-    
+
     # Appendix
     ("contents/appendix/phd_survival_guide.qmd", "PhD Survival Guide", 300),
 ]
@@ -494,7 +494,7 @@ def run_git_command(cmd, verbose=False, retries=3):
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0:
             return result.stdout.strip()
-        
+
         if attempt < retries - 1:
             print(f"⚠️ Git command failed, retrying in 2s: {result.stderr}")
             time.sleep(2)
@@ -513,7 +513,7 @@ def extract_chapter_title(file_path):
                 return title  # Frontmatter - just use title
             else:
                 return title  # Appendix - just use title
-    
+
     # Fallback: try basename matching for backwards compatibility
     base = os.path.basename(file_path)
     for fname, title, number in chapter_lookup:
@@ -526,7 +526,7 @@ def extract_chapter_title(file_path):
                 return title
             else:
                 return title
-    
+
     # Final fallback: generate from path
     if "contents/core/" in file_path:
         return f"Chapter: {base.replace('_', ' ').replace('.qmd', '').title()}"
@@ -580,13 +580,13 @@ def get_commit_messages_for_file(file_path, since, until=None, verbose=False, br
         cmd += ["--until", until]
     cmd += [f"origin/{branch}", "--", file_path]
     messages = run_git_command(cmd, verbose=verbose)
-    
+
     # Return all commit messages - let AI determine importance
     meaningful_messages = []
     for message in messages.splitlines():
         if message.strip():
             meaningful_messages.append(message.strip())
-    
+
     return "\n".join(meaningful_messages)
 
 
@@ -614,13 +614,13 @@ def call_ollama(prompt, model="gemma2:9b", url="http://localhost:11434"):
     try:
         import requests
         import json
-        
+
         payload = {
             "model": model,
             "prompt": prompt,
             "stream": False
         }
-        
+
         response = requests.post(f"{url}/api/generate", json=payload, timeout=30)
         if response.status_code == 200:
             result = response.json()
@@ -642,22 +642,22 @@ def clean_ai_summary(summary):
         r'Please let me know .*?[!.]',
         r'\s+\n\s*\n',  # Multiple blank lines
     ]
-    
+
     cleaned = summary
     for pattern in artifacts:
         cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE | re.DOTALL)
-    
+
     # Clean up extra whitespace and newlines
     cleaned = re.sub(r'\s+', ' ', cleaned)
     cleaned = cleaned.strip()
-    
+
     return cleaned
 
 def generate_ai_summary(chapter_title, commit_messages, file_path, verbose=False):
     """Generate AI summary for a file based on commit messages."""
     if not commit_messages.strip():
         return f"Updated content with minor changes"
-    
+
     # Create a prompt for AI summary
     prompt = f"""Based on these Git commit messages for {chapter_title} ({file_path}), generate a brief, informative summary of what was updated. Focus on the most important changes and improvements.
 
@@ -665,12 +665,12 @@ Commit messages:
 {commit_messages}
 
 Generate a concise summary (1-2 sentences) that describes the key updates:"""
-    
+
     if verbose:
         print(f"🤖 Generating AI summary for {chapter_title}...")
-    
+
     ai_summary = call_ollama(prompt)
-    
+
     if ai_summary:
         # Clean up AI artifacts
         return clean_ai_summary(ai_summary)
@@ -715,7 +715,7 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
 
     total_files = len(ordered_files)
     print(f"📝 Processing {total_files} changed files...")
-    
+
     for idx, file_path in enumerate(ordered_files, 1):
         added, removed = changes_by_file[file_path]
         total = added + removed
@@ -723,26 +723,26 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
             print(f"🔍 Summarizing {file_path} ({added}+ / {removed}-) [{idx}/{total_files}]")
         else:
             print(f"  📄 [{idx}/{total_files}] {os.path.basename(file_path)} ({added}+ {removed}-)")
-        
+
         # Skip references
         if "references.qmd" in file_path:
             continue
-            
+
         commit_msgs = get_commit_messages_for_file(file_path, start_date, end_date, verbose=verbose, branch=branch)
-        
+
         # Skip if no meaningful commits
         if not commit_msgs.strip():
             if verbose:
                 print(f"⏭️ Skipping {file_path} - no meaningful changes")
             continue
-            
+
         print(f"    📝 Generating summary...")
-        
+
         # Generate summary based on AI mode
         chapter_title = extract_chapter_title(file_path)
         total_changes = added + removed
         impact_bar = generate_impact_bar(total_changes)
-        
+
         if ai_mode:
             summary_text = generate_ai_summary(chapter_title, commit_msgs, file_path, verbose=verbose)
             summary = f"- `{impact_bar}` **{chapter_title}**: {summary_text}"
@@ -751,10 +751,10 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
             commit_count = len([msg for msg in commit_msgs.split('\n') if msg.strip()])
             summary_text = f"Updated content with {commit_count} changes"
             summary = f"- `{impact_bar}` **{chapter_title}**: {summary_text}"
-        
+
         # Show the generated summary
         print(f"      📝 {summary_text}")
-        
+
         # Categorize by content type
         if "contents/frontmatter/" in file_path:
             frontmatter.append(summary)
@@ -797,7 +797,7 @@ def generate_demo_entry():
     """Generate a demo changelog entry with real data from the repository."""
     current_date = datetime.now().strftime('%B %d')
     current_year = datetime.now().year
-    
+
     # Get some real file paths from the repository
     real_files = [
         "quarto/contents/frontmatter/about/about.qmd",
@@ -811,7 +811,7 @@ def generate_demo_entry():
         "quarto/contents/labs/raspi/setup/setup.qmd",
         "quarto/contents/backmatter/resources/phd_survival_guide.qmd"
     ]
-    
+
     # Try to get some real commit data for more realistic content
     try:
         # Get recent commit messages for some files
@@ -821,36 +821,36 @@ def generate_demo_entry():
             pass
     except:
         pass
-    
+
     # Generate realistic summaries based on actual files
     frontmatter_entries = [
         "**About**: Updated book description and target audience information",
         "**Acknowledgements**: Added new contributors and updated the contributor list"
     ]
-    
+
     chapter_entries = [
         "**Chapter 3: DL Primer**: Added new diagrams explaining neural network architectures and improved explanations of backpropagation",
-        "**Chapter 5: AI Workflow**: Enhanced the workflow diagram and added new examples for data preprocessing steps", 
+        "**Chapter 5: AI Workflow**: Enhanced the workflow diagram and added new examples for data preprocessing steps",
         "**Chapter 8: AI Training**: Updated training examples with new code snippets and improved explanations of gradient descent",
         "**Chapter 1: Introduction**: Fixed several typos and improved the introduction to machine learning concepts",
         "**Chapter 12: Benchmarking AI**: Added new benchmarking metrics and updated performance comparison tables"
     ]
-    
+
     lab_entries = [
         "**Lab: Arduino Image Classification**: Updated the image classification code with improved accuracy and added new examples",
         "**Lab: Raspberry Pi Setup**: Fixed setup instructions and added troubleshooting section for common issues"
     ]
-    
+
     appendix_entries = [
         "**PhD Survival Guide**: Added new resources for graduate students and updated links"
     ]
-    
+
     # Add impact bars
     frontmatter_with_impact = [f"- `███░░` {entry}" for entry in frontmatter_entries[:1]] + [f"- `██░░░` {entry}" for entry in frontmatter_entries[1:]]
     chapters_with_impact = [f"- `████░` {entry}" for entry in chapter_entries[:1]] + [f"- `███░░` {entry}" for entry in chapter_entries[1:3]] + [f"- `██░░░` {entry}" for entry in chapter_entries[3:]]
     labs_with_impact = [f"- `███░░` {entry}" for entry in lab_entries[:1]] + [f"- `██░░░` {entry}" for entry in lab_entries[1:]]
     appendix_with_impact = [f"- `█░░░░` {entry}" for entry in appendix_entries]
-    
+
     demo_entry = f"""## {current_year} Updates
 
 ### 📅 {current_date}
@@ -888,11 +888,11 @@ def generate_demo_entry():
 def fold_existing_entries(content):
     """Fold all existing details sections in the changelog content."""
     import re
-    
+
     # Pattern to match <details open> and replace with <details>
     pattern = r'<details open>'
     replacement = '<details>'
-    
+
     return re.sub(pattern, replacement, content)
 
 def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_url="http://localhost:11434", ollama_model="gemma2:9b", since_date=None, branch="dev"):
@@ -952,7 +952,7 @@ def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_
         if verbose:
             print("🔁 Running full regeneration...")
         commits = get_all_gh_pages_commits()
-        
+
         # Group commits by date (YYYY-MM-DD) to merge same-day publishes
         def extract_date_only(date_str):
             try:
@@ -964,55 +964,55 @@ def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_
                     return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z").strftime("%Y-%m-%d")
                 except:
                     return date_str.split()[0]  # fallback to first part
-        
+
         # Group commits by publication date
         commits_by_date = defaultdict(list)
         for commit, date in commits:
             date_key = extract_date_only(date)
             commits_by_date[date_key].append((commit, date))
-        
+
         # Sort dates and get unique publication periods
         unique_dates = sorted(commits_by_date.keys(), reverse=True)  # newest first
         print(f"📊 Found {len(unique_dates)} unique publication dates...")
-        
+
         # Group entries by year
         entries_by_year = defaultdict(list)
-        
+
         for i in range(len(unique_dates) - 1):
             current_date_key = unique_dates[i]
             previous_date_key = unique_dates[i + 1]
-            
+
             # Get the latest commit from current date for the "published on" date
             current_commits = commits_by_date[current_date_key]
             latest_current = max(current_commits, key=lambda x: x[1])  # latest timestamp
-            
+
             # Get the earliest commit from previous date as the "since" date
             previous_commits = commits_by_date[previous_date_key]
             earliest_previous = min(previous_commits, key=lambda x: x[1])  # earliest timestamp
-            
+
             current_date = latest_current[1]
             previous_date = earliest_previous[1]
-            
+
             # Extract year from current_date (the publication date)
             pub_year = extract_year_from_date(current_date)
-            
+
             print(f"📅 Processing period {i+1}/{len(unique_dates)-1}: {format_friendly_date(previous_date)} → {format_friendly_date(current_date)} [{pub_year}]")
             entry = generate_entry(previous_date, current_date, verbose=verbose, is_latest=(i==0), branch=branch)
             if entry:
                 entries_by_year[pub_year].append(entry)
-        
+
         if not entries_by_year:
             return "_No updates found._"
-        
+
         # Build output with year headers, newest years first
         output_sections = []
         for year in sorted(entries_by_year.keys(), reverse=True):
             year_header = f"## {year} Updates"
             year_entries = "\n\n".join(entries_by_year[year])
             output_sections.append(f"{year_header}\n\n{year_entries}")
-        
+
         return "\n\n---\n\n".join(output_sections) + "\n"
-        
+
     else:
         if verbose:
             print("⚡ Running update mode...")
@@ -1020,7 +1020,7 @@ def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_
         entry = generate_entry(latest_date, verbose=verbose, is_latest=True, ai_mode=ai_mode, ollama_url=ollama_url, ollama_model=ollama_model, branch=branch)
         if not entry:
             return "_No updates found._"
-        
+
         # Extract year from the latest date instead of using current year
         if latest_date:
             current_year = extract_year_from_date(latest_date)
@@ -1031,15 +1031,15 @@ def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate release documentation including changelog and release notes.")
-    
+
     # Main action arguments
     parser.add_argument("-c", "--changelog", action="store_true", help="Generate changelog entries.")
     parser.add_argument("-r", "--release-notes", action="store_true", help="Generate release notes.")
-    
+
     # Changelog mode arguments
     parser.add_argument("--full", action="store_true", help="Regenerate the entire changelog from scratch.")
     parser.add_argument("--incremental", action="store_true", help="Add new entries since last publish (uses --since date or falls back to gh-pages).")
-    
+
     # General options
     parser.add_argument("-t", "--test", action="store_true", help="Run without writing to file.")
     parser.add_argument("--demo", action="store_true", help="Generate a demo changelog entry with sample data.")
@@ -1051,7 +1051,7 @@ if __name__ == "__main__":
     parser.add_argument("--since", type=str, help="Start date for changelog (ISO format: YYYY-MM-DD). Overrides gh-pages date detection.")
     parser.add_argument("--branch", type=str, default="dev", help="Branch to analyze for changes (default: dev). Use 'main' for live releases.")
 
-    
+
     # Release notes arguments
     parser.add_argument("--version", type=str, help="Version number for release notes.")
     parser.add_argument("--previous-version", type=str, help="Previous version number for release notes.")
@@ -1059,7 +1059,7 @@ if __name__ == "__main__":
     parser.add_argument("--changelog-file", default="CHANGELOG.md", help="Path to changelog file.")
 
     args = parser.parse_args()
-    
+
     # Handle demo mode first
     if args.demo:
         print("🎭 DEMO MODE - Generating sample changelog entry")
@@ -1071,13 +1071,13 @@ if __name__ == "__main__":
         print("=" * 60)
         print("✅ Demo entry generated successfully!")
         exit(0)
-    
+
     # Handle release notes mode
     if args.release_notes:
         if not args.version or not args.previous_version or not args.description:
             print("❌ Error: --release-notes requires --version, --previous-version, and --description")
             exit(1)
-        
+
         print("📝 Generating release notes...")
         filename = generate_release_notes(
             version=args.version,
@@ -1085,7 +1085,7 @@ if __name__ == "__main__":
             description=args.description,
             verbose=args.verbose
         )
-        
+
         if filename and os.path.exists(filename):
             if args.test:
                 # Read and display the content for test mode
@@ -1106,7 +1106,7 @@ if __name__ == "__main__":
             print("❌ Failed to generate release notes")
             exit(1)
         exit(0)
-    
+
     # Handle changelog mode
     if args.changelog:
         # Require either --full or --incremental to be specified for changelog
@@ -1132,7 +1132,7 @@ if __name__ == "__main__":
         load_chapter_order(args.quarto_config)
         # Load lab structure from HTML config (not PDF config)
         load_lab_structure("quarto/config/_quarto-html.yml")
-        
+
         # Print configuration header
         print("=" * 60)
         print("📝 CHANGELOG GENERATION CONFIG")
@@ -1143,7 +1143,7 @@ if __name__ == "__main__":
         print(f"📋 Features: Impact bars, importance sorting, specific summaries")
         print("=" * 60)
         print()
-        
+
         print(f"🚀 Starting changelog generation in {mode} mode...")
 
 
@@ -1171,12 +1171,12 @@ if __name__ == "__main__":
                 existing_lines = existing.splitlines()
                 new_lines = []
                 inserted = False
-                
+
                 for line in existing_lines:
                     new_lines.append(line)
                     # Insert new entry right after the year header (handle both old and new formats)
                     line_stripped = line.strip()
-                    year_match = (line_stripped == year_header or 
+                    year_match = (line_stripped == year_header or
                                  line_stripped == f"## {current_year}" or
                                  line_stripped == f"## {current_year} Updates")
                     if not inserted and year_match:
@@ -1188,18 +1188,18 @@ if __name__ == "__main__":
                         new_lines.extend(new_entry_lines)
                         new_lines.append("")  # Add blank line
                         inserted = True
-                
+
                 if not inserted:
                     # If no year header found, prepend to beginning
                     new_lines = new_entry.strip().splitlines() + [""] + existing_lines
-                
+
                 updated_content = "\n".join(new_lines)
 
             with open(CHANGELOG_FILE, "w", encoding="utf-8") as f:
                 f.write(updated_content.strip() + "\n")
 
             print(f"\n✅ Changelog written to {CHANGELOG_FILE}")
-            
+
     except KeyboardInterrupt:
         print(f"\n⚠️ Process interrupted by user")
     except Exception as e:

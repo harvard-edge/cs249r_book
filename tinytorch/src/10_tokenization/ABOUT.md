@@ -1,864 +1,609 @@
----
-title: "Tokenization - Text to Numerical Sequences"
-description: "Build character-level and BPE tokenizers that convert text into token sequences for language models"
-difficulty: "●●"
-time_estimate: "4-5 hours"
-prerequisites: ["Tensor"]
-next_steps: ["Embeddings"]
-learning_objectives:
-  - "Implement character-level tokenization with vocabulary management and special token handling"
-  - "Build BPE (Byte Pair Encoding) tokenizer that learns optimal subword units from corpus statistics"
-  - "Understand vocabulary size vs sequence length trade-offs affecting model parameters and computation"
-  - "Design efficient text processing pipelines with encoding, decoding, and serialization"
-  - "Analyze tokenization throughput and compression ratios for production NLP systems"
----
+# Module 10: Tokenization
 
-# Tokenization - Text to Numerical Sequences
+**ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 4-6 hours | Prerequisites: 01-07 (Foundation tier)
 
-**ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 4-5 hours
+**Prerequisites: Foundation tier (Modules 01-07)** means you should have completed:
+- Tensor operations (Module 01)
+- Basic neural network components (Modules 02-03)
+- Training fundamentals (Modules 06-07)
+
+Tokenization is relatively independent and works primarily with strings and numbers. If you can manipulate Python strings and dictionaries, you're ready.
 
 ## Overview
 
-Build tokenization systems that convert raw text into numerical sequences for language models. This module implements character-level and Byte Pair Encoding (BPE) tokenizers that balance vocabulary size, sequence length, and computational efficiency—the fundamental trade-off shaping every modern NLP system from GPT-4 to Google Translate. You'll understand why vocabulary size directly affects model parameters while sequence length impacts transformer computation, and how BPE optimally balances both extremes.
+Neural networks operate on numbers, but humans communicate with text. Tokenization is the crucial bridge that converts text into numerical sequences that models can process. Every language model from GPT to BERT starts with tokenization, transforming raw strings like "Hello, world!" into sequences of integers that neural networks can consume.
+
+In this module, you'll build two tokenization systems from scratch: a simple character-level tokenizer that treats each character as a token, and a sophisticated Byte Pair Encoding (BPE) tokenizer that learns efficient subword representations. You'll discover the fundamental trade-off in text processing: vocabulary size versus sequence length. Small vocabularies produce long sequences; large vocabularies produce short sequences but require huge embedding tables.
+
+By the end, you'll understand why GPT uses 50,000 tokens, how tokenizers handle unknown words, and the memory implications of vocabulary choices in production systems.
 
 ## Learning Objectives
 
-By the end of this module, you will be able to:
+```{tip} By completing this module, you will:
 
-- **Implement character-level tokenization with vocabulary management**: Build tokenizers with bidirectional token-to-ID mappings, special token handling (PAD, UNK, BOS, EOS), and graceful unknown character handling for robust multilingual support
-- **Build BPE (Byte Pair Encoding) tokenizer**: Implement the iterative merge algorithm that learns optimal subword units by counting character pair frequencies—the same approach powering GPT, BERT, and modern transformers
-- **Understand vocabulary size vs sequence length trade-offs**: Analyze how vocabulary choices affect model parameters (embedding matrix size = vocab_size × embed_dim) and computation (transformer attention is O(n²) in sequence length)
-- **Design efficient text processing pipelines**: Create production-ready tokenizers with encoding/decoding, vocabulary serialization for deployment, and proper special token management for batching
-- **Analyze tokenization throughput and compression ratios**: Measure tokens/second performance, compare character vs BPE on sequence length reduction, and understand scaling to billions of tokens in production systems
-
-## Build → Use → Reflect
-
-This module follows TinyTorch's **Build → Use → Reflect** framework:
-
-1. **Build**: Implement character-level tokenizer with vocabulary building and encode/decode operations, then build BPE algorithm that iteratively merges frequent character pairs to learn optimal subword units
-2. **Use**: Tokenize Shakespeare and modern text datasets, compare character vs BPE on sequence length reduction, measure tokenization throughput on large corpora, and test subword decomposition on rare/unknown words
-3. **Reflect**: Why does vocabulary size directly control model parameters (embedding matrix rows)? How does sequence length affect transformer computation (O(n²) attention)? What's the optimal balance for mobile deployment vs cloud serving? How do tokenization choices impact multilingual model design?
-
-```{admonition} Systems Reality Check
-:class: tip
-
-**Production Context**: GPT-4 uses a 100K-token vocabulary trained on trillions of tokens. Every token in the vocabulary adds a row to the embedding matrix—at 12,288 dimensions, that's 1.2B parameters just for embeddings. Meanwhile, transformers have O(n²) attention complexity, so reducing sequence length from 1000 to 300 tokens cuts computation by 11x. This vocabulary size vs sequence length trade-off shapes every design decision in modern NLP: GPT-3 doubled vocabulary from GPT-2 (50K→100K) specifically to handle code and reduce sequence lengths for long documents.
-
-**Performance Note**: Google Translate processes billions of sentences daily through tokenization pipelines. Tokenization throughput (measured in tokens/second) is critical for serving at scale—character-level achieves ~1M tokens/sec (simple lookup) while BPE achieves ~100K tokens/sec (iterative merge application). Production systems cache tokenization results and batch aggressively to amortize preprocessing costs. At OpenAI's scale ($700/million tokens), every tokenization optimization directly impacts economics.
+- **Implement** character-level tokenization for robust text coverage and BPE tokenization for efficient subword representation
+- **Understand** the vocabulary size versus sequence length trade-off and its impact on memory and computation
+- **Master** encoding and decoding operations that convert between text and numerical token IDs
+- **Connect** your implementation to production tokenizers used in GPT, BERT, and modern language models
 ```
 
-## Implementation Guide
+## What You'll Build
+
+```{mermaid}
+:align: center
+:caption: Your Tokenization System
+flowchart LR
+    subgraph "Your Tokenization System"
+        A["Base Interface<br/>encode/decode"]
+        B["CharTokenizer<br/>character-level"]
+        C["BPETokenizer<br/>subword units"]
+        D["Vocabulary<br/>management"]
+        E["Utilities<br/>dataset processing"]
+    end
+
+    A --> B
+    A --> C
+    B --> D
+    C --> D
+    D --> E
+
+    style A fill:#e1f5ff
+    style B fill:#fff3cd
+    style C fill:#f8d7da
+    style D fill:#d4edda
+    style E fill:#e2d5f1
+```
+
+**Implementation roadmap:**
+
+| Part | What You'll Implement | Key Concept |
+|------|----------------------|-------------|
+| 1 | `Tokenizer` base class | Interface contract: encode/decode |
+| 2 | `CharTokenizer` | Character-level vocabulary, perfect coverage |
+| 3 | `BPETokenizer` | Byte Pair Encoding, learning merges |
+| 4 | Vocabulary building | Unique character extraction, frequency analysis |
+| 5 | Utility functions | Dataset processing, analysis tools |
+
+**The pattern you'll enable:**
+```python
+# Converting text to numbers for neural networks
+tokenizer = BPETokenizer(vocab_size=1000)
+tokenizer.train(corpus)
+token_ids = tokenizer.encode("Hello world")  # [142, 1847, 2341]
+```
+
+### What You're NOT Building (Yet)
+
+To keep this module focused, you will **not** implement:
+
+- GPU-accelerated tokenization (production tokenizers use Rust/C++)
+- Advanced segmentation algorithms (SentencePiece, Unigram models)
+- Language-specific preprocessing (that's Module 11: Embeddings)
+- Tokenizer serialization and loading (PyTorch handles this with `save_pretrained()`)
+
+**You are building the conceptual foundation.** Production optimizations come later.
+
+## API Reference
+
+This section provides a quick reference for the tokenization classes you'll build. Think of it as your cheat sheet while implementing and debugging.
 
 ### Base Tokenizer Interface
 
-All tokenizers share a common interface: encode text to token IDs and decode IDs back to text. This abstraction enables consistent usage across different tokenization strategies.
+```python
+Tokenizer()
+```
+- Abstract base class defining the tokenizer contract
+- All tokenizers must implement `encode()` and `decode()`
+
+### CharTokenizer
 
 ```python
-class Tokenizer:
-    """Base tokenizer interface defining the contract for all tokenizers.
+CharTokenizer(vocab: Optional[List[str]] = None)
+```
+- Character-level tokenizer treating each character as a token
+- `vocab`: Optional list of characters to include in vocabulary
 
-    All tokenization strategies (character, BPE, WordPiece) must implement:
-    - encode(text) → List[int]: Convert text to token IDs
-    - decode(token_ids) → str: Convert token IDs back to text
-    """
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `build_vocab` | `build_vocab(corpus: List[str]) -> None` | Extract unique characters from corpus |
+| `encode` | `encode(text: str) -> List[int]` | Convert text to character IDs |
+| `decode` | `decode(tokens: List[int]) -> str` | Convert character IDs back to text |
 
-    def encode(self, text: str) -> List[int]:
-        """Convert text to list of token IDs."""
-        raise NotImplementedError("Subclasses must implement encode()")
+**Properties:**
+- `vocab`: List of characters in vocabulary
+- `vocab_size`: Total number of unique characters + special tokens
+- `char_to_id`: Mapping from characters to IDs
+- `id_to_char`: Mapping from IDs to characters
+- `unk_id`: ID for unknown characters (always 0)
 
-    def decode(self, tokens: List[int]) -> str:
-        """Convert token IDs back to text."""
-        raise NotImplementedError("Subclasses must implement decode()")
+### BPETokenizer
+
+```python
+BPETokenizer(vocab_size: int = 1000)
+```
+- Byte Pair Encoding tokenizer learning subword units
+- `vocab_size`: Target vocabulary size after training
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `train` | `train(corpus: List[str], vocab_size: int = None) -> None` | Learn BPE merges from corpus |
+| `encode` | `encode(text: str) -> List[int]` | Convert text to subword token IDs |
+| `decode` | `decode(tokens: List[int]) -> str` | Convert token IDs back to text |
+
+**Helper Methods:**
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `_get_word_tokens` | `_get_word_tokens(word: str) -> List[str]` | Convert word to character list with end-of-word marker |
+| `_get_pairs` | `_get_pairs(word_tokens: List[str]) -> Set[Tuple[str, str]]` | Extract all adjacent character pairs |
+| `_apply_merges` | `_apply_merges(tokens: List[str]) -> List[str]` | Apply learned merge rules to token sequence |
+| `_build_mappings` | `_build_mappings() -> None` | Build token-to-ID and ID-to-token dictionaries |
+
+**Properties:**
+- `vocab`: List of tokens (characters + learned merges)
+- `vocab_size`: Total vocabulary size
+- `merges`: List of learned merge rules (pair tuples)
+- `token_to_id`: Mapping from tokens to IDs
+- `id_to_token`: Mapping from IDs to tokens
+
+### Utility Functions
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `create_tokenizer` | `create_tokenizer(strategy: str, vocab_size: int, corpus: List[str]) -> Tokenizer` | Factory for creating tokenizers |
+| `tokenize_dataset` | `tokenize_dataset(texts: List[str], tokenizer: Tokenizer, max_length: int) -> List[List[int]]` | Batch tokenization with length limits |
+| `analyze_tokenization` | `analyze_tokenization(texts: List[str], tokenizer: Tokenizer) -> Dict[str, float]` | Compute statistics and metrics |
+
+## Core Concepts
+
+This section covers the fundamental ideas you need to understand tokenization deeply. These concepts apply to every NLP system, from simple chatbots to large language models.
+
+### Text to Numbers
+
+Neural networks process numbers, not text. When you pass the string "Hello" to a model, it must first become a sequence of integers. This transformation happens in four steps: split text into tokens (units of meaning), build a vocabulary mapping each unique token to an integer ID, encode text by looking up each token's ID, and enable decoding to reconstruct the original text from IDs.
+
+The simplest approach treats each character as a token. Consider the word "hello": split into characters `['h', 'e', 'l', 'l', 'o']`, build a vocabulary with IDs `{'h': 1, 'e': 2, 'l': 3, 'o': 4}`, encode to `[1, 2, 3, 3, 4]`, and decode back by reversing the lookup. This implementation is beautifully simple:
+
+```python
+def encode(self, text: str) -> List[int]:
+    """Encode text to list of character IDs."""
+    tokens = []
+    for char in text:
+        tokens.append(self.char_to_id.get(char, self.unk_id))
+    return tokens
 ```
 
-**Design Pattern**: Abstract base class enforces consistent API across tokenization strategies, enabling drop-in replacement for performance testing (character vs BPE benchmarks).
+The elegance is in the simplicity: iterate through each character, look up its ID in the vocabulary dictionary, and use the unknown token ID for unseen characters. This gives perfect coverage: any text can be encoded without errors, though the sequences can be long.
 
-### Character-Level Tokenizer
+### Vocabulary Building
 
-The simplest tokenization approach: each character becomes a token. Provides perfect coverage of any text with a tiny vocabulary (~100 characters), but produces long sequences.
+Before encoding text, you need a vocabulary: the complete set of tokens your tokenizer recognizes. For character-level tokenization, this means extracting all unique characters from a training corpus.
+
+Here's how the vocabulary building process works:
 
 ```python
-class CharTokenizer(Tokenizer):
-    """Character-level tokenizer treating each character as a separate token.
+def build_vocab(self, corpus: List[str]) -> None:
+    """Build vocabulary from a corpus of text."""
+    # Collect all unique characters
+    all_chars = set()
+    for text in corpus:
+        all_chars.update(text)
 
-    Trade-offs:
-    - Small vocabulary (typically 100-500 characters)
-    - Long sequences (1 character = 1 token)
-    - Perfect coverage (no unknown tokens if vocab includes all Unicode)
-    - Simple implementation (direct character-to-ID mapping)
+    # Sort for consistent ordering
+    unique_chars = sorted(list(all_chars))
 
-    Example:
-        "hello" → ['h','e','l','l','o'] → [8, 5, 12, 12, 15] (5 tokens)
-    """
+    # Rebuild vocabulary with <UNK> token first
+    self.vocab = ['<UNK>'] + unique_chars
+    self.vocab_size = len(self.vocab)
 
-    def __init__(self, vocab: Optional[List[str]] = None):
-        """Initialize with optional vocabulary.
-
-        Args:
-            vocab: List of characters to include in vocabulary.
-                   If None, vocabulary is built later via build_vocab().
-        """
-        if vocab is None:
-            vocab = []
-
-        # Reserve ID 0 for unknown token (robust handling of unseen characters)
-        self.vocab = ['<UNK>'] + vocab
-        self.vocab_size = len(self.vocab)
-
-        # Bidirectional mappings for efficient encode/decode
-        self.char_to_id = {char: idx for idx, char in enumerate(self.vocab)}
-        self.id_to_char = {idx: char for idx, char in enumerate(self.vocab)}
-
-        # Cache unknown token ID for fast lookup
-        self.unk_id = 0
-
-    def build_vocab(self, corpus: List[str]) -> None:
-        """Build vocabulary from text corpus.
-
-        Args:
-            corpus: List of text strings to extract characters from.
-
-        Process:
-            1. Collect all unique characters across entire corpus
-            2. Sort alphabetically for consistent ordering across runs
-            3. Rebuild char↔ID mappings with <UNK> token at position 0
-        """
-        # Extract all unique characters
-        all_chars = set()
-        for text in corpus:
-            all_chars.update(text)
-
-        # Sort for reproducibility (important for model deployment)
-        unique_chars = sorted(list(all_chars))
-
-        # Rebuild vocabulary with special token first
-        self.vocab = ['<UNK>'] + unique_chars
-        self.vocab_size = len(self.vocab)
-
-        # Rebuild bidirectional mappings
-        self.char_to_id = {char: idx for idx, char in enumerate(self.vocab)}
-        self.id_to_char = {idx: char for idx, char in enumerate(self.vocab)}
-
-    def encode(self, text: str) -> List[int]:
-        """Convert text to list of character IDs.
-
-        Args:
-            text: String to tokenize.
-
-        Returns:
-            List of integer token IDs, one per character.
-            Unknown characters map to ID 0 (<UNK>).
-
-        Example:
-            >>> tokenizer.encode("hello")
-            [8, 5, 12, 12, 15]  # Depends on vocabulary ordering
-        """
-        tokens = []
-        for char in text:
-            # Use .get() with unk_id default for graceful unknown handling
-            tokens.append(self.char_to_id.get(char, self.unk_id))
-        return tokens
-
-    def decode(self, tokens: List[int]) -> str:
-        """Convert token IDs back to text.
-
-        Args:
-            tokens: List of integer token IDs.
-
-        Returns:
-            Reconstructed text string.
-            Invalid IDs map to '<UNK>' character.
-        """
-        chars = []
-        for token_id in tokens:
-            char = self.id_to_char.get(token_id, '<UNK>')
-            chars.append(char)
-        return ''.join(chars)
+    # Rebuild mappings
+    self.char_to_id = {char: idx for idx, char in enumerate(self.vocab)}
+    self.id_to_char = {idx: char for idx, char in enumerate(self.vocab)}
 ```
 
-**Key Implementation Details:**
+The special `<UNK>` token at position 0 handles characters not in the vocabulary. When encoding text with unknown characters, they all map to ID 0. This graceful degradation prevents crashes while signaling that information was lost.
 
-- **Special Token Reservation**: `<UNK>` token must occupy ID 0 consistently across vocabularies for model compatibility
-- **Bidirectional Mappings**: Both `char_to_id` (encoding) and `id_to_char` (decoding) enable O(1) lookup performance
-- **Unknown Character Handling**: Graceful degradation prevents crashes on unseen characters (critical for multilingual models encountering rare Unicode)
-- **Vocabulary Consistency**: Sorted character ordering ensures reproducible vocabularies across training runs (important for model deployment)
+Character vocabularies are tiny (typically 50-200 tokens depending on language), which means small embedding tables. A 100-character vocabulary with 512-dimensional embeddings requires only 51,200 parameters, about 200 KB of memory. This is dramatically smaller than word-level vocabularies with 100,000+ entries.
 
-### BPE (Byte Pair Encoding) Tokenizer
+### Byte Pair Encoding (BPE)
 
-The algorithm powering GPT and modern transformers: iteratively merge frequent character pairs to discover optimal subword units. Balances vocabulary size (model parameters) with sequence length (computational cost).
+Character tokenization has a fatal flaw for neural networks: sequences are too long. A 50-word sentence might produce 250 character tokens. Processing 250 tokens through self-attention layers is computationally expensive, and the model must learn to compose characters into words from scratch.
+
+BPE solves this by learning subword units. The algorithm is elegant: start with a character-level vocabulary, count all adjacent character pairs in the corpus, merge the most frequent pair into a new token, and repeat until reaching the target vocabulary size.
+
+Consider training BPE on the corpus `["hello", "hello", "help"]`. Each word starts with end-of-word markers: `['h','e','l','l','o</w>']`, `['h','e','l','l','o</w>']`, `['h','e','l','p</w>']`. Count all pairs: `('h','e')` appears 3 times, `('e','l')` appears 3 times, `('l','l')` appears 2 times. The most frequent is `('h','e')`, so merge it:
 
 ```python
-class BPETokenizer(Tokenizer):
-    """Byte Pair Encoding tokenizer for subword tokenization.
-
-    Algorithm:
-        1. Initialize: Start with character-level vocabulary
-        2. Count: Find all adjacent character pair frequencies in corpus
-        3. Merge: Replace most frequent pair with new merged token
-        4. Repeat: Continue until vocabulary reaches target size
-
-    Trade-offs:
-        - Larger vocabulary (typically 10K-50K tokens)
-        - Shorter sequences (2-4x compression vs character-level)
-        - Subword decomposition handles rare/unknown words gracefully
-        - Training complexity (requires corpus statistics)
-
-    Example:
-        Training: "hello" appears 1000x, "hell" appears 500x
-        Learns: 'h'+'e' → 'he' (freq pair), 'l'+'l' → 'll' (freq pair)
-        Result: "hello" → ['he', 'll', 'o</w>'] (3 tokens vs 5 characters)
-    """
-
-    def __init__(self, vocab_size: int = 1000):
-        """Initialize BPE tokenizer.
-
-        Args:
-            vocab_size: Target vocabulary size (includes special tokens +
-                       characters + learned merges). Typical: 10K-50K.
-        """
-        self.vocab_size = vocab_size
-        self.vocab = []              # Final vocabulary tokens
-        self.merges = []             # Learned merge rules: [(pair, merged_token), ...]
-        self.token_to_id = {}        # Token string → integer ID
-        self.id_to_token = {}        # Integer ID → token string
-
-    def _get_word_tokens(self, word: str) -> List[str]:
-        """Convert word to character tokens with end-of-word marker.
-
-        Args:
-            word: String to tokenize at character level.
-
-        Returns:
-            List of character tokens with '</w>' suffix on last character.
-            End-of-word marker enables learning of word boundaries.
-
-        Example:
-            >>> _get_word_tokens("hello")
-            ['h', 'e', 'l', 'l', 'o</w>']
-        """
-        if not word:
-            return []
-
-        tokens = list(word)
-        tokens[-1] += '</w>'  # Mark word boundaries for BPE
-        return tokens
-
-    def _get_pairs(self, word_tokens: List[str]) -> Set[Tuple[str, str]]:
-        """Extract all adjacent character pairs from token sequence.
-
-        Args:
-            word_tokens: List of token strings.
-
-        Returns:
-            Set of unique adjacent pairs (useful for frequency counting).
-
-        Example:
-            >>> _get_pairs(['h', 'e', 'l', 'l', 'o</w>'])
-            {('h', 'e'), ('e', 'l'), ('l', 'l'), ('l', 'o</w>')}
-        """
-        pairs = set()
-        for i in range(len(word_tokens) - 1):
-            pairs.add((word_tokens[i], word_tokens[i + 1]))
-        return pairs
-
-    def train(self, corpus: List[str], vocab_size: int = None) -> None:
-        """Train BPE on corpus to learn merge rules.
-
-        Args:
-            corpus: List of text strings (typically words or sentences).
-            vocab_size: Override target vocabulary size if provided.
-
-        Training Process:
-            1. Count word frequencies in corpus
-            2. Initialize with character-level tokens (all unique characters)
-            3. Iteratively:
-                a. Count all adjacent pair frequencies across all words
-                b. Merge most frequent pair into new token
-                c. Update word representations with merged token
-                d. Add merged token to vocabulary
-            4. Stop when vocabulary reaches target size
-            5. Build final token↔ID mappings
-        """
-        if vocab_size:
-            self.vocab_size = vocab_size
-
-        # Count word frequencies (training on token statistics, not raw text)
-        word_freq = Counter(corpus)
-
-        # Initialize vocabulary and word token representations
-        vocab = set()
-        word_tokens = {}
-
-        for word in word_freq:
-            tokens = self._get_word_tokens(word)
-            word_tokens[word] = tokens
-            vocab.update(tokens)  # Collect all unique character tokens
-
-        # Convert to sorted list for reproducibility
-        self.vocab = sorted(list(vocab))
-
-        # Add special unknown token
-        if '<UNK>' not in self.vocab:
-            self.vocab = ['<UNK>'] + self.vocab
-
-        # Learn merge rules iteratively
-        self.merges = []
-
-        while len(self.vocab) < self.vocab_size:
-            # Count all adjacent pairs across all words (weighted by frequency)
-            pair_counts = Counter()
-
-            for word, freq in word_freq.items():
-                tokens = word_tokens[word]
-                pairs = self._get_pairs(tokens)
-                for pair in pairs:
-                    pair_counts[pair] += freq  # Weight by word frequency
-
-            if not pair_counts:
-                break  # No more pairs to merge
-
-            # Select most frequent pair
-            best_pair = pair_counts.most_common(1)[0][0]
-
-            # Apply merge to all word representations
-            for word in word_tokens:
-                tokens = word_tokens[word]
-                new_tokens = []
-                i = 0
-                while i < len(tokens):
-                    # Check if current position matches merge pair
-                    if (i < len(tokens) - 1 and
-                        tokens[i] == best_pair[0] and
-                        tokens[i + 1] == best_pair[1]):
-                        # Merge pair into single token
-                        new_tokens.append(best_pair[0] + best_pair[1])
-                        i += 2
-                    else:
-                        new_tokens.append(tokens[i])
-                        i += 1
-                word_tokens[word] = new_tokens
-
-            # Add merged token to vocabulary
-            merged_token = best_pair[0] + best_pair[1]
-            self.vocab.append(merged_token)
-            self.merges.append(best_pair)
-
-        # Build final token↔ID mappings for efficient encode/decode
-        self._build_mappings()
-
-    def _build_mappings(self):
-        """Build bidirectional token↔ID mappings from vocabulary."""
-        self.token_to_id = {token: idx for idx, token in enumerate(self.vocab)}
-        self.id_to_token = {idx: token for idx, token in enumerate(self.vocab)}
-
-    def _apply_merges(self, tokens: List[str]) -> List[str]:
-        """Apply learned merge rules to token sequence.
-
-        Args:
-            tokens: List of character-level tokens.
-
-        Returns:
-            List of tokens after applying all learned merges.
-
-        Process:
-            Apply each merge rule in the order learned during training.
-            Early merges have priority over later merges.
-        """
-        if not self.merges:
-            return tokens
-
-        # Apply each merge rule sequentially
-        for merge_pair in self.merges:
-            new_tokens = []
-            i = 0
-            while i < len(tokens):
-                if (i < len(tokens) - 1 and
-                    tokens[i] == merge_pair[0] and
-                    tokens[i + 1] == merge_pair[1]):
-                    # Apply merge
-                    new_tokens.append(merge_pair[0] + merge_pair[1])
-                    i += 2
-                else:
-                    new_tokens.append(tokens[i])
-                    i += 1
-            tokens = new_tokens
-
-        return tokens
-
-    def encode(self, text: str) -> List[int]:
-        """Encode text using learned BPE merges.
-
-        Args:
-            text: String to tokenize.
-
-        Returns:
-            List of integer token IDs after applying BPE merges.
-
-        Process:
-            1. Split text into words (simple whitespace split)
-            2. Convert each word to character-level tokens
-            3. Apply learned BPE merges to create subword units
-            4. Convert subword tokens to integer IDs
-        """
-        if not self.vocab:
-            return []
-
-        # Simple word splitting (production systems use more sophisticated approaches)
-        words = text.split()
-        all_tokens = []
-
-        for word in words:
-            # Start with character-level tokens
-            word_tokens = self._get_word_tokens(word)
-
-            # Apply BPE merges
-            merged_tokens = self._apply_merges(word_tokens)
-
-            all_tokens.extend(merged_tokens)
-
-        # Convert tokens to IDs (unknown tokens map to ID 0)
-        token_ids = []
-        for token in all_tokens:
-            token_ids.append(self.token_to_id.get(token, 0))
-
-        return token_ids
-
-    def decode(self, tokens: List[int]) -> str:
-        """Decode token IDs back to text.
-
-        Args:
-            tokens: List of integer token IDs.
-
-        Returns:
-            Reconstructed text string.
-
-        Process:
-            1. Convert IDs to token strings
-            2. Join tokens together
-            3. Remove end-of-word markers and restore spaces
-        """
-        if not self.id_to_token:
-            return ""
-
-        # Convert IDs to token strings
-        token_strings = []
-        for token_id in tokens:
-            token = self.id_to_token.get(token_id, '<UNK>')
-            token_strings.append(token)
-
-        # Join and clean up
-        text = ''.join(token_strings)
-
-        # Replace end-of-word markers with spaces
-        text = text.replace('</w>', ' ')
-
-        # Clean up extra spaces
-        text = ' '.join(text.split())
-
-        return text
+# Merge operation: ('h', 'e') → 'he'
+# Before:
+['h','e','l','l','o</w>']  →  ['he','l','l','o</w>']
+['h','e','l','l','o</w>']  →  ['he','l','l','o</w>']
+['h','e','l','p</w>']      →  ['he','l','p</w>']
 ```
 
-**BPE Algorithm Insights:**
+The vocabulary grows from `['h','e','l','o','p','</w>']` to `['h','e','l','o','p','</w>','he']`. Continue merging: next most frequent is `('l','l')`, so merge to get `'ll'`. The vocabulary becomes `['h','e','l','o','p','</w>','he','ll']`. After sufficient merges, "hello" encodes as `['he','ll','o</w>']` (3 tokens instead of 5 characters).
 
-- **Training Phase**: Learn merge rules from corpus statistics by iteratively merging most frequent adjacent pairs
-- **Inference Phase**: Apply learned merges in order to segment new text into optimal subword units
-- **Frequency-Based Learning**: Common patterns ("ing", "ed", "tion") become single tokens, reducing sequence length
-- **Graceful Degradation**: Unseen words decompose into known subwords (e.g., "unhappiness" → ["un", "happi", "ness"])
-- **Word Boundary Awareness**: End-of-word markers (`</w>`) enable learning of prefix vs suffix patterns
-
-### Tokenization Utilities
-
-Production-ready utilities for tokenizer creation, dataset processing, and performance analysis.
+Here's how the training loop works:
 
 ```python
-def create_tokenizer(strategy: str = "char",
-                    vocab_size: int = 1000,
-                    corpus: List[str] = None) -> Tokenizer:
-    """Factory function to create and train tokenizers.
+while len(self.vocab) < self.vocab_size:
+    # Count all pairs across all words
+    pair_counts = Counter()
+    for word, freq in word_freq.items():
+        tokens = word_tokens[word]
+        pairs = self._get_pairs(tokens)
+        for pair in pairs:
+            pair_counts[pair] += freq
 
-    Args:
-        strategy: Tokenization approach ("char" or "bpe").
-        vocab_size: Target vocabulary size (for BPE).
-        corpus: Training corpus for vocabulary building.
+    if not pair_counts:
+        break
 
-    Returns:
-        Trained tokenizer instance.
+    # Get most frequent pair
+    best_pair = pair_counts.most_common(1)[0][0]
 
-    Example:
-        >>> corpus = ["hello world", "machine learning"]
-        >>> tokenizer = create_tokenizer("bpe", vocab_size=500, corpus=corpus)
-        >>> tokens = tokenizer.encode("hello")
-    """
-    if strategy == "char":
-        tokenizer = CharTokenizer()
-        if corpus:
-            tokenizer.build_vocab(corpus)
-    elif strategy == "bpe":
-        tokenizer = BPETokenizer(vocab_size=vocab_size)
-        if corpus:
-            tokenizer.train(corpus, vocab_size)
-    else:
-        raise ValueError(f"Unknown tokenization strategy: {strategy}")
+    # Merge this pair in all words
+    for word in word_tokens:
+        tokens = word_tokens[word]
+        new_tokens = []
+        i = 0
+        while i < len(tokens):
+            if (i < len(tokens) - 1 and
+                tokens[i] == best_pair[0] and
+                tokens[i + 1] == best_pair[1]):
+                # Merge pair
+                new_tokens.append(best_pair[0] + best_pair[1])
+                i += 2
+            else:
+                new_tokens.append(tokens[i])
+                i += 1
+        word_tokens[word] = new_tokens
 
-    return tokenizer
+    # Add merged token to vocabulary
+    merged_token = best_pair[0] + best_pair[1]
+    self.vocab.append(merged_token)
+    self.merges.append(best_pair)
+```
 
-def analyze_tokenization(texts: List[str],
-                        tokenizer: Tokenizer) -> Dict[str, float]:
-    """Analyze tokenization statistics for performance evaluation.
+This iterative merging automatically discovers linguistic patterns: common prefixes ("un", "re"), suffixes ("ing", "ed"), and frequent words become single tokens. The algorithm requires no linguistic knowledge, learning purely from statistics.
 
-    Args:
-        texts: List of text strings to analyze.
-        tokenizer: Trained tokenizer instance.
+### Special Tokens
 
-    Returns:
-        Dictionary containing:
-        - vocab_size: Number of unique tokens in vocabulary
-        - avg_sequence_length: Mean tokens per text
-        - max_sequence_length: Longest tokenized sequence
-        - total_tokens: Total tokens across all texts
-        - compression_ratio: Average characters per token (higher = better)
-        - unique_tokens: Number of distinct tokens used
+Production tokenizers include special tokens beyond `<UNK>`. Common ones include `<PAD>` for padding sequences to equal length, `<BOS>` (beginning of sequence) and `<EOS>` (end of sequence) for marking boundaries, and `<SEP>` for separating multiple text segments. GPT-style models often use `<|endoftext|>` to mark document boundaries.
 
-    Use Cases:
-        - Compare character vs BPE on sequence length reduction
-        - Measure compression efficiency (chars/token ratio)
-        - Identify vocabulary utilization (unique_tokens / vocab_size)
-    """
+The choice of special tokens affects the embedding table size. If you reserve 10 special tokens and have a 50,000 token vocabulary, your embedding table has 50,010 rows. Each special token needs learned parameters just like regular tokens.
+
+### Encoding and Decoding
+
+Encoding converts text to token IDs; decoding reverses the process. For BPE, encoding requires applying learned merge rules in order:
+
+```python
+def encode(self, text: str) -> List[int]:
+    """Encode text using BPE."""
+    # Split text into words
+    words = text.split()
     all_tokens = []
-    total_chars = 0
 
-    for text in texts:
-        tokens = tokenizer.encode(text)
-        all_tokens.extend(tokens)
-        total_chars += len(text)
+    for word in words:
+        # Get character-level tokens
+        word_tokens = self._get_word_tokens(word)
 
-    tokenized_lengths = [len(tokenizer.encode(text)) for text in texts]
+        # Apply BPE merges
+        merged_tokens = self._apply_merges(word_tokens)
 
-    stats = {
-        'vocab_size': (tokenizer.vocab_size
-                      if hasattr(tokenizer, 'vocab_size')
-                      else len(tokenizer.vocab)),
-        'avg_sequence_length': np.mean(tokenized_lengths),
-        'max_sequence_length': max(tokenized_lengths) if tokenized_lengths else 0,
-        'total_tokens': len(all_tokens),
-        'compression_ratio': total_chars / len(all_tokens) if all_tokens else 0,
-        'unique_tokens': len(set(all_tokens))
-    }
+        all_tokens.extend(merged_tokens)
 
-    return stats
+    # Convert to IDs
+    token_ids = []
+    for token in all_tokens:
+        token_ids.append(self.token_to_id.get(token, 0))  # 0 = <UNK>
+
+    return token_ids
 ```
 
-**Analysis Metrics Explained:**
-
-- **Compression Ratio**: Characters per token (higher = more efficient). BPE typically achieves 3-5x vs character-level at 1.0x
-- **Vocabulary Utilization**: unique_tokens / vocab_size indicates whether vocabulary is appropriately sized
-- **Sequence Length**: Directly impacts transformer computation (O(n²) attention complexity)
-
-## Getting Started
-
-### Prerequisites
-
-Ensure you understand tensor operations from Module 01:
-
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
-
-# Verify tensor module
-tito test tensor
-```
-
-**Why This Prerequisite Matters:**
-
-- Tokenization produces integer tensors (sequences of token IDs)
-- Embedding layers (Module 11) use token IDs to index into weight matrices
-- Understanding tensor shapes is critical for batching variable-length sequences
-
-### Development Workflow
-
-1. **Open the development file**: `modules/10_tokenization/tokenization_dev.ipynb`
-2. **Implement base Tokenizer interface**: Define encode() and decode() methods as abstract interface
-3. **Build CharTokenizer**: Implement vocabulary building, character-to-ID mappings, encode/decode with unknown token handling
-4. **Implement BPE algorithm**:
-   - Character pair counting with frequency statistics
-   - Iterative merge logic (find most frequent pair, merge across corpus)
-   - Vocabulary construction from learned merges
-   - Merge application during encoding
-5. **Create utility functions**: Tokenizer factory, dataset processing, performance analysis
-6. **Test on real data**:
-   - Compare character vs BPE on sequence length reduction
-   - Measure compression ratios (characters per token)
-   - Test unknown word handling via subword decomposition
-   - Analyze vocabulary utilization
-7. **Optimize for performance**: Measure tokenization throughput (tokens/second), profile merge application, test on large corpora
-8. **Export and verify**: `tito module complete 10 && tito test tokenization`
-
-**Development Tips:**
-
-- Start with small corpus (100 words, vocab_size=200) to debug BPE algorithm
-- Print learned merge rules to understand what patterns BPE discovers
-- Visualize sequence length vs vocabulary size trade-off with multiple BPE configurations
-- Test on rare/misspelled words to verify subword decomposition works
-- Profile with different vocabulary sizes to find optimal performance point
-
-## Testing
-
-### Comprehensive Test Suite
-
-Run the full test suite to verify tokenization functionality:
-
-```bash
-# TinyTorch CLI (recommended)
-tito test tokenization
-
-# Direct pytest execution
-python -m pytest tests/ -k tokenization -v
-```
-
-### Test Coverage Areas
-
-- **Base tokenizer interface**: Abstract class enforces encode/decode contract
-- **Character tokenizer correctness**: Vocabulary building from corpus, encode/decode round-trip accuracy, unknown character handling with `<UNK>` token
-- **BPE merge learning**: Pair frequency counting, merge application correctness, vocabulary size convergence, merge order preservation
-- **Vocabulary management**: Token-to-ID mapping consistency, bidirectional lookup correctness, special token ID reservation
-- **Edge case handling**: Empty strings, single characters, Unicode characters, whitespace-only text, very long sequences
-- **Round-trip accuracy**: Encode→decode produces original text for all vocabulary characters
-- **Performance benchmarks**: Tokenization throughput (tokens/second), vocabulary size vs encode time scaling, batch processing efficiency
-
-### Inline Testing & Validation
-
-The module includes comprehensive inline tests with progress tracking:
+Decoding is simpler: look up each ID, join the tokens, and clean up markers:
 
 ```python
-# Example inline test output
- Unit Test: Base Tokenizer Interface...
- encode() raises NotImplementedError correctly
- decode() raises NotImplementedError correctly
- Progress: Base Tokenizer Interface ✓
+def decode(self, tokens: List[int]) -> str:
+    """Decode token IDs back to text."""
+    # Convert IDs to tokens
+    token_strings = []
+    for token_id in tokens:
+        token = self.id_to_token.get(token_id, '<UNK>')
+        token_strings.append(token)
 
- Unit Test: Character Tokenizer...
- Vocabulary built with 89 unique characters
- Encode/decode round-trip: "hello" → [8,5,12,12,15] → "hello"
- Unknown character maps to <UNK> token (ID 0)
- Vocabulary building from corpus works correctly
- Progress: Character Tokenizer ✓
+    # Join and clean up
+    text = ''.join(token_strings)
 
- Unit Test: BPE Tokenizer...
- Character-level initialization successful
- Pair extraction: ['h','e','l','l','o</w>'] → {('h','e'), ('l','l'), ...}
- Training learned 195 merge rules from corpus
- Vocabulary size reached target (200 tokens)
- Sequence length reduced 3.2x vs character-level
- Unknown words decompose into subwords gracefully
- Progress: BPE Tokenizer ✓
+    # Replace end-of-word markers with spaces
+    text = text.replace('</w>', ' ')
 
- Unit Test: Tokenization Utils...
- Tokenizer factory creates correct instances
- Dataset processing handles variable lengths
- Analysis computes compression ratios correctly
- Progress: Tokenization Utils ✓
+    # Clean up extra spaces
+    text = ' '.join(text.split())
 
- Analyzing Tokenization Strategies...
-Strategy      Vocab    Avg Len  Compression   Coverage
-------------------------------------------------------------
-Character     89       43.2     1.00          89
-BPE-100       100      28.5     1.52          87
-BPE-500       500      13.8     3.14          245
-
- Key Insights:
-- Character: Small vocab, long sequences, perfect coverage
-- BPE: Larger vocab, shorter sequences, better compression
-- Higher compression ratio = more characters per token = efficiency
-
- ALL TESTS PASSED! Module ready for export.
+    return text
 ```
 
-### Manual Testing Examples
+The round-trip text → IDs → text should be lossless for known vocabulary. Unknown tokens degrade gracefully, mapping to `<UNK>` in both directions.
 
+### Computational Complexity
+
+Character tokenization is fast: encoding is O(n) where n is the string length (one dictionary lookup per character), and decoding is also O(n) (one reverse lookup per ID). The operations are embarrassingly parallel since each character processes independently.
+
+BPE is slower due to merge rule application. Training BPE scales approximately O(n² × m) where n is corpus size and m is the number of merges. Each merge iteration requires counting all pairs across the entire corpus, then updating token sequences. For a 10,000-word corpus learning 5,000 merges, this can take seconds to minutes depending on implementation.
+
+Encoding with trained BPE is O(n × m) where n is text length and m is the number of merge rules. Each merge rule must scan the token sequence looking for applicable pairs. Production tokenizers optimize this with trie data structures and caching, achieving near-linear time.
+
+| Operation | Character | BPE Training | BPE Encoding |
+|-----------|-----------|--------------|--------------|
+| **Complexity** | O(n) | O(n² × m) | O(n × m) |
+| **Typical Speed** | 1-5 ms/1K chars | 100-1000 ms/10K corpus | 5-20 ms/1K chars |
+| **Bottleneck** | Dictionary lookup | Pair frequency counting | Merge rule application |
+
+### Vocabulary Size Versus Sequence Length
+
+The fundamental trade-off in tokenization creates a spectrum of choices. Small vocabularies (100-500 tokens) produce long sequences because each token represents little information (individual characters or very common subwords). Large vocabularies (50,000+ tokens) produce short sequences because each token represents more information (whole words or meaningful subword units).
+
+Memory and computation scale oppositely:
+
+**Embedding table memory** = vocabulary size × embedding dimension × bytes per parameter
+**Sequence processing cost** = sequence length² × embedding dimension (for attention)
+
+A character tokenizer with vocabulary 100 and embedding dimension 512 needs 100 × 512 × 4 = 204 KB for embeddings. But a 50-word sentence produces roughly 250 character tokens, requiring 250² = 62,500 attention computations per layer.
+
+A BPE tokenizer with vocabulary 50,000 and embedding dimension 512 needs 50,000 × 512 × 4 = 102 MB for embeddings. But that same 50-word sentence might produce only 75 BPE tokens, requiring 75² = 5,625 attention computations per layer.
+
+The attention cost savings (62,500 vs 5,625) dwarf the embedding memory cost (204 KB vs 102 MB) for models with multiple layers. This is why production language models use large vocabularies: the embedding table fits easily in memory, while shorter sequences dramatically reduce training and inference time.
+
+Modern language models balance these factors:
+
+| Model | Vocabulary | Strategy | Sequence Length (typical) |
+|-------|-----------|----------|---------------------------|
+| **GPT-2/3** | 50,257 | BPE | ~50-200 tokens per sentence |
+| **BERT** | 30,522 | WordPiece | ~40-150 tokens per sentence |
+| **T5** | 32,128 | SentencePiece | ~40-180 tokens per sentence |
+| **Character** | ~100 | Character | ~250-1000 tokens per sentence |
+
+## Production Context
+
+### Your Implementation vs. Production Tokenizers
+
+Your TinyTorch tokenizers demonstrate the core algorithms, but production tokenizers optimize for speed and scale. The conceptual differences are minimal: the same BPE algorithm, the same vocabulary mappings, the same encode/decode operations. The implementation differences are dramatic.
+
+| Feature | Your Implementation | Hugging Face Tokenizers |
+|---------|---------------------|-------------------------|
+| **Language** | Pure Python | Rust (compiled to native code) |
+| **Speed** | 1-10 ms/sentence | 0.01-0.1 ms/sentence (100× faster) |
+| **Parallelization** | Single-threaded | Multi-threaded with Rayon |
+| **Vocabulary storage** | Python dict | Trie data structure |
+| **Special features** | Basic encode/decode | Padding, truncation, attention masks |
+| **Pretrained models** | Train from scratch | Load from Hugging Face Hub |
+
+### Code Comparison
+
+The following comparison shows equivalent tokenization in TinyTorch and Hugging Face. Notice how the high-level API mirrors production tools, making your learning transferable.
+
+`````{tab-set}
+````{tab-item} Your TinyTorch
 ```python
-from tokenization_dev import CharTokenizer, BPETokenizer, create_tokenizer, analyze_tokenization
+from tinytorch.core.tokenization import BPETokenizer
 
-# Test character-level tokenization
-char_tokenizer = CharTokenizer()
-corpus = ["hello world", "machine learning is awesome"]
-char_tokenizer.build_vocab(corpus)
+# Train tokenizer on corpus
+corpus = ["hello world", "machine learning"]
+tokenizer = BPETokenizer(vocab_size=1000)
+tokenizer.train(corpus)
 
-text = "hello"
-char_ids = char_tokenizer.encode(text)
-char_decoded = char_tokenizer.decode(char_ids)
-print(f"Character: '{text}' → {char_ids} → '{char_decoded}'")
-# Output: Character: 'hello' → [8, 5, 12, 12, 15] → 'hello'
+# Encode text
+text = "hello machine"
+token_ids = tokenizer.encode(text)
 
-# Test BPE tokenization
-bpe_tokenizer = BPETokenizer(vocab_size=500)
-bpe_tokenizer.train(corpus)
-
-bpe_ids = bpe_tokenizer.encode(text)
-bpe_decoded = bpe_tokenizer.decode(bpe_ids)
-print(f"BPE: '{text}' → {bpe_ids} → '{bpe_decoded}'")
-# Output: BPE: 'hello' → [142, 201] → 'hello'  # Fewer tokens!
-
-# Compare sequence lengths
-long_text = "The quick brown fox jumps over the lazy dog" * 10
-char_len = len(char_tokenizer.encode(long_text))
-bpe_len = len(bpe_tokenizer.encode(long_text))
-print(f"Sequence length reduction: {char_len / bpe_len:.1f}x")
-# Output: Sequence length reduction: 3.2x
-
-# Analyze tokenization statistics
-test_corpus = [
-    "Neural networks learn patterns",
-    "Transformers use attention mechanisms",
-    "Tokenization enables text processing"
-]
-
-char_stats = analyze_tokenization(test_corpus, char_tokenizer)
-bpe_stats = analyze_tokenization(test_corpus, bpe_tokenizer)
-
-print(f"Character - Vocab: {char_stats['vocab_size']}, "
-      f"Avg Length: {char_stats['avg_sequence_length']:.1f}, "
-      f"Compression: {char_stats['compression_ratio']:.2f}")
-# Output: Character - Vocab: 89, Avg Length: 42.3, Compression: 1.00
-
-print(f"BPE - Vocab: {bpe_stats['vocab_size']}, "
-      f"Avg Length: {bpe_stats['avg_sequence_length']:.1f}, "
-      f"Compression: {bpe_stats['compression_ratio']:.2f}")
-# Output: BPE - Vocab: 500, Avg Length: 13.5, Compression: 3.13
+# Decode back to text
+decoded = tokenizer.decode(token_ids)
 ```
-
-## Systems Thinking Questions
-
-### Real-World Applications
-
-**OpenAI GPT Series:**
-- **GPT-2**: 50,257 BPE tokens trained on 8M web pages (WebText corpus); vocabulary size chosen to balance 38M embedding parameters (50K × 768 dim) with sequence length for 1024-token context
-- **GPT-3**: Increased to 100K vocabulary to handle code (indentation, operators) and reduce sequence lengths for long documents; embedding matrix alone: 1.2B parameters (100K × 12,288 dim)
-- **GPT-4**: Advanced tiktoken library with 100K+ tokens, optimized for tokenization throughput at scale ($700/million tokens means every millisecond counts)
-- **Question**: Why did OpenAI double vocabulary size from GPT-2→GPT-3? Consider the trade-off: 2x more embedding parameters vs sequence length reduction for code/long documents. What breaks if vocabulary is too small? Too large?
-
-**Google Multilingual Models:**
-- **SentencePiece**: Used in BERT, T5, PaLM for 100+ languages without language-specific preprocessing; unified tokenization enables shared vocabulary across languages
-- **Vocabulary Sharing**: Multilingual models use single vocabulary for all languages (e.g., mT5: 250K SentencePiece tokens cover 101 languages); trade-off between per-language coverage and total vocabulary size
-- **Production Scaling**: Google Translate processes billions of sentences daily; tokenization throughput and vocabulary lookup latency are critical for serving at scale
-- **Question**: English needs ~30K tokens for 99% coverage; Chinese ideographic characters need 50K+. Should a multilingual model use one shared vocabulary or separate vocabularies per language? Consider: shared vocabulary enables zero-shot transfer but reduces per-language coverage.
-
-**Code Models (GitHub Copilot, AlphaCode):**
-- **Specialized Vocabularies**: Code tokenizers handle programming language syntax (indentation, operators, keywords) and natural language (comments, docstrings); balance code-specific tokens vs natural language
-- **Identifier Handling**: Variable names like `getUserProfile` vs `get_user_profile` require different tokenization strategies (camelCase splitting, underscore boundaries)
-- **Trade-off**: Larger vocabulary for code-specific tokens reduces sequence length but increases embedding matrix size; rare identifier fragments still need subword decomposition
-- **Question**: Should a code tokenizer treat `getUserProfile` as 1 token, 3 tokens (`get`, `User`, `Profile`), or 15 character tokens? Consider: single token = short sequence but huge vocabulary; character-level = long sequences but handles any identifier.
-
-**Production NLP Pipelines:**
-- **Google Translate**: Billions of sentences daily require high-throughput tokenization (character: ~1M tokens/sec, BPE: ~100K tokens/sec); vocabulary size affects both model memory and inference speed
-- **OpenAI API**: Tokenization cost is significant at $700/million tokens; every optimization (caching, batch processing, vocabulary size tuning) directly impacts economics
-- **Mobile Deployment**: Edge models (on-device speech recognition, keyboards) use smaller vocabularies (5K-10K) to fit memory constraints, trading sequence length for model size
-- **Question**: If your tokenizer processes 10K tokens/second but your model serves 100K requests/second (each 50 tokens), how do you scale? Consider: pre-tokenize and cache? Batch aggressively? Optimize vocabulary?
-
-### Tokenization Foundations
-
-**Vocabulary Size vs Model Parameters:**
-- **Embedding Matrix Scaling**: Embedding parameters = vocab_size × embed_dim
-  - GPT-2: 50K vocab × 768 dim = 38.4M parameters (just embeddings!)
-  - GPT-3: 100K vocab × 12,288 dim = 1.23B parameters (just embeddings!)
-  - BERT-base: 30K vocab × 768 dim = 23M parameters
-- **Training Impact**: Larger vocabulary means more parameters to train; embedding gradients scale with vocabulary size (affects memory and optimizer state size)
-- **Deployment Constraints**: Embedding matrix must fit in memory during inference; on-device models use smaller vocabularies (5K-10K) to meet memory budgets
-- **Question**: If you increase vocabulary from 10K to 100K (10x), how does this affect: (1) Model size? (2) Training memory (gradients + optimizer states)? (3) Inference latency (vocabulary lookup)?
-
-**Sequence Length vs Computation:**
-- **Transformer Attention Complexity**: O(n²) where n = sequence length; doubling sequence length quadruples attention computation
-- **BPE Compression**: Reduces "unhappiness" (11 chars) to ["un", "happi", "ness"] (3 tokens) → 13.4x less attention computation (11² vs 3²)
-- **Batch Processing**: Sequences padded to max length in batch; character-level (1000 tokens) requires 11x more computation than BPE-level (300 tokens) even if actual content is shorter
-- **Memory Scaling**: Attention matrices scale as (batch_size × n²); character-level consumes far more GPU memory than BPE
-- **Question**: Given text "machine learning" (16 chars), compare computation: (1) Character tokenizer → 16 tokens → 16² = 256 attention ops; (2) BPE → 3 tokens → 3² = 9 attention ops. What's the computational savings ratio? How does this scale to 1000-token documents?
-
-**Rare Word Handling:**
-- **Word-Level Failure**: Word tokenizers map unknown words to `<UNK>` token → complete information loss (can't distinguish "antidisestablishmentarianism" from "supercalifragilisticexpialidocious")
-- **BPE Graceful Degradation**: Decomposes unknown words into known subwords: "unhappiness" → ["un", "happi", "ness"] preserves semantic information even if full word never seen during training
-- **Morphological Generalization**: BPE learns prefixes ("un-", "pre-", "anti-") and suffixes ("-ing", "-ed", "-ness") as tokens, enabling compositional understanding
-- **Question**: How does BPE handle "antidisestablishmentarianism" (28 chars) even if never seen during training? Trace the decomposition: which subwords would be discovered? How does this enable the model to understand the word's meaning?
-
-**Tokenization as Compression:**
-- **Frequent Pattern Learning**: BPE learns common patterns become single tokens: "ing" → 1 token, "ed" → 1 token, "tion" → 1 token (similar to dictionary-based compression like LZW)
-- **Information Theory Connection**: Optimal encoding assigns short codes to frequent symbols (Huffman coding); BPE is essentially dictionary-based compression optimized for language statistics
-- **Compression Ratio**: Character-level = 1.0 chars/token (by definition); BPE typically achieves 3-5 chars/token depending on vocabulary size and language
-- **Question**: BPE and gzip both learn frequent patterns and replace with short codes. What's the key difference? Hint: BPE operates at subword granularity (preserves linguistic units), gzip operates at byte level (ignores linguistic structure).
-
-### Performance Characteristics
-
-**Tokenization Throughput:**
-- **Character-Level Speed**: ~1M tokens/second (simple array lookup: char → ID via hash map)
-- **BPE Speed**: ~100K tokens/second (iterative merge application: must scan for applicable merge rules)
-- **Production Caching**: Systems cache tokenization results to amortize preprocessing cost (especially for repeated queries or batch processing)
-- **Bottleneck Analysis**: If tokenization takes 10ms and model inference takes 100ms (single request), tokenization is 9% overhead; but for batch_size=1000, tokenization becomes 100ms (10ms × 1000 requests) while model inference might be 200ms due to batching efficiency → tokenization is now 33% overhead!
-- **Question**: Your tokenizer processes 10K tokens/sec. Model serves 100K requests/sec, each request has 50 tokens. Total tokenization throughput needed: 5M tokens/sec. What do you do? Consider: (1) Parallelize tokenization across CPUs? (2) Cache frequent queries? (3) Switch to character tokenizer (10x faster)? (4) Optimize BPE implementation?
-
-**Memory vs Compute Trade-offs:**
-- **Large Vocabulary**: More memory (embedding matrix) but faster tokenization (fewer merge applications) and shorter sequences (less attention computation)
-- **Small Vocabulary**: Less memory (smaller embedding matrix) but slower tokenization (more merge rules to apply) and longer sequences (more attention computation)
-- **Optimal Vocabulary Size**: Depends on deployment constraints—edge devices (mobile, IoT) prioritize memory (use smaller vocab, accept longer sequences); cloud serving prioritizes throughput (use larger vocab, reduce sequence length)
-- **Embedding Matrix Memory**: GPT-3's 100K vocabulary × 12,288 dim × 2 bytes (fp16) = 2.5GB just for embeddings; quantization to int8 reduces to 1.25GB
-- **Question**: For edge deployment (mobile device with 2GB RAM budget), should you prioritize: (1) Smaller vocabulary (5K tokens, saves 400MB embedding memory) accepting longer sequences? (2) Larger vocabulary (50K tokens, uses 2GB embeddings) for shorter sequences? Consider: attention computation scales quadratically with sequence length.
-
-**Batching and Padding:**
-- **Padding Waste**: Variable-length sequences padded to max length in batch; wasted computation on padding tokens (don't contribute to loss but consume attention operations)
-- **Character-Level Penalty**: Longer sequences require more padding—if batch contains [10, 50, 500] character-level tokens, all padded to 500 → 490 + 450 + 0 = 940 wasted tokens (65% waste)
-- **BPE Advantage**: Shorter sequences reduce padding waste—same batch as [3, 15, 150] BPE tokens, padded to 150 → 147 + 135 + 0 = 282 wasted tokens (still 63% waste, but absolute numbers smaller)
-- **Dynamic Batching**: Group similar-length sequences to reduce padding waste (collate_fn in DataLoader)
-- **Question**: Batch of sequences with lengths [10, 50, 500] tokens. (1) Character-level: Total computation = 3 × 500² = 750K attention operations. (2) BPE reduces to [3, 15, 150]: Total = 3 × 150² = 67.5K operations (11x reduction). But what if you sort and batch by length: [[10, 50], [500]] → Char: 2×50² + 1×500² = 255K; BPE: 2×15² + 1×150² = 23K. How much does batching strategy matter?
-
-**Multilingual Considerations:**
-- **Shared Vocabulary**: Enables zero-shot cross-lingual transfer (model trained on English can handle French without fine-tuning) but reduces per-language coverage
-- **Language-Specific Vocabulary Size**: English: 26 letters → 30K tokens for 99% coverage; Chinese: 50K+ characters → need 60K tokens for equivalent coverage; Arabic: morphologically rich → needs more subword decomposition
-- **Vocabulary Allocation**: Multilingual model with 100K shared vocabulary must allocate tokens across languages; high-resource languages (English) get better coverage than low-resource languages (Swahili)
-- **Question**: Should a multilingual model use: (1) One shared vocabulary (100K tokens across all languages, enables transfer but dilutes per-language coverage)? (2) Separate vocabularies per language (30K English + 60K Chinese = 90K total, better coverage but no cross-lingual transfer)? Consider: shared embedding space enables "cat" (English) to align with "chat" (French) via training.
-
-## Ready to Build?
-
-You're about to implement the tokenization systems that power every modern language model—from GPT-4 processing trillions of tokens to Google Translate serving billions of requests daily. Tokenization is the critical bridge between human language (text) and neural networks (numbers), and the design decisions you make have profound effects on model size, computational cost, and generalization ability.
-
-By building these systems from scratch, you'll understand the fundamental trade-off shaping modern NLP: **vocabulary size vs sequence length**. Larger vocabularies mean more model parameters (embedding matrix size = vocab_size × embed_dim) but shorter sequences (less computation, especially in transformers with O(n²) attention). Smaller vocabularies mean fewer parameters but longer sequences requiring more computation. You'll see why BPE emerged as the dominant approach—balancing both extremes optimally through learned subword decomposition—and why every major language model (GPT, BERT, T5, LLaMA) uses some form of subword tokenization.
-
-This module connects directly to Module 11 (Embeddings): your token IDs will index into embedding matrices, converting discrete tokens into continuous vectors. Understanding tokenization deeply—not just as a black-box API but as a system with measurable performance characteristics and design trade-offs—will make you a better ML systems engineer. You'll appreciate why GPT-3 doubled vocabulary size from GPT-2 (50K→100K to handle code and long documents), why mobile models use tiny 5K vocabularies (memory constraints), and why production systems aggressively cache tokenization results (throughput optimization).
-
-Take your time, experiment with different vocabulary sizes (100, 1000, 10000), and measure everything: sequence length reduction, compression ratios, tokenization throughput. This is where text becomes numbers, where linguistics meets systems engineering, and where you'll develop the intuition needed to make smart trade-offs in production NLP systems.
-
-Choose your preferred way to engage with this module:
-
-````{grid} 1 2 3 3
-
-```{grid-item-card}  Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/10_tokenization/tokenization_dev.ipynb
-:class-header: bg-light
-
-Run this module interactively in your browser. No installation required!
-```
-
-```{grid-item-card}  Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/10_tokenization/tokenization_dev.ipynb
-:class-header: bg-light
-
-Use Google Colab for GPU access and cloud compute power.
-```
-
-```{grid-item-card}  View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/10_tokenization/tokenization_dev.ipynb
-:class-header: bg-light
-
-Browse the Jupyter notebook and understand the implementation.
-```
-
 ````
 
-```{admonition}  Save Your Progress
-:class: tip
-**Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
+````{tab-item} ⚡ Hugging Face
+```python
+from tokenizers import Tokenizer, models, trainers
 
+# Train tokenizer on corpus (same algorithm!)
+corpus = ["hello world", "machine learning"]
+tokenizer = Tokenizer(models.BPE())
+trainer = trainers.BpeTrainer(vocab_size=1000)
+tokenizer.train_from_iterator(corpus, trainer)
+
+# Encode text
+text = "hello machine"
+output = tokenizer.encode(text)
+token_ids = output.ids
+
+# Decode back to text
+decoded = tokenizer.decode(token_ids)
+```
+````
+`````
+
+Let's walk through each section to understand the comparison:
+
+- **Lines 1-3 (Imports)**: TinyTorch exposes `BPETokenizer` directly from the tokenization module. Hugging Face uses a more modular design with separate `models` and `trainers` for flexibility across algorithms (BPE, WordPiece, Unigram).
+
+- **Lines 5-8 (Training)**: Both train on the same corpus using the same BPE algorithm. TinyTorch uses a simpler API with `train()` method. Hugging Face separates model definition from training for composability, but the underlying algorithm is identical.
+
+- **Lines 10-12 (Encoding)**: TinyTorch returns a list of integers directly. Hugging Face returns an `Encoding` object with additional metadata (attention masks, offsets, etc.), and you extract the IDs with `.ids` attribute. Same numerical result.
+
+- **Lines 14-15 (Decoding)**: Both use `decode()` with the token ID list. Output is identical. The core operation is the same: look up each ID in the vocabulary and join the tokens.
+
+```{tip} What's Identical
+
+The BPE algorithm, merge rule learning, vocabulary structure, and encode/decode logic. When you debug tokenization issues in production, you'll understand exactly what's happening because you built the same system.
 ```
 
----
+### Why Tokenization Matters at Scale
 
-<div class="prev-next-area">
-<a class="left-prev" href="09_spatial_ABOUT.html" title="previous page">← Module 09: Spatial</a>
-<a class="right-next" href="11_embeddings_ABOUT.html" title="next page">Module 11: Embeddings →</a>
-</div>
+To appreciate why tokenization choices matter, consider the scale of modern systems:
+
+- **GPT-3 training**: Processing 300 billion tokens required careful vocabulary selection. Using character tokenization would have increased sequence lengths by 3-4×, multiplying training time by 9-16× (quadratic attention cost).
+
+- **Embedding table memory**: A 50,000 token vocabulary with 12,288-dimensional embeddings (GPT-3 size) requires 50,000 × 12,288 × 4 bytes = **2.4 GB** just for the embedding layer. This is ~0.14% of GPT-3's 175 billion total parameters, a reasonable fraction.
+
+- **Real-time inference**: Chatbots must tokenize user input in milliseconds. Python tokenizers take 5-20 ms per sentence; Rust tokenizers take 0.05-0.2 ms. At 1 million requests per day, this saves ~5 hours of compute time daily.
+
+## Check Your Understanding
+
+Test yourself with these systems thinking questions. They're designed to build intuition for the performance characteristics you'll encounter in production NLP systems.
+
+**Q1: Vocabulary Memory Calculation**
+
+You train a BPE tokenizer with `vocab_size=30,000` for a production model. If using 768-dimensional embeddings with float32 precision, how much memory does the embedding table require?
+
+```{admonition} Answer
+:class: dropdown
+
+30,000 × 768 × 4 bytes = **92,160,000 bytes ≈ 92.16 MB**
+
+Breakdown:
+- Vocabulary size: 30,000 tokens
+- Embedding dimension: 768 (BERT-base size)
+- Float32: 4 bytes per parameter
+- Total parameters: 30,000 × 768 = 23,040,000
+- Memory: 23.04M × 4 = 92.16 MB
+
+This is why vocabulary size matters! Doubling to 60K vocab would double embedding memory to ~184 MB.
+```
+
+**Q2: Sequence Length Trade-offs**
+
+A sentence contains 200 characters. With character tokenization it produces 200 tokens. With BPE it produces 50 tokens (4:1 compression). If processing batch size 32 with attention:
+
+- How many attention computations for character tokenization per batch?
+- How many for BPE tokenization per batch?
+
+```{admonition} Answer
+:class: dropdown
+
+**Character tokenization:**
+- Sequence length: 200 tokens
+- Attention per sequence: 200² = 40,000 operations
+- Batch size: 32
+- Total: 32 × 40,000 = **1,280,000 attention operations**
+
+**BPE tokenization:**
+- Sequence length: 50 tokens (200 chars ÷ 4)
+- Attention per sequence: 50² = 2,500 operations
+- Batch size: 32
+- Total: 32 × 2,500 = **80,000 attention operations**
+
+BPE is **16× faster** for attention! This is why modern models use subword tokenization despite larger embedding tables.
+```
+
+**Q3: Unknown Token Handling**
+
+Your BPE tokenizer encounters the word "supercalifragilistic" (not in training corpus). Character tokenizer maps it to 22 known tokens. BPE tokenizer decomposes it into subwords like `['super', 'cal', 'ifr', 'ag', 'il', 'istic']` (6 tokens). Which is better?
+
+```{admonition} Answer
+:class: dropdown
+
+**BPE is better for production:**
+
+- **Efficiency**: 6 tokens vs 22 tokens = 3.7× shorter sequence
+- **Semantics**: Subwords like "super" and "istic" carry meaning; individual characters don't
+- **Generalization**: Model learns that "super" prefix modifies meaning (superman, supermarket)
+- **Memory**: 6² = 36 attention computations vs 22² = 484 (13× faster)
+
+**Character tokenization advantages:**
+- **Perfect coverage**: Never maps to `<UNK>`, always recovers original text
+- **Simplicity**: No complex merge rules or training
+
+For rare/unknown words, BPE's subword decomposition provides better semantic understanding and efficiency, which is why GPT, BERT, and T5 all use variants of subword tokenization.
+```
+
+**Q4: Compression Ratio Analysis**
+
+You analyze two tokenizers on a 10,000 character corpus:
+- Character tokenizer: 10,000 tokens
+- BPE tokenizer: 2,500 tokens
+
+What's the compression ratio, and what does it tell you about efficiency?
+
+```{admonition} Answer
+:class: dropdown
+
+**Compression ratio: 10,000 ÷ 2,500 = 4.0**
+
+This means each BPE token represents an average of 4 characters.
+
+**Efficiency implications:**
+- **Sequence processing**: 4× shorter sequences = 16× faster attention (quadratic scaling)
+- **Context window**: With max length 512, character tokenizer handles 512 chars (~100 words); BPE handles 2,048 chars (~400 words)
+- **Information density**: Each BPE token carries more semantic information (subword vs character)
+
+**Trade-off**: BPE vocabulary is ~100× larger (10K tokens vs 100), increasing embedding memory from ~200 KB to ~20 MB. This trade-off heavily favors BPE for models with multiple transformer layers where attention cost dominates.
+```
+
+**Q5: Training Corpus Size Impact**
+
+Training BPE on 1,000 words takes 100ms. How long will 10,000 words take? What about 100,000 words?
+
+```{admonition} Answer
+:class: dropdown
+
+BPE training scales approximately **O(n²)** where n is corpus size (due to repeated pair counting across the corpus).
+
+- **1,000 words**: 100 ms (baseline)
+- **10,000 words**: ~10,000 ms = 10 seconds (100× longer, due to 10² scaling)
+- **100,000 words**: ~1,000,000 ms = 1,000 seconds ≈ **16.7 minutes** (10,000× longer)
+
+**Production strategies to handle this:**
+- Sample representative subset (~50K-100K sentences is usually sufficient)
+- Use incremental/online BPE that doesn't recount all pairs each iteration
+- Parallelize pair counting across corpus chunks
+- Cache frequent pair statistics
+- Use optimized implementations (Rust, C++) that are 100-1000× faster
+
+Note: Encoding with trained BPE is much faster (linear time), only training is slow.
+```
+
+## Further Reading
+
+For students who want to understand the academic foundations and production implementations of tokenization:
+
+### Seminal Papers
+
+- **Neural Machine Translation of Rare Words with Subword Units** - Sennrich et al. (2016). The original BPE paper that introduced subword tokenization for neural machine translation. Shows how BPE handles rare words through decomposition and achieves better translation quality. [arXiv:1508.07909](https://arxiv.org/abs/1508.07909)
+
+- **SentencePiece: A simple and language independent approach to subword tokenization** - Kudo & Richardson (2018). Extends BPE with language-agnostic tokenization that handles raw text without pre-tokenization. Used in T5, ALBERT, and many multilingual models. [arXiv:1808.06226](https://arxiv.org/abs/1808.06226)
+
+- **BERT: Pre-training of Deep Bidirectional Transformers** - Devlin et al. (2018). While primarily about transformers, introduces WordPiece tokenization used in BERT family models. Section 4.1 discusses vocabulary and tokenization choices. [arXiv:1810.04805](https://arxiv.org/abs/1810.04805)
+
+### Additional Resources
+
+- **Library**: [Hugging Face Tokenizers](https://github.com/huggingface/tokenizers) - Production Rust implementation with Python bindings. Explore the source to see optimized BPE.
+- **Tutorial**: "Byte Pair Encoding Tokenization" - [Hugging Face Course](https://huggingface.co/learn/nlp-course/chapter6/5) - Interactive tutorial showing BPE in action with visualizations
+- **Textbook**: "Speech and Language Processing" by Jurafsky & Martin - Chapter 2 covers tokenization, including Unicode handling and language-specific issues
+
+## What's Next
+
+```{seealso} Coming Up: Module 11 - Embeddings
+
+Convert your token IDs into learnable dense vector representations. You'll implement embedding tables that transform discrete tokens into continuous vectors, enabling neural networks to capture semantic relationships in text.
+```
+
+**Preview - How Your Tokenizer Gets Used in Future Modules:**
+
+| Module | What It Does | Your Tokenization In Action |
+|--------|--------------|----------------------------|
+| **11: Embeddings** | Learnable lookup tables | `embedding = Embedding(vocab_size=1000, dim=128)` |
+| **12: Attention** | Sequence-to-sequence processing | Token sequences attend to each other |
+| **13: Transformers** | Complete language models | Full pipeline: tokenize → embed → attend → predict |
+
+## Get Started
+
+```{tip} Interactive Options
+
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/10_tokenization/10_tokenization.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/10_tokenization/10_tokenization.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/10_tokenization/10_tokenization.py)** - Browse the implementation code
+```
+
+```{warning} Save Your Progress
+
+Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
+```

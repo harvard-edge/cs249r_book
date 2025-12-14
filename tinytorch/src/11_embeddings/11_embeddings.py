@@ -40,7 +40,7 @@ Let's transform tokens into intelligence!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/11_embeddings/embeddings_dev.py`  
+**Learning Side:** You work in `modules/11_embeddings/embeddings_dev.py`
 **Building Side:** Code exports to `tinytorch.text.embeddings`
 
 ```python
@@ -305,11 +305,11 @@ class Embedding:
 
         # Create result tensor with gradient tracking
         result = Tensor(embedded, requires_grad=self.weight.requires_grad)
-        
+
         # Attach backward function for gradient computation (following TinyTorch protocol)
         if result.requires_grad:
             result._grad_fn = EmbeddingBackward(self.weight, indices)
-        
+
         return result
 
     def __call__(self, indices: Tensor) -> Tensor:
@@ -483,12 +483,12 @@ class PositionalEncoding:
         # Slice position embeddings for this sequence length using Tensor slicing
         # This now preserves gradient flow (as of Module 01 update with __getitem__)
         pos_embeddings = self.position_embeddings[:seq_len]  # (seq_len, embed_dim) - gradients preserved!
-        
+
         # Reshape to add batch dimension: (1, seq_len, embed_dim)
         # Need to use .data for reshaping temporarily, then wrap in Tensor
         pos_data = pos_embeddings.data[np.newaxis, :, :]
         pos_embeddings_batched = Tensor(pos_data, requires_grad=pos_embeddings.requires_grad)
-        
+
         # Copy gradient function if it exists (to preserve backward connection)
         if hasattr(pos_embeddings, '_grad_fn') and pos_embeddings._grad_fn is not None:
             pos_embeddings_batched._grad_fn = pos_embeddings._grad_fn
@@ -928,11 +928,11 @@ class EmbeddingLayer:
             # Use fixed sinusoidal encoding (not learnable)
             batch_size, seq_len, embed_dim = token_embeds.shape
             pos_embeddings = self.pos_encoding[:seq_len]  # Slice using Tensor slicing
-            
+
             # Reshape to add batch dimension
             pos_data = pos_embeddings.data[np.newaxis, :, :]
             pos_embeddings_batched = Tensor(pos_data, requires_grad=False)  # Sinusoidal are fixed
-            
+
             output = token_embeds + pos_embeddings_batched
         else:
             # No positional encoding

@@ -10,7 +10,7 @@ to solve real vision problems like handwritten digit recognition, launching the
 modern deep learning era.
 
 🎯 WHAT YOU'RE BUILDING:
-Using YOUR TinyTorch implementations, you'll build a multi-layer perceptron that
+Using YOUR Tiny🔥Torch implementations, you'll build a multi-layer perceptron that
 achieves 85-90%+ accuracy on MNIST digits - proving YOUR system can solve real vision!
 
 ✅ REQUIRED MODULES (Run after Module 06):
@@ -106,13 +106,13 @@ def flatten(x):
 
 class MNISTMLP:
     """
-    Multi-Layer Perceptron for MNIST using YOUR TinyTorch!
+    Multi-Layer Perceptron for MNIST using YOUR Tiny🔥Torch!
 
     This architecture proved deep learning could solve real vision problems.
     """
 
     def __init__(self, input_size=784, hidden1=128, hidden2=64, num_classes=10):
-        print("🧠 Building MNIST MLP with YOUR TinyTorch modules...")
+        print("🧠 Building MNIST MLP with YOUR Tiny🔥Torch modules...")
 
         # Deep architecture - multiple hidden layers!
         self.fc1 = Linear(input_size, hidden1)    # Module 04: YOUR Linear layer!
@@ -190,7 +190,7 @@ def train_mnist_mlp(model, train_data, train_labels,
     Train MNIST MLP using YOUR manual training loop!
     This demonstrates the core training cycle that YOU control.
     """
-    print("\n🚀 Training MNIST MLP with YOUR TinyTorch system!")
+    print("\n🚀 Training MNIST MLP with YOUR Tiny🔥Torch system!")
     print(f"   Dataset: {len(train_data)} training images")
     print(f"   Manual training loop - YOU control the process!")
     print(f"   Cross-entropy loss (Module 04)")
@@ -371,7 +371,7 @@ def analyze_mnist_systems(model, monitor):
     print(f"   • YOUR achievement: Real vision with YOUR code!")
 
 def main():
-    """Demonstrate MNIST digit classification using YOUR TinyTorch!"""
+    """Demonstrate MNIST digit classification using YOUR Tiny🔥Torch!"""
 
     parser = argparse.ArgumentParser(description='MNIST MLP 1986')
     parser.add_argument('--test-only', action='store_true',

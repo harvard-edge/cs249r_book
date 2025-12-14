@@ -56,7 +56,7 @@ def collect_labels_and_references(files, label_types):
 
 def report_unreferenced(defined, referenced):
     unreferenced_labels = []
-    
+
     # Get all referenced labels (keys of the referenced dict)
     referenced_labels = set(referenced.keys())
 
@@ -64,7 +64,7 @@ def report_unreferenced(defined, referenced):
         # Skip checking sections for unreferenced labels - it's normal for textbook sections to not be cross-referenced
         if label_type == "Section":
             continue
-            
+
         for label, (file, line) in sorted(label_map.items()):
             if label not in referenced_labels:
                 try:

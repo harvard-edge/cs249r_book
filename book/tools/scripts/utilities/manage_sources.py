@@ -31,7 +31,7 @@ class Colors:
 
 class SourceChecker:
     """Main class for checking and cleaning source citations"""
-    
+
     def __init__(self, target_directories=None, target_files=None):
         self.content_dir = Path("contents")
         self.target_directories = target_directories or []
@@ -56,30 +56,30 @@ class SourceChecker:
             'malformed_citations': [],
             'extra_brackets': []
         }
-        
+
     def print_status(self, message: str):
         """Print info message in blue"""
         print(f"{Colors.BLUE}[INFO]{Colors.NC} {message}")
-        
+
     def print_success(self, message: str):
         """Print success message in green"""
         print(f"{Colors.GREEN}[SUCCESS]{Colors.NC} {message}")
-        
+
     def print_warning(self, message: str):
         """Print warning message in yellow"""
         print(f"{Colors.YELLOW}[WARNING]{Colors.NC} {message}")
-        
+
     def print_error(self, message: str):
         """Print error message in red"""
         print(f"{Colors.RED}[ERROR]{Colors.NC} {message}")
-        
+
     def check_environment(self) -> bool:
         """Check if we're in the correct directory"""
         if not self.content_dir.exists():
             self.print_error("Please run this script from the MLSysBook root directory")
             return False
         return True
-        
+
     def find_qmd_files(self) -> List[Path]:
         """Find QMD files based on target directories/files or all files"""
         if self.target_files:
@@ -105,10 +105,10 @@ class SourceChecker:
         else:
             # Process all files in contents directory
             qmd_files = list(self.content_dir.rglob("*.qmd"))
-            
+
         self.stats['total_files'] = len(qmd_files)
         return qmd_files
-        
+
     def analyze_file(self, file_path: Path) -> Dict:
         """Analyze a single QMD file for source citations"""
         file_stats = {
@@ -119,40 +119,40 @@ class SourceChecker:
             'missing_periods': 0,
             'problems': []
         }
-        
+
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-                
+
             # Count academic citations: Source: [@citation]
             academic_pattern = r'Source: \[@[^\]]*\]'
             academic_matches = re.findall(academic_pattern, content)
             file_stats['academic_citations'] = len(academic_matches)
-            
+
             # Count company sources: Source: Company (not academic or link)
             company_pattern = r'Source: [A-Za-z][^.@\[]*(?:\.|$)'
             company_matches = re.findall(company_pattern, content)
             # Filter out academic and link sources
             company_matches = [m for m in company_matches if not re.search(r'\[@|\]\(', m)]
             file_stats['company_sources'] = len(company_matches)
-            
+
             # Count link sources: Source: [text](url)
             link_pattern = r'Source: \[.*?\]\([^)]*\)'
             link_matches = re.findall(link_pattern, content)
             file_stats['link_sources'] = len(link_matches)
-            
+
             # Find problematic patterns
             self._find_problems_in_content(content, file_path, file_stats)
-            
+
             return file_stats
-            
+
         except Exception as e:
             self.print_error(f"Error analyzing {file_path}: {e}")
             return file_stats
-            
+
     def _find_problems_in_content(self, content: str, file_path: Path, file_stats: Dict):
         """Find problematic patterns in file content"""
-        
+
         # Find asterisk-wrapped sources
         asterisk_pattern = r'\*[Ss]ource:[^*]*\*'
         asterisk_matches = list(re.finditer(asterisk_pattern, content))
@@ -163,7 +163,7 @@ class SourceChecker:
                 'line': content[:match.start()].count('\n') + 1,
                 'text': match.group()
             })
-            
+
         # Find sources without periods
         no_period_pattern = r'Source: [^.]*[^.]$'
         for line_num, line in enumerate(content.split('\n'), 1):
@@ -174,7 +174,7 @@ class SourceChecker:
                     'line': line_num,
                     'text': line.strip()
                 })
-                
+
         # Find lowercase 'source:'
         lowercase_pattern = r'source:'
         for line_num, line in enumerate(content.split('\n'), 1):
@@ -184,7 +184,7 @@ class SourceChecker:
                     'line': line_num,
                     'text': line.strip()
                 })
-                
+
         # Find double periods
         double_period_pattern = r'Source: .*\.\.'
         for line_num, line in enumerate(content.split('\n'), 1):
@@ -194,7 +194,7 @@ class SourceChecker:
                     'line': line_num,
                     'text': line.strip()
                 })
-                
+
         # Find malformed academic citations (missing brackets)
         malformed_pattern = r'Source: @[^[]'
         for line_num, line in enumerate(content.split('\n'), 1):
@@ -204,7 +204,7 @@ class SourceChecker:
                     'line': line_num,
                     'text': line.strip()
                 })
-                
+
         # Find extra brackets
         extra_brackets_pattern = r'Source: \[\[@'
         for line_num, line in enumerate(content.split('\n'), 1):
@@ -214,7 +214,7 @@ class SourceChecker:
                     'line': line_num,
                     'text': line.strip()
                 })
-    
+
     def analyze_sources(self) -> Dict:
         """Analyze source citations in QMD files"""
         if self.target_files:
@@ -224,35 +224,35 @@ class SourceChecker:
         else:
             self.print_status("🔍 Analyzing source citation patterns...")
         print()
-        
+
         qmd_files = self.find_qmd_files()
-        
+
         for file_path in qmd_files:
             file_stats = self.analyze_file(file_path)
-            
+
             # Aggregate stats
             self.stats['academic_citations'] += file_stats['academic_citations']
             self.stats['company_sources'] += file_stats['company_sources']
             self.stats['link_sources'] += file_stats['link_sources']
             self.stats['problematic_asterisk'] += file_stats['problematic_asterisk']
             self.stats['missing_periods'] += file_stats['missing_periods']
-            
+
             # Count files with sources
-            total_sources = (file_stats['academic_citations'] + 
-                           file_stats['company_sources'] + 
-                           file_stats['link_sources'] + 
+            total_sources = (file_stats['academic_citations'] +
+                           file_stats['company_sources'] +
+                           file_stats['link_sources'] +
                            file_stats['problematic_asterisk'])
             if total_sources > 0:
                 self.stats['files_with_sources'] += 1
-        
+
         # Update problem counts
         self.stats['lowercase_sources'] = len(self.problems['lowercase_sources'])
         self.stats['double_periods'] = len(self.problems['double_periods'])
         self.stats['malformed_citations'] = len(self.problems['malformed_citations'])
-        
+
         self._print_analysis_results()
         return self.stats
-        
+
     def _print_analysis_results(self):
         """Print the analysis results"""
         print("📊 Source Citation Summary:")
@@ -265,15 +265,15 @@ class SourceChecker:
         print(f"  ⚠️  Double periods: {self.stats['double_periods']}")
         print(f"  ⚠️  Malformed citations: {self.stats['malformed_citations']}")
         print()
-        
-        total_sources = (self.stats['academic_citations'] + 
-                        self.stats['company_sources'] + 
-                        self.stats['link_sources'] + 
+
+        total_sources = (self.stats['academic_citations'] +
+                        self.stats['company_sources'] +
+                        self.stats['link_sources'] +
                         self.stats['problematic_asterisk'])
         print(f"📈 Total sources found: {total_sources}")
         print(f"📁 Files with sources: {self.stats['files_with_sources']}/{self.stats['total_files']}")
         print()
-        
+
     def find_problems(self):
         """Find and display problematic source patterns"""
         if self.target_files or self.target_directories:
@@ -282,7 +282,7 @@ class SourceChecker:
         else:
             self.print_status("🔍 Searching for problematic source patterns...")
         print()
-        
+
         # Show asterisk sources
         if self.problems['asterisk_sources']:
             self.print_warning(f"Found {len(self.problems['asterisk_sources'])} asterisk-wrapped sources:")
@@ -292,7 +292,7 @@ class SourceChecker:
             if len(self.problems['asterisk_sources']) > 3:
                 print(f"     ... and {len(self.problems['asterisk_sources']) - 3} more")
             print()
-            
+
         # Show missing periods
         if self.problems['missing_periods']:
             self.print_warning(f"Found {len(self.problems['missing_periods'])} sources missing periods:")
@@ -302,7 +302,7 @@ class SourceChecker:
             if len(self.problems['missing_periods']) > 3:
                 print(f"     ... and {len(self.problems['missing_periods']) - 3} more")
             print()
-            
+
         # Show lowercase sources
         if self.problems['lowercase_sources']:
             self.print_warning(f"Found {len(self.problems['lowercase_sources'])} lowercase 'source:' instances:")
@@ -311,7 +311,7 @@ class SourceChecker:
             if len(self.problems['lowercase_sources']) > 3:
                 print(f"     ... and {len(self.problems['lowercase_sources']) - 3} more")
             print()
-            
+
         # Show double periods
         if self.problems['double_periods']:
             self.print_warning(f"Found {len(self.problems['double_periods'])} sources with double periods:")
@@ -321,7 +321,7 @@ class SourceChecker:
             if len(self.problems['double_periods']) > 2:
                 print(f"     ... and {len(self.problems['double_periods']) - 2} more")
             print()
-    
+
     def perform_cleanup(self) -> int:
         """Perform automatic cleanup of source citations"""
         if self.target_files:
@@ -331,43 +331,43 @@ class SourceChecker:
         else:
             self.print_status("🧹 Performing automatic cleanup...")
         print()
-        
+
         qmd_files = self.find_qmd_files()
         files_changed = 0
-        
+
         for file_path in qmd_files:
             original_content = self._read_file(file_path)
             if original_content is None:
                 continue
-                
+
             modified_content = original_content
             file_modified = False
-            
+
             # Fix asterisk-wrapped sources
             patterns = [
                 (r'\*[Ss]ource: (@[^*]*)\*', r'Source: [\1].'),
                 (r'\*[Ss]ource: (\[[^\]]*\]\([^)]*\))\*', r'Source: \1.'),
                 (r'\*[Ss]ource: ([^*]*)\*', r'Source: \1.'),
             ]
-            
+
             for pattern, replacement in patterns:
                 new_content = re.sub(pattern, replacement, modified_content)
                 if new_content != modified_content:
                     modified_content = new_content
                     file_modified = True
-            
+
             # Fix lowercase 'source:'
             new_content = re.sub(r'source:', 'Source:', modified_content)
             if new_content != modified_content:
                 modified_content = new_content
                 file_modified = True
-                
+
             # Add missing periods to company sources
             new_content = re.sub(r'Source: ([^.@\[]*[^.])$', r'Source: \1.', modified_content, flags=re.MULTILINE)
             if new_content != modified_content:
                 modified_content = new_content
                 file_modified = True
-                
+
             # Fix academic citations without brackets
             new_content = re.sub(r'Source: @([a-zA-Z0-9][^.]*)\.', r'Source: [@\1].', modified_content)
             if new_content != modified_content:
@@ -383,7 +383,7 @@ class SourceChecker:
                 (r'Source: ([^.]*)\.\.(\]\([^)]*\))', r'Source: \1.\2'),                       # Double periods before link closing
                 (r'Source: ([^.]*)\.\.', r'Source: \1.'),                                      # General double periods
             ]
-            
+
             for pattern, replacement in patterns_double_periods:
                 new_content = re.sub(pattern, replacement, modified_content)
                 if new_content != modified_content:
@@ -400,10 +400,10 @@ class SourceChecker:
             if file_modified:
                 self._write_file(file_path, modified_content)
                 files_changed += 1
-                
+
         self.print_success(f"Cleanup completed! Modified {files_changed} files.")
         return files_changed
-        
+
     def _read_file(self, file_path: Path) -> Optional[str]:
         """Read file content safely"""
         try:
@@ -412,7 +412,7 @@ class SourceChecker:
         except Exception as e:
             self.print_error(f"Error reading {file_path}: {e}")
             return None
-            
+
     def _write_file(self, file_path: Path, content: str) -> bool:
         """Write file content safely"""
         try:
@@ -422,11 +422,11 @@ class SourceChecker:
         except Exception as e:
             self.print_error(f"Error writing {file_path}: {e}")
             return False
-    
+
     def generate_report(self, output_file: str = "source_analysis_report.json") -> bool:
         """Generate detailed JSON report"""
         self.print_status("📋 Generating detailed source report...")
-        
+
         report = {
             'timestamp': datetime.now().isoformat(),
             'summary': self.stats,
@@ -434,7 +434,7 @@ class SourceChecker:
             'files_analyzed': self.stats['total_files'],
             'recommendations': self._generate_recommendations()
         }
-        
+
         try:
             with open(output_file, 'w', encoding='utf-8') as f:
                 json.dump(report, f, indent=2, ensure_ascii=False)
@@ -443,29 +443,29 @@ class SourceChecker:
         except Exception as e:
             self.print_error(f"Error generating report: {e}")
             return False
-            
+
     def _generate_recommendations(self) -> List[str]:
         """Generate recommendations based on analysis"""
         recommendations = []
-        
+
         if self.stats['problematic_asterisk'] > 0:
             recommendations.append("Run cleanup to fix asterisk-wrapped sources")
-            
+
         if self.stats['missing_periods'] > 0:
             recommendations.append("Add periods to company source citations")
-            
+
         if self.stats['lowercase_sources'] > 0:
             recommendations.append("Capitalize 'source:' to 'Source:'")
-            
+
         if self.stats['double_periods'] > 0:
             recommendations.append("Remove double periods from source citations")
-            
+
         if self.stats['malformed_citations'] > 0:
             recommendations.append("Add brackets to academic citations")
-            
+
         if not recommendations:
             recommendations.append("All source citations are properly formatted!")
-            
+
         return recommendations
 
 def main():
@@ -481,7 +481,7 @@ Examples:
   python check_sources.py --analyze -d contents/core/ml_systems  # Analyze one chapter
         """
     )
-    
+
     parser.add_argument('-a', '--analyze', action='store_true',
                         help='Analyze current source patterns')
     parser.add_argument('-p', '--problems', action='store_true',
@@ -494,31 +494,31 @@ Examples:
                         help='Run full analysis (all options)')
     parser.add_argument('-d', '--directories', nargs='+', metavar='DIR',
                         help='Target specific directories (e.g., contents/core/ml_systems)')
-    parser.add_argument('--files', nargs='+', metavar='FILE', 
+    parser.add_argument('--files', nargs='+', metavar='FILE',
                         help='Target specific files (e.g., chapter.qmd)')
     parser.add_argument('--output', default='source_analysis_report.json',
                         help='Output file for report (default: source_analysis_report.json)')
-    
+
     args = parser.parse_args()
-    
+
     # If no arguments, show help
     if not any(vars(args).values()):
         parser.print_help()
         return 1
-    
+
     # Validate file/directory arguments
     if args.files and args.directories:
         print("Error: Cannot specify both --files and --directories")
         return 1
-    
+
     checker = SourceChecker(target_directories=args.directories, target_files=args.files)
-    
+
     if not checker.check_environment():
         return 1
-    
+
     print("🔍 Source Citation Checker and Cleaner")
     print("=" * 40)
-    
+
     # Show scope information
     if args.files:
         print(f"📁 Scope: Specific files ({len(args.files)} files)")
@@ -527,7 +527,7 @@ Examples:
     else:
         print("📁 Scope: All QMD files in contents/")
     print()
-    
+
     try:
         if args.full:
             checker.analyze_sources()
@@ -547,15 +547,15 @@ Examples:
                 checker.analyze_sources()
             if args.report:
                 checker.generate_report(args.output)
-                
+
     except KeyboardInterrupt:
         checker.print_warning("\nOperation cancelled by user")
         return 1
     except Exception as e:
         checker.print_error(f"Unexpected error: {e}")
         return 1
-    
+
     return 0
 
 if __name__ == "__main__":
-    sys.exit(main()) 
+    sys.exit(main())

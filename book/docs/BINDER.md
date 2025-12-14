@@ -103,7 +103,7 @@ All commands have convenient shortcuts:
 Chapters can be referenced by their short names. Common examples:
 
 - `intro` → Introduction chapter
-- `ml_systems` → Machine Learning Systems chapter  
+- `ml_systems` → Machine Learning Systems chapter
 - `dl_primer` → Deep Learning Primer chapter
 - `training` → Training chapter
 - `ops` → MLOps chapter
@@ -201,7 +201,7 @@ The binder supports building multiple chapters together in a single Quarto rende
 # Build multiple chapters together (HTML)
 ./binder build intro,ml_systems
 
-# Build multiple chapters together (PDF)  
+# Build multiple chapters together (PDF)
 ./binder pdf intro,ml_systems
 
 # Preview multiple chapters together
@@ -210,7 +210,7 @@ The binder supports building multiple chapters together in a single Quarto rende
 
 **Benefits:**
 - ✅ **Faster builds**: Single Quarto process instead of multiple
-- ✅ **Shared context**: Dependencies loaded once  
+- ✅ **Shared context**: Dependencies loaded once
 - ✅ **Unified processing**: Cross-references and quizzes processed together
 - ✅ **Better UX**: Single browser window opens with complete site
 
@@ -294,7 +294,7 @@ The selective PDF build system works seamlessly in cloud environments like [mybi
 The binder automatically manages Quarto configurations:
 
 - **`_quarto-html.yml`**: Website build configuration
-- **`_quarto-pdf.yml`**: Academic PDF build configuration  
+- **`_quarto-pdf.yml`**: Academic PDF build configuration
 - **`_quarto.yml`**: **Symlink** to active configuration (currently → `config/_quarto-html.yml`)
 
 **Important**: The `_quarto.yml` file is a symlink that points to the active configuration. This allows the binder to quickly switch between HTML and PDF build modes without copying files.
@@ -347,7 +347,7 @@ Use `./binder switch <format>` to change the active configuration symlink.
 - Run `./binder clean` to remove temporary files
 - Use `./binder doctor` to verify system health
 
-**"Config not clean"** 
+**"Config not clean"**
 - The binder detected a previous fast build configuration
 - Run `./binder clean` to restore normal configuration
 
@@ -388,4 +388,4 @@ The `publish` command provides a complete publishing workflow:
 
 For more details, see:
 - [BUILD.md](BUILD.md) - Complete build instructions
-- [DEVELOPMENT.md](DEVELOPMENT.md) - Development setup and workflow 
+- [DEVELOPMENT.md](DEVELOPMENT.md) - Development setup and workflow

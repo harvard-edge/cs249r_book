@@ -38,10 +38,10 @@ NOTEBOOKS_GENERATED=0
 
 for module in $MODULES; do
     TARGET_NB="$NOTEBOOKS_DIR/${module}.ipynb"
-    
+
     # Check if assignment notebook already exists
     ASSIGNMENT_NB="$REPO_ROOT/assignments/source/$module/${module}.ipynb"
-    
+
     if [ -f "$ASSIGNMENT_NB" ]; then
         # Use existing assignment notebook
         cp "$ASSIGNMENT_NB" "$TARGET_NB"
@@ -74,4 +74,3 @@ else
     echo "⚠️  No notebooks prepared. Launch buttons may not appear."
     echo "   Run 'tito nbgrader generate --all' first to create assignment notebooks."
 fi
-

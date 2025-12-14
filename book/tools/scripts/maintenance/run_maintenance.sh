@@ -60,7 +60,7 @@ run_image_analysis() {
     echo ""
     read -p "Select image analysis option (1-5): " -n 1 -r
     echo
-    
+
     case $REPLY in
         1)
             python3 tools/scripts/maintenance/integrated_image_analyzer.py --analyze --interactive
@@ -161,4 +161,4 @@ esac
 echo ""
 echo "✅ Maintenance completed!"
 echo "Repository: $REPO_ROOT"
-echo "Date: $(date)" 
+echo "Date: $(date)"

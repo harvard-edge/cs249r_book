@@ -81,11 +81,11 @@ Build a complete machine learning (ML) framework from tensors to systems—under
   <p class="vision-title">The "AI Bricks" Approach</p>
   <div class="vision-grid">
     <div class="vision-item">
-      <span class="vision-icon">🧱</span>
+      <span class="vision-icon">🔧</span>
       <span class="vision-text"><strong>Build each piece</strong> — Tensors, autograd, optimizers, attention. No magic imports.</span>
     </div>
     <div class="vision-item">
-      <span class="vision-icon">🏛️</span>
+      <span class="vision-icon"></span>
       <span class="vision-text"><strong>Recreate history</strong> — Perceptron (1957) to Transformers (2017) to MLPerf (Present).</span>
     </div>
     <div class="vision-item">
@@ -149,7 +149,7 @@ Capstone: Vision • Language • Speed • Compression tracks
 
 </div>
 
-**[Complete course structure](chapters/00-introduction)** • **[Getting started guide](getting-started)** • **[Join the community](community)**
+**[Learning Journey](chapters/learning-journey)** • **[Getting started guide](getting-started)** • **[Join the community](community)**
 
 ## Recreate ML History
 
@@ -259,13 +259,15 @@ output = model(input)
 
 **Systems Thinking**: TinyTorch emphasizes understanding how components interact—memory hierarchies, computational complexity, and optimization trade-offs—not just isolated algorithms. Every module connects mathematical theory to systems understanding.
 
-**See [Course Philosophy](chapters/00-introduction)** for the full origin story and pedagogical approach.
+**See [Preface](preface)** for the full origin story and pedagogical approach.
 
 ## The Build → Use → Reflect Approach
 
 Every module follows a proven learning cycle that builds deep understanding:
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 graph LR
     B[Build<br/>Implement from scratch] --> U[Use<br/>Real data, real problems]
     U --> R[Reflect<br/>Systems thinking questions]
@@ -288,7 +290,6 @@ Perfect if you want to **debug ML systems**, **implement custom operations**, or
 
 **Prerequisites**: Python + basic linear algebra. No prior ML experience required.
 
----
 
 ##  Join the Community
 
@@ -318,6 +319,5 @@ Perfect if you want to **debug ML systems**, **implement custom operations**, or
   </div>
 </div>
 
----
 
-**Next Steps**: **[Quick Start Guide](quickstart-guide)** (15 min) • **[Course Structure](chapters/00-introduction)** • **[FAQ](faq.md)**
+**Next Steps**: **[Quick Start](getting-started)** (15 min) • **[Learning Journey](chapters/learning-journey)** • **[FAQ](faq.md)**

@@ -8,7 +8,7 @@ This guide explains how to regenerate all cross-references for the MLSysBook usi
    ```bash
    # Check if Ollama is running
    ollama list
-   
+
    # If gemma2:27b is not available, pull it
    ollama pull gemma2:27b
    ```

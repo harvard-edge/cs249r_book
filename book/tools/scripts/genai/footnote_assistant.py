@@ -55,7 +55,7 @@ def parse_qmd_sections(text):
     if buffer:
         joined = "\n".join(buffer)
         sections.append(joined)
-    
+
     # Extract headers for the outline
     for i, section in enumerate(sections):
         lines = section.split('\n')
@@ -77,7 +77,7 @@ def parse_qmd_sections(text):
                         break
                 header_text = first_line[level:].strip()
                 headers.append({"text": header_text, "level": level, "index": i})
-    
+
     logging.info(f"Found {len(sections)} sections")
     return sections, headers, prologue  # Return prologue as well
 
@@ -87,29 +87,29 @@ def replace_section(full_text, old, new):
     if old not in full_text:
         logging.warning(f"Could not find section to replace. First 50 chars of section: {old[:50]}")
         return full_text
-        
+
     # Otherwise replace it and return
     return full_text.replace(old, new)
 
 # --- Get LLM footnote suggestions ---
 def get_footnote_suggestions(section_text, prompt_template):
     logging.info(f"Getting footnote suggestions from {api_provider} LLM using model {model_name}")
-    
+
     # Don't use .format() at all - just concatenate the text at the end
     if "{text}" in prompt_template:
         complete_prompt = prompt_template.replace("{text}", section_text)
     else:
         complete_prompt = prompt_template + "\n\nText to analyze:\n" + section_text
-    
+
     # Save the prompt to a file for debugging
     with open("last_prompt_sent.txt", "w") as f:
         f.write(complete_prompt)
-    
+
     messages = [
         {"role": "system", "content": "You are an academic footnote assistant. Your response must be valid JSON only."},
         {"role": "user", "content": complete_prompt}
     ]
-    
+
     logging.info(f"Sending request to {api_provider} API")
     try:
         # Use the global client that was set at startup
@@ -125,13 +125,13 @@ def get_footnote_suggestions(section_text, prompt_template):
             )
         else:
             raise ValueError(f"Unsupported API provider: {api_provider}")
-            
+
         content = response.choices[0].message.content
-        
+
         # Save the response to a file for debugging
         with open("last_api_response.txt", "w") as f:
             f.write(content)
-            
+
         logging.info(f"Received response: {content[:100]}...")
         return content
     except Exception as e:
@@ -140,18 +140,18 @@ def get_footnote_suggestions(section_text, prompt_template):
 
 def show_section_with_markers(section_text, all_footnotes):
     """Show the section with colored footnote markers for all possible footnotes"""
-    
+
     if not all_footnotes:
         return section_text.replace("\n", "<br>")
-    
+
     # First, identify paragraphs in the text
     paragraphs = re.split(r'\n\s*\n', section_text)
     modified_paragraphs = []
-    
+
     # Escape HTML characters
     for para in paragraphs:
         escaped_para = para.replace("<", "&lt;").replace(">", "&gt;")
-        
+
         # Add colored markers for footnotes
         for fn in all_footnotes:
             insert_after = fn["insert_after"]
@@ -193,19 +193,19 @@ def show_section_with_markers(section_text, all_footnotes):
                 )
 
         modified_paragraphs.append(escaped_para)
-    
+
     # Join paragraphs with proper spacing
     html_text = "<br><br>".join(modified_paragraphs)
-    
+
     # Replace remaining newlines with <br> tags
     html_text = html_text.replace("\n", "<br>")
-    
-    return html_text    
+
+    return html_text
 
 # --- Show preview with colored footnote markers for selected footnotes ---
 def show_preview_with_markers(section_text, selected_options, all_footnotes):
     """Show the preview with colored footnote markers for selected footnotes and per-paragraph footnotes"""
-    
+
     # Extract the indices from the selected checkbox text
     selected_indices = []
     for option in selected_options:
@@ -215,47 +215,47 @@ def show_preview_with_markers(section_text, selected_options, all_footnotes):
             # Adjust for 1-based indexing in display vs 0-based in code
             idx = int(match.group(1)) - 1
             selected_indices.append(str(idx))
-    
+
     if not all_footnotes or not selected_indices:
         return section_text.replace("\n", "<br>")
-    
+
     # First, identify paragraphs in the text
     paragraphs = re.split(r'\n\s*\n', section_text)
     modified_paragraphs = []
-    
+
     # Escape HTML characters and initialize tracking
     escaped_paragraphs = []
     paragraph_footnotes = [[] for _ in paragraphs]
-    
+
     for i, para in enumerate(paragraphs):
         escaped_paragraphs.append(para.replace("<", "&lt;").replace(">", "&gt;"))
-    
+
     # For each selected footnote
     for idx in selected_indices:
         try:
             idx_int = int(idx)
             fn = all_footnotes[idx_int]
-            
+
             # Get the insert phrase
             insert_after = fn["insert_after"]
             marker = fn["marker"]
-            
+
             # Find which paragraph contains this phrase
             found = False
             for i, paragraph in enumerate(paragraphs):
                 if insert_after in paragraph:
                     # Get the modified paragraph text (already HTML-escaped)
                     modified_paragraph = escaped_paragraphs[i]
-                    
+
                     # Handle punctuation positioning
                     pattern = re.compile(rf"({re.escape(insert_after)})([.,;:!?])")
                     match = pattern.search(modified_paragraph)
-                    
+
                     if match:
                         # Use HTML for colored marker
                         modified_paragraph = pattern.sub(
-                            rf'\1<span style="color: #2E86C1; font-weight: bold; background-color: #EBF5FB; border-radius: 3px; padding: 0 2px;">{marker}</span>\2', 
-                            modified_paragraph, 
+                            rf'\1<span style="color: #2E86C1; font-weight: bold; background-color: #EBF5FB; border-radius: 3px; padding: 0 2px;">{marker}</span>\2',
+                            modified_paragraph,
                             count=1
                         )
                     else:
@@ -263,23 +263,23 @@ def show_preview_with_markers(section_text, selected_options, all_footnotes):
                         escaped = re.escape(insert_after)
                         pattern = re.compile(rf"({escaped})(?![^\n]*\[\^)")
                         modified_paragraph = pattern.sub(
-                            rf'\1<span style="color: #2E86C1; font-weight: bold; background-color: #EBF5FB; border-radius: 3px; padding: 0 2px;">{marker}</span>', 
-                            modified_paragraph, 
+                            rf'\1<span style="color: #2E86C1; font-weight: bold; background-color: #EBF5FB; border-radius: 3px; padding: 0 2px;">{marker}</span>',
+                            modified_paragraph,
                             count=1
                         )
-                    
+
                     # Update the modified paragraph
                     escaped_paragraphs[i] = modified_paragraph
-                    
+
                     # Add footnote to this paragraph's collection
                     paragraph_footnotes[i].append(f"<span style='color: #2E86C1; font-weight: bold;'>{marker}</span>: {fn['footnote_text']}")
-                    
+
                     found = True
                     break
-            
+
         except Exception as e:
             logging.error(f"Error applying footnote {idx}: {e}")
-    
+
     # Assemble paragraphs with their footnotes
     for i, para in enumerate(escaped_paragraphs):
         if paragraph_footnotes[i]:
@@ -289,10 +289,10 @@ def show_preview_with_markers(section_text, selected_options, all_footnotes):
             modified_paragraphs.append(f"{para}{footnote_html}")
         else:
             modified_paragraphs.append(para)
-    
+
     # Join all paragraphs with proper spacing
     html_text = "<br><br>".join(modified_paragraphs)
-    
+
     return html_text
 
 def apply_footnotes(section_text, selected_options, all_footnotes, global_footnote_set):
@@ -308,20 +308,20 @@ def apply_footnotes(section_text, selected_options, all_footnotes, global_footno
     paragraphs = re.split(r'\n\s*\n', section_text)
     modified_paragraphs = []
     paragraph_footnotes = [[] for _ in paragraphs]
-    
+
     # Track which paragraphs are inside div blocks
     lines = section_text.split('\n')
     in_div_block = False
     div_paragraph_indices = set()
-    
+
     current_para_idx = 0
     empty_line_count = 0
-    
+
     for line in lines:
         # Track div blocks
         if line.strip().startswith(':::'):
             in_div_block = not in_div_block
-        
+
         # Track paragraph transitions (double newline)
         if not line.strip():
             empty_line_count += 1
@@ -330,7 +330,7 @@ def apply_footnotes(section_text, selected_options, all_footnotes, global_footno
                 empty_line_count = 0
         else:
             empty_line_count = 0
-            
+
         # Mark this paragraph as being in a div block
         if in_div_block:
             div_paragraph_indices.add(current_para_idx)
@@ -354,7 +354,7 @@ def apply_footnotes(section_text, selected_options, all_footnotes, global_footno
                     if i in div_paragraph_indices:
                         logging.warning(f"Skipping footnote '{marker}' - would be inserted inside div block (paragraph {i+1})")
                         continue
-                    
+
                     modified_paragraph = paragraph
 
                     # Handle punctuation positioning
@@ -382,10 +382,10 @@ def apply_footnotes(section_text, selected_options, all_footnotes, global_footno
     for i, para in enumerate(paragraphs):
         if paragraph_footnotes[i]:
             footnote_text = "\n".join(paragraph_footnotes[i])
-            
+
             # Check if this paragraph contains an image/figure
             is_image = bool(re.search(r'!\[.*?\]\(.*?\)', para))
-            
+
             # Add extra spacing after footnotes, especially for images and final paragraphs
             if is_image or i == len(paragraphs) - 1:
                 modified_paragraphs.append(f"{para}\n\n{footnote_text}\n\n")
@@ -396,11 +396,11 @@ def apply_footnotes(section_text, selected_options, all_footnotes, global_footno
 
     # Always ensure proper spacing between sections
     result = "\n\n".join(modified_paragraphs)
-    
+
     # Ensure there's proper spacing at the end of the section
     if not result.endswith("\n\n"):
         result = result.rstrip() + "\n\n"
-        
+
     return result
 
 # --- Gradio GUI ---
@@ -478,10 +478,10 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
         .container { width: 100%; }
         .main-container { display: flex; }
 
-        .outline-sidebar { 
+        .outline-sidebar {
             width: 120px !important; /* Even narrower */
-            border-right: 1px solid #ddd; 
-            min-height: 500px; 
+            border-right: 1px solid #ddd;
+            min-height: 500px;
             overflow-x: hidden;
         }
         .content-area { flex-grow: 1; padding: 0 15px; }
@@ -504,7 +504,7 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                 display: flex !important;
                 flex-direction: column !important;
             }
-            
+
             /* Force each checkbox item to be full width */
             .footnote-box > div > div > label {
                 width: 100% !important;
@@ -512,14 +512,14 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                 padding-bottom: 5px !important;
                 border-bottom: 1px solid #eee !important;
             }
-            
+
             /* Ensure the checkbox container doesn't use grid layout */
-            .footnote-box .gr-form, 
+            .footnote-box .gr-form,
             .footnote-box .gr-form > div,
             .footnote-box .gr-panel {
                 display: block !important;
             }
-            
+
             /* Target any grid layouts and override them */
             .footnote-box [class*="grid"],
             .footnote-box [style*="grid"] {
@@ -535,7 +535,7 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
         cached_selections = gr.State({})  # Cache selected options by section
         updated_sections = gr.State(sections.copy())  # All updated sections
         applied_sections = gr.State(set())  # Track which sections have been applied
-        
+
         # Hidden dropdown for JavaScript to use
         section_dropdown = gr.Dropdown(
             choices=[i for i in range(len(sections))],
@@ -545,15 +545,15 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
             visible=False,
             elem_id="section-dropdown"
         )
-        
+
         gr.Markdown(f"## Academic Footnote Assistant (Using {api_provider} API with model {model_name})")
-        
+
         # Main container with sidebar and content
         with gr.Row(elem_classes=["main-container"]):
             # Left sidebar for outline
             with gr.Column(scale=2, min_width=100, elem_classes=["outline-sidebar"]):
                 gr.Markdown("### Document Outline")
-                
+
                 # Add custom CSS to fix button styling with minimal spacing
                 gr.HTML("""
                 <style>
@@ -563,7 +563,7 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                         margin: 0 !important;
                         padding: 0 !important;
                     }
-                    
+
                     /* Make outline buttons ultra-compact */
                     .outline-btn {
                         text-align: left !important;
@@ -585,31 +585,31 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                         text-overflow: ellipsis !important;
                         white-space: nowrap !important;
                     }
-                    
+
                     .outline-btn:hover {
                         background-color: #f0f0f0 !important;
                     }
-                    
+
                     /* Ensure no extra space between buttons */
                     .outline-sidebar button + button,
                     .outline-sidebar div + div {
                         margin-top: 0 !important;
                     }
-                    
+
                     /* Compact any button container elements */
                     .outline-sidebar div[class*="container"],
                     .outline-sidebar div[class*="Container"] {
                         margin: 0 !important;
                         padding: 0 !important;
                     }
-                    
+
                     /* Hide any decorative elements that might add space */
                     .outline-sidebar div[class*="block"],
                     .outline-sidebar div[class*="Block"] {
                         margin: 0 !important;
                         padding: 0 !important;
                     }
-                    
+
                     /* Target the HTML components that add indentation styling */
                     .outline-sidebar > div > div:has(style) {
                         margin: 0 !important;
@@ -619,7 +619,7 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                     }
                 </style>
                 """)
-                
+
                 # Create all buttons in a single container to avoid spacing
                 with gr.Column(elem_classes=["outline-buttons-container"]):
                     gr.HTML("""
@@ -630,17 +630,17 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                         }
                     </style>
                     """)
-                    
+
                     # Create buttons for each header
                     for header in headers:
                         # Calculate indent
                         indent = 10 * (header["level"] - 1)
-                        
-                        # Truncate long header text 
+
+                        # Truncate long header text
                         display_text = header["text"]
                         if len(display_text) > 30:
                             display_text = display_text[:27] + "..."
-                            
+
                         # Create the button with indentation
                         btn = gr.Button(
                             display_text,
@@ -648,7 +648,7 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                             elem_id=f"outline-btn-{header['index']}",
                             size="sm"
                         )
-                        
+
                         # Add CSS inline for this specific button
                         gr.HTML(f"""
                         <style>
@@ -660,13 +660,13 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                             }}
                         </style>
                         """)
-                        
+
                         # Set up click handler
                         def make_click_handler(idx):
                             def click_handler():
                                 return idx
                             return click_handler
-                            
+
                         # Connect the button click to navigation
                         btn.click(
                             fn=make_click_handler(header["index"]),
@@ -679,20 +679,20 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                 # Section info and progress
                 with gr.Row(elem_classes=["container"]):
                     section_info = gr.Markdown("Section 1 of " + str(len(sections)), elem_classes=["status-message"])
-                
+
                 with gr.Row(elem_classes=["progress-bar", "container"]):
                     progress = gr.Slider(minimum=1, maximum=len(sections), value=1, step=1, label="Progress", interactive=False)
-                
+
                 # Section content
                 gr.Markdown("<div class='container'><strong>Section with Suggested Footnotes:</strong></div>")
                 section_html = gr.HTML(elem_classes=["container", "section-display"])
-                
+
                 # Hidden section text (for reference only)
                 section_text = gr.Textbox(visible=False)
-                
+
                 # Footnote selection
                 gr.Markdown("<div class='container'><strong>Select Footnotes to Apply:</strong></div>")
-                
+
                 with gr.Column(elem_classes=["container", "footnote-select"]):
                     checkbox_group = gr.CheckboxGroup(
                         choices=[],
@@ -700,11 +700,11 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                         label="",
                         elem_classes=["footnote-box"]
                     )
-                
-                # Preview 
+
+                # Preview
                 gr.Markdown("<div class='container'><strong>Preview Result:</strong></div>")
                 preview_html = gr.HTML(elem_classes=["container", "preview-box"])
-                
+
                 # Action buttons
                 with gr.Row(elem_classes=["container", "button-row"]):
                     prev_btn = gr.Button("⬅️ Previous")
@@ -715,7 +715,7 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
 
         # Status display
         status_display = gr.Markdown("", elem_classes=["container", "status-message"])
-        
+
         # Process LLM response for a section - used by both load_section and regenerate
         def process_llm_response(section_idx, section_text_value, raw_response, cached_footnotes_dict, cached_selections_dict):
             try:
@@ -727,10 +727,10 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                     data = json.loads(parsed_json)
                 else:
                     data = json.loads(raw_response)
-                
+
                 footnotes = data.get("footnotes", [])
                 logging.info(f"Parsed {len(footnotes)} footnotes from LLM response")
-                
+
                 # Verify footnote structure
                 valid_footnotes = []
                 for i, fn in enumerate(footnotes):
@@ -738,27 +738,27 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                         valid_footnotes.append(fn)
                     else:
                         logging.warning(f"Footnote {i} missing required keys, skipping")
-                
+
                 # Create choices for checkbox - show marker and text
                 checkbox_choices = []
                 for i, fn in enumerate(valid_footnotes):
                     # Format like actual footnotes: [^marker]: text
                     checkbox_choices.append(f"{i+1}. {fn['marker']}: {fn['footnote_text']}")
-                
+
                 # Generate HTML with colored markers
                 section_with_markers = show_section_with_markers(section_text_value, valid_footnotes)
-                
+
                 # Clear any previous selections for this section when regenerating
                 if str(section_idx) in cached_selections_dict:
                     del cached_selections_dict[str(section_idx)]
-                
+
                 # Update the cache
                 new_footnotes_dict = dict(cached_footnotes_dict)
                 new_footnotes_dict[str(section_idx)] = valid_footnotes
-                
+
                 # Show default preview
                 preview = section_text_value.replace("\n", "<br>")
-                
+
                 return {
                     'section_html': section_with_markers,
                     'checkbox_choices': checkbox_choices,
@@ -768,11 +768,11 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                     'valid_footnotes': valid_footnotes,
                     'cached_footnotes': new_footnotes_dict
                 }
-                
+
             except Exception as e:
                 logging.error(f"Error parsing LLM response: {e}")
                 logging.error(f"Raw response: {raw_response}")
-                
+
                 return {
                     'section_html': f"<p>Error processing footnotes. Please check logs.</p><pre>{section_text_value}</pre>",
                     'checkbox_choices': [],
@@ -782,7 +782,7 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                     'valid_footnotes': [],
                     'cached_footnotes': cached_footnotes_dict
                 }
-        
+
         # Function to load a section
         def load_section(index, cached_footnotes_dict, cached_selections_dict, applied_sections_set):
             logging.info(f"Loading section {index}")
@@ -798,38 +798,38 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                     section_info: f"End of document reached",
                     status_display: "End of document reached. Click 'Save & Exit' to save your changes.",
                 }
-                
+
             section_text_value = sections[index]
             section_key = str(index)
-            
+
             # Check if we already have footnotes for this section
             if section_key in cached_footnotes_dict:
                 logging.info(f"Using cached footnotes for section {index}")
                 valid_footnotes = cached_footnotes_dict[section_key]
-                
+
                 # Create choices for checkbox - show marker and text
                 checkbox_choices = []
                 for i, fn in enumerate(valid_footnotes):
                     # Format like actual footnotes: [^marker]: text
                     checkbox_choices.append(f"{i+1}. {fn['marker']}: {fn['footnote_text']}")
-                
+
                 # Generate HTML with colored markers
                 section_with_markers = show_section_with_markers(section_text_value, valid_footnotes)
-                
+
                 # Check if we have saved selections for this section
                 selected_values = []
                 if section_key in cached_selections_dict:
                     selected_values = cached_selections_dict[section_key]
-                
+
                 # Generate preview based on saved selections
                 preview = section_text_value.replace("\n", "<br>")
                 if selected_values:
                     preview = show_preview_with_markers(section_text_value, selected_values, valid_footnotes)
-                
+
                 applied_status = ""
                 if index in applied_sections_set:
                     applied_status = " (Applied)"
-                
+
                 return {
                     section_text: section_text_value,
                     section_html: section_with_markers,
@@ -843,10 +843,10 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                 # First time visiting this section - make the API call
                 logging.info(f"First visit to section {index} - making API call")
                 raw_response = get_footnote_suggestions(section_text_value, prompt_template)
-                
-                result = process_llm_response(index, section_text_value, raw_response, 
+
+                result = process_llm_response(index, section_text_value, raw_response,
                                              cached_footnotes_dict, cached_selections_dict)
-                
+
                 return {
                     section_text: section_text_value,
                     section_html: result['section_html'],
@@ -857,15 +857,15 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                     status_display: result['status_msg'],
                     cached_footnotes: result['cached_footnotes'],
                 }
-        
+
         # Function to regenerate footnotes for current section
         def regenerate_footnotes(section_idx, section_content, cached_footnotes_dict, cached_selections_dict):
             logging.info(f"Regenerating footnotes for section {section_idx}")
             raw_response = get_footnote_suggestions(section_content, prompt_template)
-            
-            result = process_llm_response(section_idx, section_content, raw_response, 
+
+            result = process_llm_response(section_idx, section_content, raw_response,
                                          cached_footnotes_dict, cached_selections_dict)
-            
+
             return {
                 section_html: result['section_html'],
                 checkbox_group: gr.update(choices=result['checkbox_choices'], value=result['checkbox_value']),
@@ -873,22 +873,22 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                 status_display: f"Regenerated footnotes for section {section_idx + 1}",
                 cached_footnotes: result['cached_footnotes']
             }
-        
+
         # Update preview based on checkbox selections
         def update_preview(selected_options, section_content, footnotes_dict, section_idx):
             section_key = str(section_idx)
             if section_key not in footnotes_dict:
                 return section_content.replace("\n", "<br>")
-                
+
             footnotes_data = footnotes_dict[section_key]
-            
+
             if not selected_options:
                 return section_content.replace("\n", "<br>")
-            
+
             # Generate HTML with selected footnotes
             preview = show_preview_with_markers(section_content, selected_options, footnotes_data)
             return preview
-                        
+
         # Global set to track applied footnotes across sections
         global_footnote_set = set()
 
@@ -938,7 +938,7 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                 status_display: "No footnotes selected to apply"
             }
 
-        
+
         # Move to previous section
         def prev_section(section_idx):
             prev_idx = section_idx - 1
@@ -949,9 +949,9 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
             else:
                 return {
                     current_section: prev_idx,
-                    status_display: f"Moving to section {prev_idx + 1}" 
+                    status_display: f"Moving to section {prev_idx + 1}"
                 }
-        
+
         # Move to next section
         def next_section(section_idx):
             next_idx = section_idx + 1
@@ -964,18 +964,18 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                     current_section: next_idx,
                     status_display: f"Moving to section {next_idx + 1}"
                 }
-                
+
         def save_document(updates):
             try:
                 # We'll rebuild the document from scratch
                 rebuilt_document = []
                 changes_applied = a = 0
-                
+
                 logging.info(f"Starting save process with {len(updates)} sections")
-                
+
                 # Track which sections were actually changed
                 changed_sections = []
-                
+
                 # Go through each section in order
                 for i, (original, updated) in enumerate(zip(sections, updates)):
                     # Determine if this section was modified
@@ -989,10 +989,10 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                         # Add the original version to our rebuilt document
                         rebuilt_document.append(original)
                         logging.info(f"Section {i}: Using original version")
-                
+
                 # Join all sections to create the full document
                 full_text = prologue + "\n\n" + "\n".join(rebuilt_document)
-                
+
                 # Create output filename
                 output_filename = output_path
                 if "." in output_path:
@@ -1000,11 +1000,11 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                     output_filename = f"{base}-footnoted.{ext}"
                 else:
                     output_filename = f"{output_path}-footnoted"
-                
+
                 # Write the rebuilt document
                 with open(output_filename, "w", encoding="utf-8") as f:
                     f.write(full_text)
-                
+
                 # Write a debug file with just the changed sections for verification
                 if changed_sections:
                     debug_filename = f"changes_debug_{int(time.time())}.txt"
@@ -1014,7 +1014,7 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                             f.write(f"ORIGINAL:\n{sections[idx]}\n\n")
                             f.write(f"UPDATED:\n{updates[idx]}\n\n")
                             f.write("="*50 + "\n\n")
-                
+
                 logging.info(f"Saved document with {changes_applied} changed sections to {output_filename}")
                 return f"Document saved to {output_filename} with {changes_applied} changes"
             except Exception as e:
@@ -1022,7 +1022,7 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
                 logging.error(f"Save error: {str(e)}")
                 logging.error(traceback.format_exc())
                 return f"Error: {str(e)}"
-                
+
         # Set up event handlers
         # Section dropdown (for outline navigation)
         section_dropdown.change(
@@ -1030,62 +1030,62 @@ def launch_gui(sections, headers, original_text, prompt_template, output_path, p
             inputs=[section_dropdown],
             outputs=[current_section]
         )
-        
+
         # Regenerate button
         regenerate_btn.click(
             fn=regenerate_footnotes,
             inputs=[current_section, section_text, cached_footnotes, cached_selections],
             outputs=[section_html, checkbox_group, preview_html, status_display, cached_footnotes]
         )
-        
+
         # Auto-update preview when checkboxes change
         checkbox_group.change(
             fn=update_preview,
             inputs=[checkbox_group, section_text, cached_footnotes, current_section],
             outputs=preview_html
         )
-        
+
         # Apply footnotes to current section
         apply_btn.click(
             fn=apply_to_section,
             inputs=[current_section, checkbox_group, cached_footnotes, updated_sections, cached_selections, applied_sections],
             outputs=[updated_sections, cached_selections, applied_sections, section_info, status_display]
         )
-        
+
         # Previous section button
         prev_btn.click(
             fn=prev_section,
             inputs=[current_section],
             outputs=[current_section, status_display]
         )
-        
+
         # Next section button
         next_btn.click(
             fn=next_section,
             inputs=[current_section],
             outputs=[current_section, status_display]
         )
-        
+
         # Save button
         save_btn.click(
             fn=save_document,
             inputs=[updated_sections],
             outputs=status_display
         )
-        
+
         # Handle section changes
         current_section.change(
             fn=load_section,
             inputs=[current_section, cached_footnotes, cached_selections, applied_sections],
-            outputs=[section_text, section_html, checkbox_group, preview_html, 
+            outputs=[section_text, section_html, checkbox_group, preview_html,
                     progress, section_info, status_display, cached_footnotes]
         )
-        
+
         # Load the first section on startup
         demo.load(
             fn=lambda: load_section(0, {}, {}, set()),
             inputs=None,
-            outputs=[section_text, section_html, checkbox_group, preview_html, 
+            outputs=[section_text, section_html, checkbox_group, preview_html,
                     progress, section_info, status_display, cached_footnotes]
         )
 
@@ -1105,7 +1105,7 @@ def main():
     # Set default model based on API choice if not provided
     global api_provider, model_name, client
     api_provider = args.api.lower()
-    
+
     if args.model:
         model_name = args.model
     else:
@@ -1119,17 +1119,17 @@ def main():
 
     logging.info(f"Starting application with file: {args.file}, prompt template: {args.prompt}")
     logging.info(f"Using API provider: {api_provider} with model: {model_name}")
-    
+
     # Initialize the appropriate client
     api_key_var = "OPENAI_API_KEY" if api_provider == "openai" else "GROQ_API_KEY"
     api_key = os.getenv(api_key_var)
-    
+
     if not api_key:
         logging.error(f"Error: {api_key_var} environment variable is not set")
         print(f"❌ Error: {api_key_var} environment variable is not set")
         print(f"Please set it by running: export {api_key_var}=your_api_key")
         return
-    
+
     # Initialize the client based on provider
     if api_provider == "openai":
         client = OpenAI(api_key=api_key)
@@ -1139,17 +1139,17 @@ def main():
         logging.error(f"Unsupported API provider: {api_provider}")
         print(f"❌ Error: Unsupported API provider: {api_provider}")
         return
-    
+
     # Read the input file and prompt template
     try:
         with open(args.file) as f:
             text = f.read()
         logging.info(f"Successfully read input file: {args.file}")
-        
+
         with open(args.prompt) as f:
             prompt = f.read()
         logging.info(f"Successfully read prompt template: {args.prompt}")
-        
+
     except FileNotFoundError as e:
         logging.error(f"File not found: {e}")
         print(f"Error: {e}")

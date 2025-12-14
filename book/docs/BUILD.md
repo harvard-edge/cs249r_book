@@ -675,6 +675,6 @@ For detailed contribution guidelines, see [contribute.md](contribute.md).
 
 ---
 
-**Last Updated**: October 2025  
-**Project**: Machine Learning Systems - Principles and Practices  
+**Last Updated**: October 2025
+**Project**: Machine Learning Systems - Principles and Practices
 **Website**: https://mlsysbook.ai

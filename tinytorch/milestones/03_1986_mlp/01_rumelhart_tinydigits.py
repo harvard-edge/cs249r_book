@@ -11,7 +11,7 @@ after the 1969 XOR crisis.
 
 🎯 MILESTONE 3: MULTI-LAYER PERCEPTRON ON REAL DIGITS
 The 1986 backpropagation paper proved multi-layer networks could solve
-real-world problems. Let's recreate that breakthrough using YOUR TinyTorch!
+real-world problems. Let's recreate that breakthrough using YOUR Tiny🔥Torch!
 
 ✅ REQUIRED MODULES (Run after Module 08):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -10,7 +10,7 @@ CNNs preserve spatial hierarchies through local connectivity and weight sharing,
 enabling recognition of complex patterns in natural images.
 
 🎯 WHAT YOU'RE BUILDING:
-Using YOUR TinyTorch implementations, you'll build a CNN that achieves 65%+ accuracy
+Using YOUR Tiny🔥Torch implementations, you'll build a CNN that achieves 65%+ accuracy
 on CIFAR-10 natural images - proving YOUR spatial modules can extract hierarchical
 features from real-world photographs!
 
@@ -215,7 +215,7 @@ def flatten(x):
 
 class CIFARCNN:
     """
-    Convolutional Neural Network for CIFAR-10 using YOUR TinyTorch!
+    Convolutional Neural Network for CIFAR-10 using YOUR Tiny🔥Torch!
 
     This architecture demonstrates how spatial feature extraction enables
     recognition of complex patterns in natural images.
@@ -225,7 +225,7 @@ class CIFARCNN:
     """
 
     def __init__(self):
-        print("🧠 Building CIFAR-10 CNN with YOUR TinyTorch modules...")
+        print("🧠 Building CIFAR-10 CNN with YOUR Tiny🔥Torch modules...")
 
         # Convolutional feature extractors - YOUR spatial modules!
         self.conv1 = Conv2d(in_channels=3, out_channels=32, kernel_size=(3, 3))   # Module 09!
@@ -411,7 +411,7 @@ def visualize_cifar_cnn():
 
 def train_cifar_cnn(model, train_loader, epochs=3, learning_rate=0.001):
     """Train CNN using YOUR complete training system with DataLoader!"""
-    print("\n🚀 Training CIFAR-10 CNN with YOUR TinyTorch!")
+    print("\n🚀 Training CIFAR-10 CNN with YOUR Tiny🔥Torch!")
     print(f"   Dataset: {len(train_loader.dataset)} color images")
     print(f"   Batch size: {train_loader.batch_size}")
     print(f"   YOUR DataLoader (Module 10) handles batching!")
@@ -610,7 +610,7 @@ def analyze_cnn_systems(model, batch_size=32):
 # training, testing, and analysis. This is YOUR end-to-end ML pipeline.
 
 def main():
-    """Demonstrate CIFAR-10 CNN using YOUR TinyTorch!"""
+    """Demonstrate CIFAR-10 CNN using YOUR Tiny🔥Torch!"""
 
     parser = argparse.ArgumentParser(description='CIFAR-10 CNN')
     parser.add_argument('--test-only', action='store_true',

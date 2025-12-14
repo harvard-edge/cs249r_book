@@ -1732,7 +1732,7 @@ WITHOUT Schema:                     WITH Schema:
 │ Problems:                │       │ Benefits:                │
 │ • Wrong type (string %)  │       │ • Enforced types (float) │
 │ • Ambiguous name         │       │ • Clear field names      │
-│ • Unparseable time       │       │ • Standard format        │
+│ • Unparsable time        │       │ • Standard format        │
 │ • Can't aggregate        │       │ • Automated validation   │
 │ • No automation possible │       │ • Aggregation works      │
 └──────────────────────────┘       └──────────────────────────┘
@@ -1885,8 +1885,8 @@ def demo_capstone():
     """🎯 See your complete system come together."""
     print("🎯 AHA MOMENT: You Built a Complete ML System")
     print("=" * 45)
-    
-    print("📚 Your TinyTorch Journey:")
+
+    print("📚 Your Tiny🔥Torch Journey:")
     print()
     print("  Modules 01-08: Foundation")
     print("    Tensor → Activations → Layers → Losses")

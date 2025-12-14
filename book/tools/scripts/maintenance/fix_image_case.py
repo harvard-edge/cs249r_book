@@ -54,7 +54,7 @@ def fix_references_in_file(qmd_file: Path, mismatches: list[tuple[str, str]]):
     original_content = content
     for incorrect, correct in mismatches:
         content = content.replace(incorrect, correct)
-    
+
     if content != original_content:
         with open(qmd_file, 'w', encoding='utf-8') as f:
             f.write(content)

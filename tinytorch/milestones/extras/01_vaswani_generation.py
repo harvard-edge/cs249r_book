@@ -9,7 +9,7 @@ attention mechanisms alone (no RNNs!) could achieve state-of-the-art results
 on sequence tasks. This breakthrough launched the era of GPT, BERT, and modern LLMs.
 
 🎯 WHAT YOU'RE BUILDING:
-Using YOUR TinyTorch implementations, you'll build a character-level conversational
+Using YOUR Tiny🔥Torch implementations, you'll build a character-level conversational
 model that learns to answer questions - proving YOUR attention mechanism works!
 
 TinyTalks is PERFECT for learning:
@@ -273,7 +273,7 @@ class TinyGPT:
     3. N transformer blocks (self-attention + feed-forward)
     4. Output projection (vectors back to character probabilities)
 
-    Built entirely from YOUR TinyTorch modules!
+    Built entirely from YOUR Tiny🔥Torch modules!
     """
 
     def __init__(self, vocab_size, embed_dim=128, num_layers=4, num_heads=4,

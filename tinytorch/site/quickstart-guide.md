@@ -83,6 +83,8 @@ See [Community Guide](community.md) for complete features.
 Let's build your first neural network component following the **TinyTorch workflow**:
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 graph TD
     Start[Clone & Setup] --> Edit[Edit Module<br/>01_tensor.ipynb]
     Edit --> Export[Export to Package<br/>tito module complete 01]
@@ -275,7 +277,6 @@ See [Student Workflow](student-workflow.md) for detailed workflow guide and best
 <a href="tito/overview.html" style="display: inline-block; background: #28a745; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">TITO CLI Reference →</a>
 </div>
 
----
 
 **What makes TinyTorch different:** You're not just learning *about* neural networks—you're building them from fundamental mathematical operations. Every line of code you write builds toward complete ML systems mastery.
 

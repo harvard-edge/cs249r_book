@@ -2,7 +2,6 @@
 
 **Experience the evolution of AI by rebuilding history's most important breakthroughs with YOUR TinyTorch implementations.**
 
----
 
 ## What Are Milestones?
 
@@ -15,7 +14,6 @@ Milestones are **proof-of-mastery demonstrations** that showcase what you can bu
 - **Real Achievements**: Not toy examples - these are historically significant breakthroughs
 - **Systems Thinking**: Understand WHY each innovation mattered for ML systems
 
----
 
 ## Two Dimensions of Your Progress
 
@@ -44,44 +42,46 @@ See [The Learning Journey](learning-journey.md) for the complete pedagogical nar
 ### How They Connect
 
 ```{mermaid}
+:align: center
+:caption: Pedagogical Acts (What You're Learning)
 graph TB
-    subgraph "Pedagogical Acts (What You're Learning)"
-        A1["Act I: Foundation<br/>Modules 01-04<br/>Atomic Components"]
-        A2["Act II: Learning<br/>Modules 05-07<br/>Gradient Revolution"]
-        A3["Act III: Data & Scale<br/>Modules 08-09<br/>Real-World Complexity"]
-        A4["Act IV: Language<br/>Modules 10-13<br/>Sequential Intelligence"]
-        A5["Act V: Production<br/>Modules 14-19<br/>Optimization"]
-        A6["Act VI: Integration<br/>Module 20<br/>Complete Systems"]
-    end
+ subgraph "Pedagogical Acts (What You're Learning)"
+ A1["Act I: Foundation<br/>Modules 01-04<br/>Atomic Components"]
+ A2["Act II: Learning<br/>Modules 05-07<br/>Gradient Revolution"]
+ A3["Act III: Data & Scale<br/>Modules 08-09<br/>Real-World Complexity"]
+ A4["Act IV: Language<br/>Modules 10-13<br/>Sequential Intelligence"]
+ A5["Act V: Production<br/>Modules 14-19<br/>Optimization"]
+ A6["Act VI: Integration<br/>Module 20<br/>Complete Systems"]
+ end
 
-    subgraph "Historical Milestones (What You Can Build)"
-        M1["1957: Perceptron<br/>Binary Classification"]
-        M2["1969: XOR Crisis<br/>Non-linear Learning"]
-        M3["1986: MLP<br/>Multi-class Vision<br/>95%+ MNIST"]
-        M4["1998: CNN<br/>Spatial Intelligence<br/>75%+ CIFAR-10"]
-        M5["2017: Transformers<br/>Language Generation"]
-        M6["2018: Torch Olympics<br/>Production Speed"]
-    end
+ subgraph "Historical Milestones (What You Can Build)"
+ M1["1957: Perceptron<br/>Binary Classification"]
+ M2["1969: XOR Crisis<br/>Non-linear Learning"]
+ M3["1986: MLP<br/>Multi-class Vision<br/>95%+ MNIST"]
+ M4["1998: CNN<br/>Spatial Intelligence<br/>75%+ CIFAR-10"]
+ M5["2017: Transformers<br/>Language Generation"]
+ M6["2018: Torch Olympics<br/>Production Speed"]
+ end
 
-    A1 --> M1
-    A2 --> M2
-    A2 --> M3
-    A3 --> M4
-    A4 --> M5
-    A5 --> M6
+ A1 --> M1
+ A2 --> M2
+ A2 --> M3
+ A3 --> M4
+ A4 --> M5
+ A5 --> M6
 
-    style A1 fill:#e3f2fd
-    style A2 fill:#fff8e1
-    style A3 fill:#e8f5e9
-    style A4 fill:#f3e5f5
-    style A5 fill:#fce4ec
-    style A6 fill:#fff3e0
-    style M1 fill:#ffcdd2
-    style M2 fill:#f8bbd0
-    style M3 fill:#e1bee7
-    style M4 fill:#d1c4e9
-    style M5 fill:#c5cae9
-    style M6 fill:#bbdefb
+ style A1 fill:#e3f2fd
+ style A2 fill:#fff8e1
+ style A3 fill:#e8f5e9
+ style A4 fill:#f3e5f5
+ style A5 fill:#fce4ec
+ style A6 fill:#fff3e0
+ style M1 fill:#ffcdd2
+ style M2 fill:#f8bbd0
+ style M3 fill:#e1bee7
+ style M4 fill:#d1c4e9
+ style M5 fill:#c5cae9
+ style M6 fill:#bbdefb
 ```
 
 | Learning Act | Unlocked Milestone | Proof of Mastery |
@@ -95,19 +95,20 @@ graph TB
 
 **Understanding Both Dimensions**: The **Acts** explain WHY you're building each component (pedagogical progression). The **Milestones** prove WHAT you've built works (historical validation). Together, they show you're not just completing exercises - you're building something real.
 
----
 
 ## The Timeline
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 timeline
-    title Journey Through ML History
-    1957 : Perceptron : Binary classification with gradient descent
-    1969 : XOR Crisis : Hidden layers solve non-linear problems
-    1986 : MLP Revival : Backpropagation enables deep learning
-    1998 : CNN Era : Spatial intelligence for computer vision
-    2017 : Transformers : Attention revolutionizes language AI
-    2018 : Torch Olympics : Production benchmarking and optimization
+ title Journey Through ML History
+ 1957 : Perceptron : Binary classification with gradient descent
+ 1969 : XOR Crisis : Hidden layers solve non-linear problems
+ 1986 : MLP Revival : Backpropagation enables deep learning
+ 1998 : CNN Era : Spatial intelligence for computer vision
+ 2017 : Transformers : Attention revolutionizes language AI
+ 2018 : Torch Olympics : Production benchmarking and optimization
 ```
 
 ### 01. Perceptron (1957) - Rosenblatt
@@ -132,13 +133,12 @@ Input → Linear → Sigmoid → Output
 
 ```bash
 cd milestones/01_1957_perceptron
-python 01_rosenblatt_forward.py   # See the problem (random weights)
-python 02_rosenblatt_trained.py   # See the solution (trained)
+python 01_rosenblatt_forward.py # See the problem (random weights)
+python 02_rosenblatt_trained.py # See the solution (trained)
 ```
 
 **Expected Results**: ~50% (untrained) → 95%+ (trained) accuracy
 
----
 
 ### 02. XOR Crisis (1969) - Minsky & Papert
 
@@ -162,13 +162,12 @@ Input → Linear → ReLU → Linear → Output
 
 ```bash
 cd milestones/02_1969_xor
-python 01_xor_crisis.py   # Watch it fail (loss stuck at 0.69)
-python 02_xor_solved.py   # Hidden layers solve it!
+python 01_xor_crisis.py # Watch it fail (loss stuck at 0.69)
+python 02_xor_solved.py # Hidden layers solve it!
 ```
 
 **Expected Results**: 50% (single layer) → 100% (multi-layer) on XOR
 
----
 
 ### 03. MLP Revival (1986) - Backpropagation Era
 
@@ -192,17 +191,16 @@ Images → Flatten → Linear → ReLU → Linear → ReLU → Linear → Classe
 
 ```bash
 cd milestones/03_1986_mlp
-python 01_rumelhart_tinydigits.py  # 8x8 digits (quick)
-python 02_rumelhart_mnist.py       # Full MNIST
+python 01_rumelhart_tinydigits.py # 8x8 digits (quick)
+python 02_rumelhart_mnist.py # Full MNIST
 ```
 
 **Expected Results**: 95%+ accuracy on MNIST
 
----
 
 ### 04. CNN Revolution (1998) - LeCun's Breakthrough
 
-**After Modules 01-09** • **🎯 North Star Achievement**
+**After Modules 01-09** • ** North Star Achievement**
 
 ```
 Images → Conv → ReLU → Pool → Conv → ReLU → Pool → Flatten → Linear → Classes
@@ -246,9 +244,8 @@ python 02_lecun_cifar10.py
 - Shuffling prevents memorization, improves generalization
 - First-run prompts for download (~170 MB)
 
-**Expected Results**: **70%+ accuracy on CIFAR-10** ✨
+**Expected Results**: **70%+ accuracy on CIFAR-10**
 
----
 
 ### 05. Transformer Era (2017) - Attention Revolution
 
@@ -272,13 +269,12 @@ Tokens → Embeddings → Attention → FFN → ... → Attention → Output
 
 ```bash
 cd milestones/05_2017_transformer
-python 01_vaswani_generation.py  # Q&A generation with TinyTalks
-python 02_vaswani_dialogue.py    # Multi-turn dialogue
+python 01_vaswani_generation.py # Q&A generation with TinyTalks
+python 02_vaswani_dialogue.py # Multi-turn dialogue
 ```
 
 **Expected Results**: Loss < 1.5, coherent responses to questions
 
----
 
 ### 06. Torch Olympics Era (2018) - The Optimization Revolution
 
@@ -302,14 +298,13 @@ Profile → Compress → Accelerate
 
 ```bash
 cd milestones/06_2018_mlperf
-python 01_baseline_profile.py   # Find bottlenecks
-python 02_compression.py         # Reduce size (quantize + prune)
-python 03_generation_opts.py    # Speed up inference (cache + batch)
+python 01_baseline_profile.py # Find bottlenecks
+python 02_compression.py # Reduce size (quantize + prune)
+python 03_generation_opts.py # Speed up inference (cache + batch)
 ```
 
 **Expected Results**: 8-16× smaller models, 12-40× faster inference
 
----
 
 ## Learning Philosophy
 
@@ -333,7 +328,6 @@ Each milestone teaches critical systems thinking:
 3. **Architectural Patterns**: How structure enables capability
 4. **Production Deployment**: What it takes to scale
 
----
 
 ## How to Use Milestones
 
@@ -359,9 +353,9 @@ python 02_rosenblatt_trained.py
 ### 3. Understand the Systems
 
 Each milestone includes:
-- 📊 **Memory profiling**: See actual memory usage
-- ⚡ **Performance metrics**: FLOPs, parameters, timing
-- 🧠 **Architectural analysis**: Why this design matters
+- **Memory profiling**: See actual memory usage
+- **Performance metrics**: FLOPs, parameters, timing
+- **Architectural analysis**: Why this design matters
 - ↗ **Scaling insights**: How performance changes with size
 
 ### 4. Reflect and Compare
@@ -372,7 +366,6 @@ Each milestone includes:
 - How would you optimize this for production?
 - What patterns appear in PyTorch/TensorFlow?
 
----
 
 ## Quick Reference
 
@@ -394,7 +387,6 @@ Each milestone includes:
 - **Systems understanding** - You know memory, compute, scaling
 - **Production relevance** - Patterns used in real ML frameworks
 
----
 
 ## Further Learning
 
@@ -405,19 +397,17 @@ After completing milestones, explore:
 - **Capstone Projects**: Build your own ML applications
 - **Research Papers**: Read the original papers for each milestone
 
----
 
 ## Why This Matters
 
 **Most courses teach you to USE frameworks.TinyTorch teaches you to UNDERSTAND them.**
 
 By rebuilding ML history, you gain:
-- 🧠 Deep intuition for how neural networks work
-- 🔧 Systems thinking for production ML
-- 🏆 Portfolio projects demonstrating mastery
-- 💼 Preparation for ML systems engineering roles
+- Deep intuition for how neural networks work
+- Systems thinking for production ML
+- Portfolio projects demonstrating mastery
+- Preparation for ML systems engineering roles
 
----
 
 **Ready to start your journey through ML history?**
 

@@ -1,12 +1,12 @@
 # SocratiQ AI Learning Companion
 
-** NOTE: SocratiQ will be open sourced soon 
+** NOTE: SocratiQ will be open sourced soon
 
 Welcome to **SocratiQ** (pronounced "Socratic"), an AI learning assistant seamlessly integrated throughout this resource. Inspired by the Socratic method of teaching—emphasizing thoughtful questions and answers to stimulate critical thinking—SocratiQ is part of our experiment with what we call **Generative Learning**. By combining interactive quizzes, personalized assistance, and real-time feedback, SocratiQ is meant to reinforce your understanding and help you create new connections.
 
 ## About This Repository
 
-**Important Note:** This repository contains the SocratiQ integration for this specific book/resource. 
+**Important Note:** This repository contains the SocratiQ integration for this specific book/resource.
 
 - **Full Widget Code:** The complete SocratiQ widget codebase will be open-sourced in its own dedicated GitHub repository in the future.
 - **Book-Specific Version:** The source code version specifically used for this book will be placed in this directory in the future.

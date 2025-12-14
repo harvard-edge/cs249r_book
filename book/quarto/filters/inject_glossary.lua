@@ -59,14 +59,14 @@ local function load_json_glossary(path)
   if not content then
     return nil
   end
-  
+
   -- Parse JSON
   local data, pos, err = json.decode(content)
   if err then
     io.stderr:write("Error parsing JSON glossary: " .. err .. "\n")
     return nil
   end
-  
+
   -- Extract terms from structured format
   local terms = {}
   if data and data.terms then
@@ -84,17 +84,17 @@ local function load_json_glossary(path)
       end
     end
   end
-  
+
   return terms, data.metadata
 end
 
 -- Load glossary from JSON files
 local function load_glossary()
   if glossary_loaded then return end
-  
+
   local chapter = get_chapter_name()
   local loaded_from = nil
-  
+
   -- Try chapter-specific glossary first
   if chapter then
     local chapter_path = string.format("./%s_glossary.json", chapter)
@@ -102,11 +102,11 @@ local function load_glossary()
     if terms then
       glossary = terms
       loaded_from = chapter_path
-      io.stderr:write(string.format("Loaded chapter glossary: %s (%d terms)\n", 
+      io.stderr:write(string.format("Loaded chapter glossary: %s (%d terms)\n",
                                     chapter_path, metadata and metadata.total_terms or 0))
     end
   end
-  
+
   -- If no chapter glossary, try master glossary
   if not loaded_from then
     local master_path = config.glossary_paths[1]
@@ -114,14 +114,14 @@ local function load_glossary()
     if terms then
       glossary = terms
       loaded_from = master_path
-      io.stderr:write(string.format("Loaded master glossary: %s (%d terms)\n", 
+      io.stderr:write(string.format("Loaded master glossary: %s (%d terms)\n",
                                     master_path, metadata and metadata.total_terms or 0))
     end
   end
-  
+
   -- Silently continue if no glossary file is found
   -- This is expected behavior for selective chapter builds
-  
+
   glossary_loaded = true
 end
 
@@ -129,13 +129,13 @@ end
 local function create_glossary_markup(term_data, text, format)
   local term = term_data.term
   local definition = term_data.definition
-  
+
   if not format then
     format = quarto.doc.is_format("html") and config.formats.html or
              quarto.doc.is_format("pdf") and config.formats.pdf or
              config.formats.epub
   end
-  
+
   if format == "tooltip" then
     -- HTML tooltip using data-definition attribute (no title to avoid browser tooltip)
     return pandoc.Span(
@@ -150,7 +150,7 @@ local function create_glossary_markup(term_data, text, format)
     -- PDF margin note
     return {
       pandoc.Span(text, {class = "glossary-term"}),
-      pandoc.RawInline("latex", string.format("\\marginnote{\\textbf{%s}: %s}", 
+      pandoc.RawInline("latex", string.format("\\marginnote{\\textbf{%s}: %s}",
                                               term, definition))
     }
   elseif format == "footnote" then
@@ -184,10 +184,10 @@ local function process_text(elem)
   if elem.t ~= "Str" then
     return elem
   end
-  
+
   local text = elem.text
   local lower_text = config.case_sensitive and text or text:lower()
-  
+
   -- Check if this text contains any glossary terms
   for key, term_data in pairs(glossary) do
     -- Check if term has already been marked (if marking first only)
@@ -197,13 +197,13 @@ local function process_text(elem)
       if lower_text:match(pattern) then
         -- Mark this term as used
         marked_terms[key] = true
-        
+
         -- Create marked up version
         return create_glossary_markup(term_data, elem)
       end
     end
   end
-  
+
   return elem
 end
 
@@ -211,12 +211,12 @@ end
 function Pandoc(doc)
   -- Load glossary on first run
   load_glossary()
-  
+
   -- Process all blocks and inlines
   doc = doc:walk({
     Str = process_text
   })
-  
+
   -- Add CSS for HTML output
   if quarto.doc.is_format("html") then
     local css = [[
@@ -257,7 +257,7 @@ function Pandoc(doc)
 ]]
     table.insert(doc.blocks, 1, pandoc.RawBlock("html", css))
   end
-  
+
   return doc
 end
 

@@ -1205,21 +1205,21 @@ def demo_activations():
     """🎯 See how activations transform data."""
     print("🎯 AHA MOMENT: Activations Transform Data")
     print("=" * 45)
-    
+
     # Test input with positive and negative values
     x = Tensor(np.array([-2.0, -1.0, 0.0, 1.0, 2.0]))
     print(f"Input: {x.data}")
-    
+
     # ReLU - zeros out negatives
     relu = ReLU()
     relu_out = relu(x)
     print(f"ReLU:  {relu_out.data}  ← Negatives become 0!")
-    
+
     # Sigmoid - squashes to (0, 1)
     sigmoid = Sigmoid()
     sigmoid_out = sigmoid(x)
     print(f"Sigmoid: {np.round(sigmoid_out.data, 2)}  ← Squashed to (0,1)")
-    
+
     print("\n✨ Activations add nonlinearity—the key to deep learning!")
 
 # %%

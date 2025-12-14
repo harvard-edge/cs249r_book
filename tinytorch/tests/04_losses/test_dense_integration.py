@@ -13,10 +13,10 @@ import numpy as np
 
 def test_dense_module_integration():
     """Test that dense module integrates correctly with package."""
-    
+
     # Suppress warnings for cleaner test output
     warnings.filterwarnings("ignore")
-    
+
     results = {
         "module_name": "05_dense",
         "integration_type": "dense_validation",
@@ -24,7 +24,7 @@ def test_dense_module_integration():
         "success": True,
         "errors": []
     }
-    
+
     try:
         # Test 1: Linear networks import from package
         try:
@@ -52,7 +52,7 @@ def test_dense_module_integration():
                 results["success"] = False
                 results["errors"].append(f"Linear import error: {e}")
                 return results
-        
+
         # Test 2: Linear network instantiation
         try:
             mlp = MLP(input_size=4, hidden_sizes=[8, 4], output_size=2)
@@ -70,19 +70,19 @@ def test_dense_module_integration():
             results["success"] = False
             results["errors"].append(f"Linear creation error: {e}")
             return results
-        
+
         # Test 3: Integration with previous modules
         try:
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
-            
+
             # Test forward pass
             data = np.random.randn(2, 4)  # batch_size=2, input_size=4
             tensor = Tensor(data)
-            
+
             output = mlp.forward(tensor)
             assert hasattr(output, 'data'), "MLP should return tensor-like object"
-            
+
             results["tests"].append({
                 "name": "module_integration",
                 "status": "✅ PASS",
@@ -102,12 +102,12 @@ def test_dense_module_integration():
             })
             results["success"] = False
             results["errors"].append(f"Module integration error: {e}")
-        
+
         # Test 4: Network structure
         try:
             layers = mlp.layers if hasattr(mlp, 'layers') else getattr(mlp, '_layers', [])
             assert len(layers) > 0, "MLP should have layers"
-            
+
             results["tests"].append({
                 "name": "network_structure",
                 "status": "✅ PASS",
@@ -121,16 +121,16 @@ def test_dense_module_integration():
             })
             results["success"] = False
             results["errors"].append(f"Network structure error: {e}")
-        
+
         # Test 5: Required methods exist
         try:
             required_methods = ['forward']
             missing_methods = []
-            
+
             for method in required_methods:
                 if not hasattr(mlp, method):
                     missing_methods.append(method)
-            
+
             if not missing_methods:
                 results["tests"].append({
                     "name": "required_methods",
@@ -145,7 +145,7 @@ def test_dense_module_integration():
                 })
                 results["success"] = False
                 results["errors"].append(f"Missing methods: {missing_methods}")
-                
+
         except Exception as e:
             results["tests"].append({
                 "name": "required_methods",
@@ -154,7 +154,7 @@ def test_dense_module_integration():
             })
             results["success"] = False
             results["errors"].append(f"Method check error: {e}")
-            
+
     except Exception as e:
         results["success"] = False
         results["errors"].append(f"Unexpected error in dense integration test: {e}")
@@ -163,7 +163,7 @@ def test_dense_module_integration():
             "status": "❌ FAIL",
             "description": f"Unexpected error: {e}"
         })
-    
+
     return results
 
 
@@ -175,19 +175,19 @@ def run_integration_test():
 if __name__ == "__main__":
     # Run test when script is executed directly
     result = run_integration_test()
-    
+
     print(f"=== Integration Test: {result['module_name']} ===")
     print(f"Type: {result['integration_type']}")
     print(f"Overall Success: {result['success']}")
     print("\nTest Results:")
-    
+
     for test in result["tests"]:
         print(f"  {test['status']} {test['name']}: {test['description']}")
-    
+
     if result["errors"]:
         print(f"\nErrors:")
         for error in result["errors"]:
             print(f"  - {error}")
-    
+
     # Exit with appropriate code
     sys.exit(0 if result["success"] else 1)

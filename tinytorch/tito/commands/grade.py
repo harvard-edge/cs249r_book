@@ -19,20 +19,20 @@ from .base import BaseCommand
 
 class GradeCommand(BaseCommand):
     """Handle grading operations through NBGrader."""
-    
+
     @property
     def name(self) -> str:
         return "grade"
-    
+
     @property
     def description(self) -> str:
         return "Simplified grading interface (instructor tool)"
-    
+
     def add_arguments(self, parser):
         """Add arguments for the grade command."""
         # Subcommands for different grading operations
         grade_subparsers = parser.add_subparsers(dest='grade_action', help='Grade operations')
-        
+
         # Release assignment to students
         release_parser = grade_subparsers.add_parser(
             'release',
@@ -47,7 +47,7 @@ class GradeCommand(BaseCommand):
             default='tinytorch',
             help='Course identifier (default: tinytorch)'
         )
-        
+
         # Generate assignment (with solutions for instructor)
         generate_parser = grade_subparsers.add_parser(
             'generate',
@@ -57,7 +57,7 @@ class GradeCommand(BaseCommand):
             'module',
             help='Module name to generate'
         )
-        
+
         # Collect student submissions
         collect_parser = grade_subparsers.add_parser(
             'collect',
@@ -71,7 +71,7 @@ class GradeCommand(BaseCommand):
             '--student',
             help='Specific student ID (collects all if not specified)'
         )
-        
+
         # Autograde submissions
         autograde_parser = grade_subparsers.add_parser(
             'autograde',
@@ -85,7 +85,7 @@ class GradeCommand(BaseCommand):
             '--student',
             help='Specific student ID (grades all if not specified)'
         )
-        
+
         # Manual grading interface
         manual_parser = grade_subparsers.add_parser(
             'manual',
@@ -95,7 +95,7 @@ class GradeCommand(BaseCommand):
             'module',
             help='Module to grade manually'
         )
-        
+
         # Generate feedback
         feedback_parser = grade_subparsers.add_parser(
             'feedback',
@@ -105,7 +105,7 @@ class GradeCommand(BaseCommand):
             'module',
             help='Module to generate feedback for'
         )
-        
+
         # Export grades
         export_parser = grade_subparsers.add_parser(
             'export',
@@ -120,21 +120,21 @@ class GradeCommand(BaseCommand):
             default='grades.csv',
             help='Output file name'
         )
-        
+
         # Setup NBGrader course
         setup_parser = grade_subparsers.add_parser(
             'setup',
             help='Set up NBGrader course structure'
         )
-    
+
     def run(self, args: Namespace) -> int:
         """Execute the grade command."""
         if not hasattr(args, 'grade_action') or not args.grade_action:
             self._show_help()
             return 0
-        
+
         action = args.grade_action
-        
+
         # Route to appropriate handler
         if action == 'release':
             return self._release_assignment(args)
@@ -155,7 +155,7 @@ class GradeCommand(BaseCommand):
         else:
             self._show_help()
             return 0
-    
+
     def _show_help(self):
         """Show help information for grade command."""
         help_panel = Panel(
@@ -185,35 +185,35 @@ class GradeCommand(BaseCommand):
             border_style="bright_cyan"
         )
         self.console.print(help_panel)
-    
+
     def _normalize_module_name(self, module: str) -> str:
         """Normalize module name to full format."""
         # If already in full format, return as is
         if module.startswith(tuple(f"{i:02d}_" for i in range(100))):
             return module
-        
+
         # Try to find the module by short name
         source_dir = Path("modules")
         if source_dir.exists():
             for module_dir in source_dir.iterdir():
                 if module_dir.is_dir() and module_dir.name.endswith(f"_{module}"):
                     return module_dir.name
-        
+
         return module
-    
+
     def _release_assignment(self, args: Namespace) -> int:
         """Release assignment to students (removes solutions)."""
         module = self._normalize_module_name(args.module)
-        
+
         self.console.print(f"\n[bold]Releasing Assignment: {module}[/bold]")
-        
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=self.console
         ) as progress:
             task = progress.add_task("Creating student version...", total=None)
-            
+
             try:
                 # Step 1: Generate assignment first
                 result = subprocess.run(
@@ -223,13 +223,13 @@ class GradeCommand(BaseCommand):
                     capture_output=True,
                     text=True
                 )
-                
+
                 if result.returncode != 0:
                     self.console.print(f"[red]❌ Failed to generate assignment: {result.stderr}[/red]")
                     return 1
-                
+
                 progress.update(task, description="Releasing to students...")
-                
+
                 # Step 2: Release assignment
                 result = subprocess.run(
                     ["nbgrader", "release_assignment", module,
@@ -237,25 +237,25 @@ class GradeCommand(BaseCommand):
                     capture_output=True,
                     text=True
                 )
-                
+
                 if result.returncode != 0:
                     self.console.print(f"[red]❌ Failed to release: {result.stderr}[/red]")
                     return 1
-                
+
             except FileNotFoundError:
                 self.console.print("[red]❌ NBGrader not found. Install with: pip install nbgrader[/red]")
                 return 1
-        
+
         self.console.print(f"[green]✅ Assignment {module} released to students![/green]")
         self.console.print(f"[dim]Student version available in: release/{args.course_id}/{module}/[/dim]")
         return 0
-    
+
     def _generate_assignment(self, args: Namespace) -> int:
         """Generate assignment with solutions for instructor."""
         module = self._normalize_module_name(args.module)
-        
+
         self.console.print(f"\n[bold]Generating Instructor Assignment: {module}[/bold]")
-        
+
         try:
             result = subprocess.run(
                 ["nbgrader", "generate_assignment", module,
@@ -264,152 +264,152 @@ class GradeCommand(BaseCommand):
                 capture_output=True,
                 text=True
             )
-            
+
             if result.returncode != 0:
                 self.console.print(f"[red]❌ Failed to generate: {result.stderr}[/red]")
                 return 1
-                
+
         except FileNotFoundError:
             self.console.print("[red]❌ NBGrader not found. Install with: pip install nbgrader[/red]")
             return 1
-        
+
         self.console.print(f"[green]✅ Instructor version generated![/green]")
         self.console.print(f"[dim]Available in: source/{module}/[/dim]")
         return 0
-    
+
     def _collect_submissions(self, args: Namespace) -> int:
         """Collect student submissions."""
         module = self._normalize_module_name(args.module)
-        
+
         self.console.print(f"\n[bold]Collecting Submissions: {module}[/bold]")
-        
+
         cmd = ["nbgrader", "collect", module]
         if args.student:
             cmd.extend(["--student", args.student])
-        
+
         try:
             result = subprocess.run(cmd, capture_output=True, text=True)
-            
+
             if result.returncode != 0:
                 self.console.print(f"[red]❌ Collection failed: {result.stderr}[/red]")
                 return 1
-                
+
         except FileNotFoundError:
             self.console.print("[red]❌ NBGrader not found. Install with: pip install nbgrader[/red]")
             return 1
-        
+
         self.console.print(f"[green]✅ Submissions collected![/green]")
         return 0
-    
+
     def _autograde_submissions(self, args: Namespace) -> int:
         """Auto-grade collected submissions."""
         module = self._normalize_module_name(args.module)
-        
+
         self.console.print(f"\n[bold]Auto-Grading: {module}[/bold]")
-        
+
         cmd = ["nbgrader", "autograde", module]
         if args.student:
             cmd.extend(["--student", args.student])
-        
+
         try:
             result = subprocess.run(cmd, capture_output=True, text=True)
-            
+
             if result.returncode != 0:
                 self.console.print(f"[red]❌ Auto-grading failed: {result.stderr}[/red]")
                 return 1
-                
+
         except FileNotFoundError:
             self.console.print("[red]❌ NBGrader not found. Install with: pip install nbgrader[/red]")
             return 1
-        
+
         self.console.print(f"[green]✅ Auto-grading complete![/green]")
         self.console.print("[dim]Use 'tito grade manual' for manual review[/dim]")
         return 0
-    
+
     def _manual_grade(self, args: Namespace) -> int:
         """Open manual grading interface."""
         module = self._normalize_module_name(args.module)
-        
+
         self.console.print(f"\n[bold]Opening Manual Grading Interface[/bold]")
         self.console.print("[dim]This will open in your browser...[/dim]")
-        
+
         try:
             # Launch formgrader interface
             subprocess.Popen(["nbgrader", "formgrader"])
             self.console.print("[green]✅ Grading interface launched![/green]")
             self.console.print("[dim]Access at: http://localhost:5000[/dim]")
-            
+
         except FileNotFoundError:
             self.console.print("[red]❌ NBGrader not found. Install with: pip install nbgrader[/red]")
             return 1
-        
+
         return 0
-    
+
     def _generate_feedback(self, args: Namespace) -> int:
         """Generate feedback for students."""
         module = self._normalize_module_name(args.module)
-        
+
         self.console.print(f"\n[bold]Generating Feedback: {module}[/bold]")
-        
+
         try:
             result = subprocess.run(
                 ["nbgrader", "generate_feedback", module],
                 capture_output=True,
                 text=True
             )
-            
+
             if result.returncode != 0:
                 self.console.print(f"[red]❌ Feedback generation failed: {result.stderr}[/red]")
                 return 1
-                
+
         except FileNotFoundError:
             self.console.print("[red]❌ NBGrader not found. Install with: pip install nbgrader[/red]")
             return 1
-        
+
         self.console.print(f"[green]✅ Feedback generated![/green]")
         return 0
-    
+
     def _export_grades(self, args: Namespace) -> int:
         """Export grades to CSV."""
         self.console.print(f"\n[bold]Exporting Grades[/bold]")
-        
+
         try:
             cmd = ["nbgrader", "export"]
             if args.module:
                 module = self._normalize_module_name(args.module)
                 cmd.extend(["--assignment", module])
             cmd.extend(["--to", args.output])
-            
+
             result = subprocess.run(cmd, capture_output=True, text=True)
-            
+
             if result.returncode != 0:
                 self.console.print(f"[red]❌ Export failed: {result.stderr}[/red]")
                 return 1
-                
+
         except FileNotFoundError:
             self.console.print("[red]❌ NBGrader not found. Install with: pip install nbgrader[/red]")
             return 1
-        
+
         self.console.print(f"[green]✅ Grades exported to {args.output}![/green]")
         return 0
-    
+
     def _setup_course(self, args: Namespace) -> int:
         """Set up NBGrader course structure."""
         self.console.print("\n[bold]Setting Up NBGrader Course[/bold]")
-        
+
         # Create necessary directories
         dirs_to_create = [
             "source",
-            "release", 
+            "release",
             "submitted",
             "autograded",
             "feedback"
         ]
-        
+
         for dir_name in dirs_to_create:
             Path(dir_name).mkdir(exist_ok=True)
             self.console.print(f"  ✅ Created {dir_name}/")
-        
+
         # Create nbgrader_config.py if it doesn't exist
         config_file = Path("nbgrader_config.py")
         if not config_file.exists():
@@ -435,12 +435,10 @@ c.ExecuteOptions.interrupt_on_timeout = True
 '''
             config_file.write_text(config_content)
             self.console.print("  ✅ Created nbgrader_config.py")
-        
+
         self.console.print("[green]✅ NBGrader course setup complete![/green]")
         self.console.print("\n[bold]Next Steps:[/bold]")
         self.console.print("  1. tito grade generate 01_setup  # Create instructor version")
         self.console.print("  2. tito grade release 01_setup   # Create student version")
-        
+
         return 0
-
-

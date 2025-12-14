@@ -36,14 +36,14 @@ for epoch in range(500):
     out = output(h_act)
     pred = sigmoid(out)
     loss = loss_fn(pred, y)
-    
+
     # Backward
     loss.backward()
-    
+
     # Update
     optimizer.step()
     optimizer.zero_grad()
-    
+
     if (epoch + 1) % 100 == 0:
         accuracy = ((pred.data > 0.5).astype(float) == y.data).mean()
         print(f"Epoch {epoch+1:3d}/500  Loss: {loss.data:.4f}  Accuracy: {accuracy:.1%}")
