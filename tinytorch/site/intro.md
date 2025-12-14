@@ -1,5 +1,5 @@
 ---
-title: "Don't just import torch. Build it."
+title: "Don't import it. Build it."
 ---
 
 ```{raw} html
