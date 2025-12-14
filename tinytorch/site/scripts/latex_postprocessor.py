@@ -104,6 +104,24 @@ def process_latex_file(tex_file: Path) -> int:
         content
     )
 
+    # Scale mermaid diagrams: use adjustbox for smart max-width scaling
+    # This allows small diagrams to stay natural size, but caps large ones at column width
+    # First, ensure adjustbox is available by adding to preamble if not present
+    if r'\usepackage{adjustbox}' not in content:
+        # Add adjustbox after float package
+        content = content.replace(
+            r'\usepackage{float}',
+            r'\usepackage{float}' + '\n' + r'\usepackage{adjustbox}'
+        )
+
+    # Replace sphinxincludegraphics for mermaid with adjustbox-wrapped version
+    # This scales images to max column width while keeping aspect ratio
+    content = re.sub(
+        r'\\sphinxincludegraphics\{(mermaid-[^}]+\.pdf)\}',
+        r'\\adjustbox{max width=\\columnwidth}{\\includegraphics{\g<1>}}',
+        content
+    )
+
     # Write back
     with open(tex_file, 'w', encoding='utf-8') as f:
         f.write(content)
