@@ -86,7 +86,7 @@ TinyTorch follows a simple three-step workflow that you'll repeat for each modul
 
 ```{mermaid}
 :align: center
-:caption: Architecture Overview
+:caption: "**TinyTorch Build Cycle.** The three-step workflow you repeat for each module: edit in Jupyter, export to the package, and validate with milestone scripts."
 graph LR
  A[1. Edit Module<br/>modules/NN_name.ipynb] --> B[2. Export to Package<br/>tito module complete N]
  B --> C[3. Validate with Milestones<br/>Run milestone scripts]

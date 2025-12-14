@@ -19,7 +19,7 @@ The Architecture tier teaches you how to build the neural network architectures 
 
 ```{mermaid}
 :align: center
-:caption: Architecture Overview
+:caption: "**Architecture Module Flow.** Two parallel tracks branch from Foundation: vision (DataLoader, Convolutions) and language (Tokenization through Transformers)."
 graph TB
  F[ Foundation<br/>Tensor, Autograd, Training]
 
@@ -124,7 +124,7 @@ graph TB
 
 ```{mermaid}
 :align: center
-:caption: Architecture Overview
+:caption: "**Architecture Tier Milestones.** After completing modules 08-13, you unlock computer vision (1998 CNN) and language understanding (2017 Transformer) breakthroughs."
 timeline
  title Historical Achievements Unlocked
  1998 : CNN Revolution : 75%+ accuracy on CIFAR-10 with spatial intelligence

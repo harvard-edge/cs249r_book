@@ -43,7 +43,7 @@ See [The Learning Journey](learning-journey.md) for the complete pedagogical nar
 
 ```{mermaid}
 :align: center
-:caption: Pedagogical Acts (What You're Learning)
+:caption: "**Pedagogical Acts and Historical Milestones.** Two dimensions of progress: Acts explain what you learn while milestones validate what you can build."
 graph TB
  subgraph "Pedagogical Acts (What You're Learning)"
  A1["Act I: Foundation<br/>Modules 01-04<br/>Atomic Components"]
@@ -100,7 +100,7 @@ graph TB
 
 ```{mermaid}
 :align: center
-:caption: Architecture Overview
+:caption: "**Journey Through ML History.** Six decades of breakthroughs you recreate with your own implementations, from the 1957 Perceptron to modern production systems."
 timeline
  title Journey Through ML History
  1957 : Perceptron : Binary classification with gradient descent
