@@ -1,6 +1,9 @@
 # Module 03: Layers
 
-**FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 5-7 hours | Prerequisites: 01, 02
+:::{admonition} Module Info
+:class: note
+
+**FOUNDATION TIER** | Difficulty: ●●○○ | Time: 5-7 hours | Prerequisites: 01, 02
 
 **Prerequisites: Modules 01 and 02** means you have built:
 - Tensor class with arithmetic, broadcasting, matrix multiplication, and shape manipulation
@@ -8,6 +11,7 @@
 - Understanding of element-wise operations and reductions
 
 If you can multiply tensors, apply activations, and understand shape transformations, you're ready.
+:::
 
 ## Overview
 

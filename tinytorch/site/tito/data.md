@@ -98,7 +98,7 @@ TinyTorch/
 - Personal configuration
 
 **`progress.json`** - Module Completion
-```json
+```text
 {
  "version": "1.0",
  "completed_modules": [1, 2, 3, 4, 5, 6, 7],

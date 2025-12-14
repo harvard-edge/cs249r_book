@@ -260,4 +260,4 @@ tito module start 14_profiling
 - **[ Torch Olympics](olympics)** (Module 20): Final integration challenge
 
 
-**[← Back to Home](../intro)** • **[Learning Journey](../chapters/learning-journey)** • **[MLPerf Milestone](../chapters/milestones)**
+**[← Back to Home](../intro)** • **[Milestone System](../tito/milestones)**

@@ -1,6 +1,9 @@
 # Module 10: Tokenization
 
-**ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 4-6 hours | Prerequisites: 01-07
+:::{admonition} Module Info
+:class: note
+
+**ARCHITECTURE TIER** | Difficulty: ●●○○ | Time: 4-6 hours | Prerequisites: 01-07
 
 **Prerequisites: Foundation tier (Modules 01-07)** means you should have completed:
 - Tensor operations (Module 01)
@@ -8,6 +11,7 @@
 - Training fundamentals (Modules 05-07)
 
 Tokenization is relatively independent and works primarily with strings and numbers. If you can manipulate Python strings and dictionaries, you're ready.
+:::
 
 ## Overview
 
@@ -212,7 +216,7 @@ BPE solves this by learning subword units. The algorithm is elegant: start with 
 
 Consider training BPE on the corpus `["hello", "hello", "help"]`. Each word starts with end-of-word markers: `['h','e','l','l','o</w>']`, `['h','e','l','l','o</w>']`, `['h','e','l','p</w>']`. Count all pairs: `('h','e')` appears 3 times, `('e','l')` appears 3 times, `('l','l')` appears 2 times. The most frequent is `('h','e')`, so merge it:
 
-```python
+```text
 # Merge operation: ('h', 'e') → 'he'
 # Before:
 ['h','e','l','l','o</w>']  →  ['he','l','l','o</w>']

@@ -1,6 +1,9 @@
 # Module 02: Activations
 
-**FOUNDATION TIER** | Difficulty: ● (1/4) | Time: 3-5 hours | Prerequisites: 01 (Tensor)
+:::{admonition} Module Info
+:class: note
+
+**FOUNDATION TIER** | Difficulty: ●○○○ | Time: 3-5 hours | Prerequisites: 01 (Tensor)
 
 **Prerequisites: Module 01 (Tensor)** means you need:
 - Completed Tensor implementation with element-wise operations
@@ -8,6 +11,7 @@
 - Familiarity with NumPy mathematical functions
 
 If you can create a Tensor and perform element-wise arithmetic (`x + y`, `x * 2`), you're ready.
+:::
 
 ## Overview
 

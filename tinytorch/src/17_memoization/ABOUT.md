@@ -1,6 +1,9 @@
 # Module 17: Memoization
 
-**OPTIMIZATION TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01-14
+:::{admonition} Module Info
+:class: note
+
+**OPTIMIZATION TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-14
 
 **Prerequisites: Modules 01-14** means you should be comfortable with:
 - Tensor operations, matrix multiplication, and shape manipulation (Module 01)
@@ -8,6 +11,7 @@
 - Profiling tools (Module 14) to measure speedup
 
 This module introduces optimization techniques that make production language model inference economically viable. If you understand how transformers compute attention and why it's expensive, you're ready to learn how to make inference dramatically faster.
+:::
 
 ## Overview
 

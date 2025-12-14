@@ -1,6 +1,9 @@
 # Module 09: Spatial
 
-**ARCHITECTURE TIER** | Difficulty: ●●● (3/4) | Time: 6-8 hours | Prerequisites: 01-08
+:::{admonition} Module Info
+:class: note
+
+**ARCHITECTURE TIER** | Difficulty: ●●●○ | Time: 6-8 hours | Prerequisites: 01-08
 
 **Prerequisites: Modules 01-08** assumes you have:
 - Built the complete training pipeline (Modules 01-07)
@@ -8,6 +11,7 @@
 - Understanding of parameter initialization, forward/backward passes, and optimization
 
 If you can train an MLP on MNIST using your training loop and DataLoader, you're ready.
+:::
 
 ## Overview
 

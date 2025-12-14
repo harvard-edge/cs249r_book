@@ -10,7 +10,7 @@ Questions or feedback? [Join the discussion →](https://github.com/harvard-edge
 ```
 
 ```{note} Prerequisites Check
-This guide requires **Python programming** (classes, functions, NumPy basics) and **basic linear algebra** (matrix multiplication). Not sure if you're ready? Take the [Prerequisites Self-Assessment](prerequisites.md) first.
+This guide requires **Python programming** (classes, functions, NumPy basics) and **basic linear algebra** (matrix multiplication).
 ```
 
 Welcome to TinyTorch! This comprehensive guide will get you started whether you're a student building ML systems, an instructor setting up a course, or a TA supporting learners.
@@ -145,7 +145,7 @@ Each milestone validates that your modules work together correctly. Use `tito mi
 3. Return to your Jupyter notebook to debug and fix
 4. Re-export with `tito module complete 01` and try again
 
-**See [Historical Milestones](chapters/milestones.md)** for the complete progression through ML history.
+**See [Milestone System](tito/milestones)** for the complete progression through ML history.
 
 ### Your First Module (15 Minutes)
 
@@ -183,7 +183,7 @@ TinyTorch has 20 modules organized in progressive tiers:
 
 **Total: ~60-80 hours** over 14-18 weeks (4-6 hours/week pace).
 
-**See [Foundation Tier Overview](tiers/foundation.md)** for detailed module descriptions, or [Learning Journey](chapters/learning-journey.md) for the complete pedagogical narrative.
+**See [Foundation Tier Overview](tiers/foundation)** for detailed module descriptions.
 
 ### Essential Commands Reference
 
@@ -250,7 +250,7 @@ We're building comprehensive classroom support with NBGrader integration. For ha
 
 **Interested in early adoption?** [Join the discussion](https://github.com/harvard-edge/cs249r_book/discussions/1076) to share your use case.
 
-See the **[Instructor Guide](instructor-guide.md)** for detailed setup instructions and grading rubrics.
+Check back for detailed setup instructions and grading rubrics when classroom support is available.
 
 
-**Ready to start building?** Head to the [Foundation Tier](tiers/foundation.md) and begin with Module 01!
+**Ready to start building?** Head to the [Foundation Tier](tiers/foundation) and begin with Module 01!

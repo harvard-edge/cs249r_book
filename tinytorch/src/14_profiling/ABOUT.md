@@ -1,6 +1,9 @@
 # Module 14: Profiling
 
-**OPTIMIZATION TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01-13
+:::{admonition} Module Info
+:class: note
+
+**OPTIMIZATION TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-13
 
 **Prerequisites: Modules 01-13** means you should have:
 - Built the complete ML stack (Modules 01-07)
@@ -8,6 +11,7 @@
 - Models to profile and optimize
 
 **Why these prerequisites**: You'll profile models built in Modules 1-13. Understanding the implementations helps you interpret profiling results (e.g., why attention is memory-bound).
+:::
 
 ## Overview
 

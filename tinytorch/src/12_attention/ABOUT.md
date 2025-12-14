@@ -1,6 +1,9 @@
 # Module 12: Attention
 
-**ARCHITECTURE TIER** | Difficulty: ●●● (3/4) | Time: 5-7 hours | Prerequisites: 01-07, 10-11
+:::{admonition} Module Info
+:class: note
+
+**ARCHITECTURE TIER** | Difficulty: ●●●○ | Time: 5-7 hours | Prerequisites: 01-07, 10-11
 
 **Prerequisites: Modules 01-07 and 10-11** means you should understand:
 - Tensor operations and shape manipulation (Module 01)
@@ -10,6 +13,7 @@
 - Tokenization and embeddings (Modules 10-11)
 
 If you can explain why `softmax(x).sum(axis=-1)` equals 1.0 and how embeddings convert token IDs to dense vectors, you're ready.
+:::
 
 ## Overview
 

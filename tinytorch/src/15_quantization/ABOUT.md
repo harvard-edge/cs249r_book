@@ -1,6 +1,9 @@
 # Module 15: Quantization
 
-**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 4-6 hours | Prerequisites: 01-14
+:::{admonition} Module Info
+:class: note
+
+**OPTIMIZATION TIER** | Difficulty: ●●●○ | Time: 4-6 hours | Prerequisites: 01-14
 
 **Prerequisites: Modules 01-14** means you should have:
 - Built the complete foundation (Tensor through Training)
@@ -9,6 +12,7 @@
 - Familiarity with memory calculations and optimization trade-offs
 
 If you can profile a model's memory usage and understand the cost of FP32 storage, you're ready.
+:::
 
 ## Overview
 

@@ -1,6 +1,9 @@
 # Module 06: Optimizers
 
-**FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01-05
+:::{admonition} Module Info
+:class: note
+
+**FOUNDATION TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-05
 
 **Prerequisites: Modules 01-05** means you need:
 - Tensor operations and parameter storage
@@ -8,6 +11,7 @@
 - Why gradients point toward higher loss
 
 If you understand how `loss.backward()` computes gradients and why we need to update parameters to minimize loss, you're ready.
+:::
 
 ## Overview
 

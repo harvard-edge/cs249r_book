@@ -1,6 +1,9 @@
 # Module 18: Acceleration
 
-**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-7 hours | Prerequisites: 01-14
+:::{admonition} Module Info
+:class: note
+
+**OPTIMIZATION TIER** | Difficulty: ●●●○ | Time: 5-7 hours | Prerequisites: 01-14
 
 **Prerequisites: Modules 01-14** means you need:
 - Tensor operations (Module 01) for understanding data structures
@@ -9,6 +12,7 @@
 - Profiling tools (Module 14) for measuring acceleration gains
 
 If you can multiply matrices and understand why matrix multiplication is expensive, you're ready.
+:::
 
 ## Overview
 

@@ -1,6 +1,9 @@
 # Module 05: Autograd
 
-**FOUNDATION TIER** | Difficulty: ●●● (3/4) | Time: 6-8 hours | Prerequisites: 01-04
+:::{admonition} Module Info
+:class: note
+
+**FOUNDATION TIER** | Difficulty: ●●●○ | Time: 6-8 hours | Prerequisites: 01-04
 
 **Prerequisites: Modules 01-04** means you need:
 - Tensor operations (matmul, broadcasting, reductions)
@@ -9,6 +12,7 @@
 - Loss functions (the "why" behind gradients)
 
 If you can compute a forward pass through a neural network manually and understand why we need to minimize loss, you're ready.
+:::
 
 ## Overview
 

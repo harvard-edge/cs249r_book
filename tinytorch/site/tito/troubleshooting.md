@@ -550,7 +550,7 @@ echo '{"logo_theme":"standard"}' > .tito/config.json
 <div style="background: #fff5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #e74c3c; margin: 1.5rem 0;">
 
 **Symptom**:
-```bash
+```text
 $ tito module status
 Shows modules as completed that you haven't done
 ```

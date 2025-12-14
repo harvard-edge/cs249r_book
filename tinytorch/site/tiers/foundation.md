@@ -192,4 +192,4 @@ tito module start 01_tensor
 - **[ Torch Olympics](olympics)** (Module 20): Compete in ML systems challenges
 
 
-**[← Back to Home](../intro)** • **[Learning Journey](../chapters/learning-journey)** • **[Daily Workflow Guide](../student-workflow)**
+**[← Back to Home](../intro)** • **[Module Workflow](../tito/modules)**

@@ -60,9 +60,7 @@ The combination of modules + milestones ensures you don't just complete exercise
 
 ## Further Reading
 
-For the complete narrative connecting modules to milestones, see:
-- [Journey Through ML History](../site/chapters/milestones.md) - Full milestone guide with systems insights
-- [The Learning Journey](../site/chapters/learning-journey.md) - Pedagogical progression explanation
+See the individual milestone pages for detailed technical requirements and learning objectives.
 
 ---
 

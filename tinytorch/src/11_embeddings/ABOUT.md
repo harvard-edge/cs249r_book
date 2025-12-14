@@ -1,6 +1,9 @@
 # Module 11: Embeddings
 
-**ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01-07, 10
+:::{admonition} Module Info
+:class: note
+
+**ARCHITECTURE TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-07, 10
 
 **Prerequisites: Modules 01-07 and 10** means you should understand:
 - Tensor operations (shape manipulation, matrix operations, broadcasting)
@@ -8,6 +11,7 @@
 - Tokenization (converting text to token IDs, vocabularies)
 
 If you can explain how a tokenizer converts "hello" to token IDs and how to multiply matrices, you're ready.
+:::
 
 ## Overview
 

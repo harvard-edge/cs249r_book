@@ -1,6 +1,9 @@
 # Module 16: Compression
 
-**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-7 hours | Prerequisites: 01-14
+:::{admonition} Module Info
+:class: note
+
+**OPTIMIZATION TIER** | Difficulty: ●●●○ | Time: 5-7 hours | Prerequisites: 01-14
 
 **Prerequisites: Modules 01-14** means you should have:
 - Built tensors, layers, and the complete training pipeline (Modules 01-07)
@@ -8,6 +11,7 @@
 - Comfort with weight distributions, parameter counting, and memory analysis
 
 If you can profile a model's parameters and understand weight distributions, you're ready.
+:::
 
 ## Overview
 

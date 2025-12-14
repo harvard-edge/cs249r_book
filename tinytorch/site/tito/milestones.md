@@ -7,7 +7,7 @@
 
 **Purpose**: The milestone system lets you run famous ML algorithms (1957-2018) using YOUR implementations. Every milestone validates that your code can recreate a historical breakthrough.
 
-See [Historical Milestones](chapters/milestones.md) for the full historical context and significance of each milestone.
+The milestone system lets you run famous ML algorithms using YOUR implementations.
 
 ## What Are Milestones?
 

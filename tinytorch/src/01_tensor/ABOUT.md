@@ -1,6 +1,9 @@
 # Module 01: Tensor
 
-**FOUNDATION TIER** | Difficulty: ● (1/4) | Time: 4-6 hours | Prerequisites: None
+:::{admonition} Module Info
+:class: note
+
+**FOUNDATION TIER** | Difficulty: ●○○○ | Time: 4-6 hours | Prerequisites: None
 
 **Prerequisites: None** means exactly that. This module assumes:
 - Basic Python (lists, classes, methods)
@@ -8,6 +11,7 @@
 - No machine learning background required
 
 If you can multiply two matrices by hand and write a Python class, you're ready.
+:::
 
 ## Overview
 

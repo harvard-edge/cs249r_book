@@ -29,7 +29,7 @@ graph LR
 
 **The essential command**: `tito module complete XX` - exports your code to the TinyTorch package
 
-See [Student Workflow](../student-workflow.md) for the complete development cycle and best practices.
+Follow this workflow to build ML systems from scratch.
 
 
 ## Essential Commands

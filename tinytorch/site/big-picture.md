@@ -24,27 +24,35 @@ TinyTorch takes you from basic tensors to production-ready ML systems through 20
 :align: center
 :caption: TinyTorch Module Flow
 
-graph TB
-    subgraph F["FOUNDATION"]
-        T["01: Tensor"] --> A["02: Activations"] --> L["03: Layers"] --> Loss["04: Losses"] --> Auto["05: Autograd"] --> Opt["06: Optimizers"] --> Train["07: Training"]
+graph LR
+    subgraph F["FOUNDATION (01-07)"]
+        direction TB
+        T["Tensor"] --> A["Activations"]
+        A --> L["Layers"]
+        L --> Loss["Losses"]
+        Loss --> Auto["Autograd"]
+        Auto --> Opt["Optimizers"]
+        Opt --> Train["Training"]
     end
 
-    subgraph Arch["ARCHITECTURE"]
-        Data["08: DataLoader"]
-        Data --> Conv["09: CNNs"]
-        Data --> Tok["10: Tokentic"] --> Emb["11: Embed"] --> Att["12: Attention"] --> Trans["13: Transform"]
+    subgraph Arch["ARCHITECTURE (08-13)"]
+        direction TB
+        Data["DataLoader"]
+        Data --> Conv["CNNs"]
+        Data --> Tok["Tokentic"]
+        Tok --> Emb["Embed"]
+        Emb --> Att["Attention"]
+        Att --> Trans["Transform"]
     end
 
-    subgraph Optim["OPTIMIZATION"]
-        Prof["14: Profiling"]
-        Prof --> Q["15: Quant"]
-        Prof --> C["16: Compress"]
-        Prof --> M["17: Memo"]
-        Prof --> Ac["18: Accel"]
-        Q --> Bench["19: Benchmark"]
-        C --> Bench
-        M --> Bench
-        Ac --> Bench
+    subgraph Optim["OPTIMIZATION (14-19)"]
+        direction TB
+        Prof["Profiling"]
+        Prof --> Q["Quant"]
+        Prof --> C["Compress"]
+        Prof --> M["Memo"]
+        Prof --> Ac["Accel"]
+        Q & C & M & Ac --> Bench["Benchmark"]
     end
 
     Train --> Data
@@ -52,33 +60,33 @@ graph TB
     Trans --> Prof
     Bench --> Cap["20: Capstone"]
 
-    %% Foundation - Blue
-    style T fill:#2196f3,color:#fff
-    style A fill:#2196f3,color:#fff
-    style L fill:#2196f3,color:#fff
-    style Loss fill:#2196f3,color:#fff
-    style Auto fill:#2196f3,color:#fff
-    style Opt fill:#2196f3,color:#fff
-    style Train fill:#2196f3,color:#fff
+    %% Foundation - Light Blue (dark text readable)
+    style T fill:#bbdefb,stroke:#1976d2
+    style A fill:#bbdefb,stroke:#1976d2
+    style L fill:#bbdefb,stroke:#1976d2
+    style Loss fill:#bbdefb,stroke:#1976d2
+    style Auto fill:#bbdefb,stroke:#1976d2
+    style Opt fill:#bbdefb,stroke:#1976d2
+    style Train fill:#bbdefb,stroke:#1976d2
 
-    %% Architecture - Purple
-    style Data fill:#9c27b0,color:#fff
-    style Conv fill:#9c27b0,color:#fff
-    style Tok fill:#9c27b0,color:#fff
-    style Emb fill:#9c27b0,color:#fff
-    style Att fill:#9c27b0,color:#fff
-    style Trans fill:#9c27b0,color:#fff
+    %% Architecture - Light Purple (dark text readable)
+    style Data fill:#e1bee7,stroke:#7b1fa2
+    style Conv fill:#e1bee7,stroke:#7b1fa2
+    style Tok fill:#e1bee7,stroke:#7b1fa2
+    style Emb fill:#e1bee7,stroke:#7b1fa2
+    style Att fill:#e1bee7,stroke:#7b1fa2
+    style Trans fill:#e1bee7,stroke:#7b1fa2
 
-    %% Optimization - Orange
-    style Prof fill:#ff9800,color:#fff
-    style Q fill:#ff9800,color:#fff
-    style C fill:#ff9800,color:#fff
-    style M fill:#ff9800,color:#fff
-    style Ac fill:#ff9800,color:#fff
-    style Bench fill:#ff9800,color:#fff
+    %% Optimization - Light Orange (dark text readable)
+    style Prof fill:#ffe0b2,stroke:#f57c00
+    style Q fill:#ffe0b2,stroke:#f57c00
+    style C fill:#ffe0b2,stroke:#f57c00
+    style M fill:#ffe0b2,stroke:#f57c00
+    style Ac fill:#ffe0b2,stroke:#f57c00
+    style Bench fill:#ffe0b2,stroke:#f57c00
 
-    %% Capstone - Gold
-    style Cap fill:#ffc107,color:#000
+    %% Capstone - Light Gold (dark text readable)
+    style Cap fill:#fff9c4,stroke:#f9a825
 
     %% Subgraph backgrounds
     style F fill:#e3f2fd,stroke:#1976d2
@@ -213,4 +221,4 @@ The journey from tensors to transformers starts with a single `import tinytorch`
 You don't need to be an expert to start. You just need to be curious and willing to struggle through hard problems. The framework will guide you—one module at a time.
 ```
 
-**Questions before starting?** Review the [Learning Philosophy](preface.md) or explore the [Community](community.md) resources.
+**Questions before starting?** Review the [Learning Philosophy](preface).

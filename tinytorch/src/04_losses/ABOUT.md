@@ -1,6 +1,9 @@
 # Module 04: Losses
 
-**FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 4-6 hours | Prerequisites: 01, 02, 03
+:::{admonition} Module Info
+:class: note
+
+**FOUNDATION TIER** | Difficulty: ●●○○ | Time: 4-6 hours | Prerequisites: 01, 02, 03
 
 **Prerequisites:** Modules 01 (Tensor), 02 (Activations), and 03 (Layers) must be completed. This module assumes you understand:
 - Tensor operations and broadcasting (Module 01)
@@ -8,6 +11,7 @@
 - Layers and how they transform data (Module 03)
 
 If you can build a simple neural network that takes input and produces output, you're ready to learn how to measure its quality.
+:::
 
 ## Overview
 
@@ -426,7 +430,7 @@ Your model outputs logits `[50, 100, 150]`. Without the log-sum-exp trick, what 
 :class: dropdown
 
 **Without the trick (naive softmax):**
-```python
+```text
 exp_vals = [exp(50), exp(100), exp(150)]
          = [5.2×10²¹, 2.7×10⁴³, 1.4×10⁶⁵]  # Last value overflows to inf!
 softmax = exp_vals / sum(exp_vals)  # inf / inf = nan
@@ -434,7 +438,7 @@ softmax = exp_vals / sum(exp_vals)  # inf / inf = nan
 **Result**: NaN loss, training fails.
 
 **With log-sum-exp trick:**
-```python
+```text
 max_val = 150
 shifted = [50-150, 100-150, 150-150] = [-100, -50, 0]
 exp_shifted = [exp(-100), exp(-50), exp(0)]
