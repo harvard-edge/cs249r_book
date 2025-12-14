@@ -1,11 +1,11 @@
 # Module 14: Profiling
 
-**OPTIMIZATION TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01-07
+**OPTIMIZATION TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01, 03, 09
 
-**Prerequisites: Modules 01-07** means you should have:
-- Built tensors with shape manipulation and operations
-- Implemented layers with forward passes
-- Understanding of training loops and batching
+**Prerequisites: Modules 01, 03, 09** means you should have:
+- Tensor operations (Module 01)
+- Neural network layers (Module 03)
+- Convolutions for profiling spatial operations (Module 09)
 
 If you can calculate matrix multiplication cost and track memory usage patterns, you're ready.
 

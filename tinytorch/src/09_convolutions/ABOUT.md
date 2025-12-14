@@ -1,13 +1,12 @@
 # Module 09: Spatial
 
-**ARCHITECTURE TIER** | Difficulty: ●●● (3/4) | Time: 6-8 hours | Prerequisites: 01-08
+**ARCHITECTURE TIER** | Difficulty: ●●● (3/4) | Time: 6-8 hours | Prerequisites: 01, 05
 
-**Prerequisites: Modules 01-08** assumes you have:
-- Built the complete training pipeline (Modules 01-07)
-- Implemented DataLoader for batch processing (Module 08)
-- Understanding of parameter initialization, forward/backward passes, and optimization
+**Prerequisites: Modules 01 and 05** assumes you have:
+- Tensor operations (Module 01)
+- Autograd for gradient computation (Module 05)
 
-If you can train an MLP on MNIST using your training loop and DataLoader, you're ready.
+If you understand tensor operations and automatic differentiation, you're ready.
 
 ## Overview
 

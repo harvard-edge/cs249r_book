@@ -1,8 +1,8 @@
 # Module 07: Training
 
-**FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 5-7 hours | Prerequisites: 01-06
+**FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 5-7 hours | Prerequisites: 01, 03, 04, 06
 
-By completing Modules 01-06, you've built all the fundamental components: tensors, activations, layers, losses, autograd, and optimizers. Each piece works perfectly in isolation, but real machine learning requires orchestrating these components into a cohesive training process. This module provides that orchestration.
+By completing Modules 01, 03, 04, and 06, you've built the essential components: tensors, layers, losses, and optimizers. This module orchestrates these components into a cohesive training process.
 
 ## Overview
 

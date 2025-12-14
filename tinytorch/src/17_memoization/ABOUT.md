@@ -1,13 +1,11 @@
 # Module 17: Memoization
 
-**OPTIMIZATION TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01-07
+**OPTIMIZATION TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01
 
-**Prerequisites: Modules 01-07** means you should be comfortable with:
+**Prerequisites: Module 01 (Tensor)** means you should be comfortable with:
 - Tensor operations, matrix multiplication, and shape manipulation (Module 01)
-- Forward passes through neural network layers (Module 03)
-- Training loops and model evaluation (Module 07)
 
-This module introduces optimization techniques that make production language model inference economically viable. If you understand how neural networks compute predictions, you're ready to learn how to make them dramatically faster.
+This module introduces optimization techniques that make production language model inference economically viable. If you understand tensor operations, you're ready to learn how to make inference dramatically faster.
 
 ## Overview
 

@@ -1,8 +1,8 @@
 # Module 19: Benchmarking
 
-**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-7 hours | Prerequisites: 01-07, 14
+**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-7 hours | Prerequisites: 14
 
-This module assumes familiarity with the complete TinyTorch foundation (Modules 01-07) and profiling concepts from Module 14. You should understand tensors, training loops, and basic performance measurement before tackling systematic benchmarking and statistical analysis.
+This module assumes familiarity with profiling concepts from Module 14. You should understand basic performance measurement before tackling systematic benchmarking and statistical analysis.
 
 ## Overview
 

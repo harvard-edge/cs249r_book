@@ -1,12 +1,11 @@
 # Module 15: Quantization
 
-**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 4-6 hours | Prerequisites: 01-07, 14
+**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 4-6 hours | Prerequisites: 01, 02, 03
 
-**Prerequisites: Modules 01-07, 14** means you should have:
-- Built the complete foundation (Tensor through Training)
-- Implemented profiling tools to measure memory usage
-- Understanding of neural network parameters and forward passes
-- Familiarity with memory calculations and optimization trade-offs
+**Prerequisites: Modules 01, 02, 03** means you should have:
+- Tensor operations (Module 01)
+- Activations for quantized models (Module 02)
+- Neural network layers (Module 03)
 
 If you can profile a model's memory usage and understand the cost of FP32 storage, you're ready.
 

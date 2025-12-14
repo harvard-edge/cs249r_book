@@ -1,11 +1,9 @@
 # Module 10: Tokenization
 
-**ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 4-6 hours | Prerequisites: 01-07 (Foundation tier)
+**ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 4-6 hours | Prerequisites: 01
 
-**Prerequisites: Foundation tier (Modules 01-07)** means you should have completed:
+**Prerequisites: Module 01 (Tensor)** means you should have completed:
 - Tensor operations (Module 01)
-- Basic neural network components (Modules 02-03)
-- Training fundamentals (Modules 06-07)
 
 Tokenization is relatively independent and works primarily with strings and numbers. If you can manipulate Python strings and dictionaries, you're ready.
 

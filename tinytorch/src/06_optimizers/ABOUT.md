@@ -1,13 +1,11 @@
 # Module 06: Optimizers
 
-**FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: Modules 01-05
+**FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01
 
-**Prerequisites: Modules 01-05** means you need foundational knowledge from earlier modules:
-- Tensor operations and gradients (Module 01, enhanced in Module 05)
-- Understanding of backward pass and gradient computation (Module 05)
-- Familiarity with parameters and parameter updates
+**Prerequisites: Module 01 (Tensor)** means you need:
+- Tensor operations and parameter storage
 
-If you understand how `loss.backward()` computes gradients and why we need to update parameters to minimize loss, you're ready.
+If you understand tensors and why we need to update parameters to minimize loss, you're ready.
 
 ## Overview
 

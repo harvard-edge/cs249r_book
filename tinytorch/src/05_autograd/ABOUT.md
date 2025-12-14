@@ -1,12 +1,9 @@
 # Module 05: Autograd
 
-**FOUNDATION TIER** | Difficulty: ●●● (3/4) | Time: 6-8 hours | Prerequisites: 01, 02, 03, 04
+**FOUNDATION TIER** | Difficulty: ●●● (3/4) | Time: 6-8 hours | Prerequisites: 01
 
-**Prerequisites: Modules 01-04** means you need:
+**Prerequisites: Module 01 (Tensor)** means you need:
 - Tensor operations (matmul, broadcasting, reductions)
-- Activation functions (ReLU, Sigmoid, Softmax)
-- Linear layers (weight matrices, bias vectors)
-- Loss functions (MSE, cross-entropy)
 
 If you can compute a forward pass through a neural network manually, you're ready.
 

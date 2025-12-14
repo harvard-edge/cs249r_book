@@ -1,13 +1,13 @@
 # Module 16: Compression
 
-**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-7 hours | Prerequisites: 01-07, 14
+**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-7 hours | Prerequisites: 01, 02, 03
 
-**Prerequisites: Modules 01-07, 14** means you should have:
-- Built tensors, layers, and the complete training pipeline (Modules 01-07)
-- Implemented profiling tools to measure model characteristics (Module 14)
-- Comfort with weight distributions, parameter counting, and memory analysis
+**Prerequisites: Modules 01, 02, 03** means you should have:
+- Tensor operations (Module 01)
+- Activations (Module 02)
+- Neural network layers (Module 03)
 
-If you can profile a model's parameters and understand weight distributions, you're ready.
+If you understand weight distributions and neural network parameters, you're ready.
 
 ## Overview
 
