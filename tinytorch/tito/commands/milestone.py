@@ -29,6 +29,17 @@ from ..core.console import print_ascii_logo
 from ..core.console import get_console
 
 
+# Name aliases for milestone IDs (allows `tito milestone run perceptron`)
+MILESTONE_ALIASES = {
+    "perceptron": "01",
+    "xor": "02",
+    "mlp": "03",
+    "cnn": "04",
+    "transformer": "05",
+    "mlperf": "06",
+    "olympics": "06",
+}
+
 # Milestone-to-script mapping for tito milestone run command
 MILESTONE_SCRIPTS = {
     "01": {
@@ -419,7 +430,7 @@ class MilestoneCommand(BaseCommand):
         )
         run_parser.add_argument(
             'milestone_id',
-            help='Milestone ID to run (01-06)'
+            help='Milestone ID (01-06) or name (perceptron, xor, mlp, cnn, transformer, mlperf)'
         )
         run_parser.add_argument(
             '--part',
@@ -439,7 +450,7 @@ class MilestoneCommand(BaseCommand):
         )
         info_parser.add_argument(
             'milestone_id',
-            help='Milestone ID to show info for (01-06)'
+            help='Milestone ID (01-06) or name (perceptron, xor, mlp, cnn, transformer, mlperf)'
         )
 
         # Status subcommand
@@ -974,11 +985,17 @@ class MilestoneCommand(BaseCommand):
         console = self.console
         milestone_id = args.milestone_id
 
+        # Resolve name aliases (e.g., "perceptron" -> "01")
+        if milestone_id.lower() in MILESTONE_ALIASES:
+            milestone_id = MILESTONE_ALIASES[milestone_id.lower()]
+
         # Validate milestone ID
         if milestone_id not in MILESTONE_SCRIPTS:
+            alias_list = ', '.join(sorted(MILESTONE_ALIASES.keys()))
             console.print(Panel(
-                f"[red]Invalid milestone ID: {milestone_id}[/red]\n\n"
-                f"Valid milestone IDs: {', '.join(sorted(MILESTONE_SCRIPTS.keys()))}",
+                f"[red]Invalid milestone: {args.milestone_id}[/red]\n\n"
+                f"Valid IDs: {', '.join(sorted(MILESTONE_SCRIPTS.keys()))}\n"
+                f"Valid names: {alias_list}",
                 title="Invalid Milestone",
                 border_style="red"
             ))
@@ -1256,10 +1273,16 @@ class MilestoneCommand(BaseCommand):
         console = self.console
         milestone_id = args.milestone_id
 
+        # Resolve name aliases (e.g., "perceptron" -> "01")
+        if milestone_id.lower() in MILESTONE_ALIASES:
+            milestone_id = MILESTONE_ALIASES[milestone_id.lower()]
+
         if milestone_id not in MILESTONE_SCRIPTS:
+            alias_list = ', '.join(sorted(MILESTONE_ALIASES.keys()))
             console.print(Panel(
-                f"[red]Invalid milestone ID: {milestone_id}[/red]\n\n"
-                f"Valid milestone IDs: {', '.join(sorted(MILESTONE_SCRIPTS.keys()))}",
+                f"[red]Invalid milestone: {args.milestone_id}[/red]\n\n"
+                f"Valid IDs: {', '.join(sorted(MILESTONE_SCRIPTS.keys()))}\n"
+                f"Valid names: {alias_list}",
                 title="Invalid Milestone",
                 border_style="red"
             ))
