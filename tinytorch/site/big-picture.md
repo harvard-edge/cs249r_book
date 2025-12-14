@@ -18,7 +18,7 @@ TinyTorch takes you from basic tensors to production-ready ML systems through 20
 
 - **Optimization (orange)**: Make it fast. Profile to find bottlenecks, then apply quantization, compression, memoization, or acceleration. Benchmarking measures your improvements.
 
-<div class="big-picture-diagram">
+<div>
 
 ```{mermaid}
 :align: center
@@ -88,17 +88,6 @@ graph TB
 
 </div>
 
-<style>
-.big-picture-diagram .mermaid {
-    min-width: 100%;
-    max-width: none !important;
-}
-.big-picture-diagram .mermaid svg {
-    min-height: 600px;
-    width: 100% !important;
-    max-width: none !important;
-}
-</style>
 
 **Flexible paths:**
 - **Vision focus**: Foundation → DataLoader → Convolutions → Optimization
