@@ -52,7 +52,7 @@ test_command() {
     echo ""
 
     local start=$(date +%s%N)
-    
+
     # Show live output while capturing to file
     if [ "$show_live" = "true" ]; then
         if eval "$command" 2>&1 | tee /tmp/test_output.txt | sed 's/^/  │ /'; then
@@ -60,7 +60,7 @@ test_command() {
             local duration_ns=$((end - start))
             local duration_ms=$((duration_ns / 1000000))
             local duration_s=$(echo "scale=2; $duration_ms / 1000" | bc)
-            
+
             echo ""
             if [ -n "$check_output" ]; then
                 if grep -q "$check_output" /tmp/test_output.txt; then
@@ -74,7 +74,7 @@ test_command() {
                 echo -e "  ${GREEN}✓ PASS${NC} (${duration_s}s)"
                 ((PASSED++))
             fi
-            
+
             # Store timing if requested (bash 3.2 compatible)
             if [ "$collect_timing" = "true" ]; then
                 TIMING_NAMES+=("$test_name")
@@ -94,7 +94,7 @@ test_command() {
             local duration_ns=$((end - start))
             local duration_ms=$((duration_ns / 1000000))
             local duration_s=$(echo "scale=2; $duration_ms / 1000" | bc)
-            
+
             if [ -n "$check_output" ]; then
                 if grep -q "$check_output" /tmp/test_output.txt; then
                     echo -e "  ${GREEN}✓ PASS${NC} (${duration_s}s)"
@@ -107,7 +107,7 @@ test_command() {
                 echo -e "  ${GREEN}✓ PASS${NC} (${duration_s}s)"
                 ((PASSED++))
             fi
-            
+
             if [ "$collect_timing" = "true" ]; then
                 TIMING_NAMES+=("$test_name")
                 TIMING_VALUES+=("$duration_ms")
@@ -125,7 +125,7 @@ test_command() {
 validate() {
     local collect_timing="${1:-false}"
     local skip_clone="${2:-false}"
-    
+
     if [ "$collect_timing" = "true" ]; then
         echo -e "${CYAN}${BOLD}📋 Step 1: Validation + Timing Collection${NC}"
     else
@@ -133,19 +133,19 @@ validate() {
     fi
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    
+
     if [ "$skip_clone" = "true" ]; then
         echo -e "${YELLOW}⚡ Debug mode: Skipping git clone (using local copy)${NC}"
         echo ""
     fi
-    
+
     echo "Testing all demo workflows..."
     echo ""
 
     PASSED=0
     FAILED=0
     WARNINGS=0
-    
+
     # Timing data (bash 3.2 compatible - no associative arrays)
     TIMING_NAMES=()
     TIMING_VALUES=()
@@ -160,9 +160,9 @@ validate() {
         rm -rf /tmp/TinyTorch_validate
         cd /tmp
         echo ""
-        
+
         test_command "git clone" \
-            "git clone https://github.com/mlsysbook/TinyTorch.git TinyTorch_validate" \
+            "git clone https://github.com/harvard-edge/cs249r_book.git TinyTorch_validate" \
             "Cloning into" \
             "$collect_timing" \
             "true"
@@ -293,7 +293,7 @@ validate() {
         echo ""
         printf "%-30s %12s\n" "Command" "Time (s)"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        
+
         # Loop through parallel arrays (bash 3.2 compatible)
         for i in "${!TIMING_NAMES[@]}"; do
             local name="${TIMING_NAMES[$i]}"
@@ -302,7 +302,7 @@ validate() {
             printf "%-30s %10ss\n" "$name" "$sec"
         done
         echo ""
-        
+
         echo -e "${CYAN}💡 VHS wait syntax for tape files:${NC}"
         echo "   Wait+Line@10ms /profvjreddi/"
         echo ""
@@ -367,7 +367,7 @@ generate() {
     rm -rf /tmp/TinyTorch
     echo -e "  ${GREEN}✓ Clean${NC}"
     echo ""
-    
+
     # Reset all modules to clean state for demo
     echo -e "${YELLOW}⏳ Step 2.2: Resetting all modules to clean state...${NC}"
     if tito module reset --all --force --no-backup > /dev/null 2>&1; then
@@ -390,13 +390,13 @@ generate() {
     echo ""
 
     local start=$(date +%s)
-    
+
     if vhs "$tape_file" 2>&1 | while read line; do
         echo "  $line"
     done; then
         local end=$(date +%s)
         local duration=$((end - start))
-        
+
         if [ -f "$output_gif" ]; then
             local size=$(du -h "$output_gif" | cut -f1)
             echo ""
@@ -465,18 +465,18 @@ interactive() {
             echo ""
             read -p "Choose demo [00,02-05]: " demo_num
             echo ""
-            
+
             cd "$(dirname "$0")/../../.."
             generate "$demo_num"
             ;;
         3)
             echo -e "${CYAN}${BOLD}🔥 Full Workflow: Validate → Time → Generate${NC}"
             echo ""
-            
+
             # Step 1: Validate + collect timing
             if validate true "$skip_clone"; then
                 echo ""
-                
+
                 # Step 2: Generate
                 echo -e "${BOLD}Which demo to generate?${NC}"
                 echo ""
@@ -488,9 +488,9 @@ interactive() {
                 echo ""
                 read -p "Choose demo [00,02-05]: " demo_num
                 echo ""
-                
+
                 cd "$(dirname "$0")/../../.."
-                
+
                 if generate "$demo_num"; then
                     echo ""
                     echo -e "${GREEN}${BOLD}🎉 Complete! All steps done successfully.${NC}"
@@ -575,19 +575,19 @@ case "$1" in
             usage
             exit 1
         fi
-        
+
         skip_clone="false"
         if [ "$3" = "--skip-clone" ]; then
             skip_clone="true"
         fi
-        
+
         echo -e "${CYAN}${BOLD}🔥 Full Workflow: Validate → Time → Generate${NC}"
         echo ""
-        
+
         if validate true "$skip_clone"; then
             echo ""
             cd "$(dirname "$0")/../../.."
-            
+
             if generate "$2"; then
                 echo ""
                 echo -e "${GREEN}${BOLD}🎉 Complete! All steps done successfully.${NC}"
@@ -607,4 +607,3 @@ case "$1" in
         exit 1
         ;;
 esac
-

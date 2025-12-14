@@ -34,7 +34,7 @@ You'll see:
 
 ```
   ╔═══════════════════════════════════════╗
-  ║   🔥 TinyTorch Demo Studio 🎬        ║
+  ║   Tiny🔥Torch Demo Studio 🎬        ║
   ╚═══════════════════════════════════════╝
 
 What would you like to do?
@@ -71,17 +71,17 @@ The script shows live output as commands run (not silent!):
 
 ⏳ Testing: setup-environment.sh
 
-  │ 🔥 TinyTorch Environment Setup
+  │ Tiny🔥Torch Environment Setup
   │ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  │ 
+  │
   │ 📦 Creating virtual environment...
   │   ✓ Virtual environment created
-  │ 
+  │
   │ 📦 Installing dependencies...
   │   ✓ numpy installed
   │   ✓ pytest installed
   │   ...
-  │ 
+  │
   │ ✅ TinyTorch environment setup complete
 
   ✓ PASS (45.23s)
@@ -226,7 +226,7 @@ Set Height 720
 Set Shell bash
 Env PS1 "@profvjreddi 🔥 › "
 
-Type "git clone https://github.com/mlsysbook/TinyTorch.git"
+Type "git clone https://github.com/harvard-edge/cs249r_book.git"
 Enter
 Wait+Line@10ms /profvjreddi/ 120s  # Wait for clone (max 120s)
 
@@ -280,7 +280,7 @@ If VHS waits 120s then fails, your network/machine might be slow:
 # Test manually to see timing
 cd /tmp
 rm -rf TinyTorch
-time git clone https://github.com/mlsysbook/TinyTorch.git
+time git clone https://github.com/harvard-edge/cs249r_book.git
 
 # If > 120s, edit the tape file and increase timeout
 ```

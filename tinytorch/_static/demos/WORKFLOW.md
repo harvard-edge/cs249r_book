@@ -30,7 +30,7 @@ This will:
 
 **Output:**
 ```
-🔥 TinyTorch Demo Validation
+Tiny🔥Torch Demo Validation
 ========================================
 
 📋 Demo 01: Zero to Ready
@@ -161,7 +161,7 @@ Debug by running the failing command manually:
 # Run commands manually to see timing
 cd /tmp
 rm -rf TinyTorch
-time git clone https://github.com/mlsysbook/TinyTorch.git
+time git clone https://github.com/harvard-edge/cs249r_book.git
 # If > 120s, increase timeout in tape file
 ```
 
@@ -210,4 +210,3 @@ The validation script can run in CI to catch breaking changes:
 - name: Validate demos
   run: ./docs/_static/demos/scripts/validate_demos.sh
 ```
-

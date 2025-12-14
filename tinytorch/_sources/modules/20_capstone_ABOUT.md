@@ -1,692 +1,634 @@
----
-title: "Capstone - Submission Infrastructure"
-description: "Build professional benchmarking workflows that generate standardized submissions for ML competitions"
-difficulty: "●●●●"
-time_estimate: "5-8 hours"
-prerequisites: ["Module 19 - Benchmarking", "Modules 14-18 - Optimization Techniques"]
-next_steps: ["Milestone 05 - TinyGPT", "Wake Vision Competition"]
-learning_objectives:
-  - "Apply Module 19's benchmarking tools to measure baseline and optimized model performance"
-  - "Generate standardized JSON submissions following MLPerf-inspired industry formats"
-  - "Calculate normalized improvement metrics (speedup, compression ratio, accuracy delta)"
-  - "Execute complete optimization workflows integrating profiling, optimization, and benchmarking"
-  - "Build submission infrastructure that enables future ML competitions and community challenges"
----
+# Module 20: Capstone
 
-# Capstone - Submission Infrastructure
+:::{admonition} Module Info
+:class: note
 
-**OPTIMIZATION TIER CAPSTONE** | Difficulty: ●●●● (4/4) | Time: 5-8 hours
+**OPTIMIZATION TIER** | Difficulty: ●●●● | Time: 6-8 hours | Prerequisites: All modules (01-19)
+
+**Prerequisites: All modules** means you've built a complete ML framework. This capstone assumes:
+- Complete TinyTorch framework (Modules 01-13) - **Required**
+- Optimization techniques (Modules 14-18) - **Optional but recommended**
+- Benchmarking methodology (Module 19) - **Required**
+
+The core benchmarking functionality (Parts 1-4) works with just Modules 01-13 and 19. Modules 14-18 enable the advanced optimization workflow (Part 4b), which demonstrates how to integrate all TinyTorch components. If optimization modules aren't available, the system gracefully degrades to baseline benchmarking only.
+:::
 
 ## Overview
 
-Build professional submission infrastructure that brings together everything you've learned in the Optimization Tier. This capstone teaches you how to benchmark models using TinyTorch's optimization APIs (Modules 14-19), generate standardized JSON submissions, and create shareable results for ML competitions.
+You've built an entire machine learning framework from scratch across 19 modules. You can train neural networks, implement transformers, optimize models with quantization and pruning, and measure performance with profiling tools. But there's one critical piece missing: proving your work with reproducible results.
 
-**What You Learn**: Complete optimization workflow from profiling to submission—how to use TinyTorch as a cohesive framework, not just individual modules. You'll apply the optimization pipeline (Profile → Optimize → Benchmark → Submit) to demonstrate your framework's capabilities with measurable, reproducible results.
+In production ML systems, claims without measurements are worthless. This capstone module teaches you to benchmark models comprehensively, document optimizations systematically, and generate standardized submissions that mirror industry practices like MLPerf and Papers with Code. You'll learn the complete workflow from baseline measurement through optimization to final submission, using the same patterns employed by ML research labs and production engineering teams.
 
-**The Focus**: Using TinyTorch's APIs together in a professional workflow. This isn't about building new optimization techniques—it's about orchestrating existing tools to generate competition-ready submissions.
+By the end, you'll have a professional benchmarking system that demonstrates your framework's capabilities and enables fair comparisons with others' implementations.
 
 ## Learning Objectives
 
-By the end of this capstone, you will be able to:
+```{tip} By completing this module, you will:
 
-- **Apply benchmarking tools systematically**: Use Module 19's `BenchmarkReport` class to measure model performance with statistical rigor
-- **Generate standardized submissions**: Create MLPerf-inspired JSON submissions with system info, metrics, and reproducibility metadata
-- **Calculate improvement metrics**: Compute normalized speedup, compression ratio, and accuracy delta for hardware-independent comparison
-- **Execute optimization workflows**: Integrate profiling (M14), optimization techniques (M15-18), and benchmarking (M19) in complete pipeline
-- **Build competition infrastructure**: Create submission formats that enable future challenges (Wake Vision, custom competitions)
+- **Implement** comprehensive benchmarking infrastructure measuring accuracy, latency, throughput, and memory
+- **Master** the three pillars of reliable benchmarking: repeatability, comparability, and completeness
+- **Understand** performance measurement traps (variance, cold starts, batch effects) and how to avoid them
+- **Connect** your TinyTorch implementation to production ML workflows (experiment tracking, A/B testing, regression detection)
+- **Generate** schema-validated JSON submissions that enable reproducible comparisons and community sharing
+```
 
-## Build → Use → Reflect
+## What You'll Build
 
-This capstone follows TinyTorch's **Build → Use → Reflect** framework:
+```{mermaid}
+:align: center
+:caption: Benchmarking System
+flowchart LR
+    subgraph "Benchmarking System"
+        A["BenchmarkReport<br/>measure performance"]
+        B["Submission<br/>standardized format"]
+        C["Validation<br/>schema compliance"]
+    end
 
-1. **Build**: Implement `BenchmarkReport` class, `generate_submission()` function, and standardized JSON schema with system metadata
-2. **Use**: Benchmark baseline and optimized models using TinyTorch's optimization APIs; generate submissions comparing before/after performance
-3. **Reflect**: How do optimization techniques combine in practice? What makes submissions reproducible? How does standardized infrastructure enable fair competition?
+    subgraph "Workflow"
+        D["Baseline Model"]
+        E["Optimization"]
+        F["Comparison"]
+    end
 
-## Implementation Guide
+    D --> A
+    E --> A
+    A --> B
+    B --> C
+    A --> F
 
-### Core Infrastructure Components
+    style A fill:#e1f5ff
+    style B fill:#fff3cd
+    style C fill:#f8d7da
+    style D fill:#d4edda
+    style E fill:#e2d5f1
+    style F fill:#ffe4e1
+```
 
-The submission infrastructure implements three key systems:
+**Implementation roadmap:**
 
-#### 1. BenchmarkReport Class
+| Part | What You'll Implement | Key Concept |
+|------|----------------------|-------------|
+| 1 | `SimpleMLP` | Baseline model for benchmarking demonstrations |
+| 2 | `BenchmarkReport` | Comprehensive performance measurement with statistical rigor |
+| 3 | `generate_submission()` | Standardized JSON generation with schema compliance |
+| 4 | `validate_submission_schema()` | Automated validation ensuring data quality |
+| 5 | Complete workflows | Baseline, optimization, comparison, submission pipeline |
 
-**Comprehensive Performance Measurement**
-
-The `BenchmarkReport` class encapsulates all metrics needed for competition submissions:
-
+**The pattern you'll enable:**
 ```python
-class BenchmarkReport:
-    """
-    Benchmark report for model performance measurement.
+# Professional ML workflow
+report = BenchmarkReport(model_name="my_model")
+report.benchmark_model(model, X_test, y_test, num_runs=100)
 
-    Collects and stores:
-    - Model characteristics (parameters, size)
-    - Performance metrics (accuracy, latency, throughput)
-    - System information (hardware, software versions)
-    - Timestamps for reproducibility
-    """
-
-    def __init__(self, model_name="model"):
-        self.model_name = model_name
-        self.metrics = {}
-        self.system_info = self._get_system_info()
-        self.timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-
-    def benchmark_model(self, model, X_test, y_test, num_runs=100):
-        """
-        Benchmark model with statistical rigor.
-
-        Measures:
-        - Parameter count and model size (MB)
-        - Accuracy on test set
-        - Latency with mean ± std (100 runs for statistics)
-        - Throughput (samples/second)
-
-        Returns:
-            Dict with all metrics for submission generation
-        """
-        # Count parameters
-        param_count = model.count_parameters()
-        model_size_mb = (param_count * 4) / (1024 * 1024)  # FP32
-
-        # Measure accuracy
-        predictions = model.forward(X_test)
-        pred_labels = np.argmax(predictions.data, axis=1)
-        accuracy = np.mean(pred_labels == y_test)
-
-        # Measure latency (statistical rigor with 100 runs)
-        latencies = []
-        for _ in range(num_runs):
-            start = time.time()
-            _ = model.forward(X_test[:1])  # Single-sample inference
-            latencies.append((time.time() - start) * 1000)  # ms
-
-        avg_latency = np.mean(latencies)
-        std_latency = np.std(latencies)
-
-        # Store comprehensive metrics
-        self.metrics = {
-            'parameter_count': int(param_count),
-            'model_size_mb': float(model_size_mb),
-            'accuracy': float(accuracy),
-            'latency_ms_mean': float(avg_latency),
-            'latency_ms_std': float(std_latency),
-            'throughput_samples_per_sec': float(1000 / avg_latency)
-        }
-
-        return self.metrics
-```
-
-**Why This Design**: Single class captures all necessary information for reproducible benchmarking. System info ensures results can be contextualized. Multiple latency runs provide statistical confidence.
-
-#### 2. Submission Generation Function
-
-**Standardized JSON Schema Following MLPerf Format**
-
-```python
-def generate_submission(
-    baseline_report: BenchmarkReport,
-    optimized_report: Optional[BenchmarkReport] = None,
-    student_name: Optional[str] = None,
-    techniques_applied: Optional[List[str]] = None
-) -> Dict[str, Any]:
-    """
-    Generate standardized benchmark submission.
-
-    Creates MLPerf-inspired JSON with:
-    - Version and timestamp metadata
-    - System information for reproducibility
-    - Baseline performance metrics
-    - Optional optimized metrics with techniques
-    - Automatic improvement calculation
-
-    Args:
-        baseline_report: BenchmarkReport for baseline model
-        optimized_report: Optional BenchmarkReport for optimized version
-        student_name: Optional submitter name
-        techniques_applied: List of optimization techniques used
-
-    Returns:
-        Dictionary ready for JSON serialization
-    """
-    submission = {
-        'tinytorch_version': '0.1.0',
-        'submission_type': 'capstone_benchmark',
-        'timestamp': baseline_report.timestamp,
-        'system_info': baseline_report.system_info,
-        'baseline': {
-            'model_name': baseline_report.model_name,
-            'metrics': baseline_report.metrics
-        }
-    }
-
-    # Add optional student name
-    if student_name:
-        submission['student_name'] = student_name
-
-    # Add optimization results if provided
-    if optimized_report:
-        submission['optimized'] = {
-            'model_name': optimized_report.model_name,
-            'metrics': optimized_report.metrics,
-            'techniques_applied': techniques_applied or []
-        }
-
-        # Automatically calculate improvement metrics
-        baseline_lat = baseline_report.metrics['latency_ms_mean']
-        optimized_lat = optimized_report.metrics['latency_ms_mean']
-        baseline_size = baseline_report.metrics['model_size_mb']
-        optimized_size = optimized_report.metrics['model_size_mb']
-
-        submission['improvements'] = {
-            'speedup': float(baseline_lat / optimized_lat),
-            'compression_ratio': float(baseline_size / optimized_size),
-            'accuracy_delta': float(
-                optimized_report.metrics['accuracy'] -
-                baseline_report.metrics['accuracy']
-            )
-        }
-
-    return submission
-
-def save_submission(submission: Dict[str, Any], filepath: str):
-    """Save submission to JSON file with proper formatting."""
-    Path(filepath).write_text(json.dumps(submission, indent=2))
-    print(f" Submission saved to: {filepath}")
-    return filepath
-```
-
-**Submission Schema Example**:
-```json
-{
-  "tinytorch_version": "0.1.0",
-  "submission_type": "capstone_benchmark",
-  "timestamp": "2025-01-15 14:23:41",
-  "system_info": {
-    "platform": "macOS-14.2-arm64",
-    "python_version": "3.11.6",
-    "numpy_version": "1.24.3"
-  },
-  "baseline": {
-    "model_name": "baseline_mlp",
-    "metrics": {
-      "parameter_count": 263,
-      "model_size_mb": 0.001,
-      "accuracy": 0.35,
-      "latency_ms_mean": 0.042,
-      "latency_ms_std": 0.008,
-      "throughput_samples_per_sec": 23809.52
-    }
-  },
-  "optimized": {
-    "model_name": "optimized_mlp",
-    "metrics": {
-      "parameter_count": 198,
-      "model_size_mb": 0.00075,
-      "accuracy": 0.33,
-      "latency_ms_mean": 0.031,
-      "latency_ms_std": 0.006,
-      "throughput_samples_per_sec": 32258.06
-    },
-    "techniques_applied": ["pruning", "quantization"]
-  },
-  "improvements": {
-    "speedup": 1.35,
-    "compression_ratio": 1.33,
-    "accuracy_delta": -0.02
-  }
-}
-```
-
-**Why This Schema**: MLPerf-inspired format ensures reproducibility. System info enables verification. Normalized metrics (speedup, compression ratio) work across hardware. Automatic improvement calculation prevents manual errors.
-
-#### 3. Complete Optimization Workflow
-
-**Bringing Modules 14-19 Together**
-
-This workflow demonstrates the full optimization pipeline:
-
-```python
-def run_optimization_workflow_example():
-    """
-    Complete optimization workflow using Modules 14-19.
-
-    Pipeline:
-    1. Profile baseline (Module 14)
-    2. Apply optimizations (Modules 15-18)
-    3. Benchmark with rigor (Module 19)
-    4. Generate submission (Module 20)
-
-    This is the COMPLETE story of TinyTorch optimization!
-    """
-    print("="*70)
-    print("TINYTORCH OPTIMIZATION WORKFLOW")
-    print("="*70)
-
-    # Import optimization APIs
-    from tinytorch.perf.profiling import Profiler, quick_profile
-    from tinytorch.perf.compression import magnitude_prune
-    from tinytorch.benchmarking import Benchmark, BenchmarkResult
-
-    # Step 1: Profile baseline model (Module 14)
-    print("\n[STEP 1] Profile Baseline - Module 14")
-    baseline_model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-
-    profiler = Profiler()
-    # Optional: Use Module 14's profiler for detailed analysis
-    # profile_data = quick_profile(baseline_model, input_tensor)
-
-    # Step 2: Benchmark baseline (Module 19)
-    print("\n[STEP 2] Benchmark Baseline - Module 19")
-    baseline_report = BenchmarkReport(model_name="baseline_mlp")
-    baseline_report.benchmark_model(baseline_model, X_test, y_test, num_runs=50)
-
-    # Step 3: Apply optimizations (Modules 15-18)
-    print("\n[STEP 3] Apply Optimizations - Modules 15-18")
-    print("  Available APIs:")
-    print("    - Module 15: quantize_model(model, bits=8)")
-    print("    - Module 16: magnitude_prune(model, sparsity=0.5)")
-    print("    - Module 17: enable_kv_cache(model)  # For transformers")
-    print("    - Module 18: Use accelerated ops")
-
-    # Example: Apply pruning (students can add quantization, etc.)
-    optimized_model = baseline_model  # Apply real optimizations here
-    # optimized_model = magnitude_prune(baseline_model, sparsity=0.3)
-    # optimized_model = quantize_model(optimized_model, bits=8)
-
-    # Step 4: Benchmark optimized version (Module 19)
-    print("\n[STEP 4] Benchmark Optimized - Module 19")
-    optimized_report = BenchmarkReport(model_name="optimized_mlp")
-    optimized_report.benchmark_model(optimized_model, X_test, y_test, num_runs=50)
-
-    # Step 5: Generate submission (Module 20)
-    print("\n[STEP 5] Generate Submission - Module 20")
-    submission = generate_submission(
-        baseline_report=baseline_report,
-        optimized_report=optimized_report,
-        student_name="TinyTorch Optimizer",
-        techniques_applied=["pruning", "quantization"]
-    )
-
-    # Display improvements
-    if 'improvements' in submission:
-        imp = submission['improvements']
-        print(f"\n   Results:")
-        print(f"     Speedup: {imp['speedup']:.2f}x")
-        print(f"     Compression: {imp['compression_ratio']:.2f}x")
-        print(f"     Accuracy Δ: {imp['accuracy_delta']*100:+.1f}%")
-
-    # Step 6: Save submission
-    save_submission(submission, "optimization_submission.json")
-
-    print("\n Complete optimization workflow demonstrated!")
-    return submission
-```
-
-**Why This Workflow Matters**: Shows how TinyTorch modules work together as a cohesive framework. Students see the complete optimization story: measure → optimize → validate → submit. This workflow pattern applies to real production ML perf.
-
-### Connection to TinyTorch Optimization Tier
-
-This capstone brings together the entire Optimization Tier:
-
-**The Complete Optimization Story**:
-```
-Module 14 (Profiling)
-    ↓
-  Identify bottlenecks
-    ↓
-Modules 15-18 (Optimization Techniques)
-    ↓
-  Apply targeted optimizations
-    ↓
-Module 19 (Benchmarking)
-    ↓
-  Measure improvements with statistics
-    ↓
-Module 20 (Submission)
-    ↓
-  Package results for sharing
-```
-
-**How Modules Work Together**:
-
-1. **Module 14 (Profiling)**: Identifies bottlenecks (memory-bound vs compute-bound)
-2. **Module 15 (Quantization)**: Reduces precision to save memory and improve throughput
-3. **Module 16 (Compression)**: Prunes parameters to reduce model size
-4. **Module 17 (Memoization)**: Caches computations to avoid redundant work
-5. **Module 18 (Acceleration)**: Applies operator fusion and vectorization
-6. **Module 19 (Benchmarking)**: Validates optimizations with statistical rigor
-7. **Module 20 (Submission)**: Packages everything into shareable format
-
-**Real-World Application**: This workflow mirrors how production ML teams optimize models:
-- Google TPU teams profile → optimize → benchmark → deploy
-- OpenAI profiles GPT training → applies gradient checkpointing → validates memory savings
-- Meta benchmarks PyTorch inference → fuses operators → measures latency improvements
-
-### Enabling Future Competitions
-
-The submission infrastructure you build enables future TinyTorch challenges:
-
-**Wake Vision Competition (Coming Soon)**:
-- Optimize computer vision models for edge deployment
-- Constraints: Latency < 100ms, Model size < 5MB, Accuracy > 85%
-- Rankings based on normalized submissions (same format you're building)
-
-**Custom Competitions**:
-- Educational settings: Classroom competitions using TinyTorch
-- Research benchmarks: Reproducible optimization studies
-- Community challenges: Open-source ML optimization contests
-
-**Extensibility**: The submission format you implement can be extended with:
-- Additional metrics (energy consumption, memory bandwidth)
-- Constraint validation (checking competition requirements)
-- Leaderboard integration (automated ranking systems)
-
-## Getting Started
-
-### Prerequisites
-
-Ensure you understand benchmarking and optimization techniques:
-
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
-
-# Required: Benchmarking methodology (Module 19)
-tito test benchmarking
-
-# Helpful: Optimization techniques (Modules 14-18)
-tito test profiling        # Module 14: Find bottlenecks
-tito test quantization     # Module 15: Reduce precision
-tito test compression      # Module 16: Prune parameters
-tito test memoization      # Module 17: Cache computations
-tito test acceleration     # Module 18: Operator fusion
-```
-
-**Why Module 19 is Essential**: This capstone uses Module 19's `BenchmarkReport` class as the foundation. Understanding statistical measurement methodology from Module 19 is critical for generating valid submissions.
-
-### Development Workflow
-
-1. **Open the development file**: `modules/20_capstone/20_capstone.py`
-2. **Implement SimpleMLP**: Simple demonstration model for benchmarking
-3. **Build BenchmarkReport**: Class to collect and store metrics
-4. **Create generate_submission()**: Function to create standardized JSON
-5. **Add save_submission()**: JSON serialization with proper formatting
-6. **Implement workflow examples**: Basic and optimization workflow demonstrations
-7. **Export and verify**: `tito module complete 20 && tito test capstone`
-
-**Development Tips**:
-```python
-# Test BenchmarkReport with toy model
-model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-report = BenchmarkReport(model_name="test_model")
-metrics = report.benchmark_model(model, X_test, y_test, num_runs=10)
-
-# Verify all required metrics are present
-required = ['parameter_count', 'model_size_mb', 'accuracy',
-            'latency_ms_mean', 'latency_ms_std', 'throughput_samples_per_sec']
-assert all(metric in metrics for metric in required)
-
-# Test submission generation
-submission = generate_submission(report, student_name="Test")
-assert 'baseline' in submission
-assert 'system_info' in submission
-assert submission['submission_type'] == 'capstone_benchmark'
-
-# Test with optimization comparison
-optimized_report = BenchmarkReport(model_name="optimized")
-# ... benchmark optimized model ...
-submission_with_opt = generate_submission(report, optimized_report,
-                                         techniques_applied=["pruning"])
-assert 'improvements' in submission_with_opt
-assert 'speedup' in submission_with_opt['improvements']
-```
-
-## Testing
-
-### Comprehensive Test Suite
-
-Run the full test suite to verify submission infrastructure:
-
-```bash
-# TinyTorch CLI (recommended)
-tito test capstone
-
-# Direct pytest execution
-python -m pytest tests/ -k capstone -v
-
-# Expected output:
-#  test_simple_mlp - Model creation and forward pass
-#  test_benchmark_report - Metrics collection and storage
-#  test_submission_generation - JSON creation
-#  test_submission_schema - Schema validation
-#  test_submission_with_optimization - Before/after comparison
-#  test_improvements_calculation - Speedup/compression/accuracy
-#  test_json_serialization - File saving and loading
-```
-
-### Test Coverage Areas
-
-- ✓ **SimpleMLP Model**: Forward pass, parameter counting, output shape validation
-- ✓ **BenchmarkReport**: Metric collection, system info capture, statistical measurement
-- ✓ **Submission Generation**: Schema structure, field presence, type validation
-- ✓ **Schema Validation**: Required fields, value ranges, type correctness
-- ✓ **Optimization Comparison**: Improvements calculation, technique tracking
-- ✓ **JSON Serialization**: File writing, round-trip preservation, formatting
-
-### Inline Testing & Validation
-
-The module includes comprehensive unit tests:
-
-```python
- Unit Test: SimpleMLP...
- Model creation with custom parameters
- Parameter count: 263 (10×20 + 20 + 20×3 + 3)
- Forward pass output shape: (5, 3)
- No NaN values in output
- Progress: SimpleMLP ✓
-
- Unit Test: BenchmarkReport...
- Model name and timestamp set correctly
- System info collected (platform, python_version, numpy_version)
- Metrics: parameter_count, model_size_mb, accuracy, latency, throughput
- Metric types and ranges validated
- Progress: BenchmarkReport ✓
-
- Unit Test: Submission Generation...
- Baseline submission structure complete
- Version, type, timestamp, system_info, baseline present
- Student name included when provided
- Progress: generate_submission() ✓
-
- Unit Test: Submission Schema...
- Required fields present
- Field types correct (str, dict, float, int)
- Baseline and metrics structure validated
- System info contains platform and python_version
- Progress: Schema validation ✓
-
- Unit Test: Submission with Optimization...
- Optimized section present with techniques
- Improvements section with speedup, compression, accuracy_delta
- Techniques list matches input
- Progress: Optimization comparison ✓
-
- Unit Test: Improvements Calculation...
- Speedup: 2.0x (baseline 10.0ms / optimized 5.0ms)
- Compression: 2.0x (baseline 4.0MB / optimized 2.0MB)
- Accuracy delta: -0.05 (0.75 - 0.80)
- Progress: Improvements math ✓
-
- Unit Test: JSON Serialization...
- File created and exists
- JSON valid and loadable
- Structure preserved (version, student_name, metrics)
- Round-trip serialization successful
- Progress: File I/O ✓
-```
-
-### Manual Testing Examples
-
-```python
-from tinytorch.capstone import SimpleMLP, BenchmarkReport, generate_submission, save_submission
-from tinytorch.core.tensor import Tensor
-import numpy as np
-
-# Example 1: Basic benchmark workflow
-np.random.seed(42)
-X_test = Tensor(np.random.randn(100, 10))
-y_test = np.random.randint(0, 3, 100)
-
-model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-report = BenchmarkReport(model_name="simple_mlp")
-metrics = report.benchmark_model(model, X_test, y_test, num_runs=50)
-
-submission = generate_submission(report, student_name="Your Name")
-save_submission(submission, "my_submission.json")
-
-# Example 2: Optimization comparison workflow
-baseline_model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-baseline_report = BenchmarkReport(model_name="baseline")
-baseline_report.benchmark_model(baseline_model, X_test, y_test, num_runs=50)
-
-# Apply optimizations (example: smaller model)
-optimized_model = SimpleMLP(input_size=10, hidden_size=15, output_size=3)
-optimized_report = BenchmarkReport(model_name="optimized")
-optimized_report.benchmark_model(optimized_model, X_test, y_test, num_runs=50)
-
-# Generate comparison submission
 submission = generate_submission(
     baseline_report=baseline_report,
     optimized_report=optimized_report,
-    student_name="Optimizer",
-    techniques_applied=["architecture_search", "pruning"]
+    techniques_applied=["quantization", "pruning"]
+)
+save_submission(submission, "results.json")
+```
+
+### What You're NOT Building (Yet)
+
+To keep this capstone focused, you will **not** implement:
+
+- Automated CI/CD pipelines (production systems run benchmarks on every commit)
+- Multi-hardware comparison (benchmarking across CPU/GPU/TPU)
+- Visualization dashboards (plotting accuracy vs latency trade-off curves)
+- Leaderboard aggregation (combining community submissions)
+
+**You are building the measurement and reporting foundation.** Automation and visualization come later in production MLOps.
+
+## API Reference
+
+This section provides a quick reference for the benchmarking classes and functions you'll build. Use this while implementing and debugging.
+
+### BenchmarkReport Constructor
+
+```python
+BenchmarkReport(model_name: str = "model") -> BenchmarkReport
+```
+
+Creates a benchmark report instance that measures and stores model performance metrics along with system context for reproducibility.
+
+### BenchmarkReport Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `model_name` | `str` | Identifier for the model being benchmarked |
+| `metrics` | `dict` | Performance measurements (accuracy, latency, etc.) |
+| `system_info` | `dict` | Platform, Python version, NumPy version |
+| `timestamp` | `str` | When benchmark was run (ISO format) |
+
+### Core Methods
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `benchmark_model` | `benchmark_model(model, X_test, y_test, num_runs=100) -> dict` | Measures accuracy, latency (mean ± std), throughput, memory |
+| `generate_submission` | `generate_submission(baseline_report, optimized_report=None, ...) -> dict` | Creates standardized JSON with baseline, optimized, improvements |
+| `save_submission` | `save_submission(submission, filepath="submission.json") -> str` | Writes JSON to file with validation |
+| `validate_submission_schema` | `validate_submission_schema(submission) -> bool` | Validates structure and value ranges |
+
+### Module Dependencies and Imports
+
+This capstone integrates components from across TinyTorch:
+
+**Core dependencies (required):**
+```python
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.layers import Linear
+from tinytorch.core.activations import ReLU
+from tinytorch.core.losses import CrossEntropyLoss
+```
+
+**Optimization modules (optional):**
+```python
+# These imports use try/except blocks for graceful degradation
+try:
+    from tinytorch.perf.profiling import Profiler, quick_profile
+    from tinytorch.perf.compression import magnitude_prune, structured_prune
+    from tinytorch.benchmarking import Benchmark, BenchmarkResult
+except ImportError:
+    # Core benchmarking still works without optimization modules
+    pass
+```
+
+The advanced optimization workflow (Part 4b) demonstrates these optional integrations, but the core benchmarking system (Parts 1-4) works with just the foundation modules (01-13) and basic benchmarking (19).
+
+## Core Concepts
+
+This section covers the fundamental principles of professional ML benchmarking. These concepts apply to every ML system, from research papers to production deployments.
+
+### The Reproducibility Crisis in ML
+
+Modern machine learning faces a credibility problem. Many published results cannot be replicated because researchers omit critical details. When a paper claims "92% accuracy with 10ms latency," can you reproduce that result? Often not, because the paper doesn't specify hardware platform, software versions, batch size, measurement methodology, or variance across runs.
+
+Industry standards like MLPerf and Papers with Code emerged to address this crisis by requiring:
+- **Standardized tasks** with fixed datasets
+- **Hardware specifications** documented completely
+- **Measurement protocols** defined precisely
+- **Code submissions** for automated verification
+
+Your benchmarking system implements these same principles. When you generate a submission, it captures everything needed for someone else to verify your claims or build on your work.
+
+### The Three Pillars of Reliable Benchmarking
+
+Professional benchmarking rests on three foundational principles: repeatability, comparability, and completeness.
+
+**Repeatability** means running the same experiment multiple times produces the same result. This requires fixed random seeds, consistent test datasets, and measuring variance across runs. A single measurement of "10.3ms" is worthless because you don't know if that's typical or an outlier. Measuring 100 times and reporting "10.0ms ± 0.5ms" tells you the true performance and its variability.
+
+Here's how your implementation ensures repeatability:
+
+```python
+# Measure latency with statistical rigor
+latencies = []
+for _ in range(num_runs):
+    start = time.time()
+    _ = model.forward(X_test[:1])  # Single sample inference
+    latencies.append((time.time() - start) * 1000)  # Convert to ms
+
+avg_latency = np.mean(latencies)
+std_latency = np.std(latencies)
+```
+
+The loop runs inference 100 times (by default) to capture variance. The first few runs may be slower due to cold caches, and occasional runs may hit garbage collection pauses. By aggregating many measurements, you get a statistically valid estimate.
+
+**Comparability** means different people can fairly compare results. This requires documenting the environment completely:
+
+```python
+def _get_system_info(self):
+    """Collect system information for reproducibility."""
+    return {
+        'platform': platform.platform(),
+        'python_version': sys.version.split()[0],
+        'numpy_version': np.__version__
+    }
+```
+
+When someone sees your submission claiming 10ms latency, they need to know if that was measured on a MacBook or a server with 32 CPU cores. Platform differences can cause 10x performance variations, making cross-platform comparisons meaningless without context.
+
+**Completeness** means capturing all relevant metrics, not cherry-picking favorable ones. Your `benchmark_model` method measures six distinct metrics:
+
+```python
+self.metrics = {
+    'parameter_count': int(param_count),
+    'model_size_mb': float(model_size_mb),
+    'accuracy': float(accuracy),
+    'latency_ms_mean': float(avg_latency),
+    'latency_ms_std': float(std_latency),
+    'throughput_samples_per_sec': float(1000 / avg_latency)
+}
+```
+
+Each metric answers a different question. Parameter count indicates model capacity. Model size determines deployment cost. Accuracy measures task performance. Latency affects user experience. Throughput determines batch processing capacity. Optimizations create trade-offs between these dimensions, so measuring all of them prevents hiding downsides.
+
+### Latency vs Throughput: A Critical Distinction
+
+Many beginners confuse latency and throughput because both relate to speed. They measure fundamentally different things.
+
+**Latency** measures per-sample speed: how long does it take to process one input? This matters for real-time applications where users wait for results. Your implementation measures latency by timing single-sample inference:
+
+```python
+# Latency: time for ONE sample
+start = time.time()
+_ = model.forward(X_test[:1])  # Shape: (1, features)
+latency_ms = (time.time() - start) * 1000
+```
+
+A model with 10ms latency processes one input in 10 milliseconds. If a user submits a query, they wait 10ms for a response. This directly impacts user experience.
+
+**Throughput** measures batch capacity: how many inputs can you process per second? This matters for offline batch jobs processing millions of examples. Your implementation derives throughput from latency:
+
+```python
+throughput_samples_per_sec = 1000 / avg_latency
+```
+
+If latency is 10ms per sample, throughput is 1000ms / 10ms = 100 samples/second. But this assumes processing samples one at a time. In practice, batching increases throughput significantly while adding latency. Processing a batch of 32 samples might take 50ms total, giving 640 samples/second throughput but 50ms per-request latency.
+
+The trade-off: **Batching increases throughput but hurts latency.** A production API serving individual user requests optimizes for latency. A batch processing pipeline optimizes for throughput.
+
+### Statistical Rigor: Why Variance Matters
+
+Single measurements lie. Variance tells the truth about performance consistency.
+
+Consider two models, both with mean latency of 10.0ms. Model A has standard deviation of 0.5ms. Model B has standard deviation of 4.2ms. Which would you deploy?
+
+Model A's predictable performance (9.5-10.5ms range) provides consistent user experience. Model B's erratic performance (sometimes 6ms, sometimes 15ms) creates frustration. Users prefer reliable slowness over unpredictable speed.
+
+Your implementation captures this variance:
+
+```python
+latencies = []
+for _ in range(num_runs):
+    start = time.time()
+    _ = model.forward(X_test[:1])
+    latencies.append((time.time() - start) * 1000)
+
+avg_latency = np.mean(latencies)
+std_latency = np.std(latencies)  # Captures variance
+```
+
+Running 100 iterations isn't just for accuracy of the mean. It also characterizes the distribution. High standard deviation indicates performance varies significantly run-to-run, perhaps due to garbage collection pauses, cache effects, or OS scheduling.
+
+In production systems, engineers track percentiles (p50, p90, p99) to understand tail latency. The p99 latency tells you "99% of requests complete within this time," which matters more for user experience than mean latency. One user experiencing a 100ms delay (because they hit p99) has a worse experience than if all users consistently saw 20ms.
+
+### The Optimization Trade-off Triangle
+
+Every optimization involves trade-offs between three competing objectives: speed (latency), size (memory), and accuracy. You can optimize for any two, but achieving all three simultaneously is impossible with current techniques.
+
+**Fast + Small** means aggressive optimization. Quantizing to INT8 reduces model size 4x and speeds up inference 2x, but typically costs 1-2% accuracy. Pruning 50% of weights halves memory and adds another speedup, but may lose another 1-2% accuracy. You've traded accuracy for efficiency.
+
+**Fast + Accurate** means careful optimization. You might quantize only certain layers, or use INT16 instead of INT8. You preserve accuracy but achieve less compression. The model is faster but not dramatically smaller.
+
+**Small + Accurate** means conservative techniques. Knowledge distillation transfers accuracy from a large teacher to a small student. The student is smaller and maintains accuracy, but may be slower than aggressive quantization because it still operates in FP32.
+
+Your submission captures these trade-offs automatically:
+
+```python
+submission['improvements'] = {
+    'speedup': float(baseline_latency / optimized_latency),
+    'compression_ratio': float(baseline_size / optimized_size),
+    'accuracy_delta': float(
+        optimized_report.metrics['accuracy'] - baseline_report.metrics['accuracy']
+    )
+}
+```
+
+A speedup of 2.3x with compression of 4.1x but accuracy delta of -0.01 (-1%) shows you chose the "fast + small" corner of the triangle. A speedup of 1.2x with compression of 1.5x but accuracy delta of 0.00 shows you chose "accurate + moderately fast."
+
+### Schema Validation: Enabling Automation
+
+Your submission format uses a structured JSON schema that enforces completeness and type safety. This isn't bureaucracy—it enables powerful automation.
+
+Without schema validation, submissions become inconsistent. One person reports accuracy as a percentage string ("92%"), another as a float (0.92), another as an integer (92). Aggregating these results requires manual cleaning. With schema validation, every submission uses the same format:
+
+```python
+# Schema-enforced format
+'accuracy': float(accuracy)  # Always 0.0-1.0 float
+
+# Validation catches errors
+assert 0 <= metrics['accuracy'] <= 1, "Accuracy must be in [0, 1]"
+```
+
+This enables automated processing:
+
+```python
+# Aggregate community results automatically
+all_submissions = [load_json(f) for f in submission_files]
+avg_accuracy = np.mean([s['baseline']['metrics']['accuracy']
+                        for s in all_submissions])
+
+# Build leaderboards
+sorted_by_speedup = sorted(all_submissions,
+                           key=lambda s: s['improvements']['speedup'],
+                           reverse=True)
+
+# Detect regressions in CI/CD
+if new_latency > baseline_latency * 1.1:
+    raise Exception("Performance regression: 10% slower!")
+```
+
+The schema also enables forward compatibility. When you add new optional fields, old submissions remain valid. When you require new fields, the version number increments, and validation enforces the migration.
+
+### Performance Measurement Traps
+
+Real-world benchmarking is full of subtle traps that invalidate measurements. Understanding these pitfalls is crucial for accurate results.
+
+**Trap 1: Measuring the Wrong Thing.** If you time model creation instead of just inference, you're measuring initialization overhead, not runtime performance. If you include data loading in the timing loop, you're measuring I/O speed, not model speed. The fix is isolating exactly what you want to measure:
+
+```python
+# Prepare data BEFORE timing
+X = create_test_input()
+
+# Time ONLY the operation you care about
+start = time.time()
+output = model.forward(X)  # Only this is timed
+latency = time.time() - start
+
+# Process output AFTER timing
+predictions = postprocess(output)
+```
+
+**Trap 2: Ignoring System Noise.** Operating systems multitask. Your benchmark might get interrupted by background processes, garbage collection, or CPU thermal throttling. Single measurements capture noise. Multiple measurements average it out. Your implementation runs 100 iterations by default to handle this.
+
+**Trap 3: Cold Start Effects.** The first inference is often slower because caches are cold and JIT compilers haven't optimized yet. Production benchmarks typically discard the first N runs as "warm-up." Your implementation includes warm-up inherently by averaging all runs—the few slow cold starts get averaged with many fast warm runs.
+
+**Trap 4: Batch Size Confusion.** Measuring latency on batch_size=32 then dividing by 32 doesn't give per-sample latency. Batching amortizes overhead, so batch latency / batch_size underestimates per-sample latency. Always measure with the same batch size as production deployment.
+
+### System Integration: The Complete ML Lifecycle
+
+This capstone represents the final stage of the ML systems lifecycle, but it's also the beginning of the next iteration. Production ML systems operate in a never-ending loop:
+
+1. **Research & Development** - Build models (Modules 01-13)
+2. **Baseline Measurement** - Benchmark unoptimized performance (Module 19)
+3. **Optimization** - Apply techniques like quantization and pruning (Modules 14-18)
+4. **Validation** - Benchmark optimized version (Module 19)
+5. **Decision** - Keep optimization if improvements outweigh costs (Module 20)
+6. **Deployment** - Serve model in production
+7. **Monitoring** - Track performance over time, detect regressions
+8. **Iteration** - When performance degrades or requirements change, loop back to step 3
+
+Your submission captures a snapshot of this cycle. The baseline metrics document performance before optimization. The optimized metrics show results after applying techniques. The improvements section quantifies the delta. The techniques_applied list enables reproducibility.
+
+In production, engineers maintain this documentation across hundreds of experiments. When a deployment's latency increases from 10ms to 30ms three months later, they consult the original benchmark to understand what changed. Without system_info and reproducible measurements, debugging becomes guesswork.
+
+## Production Context
+
+### Your Implementation vs. Industry Standards
+
+Your TinyTorch benchmarking system implements the same principles used by production ML frameworks and research competitions, just at educational scale.
+
+| Feature | Your Implementation | Production Systems |
+|---------|---------------------|-------------------|
+| **Metrics** | 6 core metrics (accuracy, latency, etc.) | 20+ metrics including p99 latency, memory bandwidth |
+| **Runs** | 100 iterations for variance | 1000+ runs, discard outliers |
+| **Validation** | Python assertions | JSON Schema, automated CI checks |
+| **Format** | Simple JSON | Protobuf, versioned schemas |
+| **Scale** | Single model benchmarks | Automated pipelines tracking 1000s of experiments |
+
+### Code Comparison
+
+The following comparison shows how your educational implementation translates to production tools.
+
+`````{tab-set}
+````{tab-item} Your TinyTorch
+```python
+from tinytorch.capstone import BenchmarkReport, generate_submission
+
+# Benchmark baseline
+baseline_report = BenchmarkReport(model_name="my_model")
+baseline_report.benchmark_model(model, X_test, y_test, num_runs=100)
+
+# Benchmark optimized
+optimized_report = BenchmarkReport(model_name="optimized_model")
+optimized_report.benchmark_model(opt_model, X_test, y_test, num_runs=100)
+
+# Generate submission
+submission = generate_submission(
+    baseline_report=baseline_report,
+    optimized_report=optimized_report,
+    techniques_applied=["quantization", "pruning"]
 )
 
-print(f"Speedup: {submission['improvements']['speedup']:.2f}x")
-print(f"Compression: {submission['improvements']['compression_ratio']:.2f}x")
-print(f"Accuracy Δ: {submission['improvements']['accuracy_delta']*100:+.1f}%")
-
-save_submission(submission, "optimization_comparison.json")
+save_submission(submission, "results.json")
 ```
-
-## Systems Thinking Questions
-
-### Optimization Workflow Integration
-
-**Question 1: Optimization Interaction**
-
-You apply INT8 quantization (4× memory reduction) followed by 75% magnitude pruning (4× parameter reduction). Should you expect 16× total memory reduction?
-
-**Reflection Structure**:
-- Quantization affects: Precision per parameter (FP32 → INT8 = 4 bytes → 1 byte)
-- Pruning affects: Parameter count (75% zeroed out)
-- Combined effect: Depends on sparse storage format
-- Why not multiplicative: Dense storage still allocates space for zeros
-
-**Systems Insight**: Quantization reduces bits per parameter. Pruning zeros out weights but doesn't automatically reduce memory in dense format. For true 16× reduction, you need sparse storage (CSR/COO format) that doesn't allocate space for zeros. This is why Module 16 teaches both pruning AND sparse representations.
-
-### Submission Reproducibility
-
-**Question 2: System Information Requirements**
-
-Why does the submission schema require `system_info` with platform, Python version, and NumPy version? What breaks if this is omitted?
-
-**Systems Insight**: Reproducibility requires environment specification. NumPy 1.24 vs 2.0 can produce different results due to algorithm changes. Platform affects performance (ARM vs x86, SIMD instruction sets). Python version impacts library behavior. Without system info, results aren't verifiable—claims of "2× speedup" are meaningless if hardware isn't specified. Production ML teams learned this the hard way when "optimizations" only worked on specific configurations.
-
-### Statistical Measurement Validity
-
-**Question 3: Measurement Rigor**
-
-Your optimized model shows 5% latency improvement with standard deviation of 8%. Is this a real improvement or measurement noise?
-
-**Reflection Points**:
-- Mean improvement: 5% faster
-- Standard deviation: 8% of baseline latency
-- Confidence interval: Likely overlapping
-- Statistical significance: Requires hypothesis testing
-
-**Systems Insight**: When std > improvement magnitude, difference could be noise. Proper approach: run t-test with p < 0.05 threshold. Module 19's benchmarking teaches this—multiple runs + confidence intervals prevent false claims. Production teams don't deploy "optimizations" without statistical confidence because regressions cost money.
-
-### Workflow Scalability
-
-**Question 4: Production Scaling**
-
-How does this submission workflow scale to production models with millions of parameters and hours-long training runs?
-
-**Reflection**:
-- SimpleMLP benchmarks in milliseconds → GPT-2 trains for days
-- Toy dataset (100 samples) → Production (billions of tokens)
-- Single metric focus → Multi-objective optimization (latency + memory + throughput + cost)
-
-**Systems Insight**: The workflow patterns are identical—profile, optimize, benchmark, submit—but tools must scale. Production uses distributed profiling (across GPUs/nodes), long-running benchmarks (days not minutes), and comprehensive metrics (MLPerf includes 20+ metrics). TinyTorch teaches the workflow; PyTorch provides production-scale infrastructure.
-
-### Competition Fairness
-
-**Question 5: Normalized Metrics Design**
-
-Why use speedup ratios (baseline_time / optimized_time) instead of absolute times (10ms → 5ms) for competition ranking?
-
-**Systems Insight**: Hardware variability makes absolute times meaningless for comparison. M1 Mac vs Intel i9 vs AMD Threadripper all produce different absolute times. But 2× speedup is meaningful across hardware—same relative improvement. Speedup ratios enable fair comparison and focus on optimization quality, not hardware access. MLPerf competitions use normalized metrics for exactly this reason.
-
-## Ready to Complete the Optimization Tier?
-
-You've reached the capstone of TinyTorch's Optimization Tier. This submission infrastructure brings together everything from Modules 14-19, transforming individual optimization techniques into a cohesive workflow that mirrors production ML engineering.
-
-**What You'll Achieve**:
-- Complete optimization workflow: Profile → Optimize → Benchmark → Submit
-- Professional submission infrastructure enabling future competitions
-- Understanding of how TinyTorch modules work together as a framework
-- Reproducible, shareable results demonstrating your optimization skills
-
-**The Capstone Mindset**:
-> "Individual modules teach techniques. The capstone teaches workflow. Production ML isn't about knowing tools—it's about orchestrating them effectively."
-> — Every ML systems engineer
-
-**What's Next**:
-- **Milestone 05**: Build TinyGPT using your complete framework
-- **Wake Vision Competition**: Apply optimization skills to real challenges
-- **Community Sharing**: Submit your results, compare with others
-
-This capstone demonstrates you don't just understand optimization techniques—you can apply them systematically to produce measurable, reproducible improvements. That's the difference between knowing tools and being an ML systems engineer.
-
-Choose your preferred way to engage with this capstone:
-
-````{grid} 1 2 3 3
-
-```{grid-item-card}  Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/20_capstone/20_capstone.py
-:class-header: bg-light
-
-Run this capstone interactively in your browser. No installation required!
-```
-
-```{grid-item-card}  Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/20_capstone/20_capstone.ipynb
-:class-header: bg-light
-
-Use Google Colab for cloud compute power and easy sharing.
-```
-
-```{grid-item-card}  View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/20_capstone/20_capstone.py
-:class-header: bg-light
-
-Browse the Python source code and understand the implementation.
-```
-
 ````
 
-```{admonition}  Local Development Recommended
-:class: tip
-This capstone involves benchmarking workflows that benefit from consistent hardware and persistent results. Local setup provides better control over measurement conditions and faster iteration cycles.
+````{tab-item} Production MLflow
+```python
+import mlflow
 
-**Setup**: `git clone https://github.com/mlsysbook/TinyTorch.git && source scripts/activate-tinytorch && cd modules/20_capstone`
+# Track baseline experiment
+with mlflow.start_run(run_name="baseline"):
+    mlflow.log_params({"model": "my_model"})
+    metrics = benchmark_model(model, X_test, y_test)
+    mlflow.log_metrics(metrics)
+    mlflow.log_artifact("model.pkl")
+
+# Track optimized experiment
+with mlflow.start_run(run_name="optimized"):
+    mlflow.log_params({"model": "optimized_model",
+                       "techniques": ["quantization", "pruning"]})
+    metrics = benchmark_model(opt_model, X_test, y_test)
+    mlflow.log_metrics(metrics)
+    mlflow.log_artifact("optimized_model.pkl")
+
+# Compare experiments in MLflow UI
+```
+````
+`````
+
+Let's walk through the comparison line by line:
+
+- **Line 1 (Import)**: TinyTorch uses a simple module import. MLflow provides enterprise-grade experiment tracking with databases and web UIs.
+- **Line 4 (Benchmark baseline)**: TinyTorch's `BenchmarkReport` mirrors MLflow's experiment runs. Both capture metrics and system context.
+- **Line 8 (Benchmark optimized)**: Same API in both—create report, benchmark model. This consistency makes transitioning to production tools natural.
+- **Line 12 (Generate submission)**: TinyTorch generates JSON. MLflow logs to a database that supports querying, visualization, and comparison.
+- **Line 18 (Save)**: TinyTorch saves to file. MLflow persists to SQL database with version control and artifact storage.
+
+```{tip} What's Identical
+
+The workflow pattern: baseline → optimize → benchmark → compare → decide. Whether you use TinyTorch or MLflow, this cycle is fundamental to production ML. The tools scale, but the methodology remains the same.
 ```
 
----
+### Why Benchmarking Matters at Scale
 
-<div class="prev-next-area">
-<a class="left-prev" href="19_benchmarking_ABOUT.html" title="previous page">← Module 19: Benchmarking</a>
-</div>
+To appreciate why professional benchmarking matters, consider the scale of production ML systems:
+
+- **Model serving**: A recommendation system handles 10 million requests/day. If you reduce latency from 20ms to 10ms, you save 100,000 seconds of compute daily = 1.16 days of compute per day = 42% cost reduction.
+- **Training efficiency**: Training a large language model costs $1 million in GPU time. Profiling reveals 60% of time is spent in data loading. Optimizing the data pipeline saves $600,000.
+- **Deployment constraints**: A mobile app's model must fit in 50MB. Quantization compresses a 200MB model to 50MB with 1% accuracy loss. The app ships; without benchmarking, you wouldn't know the trade-off was acceptable.
+
+Systematic benchmarking with reproducible results isn't academic exercise—it's how engineers justify technical decisions and demonstrate business impact.
+
+## Check Your Understanding
+
+Test yourself with these systems thinking questions about benchmarking and performance measurement.
+
+**Q1: Memory Calculation**
+
+A model has 5 million parameters stored as FP32. After INT8 quantization, how much memory is saved?
+
+```{admonition} Answer
+:class: dropdown
+
+FP32: 5,000,000 parameters × 4 bytes = 20,000,000 bytes = **20 MB**
+
+INT8: 5,000,000 parameters × 1 byte = 5,000,000 bytes = **5 MB**
+
+Savings: 20 MB - 5 MB = **15 MB** (75% reduction)
+
+Compression ratio: 20 MB / 5 MB = **4.0x**
+
+This is why quantization is standard in mobile deployment—models must fit in tight memory budgets.
+```
+
+**Q2: Latency Variance Analysis**
+
+Model A: 10.0ms ± 0.3ms latency. Model B: 10.0ms ± 3.0ms latency. Both have same accuracy. Which do you deploy and why?
+
+```{admonition} Answer
+:class: dropdown
+
+**Deploy Model A.**
+
+Same mean latency (10.0ms) but Model A has 10x lower variance (0.3ms vs 3.0ms std).
+
+Model A's latency range: ~9.4-10.6ms (95% confidence: ± 2 std)
+Model B's latency range: ~4.0-16.0ms (95% confidence: ± 2 std)
+
+**Why consistency matters:**
+- Users prefer predictable performance over erratic speed
+- High variance suggests GC pauses, cache misses, or resource contention
+- Production SLAs commit to p99 latency—Model B's p99 could be 16ms vs Model A's 11ms
+
+In production, **reliability > mean performance**. A consistently decent experience beats an unreliable fast one.
+```
+
+**Q3: Batch Size Trade-off**
+
+Measuring latency with batch_size=32 gives 100ms total. Can you claim 100ms / 32 = 3.1ms per-sample latency?
+
+```{admonition} Answer
+:class: dropdown
+
+**No.** This underestimates per-sample latency.
+
+Batching amortizes fixed overhead (data transfer, kernel launch). Per-sample latency at batch=1 is higher than batch=32 divided by 32.
+
+Example reality:
+- Batch=32: 100ms total → 3.1ms per sample (amortized)
+- Batch=1: 8ms total → 8ms per sample (actual)
+
+**Why the discrepancy?**
+- Fixed overhead: 10ms (data transfer, setup)
+- Variable cost: 90ms / 32 = 2.8ms per sample
+- At batch=1: 10ms fixed + 2.8ms variable = 12.8ms
+
+**Always benchmark at deployment batch size.** If production serves single requests, measure with batch=1.
+```
+
+**Q4: Speedup Calculation**
+
+Baseline: 20ms latency. Optimized: 5ms latency. What is the speedup and what does it mean?
+
+```{admonition} Answer
+:class: dropdown
+
+Speedup = baseline_latency / optimized_latency = 20ms / 5ms = **4.0x**
+
+**What it means:**
+- Optimized model is **4 times faster**
+- Processes same input in 1/4 the time
+- Can handle 4x more traffic with same hardware
+
+**Real-world impact:**
+- If baseline served 100 requests/sec, optimized serves 400 requests/sec
+- If baseline cost $1000/month in compute, optimized costs $250/month
+- If baseline met latency SLA at 60% utilization, optimized has 85% headroom
+
+**Note:** Speedup alone doesn't tell the full story. Check accuracy_delta and compression_ratio to understand trade-offs.
+```
+
+**Q5: Schema Validation Value**
+
+Why does the submission schema require `accuracy` as float in [0, 1] instead of allowing any format?
+
+```{admonition} Answer
+:class: dropdown
+
+**Type safety enables automation.**
+
+Without schema:
+```python
+# Different submissions, different formats (breaks aggregation)
+{"accuracy": "92%"}      # String
+{"accuracy": 92}         # Integer (out of 100)
+{"accuracy": 0.92}       # Float
+{"accuracy": "good"}     # Non-numeric
+```
+
+Aggregating these requires manual parsing and error handling.
+
+With schema:
+```python
+# All submissions use same format (aggregation works)
+{"accuracy": 0.92}  # Always float in [0.0, 1.0]
+```
+
+**Benefits:**
+1. **Automated validation** - Reject invalid submissions immediately
+2. **Aggregation** - `np.mean([s['accuracy'] for s in submissions])` just works
+3. **Comparison** - Sort by accuracy without parsing different formats
+4. **APIs** - Other tools can consume submissions without custom parsers
+
+**Real example:** Papers with Code leaderboards require strict schemas. Thousands of submissions from different teams aggregate automatically because everyone follows the same format.
+```
+
+## Further Reading
+
+For students who want to understand the academic foundations and industry standards for ML benchmarking:
+
+### Seminal Papers
+
+- **MLPerf: An Industry Standard Benchmark Suite for Machine Learning Performance** - Mattson et al. (2020). Defines standardized ML benchmarks for hardware comparison. The gold standard for fair performance comparisons. [arXiv:1910.01500](https://arxiv.org/abs/1910.01500)
+
+- **A Step Toward Quantifying Independently Reproducible Machine Learning Research** - Pineau et al. (2021). Analyzes reproducibility crisis in ML and proposes requirements for verifiable claims. Introduces reproducibility checklist adopted by NeurIPS. [arXiv:2104.05563](https://arxiv.org/abs/2104.05563)
+
+- **Hidden Technical Debt in Machine Learning Systems** - Sculley et al. (2015). Identifies systems challenges in production ML, including monitoring, versioning, and reproducibility. Required reading for ML systems engineers. [NeurIPS 2015](https://papers.nips.cc/paper/2015/hash/86df7dcfd896fcaf2674f757a2463eba-Abstract.html)
+
+### Additional Resources
+
+- **MLflow Documentation**: [https://mlflow.org/](https://mlflow.org/) - Production experiment tracking system implementing patterns from this module
+- **Papers with Code**: [https://paperswithcode.com/](https://paperswithcode.com/) - See how research papers submit benchmarks with reproducible code
+- **Weights & Biases Best Practices**: [https://wandb.ai/site/experiment-tracking](https://wandb.ai/site/experiment-tracking) - Industry standard for ML experiment management
+
+## What's Next
+
+```{seealso} Congratulations: You've Completed TinyTorch!
+
+You've built a complete ML framework from scratch—from basic tensors to production-ready benchmarking. You understand how PyTorch works under the hood, how optimizations affect performance, and how to measure and document results professionally. These skills transfer directly to production ML engineering.
+```
+
+**Next Steps - Applying Your Knowledge:**
+
+| Direction | What To Build | Skills Applied |
+|-----------|--------------|----------------|
+| **Advanced Optimizations** | Benchmark milestone models (MNIST CNN, Transformer) with Modules 14-18 techniques | Apply learned optimizations to real models |
+| **Production Systems** | Integrate MLflow or Weights & Biases into your projects | Scale benchmarking to team workflows |
+| **Research Contributions** | Submit to Papers with Code using your schema validation patterns | Share reproducible results with community |
+| **MLOps Automation** | Build CI/CD pipelines that run benchmarks on every commit | Detect performance regressions automatically |
+
+## Get Started
+
+```{tip} Interactive Options
+
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/20_capstone/20_capstone.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/20_capstone/20_capstone.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/20_capstone/20_capstone.py)** - Browse the implementation code
+```
+
+```{warning} Save Your Progress
+
+Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
+```

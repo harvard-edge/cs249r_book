@@ -1,8 +1,7 @@
-#  Optimization Tier (Modules 14-19)
+# Optimization Tier (Modules 14-19)
 
 **Transform research prototypes into production-ready systems.**
 
----
 
 ## What You'll Learn
 
@@ -15,45 +14,45 @@ The Optimization tier teaches you how to make ML systems fast, small, and deploy
 - What KV-caching does to accelerate transformer inference
 - How batching and other optimizations achieve production speed
 
----
 
 ## Module Progression
 
 ```{mermaid}
+:align: center
+:caption: "**Optimization Module Flow.** Starting from profiling, two parallel tracks address size reduction (quantization, compression) and speed improvement (memoization, acceleration), converging at benchmarking."
 graph TB
-    A[🏛️ Architecture<br/>CNNs + Transformers]
+ A[️ Architecture<br/>CNNs + Transformers]
 
-    A --> M14[14. Profiling<br/>Find bottlenecks]
+ A --> M14[14. Profiling<br/>Find bottlenecks]
 
-    M14 --> M15[15. Quantization<br/>INT8 compression]
-    M14 --> M16[16. Compression<br/>Structured pruning]
+ M14 --> M15[15. Quantization<br/>INT8 compression]
+ M14 --> M16[16. Compression<br/>Structured pruning]
 
-    M15 --> SMALL[💡 Smaller Models<br/>4-16× size reduction]
-    M16 --> SMALL
+ M15 --> SMALL[ Smaller Models<br/>4-16× size reduction]
+ M16 --> SMALL
 
-    M14 --> M17[17. Memoization<br/>KV-cache for inference]
-    M17 --> M18[18. Acceleration<br/>Batching + optimizations]
+ M14 --> M17[17. Memoization<br/>KV-cache for inference]
+ M17 --> M18[18. Acceleration<br/>Batching + optimizations]
 
-    M18 --> FAST[💡 Faster Inference<br/>12-40× speedup]
+ M18 --> FAST[ Faster Inference<br/>12-40× speedup]
 
-    SMALL --> M19[19. Benchmarking<br/>Systematic measurement]
-    FAST --> M19
+ SMALL --> M19[19. Benchmarking<br/>Systematic measurement]
+ FAST --> M19
 
-    M19 --> OLYMPICS[🏅 MLPerf Torch Olympics<br/>Production-ready systems]
+ M19 --> OLYMPICS[ MLPerf Torch Olympics<br/>Production-ready systems]
 
-    style A fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    style M14 fill:#fff3e0,stroke:#f57c00,stroke-width:3px
-    style M15 fill:#ffe0b2,stroke:#ef6c00,stroke-width:3px
-    style M16 fill:#ffe0b2,stroke:#ef6c00,stroke-width:3px
-    style M17 fill:#ffcc80,stroke:#e65100,stroke-width:3px
-    style M18 fill:#ffb74d,stroke:#e65100,stroke-width:3px
-    style M19 fill:#ffa726,stroke:#e65100,stroke-width:4px
-    style SMALL fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
-    style FAST fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
-    style OLYMPICS fill:#fef3c7,stroke:#f59e0b,stroke-width:4px
+ style A fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+ style M14 fill:#fff3e0,stroke:#f57c00,stroke-width:3px
+ style M15 fill:#ffe0b2,stroke:#ef6c00,stroke-width:3px
+ style M16 fill:#ffe0b2,stroke:#ef6c00,stroke-width:3px
+ style M17 fill:#ffcc80,stroke:#e65100,stroke-width:3px
+ style M18 fill:#ffb74d,stroke:#e65100,stroke-width:3px
+ style M19 fill:#ffa726,stroke:#e65100,stroke-width:4px
+ style SMALL fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
+ style FAST fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
+ style OLYMPICS fill:#fef3c7,stroke:#f59e0b,stroke-width:4px
 ```
 
----
 
 ## Module Details
 
@@ -69,7 +68,6 @@ graph TB
 
 **Key insight**: Don't optimize blindly. Profile first, then optimize the bottlenecks.
 
----
 
 ### 15. Quantization - Smaller Models, Similar Accuracy
 
@@ -83,7 +81,6 @@ graph TB
 
 **Impact**: Models shrink from 100MB → 25MB while maintaining 95%+ of original accuracy.
 
----
 
 ### 16. Compression - Pruning Unnecessary Parameters
 
@@ -97,7 +94,6 @@ graph TB
 
 **Impact**: Combined with quantization, achieve 8-16× compression (quantize + prune).
 
----
 
 ### 17. Memoization - KV-Cache for Fast Generation
 
@@ -111,7 +107,6 @@ graph TB
 
 **Impact**: Text generation goes from 0.5 tokens/sec → 50+ tokens/sec.
 
----
 
 ### 18. Acceleration - Batching and Beyond
 
@@ -125,7 +120,6 @@ graph TB
 
 **Impact**: Combined with KV-cache, achieve 12-40× faster inference than naive implementations.
 
----
 
 ### 19. Benchmarking - Systematic Measurement
 
@@ -139,34 +133,34 @@ graph TB
 
 **Historical context**: MLCommons' MLPerf (founded 2018) established systematic benchmarking as AI systems grew too complex for ad-hoc evaluation.
 
----
 
 ## What You Can Build After This Tier
 
 ```{mermaid}
+:align: center
+:caption: "**Production Optimization Timeline.** Progressive improvements from baseline to production-ready: 8-16× smaller models and 12-40× faster inference."
 timeline
-    title Production-Ready Systems
-    Baseline : 100MB model, 0.5 tokens/sec, 95% accuracy
-    Quantization : 25MB model (4× smaller), same accuracy
-    Pruning : 12MB model (8× smaller), 94% accuracy
-    KV-Cache : 50 tokens/sec (100× faster generation)
-    Batching : 500 tokens/sec (1000× throughput)
-    MLPerf Olympics : Production-ready transformer deployment
+ title Production-Ready Systems
+ Baseline : 100MB model, 0.5 tokens/sec, 95% accuracy
+ Quantization : 25MB model (4× smaller), same accuracy
+ Pruning : 12MB model (8× smaller), 94% accuracy
+ KV-Cache : 50 tokens/sec (100× faster generation)
+ Batching : 500 tokens/sec (1000× throughput)
+ MLPerf Olympics : Production-ready transformer deployment
 ```
 
 After completing the Optimization tier, you'll be able to:
 
 - **Milestone 06 (2018)**: Achieve production-ready optimization:
-  - 8-16× smaller models (quantization + pruning)
-  - 12-40× faster inference (KV-cache + batching)
-  - Systematic profiling and benchmarking workflows
+ - 8-16× smaller models (quantization + pruning)
+ - 12-40× faster inference (KV-cache + batching)
+ - Systematic profiling and benchmarking workflows
 
 - Deploy models that run on:
-  - Edge devices (Raspberry Pi, mobile phones)
-  - Cloud infrastructure (cost-effective serving)
-  - Real-time applications (low-latency requirements)
+ - Edge devices (Raspberry Pi, mobile phones)
+ - Cloud infrastructure (cost-effective serving)
+ - Real-time applications (low-latency requirements)
 
----
 
 ## Prerequisites
 
@@ -181,7 +175,6 @@ After completing the Optimization tier, you'll be able to:
 - Systems programming background
 - Understanding of hardware constraints
 
----
 
 ## Time Commitment
 
@@ -191,7 +184,6 @@ After completing the Optimization tier, you'll be able to:
 
 **Recommended pace**: 1 module per week (this tier is dense!)
 
----
 
 ## Learning Approach
 
@@ -203,7 +195,6 @@ Each module follows **Measure → Optimize → Validate**:
 
 This mirrors production ML workflows where optimization is an iterative, data-driven process.
 
----
 
 ## Key Achievement: MLPerf Torch Olympics
 
@@ -211,14 +202,13 @@ This mirrors production ML workflows where optimization is an iterative, data-dr
 
 ```bash
 cd milestones/06_2018_mlperf
-python 01_baseline_profile.py   # Identify bottlenecks
-python 02_compression.py         # Quantize + prune (8-16× smaller)
-python 03_generation_opts.py    # KV-cache + batching (12-40× faster)
+python 01_baseline_profile.py # Identify bottlenecks
+python 02_compression.py # Quantize + prune (8-16× smaller)
+python 03_generation_opts.py # KV-cache + batching (12-40× faster)
 ```
 
 **What makes this special**: You'll have built the entire optimization pipeline from scratch—profiling tools, quantization engine, pruning algorithms, caching systems, and benchmarking infrastructure.
 
----
 
 ## Two Optimization Tracks
 
@@ -238,7 +228,6 @@ Both tracks start from **Module 14 (Profiling)** and converge at **Module 19 (Be
 
 **Recommendation**: Complete modules in order (14→15→16→17→18→19) to build a complete understanding of the optimization landscape.
 
----
 
 ## Real-World Impact
 
@@ -252,7 +241,6 @@ The techniques in this tier are used by every production ML system:
 
 After this tier, you'll understand how real ML systems achieve production performance.
 
----
 
 ## Next Steps
 
@@ -271,6 +259,5 @@ tito module start 14_profiling
 - **[ Architecture Tier](architecture)** (Modules 08-13): CNNs and transformers
 - **[ Torch Olympics](olympics)** (Module 20): Final integration challenge
 
----
 
-**[← Back to Home](../intro)** • **[View All Modules](../chapters/00-introduction)** • **[MLPerf Milestone](../chapters/milestones)**
+**[← Back to Home](../intro)** • **[Milestone System](../tito/milestones)**

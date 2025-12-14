@@ -4,7 +4,6 @@
 
 This project draws inspiration from pioneering educational ML frameworks and owes its existence to the open source community's commitment to accessible ML education.
 
----
 
 ## Core Inspirations
 
@@ -21,7 +20,6 @@ TinyTorch's pedagogical DNA comes from MiniTorch's brilliant "build a framework 
 
 **Connection to TinyTorch**: Modules 05-07 (Autograd, Optimizers, Training) share philosophical DNA with MiniTorch's core pedagogy
 
----
 
 ### micrograd
 **[github.com/karpathy/micrograd](https://github.com/karpathy/micrograd)** by Andrej Karpathy
@@ -36,7 +34,6 @@ Micrograd demonstrated that automatic differentiation—the heart of modern ML�
 
 **Connection to TinyTorch**: Module 05 (Autograd) teaches the same core concepts with systems engineering focus
 
----
 
 ### nanoGPT
 **[github.com/karpathy/nanoGPT](https://github.com/karpathy/nanoGPT)** by Andrej Karpathy
@@ -51,7 +48,6 @@ nanoGPT's minimalist transformer implementation showed how to teach modern archi
 
 **Connection to TinyTorch**: Module 13 (Transformers) culminates in similar architecture built from your own tensor operations
 
----
 
 ### tinygrad
 **[github.com/geohot/tinygrad](https://github.com/geohot/tinygrad)** by George Hotz
@@ -66,7 +62,6 @@ Tinygrad proves educational frameworks can achieve impressive performance. While
 
 **Connection to TinyTorch**: Modules 14-19 (Optimization Tier) share production systems focus
 
----
 
 
 ## What Makes TinyTorch Unique
@@ -79,7 +74,6 @@ TinyTorch combines inspiration from these projects into a comprehensive ML syste
 - **Pedagogical Scaffolding**: Progressive disclosure, Build → Use → Reflect methodology
 - **Production Context**: Direct connections to PyTorch, TensorFlow, and industry practices
 
----
 
 
 
@@ -87,26 +81,23 @@ TinyTorch combines inspiration from these projects into a comprehensive ML syste
 
 TinyTorch is built by students, educators, and ML engineers who believe in accessible systems education.
 
-**[View all contributors on GitHub](https://github.com/mlsysbook/TinyTorch/graphs/contributors)**
+**[View all contributors on GitHub](https://github.com/harvard-edge/cs249r_book/graphs/contributors)**
 
----
 
 ## How to Contribute
 
 TinyTorch is open source and welcomes contributions:
 
-- **Found a bug?** Report it on [GitHub Issues](https://github.com/mlsysbook/TinyTorch/issues)
+- **Found a bug?** Report it on [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues)
 - **Improved documentation?** Submit a pull request
-- **Built something cool?** Share it in [GitHub Discussions](https://github.com/mlsysbook/TinyTorch/discussions)
+- **Built something cool?** Share it in [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions)
 
-**[See contribution guidelines](https://github.com/mlsysbook/TinyTorch/blob/main/CONTRIBUTING.md)**
+**[See contribution guidelines](https://github.com/harvard-edge/cs249r_book/blob/main/CONTRIBUTING.md)**
 
----
 
 ## License
 
 TinyTorch is released under the MIT License, ensuring it remains free and open for educational use.
 
----
 
 **Thank you to everyone building the future of accessible ML education.**

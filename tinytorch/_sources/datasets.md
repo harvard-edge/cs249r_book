@@ -41,7 +41,6 @@ TinyTorch uses a two-tier dataset approach:
 
 **Philosophy**: Following Andrej Karpathy's "~1K samples" approach—small datasets for learning, full benchmarks for validation.
 
----
 
 ## Shipped Datasets (Included with TinyTorch)
 
@@ -49,8 +48,8 @@ TinyTorch uses a two-tier dataset approach:
 
 <div style="background: #fff5f5; border-left: 4px solid #e74c3c; padding: 1.5rem; margin: 1.5rem 0;">
 
-**Location**: `datasets/tinydigits/`  
-**Size**: ~310 KB  
+**Location**: `datasets/tinydigits/`
+**Size**: ~310 KB
 **Used by**: Milestones 03 & 04 (MLP and CNN examples)
 
 **Contents:**
@@ -82,8 +81,8 @@ X_train, y_train, X_test, y_test = load_tinydigits()
 
 <div style="background: #f0fff4; border-left: 4px solid #22c55e; padding: 1.5rem; margin: 1.5rem 0;">
 
-**Location**: `datasets/tinytalks/`  
-**Size**: ~40 KB  
+**Location**: `datasets/tinytalks/`
+**Size**: ~40 KB
 **Used by**: Milestone 05 (Transformer/GPT text generation)
 
 **Contents:**
@@ -121,7 +120,6 @@ See detailed documentation: `datasets/tinytalks/README.md`
 
 </div>
 
----
 
 ## Downloaded Datasets (Auto-Downloaded On-Demand)
 
@@ -131,8 +129,8 @@ These standard benchmarks download automatically when you run relevant milestone
 
 <div style="background: #fffbeb; border-left: 4px solid #f59e0b; padding: 1.5rem; margin: 1.5rem 0;">
 
-**Downloads to**: `milestones/datasets/mnist/`  
-**Size**: ~10 MB (compressed)  
+**Downloads to**: `milestones/datasets/mnist/`
+**Size**: ~10 MB (compressed)
 **Used by**: `milestones/03_1986_mlp/02_rumelhart_mnist.py`
 
 **Contents:**
@@ -157,8 +155,8 @@ These standard benchmarks download automatically when you run relevant milestone
 
 <div style="background: #fdf2f8; border-left: 4px solid #ec4899; padding: 1.5rem; margin: 1.5rem 0;">
 
-**Downloads to**: `milestones/datasets/cifar-10/`  
-**Size**: ~170 MB (compressed)  
+**Downloads to**: `milestones/datasets/cifar-10/`
+**Size**: ~170 MB (compressed)
 **Used by**: `milestones/04_1998_cnn/02_lecun_cifar10.py`
 
 **Contents:**
@@ -179,7 +177,6 @@ These standard benchmarks download automatically when you run relevant milestone
 
 </div>
 
----
 
 ## Dataset Selection Rationale
 
@@ -209,7 +206,6 @@ These standard benchmarks download automatically when you run relevant milestone
 - Standard CNN benchmark
 - 75%+ with basic CNN proves it works
 
----
 
 ## Accessing Datasets
 
@@ -243,7 +239,6 @@ conversations = load_tinytalks()
 # See milestones/data_manager.py for download utilities
 ```
 
----
 
 ## Dataset Sizes Summary
 
@@ -254,10 +249,9 @@ conversations = load_tinytalks()
 | MNIST | 10 MB | 70,000 | Downloads | MLP validation |
 | CIFAR-10 | 170 MB | 60,000 | Downloads | CNN validation |
 
-**Total shipped**: ~350 KB  
+**Total shipped**: ~350 KB
 **Total with benchmarks**: ~180 MB
 
----
 
 ## Why Ship-with-Repo Matters
 
@@ -279,31 +273,28 @@ conversations = load_tinytalks()
 
 </div>
 
----
 
 ## Frequently Asked Questions
 
-**Q: Why not use full MNIST from the start?**  
+**Q: Why not use full MNIST from the start?**
 A: TinyDigits trains 100× faster, enabling rapid iteration during learning. MNIST validates your complete implementation later.
 
-**Q: Can I use my own datasets?**  
+**Q: Can I use my own datasets?**
 A: Absolutely! TinyTorch is a real framework—add your data loading code just like PyTorch.
 
-**Q: Why ship datasets in Git?**  
+**Q: Why ship datasets in Git?**
 A: 350 KB is negligible (smaller than many images), and it enables offline learning with instant iteration.
 
-**Q: Where does CIFAR-10 download from?**  
+**Q: Where does CIFAR-10 download from?**
 A: Official sources via `milestones/data_manager.py`, with integrity verification.
 
-**Q: Can I skip the large downloads?**  
+**Q: Can I skip the large downloads?**
 A: Yes! You can work through most milestones using only shipped datasets. Downloaded datasets are for validation milestones.
 
----
 
 ## Related Documentation
 
-- [Milestones Guide](chapters/milestones.md) - See how each dataset is used in historical achievements
-- [Student Workflow](student-workflow.md) - Learn the development cycle
-- [Quick Start](quickstart-guide.md) - Start building in 15 minutes
+- [Milestone System](tito/milestones) - See how each dataset is used in historical achievements
+- [Quick Start](getting-started) - Start building in 15 minutes
 
 **Dataset implementation details**: See `datasets/tinydigits/README.md` and `datasets/tinytalks/README.md` for technical specifications.
