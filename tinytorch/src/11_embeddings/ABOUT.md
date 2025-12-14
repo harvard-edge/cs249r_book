@@ -1,12 +1,13 @@
 # Module 11: Embeddings
 
-**ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01, 05
+**ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01-07, 10
 
-**Prerequisites: Modules 01 and 05** means you should understand:
+**Prerequisites: Modules 01-07 and 10** means you should understand:
 - Tensor operations (shape manipulation, matrix operations, broadcasting)
-- Autograd for gradient computation (Module 05)
+- Training fundamentals (forward/backward, optimization)
+- Tokenization (converting text to token IDs, vocabularies)
 
-If you can explain how to multiply matrices and understand gradients, you're ready.
+If you can explain how a tokenizer converts "hello" to token IDs and how to multiply matrices, you're ready.
 
 ## Overview
 

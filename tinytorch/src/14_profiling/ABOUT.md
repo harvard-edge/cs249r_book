@@ -1,13 +1,13 @@
 # Module 14: Profiling
 
-**OPTIMIZATION TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01, 03, 09
+**OPTIMIZATION TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01-13
 
-**Prerequisites: Modules 01, 03, 09** means you should have:
-- Tensor operations (Module 01)
-- Neural network layers (Module 03)
-- Convolutions for profiling spatial operations (Module 09)
+**Prerequisites: Modules 01-13** means you should have:
+- Built the complete ML stack (Modules 01-07)
+- Implemented CNN architectures (Module 09) or Transformers (Modules 10-13)
+- Models to profile and optimize
 
-If you can calculate matrix multiplication cost and track memory usage patterns, you're ready.
+**Why these prerequisites**: You'll profile models built in Modules 1-13. Understanding the implementations helps you interpret profiling results (e.g., why attention is memory-bound).
 
 ## Overview
 

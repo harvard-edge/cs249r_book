@@ -1,8 +1,8 @@
 # Module 13: Transformers
 
-**ARCHITECTURE TIER** | Difficulty: ●●●● (4/4) | Time: 8-10 hours | Prerequisites: 01, 02, 03, 11, 12
+**ARCHITECTURE TIER** | Difficulty: ●●●● (4/4) | Time: 8-10 hours | Prerequisites: 01-07, 10-12
 
-**Prerequisites: Modules 01, 02, 03, 11, 12** means you need tensor operations, activations, layers, embeddings, and attention mechanisms. If you can explain how multi-head attention processes queries, keys, and values to compute weighted representations, you're ready.
+**Prerequisites: Modules 01-07 and 10-12** means you need a strong foundation across three domains. This module assumes you've implemented tensors, layers, training loops, tokenization, embeddings, and attention mechanisms. If you can explain how multi-head attention processes queries, keys, and values to compute weighted representations, you're ready.
 
 ## Overview
 

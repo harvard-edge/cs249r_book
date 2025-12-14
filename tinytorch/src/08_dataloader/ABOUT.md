@@ -1,8 +1,8 @@
 # Module 08: DataLoader
 
-**ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01
+**ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01-07
 
-**Prerequisites:** You should be comfortable with tensors from Module 01. This module assumes you understand why batching matters for efficient gradient descent.
+**Prerequisites:** You should be comfortable with tensors, activations, layers, losses, autograd, optimizers, and training loops from Modules 01-07. This module assumes you understand the training loop pattern and why batching matters for efficient gradient descent.
 
 ## Overview
 
