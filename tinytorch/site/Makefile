@@ -29,29 +29,17 @@ serve: clean html
 pdf:
 	@echo "🔥 Building Tiny🔥Torch PDF via XeLaTeX..."
 	@echo ""
-	@# Check dependencies
-	@command -v jupyter-book >/dev/null 2>&1 || { echo "❌ Error: jupyter-book not installed. Run: pip install jupyter-book"; exit 1; }
-	@command -v xelatex >/dev/null 2>&1 || { echo "❌ Error: xelatex not found. Install TeX Live from https://www.tug.org/texlive/"; exit 1; }
-	@echo "✅ Dependencies OK"
-	@echo ""
-	@# Clean previous builds
-	@echo "🧹 Cleaning previous builds..."
-	@jupyter-book clean . --all 2>/dev/null || true
-	@echo ""
-	@# Build LaTeX files
+	@# Step 1: Generate LaTeX (matches CI workflow)
 	@echo "📚 Generating LaTeX files..."
-	@jupyter-book build . --builder latex --config _config_pdf.yml --toc _toc_pdf.yml
+	jupyter-book build . --builder latex --config _config_pdf.yml --toc _toc_pdf.yml
+	python3 scripts/latex_postprocessor.py
+	cp _static/logos/fire-emoji.png _build/latex/
+	cp _static/logos/logo-mlsysbook.png _build/latex/
+	cp _static/images/tito.png _build/latex/
 	@echo ""
-	@# Remove emojis for clean professional PDF
-	@echo "🧹 Removing emojis for clean PDF..."
-	@python3 scripts/latex_postprocessor.py
-	@cp _static/logos/fire-emoji.png _build/latex/
-	@cp _static/logos/logo-mlsysbook.png _build/latex/
-	@cp _static/images/tito.png _build/latex/
-	@echo ""
-	@# Compile PDF with XeLaTeX
+	@# Step 2: Compile PDF with XeLaTeX (CI uses xu-cheng/latex-action with xelatex)
 	@echo "🔥 Compiling PDF with XeLaTeX..."
-	@cd _build/latex && latexmk -xelatex -pdf -dvi- -ps- tinytorch-course.tex
+	cd _build/latex && latexmk -xelatex -pdf -dvi- -ps- tinytorch-course.tex
 	@echo ""
 	@# Check if build succeeded
 	@if [ -f "_build/latex/tinytorch-course.pdf" ]; then \

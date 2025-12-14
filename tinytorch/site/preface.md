@@ -100,8 +100,6 @@ This is not a simulation. This is the actual architecture of modern ML framework
 
 Each module follows a **Build-Use-Reflect** cycle: implement from scratch, apply to real problems, then connect what you built to production systems and understand the tradeoffs. Work through Foundation first, then choose your path based on your interests.
 
-### Learning Approach
-
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.5rem 0;">
 
 <div style="border: 1px solid #e0e0e0; padding: 1rem; border-radius: 0.5rem;">
