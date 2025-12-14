@@ -21,64 +21,32 @@ TinyTorch takes you from basic tensors to production-ready ML systems through 20
 ```{mermaid}
 :align: center
 :caption: TinyTorch Module Flow
-graph TB
-    subgraph Foundation["FOUNDATION 01-07"]
-        T[01 Tensor] --> A[02 Activations] --> L[03 Layers]
-        L --> Loss[04 Losses] --> Auto[05 Autograd]
-        Auto --> Opt[06 Optimizers] --> Train[07 Training]
+graph LR
+    subgraph F["FOUNDATION"]
+        direction TB
+        T[Tensor] --> A[Activations] --> L[Layers] --> Loss[Losses] --> Auto[Autograd] --> Opt[Optimizers] --> Train[Training]
     end
 
-    Train --> Data[08 DataLoader]
-
-    subgraph Architecture["ARCHITECTURE 08-13"]
-        Data --> Conv[09 CNNs]
-        Data --> Tok[10 Tokenization]
-        Tok --> Emb[11 Embeddings] --> Att[12 Attention] --> Trans[13 Transformers]
+    subgraph Arch["ARCHITECTURE"]
+        direction TB
+        Data[DataLoader] --> Conv[CNNs]
+        Data --> Tok[Tokentic] --> Emb[Embed] --> Att[Attention] --> Trans[Transform]
     end
 
+    subgraph Optim["OPTIMIZATION"]
+        direction TB
+        Prof[Profiling] --> Q[Quant] & C[Compress] & M[Memo] & Ac[Accel]
+        Q & C & M & Ac --> Bench[Benchmark]
+    end
+
+    Train --> Data
     Conv --> Prof
     Trans --> Prof
+    Bench --> Cap[Capstone]
 
-    subgraph Optimization["OPTIMIZATION 14-19"]
-        Prof[14 Profiling]
-        Prof --> Quant[15 Quantization]
-        Prof --> Comp[16 Compression]
-        Prof --> Memo[17 Memoization]
-        Prof --> Accel[18 Acceleration]
-        Quant --> Bench[19 Benchmarking]
-        Comp --> Bench
-        Memo --> Bench
-        Accel --> Bench
-    end
-
-    Bench --> Cap[20 Capstone]
-
-    style Foundation fill:#e3f2fd
-    style Architecture fill:#f3e5f5
-    style Optimization fill:#fff3e0
-
-    style T fill:#bbdefb
-    style A fill:#bbdefb
-    style L fill:#bbdefb
-    style Loss fill:#bbdefb
-    style Auto fill:#bbdefb
-    style Opt fill:#bbdefb
-    style Train fill:#bbdefb
-
-    style Data fill:#e1bee7
-    style Conv fill:#e1bee7
-    style Tok fill:#e1bee7
-    style Emb fill:#e1bee7
-    style Att fill:#e1bee7
-    style Trans fill:#e1bee7
-
-    style Prof fill:#ffe0b2
-    style Quant fill:#ffe0b2
-    style Comp fill:#ffe0b2
-    style Memo fill:#ffe0b2
-    style Accel fill:#ffe0b2
-    style Bench fill:#ffe0b2
-
+    style F fill:#e3f2fd
+    style Arch fill:#f3e5f5
+    style Optim fill:#fff3e0
     style Cap fill:#fff59d
 ```
 

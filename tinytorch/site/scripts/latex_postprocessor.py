@@ -114,11 +114,13 @@ def process_latex_file(tex_file: Path) -> int:
             r'\usepackage{float}' + '\n' + r'\usepackage{adjustbox}'
         )
 
-    # Replace sphinxincludegraphics for mermaid with adjustbox-wrapped version
-    # This scales images to max column width while keeping aspect ratio
+    # Replace sphinxincludegraphics for mermaid with width-constrained includegraphics
+    # Using width=\linewidth ensures diagram fits within text margins
+    # height=0.6\textheight allows taller diagrams while keeping them on one page
+    # keepaspectratio prevents distortion - image scales to fit whichever constraint is tighter
     content = re.sub(
         r'\\sphinxincludegraphics\{(mermaid-[^}]+\.pdf)\}',
-        r'\\adjustbox{max width=\\columnwidth}{\\includegraphics{\g<1>}}',
+        r'\\includegraphics[width=\\linewidth,height=0.6\\textheight,keepaspectratio]{\g<1>}',
         content
     )
 
