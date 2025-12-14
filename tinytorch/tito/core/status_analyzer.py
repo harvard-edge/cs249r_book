@@ -237,7 +237,7 @@ class TinyTorchStatusAnalyzer:
                     '03_activations': 'ActivationProfiler',
                     '04_layers': 'LayerArchitectureProfiler',
                     '05_dense': 'NetworkStabilityMonitor',
-                    '06_spatial': 'ConvolutionProfiler',
+                    '09_convolutions': 'ConvolutionProfiler',
                     '08_dataloader': 'DataPipelineProfiler'
                 }
 

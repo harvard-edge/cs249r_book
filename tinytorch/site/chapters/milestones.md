@@ -373,7 +373,7 @@ Each milestone includes:
 | 01. Perceptron (1957) | 04 | Tensor, Activations, Layers |
 | 02. XOR (1969) | 06 | + Losses, Autograd |
 | 03. MLP (1986) | 08 | + Optimizers, Training |
-| 04. CNN (1998) | 09 | + Spatial, DataLoader |
+| 04. CNN (1998) | 09 | + Convolutions, DataLoader |
 | 05. Transformer (2017) | 13 | + Tokenization, Embeddings, Attention |
 | 06. Torch Olympics (2018) | 18 | + Profiling, Quantization, Compression, Memoization, Acceleration |
 

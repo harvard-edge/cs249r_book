@@ -40,7 +40,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/09_spatial/spatial_dev.py`
+**Learning Side:** You work in `modules/09_convolutions/convolutions_dev.py`
 **Building Side:** Code exports to `tinytorch.core.spatial`
 
 ```python

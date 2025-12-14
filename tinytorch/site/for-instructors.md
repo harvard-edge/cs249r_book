@@ -160,7 +160,7 @@ tito grade export --module MODULE_NAME --output grades.csv
 | 7 | 07 Training | Complete Training Loop | Milestone: Train first network! |
 | 8 | **Midterm Project** | Build and Train Network | Assessment: End-to-end system |
 | 9 | 08 DataLoader | Data Pipeline | Demo: batching, shuffling |
-| 10 | 09 Spatial | Convolutions, CNNs | ⚠ High demand - O(N²) complexity |
+| 10 | 09 Convolutions | CNNs | ⚠ High demand - O(N²) complexity |
 | 11 | 10 Tokenization | Text Processing | Demo: vocabulary building |
 | 12 | 11 Embeddings | Word Representations | Demo: embedding similarity |
 | 13 | 12 Attention | Attention Mechanisms | ⚠ Moderate-high demand |
@@ -175,7 +175,7 @@ tito grade export --module MODULE_NAME --output grades.csv
    - Create FAQ document
    - Schedule additional office hours
 
-2. **Module 09: Spatial (CNNs)** - Complex nested loops
+2. **Module 09: Convolutions (CNNs)** - Complex nested loops
    - Focus on memory profiling
    - Loop optimization strategies
    - Padding/stride calculations
@@ -197,7 +197,7 @@ tito grade export --module MODULE_NAME --output grades.csv
 - **Demo:** Visualize computational graphs, show gradient flow
 - **Watch For:** Gradient shape mismatches, disconnected graphs
 
-**Module 09: Spatial (CNNs)**
+**Module 09: Convolutions (CNNs)**
 - **Key Concept:** O(N²) operations become bottlenecks
 - **Demo:** Profile convolution memory usage
 - **Watch For:** Index out of bounds, missing padding
@@ -275,7 +275,7 @@ tito module status
 - Cause: Incorrect handling of broadcasted operations
 - Debug: Check gradient accumulation for broadcasted dims
 
-#### Module 09: CNNs (Spatial)
+#### Module 09: Convolutions (CNNs)
 
 **Error 1: Index Out of Bounds**
 - Symptom: `IndexError` in convolution loops

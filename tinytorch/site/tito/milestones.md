@@ -195,7 +195,7 @@ tito milestone run 03
 
 **What**: LeNet - Computer Vision Breakthrough
 
-**Requires**: Modules 01-09 (Foundation + Spatial/Convolutions)
+**Requires**: Modules 01-09 (Foundation + Convolutions)
 
 **What you'll do**: Build LeNet for digit recognition using convolutional layers
 

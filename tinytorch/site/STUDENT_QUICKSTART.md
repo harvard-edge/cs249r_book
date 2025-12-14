@@ -47,7 +47,7 @@ Each module builds on the previous one:
 | 03 Activations | Non-linearity functions | Add intelligence to networks |
 | 04 Layers | Neural network layers | Build network components |
 | 05 Dense | Complete networks | Create multi-layer networks |
-| 06 Spatial | Convolution operations | Process images |
+| 09 Convolutions | Convolution operations | Process images |
 | 07 Attention | Attention mechanisms | Understand sequences |
 | 08 Dataloader | Data pipelines | Efficient data loading |
 | 09 Autograd | Automatic differentiation | Compute gradients |

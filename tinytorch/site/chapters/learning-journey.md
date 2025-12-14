@@ -116,7 +116,7 @@ Real datasets don't fit in memory. DataLoader provides batching, shuffling, and 
 
 **Systems Insight**: Understanding batch processing, memory hierarchies, and I/O bottlenecks - the data pipeline is often the real bottleneck in production systems.
 
-#### Module 09: Spatial - Seeing the World in Images
+#### Module 09: Convolutions - Seeing the World in Images
 Neural networks need specialized operations for spatial data. Conv2D applies learnable filters, MaxPool2D reduces dimensions while preserving features, Flatten converts spatial features to vectors. These are the building blocks of computer vision.
 
 **Systems Insight**: Convolutions exploit weight sharing and local connectivity - architectural choices that reduce parameters 100× compared to fully connected layers while improving performance.
@@ -421,7 +421,7 @@ Act I: Atoms (Tensor, Activations, Layers, Losses)
  ↓
 Act II: Learning (Autograd, Optimizers, Training)
  ↓
-Act III: Scale (DataLoader, Spatial)
+Act III: Scale (DataLoader, Convolutions)
  ↓
 Act IV: Intelligence (Tokenization, Embeddings, Attention, Transformers)
  ↓

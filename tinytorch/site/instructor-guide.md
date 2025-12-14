@@ -240,7 +240,7 @@ def backward(self, grad):
 - Missing None gradient handling
 - Shows understanding but incomplete
 
-### Module 09: Spatial - Convolution Implementation
+### Module 09: Convolutions - Implementation
 
 **Excellent Solution (9-10 points)**:
 ```python
@@ -420,7 +420,7 @@ def forward(self, q, k, v):
 - **Key Concept**: Building blocks combine into complex systems
 - **Project**: Build a small CNN
 
-### **Module 06-07: Spatial & Attention**
+### **Module 09 & 12: Convolutions & Attention**
 - **Focus**: Algorithmic complexity, memory patterns
 - **Key Concept**: O(N²) operations become bottlenecks
 - **Demo**: Profile attention memory usage
@@ -547,7 +547,7 @@ ls submitted/*/MODULE/
 | 7 | 07 Training | Complete Training Loop |
 | 8 | Midterm Project | Build and Train Network |
 | 9 | 08 DataLoader | Data Pipeline |
-| 10 | 09 Spatial | Convolutions, CNNs |
+| 10 | 09 Convolutions | CNNs |
 | 11 | 10 Tokenization | Text Processing |
 | 12 | 11 Embeddings | Word Representations |
 | 13 | 12 Attention | Attention Mechanisms |

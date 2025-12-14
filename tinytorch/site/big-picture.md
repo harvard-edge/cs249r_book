@@ -10,25 +10,32 @@ This page answers: *How do all the pieces fit together?* Read this before diving
 
 TinyTorch takes you from basic tensors to production-ready ML systems through 20 progressive modules. Here's how they connect:
 
+**Three tiers, one complete system:**
+
+- **Foundation (blue)**: Build the core machinery—tensors hold data, activations add non-linearity, layers combine them, losses measure error, autograd computes gradients, optimizers update weights, and training orchestrates the loop. Each piece answers "what do I need to learn next?"
+
+- **Architecture (purple)**: Apply your foundation to real problems. DataLoader feeds data efficiently, then you choose your path: Convolutions for images or Transformers for text (Tokenization → Embeddings → Attention → Transformers).
+
+- **Optimization (orange)**: Make it fast. Profile to find bottlenecks, then apply quantization, compression, memoization, or acceleration. Benchmarking measures your improvements.
+
 ```{mermaid}
 :align: center
 graph TB
     subgraph Foundation["🏗 FOUNDATION (01-07)"]
-        T[01 Tensor] & A[02 Activations] --> L[03 Layers]
-        L --> Loss[04 Losses] & Auto[05 Autograd]
-        Loss & Auto --> Opt[06 Optimizers]
-        Opt --> Train[07 Training]
+        T[01 Tensor] --> A[02 Activations] --> L[03 Layers]
+        L --> Loss[04 Losses] --> Auto[05 Autograd]
+        Auto --> Opt[06 Optimizers] --> Train[07 Training]
     end
 
     Train --> Data[08 DataLoader]
 
     subgraph Architecture["🏛 ARCHITECTURE (08-13)"]
-        Data --> Spatial[09 Spatial/CNN]
+        Data --> Conv[09 CNNs]
         Data --> Tok[10 Tokenization]
         Tok --> Emb[11 Embeddings] --> Att[12 Attention] --> Trans[13 Transformers]
     end
 
-    Spatial --> Prof
+    Conv --> Prof
     Trans --> Prof
 
     subgraph Optimization["⚡ OPTIMIZATION (14-19)"]
@@ -56,7 +63,7 @@ graph TB
 
     %% Architecture nodes (purple)
     style Data fill:#e1bee7,stroke:#7b1fa2
-    style Spatial fill:#e1bee7,stroke:#7b1fa2
+    style Conv fill:#e1bee7,stroke:#7b1fa2
     style Tok fill:#e1bee7,stroke:#7b1fa2
     style Emb fill:#e1bee7,stroke:#7b1fa2
     style Att fill:#e1bee7,stroke:#7b1fa2
@@ -75,7 +82,7 @@ graph TB
 ```
 
 **Flexible paths:**
-- **Vision focus**: Foundation → DataLoader → Spatial → Optimization
+- **Vision focus**: Foundation → DataLoader → Convolutions → Optimization
 - **Language focus**: Foundation → DataLoader → Tokenization → ... → Transformers → Optimization
 - **Full course**: Both paths → Capstone
 

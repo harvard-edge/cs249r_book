@@ -177,7 +177,7 @@ TinyTorch/
 │   ├── 06_optimizers/          # Module 06: SGD, Adam optimizers
 │   ├── 07_training/            # Module 07: Complete training loops
 │   ├── 08_dataloader/          # Module 08: Efficient data pipelines
-│   ├── 09_spatial/             # Module 09: Conv2d, MaxPool2d, CNNs
+│   ├── 09_convolutions/        # Module 09: Conv2d, MaxPool2d, CNNs
 │   ├── 10_tokenization/        # Module 10: Text processing
 │   ├── 11_embeddings/          # Module 11: Token & positional embeddings
 │   ├── 12_attention/           # Module 12: Multi-head attention

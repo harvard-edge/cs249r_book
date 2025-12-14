@@ -24,7 +24,7 @@ graph TB
  F[ Foundation<br/>Tensor, Autograd, Training]
 
  F --> M08[08. DataLoader<br/>Efficient data pipelines]
- F --> M09[09. Spatial<br/>Conv2d + Pooling]
+ F --> M09[09. Convolutions<br/>Conv2d + Pooling]
 
  M08 --> M09
  M09 --> VISION[ Computer Vision<br/>CNNs unlock spatial intelligence]
@@ -61,7 +61,7 @@ graph TB
 **Systems focus**: Memory efficiency, batching strategies, I/O optimization
 
 
-### 09. Spatial - Convolutional Neural Networks
+### 09. Convolutions - Convolutional Neural Networks
 
 **What it is**: Conv2d (convolutional layers) and pooling operations for processing images.
 
@@ -200,7 +200,7 @@ python 01_vaswani_generation.py # Text generation with YOUR transformer
 The Architecture tier splits into two parallel paths that can be learned in any order:
 
 **Vision Track (Modules 08-09)**:
-- DataLoader → Spatial (Conv2d + Pooling)
+- DataLoader → Convolutions (Conv2d + Pooling)
 - Enables computer vision applications
 - Culminates in CNN milestone
 

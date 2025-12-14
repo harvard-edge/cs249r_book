@@ -242,7 +242,7 @@ These were removed based on expert review:
 ## Tier Definitions
 
 - **FOUNDATION TIER**: Core building blocks (Tensor, Activations, Layers, Losses, Autograd, Optimizers, Training)
-- **ARCHITECTURE TIER**: Model architectures (DataLoader, Spatial, Tokenization, Embeddings, Attention, Transformers)
+- **ARCHITECTURE TIER**: Model architectures (DataLoader, Convolutions, Tokenization, Embeddings, Attention, Transformers)
 - **OPTIMIZATION TIER**: Performance optimization (Profiling, Quantization, Compression, Memoization, Acceleration, Benchmarking, Capstone)
 
 ## Difficulty Scale

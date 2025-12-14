@@ -361,7 +361,7 @@ class ModuleWorkflowCommand(BaseCommand):
             ("02", "XOR Crisis (1969)", [1, 2]),
             ("03", "MLP Revival (1986)", [1, 2, 3, 4, 5, 6, 7]),
             ("04", "CNN Revolution (1998)", [1, 2, 3, 4, 5, 6, 7, 8, 9]),
-            ("05", "Transformer Era (2017)", [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13]),  # Skip spatial/dataloader for attention
+            ("05", "Transformer Era (2017)", [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13]),  # Skip convolutions/dataloader for attention
             ("06", "MLPerf (2018)", list(range(1, 20))),
         ]
 

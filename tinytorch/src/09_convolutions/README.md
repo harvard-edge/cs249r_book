@@ -109,11 +109,11 @@ By module end, you'll have all components to build:
 ## Module Structure
 
 ```
-modules/09_spatial/
+modules/09_convolutions/
 ├── README.md                 ← You are here
-├── spatial_dev.py            ← Main implementation file
-├── spatial_dev.ipynb         ← Jupyter notebook version
-└── test_spatial.py           ← Validation tests
+├── convolutions_dev.py       ← Main implementation file
+├── convolutions_dev.ipynb    ← Jupyter notebook version
+└── test_convolutions.py      ← Validation tests
 ```
 
 ## After This Module
