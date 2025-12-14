@@ -1,9 +1,9 @@
 """
-Module 07: Progressive Integration Tests
-Tests that Module 07 (Attention) works correctly AND that the entire prior stack works.
+Module 09: Progressive Integration Tests
+Tests that Module 09 (Convolutions) works correctly AND that Foundation + DataLoader work.
 
-DEPENDENCY CHAIN: 01_setup → 02_tensor → 03_activations → 04_layers → 05_dense → 06_spatial → 07_attention
-This is where attention mechanisms enable sequence understanding.
+DEPENDENCY CHAIN: 01_tensor → ... → 07_training → 08_dataloader → 09_convolutions
+This is where CNNs enable computer vision through spatial feature extraction.
 """
 
 import numpy as np

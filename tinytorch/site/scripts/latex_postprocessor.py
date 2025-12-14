@@ -89,6 +89,21 @@ def process_latex_file(tex_file: Path) -> int:
         content
     )
 
+    # Fix figure placement: change [htbp] to [H] for inline placement
+    content = re.sub(
+        r'\\begin\{figure\}\[htbp\]',
+        r'\\begin{figure}[H]',
+        content
+    )
+
+    # Center all includegraphics that aren't already centered
+    # Find \includegraphics not preceded by \centering and wrap them
+    content = re.sub(
+        r'(\\begin\{figure\}\[H\]\n)(\\includegraphics)',
+        r'\1\\centering\n\2',
+        content
+    )
+
     # Write back
     with open(tex_file, 'w', encoding='utf-8') as f:
         f.write(content)

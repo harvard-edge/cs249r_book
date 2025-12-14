@@ -20,8 +20,9 @@ TinyTorch takes you from basic tensors to production-ready ML systems through 20
 
 ```{mermaid}
 :align: center
+:caption: TinyTorch Module Flow
 graph TB
-    subgraph Foundation["🏗 FOUNDATION (01-07)"]
+    subgraph Foundation["FOUNDATION 01-07"]
         T[01 Tensor] --> A[02 Activations] --> L[03 Layers]
         L --> Loss[04 Losses] --> Auto[05 Autograd]
         Auto --> Opt[06 Optimizers] --> Train[07 Training]
@@ -29,7 +30,7 @@ graph TB
 
     Train --> Data[08 DataLoader]
 
-    subgraph Architecture["🏛 ARCHITECTURE (08-13)"]
+    subgraph Architecture["ARCHITECTURE 08-13"]
         Data --> Conv[09 CNNs]
         Data --> Tok[10 Tokenization]
         Tok --> Emb[11 Embeddings] --> Att[12 Attention] --> Trans[13 Transformers]
@@ -38,47 +39,47 @@ graph TB
     Conv --> Prof
     Trans --> Prof
 
-    subgraph Optimization["⚡ OPTIMIZATION (14-19)"]
+    subgraph Optimization["OPTIMIZATION 14-19"]
         Prof[14 Profiling]
-        Prof --> Quant[15 Quantization] & Comp[16 Compression]
-        Prof --> Memo[17 Memoization] & Accel[18 Acceleration]
-        Quant & Comp & Memo & Accel --> Bench[19 Benchmarking]
+        Prof --> Quant[15 Quantization]
+        Prof --> Comp[16 Compression]
+        Prof --> Memo[17 Memoization]
+        Prof --> Accel[18 Acceleration]
+        Quant --> Bench[19 Benchmarking]
+        Comp --> Bench
+        Memo --> Bench
+        Accel --> Bench
     end
 
-    Bench --> Cap[🏆 20 Capstone]
+    Bench --> Cap[20 Capstone]
 
-    %% Subgraph backgrounds
-    style Foundation fill:#e3f2fd,stroke:#1976d2
-    style Architecture fill:#f3e5f5,stroke:#7b1fa2
-    style Optimization fill:#fff3e0,stroke:#f57c00
+    style Foundation fill:#e3f2fd
+    style Architecture fill:#f3e5f5
+    style Optimization fill:#fff3e0
 
-    %% Foundation nodes (blue)
-    style T fill:#bbdefb,stroke:#1976d2
-    style A fill:#bbdefb,stroke:#1976d2
-    style L fill:#bbdefb,stroke:#1976d2
-    style Loss fill:#bbdefb,stroke:#1976d2
-    style Auto fill:#bbdefb,stroke:#1976d2
-    style Opt fill:#bbdefb,stroke:#1976d2
-    style Train fill:#bbdefb,stroke:#1976d2
+    style T fill:#bbdefb
+    style A fill:#bbdefb
+    style L fill:#bbdefb
+    style Loss fill:#bbdefb
+    style Auto fill:#bbdefb
+    style Opt fill:#bbdefb
+    style Train fill:#bbdefb
 
-    %% Architecture nodes (purple)
-    style Data fill:#e1bee7,stroke:#7b1fa2
-    style Conv fill:#e1bee7,stroke:#7b1fa2
-    style Tok fill:#e1bee7,stroke:#7b1fa2
-    style Emb fill:#e1bee7,stroke:#7b1fa2
-    style Att fill:#e1bee7,stroke:#7b1fa2
-    style Trans fill:#e1bee7,stroke:#7b1fa2
+    style Data fill:#e1bee7
+    style Conv fill:#e1bee7
+    style Tok fill:#e1bee7
+    style Emb fill:#e1bee7
+    style Att fill:#e1bee7
+    style Trans fill:#e1bee7
 
-    %% Optimization nodes (orange)
-    style Prof fill:#ffe0b2,stroke:#f57c00
-    style Quant fill:#ffe0b2,stroke:#f57c00
-    style Comp fill:#ffe0b2,stroke:#f57c00
-    style Memo fill:#ffe0b2,stroke:#f57c00
-    style Accel fill:#ffe0b2,stroke:#f57c00
-    style Bench fill:#ffe0b2,stroke:#f57c00
+    style Prof fill:#ffe0b2
+    style Quant fill:#ffe0b2
+    style Comp fill:#ffe0b2
+    style Memo fill:#ffe0b2
+    style Accel fill:#ffe0b2
+    style Bench fill:#ffe0b2
 
-    %% Capstone (gold)
-    style Cap fill:#fff59d,stroke:#f9a825
+    style Cap fill:#fff59d
 ```
 
 **Flexible paths:**

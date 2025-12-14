@@ -1,9 +1,9 @@
 """
-Module 08: Progressive Integration Tests
-Tests that Module 08 (DataLoader) works correctly AND that the entire prior stack works.
+Module 05: Progressive Integration Tests
+Tests that Module 05 (Autograd) works correctly AND that the entire prior stack works.
 
-DEPENDENCY CHAIN: 01_setup → 02_tensor → 03_activations → 04_layers → 05_dense → 06_spatial → 07_attention → 08_dataloader
-This is where we enable real data processing for ML systems.
+DEPENDENCY CHAIN: 01_tensor → 02_activations → 03_layers → 04_losses → 05_autograd
+This is where we enable automatic differentiation for gradient-based learning.
 """
 
 import numpy as np

@@ -1,9 +1,9 @@
 """
-Module 10: Progressive Integration Tests
-Tests that Module 10 (Optimizers) works correctly AND that the entire prior stack works.
+Module 07: Progressive Integration Tests
+Tests that Module 07 (Training) works correctly AND that the entire prior stack works.
 
-DEPENDENCY CHAIN: 01_setup → 02_tensor → 03_activations → 04_layers → 05_dense → 06_spatial → 07_attention → 08_dataloader → 09_autograd → 10_optimizers
-This is where we enable actual learning through gradient-based optimization.
+DEPENDENCY CHAIN: 01_tensor → 02_activations → 03_layers → 04_losses → 05_autograd → 06_optimizers → 07_training
+This is where we enable complete training loops for neural networks.
 """
 
 import numpy as np

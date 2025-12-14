@@ -20,29 +20,25 @@ class CheckpointValidator:
     """Validates checkpoint achievements through comprehensive testing."""
 
     # Checkpoint definitions matching the checkpoint system
+    # Module structure: 01_tensor through 20_capstone
     CHECKPOINTS = {
         "foundation": {
-            "modules": ["01_setup", "02_tensor", "03_activations"],
-            "capability": "Can build mathematical operations and ML primitives",
-            "tests": ["test_setup", "test_tensors", "test_activations"]
+            "modules": ["01_tensor", "02_activations", "03_layers", "04_losses", "05_autograd", "06_optimizers", "07_training"],
+            "capability": "Can build complete training pipeline from tensors to optimization",
+            "tests": ["test_tensor", "test_activations", "test_layers", "test_losses", "test_autograd", "test_optimizers", "test_training"]
         },
         "architecture": {
-            "modules": ["04_layers", "05_dense", "06_spatial", "07_attention"],
-            "capability": "Can design and construct any neural network architecture",
-            "tests": ["test_layers", "test_dense", "test_convolution", "test_attention"]
+            "modules": ["08_dataloader", "09_convolutions", "10_tokenization", "11_embeddings", "12_attention", "13_transformers"],
+            "capability": "Can design CNNs for vision and Transformers for language",
+            "tests": ["test_dataloader", "test_convolution", "test_tokenization", "test_embeddings", "test_attention", "test_transformers"]
         },
-        "training": {
-            "modules": ["08_dataloader", "09_autograd", "10_optimizers", "11_training"],
-            "capability": "Can train neural networks on real datasets",
-            "tests": ["test_dataloader", "test_autograd", "test_optimizers", "test_training"]
+        "optimization": {
+            "modules": ["14_profiling", "15_quantization", "16_compression", "17_memoization", "18_acceleration", "19_benchmarking"],
+            "capability": "Can optimize models for production deployment",
+            "tests": ["test_profiling", "test_quantization", "test_compression", "test_memoization", "test_acceleration", "test_benchmarking"]
         },
-        "inference": {
-            "modules": ["12_compression", "13_kernels", "14_benchmarking", "15_mlops"],
-            "capability": "Can deploy optimized models for production inference",
-            "tests": ["test_compression", "test_kernels", "test_benchmarking", "test_mlops"]
-        },
-        "serving": {
-            "modules": ["16_capstone"],
+        "capstone": {
+            "modules": ["20_capstone"],
             "capability": "Have built a complete, production-ready ML framework",
             "tests": ["test_capstone_integration"]
         }
