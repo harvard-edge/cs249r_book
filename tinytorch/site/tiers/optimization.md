@@ -19,7 +19,7 @@ The Optimization tier teaches you how to make ML systems fast, small, and deploy
 
 ```{mermaid}
 :align: center
-:caption: Architecture Overview
+:caption: "**Optimization Module Flow.** Starting from profiling, two parallel tracks address size reduction (quantization, compression) and speed improvement (memoization, acceleration), converging at benchmarking."
 graph TB
  A[️ Architecture<br/>CNNs + Transformers]
 
@@ -138,7 +138,7 @@ graph TB
 
 ```{mermaid}
 :align: center
-:caption: Architecture Overview
+:caption: "**Production Optimization Timeline.** Progressive improvements from baseline to production-ready: 8-16× smaller models and 12-40× faster inference."
 timeline
  title Production-Ready Systems
  Baseline : 100MB model, 0.5 tokens/sec, 95% accuracy

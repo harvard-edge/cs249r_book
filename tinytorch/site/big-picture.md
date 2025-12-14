@@ -22,7 +22,7 @@ TinyTorch takes you from basic tensors to production-ready ML systems through 20
 
 ```{mermaid}
 :align: center
-:caption: TinyTorch Module Flow
+:caption: "**TinyTorch Module Flow.** The 20 modules progress through three tiers: Foundation (blue) builds core ML primitives, Architecture (purple) applies them to vision and language tasks, and Optimization (orange) makes systems production-ready."
 
 graph LR
     subgraph F["FOUNDATION (01-07)"]

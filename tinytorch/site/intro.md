@@ -268,7 +268,7 @@ Every module follows a proven learning cycle that builds deep understanding:
 
 ```{mermaid}
 :align: center
-:caption: Architecture Overview
+:caption: "**Build-Use-Reflect Learning Cycle.** Every module follows this proven pattern: implement from scratch, apply to real problems, then answer systems thinking questions."
 graph LR
     B[Build<br/>Implement from scratch] --> U[Use<br/>Real data, real problems]
     U --> R[Reflect<br/>Systems thinking questions]

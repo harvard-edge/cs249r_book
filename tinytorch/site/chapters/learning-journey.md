@@ -11,7 +11,7 @@ TinyTorch's 20 modules follow a carefully crafted six-act narrative arc. Each ac
 
 ```{mermaid}
 :align: center
-:caption: Architecture Overview
+:caption: "**Six-Act Learning Narrative.** TinyTorch's 20 modules follow a carefully crafted arc from atomic components through production systems."
 graph LR
  Act1["Act I: Foundation<br/>01-04<br/>Atomic Components"] --> Act2["Act II: Learning<br/>05-07<br/>Gradient Revolution"]
  Act2 --> Act3["Act III: Data & Scale<br/>08-09<br/>Real Complexity"]

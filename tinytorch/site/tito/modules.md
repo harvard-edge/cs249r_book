@@ -13,7 +13,7 @@ TinyTorch follows a simple build-export-validate cycle:
 
 ```{mermaid}
 :align: center
-:caption: Architecture Overview
+:caption: "**Module Development Workflow.** The core cycle for building TinyTorch: start a module, edit in Jupyter, export to the package, test your imports, then move to the next module."
 graph LR
  A[Start/Resume Module] --> B[Edit in Jupyter]
  B --> C[Complete & Export]
