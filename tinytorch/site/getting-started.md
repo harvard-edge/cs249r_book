@@ -134,16 +134,10 @@ from tinytorch.core.tensor import Tensor # YOUR implementation!
 Run milestone scripts to prove your implementation works:
 
 ```bash
-cd milestones/01_1957_perceptron
-python 01_rosenblatt_forward.py # Uses YOUR Tensor (M01)
-python 02_rosenblatt_trained.py # Uses YOUR implementation (M01-M07)
+tito milestone run perceptron  # Uses YOUR Tensor, Activations, Layers
 ```
 
-Each milestone has a README explaining:
-- Required modules
-- Historical context
-- Expected results
-- What you're learning
+Each milestone validates that your modules work together correctly. Use `tito milestone list` to see all available milestones and their required modules.
 
 **What if validation fails?** If a milestone script produces errors:
 1. Read the error message carefully—it usually points to the problem

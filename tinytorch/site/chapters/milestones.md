@@ -132,9 +132,7 @@ Input → Linear → Sigmoid → Output
 - Limitation: Only linearly separable problems
 
 ```bash
-cd milestones/01_1957_perceptron
-python 01_rosenblatt_forward.py # See the problem (random weights)
-python 02_rosenblatt_trained.py # See the solution (trained)
+tito milestone run perceptron
 ```
 
 **Expected Results**: ~50% (untrained) → 95%+ (trained) accuracy
@@ -346,8 +344,7 @@ tito module complete 02
 ### 2. Run the Milestone
 
 ```bash
-cd milestones/01_1957_perceptron
-python 02_rosenblatt_trained.py
+tito milestone run perceptron
 ```
 
 ### 3. Understand the Systems
@@ -412,8 +409,7 @@ By rebuilding ML history, you gain:
 **Ready to start your journey through ML history?**
 
 ```bash
-cd milestones/01_1957_perceptron
-python 02_rosenblatt_trained.py
+tito milestone run perceptron
 ```
 
 **Build the future by understanding the past.**

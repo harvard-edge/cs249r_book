@@ -25,9 +25,7 @@ document.addEventListener('DOMContentLoaded', function() {
             modules: "After Modules 02-04",
             expectedResults: "~50% (untrained) → 95%+ (trained) accuracy",
             commands: [
-                "cd milestones/01_1957_perceptron",
-                "python 01_rosenblatt_forward.py   # See the problem (random weights)",
-                "python 02_rosenblatt_trained.py   # See the solution (trained)"
+                "tito milestone run perceptron"
             ]
         },
         xor: {
@@ -50,9 +48,7 @@ document.addEventListener('DOMContentLoaded', function() {
             modules: "After Modules 02-06",
             expectedResults: "50% (single layer) → 100% (multi-layer) on XOR",
             commands: [
-                "cd milestones/02_1969_xor",
-                "python 01_xor_crisis.py   # Watch it fail (loss stuck at 0.69)",
-                "python 02_xor_solved.py   # Hidden layers solve it!"
+                "tito milestone run xor"
             ]
         },
         mlp: {
@@ -75,9 +71,7 @@ document.addEventListener('DOMContentLoaded', function() {
             modules: "After Modules 02-08",
             expectedResults: "95%+ accuracy on MNIST",
             commands: [
-                "cd milestones/03_1986_mlp",
-                "python 01_rumelhart_tinydigits.py  # 8x8 digits (quick)",
-                "python 02_rumelhart_mnist.py       # Full MNIST"
+                "tito milestone run mlp"
             ]
         },
         cnn: {
@@ -100,9 +94,7 @@ document.addEventListener('DOMContentLoaded', function() {
             modules: "After Modules 02-09",
             expectedResults: "75%+ accuracy on CIFAR-10 ✨",
             commands: [
-                "cd milestones/04_1998_cnn",
-                "python 01_lecun_tinydigits.py  # Spatial features on digits",
-                "python 02_lecun_cifar10.py     # CIFAR-10 @ 75%+ accuracy"
+                "tito milestone run cnn"
             ],
             northStar: true
         },
@@ -126,9 +118,7 @@ document.addEventListener('DOMContentLoaded', function() {
             modules: "After Modules 02-13",
             expectedResults: "Loss < 1.5, coherent responses to questions",
             commands: [
-                "cd milestones/05_2017_transformer",
-                "python 01_vaswani_generation.py  # Q&A generation with TinyTalks",
-                "python 02_vaswani_dialogue.py    # Multi-turn dialogue"
+                "tito milestone run transformer"
             ]
         },
         olympics: {
@@ -151,10 +141,7 @@ document.addEventListener('DOMContentLoaded', function() {
             modules: "After Modules 14-18",
             expectedResults: "8-16× smaller models, 12-40× faster inference",
             commands: [
-                "cd milestones/06_2018_mlperf",
-                "python 01_baseline_profile.py   # Find bottlenecks",
-                "python 02_compression.py         # Reduce size (quantize + prune)",
-                "python 03_generation_opts.py    # Speed up inference (cache + batch)"
+                "tito milestone run mlperf"
             ]
         }
     };
