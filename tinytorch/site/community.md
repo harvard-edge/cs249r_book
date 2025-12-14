@@ -114,7 +114,7 @@ Teaching TinyTorch in your classroom?
 Built something impressive with TinyTorch?
 
 **Share it with the community:**
-- Post in [GitHub Discussions](https://github.com/mlsysbook/TinyTorch/discussions) under "Show and Tell"
+- Post in [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions) under "Show and Tell"
 - Tag us on social media with #TinyTorch
 - Submit your project for community showcase (coming soon)
 
@@ -126,9 +126,9 @@ Built something impressive with TinyTorch?
 
 ## Stay Updated
 
-**GitHub Watch**: [Enable notifications](https://github.com/mlsysbook/TinyTorch) for releases and updates
+**GitHub Watch**: [Enable notifications](https://github.com/harvard-edge/cs249r_book) for releases and updates
 
-**Follow Development**: Check [GitHub Issues](https://github.com/mlsysbook/TinyTorch/issues) for roadmap and upcoming features
+**Follow Development**: Check [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues) for roadmap and upcoming features
 
 
 **Build ML systems. Learn together. Grow the community.**

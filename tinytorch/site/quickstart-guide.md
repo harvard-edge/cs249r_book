@@ -16,7 +16,7 @@ Let's get you ready to build ML systems:
 
 ```bash
 # Clone repository
-git clone https://github.com/mlsysbook/TinyTorch.git
+git clone https://github.com/harvard-edge/cs249r_book.git
 cd TinyTorch
 
 # Automated setup (handles everything!)

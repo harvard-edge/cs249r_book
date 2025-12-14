@@ -161,7 +161,7 @@ Debug by running the failing command manually:
 # Run commands manually to see timing
 cd /tmp
 rm -rf TinyTorch
-time git clone https://github.com/mlsysbook/TinyTorch.git
+time git clone https://github.com/harvard-edge/cs249r_book.git
 # If > 120s, increase timeout in tape file
 ```
 

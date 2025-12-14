@@ -226,7 +226,7 @@ Set Height 720
 Set Shell bash
 Env PS1 "@profvjreddi 🔥 › "
 
-Type "git clone https://github.com/mlsysbook/TinyTorch.git"
+Type "git clone https://github.com/harvard-edge/cs249r_book.git"
 Enter
 Wait+Line@10ms /profvjreddi/ 120s  # Wait for clone (max 120s)
 
@@ -280,7 +280,7 @@ If VHS waits 120s then fails, your network/machine might be slow:
 # Test manually to see timing
 cd /tmp
 rm -rf TinyTorch
-time git clone https://github.com/mlsysbook/TinyTorch.git
+time git clone https://github.com/harvard-edge/cs249r_book.git
 
 # If > 120s, edit the tape file and increase timeout
 ```

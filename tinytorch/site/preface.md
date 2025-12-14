@@ -141,10 +141,6 @@ That is what TinyTorch offers: the confidence that comes from building something
 *2025*
 
 
-## What to Read Next
+## What's Next?
 
-**Ready to build right now?** → [Quick Start](getting-started.md) — Install and complete your first module in 15 minutes.
-
-**Not sure if you're ready?** → [Prerequisites](prerequisites.md) — Self-assessment + resources to fill any gaps.
-
-**Want to see the full journey?** → [Learning Journey](chapters/learning-journey.md) — The complete pedagogical arc from tensors to transformers.
+**[See the Big Picture →](big-picture.md)** — How all 20 modules connect, what you'll build, and which path to take.

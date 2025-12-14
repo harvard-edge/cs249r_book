@@ -605,9 +605,9 @@ Build complete transformer blocks by combining your attention mechanism with fee
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/12_attention/12_attention.py)** - Run interactively in browser, no setup required
-- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/12_attention/12_attention.py)** - Use Google Colab for cloud compute
-- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/12_attention/12_attention.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/12_attention/12_attention.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/12_attention/12_attention.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/12_attention/12_attention.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

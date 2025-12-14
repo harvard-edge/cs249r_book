@@ -19,7 +19,7 @@
 **Step 1: Environment Setup (10 minutes)**
 ```bash
 # Clone repository
-git clone https://github.com/mlsysbook/TinyTorch.git
+git clone https://github.com/harvard-edge/cs249r_book.git
 cd TinyTorch
 
 # Create virtual environment
@@ -412,8 +412,8 @@ ls submitted/*/MODULE/
 - **[Student Getting Started](getting-started.md)** - Send this to students
 - **[CLI Documentation](tito/overview.md)** - Detailed command reference
 - **[Troubleshooting Guide](tito/troubleshooting.md)** - Common issues and solutions
-- **[GitHub Discussions](https://github.com/mlsysbook/TinyTorch/discussions)** - Community support
-- **[Issue Tracker](https://github.com/mlsysbook/TinyTorch/issues)** - Report bugs
+- **[GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions)** - Community support
+- **[Issue Tracker](https://github.com/harvard-edge/cs249r_book/issues)** - Report bugs
 
 
 ## Contact & Support

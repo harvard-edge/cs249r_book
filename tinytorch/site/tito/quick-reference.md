@@ -7,7 +7,7 @@
 ### Setup & Verification
 ```bash
 # Initial setup
-git clone https://github.com/mlsysbook/TinyTorch.git
+git clone https://github.com/harvard-edge/cs249r_book.git
 cd TinyTorch
 ./setup-environment.sh
 source activate.sh

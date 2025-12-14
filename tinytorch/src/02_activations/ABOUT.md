@@ -529,9 +529,9 @@ Implement Linear layers that combine your Tensor operations with your activation
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/02_activations/02_activations.py)** - Run interactively in browser, no setup required
-- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/02_activations/02_activations.py)** - Use Google Colab for cloud compute
-- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/02_activations/02_activations.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/02_activations/02_activations.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/02_activations/02_activations.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/02_activations/02_activations.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

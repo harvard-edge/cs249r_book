@@ -149,7 +149,7 @@ Capstone: Vision • Language • Speed • Compression tracks
 
 </div>
 
-**[Learning Journey](chapters/learning-journey)** • **[Getting started guide](getting-started)** • **[Join the community](community)**
+**[The Big Picture](big-picture)** • **[Getting started guide](getting-started)** • **[Join the community](community)**
 
 ## Recreate ML History
 
@@ -221,7 +221,7 @@ Walk through ML history by rebuilding its greatest breakthroughs with YOUR TinyT
 </div>
 ```
 
-**[View complete milestone details](chapters/milestones)** to see full technical requirements and learning objectives.
+**[View complete milestone details](tito/milestones)** to see full technical requirements and learning objectives.
 
 ## Why Build Instead of Use?
 
@@ -320,4 +320,4 @@ Perfect if you want to **debug ML systems**, **implement custom operations**, or
 </div>
 
 
-**Next Steps**: **[Quick Start](getting-started)** (15 min) • **[Learning Journey](chapters/learning-journey)** • **[FAQ](faq.md)**
+**Next Steps**: **[Quick Start](getting-started)** (15 min) • **[The Big Picture](big-picture)** • **[Community](community)**

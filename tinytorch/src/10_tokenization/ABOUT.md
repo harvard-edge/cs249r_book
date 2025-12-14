@@ -598,9 +598,9 @@ Convert your token IDs into learnable dense vector representations. You'll imple
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/10_tokenization/10_tokenization.py)** - Run interactively in browser, no setup required
-- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/10_tokenization/10_tokenization.py)** - Use Google Colab for cloud compute
-- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/10_tokenization/10_tokenization.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/10_tokenization/10_tokenization.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/10_tokenization/10_tokenization.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/10_tokenization/10_tokenization.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

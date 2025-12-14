@@ -24,7 +24,7 @@ When users click the "Launch Binder" button on any notebook page in the TinyTorc
 
 **Binder URL Format:**
 ```
-https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main
+https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main
 ```
 
 ### Google Colab
@@ -36,7 +36,7 @@ Colab launch buttons automatically:
 
 **Colab URL Format:**
 ```
-https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/path/to/notebook.ipynb
+https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/path/to/notebook.ipynb
 ```
 
 ## Testing
@@ -45,9 +45,9 @@ To test your Binder setup:
 
 1. **Test Binder Build:**
    ```bash
-   # Visit: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main
+   # Visit: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main
    # Or use the badge:
-   [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main)
+   [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main)
    ```
 
 2. **Verify Installation:**
@@ -71,7 +71,7 @@ To test your Binder setup:
 
 - Check `binder/requirements.txt` for syntax errors
 - Verify `binder/postBuild` has execute permissions (`chmod +x binder/postBuild`)
-- Review Binder build logs at: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?urlpath=lab/tree/logs%2Fbuild.log
+- Review Binder build logs at: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/logs%2Fbuild.log
 
 ### Colab Import Errors
 

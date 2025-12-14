@@ -81,18 +81,18 @@ TinyTorch combines inspiration from these projects into a comprehensive ML syste
 
 TinyTorch is built by students, educators, and ML engineers who believe in accessible systems education.
 
-**[View all contributors on GitHub](https://github.com/mlsysbook/TinyTorch/graphs/contributors)**
+**[View all contributors on GitHub](https://github.com/harvard-edge/cs249r_book/graphs/contributors)**
 
 
 ## How to Contribute
 
 TinyTorch is open source and welcomes contributions:
 
-- **Found a bug?** Report it on [GitHub Issues](https://github.com/mlsysbook/TinyTorch/issues)
+- **Found a bug?** Report it on [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues)
 - **Improved documentation?** Submit a pull request
-- **Built something cool?** Share it in [GitHub Discussions](https://github.com/mlsysbook/TinyTorch/discussions)
+- **Built something cool?** Share it in [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions)
 
-**[See contribution guidelines](https://github.com/mlsysbook/TinyTorch/blob/main/CONTRIBUTING.md)**
+**[See contribution guidelines](https://github.com/harvard-edge/cs249r_book/blob/main/CONTRIBUTING.md)**
 
 
 ## License

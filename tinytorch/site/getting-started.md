@@ -253,41 +253,4 @@ We're building comprehensive classroom support with NBGrader integration. For ha
 See the **[Instructor Guide](instructor-guide.md)** for detailed setup instructions and grading rubrics.
 
 
-## Additional Resources
-
-<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin: 2rem 0;">
-
-<div style="background: #f0f9ff; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #3b82f6;">
-<h4 style="margin: 0 0 0.5rem 0; color: #1e40af;"> Course Documentation</h4>
-<ul style="margin: 0.5rem 0; padding-left: 1.25rem; font-size: 0.9rem;">
-<li><a href="chapters/learning-journey.html">Learning Journey</a></li>
-<li><a href="chapters/milestones.html">Historical Milestones</a></li>
-<li><a href="prerequisites.html">Prerequisites & Resources</a></li>
-<li><a href="faq.html">Frequently Asked Questions</a></li>
-</ul>
-</div>
-
-<div style="background: #f0fdf4; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #22c55e;">
-<h4 style="margin: 0 0 0.5rem 0; color: #166534;"> CLI & Tools</h4>
-<ul style="margin: 0.5rem 0; padding-left: 1.25rem; font-size: 0.9rem;">
-<li><a href="tito/overview.html">TITO CLI Overview</a></li>
-<li><a href="tito/modules.html">Module Workflow</a></li>
-<li><a href="tito/milestones.html">Milestone System</a></li>
-<li><a href="tito/troubleshooting.html">Troubleshooting</a></li>
-</ul>
-</div>
-
-<div style="background: #fef3c7; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #eab308;">
-<h4 style="margin: 0 0 0.5rem 0; color: #a16207;"> Community</h4>
-<ul style="margin: 0.5rem 0; padding-left: 1.25rem; font-size: 0.9rem;">
-<li><a href="community.html">Community Ecosystem</a></li>
-<li><a href="resources.html">Learning Resources</a></li>
-<li><a href="credits.html">Credits & Acknowledgments</a></li>
-<li><a href="https://github.com/mlsysbook/TinyTorch/discussions">GitHub Discussions</a></li>
-</ul>
-</div>
-
-</div>
-
-
-**Ready to start building?** Choose your path above and dive into the most comprehensive ML systems course available!
+**Ready to start building?** Head to the [Foundation Tier](tiers/foundation.md) and begin with Module 01!

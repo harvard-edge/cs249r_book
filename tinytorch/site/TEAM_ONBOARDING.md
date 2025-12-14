@@ -219,7 +219,7 @@ After completing TinyTorch onboarding, team members will:
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/mlsysbook/TinyTorch.git
+git clone https://github.com/harvard-edge/cs249r_book.git
 cd TinyTorch
 
 # 2. Set up environment

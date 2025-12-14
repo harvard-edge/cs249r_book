@@ -224,7 +224,7 @@ TinyTorch notebooks work with multiple platforms, but **important distinction**:
 
 ```bash
 # Clone and setup locally
-git clone https://github.com/mlsysbook/TinyTorch.git
+git clone https://github.com/harvard-edge/cs249r_book.git
 cd TinyTorch
 python -m venv .venv
 source .venv/bin/activate

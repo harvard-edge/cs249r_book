@@ -232,7 +232,7 @@ Each milestone proves your framework works by running actual ML experiments.
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/mlsysbook/TinyTorch.git
+git clone https://github.com/harvard-edge/cs249r_book.git
 cd TinyTorch
 
 # 2. Automated setup
@@ -369,4 +369,4 @@ TinyTorch is developed at the intersection of academia and education:
 <a href="intro.html" style="display: inline-block; background: #28a745; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">Learn More →</a>
 </div>
 
-**Can't find your question?** Open an issue on [GitHub](https://github.com/mlsysbook/TinyTorch/issues) and we'll help!
+**Can't find your question?** Open an issue on [GitHub](https://github.com/harvard-edge/cs249r_book/issues) and we'll help!

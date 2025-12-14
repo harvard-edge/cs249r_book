@@ -662,9 +662,9 @@ Implement efficient data loading with batching, shuffling, and iteration. Your T
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/07_training/07_training.py)** - Run interactively in browser, no setup required
-- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/07_training/07_training.py)** - Use Google Colab for cloud compute
-- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/07_training/07_training.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/07_training/07_training.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/07_training/07_training.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/07_training/07_training.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

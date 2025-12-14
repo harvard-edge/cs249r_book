@@ -7,7 +7,7 @@ Welcome to TinyTorch! You're about to build an ML framework from scratch and und
 ### 1⃣ **Setup Your Environment**
 ```bash
 # Clone the repository
-git clone https://github.com/MLSysBook/TinyTorch.git
+git clone https://github.com/harvard-edge/cs249r_book.git
 cd TinyTorch
 
 # One-command setup (handles everything!)
@@ -160,7 +160,7 @@ tito module reset XX
 ```
 
 ### **Community**
-- GitHub Issues: [Report problems](https://github.com/MLSysBook/TinyTorch/issues)
+- GitHub Issues: [Report problems](https://github.com/harvard-edge/cs249r_book/issues)
 - Discussions: Ask questions and share insights
 
 ## 🏆 Challenge Yourself
