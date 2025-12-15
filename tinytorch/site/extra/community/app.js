@@ -66,9 +66,9 @@ import { setupCameraEvents } from './modules/camera.js';
 
     if (authClose) authClose.addEventListener('click', closeModal);
     if (authOverlay) {
-        authOverlay.addEventListener('click', (e) => {
-            if (e.target === authOverlay) closeModal();
-        });
+        // authOverlay.addEventListener('click', (e) => {
+        //     if (e.target === authOverlay) closeModal();
+        // });
     }
     if (authToggle) authToggle.addEventListener('click', handleToggle);
     if (forgotLink) forgotLink.addEventListener('click', () => setMode('forgot'));
@@ -77,9 +77,9 @@ import { setupCameraEvents } from './modules/camera.js';
     // Profile Modal Events
     if (profileClose) profileClose.addEventListener('click', closeProfileModal);
     if (profileOverlay) {
-        profileOverlay.addEventListener('click', (e) => {
-            if (e.target === profileOverlay) closeProfileModal();
-        });
+        // profileOverlay.addEventListener('click', (e) => {
+        //     if (e.target === profileOverlay) closeProfileModal();
+        // });
     }
     if (profileLogoutBtn) profileLogoutBtn.addEventListener('click', handleLogout);
     if (profileForm) profileForm.addEventListener('submit', handleProfileUpdate);
