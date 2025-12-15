@@ -1,5 +1,6 @@
 ---
 title: "Don't import torch. Build it."
+ogp_title: "Don't import torch. Build it."
 ---
 
 ```{raw} html
