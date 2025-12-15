@@ -23,7 +23,7 @@ Don't import it. Build it.
 </h2>
 
 <p style="text-align: center; font-size: 1.15rem; margin: 0 auto 1.5rem auto; max-width: 750px; color: #374151;">
-An educational framework for building and optimizing ML—understand how PyTorch, TensorFlow, and JAX really work.
+From tensors to systems. An educational framework for building and optimizing ML—understand how PyTorch, TensorFlow, and JAX really work.
 </p>
 
 <div style="text-align: center; margin: 0 0 2.5rem 0;">
@@ -78,7 +78,6 @@ An educational framework for building and optimizing ML—understand how PyTorch
 </style>
 
 <div class="approach-box">
-  <p class="approach-title">TinyTorch: From Tensors to Systems</p>
   <div class="approach-grid">
     <div class="approach-item">
       <span class="approach-icon">🔧</span>
