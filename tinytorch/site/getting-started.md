@@ -177,7 +177,7 @@ tito milestone list         # See all milestones & requirements
 tito milestone run <name>   # Run a milestone with your code
 
 # Utilities
-tito setup                  # Verify installation
+tito setup                  # First-time setup (safe to re-run)
 tito update                 # Update TinyTorch (your work is preserved)
 tito --help                 # Full command reference
 ```
