@@ -24,7 +24,7 @@ ENDPOINTS = {
 }
 
 # Defaults
-LOCAL_SERVER_HOST = "127.0.0.1"
+LOCAL_SERVER_HOST = "0.0.0.0"  # Listen on all interfaces for WSL compatibility
 AUTH_START_PORT = 54321
 AUTH_PORT_HUNT_RANGE = 100
 AUTH_CALLBACK_PATH = "/callback"
@@ -191,6 +191,7 @@ class CallbackHandler(http.server.BaseHTTPRequestHandler):
         parsed_path = urlparse(self.path)
 
         if parsed_path.path == "/logout":
+            self.server.logout_requested = True  # Signal that logout was hit
             self.send_response(302)
             self.send_header('Location', f"{API_BASE_URL}/cli/logged-out")
             self.end_headers()
@@ -232,6 +233,35 @@ class LocalAuthServer(http.server.HTTPServer):
     def __init__(self, server_address, RequestHandlerClass):
         super().__init__(server_address, RequestHandlerClass)
         self.auth_data: Optional[Dict[str, str]] = None
+        self.logout_requested: bool = False  # Initialize the logout flag
+
+def _is_wsl() -> bool:
+    """Check if running in WSL environment."""
+    try:
+        with open('/proc/version', 'r') as f:
+            return 'microsoft' in f.read().lower()
+    except:
+        return False
+
+def _get_callback_host() -> str:
+    """Get the appropriate host for callback URL (handles WSL)."""
+    if _is_wsl():
+        import subprocess
+        try:
+            # Get WSL IP that Windows can reach
+            result = subprocess.run(
+                ['hostname', '-I'],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            if result.returncode == 0:
+                wsl_ip = result.stdout.strip().split()[0]
+                if wsl_ip:
+                    return wsl_ip
+        except Exception:
+            pass
+    return "127.0.0.1"
 
 class AuthReceiver:
     def __init__(self, start_port: int = None):
@@ -239,6 +269,7 @@ class AuthReceiver:
         self.server: Optional[LocalAuthServer] = None
         self.thread: Optional[threading.Thread] = None
         self.port: int = 0
+        self.callback_host: str = "127.0.0.1"
 
     def start(self) -> int:
         port = self.start_port
@@ -263,6 +294,9 @@ class AuthReceiver:
         self.thread = threading.Thread(target=serve_with_error_handling, daemon=True)
         self.thread.start()
         time.sleep(0.2)
+        
+        # Determine the callback host for URL construction
+        self.callback_host = _get_callback_host()
 
         # Check if server is ready
         max_wait = 2.0
@@ -276,7 +310,8 @@ class AuthReceiver:
 
                 test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 test_socket.settimeout(0.2)
-                result = test_socket.connect_ex((LOCAL_SERVER_HOST, self.port))
+                # Test on localhost since we're checking from within WSL
+                result = test_socket.connect_ex(("127.0.0.1", self.port))
                 test_socket.close()
                 if result == 0:
                     server_ready = True
@@ -291,6 +326,10 @@ class AuthReceiver:
             raise Exception(f"Server failed to start on port {self.port}")
 
         return self.port
+    
+    def get_redirect_url(self) -> str:
+        """Get the full redirect URL that should work from the browser."""
+        return f"http://{self.callback_host}:{self.port}{AUTH_CALLBACK_PATH}"
 
     def wait_for_tokens(self, timeout: int = 120) -> Optional[Dict[str, str]]:
         start_time = time.time()
@@ -311,12 +350,23 @@ class AuthReceiver:
         finally:
             self.stop()
 
+    def wait_for_logout(self, timeout: int = 20) -> bool:
+        """Wait for the /logout endpoint to be hit."""
+        start_time = time.time()
+        try:
+            while not getattr(self.server, "logout_requested", False):
+                if time.time() - start_time > timeout:
+                    return False  # Timed out
+                time.sleep(0.25)
+            return True  # Logout signal received
+        finally:
+            self.stop()
+
     def stop(self):
         if self.server:
             try:
-                self.server.shutdown()
+                # Just close the socket - the daemon thread will handle cleanup
+                # Don't call shutdown() as it blocks waiting for serve_forever() to finish
                 self.server.server_close()
             except Exception:
                 pass
-        if self.thread and self.thread.is_alive():
-            self.thread.join(timeout=1)

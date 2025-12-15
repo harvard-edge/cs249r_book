@@ -1,4 +1,4 @@
-import { SUPABASE_URL, NETLIFY_URL } from './config.js';
+import { SUPABASE_URL, NETLIFY_URL, getBasePath } from './config.js';
 import { forceLogin } from './state.js?v=2';
 
 export function openProfileModal() {
@@ -112,8 +112,6 @@ function populateProfileForm(data) {
     const profileLocationInput = document.getElementById('profileLocation');
     const profileInstitutionInput = document.getElementById('profileInstitution');
     const profileWebsitesInput = document.getElementById('profileWebsites');
-    const profileContactJsonTextarea = document.getElementById('profileContactJson');
-    const profilePreferencesTextarea = document.getElementById('profilePreferences');
     const avatarPreview = document.getElementById('avatarPreview');
 
     profileDisplayNameInput.value = data.display_name || '';
@@ -127,18 +125,6 @@ function populateProfileForm(data) {
 
     const sites = data.website || data.websites;
     profileWebsitesInput.value = Array.isArray(sites) ? sites.join(', ') : (sites || '');
-
-    try {
-        profileContactJsonTextarea.value = data.socials ? JSON.stringify(data.socials, null, 2) : '';
-    } catch (e) {
-        profileContactJsonTextarea.value = '';
-    }
-
-    try {
-        profilePreferencesTextarea.value = data.preferences ? JSON.stringify(data.preferences, null, 2) : '{"theme": "standard"}';
-    } catch (e) {
-        profilePreferencesTextarea.value = '{"theme": "standard"}';
-    }
 
     if(avatarPreview) {
          avatarPreview.src = data.avatar || '';
@@ -161,8 +147,6 @@ export async function handleProfileUpdate(e) {
     const profileLocationInput = document.getElementById('profileLocation');
     const profileInstitutionInput = document.getElementById('profileInstitution');
     const profileWebsitesInput = document.getElementById('profileWebsites');
-    const profileContactJsonTextarea = document.getElementById('profileContactJson');
-    const profilePreferencesTextarea = document.getElementById('profilePreferences');
 
     const updatedProfile = {
         display_name: profileDisplayNameInput.value,
@@ -173,19 +157,6 @@ export async function handleProfileUpdate(e) {
         institution: profileInstitutionInput.value.split(',').map(s => s.trim()).filter(s => s),
         website: profileWebsitesInput.value.split(',').map(s => s.trim()).filter(s => s),
     };
-
-    try {
-        updatedProfile.contact_json = profileContactJsonTextarea.value ? JSON.parse(profileContactJsonTextarea.value) : null;
-    } catch (e) {
-        alert("Invalid Contact Info JSON. Please correct it.");
-        return;
-    }
-    try {
-        updatedProfile.preferences = profilePreferencesTextarea.value ? JSON.parse(profilePreferencesTextarea.value) : '{"theme": "standard"}';
-    } catch (e) {
-        alert("Invalid Preferences JSON. Please correct it.");
-        return;
-    }
 
     let retryCount = 0;
     const MAX_RETRIES = 1;
@@ -254,6 +225,12 @@ export async function handleProfileUpdate(e) {
 
             alert('Profile updated successfully!');
             closeProfileModal();
+
+            // Check if 'community' param is present in the URL
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('community')) {
+                window.location.href = getBasePath() + '/community.html';
+            }
             return;
         } catch (error) {
             console.error("Error updating user profile:", error);
