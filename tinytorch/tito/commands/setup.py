@@ -505,7 +505,7 @@ class SetupCommand(BaseCommand):
                     ))
                     if Confirm.ask("[bold]Update your community profile?[/bold]", default=True):
                         self.console.print("[dim]Opening profile editor...[/dim]")
-                        open_url("https://mlsysbook.ai/tinytorch/community/?action=profile", self.console, show_manual_fallback=True)
+                        open_url("https://mlsysbook.ai/tinytorch/community/?action=profile&community=true", self.console, show_manual_fallback=True)
                 else:
                     self.console.print("[yellow]⚠️  Community connection failed or was cancelled. You can try again later with 'tito login'.[/yellow]")
             except Exception as e:
