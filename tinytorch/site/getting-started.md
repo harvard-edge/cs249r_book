@@ -111,40 +111,40 @@ tito milestone run perceptron
 The milestone uses YOUR implementations to recreate Rosenblatt's 1957 Perceptron:
 
 ```
-🔍 Checking prerequisites for Milestone 01...
-✅ All required modules completed!
+Checking prerequisites for Milestone 01...
+All required modules completed!
 
-🧪 Testing YOUR implementations...
-  ✓ Tensor import successful
-  ✓ Activations import successful
-  ✓ Layers import successful
-✅ YOUR Tiny🔥Torch is ready!
+Testing YOUR implementations...
+  * Tensor import successful
+  * Activations import successful
+  * Layers import successful
+YOUR TinyTorch is ready!
 
-╭─────────────────────────── 🏆 Milestone 01 (1957) ───────────────────────────╮
-│  🧠 Milestone 01: Perceptron (1957)                                          │
-│  Frank Rosenblatt's First Neural Network                                     │
-│                                                                              │
-│  📂 Running: milestones/01_1957_perceptron/01_rosenblatt_forward.py          │
-│  All code uses YOUR Tiny🔥Torch implementations!                             │
-╰──────────────────────────────────────────────────────────────────────────────╯
++----------------------- Milestone 01 (1957) -----------------------+
+|  Milestone 01: Perceptron (1957)                                  |
+|  Frank Rosenblatt's First Neural Network                          |
+|                                                                   |
+|  Running: milestones/01_1957_perceptron/01_rosenblatt_forward.py  |
+|  All code uses YOUR TinyTorch implementations!                    |
++-------------------------------------------------------------------+
 
-🚀 Starting Milestone 01...
+Starting Milestone 01...
 
-🧠 Assembling perceptron with YOUR Tiny🔥Torch modules...
-   ✓ Linear layer: 2 → 1 (YOUR Module 03!)
-   ✓ Activation: Sigmoid (YOUR Module 02!)
+Assembling perceptron with YOUR TinyTorch modules...
+   * Linear layer: 2 -> 1 (YOUR Module 03!)
+   * Activation: Sigmoid (YOUR Module 02!)
 
-╭───────────────────────── ✨ Achievement Unlocked ✨ ─────────────────────────╮
-│  🏆 MILESTONE ACHIEVED!                                                      │
-│                                                                              │
-│  You completed Milestone 01: Perceptron (1957)                               │
-│  Frank Rosenblatt's First Neural Network                                     │
-│                                                                              │
-│  What makes this special:                                                    │
-│  • Every tensor operation: YOUR Tensor class                                 │
-│  • Every layer: YOUR Linear implementation                                   │
-│  • Every activation: YOUR Sigmoid function                                   │
-╰──────────────────────────────────────────────────────────────────────────────╯
++-------------------- Achievement Unlocked --------------------+
+|  MILESTONE ACHIEVED!                                         |
+|                                                              |
+|  You completed Milestone 01: Perceptron (1957)               |
+|  Frank Rosenblatt's First Neural Network                     |
+|                                                              |
+|  What makes this special:                                    |
+|  - Every tensor operation: YOUR Tensor class                 |
+|  - Every layer: YOUR Linear implementation                   |
+|  - Every activation: YOUR Sigmoid function                   |
++--------------------------------------------------------------+
 ```
 
 You're recreating ML history with your own code. *By Module 19, you'll benchmark against MLPerf—the industry standard for ML performance.*
