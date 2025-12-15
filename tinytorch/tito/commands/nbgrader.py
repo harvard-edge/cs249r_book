@@ -418,7 +418,9 @@ class NBGraderCommand(BaseCommand):
             assignment_dir = self.source_dir / module_name
             assignment_dir.mkdir(parents=True, exist_ok=True)
 
-            assignment_file = assignment_dir / f"{module_name}.ipynb"
+            # Use short name for notebook (e.g., "tensor.ipynb" not "01_tensor.ipynb")
+            short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+            assignment_file = assignment_dir / f"{short_name}.ipynb"
             generator.save_student_notebook(notebook, assignment_file)
 
             console.print(f"✅ Assignment created: {assignment_file}")

@@ -258,7 +258,8 @@ class ModuleWorkflowCommand(BaseCommand):
                 return 1
 
         # Prerequisites met! Check if module needs to be created from src/
-        module_dir = self.config.modules_dir / module_name
+        # Notebooks are in modules/ directory, not src/ (which is modules_dir in config)
+        module_dir = self.config.project_root / "modules" / module_name
         if not module_dir.exists():
             # Create module from src/ using export
             src_dir = self.config.project_root / "src" / module_name
@@ -330,7 +331,8 @@ class ModuleWorkflowCommand(BaseCommand):
             return 1
 
         module_name = module_mapping[normalized]
-        module_dir = self.config.modules_dir / module_name
+        # Notebooks are in modules/ directory, not src/ (which is modules_dir in config)
+        module_dir = self.config.project_root / "modules" / module_name
 
         if not module_dir.exists():
             self.console.print(f"[yellow]⚠️  Module {normalized} not started yet[/yellow]")
@@ -414,16 +416,33 @@ class ModuleWorkflowCommand(BaseCommand):
         import time
 
         try:
-            module_dir = self.config.modules_dir / module_name
+            # Notebooks are in modules/ directory, not src/ (which is modules_dir in config)
+            module_dir = self.config.project_root / "modules" / module_name
             if not module_dir.exists():
                 self.console.print(f"[yellow]⚠️  Module directory not found: {module_name}[/yellow]")
                 return 1
 
+            # Find the notebook file to open directly
+            # Notebook uses short name (e.g., "tensor.ipynb" not "01_tensor.ipynb")
+            short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+            notebook_path = module_dir / f"{short_name}.ipynb"
+            if not notebook_path.exists():
+                # Fallback: look for any .ipynb file
+                notebooks = list(module_dir.glob("*.ipynb"))
+                if notebooks:
+                    notebook_path = notebooks[0]
+                else:
+                    notebook_path = None
+
             self.console.print(f"\n[cyan]🚀 Opening Jupyter Lab for module {module_name}...[/cyan]")
 
-            # Launch Jupyter Lab - capture output to get URL
+            # Launch Jupyter Lab with the notebook file directly
+            cmd = ["jupyter", "lab"]
+            if notebook_path and notebook_path.exists():
+                cmd.append(str(notebook_path))
+
             process = subprocess.Popen(
-                ["jupyter", "lab"],
+                cmd,
                 cwd=str(module_dir),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
