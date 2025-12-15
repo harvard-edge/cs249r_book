@@ -1,5 +1,5 @@
 import { getBasePath } from './config.js';
-import { getSession } from './state.js';
+import { getSession } from './state.js?v=2';
 
 export function updateNavState() {
     const { isLoggedIn, email: userEmail } = getSession();

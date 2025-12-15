@@ -1,8 +1,82 @@
-import { NETLIFY_URL, getBasePath } from './config.js';
-import { updateNavState } from './ui.js';
-import { openProfileModal, closeProfileModal, handleProfileUpdate } from './profile.js';
+import { NETLIFY_URL, SUPABASE_URL, getBasePath } from './config.js';
+import { updateNavState } from './ui.js?v=2';
+import { closeProfileModal } from './profile.js';
+import { getSession, forceLogin, clearSession } from './state.js?v=2';
 
 let currentMode = 'signup';
+
+export async function refreshToken() {
+    const refreshToken = localStorage.getItem("tinytorch_refresh_token");
+    if (!refreshToken) {
+        return false;
+    }
+
+    try {
+        const refreshRes = await fetch(`${NETLIFY_URL}/api/auth/refresh`, { 
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refreshToken })
+        });
+
+        if (!refreshRes.ok) { 
+            return false; 
+        }
+
+        const refreshData = await refreshRes.json();
+        const session = refreshData.session || refreshData; 
+
+        if (session && session.access_token) {
+            localStorage.setItem("tinytorch_token", session.access_token);
+            if (session.refresh_token) {
+                localStorage.setItem("tinytorch_refresh_token", session.refresh_token);
+            }
+            if (session.user) {
+                localStorage.setItem("tinytorch_user", JSON.stringify(session.user));
+            }
+            return session.access_token;
+        }
+    } catch (e) {
+        console.error("Token refresh failed", e);
+    }
+    return false;
+}
+
+export async function verifySession() {
+    const { token } = getSession();
+    if (!token) return;
+
+    try {
+        // Use a lightweight call to check validity. 
+        // We use get-profile-details but we could also just decode if we trusted client time.
+        // A network call is safer.
+        const response = await fetch(`${SUPABASE_URL}/get-profile-details`, { 
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (response.ok) {
+            return; // Token is valid
+        }
+
+        if (response.status === 401 || response.status === 403) {
+            console.log("Session verification failed. Attempting refresh...");
+            const newToken = await refreshToken();
+            if (newToken) {
+                console.log("Session refreshed successfully.");
+                updateNavState(); // Update UI with new state if needed
+            } else {
+                console.warn("Session refresh failed. Clearing session.");
+                clearSession();
+                updateNavState();
+            }
+        }
+    } catch (e) {
+        console.error("Session verification error", e);
+    }
+}
 
 export function setMode(mode) {
     const emailInput = document.getElementById('authEmail');
@@ -136,7 +210,7 @@ export async function handleAuth(e) {
                     window.location.href = basePath + '/dashboard.html';
                 }
             } else {
-                alert('Account created successfully! Please check your email to confirm before logging in.');
+                alert('If an account exists for this email, we have sent you a login link. Otherwise, please check your email to confirm your signup.');
                 window.location.href = basePath + '/dashboard.html';
             }
         }

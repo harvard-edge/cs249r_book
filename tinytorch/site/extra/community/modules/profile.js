@@ -1,5 +1,5 @@
 import { SUPABASE_URL, NETLIFY_URL } from './config.js';
-import { forceLogin } from './state.js';
+import { forceLogin } from './state.js?v=2';
 
 export function openProfileModal() {
     const profileOverlay = document.getElementById('profileOverlay');
