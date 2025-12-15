@@ -12,12 +12,6 @@ Build Your Own ML Framework
 </p>
 ```
 
-<p style="text-align: center; margin: 0 0 1rem 0;">
-<a href="https://mlsysbook.ai" target="_blank" style="color: #64748b; font-size: 0.95rem; text-decoration: none; border-bottom: 1px solid #cbd5e1;">
-Hands-on labs for the <span style="font-weight: 600; color: #475569;">Machine Learning Systems</span> textbook
-</a>
-</p>
-
 <h2 style="background: linear-gradient(135deg, #E74C3C 0%, #E67E22 50%, #F39C12 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-align: center; font-size: 2.5rem; margin: 1rem 0; font-weight: 700;">
 Don't import it. Build it.
 </h2>
