@@ -290,7 +290,8 @@ class TinyTorchCLI:
 
             # Guard against running outside a virtual environment unless explicitly allowed
             if parsed_args.command not in ['setup', 'logo', None]:
-                in_venv = sys.prefix != sys.base_prefix
+                # Check both sys.prefix (traditional activation) and VIRTUAL_ENV (direnv/PATH-based)
+                in_venv = sys.prefix != sys.base_prefix or os.environ.get("VIRTUAL_ENV") is not None
                 allow_system = os.environ.get("TITO_ALLOW_SYSTEM") == "1"
                 if not in_venv and not allow_system:
                     print_error(
