@@ -211,7 +211,8 @@ class TinyTorchCLI:
             temp_command = command_class(self.config)
             cmd_parser = subparsers.add_parser(
                 command_name,
-                help=temp_command.description
+                help=temp_command.description,
+                formatter_class=argparse.RawDescriptionHelpFormatter
             )
             temp_command.add_arguments(cmd_parser)
 
