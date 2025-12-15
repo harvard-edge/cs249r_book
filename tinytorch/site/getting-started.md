@@ -35,8 +35,6 @@ graph LR
 
 As you complete modules, you unlock milestones that recreate landmark moments in ML history—using YOUR code.
 
----
-
 ## Step 1: Install & Setup (2 Minutes)
 
 ```bash
@@ -55,8 +53,6 @@ tito setup
 - Creates an isolated virtual environment
 - Installs all dependencies
 - Verifies installation
-
----
 
 ## Step 2: Your First Module (15 Minutes)
 
@@ -97,8 +93,6 @@ Your code is now importable:
 from tinytorch.core.tensor import Tensor  # YOUR implementation!
 x = Tensor([1, 2, 3])
 ```
-
----
 
 ## Step 3: Your First Milestone
 
@@ -149,8 +143,6 @@ Assembling perceptron with YOUR TinyTorch modules...
 
 You're recreating ML history with your own code. *By Module 19, you'll benchmark against MLPerf—the industry standard for ML performance.*
 
----
-
 ## The Pattern Continues
 
 As you complete more modules, you unlock more milestones:
@@ -169,8 +161,6 @@ See all milestones and their requirements:
 ```bash
 tito milestone list
 ```
-
----
 
 ## Quick Reference
 
@@ -192,8 +182,6 @@ tito update                 # Update TinyTorch (your work is preserved)
 tito --help                 # Full command reference
 ```
 
----
-
 ## Module Progression
 
 TinyTorch has 20 modules organized in progressive tiers:
@@ -209,8 +197,6 @@ TinyTorch has 20 modules organized in progressive tiers:
 
 **See [Foundation Tier Overview](tiers/foundation)** for detailed module descriptions.
 
----
-
 ## Join the Community (Optional)
 
 After setup, join the global TinyTorch community:
@@ -220,8 +206,6 @@ tito community login        # Join the community
 ```
 
 See **[Community Guide](community.md)** for complete features.
-
----
 
 ## For Instructors & TAs
 
@@ -236,7 +220,5 @@ Classroom support with NBGrader integration is coming (target: Summer/Fall 2026)
 - Grade export to CSV for LMS integration
 
 **Interested in early adoption?** [Join the discussion](https://github.com/harvard-edge/cs249r_book/discussions/1076) to share your use case.
-
----
 
 **Ready to start?** Run `tito module start 01` and begin building!
