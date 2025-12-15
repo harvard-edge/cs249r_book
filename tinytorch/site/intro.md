@@ -1,7 +1,8 @@
 ---
 title: "Don't import torch. Build it."
-ogp_title: "Don't import torch. Build it."
 ---
+
+:og:title: Don't import torch. Build it.
 
 ```{raw} html
 <p style="text-align: center; font-size: 2.5rem; margin: 1rem 0 0.5rem 0; font-weight: 700;">
