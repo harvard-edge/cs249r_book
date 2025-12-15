@@ -538,6 +538,21 @@
       }, 100);
     });
 
+    // Check if URL has #subscribe hash on page load - auto-open modal
+    if (window.location.hash === '#subscribe') {
+      // Small delay to ensure page is fully loaded
+      setTimeout(() => {
+        openModal();
+      }, 300);
+    }
+
+    // Also listen for hash changes (e.g., user clicks back/forward)
+    window.addEventListener('hashchange', function() {
+      if (window.location.hash === '#subscribe') {
+        openModal();
+      }
+    });
+
     // Intercept navbar subscribe link
     setTimeout(() => {
       // Look for subscribe links in navbar

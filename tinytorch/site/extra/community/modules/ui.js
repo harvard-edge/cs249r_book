@@ -155,14 +155,6 @@ export function renderLayout() {
                         <label for="profileWebsites" class="profile-label">Websites (comma-separated URLs):</label>
                         <input type="text" class="profile-input" id="profileWebsites" placeholder="https://site1.com, https://site2.com">
                     </div>
-                    <div class="profile-form-group">
-                        <label for="profileContactJson" class="profile-label">Contact Info (JSON):</label>
-                        <textarea class="profile-textarea" id="profileContactJson" placeholder='{"phone": "+123456789", "twitter": "@handle"}'></textarea>
-                    </div>
-                    <div class="profile-form-group">
-                        <label for="profilePreferences" class="profile-label">Preferences (JSON):</label>
-                        <textarea class="profile-textarea" id="profilePreferences" placeholder='{"theme": "dark", "notifications": true}'></textarea>
-                    </div>
 
 
                     <button type="submit" class="profile-submit" id="profileSubmit">Update Profile</button>

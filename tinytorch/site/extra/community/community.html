@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>D3 Pen Outline Globe</title>
-  <link rel="icon" href="assets/flame.ico" type="image/x-icon">
+  <title>The Tiny Torch Globe</title>
+  <link rel="icon" href="assets/flame.svg" type="image/svg+xml">
   <style>
     body {
       margin: 0;
@@ -36,15 +36,17 @@
     .label-box {
       position: absolute;
       top: 80px;
-      /* Shifted right as requested */
-      left: 80px;
+      left: 20px;
       padding: 15px;
       background: rgba(255, 255, 255, 0.95);
       border: 1px solid #333;
       box-shadow: 4px 4px 0px rgba(0,0,0,0.1);
       z-index: 10;
       pointer-events: auto;
-      min-width: 240px;
+      min-width: 200px;
+      max-width: 280px;
+      max-height: 240px;
+      overflow-y: auto;
       display: flex;
       flex-direction: column;
       gap: 10px;
@@ -53,6 +55,8 @@
     .label-header {
       border-bottom: 1px dashed #ccc;
       padding-bottom: 8px;
+      font-size: 13px;
+      line-height: 1.4;
     }
 
     /* Search Input Styling */
@@ -119,6 +123,18 @@
       display: inline-block;
       border: 1px solid #ffcc00;
       box-shadow: 0 0 2px rgba(255, 102, 0, 0.6);
+      flex-shrink: 0;
+    }
+
+    .legend-dot-institution {
+      width: 8px;
+      height: 8px;
+      background-color: #4a90e2;
+      border-radius: 50%;
+      display: inline-block;
+      border: 1px solid #a4c8f0;
+      box-shadow: 0 0 2px rgba(74, 144, 226, 0.6);
+      flex-shrink: 0;
     }
 
     /* Toggle Button Styling */
@@ -191,6 +207,27 @@
         stroke: #fff;
     }
 
+    /* Institution Marker Styling */
+    .institution-marker {
+      cursor: pointer;
+      pointer-events: all !important;
+    }
+
+    .institution-marker:hover {
+      /* transform: scale(1.15) !important; */
+    }
+
+    .institution-building {
+      fill: rgba(255, 255, 255, 0.85);
+      stroke: #4a90e2;
+      stroke-width: 0.8;
+      filter: drop-shadow(0 0 3px rgba(74, 144, 226, 0.4));
+    }
+    
+    .building-windows rect {
+      pointer-events: none;
+    }
+
     /* Tooltip / Mini Modal Styling */
     .tooltip {
       position: absolute;
@@ -252,7 +289,11 @@
 
     <div class="legend-row">
       <span class="legend-dot"></span>
-      <span>Tiny Torch Community Member</span>
+      <span id="member-count">0 Members</span>
+    </div>
+    <div class="legend-row">
+      <span class="legend-dot-institution"></span>
+      <span id="institution-count">0 Institutions</span>
     </div>
   </div>
 
@@ -312,6 +353,7 @@
     ];
 
     let locations = [];
+    let institutions = []; // Aggregated institution data
     const API_URL = "https://zrvmjrxhokwwmjacyhpq.supabase.co/functions/v1/search-profiles";
 
     const svg = d3.select('#globe-svg');
@@ -336,6 +378,7 @@
     const globeGroup = svg.append('g');
     const graticuleGroup = svg.append('g');
     const mapGroup = svg.append('g');
+    const institutionGroup = svg.append('g');
     const markerGroup = svg.append('g');
 
     // 1. Globe Background
@@ -364,7 +407,59 @@
         fetchProfiles(); // Load real data
       });
 
-    // Helper: Get rough coords from string hash (Deterministic)
+    // Geocoding cache to avoid repeated API calls
+    const geocodeCache = {};
+    let lastGeocodingTime = 0;
+    const GEOCODING_DELAY = 1100; // 1.1 seconds between requests to respect Nominatim usage policy
+
+    // Helper: Sleep function for rate limiting
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // Helper: Get coordinates from location string using Nominatim geocoding
+    async function getCoords(locationStr) {
+        if (!locationStr || locationStr === "unknown") {
+            return getRoughCoords("unknown");
+        }
+
+        // Check cache first
+        if (geocodeCache[locationStr]) {
+            return geocodeCache[locationStr];
+        }
+
+        try {
+            // Rate limiting: ensure at least GEOCODING_DELAY ms between requests
+            const now = Date.now();
+            const timeSinceLastRequest = now - lastGeocodingTime;
+            if (timeSinceLastRequest < GEOCODING_DELAY) {
+                await sleep(GEOCODING_DELAY - timeSinceLastRequest);
+            }
+            lastGeocodingTime = Date.now();
+
+            const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(locationStr)}&format=json&limit=1`;
+            const response = await fetch(url, {
+                headers: { 'User-Agent': 'TinyTorch Community Globe' }
+            });
+            const data = await response.json();
+
+            if (data && data.length > 0) {
+                const coords = {
+                    latitude: parseFloat(data[0].lat),
+                    longitude: parseFloat(data[0].lon)
+                };
+                geocodeCache[locationStr] = coords;
+                return coords;
+            }
+        } catch (e) {
+            console.warn("Geocoding failed for:", locationStr, e);
+        }
+
+        // Fallback to hash-based approach
+        return getRoughCoords(locationStr);
+    }
+
+    // Helper: Get rough coords from string hash (Deterministic) - used as fallback
     function getRoughCoords(str) {
         if (!str) str = "unknown";
         let hash = 0;
@@ -393,20 +488,48 @@
             const data = await response.json();
 
             if (Array.isArray(data) && data.length > 0) {
+                // Clear existing locations if new search
+                if (query) locations = [];
+                
+                // If the API provides lat/lon, use it. Otherwise, get a rough estimate.
                 locations = data.map(p => {
-                    const coords = getRoughCoords(p.location || p.username);
+                    const roughCoords = (p.latitude && p.longitude) 
+                        ? { latitude: p.latitude, longitude: p.longitude } 
+                        : getRoughCoords(p.location || p.institution || p.username);
+                    
                     return {
-                        latitude: coords.latitude,
-                        longitude: coords.longitude,
+                        latitude: roughCoords.latitude,
+                        longitude: roughCoords.longitude,
                         user: p.username,
-                        completed: "Member", // Data not provided by search API
-                        institution: Array.isArray(p.institution) ? p.institution.join(", ") : (p.institution || "Unknown")
+                        displayName: p.display_name || p.username,
+                        completed: "Member",
+                        institution: Array.isArray(p.institution) ? p.institution.join(", ") : (p.institution || "Independent")
                     };
+                });
+                
+                // Render immediately with best-guess positions
+                renderMarkers();
+                renderInstitutions();
+                
+                // Then, geocode in the background for items that didn't have coordinates
+                data.forEach(async (p, index) => {
+                    const locationString = p.location || p.institution;
+                    // Only geocode if we didn't already have coordinates
+                    if (locationString && !(p.latitude && p.longitude)) {
+                        const coords = await getCoords(locationString);
+                        if (locations[index]) {
+                            locations[index].latitude = coords.latitude;
+                            locations[index].longitude = coords.longitude;
+                            // Redraw marker positions after geocoding
+                            updateMarkerPositions();
+                            updateInstitutionPositions();
+                        }
+                    }
                 });
             } else {
                // If no results (and no query), use fallback
                if (!query && locations.length === 0) {
-                   locations = fallbackLocations;
+                   locations = fallbackLocations.map(l => ({...l, displayName: l.user, institution: l.institution || "Independent"}));
                } else if (query) {
                    // If searching and no results, clear map
                    locations = [];
@@ -414,10 +537,11 @@
             }
         } catch (e) {
             console.warn("Fetch failed, using fallback data.", e);
-            if (locations.length === 0) locations = fallbackLocations;
+            if (locations.length === 0) locations = fallbackLocations.map(l => ({...l, displayName: l.user, institution: l.institution || "Independent"}));
         }
 
         renderMarkers();
+        renderInstitutions();
         if (query) updateSearchDropdown(query);
     }
 
@@ -484,9 +608,9 @@
             matches.forEach(match => {
               const div = document.createElement('div');
               div.className = 'search-item';
-              div.textContent = match.user;
+              div.textContent = match.displayName;
               div.onclick = () => {
-                 searchInput.value = match.user;
+                 searchInput.value = match.displayName;
                  searchDropdown.style.display = 'none';
                  focusUser(match);
               };
@@ -537,29 +661,150 @@
     }
 
     function redraw() {
-        svg.selectAll("path").attr("d", path);
+        // Only update geographic paths (graticule and countries), not institution buildings
+        graticuleGroup.selectAll("path").attr("d", path);
+        mapGroup.selectAll("path").attr("d", path);
+        globeGroup.selectAll("path").attr("d", path);
         updateMarkerPositions();
+        updateInstitutionPositions();
+    }
+
+    // Aggregate institutions from locations
+    function aggregateInstitutions() {
+        const institutionMap = new Map();
+        
+        locations.forEach(loc => {
+            if (loc.institution && loc.institution !== "Independent") {
+                const inst = loc.institution;
+                if (!institutionMap.has(inst)) {
+                    institutionMap.set(inst, {
+                        name: inst,
+                        latitude: loc.latitude,
+                        longitude: loc.longitude,
+                        members: []
+                    });
+                }
+                institutionMap.get(inst).members.push(loc.displayName);
+            }
+        });
+        
+        institutions = Array.from(institutionMap.values());
+    }
+
+
+
+    // Render Institution Markers
+    function renderInstitutions() {
+        aggregateInstitutions();
+        
+        const instMarkers = institutionGroup.selectAll('g.institution-marker')
+            .data(institutions, d => d.name);
+
+        // Exit
+        instMarkers.exit().remove();
+
+        // Enter + Update
+        const enter = instMarkers.enter()
+            .append('g')
+            .attr('class', 'institution-marker')
+            .on("mouseover", function(event, d) {
+                isHovering = true;
+                d3.select(this).select('.institution-building').style('stroke', '#ff6600');
+                
+                tooltip.html(`
+                    <h3>🏛️ ${d.name}</h3>
+                    <div class="info-row">Members: <span class="highlight">${d.members.length}</span></div>
+                    <div class="info-row" style="font-size: 11px; color: #777;">${d.members.join(', ')}</div>
+                `);
+
+                tooltip
+                    .style("left", (event.pageX + 15) + "px")
+                    .style("top", (event.pageY - 15) + "px")
+                    .style("opacity", 1);
+            })
+            .on("mouseout", function() {
+                isHovering = false;
+                d3.select(this).select('.institution-building').style('stroke', '#4a90e2');
+                tooltip.style("opacity", 0);
+            });
+        
+        // Update institution count
+        document.getElementById('institution-count').textContent = `${institutions.length} Institutions`;
+
+        // Append building rectangle (main building body)
+        enter.append('rect')
+            .attr('class', 'institution-building')
+            .attr('x', -5)
+            .attr('y', -8)
+            .attr('width', 10)
+            .attr('height', 8);
+        
+        // Add windows as a group to keep them contained
+        const windowsGroup = enter.append('g').attr('class', 'building-windows');
+        
+        const windows = [
+            {x: -4, y: -7, w: 1.5, h: 1.5},
+            {x: -1, y: -7, w: 1.5, h: 1.5},
+            {x: 2.5, y: -7, w: 1.5, h: 1.5},
+            {x: -4, y: -4.5, w: 1.5, h: 1.5},
+            {x: -1, y: -4.5, w: 1.5, h: 1.5},
+            {x: 2.5, y: -4.5, w: 1.5, h: 1.5},
+            {x: -4, y: -2, w: 1.5, h: 1.5},
+            {x: 2.5, y: -2, w: 1.5, h: 1.5}
+        ];
+        
+        windows.forEach(w => {
+            windowsGroup.append('rect')
+                .attr('x', w.x)
+                .attr('y', w.y)
+                .attr('width', w.w)
+                .attr('height', w.h)
+                .attr('fill', 'rgba(74, 144, 226, 0.6)');
+        });
+    }
+
+    // Update institution positions (Run every frame)
+    function updateInstitutionPositions() {
+        const instMarkers = institutionGroup.selectAll('g.institution-marker');
+
+        if (instMarkers.empty()) return;
+
+        instMarkers.each(function(d, i) {
+            const coordinate = [d.longitude, d.latitude];
+            const gdistance = d3.geoDistance(coordinate, projection.invert(center));
+            const isVisible = gdistance < 1.57;
+
+            if (isVisible) {
+                const pos = projection(coordinate);
+                const element = d3.select(this);
+                element
+                    .attr('transform', `translate(${pos[0]},${pos[1]})`)
+                    .style('display', 'block');
+            } else {
+                d3.select(this).style('display', 'none');
+            }
+        });
     }
 
     // Render Markers (Handles Enter/Exit)
     function renderMarkers() {
       const markers = markerGroup.selectAll('circle.marker')
-        .data(locations, d => d.user); // Key by user to ensure smooth transitions
+        .data(locations, d => d.user);
 
       // Exit
-      markers.exit().transition().duration(500).attr("r", 0).remove();
+      markers.exit().remove();
 
       // Enter
       const enter = markers.enter()
         .append('circle')
         .attr('class', 'marker')
-        .attr('r', 0) // Start small
+        .attr('r', 4)
         .on("mouseover", function(event, d) {
             isHovering = true;
-            d3.select(this).transition().duration(200).attr("r", 7);
+            d3.select(this).attr("r", 6);
 
             tooltip.html(`
-                <h3>${d.user}</h3>
+                <h3>${d.displayName}</h3>
                 <div class="info-row">Status: <span class="highlight">${d.completed}</span></div>
                 <div class="info-row"><i>${d.institution}</i></div>
             `);
@@ -571,11 +816,20 @@
         })
         .on("mouseout", function() {
             isHovering = false;
-            d3.select(this).transition().duration(200).attr("r", 4);
+            d3.select(this).attr("r", 4);
             tooltip.style("opacity", 0);
         });
-
-      enter.transition().duration(500).attr("r", 4);
+      
+      // Fade in markers
+      enter.transition()
+        .duration(300)
+        .style('opacity', 1);
+      
+      // Update member count
+      document.getElementById('member-count').textContent = `${locations.length + 10} Members`;
+      
+      // Force immediate position update
+      updateMarkerPositions();
     }
 
     // Update positions (Run every frame)

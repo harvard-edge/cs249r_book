@@ -3,19 +3,57 @@
 # TinyTorch Installer
 # ============================================================================
 #
-# Usage:
+# USAGE
+# -----
 #   curl -sSL tinytorch.ai/install | bash
 #
-# What this script does:
-#   1. Checks prerequisites (git, Python 3.8+)
-#   2. Shows you what it's about to do and asks for confirmation
-#   3. Downloads the TinyTorch folder using git sparse checkout
-#   4. Creates a Python virtual environment
-#   5. Installs dependencies and the tito CLI
+# WHAT THIS SCRIPT DOES
+# ---------------------
+#   1. Checks prerequisites (git, Python 3.8+, venv module)
+#   2. Shows installation plan and asks for confirmation
+#   3. Downloads TinyTorch via git sparse checkout (minimal download)
+#   4. Creates an isolated Python virtual environment (.venv/)
+#   5. Installs all dependencies and the tito CLI
 #
-# The installer creates a 'tinytorch' directory in your current location.
+# AFTER INSTALLATION
+# ------------------
+#   cd tinytorch
+#   source .venv/bin/activate
+#   tito setup                    # First-time profile setup
 #
-# For more information: https://mlsysbook.ai/tinytorch/
+# WHAT GETS CREATED
+# -----------------
+#   tinytorch/                    # Created in your current directory
+#   ├── .venv/                    # Python virtual environment
+#   ├── src/                      # Module source notebooks (20 modules)
+#   ├── tinytorch/                # Package - your implementations go here
+#   ├── tito/                     # CLI tool source
+#   ├── milestones/               # Historical ML recreations
+#   ├── tests/                    # Test suites for your code
+#   ├── datasets/                 # Sample datasets (tinydigits, tinytalks)
+#   ├── modules/                  # Working directory (populated by tito)
+#   ├── bin/                      # CLI entry point
+#   ├── requirements.txt          # Python dependencies
+#   ├── pyproject.toml            # Package configuration
+#   ├── settings.ini              # nbdev configuration
+#   └── README.md, LICENSE        # Documentation
+#
+# REQUIREMENTS
+# ------------
+#   - git (any recent version)
+#   - Python 3.8 or higher
+#   - Python venv module (usually included; on Debian/Ubuntu: apt install python3-venv)
+#   - Internet connection to GitHub
+#
+# DOCUMENTATION
+# -------------
+#   https://tinytorch.ai
+#   https://mlsysbook.ai/tinytorch/
+#
+# SOURCE
+# ------
+#   https://github.com/harvard-edge/cs249r_book (tinytorch/ subdirectory)
+#
 # ============================================================================
 
 set -e  # Exit on any error
@@ -28,11 +66,10 @@ REPO_SHORT="harvard-edge/cs249r_book"
 BRANCH="main"
 INSTALL_DIR="tinytorch"
 SPARSE_PATH="tinytorch"
-MIN_PYTHON_VERSION="3.8"
 TINYTORCH_VERSION="0.1.0"
 
 # ============================================================================
-# ANSI Color Codes
+# ANSI Color Codes (for terminal output)
 # ============================================================================
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -44,7 +81,8 @@ DIM='\033[2m'
 NC='\033[0m'  # No Color / Reset
 
 # ============================================================================
-# Cleanup on exit
+# Cleanup Handler
+# Removes temporary files if script exits unexpectedly
 # ============================================================================
 TEMP_DIR=""
 cleanup() {
@@ -63,7 +101,7 @@ print_error() { echo -e "${RED}✗${NC} $1"; }
 print_warning() { echo -e "${YELLOW}!${NC} $1"; }
 print_info() { echo -e "${BLUE}→${NC} $1"; }
 
-# Spinner for long-running tasks
+# Spinner animation for long-running background tasks
 spin() {
     local pid=$1
     local msg=$2
@@ -90,6 +128,7 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Find the Python 3 command (python3 or python)
 get_python_cmd() {
     if command_exists python3; then
         echo "python3"
@@ -100,6 +139,7 @@ get_python_cmd() {
     fi
 }
 
+# Check if Python version is 3.8+
 check_python_version() {
     local python_cmd="$1"
     local version major minor
@@ -118,20 +158,19 @@ check_python_version() {
 
 # ============================================================================
 # Pre-flight Checks
+# These run before any installation to catch problems early
 # ============================================================================
 
 check_write_permission() {
-    # Check write permission
     if ! touch ".tinytorch_write_test" 2>/dev/null; then
         print_error "Cannot write to this directory"
-        echo "  Check your permissions or cd somewhere else."
+        echo "  Check your permissions or cd to a writable directory."
         exit 1
     fi
     rm -f ".tinytorch_write_test"
 }
 
 check_not_in_venv() {
-    # Warn if already in a virtual environment
     if [ -n "$VIRTUAL_ENV" ]; then
         print_warning "You're inside a virtual environment: $VIRTUAL_ENV"
         echo "  Consider deactivating first: deactivate"
@@ -140,7 +179,6 @@ check_not_in_venv() {
 }
 
 check_internet() {
-    # Quick connectivity check
     if ! git ls-remote --exit-code "$REPO_URL" >/dev/null 2>&1; then
         print_error "Cannot reach GitHub"
         echo "  Check your internet connection and try again."
@@ -199,13 +237,14 @@ check_prerequisites() {
 check_existing_directory() {
     if [ -d "$INSTALL_DIR" ]; then
         print_error "Directory '$INSTALL_DIR' already exists"
-        echo "  Remove it first or cd to a different location."
+        echo "  Remove it first: rm -rf $INSTALL_DIR"
+        echo "  Or cd to a different location."
         exit 1
     fi
 }
 
 # ============================================================================
-# Main Installation
+# Installation Steps
 # ============================================================================
 
 show_plan_and_confirm() {
@@ -214,9 +253,9 @@ show_plan_and_confirm() {
     echo -e "  ${BOLD}$PWD/tinytorch${NC}"
     echo ""
     echo "What will be installed:"
-    echo -e "  • Tiny${YELLOW}🔥Torch${NC} learning modules"
-    echo "  • Python virtual environment"
-    echo "  • tito CLI tool"
+    echo -e "  - Tiny${YELLOW}🔥Torch${NC} learning modules"
+    echo "  - Python virtual environment (.venv/)"
+    echo "  - tito CLI tool"
     echo ""
     echo -e "${DIM}Source: ${REPO_SHORT} (${BRANCH} branch)${NC}"
     echo ""
@@ -225,12 +264,14 @@ show_plan_and_confirm() {
 do_install() {
     echo ""
 
-    # Step 1: Download
+    # -------------------------------------------------------------------------
+    # Step 1: Download from GitHub using sparse checkout
+    # This downloads only the tinytorch/ subdirectory, not the entire repo
+    # -------------------------------------------------------------------------
     echo -e "${BLUE}[1/4]${NC} Downloading from GitHub..."
 
     TEMP_DIR=$(mktemp -d)
 
-    # Clone in background with spinner
     git clone --depth 1 --filter=blob:none --sparse --branch "$BRANCH" \
         "$REPO_URL" "$TEMP_DIR/repo" >/dev/null 2>&1 &
     local clone_pid=$!
@@ -248,7 +289,7 @@ do_install() {
     cd "$TEMP_DIR/repo"
     git sparse-checkout set "$SPARSE_PATH" 2>/dev/null
 
-    # Capture commit hash for provenance
+    # Capture commit hash for provenance tracking
     COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
     cd "$original_dir"
 
@@ -257,9 +298,24 @@ do_install() {
     rm -rf "$TEMP_DIR"
     TEMP_DIR=""
 
-    # Remove dev-only files that students don't need
-    # NOTE: Keep settings.ini - required for nbdev_export to work!
-    # NOTE: Keep milestones/ - required for tito milestone run!
+    # -------------------------------------------------------------------------
+    # Clean up dev-only files that students don't need
+    #
+    # KEEP (students need these):
+    #   src/           - Module source notebooks
+    #   tinytorch/     - Package where student code goes
+    #   tito/          - CLI tool source
+    #   milestones/    - Historical ML recreations
+    #   modules/       - Working directory (cleared, populated by tito)
+    #   tests/         - Test suites for student code
+    #   datasets/      - Sample datasets (tinydigits, tinytalks)
+    #   bin/           - CLI entry point script
+    #   requirements.txt, pyproject.toml - Package dependencies
+    #   settings.ini   - nbdev config (needed for exports)
+    #   README.md, LICENSE - Documentation
+    #
+    # REMOVE (dev-only):
+    # -------------------------------------------------------------------------
     rm -rf "$INSTALL_DIR/paper" \
            "$INSTALL_DIR/instructor" \
            "$INSTALL_DIR/site" \
@@ -285,15 +341,16 @@ do_install() {
            "$INSTALL_DIR/.tinyrc" \
            "$INSTALL_DIR/.editorconfig" \
            "$INSTALL_DIR/.gitattributes" \
+           "$INSTALL_DIR/settings.json" \
+           "$INSTALL_DIR/.tinytorch" \
            2>/dev/null || true
 
-    # Clear modules/ folder - students populate via CLI exports from src/
+    # Clear modules/ folder - students populate this via tito CLI exports
     if [ -d "$INSTALL_DIR/modules" ]; then
         find "$INSTALL_DIR/modules" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null || true
     fi
 
-    # Clear tinytorch/core/ contents - students build this through module exports
-    # Keep the directory and __init__.py files, but remove implementation files
+    # Clear tinytorch/core/ implementation files - students build these
     if [ -d "$INSTALL_DIR/tinytorch/core" ]; then
         find "$INSTALL_DIR/tinytorch/core" -name "*.py" ! -name "__init__.py" -type f -delete 2>/dev/null || true
     fi
@@ -304,23 +361,27 @@ do_install() {
 
     print_success "Downloaded TinyTorch ${DIM}(${COMMIT_HASH})${NC}"
 
-    # Step 2: Create virtual environment
+    # -------------------------------------------------------------------------
+    # Step 2: Create Python virtual environment
+    # -------------------------------------------------------------------------
     echo -e "${BLUE}[2/4]${NC} Creating Python environment..."
     cd "$INSTALL_DIR"
     $PYTHON_CMD -m venv .venv
     source .venv/bin/activate
     print_success "Created virtual environment"
 
+    # -------------------------------------------------------------------------
     # Step 3: Install dependencies
+    # -------------------------------------------------------------------------
     echo -e "${BLUE}[3/4]${NC} Installing dependencies..."
 
-    # Upgrade pip
+    # Upgrade pip first
     pip install --upgrade pip -q 2>/dev/null &
     local pip_pid=$!
     spin $pip_pid "Upgrading pip..."
     wait $pip_pid
 
-    # Install requirements
+    # Install from requirements.txt
     if [ -f "requirements.txt" ]; then
         total_pkgs=$(grep -c -E "^[^#]" requirements.txt 2>/dev/null || echo "?")
         pip install -r requirements.txt -q 2>/dev/null &
@@ -329,7 +390,7 @@ do_install() {
         wait $req_pid
     fi
 
-    # Install tinytorch
+    # Install TinyTorch package in editable mode (includes tito CLI)
     pip install -e . -q 2>/dev/null &
     local tt_pid=$!
     spin $tt_pid "Installing TinyTorch..."
@@ -337,13 +398,15 @@ do_install() {
 
     print_success "Installed dependencies"
 
-    # Step 4: Verify
+    # -------------------------------------------------------------------------
+    # Step 4: Verify installation
+    # -------------------------------------------------------------------------
     echo -e "${BLUE}[4/4]${NC} Verifying installation..."
     if command -v tito >/dev/null 2>&1; then
-        print_success "Verified installation"
+        print_success "Verified tito CLI"
     else
-        print_warning "Installation completed but verification failed"
-        echo "  Try: cd tinytorch && source .venv/bin/activate && pip install -e ."
+        print_warning "Installation completed but tito not found in PATH"
+        echo "  This is normal - activate the venv first."
     fi
 }
 
@@ -353,31 +416,28 @@ print_success_message() {
     echo ""
     echo -e "${GREEN}✓${NC} Tiny${YELLOW}🔥Torch${NC} installed successfully!"
     echo ""
-    echo -e "${BOLD}Get started:${NC}"
+    echo -e "${BOLD}Next steps:${NC}"
     echo ""
     echo -e "  ${CYAN}cd $install_path${NC}"
     echo -e "  ${CYAN}source .venv/bin/activate${NC}"
-    echo -e "  ${CYAN}tito module start 01${NC}       # Start building!"
+    echo -e "  ${CYAN}tito setup${NC}"
     echo ""
-    echo -e "${BOLD}Useful commands:${NC}"
+    echo -e "${BOLD}Then start building:${NC}"
     echo ""
-    echo -e "  ${CYAN}tito module status${NC}         # View your progress"
-    echo -e "  ${CYAN}tito system health${NC}         # Check environment health"
-    echo -e "  ${CYAN}tito update${NC}                # Check for updates"
+    echo -e "  ${CYAN}tito module start 01${NC}"
     echo ""
     echo -e "${DIM}Documentation: https://tinytorch.ai${NC}"
     echo ""
 }
 
 # ============================================================================
-# Main
+# Main Entry Point
 # ============================================================================
 
 main() {
-    # Show banner first
     print_banner
 
-    # Phase 1: Pre-flight checks
+    # Pre-flight checks
     check_write_permission
     check_existing_directory
     check_not_in_venv
@@ -386,7 +446,7 @@ main() {
     check_prerequisites
     check_internet
 
-    # Phase 2: Show plan and confirm
+    # Show plan and confirm
     show_plan_and_confirm
 
     read -p "Continue? [Y/n] " -n 1 -r
@@ -396,10 +456,10 @@ main() {
         exit 0
     fi
 
-    # Phase 3: Do the install
+    # Run installation
     do_install
 
-    # Phase 4: Success
+    # Success message with next steps
     print_success_message
 }
 

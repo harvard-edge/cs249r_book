@@ -1,46 +1,37 @@
-// Add permanent textbook link to sidebar on all pages
+// Add tagline directly under the logo in the sidebar
 document.addEventListener('DOMContentLoaded', function() {
-    // Find the sidebar header (logo area)
-    const sidebarHeader = document.querySelector('.sidebar-header-items.sidebar-primary__section');
+    // Find the logo link in the sidebar
+    const logoLink = document.querySelector('.navbar-brand.logo');
 
-    if (sidebarHeader) {
-        // Create the link container
-        const linkBox = document.createElement('div');
-        linkBox.className = 'sidebar-textbook-link';
-        linkBox.style.cssText = `
-            margin: 0.5rem 1rem;
-            padding: 0.6rem 0.8rem;
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            text-align: center;
-        `;
-
-        // Create the actual link
-        const link = document.createElement('a');
-        link.href = 'https://mlsysbook.ai';
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.textContent = 'Hands-on labs for the ML Systems textbook';
-        link.style.cssText = `
-            font-size: 0.75rem;
+    if (logoLink) {
+        // Create the tagline element
+        const tagline = document.createElement('a');
+        tagline.href = 'https://mlsysbook.ai';
+        tagline.target = '_blank';
+        tagline.rel = 'noopener noreferrer';
+        tagline.className = 'sidebar-tagline';
+        tagline.innerHTML = 'A Build-It-Yourself Companion to the <strong>Machine Learning Systems</strong> textbook';
+        tagline.style.cssText = `
+            display: block;
+            font-size: 0.7rem;
             color: #64748b;
             text-decoration: none;
             line-height: 1.4;
-            display: block;
+            margin-top: 0.25rem;
+            padding: 0 0.5rem;
+            text-align: center;
             transition: color 0.2s ease;
         `;
 
         // Add hover effect
-        link.addEventListener('mouseenter', function() {
-            this.style.color = '#1e293b';
+        tagline.addEventListener('mouseenter', function() {
+            this.style.color = '#f97316';
         });
-        link.addEventListener('mouseleave', function() {
+        tagline.addEventListener('mouseleave', function() {
             this.style.color = '#64748b';
         });
 
-        // Assemble and insert
-        linkBox.appendChild(link);
-        sidebarHeader.appendChild(linkBox);
+        // Insert right after the logo
+        logoLink.parentNode.insertBefore(tagline, logoLink.nextSibling);
     }
 });

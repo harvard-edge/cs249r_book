@@ -49,10 +49,20 @@ class SetupCommand(BaseCommand):
 
     @property
     def description(self) -> str:
-        return "First-time setup: install packages, create profile, initialize workspace"
+        return "Set up your development environment (idempotent)"
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         """Add setup command arguments."""
+        parser.description = (
+            "Set up your Tiny🔥Torch development environment.\n\n"
+            "This command is idempotent - safe to run multiple times. "
+            "It will skip steps that are already complete and only set up what's missing.\n\n"
+            "Steps performed:\n"
+            "  1. Create virtual environment (.venv)\n"
+            "  2. Install required packages (numpy, jupyter, etc.)\n"
+            "  3. Create user profile (~/.tinytorch/profile.json)\n"
+            "  4. Validate environment"
+        )
         parser.add_argument(
             '--skip-venv',
             action='store_true',
@@ -71,103 +81,169 @@ class SetupCommand(BaseCommand):
         parser.add_argument(
             '--force',
             action='store_true',
-            help='Force setup even if already configured'
+            help='Prompt to recreate existing components (venv, profile)'
         )
 
-    def check_existing_setup(self) -> bool:
-        """Check if Tiny🔥Torch is already set up."""
-        # Check for profile file in .tinytorch (flat structure)
-        profile_path = Path.home() / ".tinytorch" / "profile.json"
-
-        # Check for virtual environment
+    def get_existing_venv_path(self) -> Optional[Path]:
+        """Return the path to an existing venv, or None if not found."""
         venv_paths = [
             self.config.project_root / ".venv",
             self.config.project_root / "venv",
             self.config.project_root / "tinytorch-env",
         ]
+        for venv_path in venv_paths:
+            if venv_path.exists():
+                return venv_path
+        return None
 
-        has_profile = profile_path.exists()
-        has_venv = any(venv_path.exists() for venv_path in venv_paths)
+    def get_profile_path(self) -> Path:
+        """Return the path to the profile file."""
+        return Path.home() / ".tinytorch" / "profile.json"
 
-        return has_profile and has_venv
+    def check_existing_setup(self) -> Dict[str, Any]:
+        """Check what parts of setup already exist.
+
+        Returns a dict with status of each component.
+        """
+        profile_path = self.get_profile_path()
+        venv_path = self.get_existing_venv_path()
+
+        return {
+            "has_profile": profile_path.exists(),
+            "profile_path": profile_path,
+            "has_venv": venv_path is not None,
+            "venv_path": venv_path,
+        }
+
+    def _check_package_installed(self, package_name: str) -> bool:
+        """Check if a package is already installed."""
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "show", package_name],
+                capture_output=True, text=True, timeout=10
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
 
     def install_packages(self) -> bool:
         """Install required packages for Tiny🔥Torch development."""
-        self.console.print("📦 Installing Tiny🔥Torch dependencies...")
-
         # Essential packages for TinyTorch
         packages = [
-            "numpy>=1.21.0",
-            "matplotlib>=3.5.0",
-            "jupyter>=1.0.0",
-            "jupyterlab>=3.0.0",
-            "jupytext>=1.13.0",
-            "rich>=12.0.0",
-            "pyyaml>=6.0",
-            "psutil>=5.8.0"
+            ("numpy", "numpy>=1.21.0"),
+            ("matplotlib", "matplotlib>=3.5.0"),
+            ("jupyter", "jupyter>=1.0.0"),
+            ("jupyterlab", "jupyterlab>=3.0.0"),
+            ("jupytext", "jupytext>=1.13.0"),
+            ("rich", "rich>=12.0.0"),
+            ("pyyaml", "pyyaml>=6.0"),
+            ("psutil", "psutil>=5.8.0"),
         ]
 
+        # First, check what's already installed
+        to_install = []
+        already_installed = []
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+            transient=True
+        ) as progress:
+            task = progress.add_task("Checking installed packages...", total=None)
+            for pkg_name, pkg_spec in packages:
+                if self._check_package_installed(pkg_name):
+                    already_installed.append(pkg_name)
+                else:
+                    to_install.append((pkg_name, pkg_spec))
+
+        if already_installed:
+            self.console.print(f"[green]✅ Already installed:[/green] [dim]{', '.join(already_installed)}[/dim]")
+
+        if not to_install:
+            self.console.print("[green]✅ All dependencies already installed[/green]")
+        else:
+            self.console.print(f"[cyan]📦 Installing:[/cyan] {', '.join(p[0] for p in to_install)}")
+
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=self.console
+            ) as progress:
+
+                for pkg_name, pkg_spec in to_install:
+                    task = progress.add_task(f"Installing {pkg_name}...", total=None)
+
+                    try:
+                        result = subprocess.run([
+                            sys.executable, "-m", "pip", "install", "-q", pkg_spec
+                        ], capture_output=True, text=True, timeout=120)
+
+                        if result.returncode == 0:
+                            progress.update(task, description=f"[green]✅ {pkg_name}[/green]")
+                        else:
+                            progress.update(task, description=f"[red]❌ {pkg_name} failed[/red]")
+                            self.console.print(f"[red]Error installing {pkg_spec}: {result.stderr}[/red]")
+                            return False
+
+                    except subprocess.TimeoutExpired:
+                        progress.update(task, description=f"[yellow]⏰ {pkg_name} timed out[/yellow]")
+                        self.console.print(f"[yellow]Warning: {pkg_spec} installation timed out[/yellow]")
+                    except Exception as e:
+                        progress.update(task, description=f"[red]❌ {pkg_name} error[/red]")
+                        self.console.print(f"[red]Error installing {pkg_spec}: {e}[/red]")
+                        return False
+
+        # Install Tiny🔥Torch in development mode
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=self.console
         ) as progress:
+            task = progress.add_task("Installing Tiny🔥Torch in development mode...", total=None)
 
-            for package in packages:
-                task = progress.add_task(f"Installing {package.split('>=')[0]}...", total=None)
+            try:
+                result = subprocess.run([
+                    sys.executable, "-m", "pip", "install", "-q", "-e", "."
+                ], cwd=self.config.project_root, capture_output=True, text=True, timeout=120)
 
-                try:
-                    result = subprocess.run([
-                        sys.executable, "-m", "pip", "install", package
-                    ], capture_output=True, text=True, timeout=120)
-
-                    if result.returncode == 0:
-                        progress.update(task, description=f"✅ {package.split('>=')[0]} installed")
-                    else:
-                        progress.update(task, description=f"❌ {package.split('>=')[0]} failed")
-                        self.console.print(f"[red]Error installing {package}: {result.stderr}[/red]")
-                        return False
-
-                except subprocess.TimeoutExpired:
-                    progress.update(task, description=f"⏰ {package.split('>=')[0]} timed out")
-                    self.console.print(f"[yellow]Warning: {package} installation timed out[/yellow]")
-                except Exception as e:
-                    progress.update(task, description=f"❌ {package.split('>=')[0]} error")
-                    self.console.print(f"[red]Error installing {package}: {e}[/red]")
+                if result.returncode == 0:
+                    progress.update(task, description="[green]✅ Tiny🔥Torch installed[/green]")
+                    return True
+                else:
+                    progress.update(task, description="[red]❌ Tiny🔥Torch install failed[/red]")
+                    self.console.print(f"[red]Failed to install Tiny🔥Torch: {result.stderr}[/red]")
                     return False
 
-        # Install Tiny🔥Torch in development mode
-        try:
-            self.console.print("🔧 Installing Tiny🔥Torch in development mode...")
-            result = subprocess.run([
-                sys.executable, "-m", "pip", "install", "-e", "."
-            ], cwd=self.config.project_root, capture_output=True, text=True)
-
-            if result.returncode == 0:
-                self.console.print("✅ Tiny🔥Torch installed in development mode")
-                return True
-            else:
-                self.console.print(f"[red]Failed to install Tiny🔥Torch: {result.stderr}[/red]")
+            except Exception as e:
+                progress.update(task, description="[red]❌ Tiny🔥Torch error[/red]")
+                self.console.print(f"[red]Error installing Tiny🔥Torch: {e}[/red]")
                 return False
 
-        except Exception as e:
-            self.console.print(f"[red]Error installing Tiny🔥Torch: {e}[/red]")
-            return False
+    def create_virtual_environment(self, force: bool = False) -> bool:
+        """Create a virtual environment for Tiny🔥Torch development.
 
-    def create_virtual_environment(self) -> bool:
-        """Create a virtual environment for Tiny🔥Torch development."""
+        Args:
+            force: If True, recreate even if venv exists (after user confirmation).
+        """
         venv_path = self.config.project_root / ".venv"
 
         if venv_path.exists():
-            if not Confirm.ask(f"Virtual environment already exists at {venv_path}. Recreate?"):
-                self.console.print("[green]✅ Using existing virtual environment[/green]")
+            if not force:
+                # Silently use existing - this is idempotent behavior
+                self.console.print(f"[green]✅ Using existing virtual environment[/green] [dim]({venv_path})[/dim]")
+                return True
+
+            # Force mode - ask before destroying
+            if not Confirm.ask(f"[yellow]Recreate virtual environment at {venv_path}?[/yellow] This will delete the existing one"):
+                self.console.print("[green]✅ Keeping existing virtual environment[/green]")
                 return True
 
             self.console.print("🐍 Recreating virtual environment...")
             import shutil
             shutil.rmtree(venv_path)
         else:
-            self.console.print("🐍 Setting up virtual environment...")
+            self.console.print("🐍 Creating virtual environment...")
 
         try:
             # Detect Apple Silicon and force arm64 if needed
@@ -227,20 +303,33 @@ class SetupCommand(BaseCommand):
             return False
 
 
-    def create_user_profile(self) -> Dict[str, Any]:
-        """Create user profile for development tracking."""
-        self.console.print("👋 Creating your Tiny🔥Torch development profile...")
+    def create_user_profile(self, force: bool = False) -> Dict[str, Any]:
+        """Create user profile for development tracking.
 
+        Args:
+            force: If True, prompt to update existing profile.
+        """
         # Use .tinytorch directory (flat structure, not nested under community/)
         tinytorch_dir = Path.home() / ".tinytorch"
         tinytorch_dir.mkdir(parents=True, exist_ok=True)
         profile_path = tinytorch_dir / "profile.json"
 
         if profile_path.exists():
-            if not Confirm.ask("Profile already exists. Update it?"):
-                import json
-                with open(profile_path, 'r') as f:
-                    return json.load(f)
+            import json
+            with open(profile_path, 'r') as f:
+                existing_profile = json.load(f)
+
+            if not force:
+                # Silently use existing profile
+                self.console.print(f"[green]✅ Using existing profile[/green] [dim]({existing_profile.get('name', 'Unknown')})[/dim]")
+                return existing_profile
+
+            # Force mode - ask before overwriting
+            if not Confirm.ask("[yellow]Update your existing profile?[/yellow]"):
+                self.console.print("[green]✅ Keeping existing profile[/green]")
+                return existing_profile
+
+        self.console.print("👋 Creating your Tiny🔥Torch development profile...")
 
         # Collect user information
         name = Prompt.ask("Your name", default="Tiny🔥Torch Developer")
@@ -271,27 +360,41 @@ class SetupCommand(BaseCommand):
 
     def validate_environment(self) -> bool:
         """Validate the development environment setup."""
-        self.console.print("🔍 Validating environment...")
-
         checks = [
-            ("Python version", self.check_python_version),
-            ("NumPy installation", self.check_numpy),
-            ("Jupyter installation", self.check_jupyter),
-            ("TinyTorch package", self.check_tinytorch_package)
+            ("Python version (≥3.8)", self.check_python_version),
+            ("NumPy", self.check_numpy),
+            ("Jupyter", self.check_jupyter),
+            ("TinyTorch CLI", self.check_tinytorch_package)
         ]
 
         all_passed = True
+        results = []
 
-        for check_name, check_func in checks:
-            try:
-                if check_func():
-                    self.console.print(f"  ✅ {check_name}")
-                else:
-                    self.console.print(f"  ❌ {check_name}")
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+            transient=True
+        ) as progress:
+            task = progress.add_task("Validating environment...", total=None)
+            for check_name, check_func in checks:
+                try:
+                    passed = check_func()
+                    results.append((check_name, passed, None))
+                    if not passed:
+                        all_passed = False
+                except Exception as e:
+                    results.append((check_name, False, str(e)))
                     all_passed = False
-            except Exception as e:
-                self.console.print(f"  ❌ {check_name}: {e}")
-                all_passed = False
+
+        # Print results
+        for check_name, passed, error in results:
+            if passed:
+                self.console.print(f"  [green]✅ {check_name}[/green]")
+            elif error:
+                self.console.print(f"  [red]❌ {check_name}: {error}[/red]")
+            else:
+                self.console.print(f"  [red]❌ {check_name}[/red]")
 
         return all_passed
 
@@ -402,7 +505,7 @@ class SetupCommand(BaseCommand):
                     ))
                     if Confirm.ask("[bold]Update your community profile?[/bold]", default=True):
                         self.console.print("[dim]Opening profile editor...[/dim]")
-                        open_url("https://mlsysbook.ai/tinytorch/community/?action=profile", self.console, show_manual_fallback=True)
+                        open_url("https://mlsysbook.ai/tinytorch/community/?action=profile&community=true", self.console, show_manual_fallback=True)
                 else:
                     self.console.print("[yellow]⚠️  Community connection failed or was cancelled. You can try again later with 'tito login'.[/yellow]")
             except Exception as e:
@@ -441,46 +544,59 @@ class SetupCommand(BaseCommand):
             border_style="bright_green"
         ))
 
-        # Check if already set up
-        if not args.force and self.check_existing_setup():
-            if not Confirm.ask("Tiny🔥Torch appears to be already set up. Continue anyway?"):
-                self.console.print("✅ Setup cancelled. You're ready to go!")
-                self.console.print("💡 Try: tito module start 01")
-                return 0
+        # Check existing setup status
+        status = self.check_existing_setup()
+        is_fresh_install = not status["has_venv"] and not status["has_profile"]
+
+        if args.force:
+            self.console.print("[yellow]⚠️  Force mode: will prompt to recreate existing components[/yellow]\n")
+        elif not is_fresh_install:
+            self.console.print("[dim]Checking existing setup...[/dim]\n")
 
         try:
-            # Step 1: Virtual environment (optional)
+            # Step 1: Virtual environment
+            self.console.print("[bold]Step 1/4:[/bold] Virtual Environment")
             if not args.skip_venv:
-                if not self.create_virtual_environment():
+                if not self.create_virtual_environment(force=args.force):
                     self.console.print("[yellow]⚠️  Virtual environment setup failed, but continuing...[/yellow]")
+            else:
+                self.console.print("[dim]  ⏭️  Skipped (--skip-venv)[/dim]")
+            self.console.print()
 
             # Step 2: Install packages
+            self.console.print("[bold]Step 2/4:[/bold] Package Installation")
             if not args.skip_packages:
                 if not self.install_packages():
                     self.console.print("[red]❌ Package installation failed[/red]")
                     return 1
+            else:
+                self.console.print("[dim]  ⏭️  Skipped (--skip-packages)[/dim]")
+            self.console.print()
 
             # Step 3: Create user profile
+            self.console.print("[bold]Step 3/4:[/bold] User Profile")
             profile = {}
             if not args.skip_profile:
-                profile = self.create_user_profile()
+                profile = self.create_user_profile(force=args.force)
+            else:
+                self.console.print("[dim]  ⏭️  Skipped (--skip-profile)[/dim]")
+            self.console.print()
 
             # Step 4: Validate environment
+            self.console.print("[bold]Step 4/4:[/bold] Environment Validation")
             if not self.validate_environment():
                 self.console.print("[yellow]⚠️  Some validation checks failed, but setup completed[/yellow]")
+            self.console.print()
 
             # Success!
-            if profile:  # Only print if profile was created
+            if profile:
                 self.print_success_message(profile)
             else:
-                self.console.print("✅ Setup completed successfully!")
-                self.console.print("💡 Try: tito module start 01")
+                self.console.print("[green]✅ Setup completed successfully![/green]")
+                self.console.print("💡 Try: [bold]tito module start 01[/bold]")
 
             # Prompt to join community
             self.prompt_community_registration()
-
-            # Prompt to login to CLI
-            # self.prompt_community_login()
 
             return 0
 

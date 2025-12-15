@@ -517,18 +517,15 @@ class TestCommand(BaseCommand):
 
     def _get_dev_file_path(self, module_name: str) -> Path:
         """Get the path to a module's dev file."""
+        # Extract short name from module directory name (e.g., "01_tensor" -> "tensor")
+        short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+
         # Try .ipynb first (notebook format), then .py
-        ipynb_path = Path("modules") / module_name / f"{module_name}.ipynb"
+        ipynb_path = Path("modules") / module_name / f"{short_name}.ipynb"
         if ipynb_path.exists():
             return ipynb_path
 
         # Fallback to .py file
-        # Extract short name from module directory name
-        if module_name.startswith(tuple(f"{i:02d}_" for i in range(100))):
-            short_name = module_name[3:]  # Remove "00_" prefix
-        else:
-            short_name = module_name
-
         return Path("modules") / module_name / f"{short_name}.py"
 
     def _generate_summary_report(self, results: List[ModuleTestResult]) -> None:

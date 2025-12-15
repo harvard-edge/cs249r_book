@@ -45,7 +45,7 @@ class SubmissionHandler:
 
         # Derive paths from the project root in config
         self.tito_dir = self.config.project_root / ".tito"
-        self.progress_file = self.config.project_root / "progress.json"
+        self.progress_file = self.tito_dir / "progress.json"
         self.milestones_file = self.tito_dir / "milestones.json"
         self.config_file = self.tito_dir / "config.json" # Though config is passed via CLIConfig
 
