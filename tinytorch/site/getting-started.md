@@ -147,7 +147,7 @@ The milestone uses YOUR implementations to recreate Rosenblatt's 1957 Perceptron
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
-You're recreating ML history with your own code.
+You're recreating ML history with your own code. *By Module 19, you'll benchmark against MLPerf—the industry standard for ML performance.*
 
 ---
 
