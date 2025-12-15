@@ -1,7 +1,7 @@
 import { injectStyles } from './modules/styles.js';
-import { renderLayout, updateNavState } from './modules/ui.js';
-import { getSession } from './modules/state.js';
-import { openModal, closeModal, handleToggle, handleAuth, handleLogout, setMode } from './modules/auth.js';
+import { renderLayout, updateNavState } from './modules/ui.js?v=2';
+import { getSession } from './modules/state.js?v=2';
+import { openModal, closeModal, handleToggle, handleAuth, handleLogout, setMode, verifySession } from './modules/auth.js?v=2';
 import { openProfileModal, closeProfileModal, handleProfileUpdate } from './modules/profile.js';
 import { setupCameraEvents } from './modules/camera.js';
 
@@ -12,7 +12,10 @@ import { setupCameraEvents } from './modules/camera.js';
     // 2. Render Layout
     renderLayout();
 
-    // 3. Add Event Listeners
+    // 3. Verify Session (Async)
+    verifySession();
+
+    // 4. Add Event Listeners
     const menuBtn = document.getElementById('menuBtn');
     const sidebar = document.getElementById('sidebar');
     const authBtn = document.getElementById('authBtn');

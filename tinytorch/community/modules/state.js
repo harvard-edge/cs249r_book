@@ -12,10 +12,14 @@ export function getSession() {
     return { token, email, isLoggedIn: !!token };
 }
 
-export function forceLogin() {
-    console.warn("Session expired or invalid. Redirecting to login...");
+export function clearSession() {
     localStorage.removeItem("tinytorch_token");
     localStorage.removeItem("tinytorch_refresh_token");
     localStorage.removeItem("tinytorch_user");
+}
+
+export function forceLogin() {
+    console.warn("Session expired or invalid. Redirecting to login...");
+    clearSession();
     window.location.href = getBasePath() + '/index.html?action=login';
 }

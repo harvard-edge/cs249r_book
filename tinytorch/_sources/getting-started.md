@@ -6,46 +6,39 @@ You're ahead of the curve. TinyTorch is functional but still being refined. Expe
 
 **Best approach right now:** Browse the code and concepts. For hands-on building, check back when we announce classroom readiness (Summer/Fall 2026).
 
-Questions or feedback? [Join the discussion →](https://github.com/harvard-edge/cs249r_book/discussions/1076)
+Questions or feedback? [Join the discussion](https://github.com/harvard-edge/cs249r_book/discussions/1076)
 ```
 
 ```{note} Prerequisites Check
 This guide requires **Python programming** (classes, functions, NumPy basics) and **basic linear algebra** (matrix multiplication).
 ```
 
-Welcome to TinyTorch! This comprehensive guide will get you started whether you're a student building ML systems, an instructor setting up a course, or a TA supporting learners.
+## The Journey
 
-<div style="background: #f8f9fa; padding: 2rem; border-radius: 0.5rem; margin: 2rem 0; text-align: center;">
-<h2 style="margin: 0 0 1rem 0; color: #495057;">Choose Your Path</h2>
-<p style="margin: 0 0 1.5rem 0; color: #6c757d;">Jump directly to your role-specific guide</p>
+TinyTorch follows a simple pattern: **build modules, unlock milestones, recreate ML history**.
 
-<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; max-width: 800px; margin: 0 auto;">
+```{mermaid}
+:align: center
+graph LR
+    A[Install] --> B[Setup]
+    B --> C[Start Module]
+    C --> D[Complete Module]
+    D --> E[Run Milestone]
+    E --> C
 
-<a href="#students" style="display: block; background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #1976d2; text-decoration: none; transition: transform 0.2s;">
-<div style="font-size: 2rem; margin-bottom: 0.5rem;"></div>
-<div style="color: #0d47a1; font-weight: 600; font-size: 1.1rem;">Students</div>
-<div style="color: #1565c0; font-size: 0.85rem; margin-top: 0.5rem;">Setup + Build Workflow</div>
-</a>
+    style A fill:#e3f2fd
+    style B fill:#e3f2fd
+    style C fill:#fff3e0
+    style D fill:#f0fdf4
+    style E fill:#fce4ec
+```
 
-<a href="#instructors" style="display: block; background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #7b1fa2; text-decoration: none; transition: transform 0.2s;">
-<div style="font-size: 2rem; margin-bottom: 0.5rem;"></div>
-<div style="color: #4a148c; font-weight: 600; font-size: 1.1rem;">Instructors & TAs</div>
-<div style="color: #6a1b9a; font-size: 0.85rem; margin-top: 0.5rem;">Coming Soon</div>
-</a>
+As you complete modules, you unlock milestones that recreate landmark moments in ML history—using YOUR code.
 
-</div>
-</div>
-
-
-<a id="students"></a>
-## For Students: Build Your ML Framework
-
-### Quick Setup (2 Minutes)
-
-Get your development environment ready to build ML systems from scratch:
+## Step 1: Install & Setup (2 Minutes)
 
 ```bash
-# One-line install (run from a project folder like ~/projects)
+# Install TinyTorch (run from a project folder like ~/projects)
 curl -sSL tinytorch.ai/install | bash
 
 # Activate and verify
@@ -61,116 +54,135 @@ tito setup
 - Installs all dependencies
 - Verifies installation
 
-**Keeping up to date:**
-```bash
-tito update # Check for and install updates (your work is preserved)
-```
+## Step 2: Your First Module (15 Minutes)
 
-### Join the Community (Optional)
+Let's build Module 01 (Tensor)—the foundation of all neural networks.
 
-After setup, join the global TinyTorch community and validate your installation:
+### Start the module
 
 ```bash
-# Log in to join the community
-tito community login
-
-# Run baseline benchmark to validate setup
-tito benchmark baseline
+tito module start 01
 ```
 
-All community data is stored locally in `.tinytorch/` directory. See **[Community Guide](community.md)** for complete features.
+This opens the module notebook and tracks your progress.
 
-### The TinyTorch Build Cycle
+### Work in the notebook
 
-TinyTorch follows a simple three-step workflow that you'll repeat for each module:
-
-```{mermaid}
-:align: center
-:caption: "**TinyTorch Build Cycle.** The three-step workflow you repeat for each module: edit in Jupyter, export to the package, and validate with milestone scripts."
-graph LR
- A[1. Edit Module<br/>modules/NN_name.ipynb] --> B[2. Export to Package<br/>tito module complete N]
- B --> C[3. Validate with Milestones<br/>Run milestone scripts]
- C --> A
-
- style A fill:#fffbeb
- style B fill:#f0fdf4
- style C fill:#fef3c7
-```
-
-#### Step 1: Edit Modules
-
-Work on module notebooks interactively:
+Edit `modules/01_tensor/01_tensor.ipynb` in Jupyter:
 
 ```bash
-# Example: Working on Module 01 (Tensor)
-cd modules/01_tensor
-jupyter lab 01_tensor.ipynb
+jupyter lab modules/01_tensor/01_tensor.ipynb
 ```
 
-Each module is a Jupyter notebook where you'll:
-- Implement the required functionality from scratch
-- Add docstrings and comments
-- Run and test your code inline
-- See immediate feedback
-
-#### Step 2: Export to Package
-
-Once your implementation is complete, export it to the main TinyTorch package:
-
-```bash
-tito module complete MODULE_NUMBER
-
-# Example:
-tito module complete 01 # Export Module 01 (Tensor)
-```
-
-After export, your code becomes importable:
-```python
-from tinytorch.core.tensor import Tensor # YOUR implementation!
-```
-
-#### Step 3: Validate with Milestones
-
-Run milestone scripts to prove your implementation works:
-
-```bash
-tito milestone run perceptron  # Uses YOUR Tensor, Activations, Layers
-```
-
-Each milestone validates that your modules work together correctly. Use `tito milestone list` to see all available milestones and their required modules.
-
-**What if validation fails?** If a milestone script produces errors:
-1. Read the error message carefully—it usually points to the problem
-2. Run module tests: `tito module test 01` to check your implementation
-3. Return to your Jupyter notebook to debug and fix
-4. Re-export with `tito module complete 01` and try again
-
-**See [Milestone System](tito/milestones)** for the complete progression through ML history.
-
-### Your First Module (15 Minutes)
-
-Start with Module 01 to build tensor operations - the foundation of all neural networks:
-
-```bash
-# Step 1: Edit the module
-cd modules/01_tensor
-jupyter lab 01_tensor.ipynb
-
-# Step 2: Export when ready
-tito module complete 01
-
-# Step 3: Validate
-from tinytorch.core.tensor import Tensor
-x = Tensor([1, 2, 3]) # YOUR implementation!
-```
-
-**What you'll implement:**
+You'll implement:
 - N-dimensional array creation
 - Mathematical operations (add, multiply, matmul)
 - Shape manipulation (reshape, transpose)
-- Memory layout understanding
 
-### Module Progression
+### Complete the module
+
+When your implementation is ready, export it to the TinyTorch package:
+
+```bash
+tito module complete 01
+```
+
+Your code is now importable:
+
+```python
+from tinytorch.core.tensor import Tensor  # YOUR implementation!
+x = Tensor([1, 2, 3])
+```
+
+## Step 3: Your First Milestone
+
+Now for the payoff! After completing the required modules (01-03), run a milestone:
+
+```bash
+tito milestone run perceptron
+```
+
+The milestone uses YOUR implementations to recreate Rosenblatt's 1957 Perceptron:
+
+```text
+Checking prerequisites for Milestone 01...
+All required modules completed!
+
+Testing YOUR implementations...
+  * Tensor import successful
+  * Activations import successful
+  * Layers import successful
+YOUR TinyTorch is ready!
+
++----------------------- Milestone 01 (1957) -----------------------+
+|  Milestone 01: Perceptron (1957)                                  |
+|  Frank Rosenblatt's First Neural Network                          |
+|                                                                   |
+|  Running: milestones/01_1957_perceptron/01_rosenblatt_forward.py  |
+|  All code uses YOUR TinyTorch implementations!                    |
++-------------------------------------------------------------------+
+
+Starting Milestone 01...
+
+Assembling perceptron with YOUR TinyTorch modules...
+   * Linear layer: 2 -> 1 (YOUR Module 03!)
+   * Activation: Sigmoid (YOUR Module 02!)
+
++-------------------- Achievement Unlocked --------------------+
+|  MILESTONE ACHIEVED!                                         |
+|                                                              |
+|  You completed Milestone 01: Perceptron (1957)               |
+|  Frank Rosenblatt's First Neural Network                     |
+|                                                              |
+|  What makes this special:                                    |
+|  - Every tensor operation: YOUR Tensor class                 |
+|  - Every layer: YOUR Linear implementation                   |
+|  - Every activation: YOUR Sigmoid function                   |
++--------------------------------------------------------------+
+```
+
+You're recreating ML history with your own code. *By Module 19, you'll benchmark against MLPerf—the industry standard for ML performance.*
+
+## The Pattern Continues
+
+As you complete more modules, you unlock more milestones:
+
+| Modules Completed | Milestone Unlocked | What You Recreate |
+|-------------------|-------------------|-------------------|
+| 01-03 | `perceptron` | The 1957 Perceptron |
+| 01-05 | `backprop` | 1986 Backpropagation |
+| 01-07 | `lenet` | 1989 LeNet CNN |
+| 01-09 | `alexnet` | 2012 AlexNet |
+| 01-13 | `transformer` | 2017 Transformer |
+| 01-19 | `mlperf` | MLPerf Benchmarks |
+
+See all milestones and their requirements:
+
+```bash
+tito milestone list
+```
+
+## Quick Reference
+
+Here are the commands you'll use throughout your journey:
+
+```bash
+# Module workflow
+tito module start <N>       # Start working on module N
+tito module complete <N>    # Export module to package
+tito module status          # See your progress across all modules
+
+# Milestones
+tito milestone list         # See all milestones & requirements
+tito milestone run <name>   # Run a milestone with your code
+
+# Utilities
+tito setup                  # Verify installation
+tito update                 # Update TinyTorch (your work is preserved)
+tito --help                 # Full command reference
+```
+
+## Module Progression
 
 TinyTorch has 20 modules organized in progressive tiers:
 
@@ -185,72 +197,28 @@ TinyTorch has 20 modules organized in progressive tiers:
 
 **See [Foundation Tier Overview](tiers/foundation)** for detailed module descriptions.
 
-### Essential Commands Reference
+## Join the Community (Optional)
 
-The most important commands you'll use daily:
+After setup, join the global TinyTorch community:
 
 ```bash
-# Export module to package
-tito module complete MODULE_NUMBER
-
-# Check module status
-tito module status
-
-# System information
-tito system info
-
-# Community features
-tito community login
-tito benchmark baseline
+tito community login        # Join the community
 ```
 
-**See [TITO CLI Reference](tito/overview.md)** for complete command documentation.
+See **[Community Guide](community.md)** for complete features.
 
-### Notebook Platform Options
-
-**For Viewing & Exploration (Online):**
-- Jupyter/MyBinder: Click "Launch Binder" on any notebook page
-- Google Colab: Click "Launch Colab" for GPU access
-- Marimo: Click "~ Open in Marimo" for reactive notebooks
-
-**For Full Development (Local - Required):**
-
-To actually build the framework, you need local installation:
-- Full `tinytorch.*` package available
-- Run milestone validation scripts
-- Use `tito` CLI commands
-- Execute complete experiments
-- Export modules to package
-
-**Note for NBGrader assignments**: Submit `.ipynb` files to preserve grading metadata.
-
-### What's Next?
-
-1. **Continue Building**: Follow the module progression (01 → 02 → 03...)
-2. **Run Milestones**: Prove your implementations work with real ML history
-3. **Build Intuition**: Understand ML systems from first principles
-
-The goal isn't just to write code - it's to **understand** how modern ML frameworks work by building one yourself.
-
-
-## For Instructors & TAs: Classroom Support Coming Soon
+## For Instructors & TAs
 
 ```{note}
-We're building comprehensive classroom support with NBGrader integration. For hands-on building today, TinyTorch is fully functional for self-paced learning.
+Classroom support with NBGrader integration is coming (target: Summer/Fall 2026). TinyTorch works for self-paced learning today.
 ```
 
 **What's Planned:**
 - Automated assignment generation with solutions removed
 - Auto-grading against test suites
-- Manual review interface for ML Systems Thinking questions
 - Progress tracking across all 20 modules
 - Grade export to CSV for LMS integration
 
-**Current Status:** TinyTorch works for self-paced learning today. For classroom deployment, we recommend waiting for the official NBGrader integration (target: Summer/Fall 2026).
-
 **Interested in early adoption?** [Join the discussion](https://github.com/harvard-edge/cs249r_book/discussions/1076) to share your use case.
 
-Check back for detailed setup instructions and grading rubrics when classroom support is available.
-
-
-**Ready to start building?** Head to the [Foundation Tier](tiers/foundation) and begin with Module 01!
+**Ready to start?** Run `tito module start 01` and begin building!

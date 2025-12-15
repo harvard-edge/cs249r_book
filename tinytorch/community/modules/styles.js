@@ -6,7 +6,7 @@ export function injectStyles() {
             position: fixed;
             top: 30px;
             left: 30px;
-            z-index: 100;
+            z-index: 120;
             width: 35px;
             height: 25px;
             cursor: pointer;
@@ -42,7 +42,7 @@ export function injectStyles() {
             position: fixed;
             top: 30px;
             right: 30px;
-            z-index: 100;
+            z-index: 120;
             display: flex;
             align-items: center;
             gap: 10px;
@@ -107,7 +107,7 @@ export function injectStyles() {
             height: 100%;
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);
-            z-index: 90;
+            z-index: 110;
             transform: translateX(-100%);
             transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
             box-shadow: 2px 0 15px rgba(0,0,0,0.1);
