@@ -110,7 +110,7 @@ tito milestone run perceptron
 
 The milestone uses YOUR implementations to recreate Rosenblatt's 1957 Perceptron:
 
-```
+```text
 Checking prerequisites for Milestone 01...
 All required modules completed!
 
