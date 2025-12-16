@@ -5,7 +5,7 @@
 #
 # USAGE
 # -----
-#   curl -sSL tinytorch.ai/install | bash
+#   curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
 #
 # WHAT THIS SCRIPT DOES
 # ---------------------

@@ -39,7 +39,7 @@ As you complete modules, you unlock milestones that recreate landmark moments in
 
 ```bash
 # Install TinyTorch (run from a project folder like ~/projects)
-curl -sSL tinytorch.ai/install | bash
+curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
 
 # Activate and verify
 cd tinytorch
