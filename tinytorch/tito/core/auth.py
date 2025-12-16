@@ -5,12 +5,15 @@ import http.server
 import threading
 import json
 import os
+import ssl
 import time
 import socket
 import webbrowser
 from pathlib import Path
 from typing import Optional, Dict
 from urllib.parse import urlparse, parse_qs
+
+import certifi
 
 # --- Configuration Constants ---
 API_BASE_URL = "https://tinytorch.netlify.app"
@@ -134,8 +137,11 @@ def refresh_token(console: "Console") -> Optional[str]:
         method="POST"
     )
 
+    # Create SSL context with certifi certificates for macOS compatibility
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+
     try:
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, context=ssl_context) as response:
             if response.status == 200:
                 new_session = json.loads(response.read().decode('utf-8'))
 

@@ -6,10 +6,13 @@ with the TinyTorch CLI's config and console objects, using only standard librari
 """
 import json
 import os
+import ssl
 import urllib.request
 import urllib.error
 from pathlib import Path
 from typing import Dict, Any, Optional
+
+import certifi
 
 from rich.console import Console
 from rich.table import Table
@@ -181,8 +184,11 @@ class SubmissionHandler:
             method="POST"
         )
 
+        # Create SSL context with certifi certificates for macOS compatibility
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+
         try:
-            with urllib.request.urlopen(req, timeout=15) as response: # Added timeout
+            with urllib.request.urlopen(req, timeout=15, context=ssl_context) as response:
                 if 200 <= response.status < 300:
                     resp_body = json.loads(response.read().decode('utf-8'))
                     self.console.print("✅ [bold green]Sync Successful![/bold green]")
