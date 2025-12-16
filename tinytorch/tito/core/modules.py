@@ -6,9 +6,22 @@ This ensures the CLI is always in sync with actual module folders.
 """
 
 import re
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Tuple, Optional
+
+
+@dataclass
+class ModuleMetadata:
+    """Metadata extracted from module.yaml file."""
+    title: str
+    subtitle: str
+    description: str
+
+
+# Required fields in module.yaml
+REQUIRED_METADATA_FIELDS = {'title', 'subtitle', 'description'}
 
 
 def _find_project_root() -> Path:
@@ -123,6 +136,116 @@ def module_exists(module_input: str) -> bool:
     return get_module_name(module_input) is not None
 
 
+def _parse_yaml_file(content: str) -> Dict[str, str]:
+    """
+    Parse simple YAML content (key: value format).
+
+    This is a lightweight parser that handles the simple module.yaml format
+    without requiring the pyyaml dependency.
+
+    Args:
+        content: YAML file content
+
+    Returns:
+        Dictionary of parsed key-value pairs
+    """
+    data = {}
+    for line in content.strip().split('\n'):
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if ':' in line:
+            key, value = line.split(':', 1)
+            data[key.strip()] = value.strip()
+    return data
+
+
+def _validate_module_yaml(data: Dict[str, str], yaml_path: Path) -> Optional[str]:
+    """
+    Validate module.yaml content has all required fields.
+
+    Args:
+        data: Parsed YAML data
+        yaml_path: Path to the YAML file (for error messages)
+
+    Returns:
+        Error message string if invalid, None if valid
+    """
+    missing = REQUIRED_METADATA_FIELDS - set(data.keys())
+    if missing:
+        return f"module.yaml missing required fields: {', '.join(sorted(missing))} in {yaml_path}"
+
+    # Check for empty values
+    for field in REQUIRED_METADATA_FIELDS:
+        if not data[field]:
+            return f"module.yaml has empty '{field}' field in {yaml_path}"
+
+    return None
+
+
+def get_module_metadata(module_input: str) -> Optional[ModuleMetadata]:
+    """
+    Get metadata for a module from its module.yaml file.
+
+    Args:
+        module_input: Module number ("01") or folder name ("01_tensor")
+
+    Returns:
+        ModuleMetadata or None if not found/parseable
+    """
+    folder = get_module_name(module_input)
+    if not folder:
+        return None
+
+    project_root = _find_project_root()
+    yaml_file = project_root / 'src' / folder / 'module.yaml'
+
+    if not yaml_file.exists():
+        return None
+
+    try:
+        content = yaml_file.read_text(encoding='utf-8')
+        data = _parse_yaml_file(content)
+
+        # Validate
+        error = _validate_module_yaml(data, yaml_file)
+        if error:
+            # Log warning but don't crash
+            import sys
+            print(f"Warning: {error}", file=sys.stderr)
+            return None
+
+        return ModuleMetadata(
+            title=data['title'],
+            subtitle=data['subtitle'],
+            description=data['description']
+        )
+    except Exception as e:
+        import sys
+        print(f"Warning: Failed to parse {yaml_file}: {e}", file=sys.stderr)
+        return None
+
+
+@lru_cache(maxsize=1)
+def get_all_module_metadata() -> Dict[str, ModuleMetadata]:
+    """
+    Get metadata for all modules.
+
+    Returns: {"01": ModuleMetadata(...), "02": ModuleMetadata(...), ...}
+    Cached for performance.
+    """
+    mapping = _discover_modules()
+    result = {}
+
+    for num in mapping:
+        metadata = get_module_metadata(num)
+        if metadata:
+            result[num] = metadata
+
+    return result
+
+
 def clear_cache():
-    """Clear the module discovery cache (useful after adding new modules)."""
+    """Clear all module caches (useful after adding new modules)."""
     _discover_modules.cache_clear()
+    get_all_module_metadata.cache_clear()
