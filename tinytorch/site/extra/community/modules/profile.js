@@ -1,6 +1,38 @@
 import { SUPABASE_URL, NETLIFY_URL, getBasePath } from './config.js';
 import { forceLogin } from './state.js?v=2';
 
+export async function geocodeAndSetCoordinates(location) {
+    const latInput = document.getElementById('profileLatitude');
+    const lonInput = document.getElementById('profileLongitude');
+
+    if (!location) {
+        if(latInput) latInput.value = '';
+        if(lonInput) lonInput.value = '';
+        return;
+    }
+
+    try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(location)}&limit=1`);
+        if (!response.ok) {
+            throw new Error('Geocoding search failed');
+        }
+        const data = await response.json();
+        if (data && data.length > 0) {
+            const { lat, lon } = data[0];
+            if(latInput) latInput.value = lat;
+            if(lonInput) lonInput.value = lon;
+        } else {
+            console.warn(`Could not geocode '${location}'`);
+            if(latInput) latInput.value = '';
+            if(lonInput) lonInput.value = '';
+        }
+    } catch (error) {
+        console.error('Geocoding error:', error);
+        if(latInput) latInput.value = '';
+        if(lonInput) lonInput.value = '';
+    }
+}
+
 export function openProfileModal() {
     const profileOverlay = document.getElementById('profileOverlay');
     profileOverlay.classList.add('active');
@@ -113,6 +145,8 @@ function populateProfileForm(data) {
     const profileInstitutionInput = document.getElementById('profileInstitution');
     const profileWebsitesInput = document.getElementById('profileWebsites');
     const avatarPreview = document.getElementById('avatarPreview');
+    const profileLatitude = document.getElementById('profileLatitude');
+    const profileLongitude = document.getElementById('profileLongitude');
 
     profileDisplayNameInput.value = data.display_name || '';
     profileAvatarUrlInput.value = data.avatar || data.avatar_url || '';
@@ -120,6 +154,8 @@ function populateProfileForm(data) {
     profileFullNameInput.value = data.full_name || '';
     profileSummaryTextarea.value = data.bio || data.summary || '';
     profileLocationInput.value = data.location || '';
+    if (profileLatitude) profileLatitude.value = data.latitude || '';
+    if (profileLongitude) profileLongitude.value = data.longitude || '';
 
     profileInstitutionInput.value = Array.isArray(data.institution) ? data.institution.join(', ') : (data.institution || '');
 
@@ -147,15 +183,19 @@ export async function handleProfileUpdate(e) {
     const profileLocationInput = document.getElementById('profileLocation');
     const profileInstitutionInput = document.getElementById('profileInstitution');
     const profileWebsitesInput = document.getElementById('profileWebsites');
+    const profileLatitude = document.getElementById('profileLatitude');
+    const profileLongitude = document.getElementById('profileLongitude');
 
     const updatedProfile = {
         display_name: profileDisplayNameInput.value,
         avatar: profileAvatarUrlInput.value,
-                full_name: profileFullNameInput.value,
+        full_name: profileFullNameInput.value,
         summary: profileSummaryTextarea.value,
         location: profileLocationInput.value,
         institution: profileInstitutionInput.value.split(',').map(s => s.trim()).filter(s => s),
         website: profileWebsitesInput.value.split(',').map(s => s.trim()).filter(s => s),
+        latitude: profileLatitude && profileLatitude.value ? parseFloat(profileLatitude.value) : null,
+        longitude: profileLongitude && profileLongitude.value ? parseFloat(profileLongitude.value) : null,
     };
 
     let retryCount = 0;

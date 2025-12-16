@@ -2,7 +2,7 @@ import { injectStyles } from './modules/styles.js';
 import { renderLayout, updateNavState } from './modules/ui.js?v=2';
 import { getSession } from './modules/state.js?v=2';
 import { openModal, closeModal, handleToggle, handleAuth, handleLogout, setMode, verifySession } from './modules/auth.js?v=2';
-import { openProfileModal, closeProfileModal, handleProfileUpdate } from './modules/profile.js';
+import { openProfileModal, closeProfileModal, handleProfileUpdate, geocodeAndSetCoordinates } from './modules/profile.js';
 import { setupCameraEvents } from './modules/camera.js';
 import { getBasePath } from './modules/config.js';
 
@@ -85,14 +85,17 @@ import { getBasePath } from './modules/config.js';
     if (profileLogoutBtn) profileLogoutBtn.addEventListener('click', handleLogout);
     if (profileForm) profileForm.addEventListener('submit', handleProfileUpdate);
 
+    // Add blur event listener for geocoding the location
+    const profileLocationInput = document.getElementById('profileLocation');
+    if (profileLocationInput) {
+        profileLocationInput.addEventListener('blur', () => {
+            geocodeAndSetCoordinates(profileLocationInput.value);
+        });
+    }
+
     // Check for redirect action
     const params = new URLSearchParams(window.location.search);
     const action = params.get('action');
-
-    if (params.get('community')) {
-        window.location.href = getBasePath() + '/community.html';
-        return;
-    }
 
     if (action === 'login') {
         localStorage.removeItem("tinytorch_token");
@@ -112,5 +115,8 @@ import { getBasePath } from './modules/config.js';
         if (!isLoggedIn) {
             openModal('signup');
         }
+    } else if (params.get('community')) {
+        window.location.href = getBasePath() + '/community.html';
+        return;
     }
 })();
