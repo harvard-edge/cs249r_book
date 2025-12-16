@@ -1314,7 +1314,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 8.6 Systems Analysis - Compression Techniques
+## 8.1 Systems Analysis - Compression Techniques
 
 Understanding the real-world effectiveness of different compression techniques through systematic measurement and comparison.
 
@@ -1325,7 +1325,7 @@ The fundamental challenge in model compression is balancing three competing obje
 
 # %% [markdown]
 """
-## 8.5 Measuring Compression Impact with Profiler
+## 8.2 Measuring Compression Impact with Profiler
 
 Now let's use the **Profiler** tool from Module 14 to measure the actual parameter reduction from pruning. This demonstrates the complete workflow: profile baseline (M14) → apply compression (M16) → measure impact (M14+M16).
 
@@ -1403,7 +1403,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 8.6 Systems Analysis - Compression Techniques
+## 8.3 Systems Analysis - Compression Techniques
 
 Understanding the real-world effectiveness of different compression techniques.
 """
@@ -1625,7 +1625,7 @@ For deploying on a mobile device with 50MB model limit and 100ms latency require
 
 # %% [markdown]
 """
-## 8.5 Verification: Prove Pruning Works
+## 8.4 Verification: Prove Pruning Works
 
 Before running the full integration test, let's create a verification function that
 proves pruning actually creates zeros using real zero counting.

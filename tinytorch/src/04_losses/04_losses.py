@@ -44,8 +44,8 @@ Let's measure prediction quality!
 """
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/04_losses/losses_dev.py
-**Building Side:** Code exports to tinytorch.core.losses
+**Learning Side:** You work in `src/04_losses/04_losses.py`
+**Building Side:** Code exports to `tinytorch.core.losses`
 
 ```python
 # Final package structure:
@@ -109,7 +109,7 @@ EPSILON = 1e-7  # Small value to prevent log(0) and numerical instability
 
 # %% [markdown]
 """
-# Part 1: Introduction - What Are Loss Functions?
+## Part 1: Introduction - What Are Loss Functions?
 
 Loss functions are the mathematical conscience of machine learning. They measure the distance between what your model predicts and what actually happened. Without loss functions, models have no way to improve - they're like athletes training without knowing their score.
 
@@ -180,7 +180,7 @@ Each loss function creates a different "error landscape" that guides learning in
 
 # %% [markdown]
 """
-# Part 2: Mathematical Foundations
+## Part 2: Mathematical Foundations
 
 ## Mean Squared Error (MSE)
 The foundation of regression, MSE measures the average squared distance between predictions and targets:
@@ -221,7 +221,7 @@ The mathematics naturally handles both "positive" and "negative" cases in a sing
 
 # %% [markdown]
 """
-# Part 3: Implementation - Building Loss Functions
+## Part 3: Implementation - Building Loss Functions
 
 Let's implement our loss functions with proper numerical stability and clear educational structure.
 """
@@ -879,7 +879,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-# Part 4: Integration - Bringing It Together
+## Part 4: Integration - Bringing It Together
 
 Now let's test how our loss functions work together with real data scenarios and explore their behavior with different types of predictions.
 
@@ -1031,7 +1031,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-# Part 5: Systems Analysis - Understanding Loss Function Performance
+## Part 5: Systems Analysis - Understanding Loss Function Performance
 
 Loss functions seem simple, but they have important computational and numerical properties that affect training performance. Let's analyze the systems aspects.
 
@@ -1187,7 +1187,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-# Part 6: Production Context - How Loss Functions Scale
+## Part 6: Production Context - How Loss Functions Scale
 
 Understanding how loss functions behave in production helps make informed engineering decisions about model architecture and training strategies.
 

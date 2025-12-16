@@ -710,7 +710,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 Part 3: Cache-Aware Generation
+## 🎯 Part 3b: Cache-Aware Generation
 
 ### Integration Strategy
 
