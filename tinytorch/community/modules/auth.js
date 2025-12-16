@@ -1,6 +1,6 @@
 import { NETLIFY_URL, SUPABASE_URL, getBasePath } from './config.js';
 import { updateNavState } from './ui.js?v=2';
-import { closeProfileModal } from './profile.js';
+import { closeProfileModal, openProfileModal } from './profile.js';
 import { getSession, forceLogin, clearSession } from './state.js?v=2';
 
 let currentMode = 'signup';
@@ -207,7 +207,13 @@ export async function handleAuth(e) {
                     localStorage.setItem("tinytorch_user", JSON.stringify(data.user));
                     updateNavState();
 
-                    window.location.href = basePath + '/dashboard.html';
+                    const params = new URLSearchParams(window.location.search);
+                    if (params.get('action') === 'profile') {
+                        closeModal();
+                        openProfileModal();
+                    } else {
+                        window.location.href = basePath + '/dashboard.html';
+                    }
                 }
             } else {
                 alert('If an account exists for this email, we have sent you a login link. Otherwise, please check your email to confirm your signup.');
