@@ -93,7 +93,7 @@ that every other TinyTorch component depends on.
 
 # %% [markdown]
 """
-## 1. Introduction: What is a Tensor?
+## Introduction: What is a Tensor?
 
 A tensor is a multi-dimensional array that serves as the fundamental data structure in machine learning. Think of it as a universal container that can hold data in different dimensions:
 
@@ -135,7 +135,7 @@ Raw Data → Preprocessing → Tensor Creation → Model Forward Pass → Loss C
 
 # %% [markdown]
 """
-## 2. Foundations: Mathematical Background
+## Foundations: Mathematical Background
 
 ### Core Operations We'll Implement
 
@@ -189,7 +189,7 @@ This memory layout affects performance in real ML workloads - algorithms that ac
 
 # %% [markdown]
 """
-## 3. Implementation: Building Tensor Foundation
+## Implementation: Building Tensor Foundation
 
 Let's build our Tensor class step by step, testing each component as we go.
 
@@ -1275,7 +1275,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 4. Integration: Bringing It Together
+## Integration: Bringing It Together
 
 Let's test how our Tensor operations work together in realistic scenarios that mirror neural network computations. This integration demonstrates that our individual operations combine correctly for complex ML workflows.
 

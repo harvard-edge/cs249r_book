@@ -104,7 +104,7 @@ DROPOUT_MAX_PROB = 1.0  # Maximum dropout probability (drop everything)
 
 # %% [markdown]
 """
-## 1. Introduction: What are Neural Network Layers?
+## Introduction: What are Neural Network Layers?
 
 Neural network layers are the fundamental building blocks that transform data as it flows through a network. Each layer performs a specific computation:
 
@@ -123,7 +123,7 @@ Each layer learns its own piece of the puzzle. Linear layers learn which feature
 
 # %% [markdown]
 """
-## 2. Foundations: Mathematical Background
+## Foundations: Mathematical Background
 
 ### Linear Layer Mathematics
 A linear layer implements: **y = xW + b**
@@ -156,7 +156,7 @@ Memory usage: 4 bytes/param × 203,530 = ~814KB for weights alone
 
 # %% [markdown]
 """
-## 3. Implementation: Building Layer Foundation
+## Implementation: Building Layer Foundation
 
 Let's build our layer system step by step. We'll implement two essential layer types:
 
@@ -789,7 +789,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 4. Integration: Bringing It Together
+## Integration: Bringing It Together
 
 Now that we've built both layer types, let's see how they work together to create a complete neural network architecture. We'll manually compose a realistic 3-layer MLP for MNIST digit classification.
 
@@ -844,7 +844,7 @@ Parameter Breakdown (Manual Layer Composition):
 
 # %% [markdown]
 """
-## 5. Systems Analysis: Memory and Performance
+## Systems Analysis: Memory and Performance
 
 Now let's analyze the systems characteristics of our layer implementations. Understanding memory usage and computational complexity helps us build efficient neural networks.
 
@@ -1146,7 +1146,7 @@ You're deploying a 3-layer network (784→256→128→10) to a mobile device:
 
 # %% [markdown]
 """
-## 8. Main Execution Block
+## Main Execution Block
 
 This block runs when the module is executed directly, orchestrating all tests and analyses.
 """

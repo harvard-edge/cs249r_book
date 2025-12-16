@@ -74,7 +74,7 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
-## 1. Introduction - Why Embeddings?
+## Introduction - Why Embeddings?
 
 Neural networks operate on dense vectors, but language consists of discrete tokens. Embeddings are the crucial bridge that converts discrete tokens into continuous, learnable vector representations that capture semantic meaning.
 
@@ -126,7 +126,7 @@ The choice of embedding strategy dramatically affects:
 
 # %% [markdown]
 """
-## 2. Foundations - Embedding Strategies
+## Foundations - Embedding Strategies
 
 Different embedding approaches make different trade-offs between memory, semantic understanding, and computational efficiency.
 
@@ -227,7 +227,7 @@ The combination enables transformers to understand both meaning and order!
 
 # %% [markdown]
 """
-## 3. Implementation - Building Embedding Systems
+## Implementation - Building Embedding Systems
 
 Let's implement embedding systems from basic token lookup to sophisticated position-aware representations. We'll start with the core embedding layer and work up to complete systems.
 """
@@ -736,7 +736,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 4. Integration - Bringing It Together
+## Integration - Bringing It Together
 
 Now let's build the complete embedding system that combines token and positional embeddings into a production-ready component used in modern transformers and language models.
 
@@ -1044,7 +1044,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 5. Systems Analysis - Embedding Trade-offs
+## Systems Analysis - Embedding Trade-offs
 
 Understanding the performance implications of different embedding strategies is crucial for building efficient NLP systems that scale to production workloads.
 """
@@ -1227,7 +1227,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 6. Module Integration Test
+## Module Integration Test
 
 Let's test our complete embedding system to ensure everything works together correctly.
 """

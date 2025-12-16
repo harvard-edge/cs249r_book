@@ -76,7 +76,7 @@ MASK_VALUE = -1e9  # Large negative value used for attention masking (becomes ~0
 
 # %% [markdown]
 """
-## Part 1: Introduction - What is Attention?
+## Introduction - What is Attention?
 
 Attention is the mechanism that allows models to focus on relevant parts of the input when processing sequences. Think of it as a search engine inside your neural network - given a query, attention finds the most relevant keys and retrieves their associated values.
 
@@ -128,7 +128,7 @@ This simple formula powers GPT, BERT, and virtually every modern language model.
 
 # %% [markdown]
 """
-## Part 2: Foundations - Attention Mathematics
+## Foundations - Attention Mathematics
 
 ### The Three Components Visualized
 
@@ -215,7 +215,7 @@ Each row sums to 1.0 (probability distribution)
 
 # %% [markdown]
 """
-## Part 3: Implementation - Building Scaled Dot-Product Attention
+## Implementation - Building Scaled Dot-Product Attention
 
 Now let's implement the core attention mechanism that powers all transformer models. We'll use explicit loops first to make the O(n²) complexity visible and educational.
 
@@ -436,7 +436,7 @@ This test validates our core attention mechanism:
 
 # %% [markdown]
 """
-## Part 4: Implementation - Multi-Head Attention
+## Implementation - Multi-Head Attention
 
 Multi-head attention runs multiple attention "heads" in parallel, each learning to focus on different types of relationships. Think of it as having multiple specialists: one for syntax, one for semantics, one for long-range dependencies, etc.
 
@@ -748,7 +748,7 @@ This test validates our multi-head attention implementation:
 
 # %% [markdown]
 """
-## Part 5: Systems Analysis - Attention's Computational Reality
+## Systems Analysis - Attention's Computational Reality
 
 Now let's analyze the computational and memory characteristics that make attention both powerful and challenging at scale.
 
@@ -916,7 +916,7 @@ The quadratic wall is why long-context AI is an active research frontier, not a 
 
 # %% [markdown]
 """
-## Part 6: Integration - Attention Patterns in Action
+## Integration - Attention Patterns in Action
 
 Let's test our complete attention system with realistic scenarios and visualize actual attention patterns.
 
@@ -1063,7 +1063,7 @@ The attention matrices you see here are the foundation of model interpretability
 
 # %% [markdown]
 """
-## Part 7: Module Integration Test
+## Module Integration Test
 
 Final validation that everything works together correctly.
 """

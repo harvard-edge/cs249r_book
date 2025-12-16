@@ -90,7 +90,7 @@ results = benchmark.run_latency_benchmark()
 
 # %% [markdown]
 """
-## 1. Introduction - What is Fair Benchmarking?
+## Introduction - What is Fair Benchmarking?
 
 Benchmarking in ML systems isn't just timing code - it's about making fair, reproducible comparisons that guide real optimization decisions. Think of it like standardized testing: everyone takes the same test under the same conditions.
 
@@ -121,7 +121,7 @@ This module builds infrastructure that addresses all these challenges while gene
 
 # %% [markdown]
 """
-## 2. Mathematical Foundations - Statistics for Performance Engineering
+## Mathematical Foundations - Statistics for Performance Engineering
 
 Benchmarking is applied statistics. We measure noisy processes (model inference) and need to extract reliable insights about their true performance characteristics.
 
@@ -248,7 +248,7 @@ class OlympicEvent(Enum):
 
 # %% [markdown]
 """
-## 3. Implementation - Building Professional Benchmarking Infrastructure
+## Implementation - Building Professional Benchmarking Infrastructure
 
 We'll build a comprehensive benchmarking system that handles statistical analysis, multi-dimensional comparison, and automated reporting. Each component builds toward production-quality evaluation tools.
 
@@ -1678,7 +1678,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 4. Integration - Building Complete Benchmark Workflows
+## Integration - Building Complete Benchmark Workflows
 
 Now we'll integrate all our benchmarking components into complete workflows that demonstrate professional ML systems evaluation. This integration shows how to combine statistical rigor with practical insights.
 
@@ -1989,7 +1989,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 4.4 Systems Analysis - Benchmark Variance and Optimization Trade-offs
+## Systems Analysis - Benchmark Variance and Optimization Trade-offs
 
 Understanding measurement variance and optimization trade-offs through systematic analysis.
 """
@@ -2076,7 +2076,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 4.4 MLPerf Principles - Industry-Standard Benchmarking
+## MLPerf Principles - Industry-Standard Benchmarking
 
 MLPerf (created by MLCommons) is the industry-standard ML benchmarking framework. Understanding these principles grounds your capstone competition in professional methodology.
 
@@ -2102,7 +2102,7 @@ MLPerf (created by MLCommons) is the industry-standard ML benchmarking framework
 
 # %% [markdown]
 """
-## 4.5 Combination Strategies - Preparing for TorchPerf Olympics
+## Combination Strategies - Preparing for TorchPerf Olympics
 
 Strategic optimization combines multiple techniques for different competition objectives. The order matters: quantize-then-prune may preserve accuracy better, while prune-then-quantize may be faster.
 
@@ -2130,7 +2130,7 @@ Baseline:           Accuracy: 89%, Latency: 45ms, Memory: 12MB
 
 # %% [markdown]
 """
-## 5. Module Integration Test
+## Module Integration Test
 
 Final validation that our complete benchmarking system works correctly and integrates properly with all TinyTorch components.
 

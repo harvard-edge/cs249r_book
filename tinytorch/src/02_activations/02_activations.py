@@ -104,7 +104,7 @@ __all__ = ['Sigmoid', 'ReLU', 'Tanh', 'GELU', 'Softmax']
 
 # %% [markdown]
 """
-## 1. Introduction - What Makes Neural Networks Intelligent?
+## Introduction - What Makes Neural Networks Intelligent?
 
 Consider two scenarios:
 
@@ -141,7 +141,7 @@ This is how deep networks build intelligence from simple mathematical operations
 
 # %% [markdown]
 """
-## 2. Mathematical Foundations
+## Mathematical Foundations
 
 Each activation function serves a different purpose in neural networks:
 
@@ -158,7 +158,7 @@ Let's implement each one with clear explanations and immediate testing!
 
 # %% [markdown]
 """
-## 3. Implementation - Building Activation Functions
+## Implementation - Building Activation Functions
 
 ### 🏗️ Implementation Pattern
 
@@ -843,7 +843,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 4. Integration - Bringing It Together
+## Integration - Bringing It Together
 
 Now let's test how all our activation functions work together and understand their different behaviors.
 """
@@ -1067,7 +1067,7 @@ You've built activations that are both correct AND production-ready!
 
 # %% [markdown]
 """
-## 5. Real-World Production Context
+## Real-World Production Context
 
 Now that you've implemented these activations, let's understand how they're used in real ML systems.
 

@@ -115,7 +115,7 @@ from tinytorch.core.transformer import TransformerBlock, GPT, LayerNorm, MLP
 
 # %% [markdown]
 """
-## 1. Introduction: What are Transformers?
+## Introduction: What are Transformers?
 
 Transformers are the revolutionary architecture that powers modern AI language models like GPT, ChatGPT, and Claude. The key breakthrough is **self-attention**, which allows every token in a sequence to directly interact with every other token, creating rich contextual understanding.
 
@@ -196,7 +196,7 @@ Before transformers, language models used RNNs or CNNs that processed text seque
 
 # %% [markdown]
 """
-## 2. Foundations: Essential Transformer Mathematics
+## Foundations: Essential Transformer Mathematics
 
 ### Layer Normalization: The Stability Engine
 
@@ -326,7 +326,7 @@ Output Tensor (batch, seq_len, embed_dim)
 
 # %% [markdown]
 """
-## 3. Implementation: Building Transformer Components
+## Implementation: Building Transformer Components
 
 Now we'll implement each transformer component with a clear understanding of their role in the overall architecture. We'll follow the pattern: **Explanation → Implementation → Test** for each component.
 
@@ -1369,7 +1369,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 4. Integration: Complete Transformer Workflow
+## Integration: Complete Transformer Workflow
 
 Now that we've built all the components, let's see how they work together in a complete language modeling pipeline. This demonstrates the full power of the transformer architecture.
 
@@ -1468,7 +1468,7 @@ def demonstrate_transformer_integration():
 
 # %% [markdown]
 """
-## 5. Systems Analysis: Parameter Scaling and Memory
+## Systems Analysis: Parameter Scaling and Memory
 
 Transformer models scale dramatically with size, leading to both opportunities and challenges. Let's analyze the computational and memory requirements to understand why training large language models requires massive infrastructure.
 

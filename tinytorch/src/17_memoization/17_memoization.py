@@ -161,7 +161,7 @@ def profile_naive_generation():
 
 # %% [markdown]
 """
-## 🎯 Part 1: Understanding the Autoregressive Generation Problem
+## 🎯 Understanding the Autoregressive Generation Problem
 
 ### The Core Inefficiency
 
@@ -710,7 +710,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 Part 3b: Cache-Aware Generation
+## 🎯 Cache-Aware Generation
 
 ### Integration Strategy
 
@@ -750,7 +750,7 @@ for each new token:
 
 # %% [markdown]
 """
-## 🎯 Part 4: Non-Invasive Integration with Existing Models
+## 🎯 Non-Invasive Integration with Existing Models
 
 ### The Challenge
 
@@ -1234,7 +1234,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Part 5: Systems Analysis - KV Cache Performance
+## Systems Analysis - KV Cache Performance
 
 Now let's analyze the performance characteristics and trade-offs of KV caching.
 """
@@ -1379,7 +1379,7 @@ def analyze_kvcache_speedup():
 
 # %% [markdown]
 """
-## Part 6: Module Integration Test
+## Module Integration Test
 
 Final validation that everything works together correctly before module completion.
 """

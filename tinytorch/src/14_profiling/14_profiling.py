@@ -88,7 +88,7 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
-## 1. Introduction: Why Profiling Matters in ML Systems
+## Introduction: Why Profiling Matters in ML Systems
 
 Imagine you're a detective investigating a performance crime. Your model is running slowly, using too much memory, or burning through compute budgets. Without profiling, you're flying blind - making guesses about what to optimize. With profiling, you have evidence.
 
@@ -147,7 +147,7 @@ bottlenecks just like production ML teams do.
 
 # %% [markdown]
 """
-## 2. Foundations: Performance Measurement Principles
+## Foundations: Performance Measurement Principles
 
 Before we build our profiler, let's understand what we're measuring and why each metric matters.
 
@@ -225,7 +225,7 @@ Result: median(all_times) ← Robust to outliers
 
 # %% [markdown]
 """
-## 3. Implementation: Building the Core Profiler Class
+## Implementation: Building the Core Profiler Class
 
 Now let's implement our profiler step by step. We'll start with the foundation and build up to comprehensive analysis.
 
@@ -1227,7 +1227,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 4. Integration: Advanced Profiling Functions
+## Integration: Advanced Profiling Functions
 
 Now let's validate our higher-level profiling functions that combine core measurements into comprehensive analysis tools.
 
@@ -1343,7 +1343,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 5. Systems Analysis: Understanding Performance Characteristics
+## Systems Analysis: Understanding Performance Characteristics
 
 Let's analyze how different model characteristics affect performance. This analysis guides optimization decisions and helps identify bottlenecks.
 
@@ -1465,7 +1465,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 6. Optimization Insights: Production Performance Patterns
+## Optimization Insights: Production Performance Patterns
 
 Understanding profiling results helps guide optimization decisions. Let's analyze different operation types and measurement overhead.
 

@@ -99,7 +99,7 @@ KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
 
 # %% [markdown]
 """
-## 1. Introduction - Why Tokenization?
+## Introduction - Why Tokenization?
 
 Neural networks operate on numbers, but humans communicate with text. Tokenization is the crucial bridge that converts text into numerical sequences that models can process.
 
@@ -151,7 +151,7 @@ The choice of tokenization strategy dramatically affects:
 
 # %% [markdown]
 """
-## 2. Foundations - Tokenization Strategies
+## Foundations - Tokenization Strategies
 
 Different tokenization approaches make different trade-offs between vocabulary size, sequence length, and semantic understanding.
 
@@ -258,7 +258,7 @@ The sweet spot for most applications is BPE with 10K-50K vocabulary size.
 
 # %% [markdown]
 """
-## 3. Implementation - Building Tokenization Systems
+## Implementation - Building Tokenization Systems
 
 Let's implement tokenization systems from simple character-based to sophisticated BPE. We'll start with the base interface and work our way up to advanced algorithms.
 """
@@ -990,7 +990,7 @@ Final:    "tokenization" → ['token','ization']  # 2 tokens vs 13 characters!
 
 # %% [markdown]
 """
-## 4. Integration - Bringing It Together
+## Integration - Bringing It Together
 
 Now let's build utility functions that make tokenization easy to use in practice. These tools will help you tokenize datasets, analyze performance, and choose the right strategy.
 
@@ -1140,7 +1140,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 5. Systems Analysis - Tokenization Trade-offs
+## Systems Analysis - Tokenization Trade-offs
 
 Understanding the performance implications of different tokenization strategies is crucial for building efficient NLP systems.
 """
@@ -1462,7 +1462,7 @@ Real-World Production Examples:
 
 # %% [markdown]
 """
-## 6. Module Integration Test
+## Module Integration Test
 
 Let's test our complete tokenization system to ensure everything works together.
 """

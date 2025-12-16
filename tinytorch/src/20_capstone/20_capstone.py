@@ -139,7 +139,7 @@ print("📊 Ready to benchmark and submit results")
 
 # %% [markdown]
 """
-## 2. Foundations: The Science of Benchmarking
+## Foundations: The Science of Benchmarking
 
 Before we build our submission system, let's understand what makes a good benchmark and why standardized reporting matters.
 
@@ -327,7 +327,7 @@ Now let's build it!
 
 # %% [markdown]
 """
-## Part 1: Building a Simple Benchmark Model
+## Building a Simple Benchmark Model
 
 For this capstone, we'll use a simple MLP model. This keeps the focus on the benchmarking workflow rather than model complexity.
 
@@ -429,7 +429,7 @@ This small model is perfect for demonstrating optimization impact without long b
 
 # %% [markdown]
 """
-## Part 2: Benchmark Report Class
+## Benchmark Report Class
 
 The BenchmarkReport class encapsulates all benchmark results and provides methods for comprehensive measurement and professional reporting.
 
@@ -598,7 +598,7 @@ This design decision makes our submissions JSON-compatible without custom encode
 
 # %% [markdown]
 """
-## Part 3: Submission Generation
+## Submission Generation
 
 The core function that generates a standardized JSON submission from benchmark results.
 
@@ -821,7 +821,7 @@ In production ML, schema validation is what makes benchmarks trustworthy and com
 
 # %% [markdown]
 """
-## Part 4: Complete Example Workflow
+## Complete Example Workflow
 
 This section demonstrates the complete workflow from model to submission.
 Students can modify this to benchmark their own models!
@@ -926,7 +926,7 @@ Production ML Workflow:
 
 # %% [markdown]
 """
-## Part 4b: Advanced Workflow - Using TinyTorch Optimization APIs
+## Advanced Workflow - Using TinyTorch Optimization APIs
 
 This section demonstrates using the complete optimization pipeline from Modules 14-19:
 - Module 14 (Profiling): Measure baseline performance and identify bottlenecks
@@ -1118,7 +1118,7 @@ This tells other engineers EXACTLY what you did, so they can reproduce or build 
 
 # %% [markdown]
 """
-## Part 5: Module Testing
+## Module Testing
 
 Individual unit tests for each component, following TinyTorch testing patterns.
 

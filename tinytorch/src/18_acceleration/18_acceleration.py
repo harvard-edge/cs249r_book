@@ -92,7 +92,7 @@ We'll fix these issues with vectorization and kernel fusion, achieving 2-5× spe
 
 # %% [markdown]
 """
-## 1. Introduction - The Performance Challenge
+## Introduction - The Performance Challenge
 
 Modern neural networks face two fundamental bottlenecks that limit their speed:
 
@@ -155,7 +155,7 @@ from tinytorch.core.tensor import Tensor
 
 # %% [markdown]
 """
-## 2. Foundations - Vectorization: From Loops to Lightning
+## Foundations - Vectorization: From Loops to Lightning
 
 ### The SIMD Revolution
 
@@ -332,7 +332,7 @@ def test_unit_vectorized_matmul():
 
 # %% [markdown]
 """
-## 3. Implementation - Kernel Fusion: Eliminating Memory Bottlenecks
+## Implementation - Kernel Fusion: Eliminating Memory Bottlenecks
 
 ### The Memory Bandwidth Crisis
 
@@ -632,7 +632,7 @@ def test_unit_fusion_speedup():
 
 # %% [markdown]
 """
-## 3.4 Cache-Aware Matrix Multiplication
+## Cache-Aware Matrix Multiplication
 
 For large matrices that don't fit in cache, we need **tiling** (also called blocking).
 This breaks the computation into cache-sized chunks for better performance.
@@ -762,7 +762,7 @@ def test_unit_tiled_matmul():
 
 # %% [markdown]
 """
-## 4. Systems Analysis - Performance Scaling Patterns
+## Systems Analysis - Performance Scaling Patterns
 
 Let's analyze how our acceleration techniques perform across different scenarios and understand their scaling characteristics.
 """
@@ -975,7 +975,7 @@ def analyze_memory_efficiency():
 
 # %% [markdown]
 """
-## 5. Optimization Insights - Production Acceleration Strategy
+## Optimization Insights - Production Acceleration Strategy
 
 Understanding when and how to apply different acceleration techniques in real-world scenarios.
 """
@@ -1142,7 +1142,7 @@ def analyze_acceleration_decision_framework():
 
 # %% [markdown]
 """
-## 5.5 Measuring Acceleration Gains with Profiler
+## Measuring Acceleration Gains with Profiler
 
 Now let's use the **Profiler** tool you built in Module 15 to measure the actual performance improvements from vectorization. This demonstrates the full workflow: build profiling tools (M15), apply optimizations (M16), measure gains (M15+M16).
 
@@ -1269,7 +1269,7 @@ For edge deployment (memory critical, stability required, hardware diverse):
 
 # %% [markdown]
 """
-## 6. Module Integration Test
+## Module Integration Test
 
 Final validation that all acceleration components work together correctly.
 """
