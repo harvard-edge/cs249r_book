@@ -156,9 +156,9 @@ model.fit(X, y)  # Magic happens
 
 | Audience | Resources |
 |----------|-----------|
-| **Students** | [Course Website](https://mlsysbook.ai/tinytorch) ・ [Quick Start](site/STUDENT_QUICKSTART.md) ・ [FAQ](site/faq.md) |
-| **Instructors** | [Instructor Guide](INSTRUCTOR.md) ・ [NBGrader Setup](site/nbgrader/) ・ [TA Guide](TA_GUIDE.md) |
-| **Contributors** | [Contributing Guide](CONTRIBUTING.md) ・ [Module Development](site/development/module-rules.md) |
+| **Students** | [Course Website](https://mlsysbook.ai/tinytorch) ・ [Getting Started](site/getting-started.md) |
+| **Instructors** | [Instructor Guide](INSTRUCTOR.md) |
+| **Contributors** | [Contributing Guide](CONTRIBUTING.md) |
 
 ---
 

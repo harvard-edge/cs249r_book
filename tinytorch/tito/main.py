@@ -26,8 +26,6 @@ from .core.exceptions import TinyTorchCLIError
 from .core.theme import Theme
 from rich.panel import Panel
 from .commands.base import BaseCommand
-from .commands.test import TestCommand
-from .commands.export import ExportCommand
 from .commands.src import SrcCommand
 from .commands.system import SystemCommand
 from .commands.module import ModuleWorkflowCommand
@@ -82,9 +80,6 @@ class TinyTorchCLI:
             'olympics': OlympicsCommand,
             # Utilities
             'update': UpdateCommand,
-            # Shortcuts
-            'export': ExportCommand,
-            'test': TestCommand,
             'grade': GradeCommand,
             'logo': LogoCommand,
         }
@@ -290,7 +285,8 @@ class TinyTorchCLI:
 
             # Guard against running outside a virtual environment unless explicitly allowed
             if parsed_args.command not in ['setup', 'logo', None]:
-                in_venv = sys.prefix != sys.base_prefix
+                # Check both sys.prefix (traditional activation) and VIRTUAL_ENV (direnv/PATH-based)
+                in_venv = sys.prefix != sys.base_prefix or os.environ.get("VIRTUAL_ENV") is not None
                 allow_system = os.environ.get("TITO_ALLOW_SYSTEM") == "1"
                 if not in_venv and not allow_system:
                     print_error(
