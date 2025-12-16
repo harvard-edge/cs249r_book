@@ -1,0 +1,180 @@
+// Satellite Configuration
+const satelliteConfig = {
+    radius: 90, 
+    rotationSpeed: 0.005,
+    tilt: 0.3
+};
+
+let satelliteGroup;
+let satelliteBody;
+let solarPanels;
+let satUsers = [];
+let tooltipSelection; 
+let currentAngle = 0;
+let originX = 0;
+let originY = 0;
+
+export function initCloud(svgSelection, width, height, tooltipSel) {
+    // Store origin for animation loop
+    originX = width - 180;
+    originY = height / 2;
+    tooltipSelection = tooltipSel;
+
+    satelliteGroup = svgSelection.append('g')
+        .attr("transform", `translate(${originX}, ${originY})`)
+        .style("cursor", "pointer");
+
+    // Draw Satellite Structure (Outline Style)
+    solarPanels = satelliteGroup.append("g").attr("class", "solar-panels");
+    
+    const panelWidth = 75; 
+    const panelHeight = 30;
+    
+    // Left Panel
+    solarPanels.append("rect")
+        .attr("x", -panelWidth - 35)
+        .attr("y", -panelHeight/2)
+        .attr("width", panelWidth)
+        .attr("height", panelHeight)
+        .attr("fill", "rgba(255,255,255,0.1)")
+        .attr("stroke", "#333") 
+        .attr("stroke-width", 1.5)
+        .attr("rx", 2);
+
+    // Right Panel
+    solarPanels.append("rect")
+        .attr("x", 35)
+        .attr("y", -panelHeight/2)
+        .attr("width", panelWidth)
+        .attr("height", panelHeight)
+        .attr("fill", "rgba(255,255,255,0.1)")
+        .attr("stroke", "#333")
+        .attr("stroke-width", 1.5)
+        .attr("rx", 2);
+        
+    // Connecting Rod
+    solarPanels.append("line")
+        .attr("x1", -panelWidth - 35)
+        .attr("x2", panelWidth + 35)
+        .attr("y1", 0)
+        .attr("y2", 0)
+        .attr("stroke", "#555")
+        .attr("stroke-width", 2);
+
+    // Central Body
+    satelliteBody = satelliteGroup.append("circle")
+        .attr("r", 35) 
+        .attr("fill", "#fff") 
+        .attr("stroke", "#333")
+        .attr("stroke-width", 2);
+
+    // Detail Ring
+    satelliteGroup.append("circle")
+        .attr("r", 18)
+        .attr("fill", "none")
+        .attr("stroke", "#777")
+        .attr("stroke-width", 1)
+        .attr("stroke-dasharray", "3,3");
+
+    // Hint Line Group (Vertical line + label) - Static
+    const hintGroup = svgSelection.append("g")
+        .attr("transform", `translate(${originX - 130}, ${originY})`); // Position to the left
+
+    // Vertical line
+    hintGroup.append("line")
+        .attr("x1", 0).attr("y1", -40)
+        .attr("x2", 0).attr("y2", 40)
+        .attr("stroke", "#ccc")
+        .attr("stroke-width", 1);
+
+    // Top Serif
+    hintGroup.append("line")
+        .attr("x1", -3).attr("y1", -40)
+        .attr("x2", 3).attr("y2", -40)
+        .attr("stroke", "#ccc")
+        .attr("stroke-width", 1);
+
+    // Bottom Serif
+    hintGroup.append("line")
+        .attr("x1", -3).attr("y1", 40)
+        .attr("x2", 3).attr("y2", 40)
+        .attr("stroke", "#ccc")
+        .attr("stroke-width", 1);
+
+    // Label for the vertical line
+    hintGroup.append("text")
+        .attr("x", -5) // Slightly to the left of the vertical line
+        .attr("y", 0)
+        .attr("text-anchor", "end") // Align to the right of x=-5
+        .style("font-family", "Courier New")
+        .style("font-size", "8px")
+        .style("fill", "#777")
+        .style("pointer-events", "none")
+        .text("Launched: 12.2025 🔥");
+}
+
+export function updateCloudUsers(users) {
+    satUsers = users.map((d, i) => {
+        // Random distribution inside the habitat
+        const angle = Math.random() * Math.PI * 2;
+        const radius = Math.random() * 25; // Keep within body r=35
+        
+        return {
+            ...d,
+            lx: Math.cos(angle) * radius,
+            ly: Math.sin(angle) * radius
+        };
+    });
+
+    const markers = satelliteGroup.selectAll('circle.sat-marker')
+        .data(satUsers, d => d.user);
+
+    markers.exit().remove();
+
+    markers.enter()
+        .append('circle')
+        .attr('class', 'sat-marker')
+        .attr('r', 3)
+        .attr("fill", "#2ecc71") 
+        .attr("stroke", "#fff")
+        .attr("stroke-width", 1)
+        .style("cursor", "pointer")
+        .on("mouseover", function(event, d) {
+             d3.select(this).attr("r", 5);
+             showSatTooltip(event, d);
+        })
+        .on("mouseout", function() {
+             d3.select(this).attr("r", 3);
+             tooltipSelection.style("opacity", 0);
+        });
+}
+
+export function animateCloud() {
+    currentAngle += satelliteConfig.rotationSpeed;
+    
+    // Rocking animation
+    const deg = Math.sin(currentAngle) * 15; 
+    
+    // Use stored origin coordinates to prevent jumping
+    satelliteGroup.attr("transform", `translate(${originX}, ${originY}) rotate(${deg})`);
+    
+    // Update markers
+    const markers = satelliteGroup.selectAll('circle.sat-marker');
+    markers
+        .attr("cx", d => d.lx)
+        .attr("cy", d => d.ly);
+}
+
+function showSatTooltip(event, d) {
+    tooltipSelection.html(`
+        <h3>${d.displayName}</h3>
+        <div class="info-row">Status: <span class="highlight">${d.completed}</span></div>
+        <div class="info-row"><i>${d.institution}</i></div>
+        <div class="info-row" style="color:#2ecc71;">🛰️ Unknown Location</div>
+    `);
+
+    tooltipSelection
+        .style("left", (event.pageX + 15) + "px")
+        .style("top", (event.pageY - 15) + "px")
+        .style("opacity", 1);
+}
