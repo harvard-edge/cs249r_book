@@ -146,6 +146,8 @@ export function renderLayout() {
                     <div class="profile-form-group">
                         <label for="profileLocation" class="profile-label">Location:</label>
                         <input type="text" class="profile-input" id="profileLocation" placeholder="City, Country">
+                        <input type="hidden" id="profileLatitude">
+                        <input type="hidden" id="profileLongitude">
                     </div>
                     <div class="profile-form-group">
                         <label for="profileInstitution" class="profile-label">Institution (comma-separated):</label>

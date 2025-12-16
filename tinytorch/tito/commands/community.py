@@ -16,7 +16,7 @@ from ..core.browser import open_url
 
 # Community URLs
 URL_COMMUNITY_MAP = "https://mlsysbook.ai/tinytorch/community/community.html"
-URL_COMMUNITY_PROFILE = "https://mlsysbook.ai/tinytorch/community/?action=profile"
+URL_COMMUNITY_PROFILE = "https://mlsysbook.ai/tinytorch/community/?action=profile&community=true"
 
 
 class CommunityCommand(BaseCommand):
