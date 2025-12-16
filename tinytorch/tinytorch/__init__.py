@@ -99,9 +99,15 @@ except ImportError:
 
 # Module 19: Benchmarking
 try:
-    from . import bench
+    from .perf import benchmarking
 except ImportError:
-    bench = None
+    benchmarking = None
+
+# Module 20: Olympics (submission infrastructure)
+try:
+    from . import olympics
+except ImportError:
+    olympics = None
 
 # ============================================================================
 # Public API - All symbols that may be available
@@ -126,6 +132,7 @@ __all__ = [
     # Attention & Transformers
     'MultiHeadAttention', 'scaled_dot_product_attention',
     'LayerNorm', 'MLP', 'TransformerBlock', 'GPT', 'create_causal_mask',
-    # Benchmarking
-    'bench',
+    # Performance & Competition
+    'benchmarking',
+    'olympics',
 ]

@@ -12,7 +12,7 @@
 #     name: python3
 # ---
 
-#| default_exp bench
+#| default_exp perf.benchmarking
 #| export
 
 # Constants for benchmarking defaults
@@ -68,12 +68,12 @@ By the end of this module, you will:
 ## 📦 Where This Code Lives in the Final Package
 
 **Learning Side:** You work in `modules/19_benchmarking/benchmarking_dev.py`
-**Building Side:** Code exports to `tinytorch.benchmarking.benchmark`
+**Building Side:** Code exports to `tinytorch.perf.benchmarking`
 
 **How to use this module (after running `tito module complete 19`):**
 
 ```python
-from tinytorch.benchmarking.benchmark import Benchmark, OlympicEvent
+from tinytorch.perf.benchmarking import Benchmark, OlympicEvent
 
 # For capstone submission:
 benchmark = Benchmark([baseline_model, optimized_model],

@@ -206,7 +206,7 @@ def main():
         console.print("  [green]✓[/green] vectorized_matmul, fused_gelu (YOUR Module 18 implementation)")
 
         # YOUR Benchmarking (Module 19)
-        from tinytorch.benchmarking.benchmark import Benchmark, TinyMLPerf
+        from tinytorch.perf.benchmarking import Benchmark, TinyMLPerf
         console.print("  [green]✓[/green] Benchmark, TinyMLPerf (YOUR Module 19 implementation)")
 
     except ImportError as e:

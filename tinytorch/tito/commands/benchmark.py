@@ -273,7 +273,7 @@ class BenchmarkCommand(BaseCommand):
 
         # Check if Module 20 is available
         try:
-            from tinytorch.benchmarking.benchmark import Benchmark
+            from tinytorch.perf.benchmarking import Benchmark
         except ImportError:
             console.print(Panel(
                 "[red]❌ Module 19 (Benchmarking) not available[/red]\n\n"

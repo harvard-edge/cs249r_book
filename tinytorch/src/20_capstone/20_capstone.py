@@ -43,11 +43,11 @@ By the end of this capstone, you will:
 ## 📦 Where This Code Lives in the Final Package
 
 **Learning Side:** You work in `src/20_capstone/20_capstone.py`
-**Building Side:** Code exports to `tinytorch.capstone`
+**Building Side:** Code exports to `tinytorch.olympics`
 
 ```python
 # How to use this module:
-from tinytorch.capstone import generate_submission, BenchmarkReport
+from tinytorch.olympics import generate_submission, BenchmarkReport
 
 # Benchmark your model
 report = BenchmarkReport()
@@ -66,7 +66,7 @@ submission.save("my_submission.json")
 """
 
 # %% nbgrader={"grade": false, "grade_id": "exports", "solution": true}
-#| default_exp capstone
+#| default_exp olympics
 #| export
 
 # %% [markdown]

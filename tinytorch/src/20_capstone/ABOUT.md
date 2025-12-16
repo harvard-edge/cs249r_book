@@ -393,7 +393,7 @@ The following comparison shows how your educational implementation translates to
 `````{tab-set}
 ````{tab-item} Your TinyTorch
 ```python
-from tinytorch.capstone import BenchmarkReport, generate_submission
+from tinytorch.olympics import BenchmarkReport, generate_submission
 
 # Benchmark baseline
 baseline_report = BenchmarkReport(model_name="my_model")
