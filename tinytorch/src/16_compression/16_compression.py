@@ -180,7 +180,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 1. Introduction: What is Model Compression?
+## Introduction: What is Model Compression?
 
 Imagine you have a massive library with millions of books, but you only reference 10% of them regularly. Model compression is like creating a curated collection that keeps the essential knowledge while dramatically reducing storage space.
 
@@ -230,7 +230,7 @@ Think of compression like optimizing a recipe - you want to keep the essential i
 
 # %% [markdown]
 """
-## 2. Foundations: Mathematical Background
+## Foundations: Mathematical Background
 
 Understanding the mathematics behind compression helps us choose the right technique for each situation and predict their effects on model performance.
 
@@ -317,7 +317,7 @@ Reconstruction Error:
 
 # %% [markdown]
 """
-## 3. Sparsity Measurement - Understanding Model Density
+## Sparsity Measurement - Understanding Model Density
 
 Before we can compress models, we need to understand how dense they are. Sparsity measurement tells us what percentage of weights are zero (or effectively zero).
 
@@ -416,7 +416,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 4. Magnitude-Based Pruning - Removing Small Weights
+## Magnitude-Based Pruning - Removing Small Weights
 
 Magnitude pruning is the simplest and most intuitive compression technique. It's based on the observation that weights with small magnitudes contribute little to the model's output.
 
@@ -573,7 +573,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 5. Structured Pruning - Hardware-Friendly Compression
+## Structured Pruning - Hardware-Friendly Compression
 
 While magnitude pruning creates scattered zeros throughout the network, structured pruning removes entire computational units (channels, neurons, heads). This creates sparsity patterns that modern hardware can actually accelerate.
 
@@ -746,7 +746,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 6. Low-Rank Approximation - Matrix Compression Through Factorization
+## Low-Rank Approximation - Matrix Compression Through Factorization
 
 Low-rank approximation discovers that large weight matrices often contain redundant information that can be captured with much smaller matrices through mathematical decomposition.
 
@@ -896,7 +896,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 7. Knowledge Distillation - Learning from Teacher Models
+## Knowledge Distillation - Learning from Teacher Models
 
 Knowledge distillation is like having an expert teacher simplify complex concepts for a student. The large "teacher" model shares its knowledge with a smaller "student" model, achieving similar performance with far fewer parameters.
 
@@ -1145,7 +1145,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 8. Integration: Complete Compression Pipeline
+## Integration: Complete Compression Pipeline
 
 Now let's combine all our compression techniques into a unified system that can apply multiple methods and track their cumulative effects.
 
@@ -1314,7 +1314,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 8.6 Systems Analysis - Compression Techniques
+## Systems Analysis - Compression Techniques
 
 Understanding the real-world effectiveness of different compression techniques through systematic measurement and comparison.
 
@@ -1325,7 +1325,7 @@ The fundamental challenge in model compression is balancing three competing obje
 
 # %% [markdown]
 """
-## 8.5 Measuring Compression Impact with Profiler
+## Measuring Compression Impact with Profiler
 
 Now let's use the **Profiler** tool from Module 14 to measure the actual parameter reduction from pruning. This demonstrates the complete workflow: profile baseline (M14) → apply compression (M16) → measure impact (M14+M16).
 
@@ -1403,7 +1403,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 8.6 Systems Analysis - Compression Techniques
+## Advanced Systems Analysis - Compression Techniques
 
 Understanding the real-world effectiveness of different compression techniques.
 """
@@ -1625,7 +1625,7 @@ For deploying on a mobile device with 50MB model limit and 100ms latency require
 
 # %% [markdown]
 """
-## 8.5 Verification: Prove Pruning Works
+## Verification: Prove Pruning Works
 
 Before running the full integration test, let's create a verification function that
 proves pruning actually creates zeros using real zero counting.
@@ -1691,7 +1691,7 @@ def verify_pruning_works(model, target_sparsity=0.8):
 
 # %% [markdown]
 """
-## 9. Module Integration Test
+## Module Integration Test
 
 Final validation that all compression techniques work together correctly.
 """

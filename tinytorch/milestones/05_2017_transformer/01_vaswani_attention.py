@@ -111,7 +111,7 @@ sys.path.insert(0, os.getcwd())
 # Import TinyTorch components YOU BUILT!
 from tinytorch import Tensor, Linear, ReLU, CrossEntropyLoss
 from tinytorch.core.optimizers import Adam
-from tinytorch.text.embeddings import Embedding, PositionalEncoding
+from tinytorch.core.embeddings import Embedding, PositionalEncoding
 from tinytorch.core.attention import MultiHeadAttention
 from tinytorch.core.transformer import LayerNorm
 

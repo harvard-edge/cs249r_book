@@ -36,7 +36,7 @@ class TestBenchmarkReport:
     def test_report_import(self):
         """Verify BenchmarkReport can be imported."""
         try:
-            from tinytorch.bench import BenchmarkReport
+            from tinytorch.perf.benchmarking import BenchmarkReport
             assert BenchmarkReport is not None
         except ImportError as e:
             pytest.skip(f"BenchmarkReport not yet exported: {e}")
@@ -44,7 +44,7 @@ class TestBenchmarkReport:
     def test_report_can_instantiate(self):
         """Verify BenchmarkReport can be created."""
         try:
-            from tinytorch.bench import BenchmarkReport
+            from tinytorch.perf.benchmarking import BenchmarkReport
             report = BenchmarkReport()
             assert report is not None
         except ImportError:
@@ -58,7 +58,7 @@ class TestBenchmarkReport:
         Students need to see their results.
         """
         try:
-            from tinytorch.bench import BenchmarkReport
+            from tinytorch.perf.benchmarking import BenchmarkReport
         except ImportError:
             pytest.skip("BenchmarkReport not yet exported")
 
@@ -81,7 +81,7 @@ class TestBenchmarkReport:
         WHY: Students need a readable summary of their results.
         """
         try:
-            from tinytorch.bench import BenchmarkReport
+            from tinytorch.perf.benchmarking import BenchmarkReport
         except ImportError:
             pytest.skip("BenchmarkReport not yet exported")
 
@@ -100,7 +100,7 @@ class TestSubmissionHarness:
     def test_submission_harness_import(self):
         """Verify submission harness can be imported."""
         try:
-            from tinytorch.bench import SubmissionHarness
+            from tinytorch.perf.benchmarking import SubmissionHarness
             assert SubmissionHarness is not None
         except ImportError:
             # This might be named differently

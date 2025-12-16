@@ -10,10 +10,11 @@
 # WHAT THIS SCRIPT DOES
 # ---------------------
 #   1. Checks prerequisites (git, Python 3.8+, venv module)
-#   2. Shows installation plan and asks for confirmation
-#   3. Downloads TinyTorch via git sparse checkout (minimal download)
-#   4. Creates an isolated Python virtual environment (.venv/)
-#   5. Installs all dependencies and the tito CLI
+#   2. Asks where to install (default: ./tinytorch)
+#   3. Shows installation plan and asks for confirmation
+#   4. Downloads TinyTorch via git sparse checkout (minimal download)
+#   5. Creates an isolated Python virtual environment (.venv/)
+#   6. Installs all dependencies and the tito CLI
 #
 # AFTER INSTALLATION
 # ------------------
@@ -247,10 +248,23 @@ check_existing_directory() {
 # Installation Steps
 # ============================================================================
 
+prompt_install_directory() {
+    echo ""
+    echo -e "Where would you like to install Tiny${YELLOW}🔥Torch${NC}?"
+    echo -e "  ${DIM}Press Enter for default: ${BOLD}$PWD/tinytorch${NC}"
+    echo ""
+    printf "Install directory [tinytorch]: "
+    read -r user_dir </dev/tty
+
+    if [ -n "$user_dir" ]; then
+        INSTALL_DIR="$user_dir"
+    fi
+}
+
 show_plan_and_confirm() {
     echo ""
-    echo -e "This will create a ${CYAN}tinytorch${NC} folder here:"
-    echo -e "  ${BOLD}$PWD/tinytorch${NC}"
+    echo -e "This will create a ${CYAN}${INSTALL_DIR}${NC} folder here:"
+    echo -e "  ${BOLD}$PWD/${INSTALL_DIR}${NC}"
     echo ""
     echo "What will be installed:"
     echo -e "  - Tiny${YELLOW}🔥Torch${NC} learning modules"
@@ -440,18 +454,23 @@ main() {
 
     # Pre-flight checks
     check_write_permission
-    check_existing_directory
     check_not_in_venv
 
     echo "Checking prerequisites..."
     check_prerequisites
     check_internet
 
+    # Ask where to install
+    prompt_install_directory
+
+    # Check directory doesn't exist (after user chooses)
+    check_existing_directory
+
     # Show plan and confirm
     show_plan_and_confirm
 
-    read -p "Continue? [Y/n] " -n 1 -r
-    echo ""
+    printf "Continue? [Y/n] "
+    read -r REPLY </dev/tty
     if [[ $REPLY =~ ^[Nn]$ ]]; then
         print_info "Installation cancelled"
         exit 0

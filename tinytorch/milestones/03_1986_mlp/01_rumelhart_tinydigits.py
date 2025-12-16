@@ -82,7 +82,7 @@ sys.path.insert(0, os.getcwd())
 
 # Import TinyTorch components YOU BUILT!
 from tinytorch import Tensor, Linear, ReLU, CrossEntropyLoss, SGD
-from tinytorch.data.loader import TensorDataset, DataLoader
+from tinytorch.core.dataloader import TensorDataset, DataLoader
 
 # Rich for beautiful output
 from rich.console import Console

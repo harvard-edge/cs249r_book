@@ -82,11 +82,11 @@ from rich.layout import Layout
 from rich.text import Text
 from rich import box
 
-from tinytorch.models.transformer import GPT
-from tinytorch.text.tokenization import CharTokenizer
+from tinytorch.core.transformer import GPT
+from tinytorch.core.tokenization import CharTokenizer
 from tinytorch.core.tensor import Tensor
-from tinytorch.profiling.profiler import Profiler
-from tinytorch.generation.kv_cache import enable_kv_cache, disable_kv_cache
+from tinytorch.perf.profiling import Profiler
+from tinytorch.perf.memoization import enable_kv_cache, disable_kv_cache
 
 console = Console()
 

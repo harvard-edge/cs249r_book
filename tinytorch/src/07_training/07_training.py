@@ -81,7 +81,7 @@ DEFAULT_TOTAL_EPOCHS = 100  # Default total epochs for learning rate schedule
 
 # %% [markdown]
 """
-## 🏗️ Part 1: Introduction - What is Training?
+## 🏗️ Introduction - What is Training?
 
 Training is where the magic happens - it's the process that transforms a randomly initialized neural network into an intelligent system that can solve problems. Think of training as teaching: you show the model examples, it makes predictions, you measure how wrong it is, and then you adjust its parameters to do better next time.
 
@@ -105,7 +105,7 @@ But production training systems need much more than this basic loop. They need l
 
 # %% [markdown]
 """
-## 📐 Part 2: Foundations - Mathematical Background
+## 📐 Foundations - Mathematical Background
 
 ### Training Loop Mathematics
 
@@ -147,7 +147,7 @@ This mode switching is crucial for proper model behavior and performance.
 
 # %% [markdown]
 """
-## 🏗️ Part 3: Implementation - Building Training Infrastructure
+## 🏗️ Implementation - Building Training Infrastructure
 
 Now let's implement the complete training system. We'll build each component step by step: learning rate scheduling, gradient utilities, and finally the complete Trainer class.
 
@@ -832,7 +832,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Part 4: Integration - Complete Training Example
+## 🔧 Integration - Complete Training Example
 
 Now let's create a complete training example that demonstrates how all the components work together. This integration shows the full power of our training infrastructure.
 
@@ -955,7 +955,7 @@ def demonstrate_complete_training_pipeline():
 
 # %% [markdown]
 """
-## 📊 Part 5: Systems Analysis - Training Performance and Memory
+## 📊 Systems Analysis - Training Performance and Memory
 
 Training systems have significant resource requirements. Understanding memory usage, checkpoint sizes, and training overhead helps optimize production ML pipelines.
 
@@ -1121,7 +1121,7 @@ def analyze_checkpoint_overhead():
 
 # %% [markdown]
 """
-## 🧪 Part 6: Module Integration Test
+## 🧪 Module Integration Test
 
 Final validation that everything works together correctly.
 """
@@ -1242,7 +1242,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🤔 Part 7: ML Systems Reflection Questions
+## 🤔 ML Systems Reflection Questions
 
 Before we complete this module, let's reflect on the systems aspects of training infrastructure.
 

@@ -33,7 +33,7 @@ def test_tokenization_basic():
     print("Testing Module 10: Tokenization...")
 
     try:
-        from tinytorch.text.tokenization import CharacterTokenizer
+        from tinytorch.core.tokenization import CharacterTokenizer
 
         tokenizer = CharacterTokenizer()
         text = "Hello World"  # Avoid comma which might not be in vocab

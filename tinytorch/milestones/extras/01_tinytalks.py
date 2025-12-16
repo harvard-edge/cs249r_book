@@ -129,7 +129,7 @@ def main():
         from tinytorch import Tensor, Linear, ReLU, CrossEntropyLoss
         from tinytorch import LayerNorm, create_causal_mask
         from tinytorch.core.optimizers import Adam
-        from tinytorch.text.embeddings import Embedding, PositionalEncoding
+        from tinytorch.core.embeddings import Embedding, PositionalEncoding
         from tinytorch.core.attention import MultiHeadAttention
 
         console.print("  [green]✓[/green] All YOUR implementations loaded!")

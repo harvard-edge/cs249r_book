@@ -131,7 +131,6 @@ class SetupCommand(BaseCommand):
         # Essential packages for TinyTorch
         packages = [
             ("numpy", "numpy>=1.21.0"),
-            ("matplotlib", "matplotlib>=3.5.0"),
             ("jupyter", "jupyter>=1.0.0"),
             ("jupyterlab", "jupyterlab>=3.0.0"),
             ("jupytext", "jupytext>=1.13.0"),

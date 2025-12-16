@@ -32,6 +32,7 @@ from ...core.modules import (
     normalize_module_number,
     get_total_modules,
     module_exists,
+    get_all_module_metadata,
 )
 
 class ModuleWorkflowCommand(BaseCommand):
@@ -1065,21 +1066,28 @@ class ModuleWorkflowCommand(BaseCommand):
 
         # Auto-discover modules from filesystem
         module_mapping = get_module_mapping()
+        metadata = get_all_module_metadata()
 
         # Build table
         table = Table(
-            title="📚 TinyTorch Modules",
+            title="📚 Tiny🔥Torch Modules",
             box=box.ROUNDED,
             show_header=True,
             header_style="bold blue"
         )
         table.add_column("#", style="cyan", width=3)
-        table.add_column("Module", style="bold")
-        table.add_column("Folder")
+        table.add_column("Module", style="bold", no_wrap=True)
+        table.add_column("Description", style="dim")
 
         for num, folder_name in sorted(module_mapping.items()):
-            display_name = get_module_display_name(num)
-            table.add_row(num, display_name, folder_name)
+            meta = metadata.get(num)
+            if meta:
+                title = meta.title
+                desc = meta.description
+            else:
+                title = get_module_display_name(num)
+                desc = ""
+            table.add_row(num, title, desc)
 
         self.console.print()
         self.console.print(table)

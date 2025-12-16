@@ -94,7 +94,7 @@ from tinytorch.core.activations import ReLU, Softmax  # Module 03: YOU built thi
 from tinytorch.core.spatial import Conv2d, MaxPool2D, BatchNorm2d  # Module 09: YOU built this!
 from tinytorch.core.optimizers import Adam            # Module 07: YOU built this!
 from tinytorch.core.dataloader import DataLoader, Dataset  # Module 10: YOU built this!
-from tinytorch.data.loader import RandomHorizontalFlip, RandomCrop, Compose  # Module 08: Data Augmentation!
+from tinytorch.core.dataloader import RandomHorizontalFlip, RandomCrop, Compose  # Module 08: Data Augmentation!
 
 # Import dataset manager
 from data_manager import DatasetManager

@@ -74,7 +74,7 @@ EPSILON = 1e-7  # Small perturbation for numerical gradient computation
 
 # %% [markdown]
 """
-## 1. Introduction: What is Automatic Differentiation?
+## Introduction: What is Automatic Differentiation?
 
 Automatic differentiation (autograd) is the magic that makes neural networks learn. Instead of manually computing gradients for every parameter, autograd tracks operations and automatically computes gradients via the chain rule.
 
@@ -123,7 +123,7 @@ Each operation records how to compute its backward pass. The chain rule connects
 
 # %% [markdown]
 """
-## 2. Foundations: The Chain Rule in Action
+## Foundations: The Chain Rule in Action
 
 ### Mathematical Foundation
 For composite functions: f(g(x)), the derivative is:
@@ -177,7 +177,7 @@ Memory Cost: 2× parameters (data + gradients) + graph overhead
 
 # %% [markdown]
 """
-## 3. Implementation: Building the Autograd Engine
+## Implementation: Building the Autograd Engine
 
 Let's implement the autograd system step by step. We'll enhance the existing Tensor class and create supporting infrastructure.
 
@@ -1014,7 +1014,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 4. Enhancing Tensor with Autograd Capabilities
+## Enhancing Tensor with Autograd Capabilities
 
 Now we'll enhance the existing Tensor class to use these gradient functions and build computation graphs automatically.
 

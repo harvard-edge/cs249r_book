@@ -155,7 +155,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 1. Introduction - The Memory Wall Problem
+## Introduction - The Memory Wall Problem
 
 Imagine trying to fit a library in your backpack. Neural networks face the same challenge - models are getting huge, but devices have limited memory!
 
@@ -231,7 +231,7 @@ Today you'll build the production-quality quantization system that makes all thi
 
 # %% [markdown]
 """
-## 2. Foundations - The Mathematics of Compression
+## Foundations - The Mathematics of Compression
 
 ### Understanding the Core Challenge
 
@@ -344,7 +344,7 @@ INT8 gives us 4× memory reduction with <1% accuracy loss - the perfect balance 
 
 # %% [markdown]
 """
-## 3. Implementation - Building the Quantization Engine
+## Implementation - Building the Quantization Engine
 
 ### Our Implementation Strategy
 
@@ -924,7 +924,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 4. Integration - Scaling to Full Neural Networks
+## Integration - Scaling to Full Neural Networks
 
 ### The Model Quantization Challenge
 
@@ -1318,7 +1318,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 5. Systems Analysis - Quantization in Production
+## Systems Analysis - Quantization in Production
 
 Now let's measure the real-world impact of quantization through systematic analysis.
 """
@@ -1550,7 +1550,7 @@ This analysis reveals which strategies work best for different deployment scenar
 
 # %% [markdown]
 """
-## 5.5 Measuring Quantization Savings with Profiler
+## Measuring Quantization Savings with Profiler
 
 Now let's use the **Profiler** tool from Module 14 to measure the actual memory savings from quantization. This demonstrates end-to-end workflow: profile baseline (M14) → apply quantization (M15) → measure savings (M14+M15).
 
@@ -1627,7 +1627,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 6. Verification: Prove Quantization Works
+## Verification: Prove Quantization Works
 
 Before running the full integration test, let's create a verification function that
 proves quantization actually reduces memory using real `.nbytes` measurements.
@@ -1694,7 +1694,7 @@ def verify_quantization_works(original_model, quantized_model):
 
 # %% [markdown]
 """
-## 7. Module Integration Test
+## Module Integration Test
 
 Final validation that our quantization system works correctly across all components.
 """

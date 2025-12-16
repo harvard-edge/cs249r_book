@@ -36,7 +36,7 @@ class TestBenchmarkBasics:
     def test_benchmark_import(self):
         """Verify Benchmark can be imported."""
         try:
-            from tinytorch.bench import Benchmark, TinyMLPerf
+            from tinytorch.perf.benchmarking import Benchmark, TinyMLPerf
             assert Benchmark is not None
             assert TinyMLPerf is not None
         except ImportError as e:
@@ -45,7 +45,7 @@ class TestBenchmarkBasics:
     def test_benchmark_can_instantiate(self):
         """Verify Benchmark can be created."""
         try:
-            from tinytorch.bench import Benchmark
+            from tinytorch.perf.benchmarking import Benchmark
 
             # Create simple dummy model
             class DummyModel:
@@ -67,7 +67,7 @@ class TestBenchmarkBasics:
         WHY: Throughput (items/second) is a key performance metric.
         """
         try:
-            from tinytorch.bench import Benchmark
+            from tinytorch.perf.benchmarking import Benchmark
         except ImportError:
             pytest.skip("Benchmark not yet exported")
 
@@ -103,7 +103,7 @@ class TestTinyMLPerf:
         WHY: This is the capstone benchmarking tool students build.
         """
         try:
-            from tinytorch.bench import TinyMLPerf
+            from tinytorch.perf.benchmarking import TinyMLPerf
         except ImportError:
             pytest.skip("TinyMLPerf not yet exported")
 
@@ -124,7 +124,7 @@ class TestBenchmarkMetrics:
     def test_latency_is_positive(self):
         """Latency must always be positive."""
         try:
-            from tinytorch.bench import Benchmark
+            from tinytorch.perf.benchmarking import Benchmark
         except ImportError:
             pytest.skip("Benchmark not yet exported")
 
@@ -151,7 +151,7 @@ class TestBenchmarkMetrics:
         means we can't trust the measurements.
         """
         try:
-            from tinytorch.bench import Benchmark
+            from tinytorch.perf.benchmarking import Benchmark
         except ImportError:
             pytest.skip("Benchmark not yet exported")
 
