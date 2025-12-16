@@ -107,11 +107,11 @@ def main():
         console.print("  [green]✓[/green] MultiHeadAttention (YOUR Module 12)")
 
         # Profiler
-        from tinytorch.profiling.profiler import Profiler
+        from tinytorch.perf.profiling import Profiler
         console.print("  [green]✓[/green] Profiler (YOUR Module 14)")
 
         # KV Cache
-        from tinytorch.generation.kv_cache import KVCache
+        from tinytorch.perf.memoization import KVCache
         console.print("  [green]✓[/green] KVCache (YOUR Module 17)")
 
     except ImportError as e:

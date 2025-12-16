@@ -18,7 +18,7 @@ from tinytorch.core.autograd import enable_autograd
 from tinytorch.core.optimizers import Adam
 from tinytorch.core.losses import CrossEntropyLoss
 from tinytorch.models.transformer import GPT
-from tinytorch.text.tokenization import CharTokenizer
+from tinytorch.core.tokenization import CharTokenizer
 
 
 def test_transformer_memorization():

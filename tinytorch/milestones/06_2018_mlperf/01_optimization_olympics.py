@@ -186,7 +186,7 @@ def main():
         console.print("  [green]✓[/green] Tensor, Linear, ReLU (YOUR implementations)")
 
         # YOUR Profiler (Module 14)
-        from tinytorch.profiling.profiler import Profiler
+        from tinytorch.perf.profiling import Profiler
         console.print("  [green]✓[/green] Profiler (YOUR Module 14 implementation)")
 
         # YOUR Quantization (Module 15)
@@ -279,7 +279,7 @@ def main():
     console.print("\n[bold cyan]📊 Loading TinyDigits dataset...[/bold cyan]")
 
     try:
-        from tinytorch.datasets import TinyDigits
+        from tinytorch.core.dataloader import TinyDigits
         dataset = TinyDigits()
         X_train, y_train = dataset.get_train_data()
         X_test, y_test = dataset.get_test_data()

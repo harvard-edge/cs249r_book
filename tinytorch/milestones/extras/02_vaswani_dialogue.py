@@ -89,8 +89,8 @@ import tinytorch as tt
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.optimizers import Adam
 from tinytorch.core.losses import CrossEntropyLoss
-from tinytorch.models.transformer import GPT
-from tinytorch.text.tokenization import CharTokenizer  # Module 10: Students built this!
+from tinytorch.core.transformer import GPT
+from tinytorch.core.tokenization import CharTokenizer  # Module 10: Students built this!
 
 
 # ============================================================================

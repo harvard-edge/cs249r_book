@@ -218,7 +218,7 @@ class TinyTalksDataset:
             seq_length: Length of input sequences
             levels: List of difficulty levels to include (1-5), None = all
         """
-        from tinytorch.text.tokenization import CharTokenizer
+        from tinytorch.core.tokenization import CharTokenizer
 
         self.seq_length = seq_length
 
@@ -288,8 +288,8 @@ class TinyGPT:
             dropout: Dropout probability (for training)
         """
         from tinytorch.core.tensor import Tensor
-        from tinytorch.text.embeddings import Embedding, PositionalEncoding
-        from tinytorch.models.transformer import LayerNorm, TransformerBlock
+        from tinytorch.core.embeddings import Embedding, PositionalEncoding
+        from tinytorch.core.transformer import LayerNorm, TransformerBlock
         from tinytorch.core.layers import Linear
 
         self.vocab_size = vocab_size
@@ -430,7 +430,7 @@ class TinyGPT:
             # MODULE 14 OPTIMIZATION: KV-Cached Generation
             # Students learn this AFTER building the base transformer!
             try:
-                from tinytorch.generation.kv_cache import enable_kv_cache, disable_kv_cache
+                from tinytorch.perf.memoization import enable_kv_cache, disable_kv_cache
 
                 # Enable caching on this model (non-invasive enhancement!)
                 # If already enabled, just reset it; otherwise enable fresh
@@ -787,7 +787,7 @@ def main():
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.optimizers import Adam
         from tinytorch.core.losses import CrossEntropyLoss
-        from tinytorch.text.tokenization import CharTokenizer
+        from tinytorch.core.tokenization import CharTokenizer
         console.print("[green]✓[/green] All modules imported successfully!")
     except ImportError as e:
         console.print(f"[red]✗[/red] Import error: {e}")

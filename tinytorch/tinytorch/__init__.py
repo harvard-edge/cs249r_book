@@ -61,8 +61,8 @@ except ImportError:
 
 # Module 08: Data Loading
 try:
-    from .data.loader import Dataset, TensorDataset, DataLoader
-    from .data.loader import RandomHorizontalFlip, RandomCrop, Compose
+    from .core.dataloader import Dataset, TensorDataset, DataLoader
+    from .core.dataloader import RandomHorizontalFlip, RandomCrop, Compose
 except ImportError:
     Dataset = TensorDataset = DataLoader = None
     RandomHorizontalFlip = RandomCrop = Compose = None
@@ -75,13 +75,13 @@ except ImportError:
 
 # Module 10: Tokenization
 try:
-    from .text.tokenization import Tokenizer, CharTokenizer, BPETokenizer
+    from .core.tokenization import Tokenizer, CharTokenizer, BPETokenizer
 except ImportError:
     Tokenizer = CharTokenizer = BPETokenizer = None
 
 # Module 11: Embeddings
 try:
-    from .text.embeddings import Embedding, PositionalEncoding, EmbeddingLayer
+    from .core.embeddings import Embedding, PositionalEncoding, EmbeddingLayer
 except ImportError:
     Embedding = PositionalEncoding = EmbeddingLayer = None
 
@@ -99,7 +99,7 @@ except ImportError:
 
 # Module 19: Benchmarking
 try:
-    from . import benchmarking as bench
+    from . import bench
 except ImportError:
     bench = None
 
