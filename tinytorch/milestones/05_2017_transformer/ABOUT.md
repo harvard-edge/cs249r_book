@@ -127,4 +127,4 @@ You can BUILD transformers, but can you OPTIMIZE them? Milestone 06 (MLPerf) tea
 
 - **The Paper**: Vaswani et al. (2017). "Attention Is All You Need"
 - **Illustrated Guide**: http://jalammar.github.io/illustrated-transformer/
-- **GPT Papers**: Radford et al. (2018, 2019, 2020). GPT-1/2/3
+- **GPT-2**: Radford, A. et al. (2019). "Language Models are Unsupervised Multitask Learners"

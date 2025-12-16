@@ -106,6 +106,6 @@ Hidden layers solve XOR, but can they scale to real problems? Milestone 03 prove
 
 ## Further Reading
 
-- **The Crisis**: Minsky, M., & Papert, S. (1969). "Perceptrons"
+- **The Crisis**: Minsky, M., & Papert, S. (1969). "Perceptrons: An Introduction to Computational Geometry"
 - **The Solution**: Rumelhart, Hinton, Williams (1986). "Learning representations by back-propagating errors"
 - **Wikipedia**: [AI Winter](https://en.wikipedia.org/wiki/AI_winter)
