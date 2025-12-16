@@ -96,4 +96,4 @@ CNNs excel at vision, but what about sequences (text, audio, time series)? Miles
 
 - **LeNet Paper**: LeCun et al. (1998). "Gradient-based learning applied to document recognition"
 - **CIFAR-10**: Krizhevsky (2009). "Learning Multiple Layers of Features from Tiny Images"
-- **AlexNet**: Krizhevsky et al. (2012). "ImageNet Classification with Deep CNNs"
+- **AlexNet**: Krizhevsky, A., Sutskever, I., & Hinton, G. (2012). "ImageNet Classification with Deep Convolutional Neural Networks"
