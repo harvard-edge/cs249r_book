@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="tinytorch-bar-content">
                 <div class="tinytorch-bar-left">
                     <a href="intro.html" class="tinytorch-bar-brand">
-                        <span class="brand-fire">🔥</span>Tiny<span class="brand-fire">🔥</span>Torch
+                        Tiny<span class="brand-fire">🔥</span>Torch
                     </a>
                     <span class="tinytorch-bar-badge">Under Construction</span>
                 </div>

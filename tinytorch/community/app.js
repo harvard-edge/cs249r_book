@@ -4,6 +4,7 @@ import { getSession } from './modules/state.js?v=2';
 import { openModal, closeModal, handleToggle, handleAuth, handleLogout, setMode, verifySession } from './modules/auth.js?v=2';
 import { openProfileModal, closeProfileModal, handleProfileUpdate } from './modules/profile.js';
 import { setupCameraEvents } from './modules/camera.js';
+import { getBasePath } from './modules/config.js';
 
 (function() {
     // 1. Inject CSS
@@ -66,9 +67,9 @@ import { setupCameraEvents } from './modules/camera.js';
 
     if (authClose) authClose.addEventListener('click', closeModal);
     if (authOverlay) {
-        authOverlay.addEventListener('click', (e) => {
-            if (e.target === authOverlay) closeModal();
-        });
+        // authOverlay.addEventListener('click', (e) => {
+        //     if (e.target === authOverlay) closeModal();
+        // });
     }
     if (authToggle) authToggle.addEventListener('click', handleToggle);
     if (forgotLink) forgotLink.addEventListener('click', () => setMode('forgot'));
@@ -77,9 +78,9 @@ import { setupCameraEvents } from './modules/camera.js';
     // Profile Modal Events
     if (profileClose) profileClose.addEventListener('click', closeProfileModal);
     if (profileOverlay) {
-        profileOverlay.addEventListener('click', (e) => {
-            if (e.target === profileOverlay) closeProfileModal();
-        });
+        // profileOverlay.addEventListener('click', (e) => {
+        //     if (e.target === profileOverlay) closeProfileModal();
+        // });
     }
     if (profileLogoutBtn) profileLogoutBtn.addEventListener('click', handleLogout);
     if (profileForm) profileForm.addEventListener('submit', handleProfileUpdate);
@@ -87,6 +88,11 @@ import { setupCameraEvents } from './modules/camera.js';
     // Check for redirect action
     const params = new URLSearchParams(window.location.search);
     const action = params.get('action');
+
+    if (params.get('community')) {
+        window.location.href = getBasePath() + '/community.html';
+        return;
+    }
 
     if (action === 'login') {
         localStorage.removeItem("tinytorch_token");

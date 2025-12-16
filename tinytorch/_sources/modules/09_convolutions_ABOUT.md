@@ -673,12 +673,11 @@ Shift from spatial processing (images) to sequential processing (text). You'll i
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/09_convolutions/09_convolutions.py)** - Run interactively in browser, no setup required
-- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/09_convolutions/09_convolutions.py)** - Use Google Colab for cloud compute
-- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/09_convolutions/09_convolutions.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/09_convolutions/09_convolutions.ipynb)** - Run interactively in browser, no setup required
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/09_convolutions/09_convolutions.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress
 
-Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
+Binder sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

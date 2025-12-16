@@ -632,12 +632,11 @@ Apply everything you have learned in Modules 01-19 to compete in the TorchPerf O
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/19_benchmarking/19_benchmarking.py)** - Run interactively in browser, no setup required
-- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/19_benchmarking/19_benchmarking.py)** - Use Google Colab for cloud compute
-- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/19_benchmarking/19_benchmarking.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/19_benchmarking/19_benchmarking.ipynb)** - Run interactively in browser, no setup required
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/19_benchmarking/19_benchmarking.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress
 
-Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
+Binder sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```
