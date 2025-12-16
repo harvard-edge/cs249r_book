@@ -19,7 +19,6 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.prompt import Confirm
 
 from ..base import BaseCommand
-from ..export import ExportCommand
 from .reset import ModuleResetCommand
 from .test import ModuleTestCommand
 from ...core.exceptions import ModuleNotFoundError
@@ -179,6 +178,32 @@ class ModuleWorkflowCommand(BaseCommand):
         list_parser = subparsers.add_parser(
             'list',
             help='List all available modules'
+        )
+
+        # EXPORT command - export module code to tinytorch package
+        export_parser = subparsers.add_parser(
+            'export',
+            help='Export module code to tinytorch package'
+        )
+        export_parser.add_argument(
+            'modules',
+            nargs='*',
+            help='Module names to export (e.g., 01_tensor 02_activations)'
+        )
+        export_parser.add_argument(
+            '--all',
+            action='store_true',
+            help='Export all modules'
+        )
+        export_parser.add_argument(
+            '--from-release',
+            action='store_true',
+            help='Export from release directory (student version) instead of source'
+        )
+        export_parser.add_argument(
+            '--test-checkpoint',
+            action='store_true',
+            help='Run checkpoint test after successful export'
         )
 
     # Module mapping and normalization now imported from core.modules
@@ -1266,6 +1291,11 @@ class ModuleWorkflowCommand(BaseCommand):
                 return self.show_status()
             elif args.module_command == 'list':
                 return self.list_modules()
+            elif args.module_command == 'export':
+                # Delegate to ExportCommand
+                from ..export import ExportCommand
+                export_command = ExportCommand(self.config)
+                return export_command.run(args)
 
         # Show help if no valid command
         self.console.print(Panel(
@@ -1276,6 +1306,9 @@ class ModuleWorkflowCommand(BaseCommand):
             "  [bold green]tito module resume 01[/bold green]    - Resume working on Module 01 (continue)\n"
             "  [bold green]tito module complete 01[/bold green]  - Complete Module 01 (test + export)\n"
             "  [bold yellow]tito module reset 01[/bold yellow]    - Reset Module 01 to clean state (with backup)\n\n"
+            "[bold]Export:[/bold]\n"
+            "  [bold cyan]tito module export 01_tensor[/bold cyan]  - Export module to tinytorch package\n"
+            "  [bold cyan]tito module export --all[/bold cyan]      - Export all modules\n\n"
             "[bold]Smart Defaults:[/bold]\n"
             "  [bold]tito module resume[/bold]        - Resume last worked module\n"
             "  [bold]tito module complete[/bold]      - Complete current module\n"

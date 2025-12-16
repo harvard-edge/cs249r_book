@@ -26,8 +26,6 @@ from .core.exceptions import TinyTorchCLIError
 from .core.theme import Theme
 from rich.panel import Panel
 from .commands.base import BaseCommand
-from .commands.test import TestCommand
-from .commands.export import ExportCommand
 from .commands.src import SrcCommand
 from .commands.system import SystemCommand
 from .commands.module import ModuleWorkflowCommand
@@ -82,9 +80,6 @@ class TinyTorchCLI:
             'olympics': OlympicsCommand,
             # Utilities
             'update': UpdateCommand,
-            # Shortcuts
-            'export': ExportCommand,
-            'test': TestCommand,
             'grade': GradeCommand,
             'logo': LogoCommand,
         }
