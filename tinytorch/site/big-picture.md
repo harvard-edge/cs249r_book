@@ -102,7 +102,20 @@ graph LR
 - **Language focus**: Foundation → DataLoader → Tokenization → ... → Transformers → Optimization
 - **Full course**: Both paths → Capstone
 
-**Key insight:** Each tier unlocks a historical milestone. You're not just learning—you're recreating 70 years of ML evolution.
+---
+
+## Milestones You'll Unlock
+
+As you progress through modules, you'll unlock historical milestones—moments when your code can do something that once made headlines:
+
+1. **1957 Perceptron**: Your first learning algorithm with automatic weight updates (Rosenblatt)
+2. **1969 XOR**: Your MLP solves the problem that stumped single-layer networks (Minsky & Papert → Rumelhart)
+3. **1986 MLP**: Your network recognizes handwritten digits on real data
+4. **1998 CNN**: Your convolutional network classifies images with spatial understanding (LeCun's LeNet-5)
+5. **2017 Transformer**: Your attention mechanism generates text (Vaswani et al.)
+6. **2018 MLPerf**: Your optimized system benchmarks at production speed
+
+Each milestone activates when you complete the required modules. You're not just learning—you're recreating 70 years of ML evolution, one working implementation at a time.
 
 ---
 
