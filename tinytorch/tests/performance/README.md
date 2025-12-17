@@ -159,31 +159,36 @@ Test optimization reliability:
 
 ### What We've Learned
 
-**Profiling Tools (Module 15)**:
+**Profiling Tools (Module 14)**:
 - Timer accuracy varies significantly with operation complexity
 - Memory profiling has substantial overhead on small operations
 - FLOP counting can be accurate but requires careful implementation
 - Production profiling needs minimal overhead for practical use
 
-**Hardware Acceleration (Module 16)**:
-- NumPy vs naive loops: 10-100× speedups easily achievable
-- Cache blocking: 20-50% improvements on appropriate workloads
-- Backend dispatch: Can add 5-20% overhead if not implemented carefully
-- Scaling behavior: Benefits increase with problem size (memory-bound operations)
-
-**Quantization (Module 17)**:
+**Quantization (Module 15)**:
 - Memory reduction: Reliable 3-4× improvement in model size
 - Speed improvement: Depends heavily on hardware INT8 support
 - Accuracy preservation: Achievable with proper calibration
 - Educational vs production: Large gap in actual speedup implementation
 
-**KV Caching (Module 19)**:
+**Compression (Module 16)**:
+- Pruning reduces parameters 50%+ with minimal accuracy loss
+- Structured vs unstructured pruning tradeoffs
+- Magnitude-based pruning is simple but effective
+
+**KV Caching (Module 17)**:
 - Complexity reduction: Demonstrable O(N²) → O(N) improvement
 - Memory growth: Linear scaling validates cache design
 - Practical speedups: Most visible in longer sequences (>32 tokens)
 - Implementation complexity: Easy to introduce subtle bugs
 
-**Benchmarking (Module 20)**:
+**Acceleration (Module 18)**:
+- NumPy vs naive loops: 10-100× speedups easily achievable
+- Cache blocking: 20-50% improvements on appropriate workloads
+- Backend dispatch: Can add 5-20% overhead if not implemented carefully
+- Scaling behavior: Benefits increase with problem size (memory-bound operations)
+
+**Benchmarking (Module 19)**:
 - Reproducibility: Achievable with proper methodology
 - Fair comparison: Requires careful workload design
 - Performance detection: Can identify differences >20% reliably
