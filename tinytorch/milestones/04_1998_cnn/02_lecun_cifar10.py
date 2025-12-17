@@ -24,7 +24,7 @@ features from real-world photographs!
   Module 06 (Optimizers)    : YOUR Adam optimizer
   Module 07 (Training)      : YOUR training loops
   Module 08 (DataLoader)    : YOUR Dataset/DataLoader for batching!  <-- SHOWCASED HERE
-  Module 09 (Spatial)       : YOUR Conv2D, MaxPool2D, Flatten
+  Module 09 (Convolutions)  : YOUR Conv2D, MaxPool2D, Flatten
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🏗️ ARCHITECTURE (Modern Pattern with BatchNorm):
@@ -203,7 +203,7 @@ train_transforms = Compose([
 
 
 # =============================================================================
-# CNN MODEL - Your Spatial Modules Power Feature Extraction
+# CNN MODEL - Your Convolution Modules Power Feature Extraction
 # =============================================================================
 # CNNs revolutionized vision by exploiting spatial structure. YOUR Conv2d uses
 # local connectivity + weight sharing to detect patterns with 100x fewer params.
@@ -625,7 +625,7 @@ def main():
                        help='Use small subset for testing')
     args = parser.parse_args()
 
-    print("🎯 CIFAR-10 CNN - Natural Image Recognition with YOUR Spatial Modules!")
+    print("🎯 CIFAR-10 CNN - Natural Image Recognition with YOUR Convolution Modules!")
     print("   Historical significance: CNNs revolutionized computer vision")
     print("   YOUR achievement: Spatial feature extraction on real photos")
     print("   Components used: YOUR Conv2D + MaxPool2D + complete system")

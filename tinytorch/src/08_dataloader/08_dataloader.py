@@ -1876,7 +1876,7 @@ Export with: `tito export 08_dataloader`
 - Milestone 03: Train MLP on real MNIST digits
 - Milestone 04: Train CNN on CIFAR-10 images
 
-**Then continue with:** Module 09 (Spatial) for Conv2d layers!
+**Then continue with:** Module 09 (Convolutions) for Conv2d layers!
 
 ### Real-World Connection
 You've implemented the same patterns used in:

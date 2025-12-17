@@ -513,7 +513,7 @@ Combine optimizers with training loops to actually train neural networks. You'll
 |--------|--------------|---------------------------|
 | **07: Training** | Complete training loops | `for epoch in range(10): loss.backward(); optimizer.step()` |
 | **08: DataLoader** | Batch data processing | `optimizer.step()` updates after each batch of data |
-| **09: Spatial (CNNs)** | Convolutional networks | `AdamW` optimizes millions of CNN parameters efficiently |
+| **09: Convolutions** | Convolutional networks | `AdamW` optimizes millions of CNN parameters efficiently |
 
 ## Get Started
 

@@ -1,4 +1,4 @@
-# Module 09: Spatial Operations - CNNs for Vision
+# Module 09: Convolutions - CNNs for Vision
 
 ## Overview
 **Time**: 3-4 hours

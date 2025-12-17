@@ -67,7 +67,7 @@ except ImportError:
     Dataset = TensorDataset = DataLoader = None
     RandomHorizontalFlip = RandomCrop = Compose = None
 
-# Module 09: Spatial Operations (CNN)
+# Module 09: Convolutions (CNN)
 try:
     from .core.spatial import Conv2d, MaxPool2d, AvgPool2d
 except ImportError:

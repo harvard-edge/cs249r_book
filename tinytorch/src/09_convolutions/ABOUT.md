@@ -1,4 +1,4 @@
-# Module 09: Spatial
+# Module 09: Convolutions
 
 :::{admonition} Module Info
 :class: note

@@ -143,7 +143,7 @@ class TestCompleteMLSystemStillWorks:
             2. Activation functions (Module 03)
             3. Layer infrastructure (Module 04)
             4. Dense networks (Module 05)
-            5. Spatial operations (Module 06)
+            5. Convolutions (Module 06)
             6. Attention mechanisms (Module 07)
             7. Data loading (Module 08)
             8. Automatic differentiation (Module 09)

@@ -19,7 +19,7 @@ You must complete **Modules 01-11** before starting this module:
 - Module 06: Optimizers
 - Module 07: Training loops
 - Module 08: DataLoader
-- Module 09: Spatial operations (Conv2d, Pooling)
+- Module 09: Convolutions (Conv2d, Pooling)
 - Module 10: Batch Normalization
 - Module 11: Tokenization and Embeddings
 

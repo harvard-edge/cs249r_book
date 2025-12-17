@@ -36,7 +36,7 @@ Layers (03) → Training (07) → CNNs (09) → Acceleration (18) → Advanced O
 Before starting, verify:
 - [ ] Module 01 (Tensor): Tensor class works
 - [ ] Module 05 (Autograd): Gradients work
-- [ ] Module 09 (Spatial): Conv2d works (optional)
+- [ ] Module 09 (Convolutions): Conv2d works (optional)
 
 ## Learning Objectives
 By the end of this module, you will:

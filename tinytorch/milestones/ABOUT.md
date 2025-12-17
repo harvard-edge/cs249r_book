@@ -19,7 +19,7 @@ This isn't a demo - it's proof that you understand ML systems engineering from t
 | **1957** | Perceptron | Binary classification with gradient descent | Module 04 |
 | **1969** | XOR Crisis | Hidden layers solve non-linear problems | Module 06 |
 | **1986** | MLP Revival | Multi-class vision (95%+ MNIST) | Module 08 |
-| **1998** | CNN Revolution | Spatial intelligence (70%+ CIFAR-10) | Module 09 |
+| **1998** | CNN Revolution | Convolutions (70%+ CIFAR-10) | Module 09 |
 | **2017** | Transformers | Language generation with attention | Module 13 |
 | **2018** | MLPerf | Production optimization pipeline | Module 18 |
 

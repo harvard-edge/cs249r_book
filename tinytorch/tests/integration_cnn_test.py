@@ -7,7 +7,7 @@ This test validates that modules 1-11 work together for CNN image classification
 
 Required modules:
 - Module 01-08: Core MLP functionality (from MNIST test)
-- Module 09: Spatial operations (Conv2d, MaxPool2d)
+- Module 09: Convolutions (Conv2d, MaxPool2d)
 - Module 10: DataLoader for efficient batch processing
 - Module 11: CNN training capabilities
 

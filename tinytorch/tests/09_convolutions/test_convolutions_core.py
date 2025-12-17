@@ -1,6 +1,6 @@
 """
-Module 09: Spatial - Core Functionality Tests
-==============================================
+Module 09: Convolutions - Core Functionality Tests
+===================================================
 
 These tests verify convolutional layers work correctly for computer vision.
 

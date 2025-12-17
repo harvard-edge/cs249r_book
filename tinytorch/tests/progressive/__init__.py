@@ -22,7 +22,7 @@ MODULE_DEPENDENCIES = {
     "06": ["01", "02", "03", "04", "05"],        # Optimizers need Autograd
     "07": ["01", "02", "03", "04", "05", "06"],  # Training needs Optimizers
     "08": ["01"],                                # DataLoader mainly needs Tensor
-    "09": ["01", "02", "03", "05"],              # Spatial needs Tensor, Layers, Autograd
+    "09": ["01", "02", "03", "05"],              # Convolutions needs Tensor, Layers, Autograd
     "10": ["01"],                                # Tokenization mainly needs Tensor
     "11": ["01", "05", "10"],                    # Embeddings need Tensor, Autograd, Tokenization
     "12": ["01", "03", "05", "11"],              # Attention needs Layers, Autograd, Embeddings

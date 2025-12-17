@@ -600,7 +600,7 @@ For students who want to understand the academic foundations and engineering dec
 
 ## What's Next
 
-```{seealso} Coming Up: Module 09 - Spatial
+```{seealso} Coming Up: Module 09 - Convolutions
 
 Implement Conv2d, MaxPool2d, and Flatten layers to build convolutional neural networks. You'll apply your DataLoader to image datasets and discover why CNNs revolutionized computer vision.
 ```
@@ -609,7 +609,7 @@ Implement Conv2d, MaxPool2d, and Flatten layers to build convolutional neural ne
 
 | Module | What It Does | Your DataLoader In Action |
 |--------|--------------|--------------------------|
-| **09: Spatial** | Convolutional layers for images | `for images, labels in loader:` feed batches to CNNs |
+| **09: Convolutions** | Convolutional layers for images | `for images, labels in loader:` feed batches to CNNs |
 | **10: Tokenization** | Text processing | `DataLoader(text_dataset)` batch sentences |
 | **13: Transformers** | Attention mechanisms | Large batch sizes enabled by efficient data loading |
 

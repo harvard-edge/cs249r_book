@@ -29,7 +29,7 @@ MLP from Milestone 03 on the SAME dataset. This proves spatial operations matter
   Module 04 (Losses)        : YOUR CrossEntropyLoss
   Module 05 (Autograd)      : YOUR automatic differentiation
   Module 06 (Optimizers)    : YOUR SGD optimizer
-  Module 09 (Spatial)       : YOUR Conv2d + MaxPool2d  <-- NEW!
+  Module 09 (Convolutions)  : YOUR Conv2d + MaxPool2d  <-- NEW!
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🏗️ ARCHITECTURE (Simple LeNet-style CNN):

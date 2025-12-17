@@ -14,7 +14,7 @@
 
 # %% [markdown]
 """
-# Module 09: Spatial - Processing Images with Convolutions
+# Module 09: Convolutions - Processing Images with Convolutions
 
 Welcome to Module 09! You'll implement spatial operations that transform machine learning from working with simple vectors to understanding images and spatial patterns.
 

@@ -659,7 +659,7 @@ Implement efficient data loading with batching, shuffling, and iteration. Your T
 | Module | What It Does | Your Trainer In Action |
 |--------|--------------|------------------------|
 | **08: DataLoader** | Efficient batching and shuffling | `trainer.train_epoch(dataloader)` with automatic batching |
-| **09: Spatial** | Convolutional layers for images | Train CNNs with same `trainer.train_epoch()` loop |
+| **09: Convolutions** | Convolutional layers for images | Train CNNs with same `trainer.train_epoch()` loop |
 | **Milestone: MLP** | Complete MNIST digit recognition | `trainer` orchestrates full training pipeline |
 
 ## Get Started
