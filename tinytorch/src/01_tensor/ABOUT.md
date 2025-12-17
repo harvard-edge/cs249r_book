@@ -13,6 +13,31 @@
 If you can multiply two matrices by hand and write a Python class, you're ready.
 :::
 
+```{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F01_tensor%2F01_tensor.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/01_tensor/01_tensor.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+:link: NOTEBOOKLM_LINK_HERE
+
+Listen to an AI-generated overview and take a quiz.
+```
+
+````
+```
+
 ## Overview
 
 The Tensor class is the foundational data structure of machine learning. Every neural network, from recognizing handwritten digits to translating languages, operates on tensors. These networks process millions of numbers per second, and tensors are the data structure that makes this possible. In this module, you'll build N-dimensional arrays from scratch, gaining deep insight into how PyTorch works under the hood.
@@ -618,16 +643,3 @@ Implement ReLU, Sigmoid, Tanh, and Softmax. You'll apply element-wise operations
 | **02: Activations** | Element-wise functions | `ReLU()(x)` transforms your tensor |
 | **03: Layers** | Neural network building blocks | `Linear(784, 128)` stores weights as YOUR Tensor |
 | **05: Autograd** | Automatic gradients | `y.backward()` computes gradients into `x.grad` |
-
-## Get Started
-
-```{tip} Interactive Options
-
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/01_tensor/01_tensor.ipynb)** - Run interactively in browser, no setup required
-- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/01_tensor/01_tensor.py)** - Browse the implementation code
-```
-
-```{warning} Save Your Progress
-
-Binder sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
-```

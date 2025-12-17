@@ -8,6 +8,31 @@
 **Prerequisites:** You should be comfortable with tensors, activations, layers, losses, autograd, optimizers, and training loops from Modules 01-07. This module assumes you understand the training loop pattern and why batching matters for efficient gradient descent.
 :::
 
+```{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F08_dataloader%2F08_dataloader.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/08_dataloader/08_dataloader.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+:link: NOTEBOOKLM_LINK_HERE
+
+Listen to an AI-generated overview and take a quiz.
+```
+
+````
+```
+
 ## Overview
 
 Training a neural network on 50,000 images presents an immediate systems challenge: you cannot load all data into memory simultaneously, and even if you could, processing one sample at a time wastes GPU parallelism. The DataLoader solves this by transforming raw datasets into batches that feed efficiently into training loops.
@@ -426,6 +451,7 @@ for epoch in range(num_epochs):
         optimizer.step()
 ```
 ````
+```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -453,6 +479,7 @@ for epoch in range(num_epochs):
         optimizer.step()
 ```
 ````
+```
 `````
 
 Walking through the differences:

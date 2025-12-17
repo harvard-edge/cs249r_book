@@ -13,6 +13,31 @@
 **Why these prerequisites**: You'll profile models built in Modules 1-13. Understanding the implementations helps you interpret profiling results (e.g., why attention is memory-bound).
 :::
 
+```{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F14_profiling%2F14_profiling.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/14_profiling/14_profiling.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+:link: NOTEBOOKLM_LINK_HERE
+
+Listen to an AI-generated overview and take a quiz.
+```
+
+````
+```
+
 ## Overview
 
 Profiling is the foundation of performance optimization. Before making a model faster or smaller, you need to measure where time and memory go. In this module, you'll build professional profiling tools that measure parameters, FLOPs, memory usage, and latency with statistical rigor.
@@ -270,6 +295,7 @@ print(f"Bottleneck: {profile['bottleneck']}")
 print(f"GFLOP/s: {profile['gflops_per_second']:.2f}")
 ```
 ````
+```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -292,6 +318,7 @@ flops = FlopCountAnalysis(model, input_tensor)
 print(f"FLOPs: {flops.total()}")
 ```
 ````
+```
 `````
 
 Let's walk through the comparison:

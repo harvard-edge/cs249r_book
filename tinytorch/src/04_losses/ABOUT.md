@@ -13,6 +13,31 @@
 If you can build a simple neural network that takes input and produces output, you're ready to learn how to measure its quality.
 :::
 
+```{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F04_losses%2F04_losses.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/04_losses/04_losses.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+:link: NOTEBOOKLM_LINK_HERE
+
+Listen to an AI-generated overview and take a quiz.
+```
+
+````
+```
+
 ## Overview
 
 Loss functions are the mathematical conscience of machine learning. Every neural network needs to know when it's right and when it's wrong. Loss functions provide that feedback by measuring the distance between what your model predicts and what actually happened. Without loss functions, models have no way to improve - they're like athletes training without knowing their score.
@@ -329,6 +354,7 @@ labels = Tensor([0, 1])
 loss = ce_loss(logits, labels)
 ```
 ````
+```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -348,6 +374,7 @@ labels = torch.tensor([0, 1])
 loss = ce_loss(logits, labels)
 ```
 ````
+```
 `````
 
 Let's walk through the key similarities and differences:

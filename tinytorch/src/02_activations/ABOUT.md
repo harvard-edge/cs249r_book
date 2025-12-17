@@ -13,6 +13,31 @@
 If you can create a Tensor and perform element-wise arithmetic (`x + y`, `x * 2`), you're ready.
 :::
 
+```{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F02_activations%2F02_activations.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/02_activations/02_activations.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+:link: NOTEBOOKLM_LINK_HERE
+
+Listen to an AI-generated overview and take a quiz.
+```
+
+````
+```
+
 ## Overview
 
 Activation functions are the nonlinear transformations that give neural networks their power. Without them, stacking multiple layers would be pointless: no matter how many linear transformations you chain together, the result is still just one linear transformation. A 100-layer network without activations is mathematically identical to a single-layer network.
@@ -355,6 +380,7 @@ softmax = Softmax()
 probs = softmax(logits)  # [0.09, 0.24, 0.67], sum = 1
 ```
 ````
+```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -373,6 +399,7 @@ logits = torch.tensor([[1, 2, 3]], dtype=torch.float32)
 probs = F.softmax(logits, dim=-1)  # [0.09, 0.24, 0.67], sum = 1
 ```
 ````
+```
 `````
 
 Let's walk through the key similarities and differences:

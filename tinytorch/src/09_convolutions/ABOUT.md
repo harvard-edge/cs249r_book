@@ -13,6 +13,31 @@
 If you can train an MLP on MNIST using your training loop and DataLoader, you're ready.
 :::
 
+```{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F09_convolutions%2F09_convolutions.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/09_convolutions/09_convolutions.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+:link: NOTEBOOKLM_LINK_HERE
+
+Listen to an AI-generated overview and take a quiz.
+```
+
+````
+```
+
 ## Overview
 
 Spatial operations transform machine learning from working with flattened vectors to understanding images and spatial patterns. When you look at a photo, your brain naturally processes spatial relationships: edges connect to form textures, textures form objects. Convolution gives neural networks this same capability by detecting local patterns through sliding filters across images.
@@ -467,6 +492,7 @@ x = relu(conv2(x))       # (32, 128, 112, 112)
 x = pool(x)              # (32, 128, 56, 56)
 ```
 ````
+```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -487,6 +513,7 @@ x = relu(conv2(x))
 x = pool(x)
 ```
 ````
+```
 `````
 
 Let's walk through each line to understand the comparison:

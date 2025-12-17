@@ -13,6 +13,31 @@
 If you can profile a model's parameters and understand weight distributions, you're ready.
 :::
 
+```{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F16_compression%2F16_compression.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/16_compression/16_compression.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+:link: NOTEBOOKLM_LINK_HERE
+
+Listen to an AI-generated overview and take a quiz.
+```
+
+````
+```
+
 ## Overview
 
 Model compression is the art of making neural networks smaller and faster while preserving their intelligence. Modern language models occupy 100GB+ of storage, but mobile devices have less than 1GB available for models. Edge devices have even tighter constraints at under 100MB. Compression techniques bridge this gap, enabling deployment of powerful models on resource-constrained devices.
@@ -381,6 +406,7 @@ sparsity = measure_sparsity(model)  # Returns 80.0 (percentage)
 print(f"Sparsity: {sparsity:.1f}%")
 ```
 ````
+```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -408,6 +434,7 @@ sparsity = zero_params / total_params
 print(f"Sparsity: {sparsity:.1%}")
 ```
 ````
+```
 `````
 
 Let's walk through the key differences:

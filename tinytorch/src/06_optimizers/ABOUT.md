@@ -13,6 +13,31 @@
 If you understand how `loss.backward()` computes gradients and why we need to update parameters to minimize loss, you're ready.
 :::
 
+```{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F06_optimizers%2F06_optimizers.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/06_optimizers/06_optimizers.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+:link: NOTEBOOKLM_LINK_HERE
+
+Listen to an AI-generated overview and take a quiz.
+```
+
+````
+```
+
 ## Overview
 
 Optimizers are the engines that drive neural network learning. After your autograd system computes gradients that point uphill toward higher loss, optimizers use those gradients to move parameters downhill toward lower loss. Think of optimization as hiking in dense fog where you can only feel the slope under your feet but can't see where you're going. Different optimizers represent different hiking strategies, from simple gradient descent to sophisticated algorithms that adapt their step size for each parameter.
@@ -347,6 +372,7 @@ optimizer.step()  # Update parameters
 optimizer.zero_grad()  # Clear gradients
 ```
 ````
+```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -362,6 +388,7 @@ optimizer.step()  # Update parameters
 optimizer.zero_grad()  # Clear gradients
 ```
 ````
+```
 `````
 
 Let's walk through each line to understand the comparison:

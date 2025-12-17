@@ -14,6 +14,31 @@
 If you can compute a forward pass through a neural network manually and understand why we need to minimize loss, you're ready.
 :::
 
+```{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F05_autograd%2F05_autograd.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/05_autograd/05_autograd.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+:link: NOTEBOOKLM_LINK_HERE
+
+Listen to an AI-generated overview and take a quiz.
+```
+
+````
+```
+
 ## Overview
 
 Autograd is the gradient engine that makes neural networks learn. Every modern deep learning framework—PyTorch, TensorFlow, JAX—has automatic differentiation at its core. Without autograd, training a neural network would require deriving and coding gradients by hand for every parameter in every layer. For a network with millions of parameters, this is impossible.
@@ -403,6 +428,7 @@ print(f"x.grad: {x.grad}")  # ∂loss/∂x
 print(f"W.grad: {W.grad}")  # ∂loss/∂W
 ```
 ````
+```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -424,6 +450,7 @@ print(f"x.grad: {x.grad}")
 print(f"W.grad: {W.grad}")
 ```
 ````
+```
 `````
 
 Let's walk through the comparison line by line:

@@ -14,6 +14,31 @@
 If you can multiply matrices and understand why matrix multiplication is expensive, you're ready.
 :::
 
+```{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F18_acceleration%2F18_acceleration.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/18_acceleration/18_acceleration.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+:link: NOTEBOOKLM_LINK_HERE
+
+Listen to an AI-generated overview and take a quiz.
+```
+
+````
+```
+
 ## Overview
 
 Neural network training and inference spend 90% of their time on matrix operations. A single forward pass through a transformer model can involve billions of floating-point operations, and training requires thousands of these passes. The difference between a model that trains in hours versus days, or that serves predictions in milliseconds versus seconds, comes down to how efficiently these operations execute on hardware.
@@ -374,6 +399,7 @@ h = vectorized_matmul(x, w)
 output = fused_gelu(h)
 ```
 ````
+```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -394,6 +420,7 @@ def fused_gelu(x):
 output = fused_gelu(h)
 ```
 ````
+```
 `````
 
 Let's walk through the key differences:

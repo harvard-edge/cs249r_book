@@ -13,6 +13,31 @@
 The core benchmarking functionality (Parts 1-4) works with just Modules 01-13 and 19. Modules 14-18 enable the advanced optimization workflow (Part 4b), which demonstrates how to integrate all TinyTorch components. If optimization modules aren't available, the system gracefully degrades to baseline benchmarking only.
 :::
 
+```{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F20_capstone%2F20_capstone.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/20_capstone/20_capstone.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+:link: NOTEBOOKLM_LINK_HERE
+
+Listen to an AI-generated overview and take a quiz.
+```
+
+````
+```
+
 ## Overview
 
 You've built an entire machine learning framework from scratch across 19 modules. You can train neural networks, implement transformers, optimize models with quantization and pruning, and measure performance with profiling tools. But there's one critical piece missing: proving your work with reproducible results.
@@ -413,6 +438,7 @@ submission = generate_submission(
 save_submission(submission, "results.json")
 ```
 ````
+```
 
 ````{tab-item} Production MLflow
 ```python
@@ -436,6 +462,7 @@ with mlflow.start_run(run_name="optimized"):
 # Compare experiments in MLflow UI
 ```
 ````
+```
 `````
 
 Let's walk through the comparison line by line:

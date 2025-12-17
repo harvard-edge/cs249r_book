@@ -13,6 +13,31 @@
 If you can multiply tensors, apply activations, and understand shape transformations, you're ready.
 :::
 
+```{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F03_layers%2F03_layers.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/03_layers/03_layers.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+:link: NOTEBOOKLM_LINK_HERE
+
+Listen to an AI-generated overview and take a quiz.
+```
+
+````
+```
+
 ## Overview
 
 Neural network layers are the fundamental building blocks that transform data as it flows through a network. Each layer performs a specific computation: Linear layers apply learned transformations (`y = xW + b`), while Dropout layers randomly zero elements for regularization. In this module, you'll build these essential components from scratch, gaining deep insight into how PyTorch's `nn.Linear` and `nn.Dropout` work under the hood.
@@ -475,6 +500,7 @@ output = model(x)
 params = model.parameters()
 ```
 ````
+```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -504,6 +530,7 @@ output = model(x)
 params = list(model.parameters())
 ```
 ````
+```
 `````
 
 Let's walk through each difference:

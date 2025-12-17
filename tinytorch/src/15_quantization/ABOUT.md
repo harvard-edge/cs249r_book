@@ -14,6 +14,31 @@
 If you can profile a model's memory usage and understand the cost of FP32 storage, you're ready.
 :::
 
+```{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F15_quantization%2F15_quantization.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/15_quantization/15_quantization.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+:link: NOTEBOOKLM_LINK_HERE
+
+Listen to an AI-generated overview and take a quiz.
+```
+
+````
+```
+
 ## Overview
 
 Modern neural networks face a memory wall problem. A BERT model requires 440 MB, GPT-2 needs 6 GB, and GPT-3 demands 700 GB, yet mobile devices have only 4-8 GB of RAM. The culprit? Every parameter uses 4 bytes of FP32 precision, representing values with 32-bit accuracy when 8 bits often suffice. Quantization solves this by converting FP32 weights to INT8, achieving 4× memory reduction with less than 1% accuracy loss.
@@ -299,6 +324,7 @@ quantize_model(model, calibration_data)
 output = model.forward(x)  # 4× less memory!
 ```
 ````
+```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -323,6 +349,7 @@ model_quantized = quantization.convert(model_prepared)
 output = model_quantized(x)  # 4× less memory!
 ```
 ````
+```
 `````
 
 Let's walk through the key differences:
