@@ -45,7 +45,7 @@ Let's get started!
 
 ```python
 # Final package structure:
-# Future modules will import and extend this Tensor
+# Other modules will import and use this Tensor
 ```
 
 **Why this matters:**
@@ -78,11 +78,11 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 **TinyTorch Dependencies**: NONE
 
 **Important**: This module has NO TinyTorch dependencies.
-All future modules will import FROM this module.
+Other modules will import FROM this module.
 
 **Dependency Flow**:
 ```
-Module 01 (Tensor) → All Future Modules
+Module 01 (Tensor) → All Other Modules
      ↓
   Foundation for entire TinyTorch system
 ```
@@ -192,8 +192,6 @@ This memory layout affects performance in real ML workloads - algorithms that ac
 ## Implementation: Building Tensor Foundation
 
 Let's build our Tensor class step by step, testing each component as we go.
-
-**Key Design Decision**: We focus on core tensor operations first. Gradient tracking will be added in Module 05 (Autograd) when you're ready to learn backpropagation.
 
 ### Tensor Class Architecture
 
@@ -1122,7 +1120,7 @@ if __name__ == "__main__":
 """
 ## Systems Analysis: Memory Layout and Performance
 
-Even as a foundation module, let's understand ONE key systems concept that will inform every design decision in future modules: **memory layout and cache behavior**.
+Let's understand ONE key systems concept: **memory layout and cache behavior**.
 
 This single analysis reveals why certain operations are fast while others are slow, and why framework designers make specific architectural choices.
 """
@@ -1485,7 +1483,7 @@ def custom_activation(tensor):
 operation—from simple addition to complex attention mechanisms—will use this class. The fact
 that it works exactly like NumPy means you've built something production-ready.
 
-In the next modules, you'll add activations, layers, and autograd on top of this foundation.
+Your Tensor is ready for machine learning operations.
 Every operation you just implemented will be called millions of times during training!
 """
 
@@ -1542,10 +1540,5 @@ Congratulations! You've built the foundational Tensor class that powers all mach
 - **Cache behavior**: Row-wise access is faster than column-wise due to memory layout
 - **Shape validation trade-offs**: Clear errors vs. performance in tight loops
 
-### Ready for Next Steps
-Your Tensor implementation enables all future modules! In Module 05 (Autograd), gradient tracking will be added to enable training. Every neural network component will build on this foundation.
-
 Export with: `tito module complete 01_tensor`
-
-**Next**: Module 02 will add activation functions (ReLU, Sigmoid, GELU) that bring intelligence to neural networks by introducing nonlinearity!
 """
