@@ -135,9 +135,19 @@ We are tracking our way to **1 million learners by 2030**. Every star, share, an
 
 1 ✓ → 10 ✓ → 100 ✓ → 1,000 ✓ → **10,000 ✓** → 100,000 by 2026 → ... → **1M by 2030**
 
+</div>
+
+**Here's how it works:** Organizations like the [EDGE AI Foundation](https://edgeaifoundation.org) watch open source education projects. When they see a growing, active community, they contribute funding. Your star isn't just a bookmark—it's a vote that sponsors notice.
+
+That funding goes directly to [Open Collective](https://opencollective.com/mlsysbook) or sponsors initiatives like [TinyML4D](https://tinyml.seas.harvard.edu/4D) workshops in developing countries, TinyML kits for underserved classrooms, and infrastructure to keep this resource free for everyone.
+
+One click. Real impact.
+
+<div align="center">
+
 ### Fund the Mission
 
-All contributions go to [Open Collective](https://opencollective.com/mlsysbook), a transparent fund that supports educational outreach: TinyML system kits, workshops, and infrastructure for learners worldwide.
+All contributions go to [Open Collective](https://opencollective.com/mlsysbook), a transparent fund that supports educational outreach.
 
 [![Open Collective](https://img.shields.io/badge/💝%20Support%20AI%20Education-Open%20Collective-blue.svg?style=for-the-badge)](https://opencollective.com/mlsysbook)
 
