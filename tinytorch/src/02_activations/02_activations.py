@@ -762,19 +762,18 @@ class Softmax:
         """
         ### BEGIN SOLUTION
         # Numerical stability: subtract max to prevent overflow
-        # Use Tensor operations to preserve gradient flow!
         x_max_data = np.max(x.data, axis=dim, keepdims=True)
-        x_max = Tensor(x_max_data, requires_grad=False)  # max is not differentiable in this context
-        x_shifted = x - x_max  # Tensor subtraction!
+        x_max = Tensor(x_max_data)
+        x_shifted = x - x_max  # Tensor subtraction
 
-        # Compute exponentials (NumPy operation, but wrapped in Tensor)
-        exp_values = Tensor(np.exp(x_shifted.data), requires_grad=x_shifted.requires_grad)
+        # Compute exponentials
+        exp_values = Tensor(np.exp(x_shifted.data))
 
-        # Sum along dimension (Tensor operation)
+        # Sum along dimension
         exp_sum_data = np.sum(exp_values.data, axis=dim, keepdims=True)
-        exp_sum = Tensor(exp_sum_data, requires_grad=exp_values.requires_grad)
+        exp_sum = Tensor(exp_sum_data)
 
-        # Normalize to get probabilities (Tensor division!)
+        # Normalize to get probabilities
         result = exp_values / exp_sum
         return result
         ### END SOLUTION
@@ -782,10 +781,6 @@ class Softmax:
     def __call__(self, x: Tensor, dim: int = -1) -> Tensor:
         """Allows the activation to be called like a function."""
         return self.forward(x, dim)
-
-    def backward(self, grad: Tensor) -> Tensor:
-        """Compute gradient (implemented in Module 05)."""
-        pass  # Will implement backward pass in Module 05
 
 # %% [markdown]
 """

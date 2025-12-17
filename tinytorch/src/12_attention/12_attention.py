@@ -327,7 +327,7 @@ def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor, mask: Optional
         # Ensure mask is broadcastable
         mask_data = mask.data
         adder_mask = (1.0 - mask_data) * MASK_VALUE
-        adder_mask_tensor = Tensor(adder_mask, requires_grad=False)
+        adder_mask_tensor = Tensor(adder_mask)
         scores = scores + adder_mask_tensor
 
     # Step 5: Apply softmax to get attention weights
@@ -648,7 +648,7 @@ class MultiHeadAttention:
              # This allows the mask to broadcast across all attention heads
              batch_size_mask, seq_len_mask, _ = mask.shape
              mask_data = mask.data.reshape(batch_size_mask, 1, seq_len_mask, seq_len_mask)
-             mask_reshaped = Tensor(mask_data, requires_grad=False)
+             mask_reshaped = Tensor(mask_data)
 
         attended, _ = scaled_dot_product_attention(Q, K, V, mask=mask_reshaped)
 
