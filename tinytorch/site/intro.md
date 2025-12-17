@@ -22,9 +22,16 @@ Don't import it. Build it.
 From tensors to systems. An educational framework for building and optimizing ML—understand how PyTorch, TensorFlow, and JAX really work.
 </p>
 
-<div style="text-align: center; margin: 0 0 2.5rem 0;">
+<div style="text-align: center; margin: 0 0 1rem 0;">
   <a href="getting-started.html" style="display: inline-block; background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); color: white; padding: 0.875rem 2.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600; font-size: 1.1rem; box-shadow: 0 4px 12px rgba(249,115,22,0.3);">
     Start Building →
+  </a>
+</div>
+<div style="text-align: center; margin: 0 0 2.5rem 0;">
+  <a href="https://github.com/harvard-edge/cs249r_book?tab=readme-ov-file#support-this-work" target="_blank" style="display: inline-flex; align-items: center; gap: 0.4rem; color: #6b7280; font-size: 0.85rem; text-decoration: none;">
+    <span>⭐</span>
+    <span id="star-count-hero" style="font-weight: 600;">...</span>
+    <span>learners · every ⭐ helps fund free ML education</span>
   </a>
 </div>
 
@@ -260,16 +267,29 @@ Four progressive tiers take you from foundations to production systems:
   <p style="color: #f1f5f9; font-size: 1.25rem; margin: 0 0 0.5rem 0; font-weight: 600;">
     See learners building ML systems worldwide
   </p>
-  <p style="color: #94a3b8; margin: 0 0 1.5rem 0;">
+  <p style="color: #94a3b8; margin: 0 0 0.75rem 0;">
     Add yourself to the map • Share your progress • Connect with builders
   </p>
-  <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+  <p style="color: #fbbf24; margin: 0 0 1.5rem 0; font-size: 0.9rem;">
+    Part of the <a href="https://github.com/harvard-edge/cs249r_book?tab=readme-ov-file#support-this-work" target="_blank" style="color: #fbbf24; text-decoration: underline;">MLSysBook</a> project — every ⭐ helps fund free ML education
+  </p>
+  <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; align-items: center;">
     <a href="community/"
        style="display: inline-block; background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
               color: white; padding: 0.75rem 2rem; border-radius: 0.5rem;
               text-decoration: none; font-weight: 600; font-size: 1rem;
               box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
       🌍 Join the Community
+    </a>
+    <a href="https://github.com/harvard-edge/cs249r_book" target="_blank"
+       style="display: inline-flex; align-items: center; gap: 0.5rem;
+              background: rgba(255,255,255,0.15);
+              border: 1px solid rgba(255,255,255,0.3);
+              color: #ffffff; padding: 0.75rem 1.5rem; border-radius: 0.5rem;
+              text-decoration: none; font-weight: 600; font-size: 1rem;
+              transition: all 0.2s ease;">
+      ⭐ Star on GitHub
+      <span id="star-count" style="background: rgba(249,115,22,0.3); padding: 0.2rem 0.6rem; border-radius: 1rem; font-size: 0.85rem; color: #fbbf24;">...</span>
     </a>
     <a href="https://github.com/harvard-edge/cs249r_book/discussions/1076" target="_blank"
        style="display: inline-block; background: rgba(255,255,255,0.15);
@@ -289,6 +309,29 @@ Four progressive tiers take you from foundations to production systems:
     </a>
   </div>
 </div>
+
+<script>
+async function fetchGitHubStars() {
+  const starElement = document.getElementById('star-count');
+  const starElementHero = document.getElementById('star-count-hero');
+
+  try {
+    const response = await fetch('https://api.github.com/repos/harvard-edge/cs249r_book');
+    const data = await response.json();
+    const starCount = data.stargazers_count;
+    const formattedCount = starCount.toLocaleString();
+
+    if (starElement) starElement.textContent = formattedCount;
+    if (starElementHero) starElementHero.textContent = formattedCount;
+  } catch (error) {
+    console.error('Failed to fetch GitHub stars:', error);
+    if (starElement) starElement.textContent = '10k+';
+    if (starElementHero) starElementHero.textContent = '10k+';
+  }
+}
+
+document.addEventListener('DOMContentLoaded', fetchGitHubStars);
+</script>
 
 
 **Next Steps**: **[Quick Start](getting-started)** (15 min) • **[The Big Picture](big-picture)** • **[Community](community)**
