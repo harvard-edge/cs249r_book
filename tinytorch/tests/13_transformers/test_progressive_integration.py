@@ -139,18 +139,19 @@ class TestCompleteMLSystemStillWorks:
 
             🔧 COMPLETE ML SYSTEM REQUIREMENTS:
             All modules (01→13) must be working:
-            1. Tensor operations (Module 02)
-            2. Activation functions (Module 03)
-            3. Layer infrastructure (Module 04)
-            4. Dense networks (Module 05)
-            5. Convolutions (Module 06)
-            6. Attention mechanisms (Module 07)
-            7. Data loading (Module 08)
-            8. Automatic differentiation (Module 09)
-            9. Optimizers (Module 10)
-            10. Training loops (Module 11)
-            11. Model compression (Module 12)
-            12. Performance kernels (Module 13)
+            1. Tensor operations (Module 01)
+            2. Activation functions (Module 02)
+            3. Layer infrastructure (Module 03)
+            4. Losses (Module 04)
+            5. Autograd (Module 05)
+            6. Optimizers (Module 06)
+            7. Training loops (Module 07)
+            8. Data loading (Module 08)
+            9. Convolutions (Module 09)
+            10. Tokenization (Module 10)
+            11. Embeddings (Module 11)
+            12. Attention (Module 12)
+            13. Transformers (Module 13)
 
             💡 SYSTEM INTEGRITY:
             Benchmarking should be NON-INVASIVE - it measures

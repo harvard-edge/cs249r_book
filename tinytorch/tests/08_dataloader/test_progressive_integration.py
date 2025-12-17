@@ -9,7 +9,7 @@ This is where we enable efficient data loading for training.
 - Module 08: Dataset abstraction, batching, shuffling, data pipelines
 - Integration: DataLoader works with Foundation tier modules
 - Regression: Complete ML pipeline (01→08) still works correctly
-- Preparation: Ready for optimizers (Module 10) and training (Module 11)
+- Preparation: Ready for CNNs (Module 09) and advanced architectures
 
 💡 FOR STUDENTS: If tests fail, check:
 1. Does your Variable class exist in tinytorch.core.autograd?
@@ -116,13 +116,14 @@ class TestCompleteMLPipelineStillWorks:
 
             🔧 PIPELINE REQUIREMENTS:
             All previous modules (01→08) must be working:
-            1. Tensor operations (Module 02)
-            2. Activation functions (Module 03)
-            3. Layer base class (Module 04)
-            4. Dense layers (Module 05)
-            5. Convolutions (Module 06)
-            6. Attention mechanisms (Module 07)
-            7. Data loading (Module 08)
+            1. Tensor operations (Module 01)
+            2. Activation functions (Module 02)
+            3. Layer infrastructure (Module 03)
+            4. Losses (Module 04)
+            5. Autograd (Module 05)
+            6. Optimizers (Module 06)
+            7. Training loops (Module 07)
+            8. Data loading (Module 08)
 
             💡 DEBUG STEPS:
             1. Test each module individually
@@ -688,7 +689,7 @@ class TestGradientBasedLearningFoundation:
         - Learning rate scaling
         - Multiple parameter groups
 
-        🎯 Foundation for optimizers (Module 10)
+        🎯 Foundation for efficient batch training
         """
         try:
             from tinytorch.core.tensor import Tensor

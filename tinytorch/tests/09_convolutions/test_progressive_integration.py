@@ -290,7 +290,7 @@ class TestRegressionPrevention:
         assert project_root.exists(), "Foundation: Project structure broken"
 
     def test_no_spatial_regression(self):
-        """Verify spatial operations (Module 06) unchanged."""
+        """Verify convolution operations (Module 09) unchanged."""
         try:
             from tinytorch.core.spatial import Conv2d as Conv2D
 
