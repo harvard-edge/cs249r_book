@@ -16,7 +16,7 @@ A single-layer perceptron for binary classification, demonstrating:
 
 **Progressive Requirements:**
 - **Part 1 (Forward Only):** Run after Module 04 (building blocks)
-- **Part 2 (Trained):** Run after Module 07 (training capability)
+- **Part 2 (Trained):** Run after Module 08 (training capability)
 
 | Module | Component | What It Provides |
 |--------|-----------|------------------|
@@ -24,9 +24,9 @@ A single-layer perceptron for binary classification, demonstrating:
 | Module 02 | Activations | YOUR sigmoid activation |
 | Module 03 | Layers | YOUR Linear layer |
 | Module 04 | Losses | YOUR loss functions |
-| Module 05 | Autograd | YOUR automatic differentiation (Part 2 only) |
-| Module 06 | Optimizers | YOUR SGD optimizer (Part 2 only) |
-| Module 07 | Training | YOUR end-to-end training loop (Part 2 only) |
+| Module 06 | Autograd | YOUR automatic differentiation (Part 2 only) |
+| Module 07 | Optimizers | YOUR SGD optimizer (Part 2 only) |
+| Module 08 | Training | YOUR end-to-end training loop (Part 2 only) |
 
 ## Milestone Structure
 
@@ -50,7 +50,7 @@ This milestone uses **progressive revelation** with 2 scripts:
 - Watch accuracy improve from ~50% to 95%+
 - **Key Learning:** "Training makes it work!"
 
-**When to run:** After Module 07 (after learning training)
+**When to run:** After Module 08 (after learning training)
 
 ## Expected Results
 
@@ -75,7 +75,7 @@ cd milestones/01_1957_perceptron
 # Step 1: See the problem (run after Module 04)
 python 01_rosenblatt_forward.py
 
-# Step 2: See the solution (run after Module 07)
+# Step 2: See the solution (run after Module 08)
 python 02_rosenblatt_trained.py
 ```
 

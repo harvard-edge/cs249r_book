@@ -19,9 +19,10 @@ real-world problems. Let's recreate that breakthrough using YOUR Tiny🔥Torch!
   Module 02 (Activations)   : YOUR ReLU activation
   Module 03 (Layers)        : YOUR Linear layer
   Module 04 (Losses)        : YOUR CrossEntropyLoss
-  Module 05 (Autograd)      : YOUR automatic differentiation
-  Module 06 (Optimizers)    : YOUR SGD optimizer
-  Module 08 (DataLoader)    : YOUR data batching system
+  Module 05 (DataLoader)    : YOUR data batching system
+  Module 06 (Autograd)      : YOUR automatic differentiation
+  Module 07 (Optimizers)    : YOUR SGD optimizer
+  Module 08 (Training)      : YOUR training loops
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🏗️ ARCHITECTURE (The Classic MLP):
@@ -115,14 +116,14 @@ console = Console()
 # │ Module 04: Loss     │ CrossEntropyLoss for           │ Multi-class loss guides     │
 # │                     │ 10-way classification          │ learning of all 10 digits   │
 # │                     │                                │                             │
-# │ Module 05: Autograd │ .backward() computes gradients │ Chain rule through 2 layers │
+# │ Module 05: DataLoader│ Batches training images       │ Memory efficient iteration  │
+# │                     │ (no need to load all at once)  │ over dataset                │
+# │                     │                                │                             │
+# │ Module 06: Autograd │ .backward() computes gradients │ Chain rule through 2 layers │
 # │                     │ for 2,378 parameters           │ automatically               │
 # │                     │                                │                             │
-# │ Module 06: SGD      │ Updates all weights each step  │ Stochastic gradient descent │
+# │ Module 07: SGD      │ Updates all weights each step  │ Stochastic gradient descent │
 # │                     │                                │ with learning rate          │
-# │                     │                                │                             │
-# │ Module 08: DataLoader│ Batches training images       │ Memory efficient iteration  │
-# │                     │ (no need to load all at once)  │ over dataset                │
 # └─────────────────────┴────────────────────────────────┴─────────────────────────────┘
 #
 # =============================================================================

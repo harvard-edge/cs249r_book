@@ -25,10 +25,10 @@ Multi-layer perceptrons (MLPs) on real image classification tasks:
 | Module 02 | Activations | YOUR ReLU activation |
 | Module 03 | Layers | YOUR Linear layers |
 | Module 04 | Losses | YOUR CrossEntropyLoss |
-| Module 05 | Autograd | YOUR automatic differentiation |
-| Module 06 | Optimizers | YOUR SGD optimizer |
-| Module 07 | Training | YOUR end-to-end training loop |
-| Module 08 | DataLoader | YOUR batching and data pipeline |
+| Module 05 | DataLoader | YOUR batching and data pipeline |
+| Module 06 | Autograd | YOUR automatic differentiation |
+| Module 07 | Optimizers | YOUR SGD optimizer |
+| Module 08 | Training | YOUR end-to-end training loop |
 
 ## Milestone Structure
 

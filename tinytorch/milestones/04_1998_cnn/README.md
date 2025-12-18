@@ -27,10 +27,10 @@ CNNs that exploit spatial structure in images:
 | Module 02 | Activations | YOUR ReLU activation |
 | Module 03 | Layers | YOUR Linear layers |
 | Module 04 | Losses | YOUR CrossEntropyLoss |
-| Module 05 | Autograd | YOUR automatic differentiation |
-| Module 06 | Optimizers | YOUR SGD/Adam optimizers |
-| Module 07 | Training | YOUR end-to-end training loop |
-| Module 08 | DataLoader | YOUR data batching |
+| Module 05 | DataLoader | YOUR data batching |
+| Module 06 | Autograd | YOUR automatic differentiation |
+| Module 07 | Optimizers | YOUR SGD/Adam optimizers |
+| Module 08 | Training | YOUR end-to-end training loop |
 | **Module 09** | **Convolutions** | **YOUR Conv2d + MaxPool2d** |
 
 ## Milestone Structure
@@ -65,7 +65,7 @@ This milestone has **two parts** that progressively showcase your TinyTorch modu
 - **Key Learning:** "YOUR DataLoader + CNN scale to realistic vision!"
 
 **What Part 2 Showcases:**
-- **YOUR DataLoader (Module 08)** batches 50,000 images efficiently
+- **YOUR DataLoader (Module 05)** batches 50,000 images efficiently
 - **YOUR Dataset abstraction** handles real image data
 - Shuffling prevents memorization, improves generalization
 - First-run prompts for download (~170 MB) with space check
