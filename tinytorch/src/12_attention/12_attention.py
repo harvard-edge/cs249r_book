@@ -681,6 +681,18 @@ class MultiHeadAttention:
 
         Returns:
             List of all parameter tensors
+
+        EXAMPLE:
+        >>> mha = MultiHeadAttention(embed_dim=64, num_heads=8)
+        >>> params = mha.parameters()
+        >>> print(len(params))  # 8 (4 layers × 2 params each: weight + bias)
+        >>> print(params[0].shape)  # (64, 64) - q_proj weight
+        >>> print(params[1].shape)  # (64,) - q_proj bias
+
+        HINTS:
+        - Each Linear layer has .parameters() method that returns [weight, bias]
+        - Use extend() to add all parameters from each layer to the list
+        - Total should be 8 tensors: 4 layers × 2 parameters each
         """
         ### BEGIN SOLUTION
         params = []
