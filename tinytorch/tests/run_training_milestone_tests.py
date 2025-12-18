@@ -30,9 +30,10 @@ MODULES = [
     ("02_activations", "Activations"),
     ("03_layers", "Layers"),
     ("04_losses", "Losses"),
-    ("05_autograd", "Autograd"),
-    ("06_optimizers", "Optimizers"),
-    ("07_training", "Training"),
+    ("05_dataloader", "DataLoader"),
+    ("06_autograd", "Autograd"),
+    ("07_optimizers", "Optimizers"),
+    ("08_training", "Training"),
 ]
 
 def run_module_tests(module_dir: str) -> dict:

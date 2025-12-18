@@ -20,7 +20,7 @@ CAPABILITY_DEMOS = {
     "03_layers": "capabilities/03_neural_networks/demonstrate.py",
     "09_convolutions": "capabilities/09_computer_vision/demonstrate.py",
     "12_attention": "capabilities/12_attention_mechanism/demonstrate.py",
-    "07_training": "capabilities/07_complete_training/demonstrate.py",
+    "08_training": "capabilities/08_complete_training/demonstrate.py",
     "13_transformers": "capabilities/13_language_model/demonstrate.py",
 }
 
@@ -157,8 +157,8 @@ class ModuleCompletionOrchestrator:
     def _suggest_next_module(self, current_module: str, console):
         """Suggest the next module to complete."""
         module_order = [
-            "01_tensor", "02_activations", "03_layers", "04_losses", "05_autograd",
-            "06_optimizers", "07_training", "08_dataloader", "09_convolutions",
+            "01_tensor", "02_activations", "03_layers", "04_losses", "05_dataloader",
+            "06_autograd", "07_optimizers", "08_training", "09_convolutions",
             "10_tokenization", "11_embeddings", "12_attention", "13_transformers",
             "14_profiling", "15_quantization", "16_compression", "17_memoization",
             "18_acceleration", "19_benchmarking", "20_capstone"
