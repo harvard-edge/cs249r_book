@@ -148,9 +148,9 @@ def test_optimizer_with_activations():
         "Sigmoid should output in [0, 1]"
 
     loss = output.sum()
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
 
     print("✅ Optimizer works with activation functions!")
 
