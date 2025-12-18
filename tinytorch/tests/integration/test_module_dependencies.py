@@ -19,7 +19,7 @@ MODULE_DEPENDENCIES = {
     "05_dataloader": ["01_tensor"],  # Needs Tensor
     "06_autograd": ["01_tensor"],  # Core dependency on Tensor
     "07_optimizers": ["01_tensor", "06_autograd"],  # Needs Tensor and autograd
-    "08_training": ["01_tensor", "06_autograd", "07_optimizers"],  # Training loop deps
+    "08_training": ["01_tensor", "05_dataloader", "06_autograd", "07_optimizers"],  # Training loop deps
     "09_convolutions": ["01_tensor", "03_layers"],  # Needs Tensor and Layer base
     "10_tokenization": ["01_tensor"],  # Needs Tensor
     "11_embeddings": ["01_tensor"],  # Needs Tensor
