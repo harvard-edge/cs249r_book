@@ -8,7 +8,7 @@ Students progressively build this package module by module.
 Imports are optional - only available after completing each module.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 # ============================================================================
 # Progressive Imports - Available as students complete modules
