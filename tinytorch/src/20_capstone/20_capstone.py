@@ -120,6 +120,7 @@ Let's build a benchmarking and submission system worthy of production ML!
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+#| export
 import numpy as np
 import time
 import json
@@ -128,7 +129,8 @@ from typing import Dict, List, Tuple, Optional, Any
 import platform
 import sys
 
-# Import TinyTorch modules
+# %% nbgrader={"grade": false, "grade_id": "imports2", "solution": false}
+# Import TinyTorch modules (not exported - used for module development only)
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU

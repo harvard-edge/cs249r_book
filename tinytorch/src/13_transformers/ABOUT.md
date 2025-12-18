@@ -8,6 +8,34 @@
 **Prerequisites: Modules 01-07 and 10-12** means you need a strong foundation across three domains. This module assumes you've implemented tensors, layers, training loops, tokenization, embeddings, and attention mechanisms. If you can explain how multi-head attention processes queries, keys, and values to compute weighted representations, you're ready.
 :::
 
+`````{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F13_transformers%2F13_transformers.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/13_transformers/13_transformers.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/13_transformers.mp3" type="audio/mpeg">
+</audio>
+```
+
+````
+`````
+
 ## Overview
 
 The Transformer architecture revolutionized machine learning and powers every major language model you interact with today: GPT, Claude, LLaMA, and countless others. At its core, transformers combine self-attention mechanisms with feed-forward networks using residual connections and layer normalization to process sequences of any length. This module brings together everything you've built to create a complete autoregressive language model capable of generating coherent text.

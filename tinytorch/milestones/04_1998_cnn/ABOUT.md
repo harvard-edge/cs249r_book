@@ -25,7 +25,7 @@ Images --> Conv --> ReLU --> Pool --> Conv --> ReLU --> Pool --> Flatten --> Lin
 | Module | Component | What It Provides |
 |--------|-----------|------------------|
 | 01-08 | Foundation + Training | Complete training pipeline |
-| **09** | **Spatial** | **YOUR Conv2d + MaxPool2d** |
+| **09** | **Convolutions** | **YOUR Conv2d + MaxPool2d** |
 
 ## Running the Milestone
 

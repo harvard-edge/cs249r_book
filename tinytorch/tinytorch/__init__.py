@@ -8,7 +8,7 @@ Students progressively build this package module by module.
 Imports are optional - only available after completing each module.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 # ============================================================================
 # Progressive Imports - Available as students complete modules
@@ -67,7 +67,7 @@ except ImportError:
     Dataset = TensorDataset = DataLoader = None
     RandomHorizontalFlip = RandomCrop = Compose = None
 
-# Module 09: Spatial Operations (CNN)
+# Module 09: Convolutions (CNN)
 try:
     from .core.spatial import Conv2d, MaxPool2d, AvgPool2d
 except ImportError:

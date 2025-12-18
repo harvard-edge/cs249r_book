@@ -18,7 +18,7 @@ MODULE_NAMES = {
     "06": "Optimizers",
     "07": "Training",
     "08": "DataLoader",
-    "09": "Spatial",
+    "09": "Convolutions",
     "10": "Tokenization",
     "11": "Embeddings",
     "12": "Attention",

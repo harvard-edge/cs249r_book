@@ -345,7 +345,7 @@ class TestModule04LayersCore:
         - Custom forward() method works correctly
         - Layer interface is flexible and extensible
 
-        💡 FOR STUDENTS: This shows how your Dense layer (Module 05) will work
+        💡 FOR STUDENTS: This shows how your Linear layer works in Module 03
         """
         try:
             from tinytorch.core.layers import Layer
@@ -688,8 +688,8 @@ class TestNeuralNetworkReadiness:
             4. Matrix operations must work
 
             💡 WHAT THIS ENABLES:
-            - Dense layers (Module 05)
-            - Convolutional layers (Module 06)
+            - Linear/Dense layers (Module 03)
+            - Convolutional layers (Module 09)
             - All parameterized neural network components
 
             🧪 DEBUG CHECKLIST:
@@ -987,7 +987,7 @@ class TestModuleCompletionReadiness:
         - Train on real datasets
         - Solve non-linear problems like XOR
 
-        🎯 Next: Implement Dense layer in Module 05!
+        🎯 Next: Implement Losses in Module 04!
         """
 
 

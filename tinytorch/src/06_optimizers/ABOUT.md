@@ -13,6 +13,34 @@
 If you understand how `loss.backward()` computes gradients and why we need to update parameters to minimize loss, you're ready.
 :::
 
+`````{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F06_optimizers%2F06_optimizers.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/06_optimizers/06_optimizers.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/06_optimizers.mp3" type="audio/mpeg">
+</audio>
+```
+
+````
+`````
+
 ## Overview
 
 Optimizers are the engines that drive neural network learning. After your autograd system computes gradients that point uphill toward higher loss, optimizers use those gradients to move parameters downhill toward lower loss. Think of optimization as hiking in dense fog where you can only feel the slope under your feet but can't see where you're going. Different optimizers represent different hiking strategies, from simple gradient descent to sophisticated algorithms that adapt their step size for each parameter.
@@ -513,7 +541,7 @@ Combine optimizers with training loops to actually train neural networks. You'll
 |--------|--------------|---------------------------|
 | **07: Training** | Complete training loops | `for epoch in range(10): loss.backward(); optimizer.step()` |
 | **08: DataLoader** | Batch data processing | `optimizer.step()` updates after each batch of data |
-| **09: Spatial (CNNs)** | Convolutional networks | `AdamW` optimizes millions of CNN parameters efficiently |
+| **09: Convolutions** | Convolutional networks | `AdamW` optimizes millions of CNN parameters efficiently |
 
 ## Get Started
 

@@ -24,7 +24,7 @@ features from real-world photographs!
   Module 06 (Optimizers)    : YOUR Adam optimizer
   Module 07 (Training)      : YOUR training loops
   Module 08 (DataLoader)    : YOUR Dataset/DataLoader for batching!  <-- SHOWCASED HERE
-  Module 09 (Spatial)       : YOUR Conv2D, MaxPool2D, Flatten
+  Module 09 (Convolutions)  : YOUR Conv2D, MaxPool2D, Flatten
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🏗️ ARCHITECTURE (Modern Pattern with BatchNorm):
@@ -91,7 +91,7 @@ sys.path.append(project_root)
 from tinytorch.core.tensor import Tensor              # Module 02: YOU built this!
 from tinytorch.core.layers import Linear             # Module 04: YOU built this!
 from tinytorch.core.activations import ReLU, Softmax  # Module 03: YOU built this!
-from tinytorch.core.spatial import Conv2d, MaxPool2D, BatchNorm2d  # Module 09: YOU built this!
+from tinytorch.core.spatial import Conv2d, MaxPool2d, BatchNorm2d  # Module 09: YOU built this!
 from tinytorch.core.optimizers import Adam            # Module 07: YOU built this!
 from tinytorch.core.dataloader import DataLoader, Dataset  # Module 10: YOU built this!
 from tinytorch.core.dataloader import RandomHorizontalFlip, RandomCrop, Compose  # Module 08: Data Augmentation!
@@ -203,7 +203,7 @@ train_transforms = Compose([
 
 
 # =============================================================================
-# CNN MODEL - Your Spatial Modules Power Feature Extraction
+# CNN MODEL - Your Convolution Modules Power Feature Extraction
 # =============================================================================
 # CNNs revolutionized vision by exploiting spatial structure. YOUR Conv2d uses
 # local connectivity + weight sharing to detect patterns with 100x fewer params.
@@ -232,7 +232,7 @@ class CIFARCNN:
         self.bn1 = BatchNorm2d(32)  # Module 09: YOUR BatchNorm! Stabilizes training
         self.conv2 = Conv2d(in_channels=32, out_channels=64, kernel_size=(3, 3))  # Module 09!
         self.bn2 = BatchNorm2d(64)  # Module 09: YOUR BatchNorm!
-        self.pool = MaxPool2D(pool_size=(2, 2))  # Module 09: YOUR pooling!
+        self.pool = MaxPool2d(pool_size=(2, 2))  # Module 09: YOUR pooling!
 
         # Activation functions
         self.relu = ReLU()  # Module 03: YOUR activation!
@@ -625,7 +625,7 @@ def main():
                        help='Use small subset for testing')
     args = parser.parse_args()
 
-    print("🎯 CIFAR-10 CNN - Natural Image Recognition with YOUR Spatial Modules!")
+    print("🎯 CIFAR-10 CNN - Natural Image Recognition with YOUR Convolution Modules!")
     print("   Historical significance: CNNs revolutionized computer vision")
     print("   YOUR achievement: Spatial feature extraction on real photos")
     print("   Components used: YOUR Conv2D + MaxPool2D + complete system")

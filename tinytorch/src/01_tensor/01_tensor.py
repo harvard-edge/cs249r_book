@@ -33,8 +33,8 @@ NumPy Arrays → Tensor → Activations (Module 02)
 By the end of this module, you will:
 1. Implement a complete Tensor class with fundamental operations
 2. Understand tensors as the universal data structure in ML
-3. Test tensor operations with immediate validation
-4. Prepare for gradient computation in Module 05
+3. Master broadcasting, matrix multiplication, and shape manipulation
+4. Test tensor operations with immediate validation
 
 Let's get started!
 
@@ -45,7 +45,7 @@ Let's get started!
 
 ```python
 # Final package structure:
-# Future modules will import and extend this Tensor
+# Other modules will import and use this Tensor
 ```
 
 **Why this matters:**
@@ -78,11 +78,11 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 **TinyTorch Dependencies**: NONE
 
 **Important**: This module has NO TinyTorch dependencies.
-All future modules will import FROM this module.
+Other modules will import FROM this module.
 
 **Dependency Flow**:
 ```
-Module 01 (Tensor) → All Future Modules
+Module 01 (Tensor) → All Other Modules
      ↓
   Foundation for entire TinyTorch system
 ```
@@ -193,8 +193,6 @@ This memory layout affects performance in real ML workloads - algorithms that ac
 
 Let's build our Tensor class step by step, testing each component as we go.
 
-**Key Design Decision**: We'll include gradient-related attributes from the start, but they'll remain dormant until Module 05. This ensures a consistent interface throughout the course while keeping the cognitive load manageable.
-
 ### Tensor Class Architecture
 
 ```
@@ -204,21 +202,24 @@ Tensor Class Structure:
 │ • data: np.array (the numbers)  │
 │ • shape: tuple (dimensions)     │
 │ • size: int (total elements)    │
-│ • dtype: type (float32, int64)  │
+│ • dtype: type (float32)         │
 ├─────────────────────────────────┤
-│ Gradient Attributes (dormant):  │
-│ • requires_grad: bool           │
-│ • grad: None (until Module 05)  │
-├─────────────────────────────────┤
-│ Operations:                     │
+│ Arithmetic Operations:          │
 │ • __add__, __sub__, __mul__     │
-│ • matmul(), reshape()           │
+│ • __truediv__, matmul()         │
+├─────────────────────────────────┤
+│ Shape Operations:               │
+│ • reshape(), transpose()        │
 │ • sum(), mean(), max()          │
+│ • __getitem__ (indexing)        │
+├─────────────────────────────────┤
+│ Utility Methods:                │
 │ • __repr__(), __str__()         │
+│ • numpy(), memory_footprint()   │
 └─────────────────────────────────┘
 ```
 
-The beauty of this design: **all methods are defined inside the class from day one**. No monkey-patching, no dynamic attribute addition. Clean, consistent, debugger-friendly.
+This clean design focuses on what tensors fundamentally do: store and manipulate numerical data efficiently.
 """
 
 # %% [markdown]
@@ -255,31 +256,29 @@ Tensor wraps with: shape=(2,3), size=6, dtype=int64
 # %% nbgrader={"grade": false, "grade_id": "tensor-class", "solution": true}
 #| export
 class Tensor:
-    """Educational tensor that grows with student knowledge.
+    """Educational tensor - the foundation of machine learning computation.
 
-    This class starts simple but includes dormant features for future modules:
-    - requires_grad: Will be used for automatic differentiation (Module 05)
-    - grad: Will store computed gradients (Module 05)
-    - backward(): Will compute gradients (Module 05)
+    This class provides the core data structure for all ML operations:
+    - data: The actual numerical values (NumPy array)
+    - shape: Dimensions of the tensor
+    - size: Total number of elements
+    - dtype: Data type (float32)
 
-    For now, focus on: data, shape, and basic operations.
+    All arithmetic, matrix, and shape operations are built on this foundation.
     """
 
-    def __init__(self, data, requires_grad=False):
+    def __init__(self, data):
         """Create a new tensor from data."""
         ### BEGIN SOLUTION
         self.data = np.array(data, dtype=np.float32)
         self.shape = self.data.shape
         self.size = self.data.size
         self.dtype = self.data.dtype
-        self.requires_grad = requires_grad
-        self.grad = None
         ### END SOLUTION
 
     def __repr__(self):
         """String representation of tensor for debugging."""
-        grad_info = f", requires_grad={self.requires_grad}" if self.requires_grad else ""
-        return f"Tensor(data={self.data}, shape={self.shape}{grad_info})"
+        return f"Tensor(data={self.data}, shape={self.shape})"
 
     def __str__(self):
         """Human-readable string representation."""
@@ -389,8 +388,7 @@ class Tensor:
         result_data = self.data[key]
         if not isinstance(result_data, np.ndarray):
             result_data = np.array(result_data)
-        result = Tensor(result_data, requires_grad=self.requires_grad)
-        return result
+        return Tensor(result_data)
         ### END SOLUTION
 
     def reshape(self, *shape):
@@ -418,8 +416,7 @@ class Tensor:
                 f"Total elements must match: {self.size} ≠ {target_size}"
             )
         reshaped_data = np.reshape(self.data, new_shape)
-        result = Tensor(reshaped_data, requires_grad=self.requires_grad)
-        return result
+        return Tensor(reshaped_data)
         ### END SOLUTION
 
     def transpose(self, dim0=None, dim1=None):
@@ -438,8 +435,7 @@ class Tensor:
             axes = list(range(len(self.shape)))
             axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
             transposed_data = np.transpose(self.data, axes)
-        result = Tensor(transposed_data, requires_grad=self.requires_grad)
-        return result
+        return Tensor(transposed_data)
         ### END SOLUTION
 
     def sum(self, axis=None, keepdims=False):
@@ -463,12 +459,6 @@ class Tensor:
         return Tensor(result)
         ### END SOLUTION
 
-    def backward(self):
-        """Compute gradients (implemented in Module 05: Autograd)."""
-        ### BEGIN SOLUTION
-        pass
-        ### END SOLUTION
-
 # %% [markdown]
 """
 ### 🧪 Unit Test: Tensor Creation
@@ -490,8 +480,6 @@ def test_unit_tensor_creation():
     assert scalar.data == 5.0
     assert scalar.shape == ()
     assert scalar.size == 1
-    assert scalar.requires_grad == False
-    assert scalar.grad is None
     assert scalar.dtype == np.float32
 
     # Test vector creation
@@ -506,10 +494,10 @@ def test_unit_tensor_creation():
     assert matrix.shape == (2, 2)
     assert matrix.size == 4
 
-    # Test gradient flag (dormant feature)
-    grad_tensor = Tensor([1, 2], requires_grad=True)
-    assert grad_tensor.requires_grad == True
-    assert grad_tensor.grad is None  # Still None until Module 05
+    # Test 3D tensor creation
+    tensor_3d = Tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
+    assert tensor_3d.shape == (2, 2, 2)
+    assert tensor_3d.size == 8
 
     print("✅ Tensor creation works correctly!")
 
@@ -1130,79 +1118,9 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Gradient Features: Preparing for Module 05
-
-Our Tensor includes dormant gradient features that will spring to life in Module 05. For now, they exist but do nothing - this design choice ensures a consistent interface throughout the course.
-
-### Why Include Gradient Features Now?
-
-```
-Gradient System Evolution:
-Module 01: Tensor with dormant gradients
-  ┌─────────────────────────────────┐
-  │ Tensor                          │
-  │ • data: actual values           │
-  │ • requires_grad: False          │ ← Present but unused
-  │ • grad: None                    │ ← Present but stays None
-  │ • backward(): pass              │ ← Present but does nothing
-  └─────────────────────────────────┘
-         ↓ Module 05 activates these
-Module 05: Tensor with active gradients
-  ┌─────────────────────────────────┐
-  │ Tensor                          │
-  │ • data: actual values           │
-  │ • requires_grad: True           │ ← Now controls gradient tracking
-  │ • grad: computed gradients      │ ← Now accumulates gradients
-  │ • backward(): computes grads    │ ← Now implements chain rule
-  └─────────────────────────────────┘
-```
-
-### Design Benefits
-
-**Consistency**: Same Tensor class interface throughout all modules
-- No confusing Variable vs. Tensor distinction (unlike early PyTorch)
-- Students never need to learn a "new" Tensor class
-- IDE autocomplete works from day one
-
-**Gradual Complexity**: Features activate when students are ready
-- Module 01-04: Ignore gradient features, focus on operations
-- Module 05: Gradient features "turn on" magically
-- No cognitive overload in early modules
-
-**Future-Proof**: Easy to extend without breaking changes
-- Additional features can be added as dormant initially
-- No monkey-patching or dynamic class modification
-- Clean evolution path
-
-### Current State (Module 01)
-
-```
-Gradient Features - Current Behavior:
-┌─────────────────────────────────────────────────────────┐
-│ Feature           │ Current State  │ Module 05 State    │
-├─────────────────────────────────────────────────────────┤
-│ requires_grad     │ False          │ True (when needed) │
-│ grad              │ None           │ np.array(...)      │
-│ backward()        │ pass (no-op)   │ Chain rule impl    │
-│ Operation chaining│ Not tracked    │ Computation graph  │
-└─────────────────────────────────────────────────────────┘
-
-Student Experience:
-• Can call .backward() without errors (just does nothing)
-• Can set requires_grad=True (just gets stored)
-• Focus on understanding tensor operations first
-• Gradients remain "mysterious" until Module 05 reveals them
-```
-
-This approach matches the pedagogical principle of "progressive disclosure" - reveal complexity only when students are ready to handle it.
-"""
-
-
-# %% [markdown]
-"""
 ## Systems Analysis: Memory Layout and Performance
 
-Even as a foundation module, let's understand ONE key systems concept that will inform every design decision in future modules: **memory layout and cache behavior**.
+Let's understand ONE key systems concept: **memory layout and cache behavior**.
 
 This single analysis reveals why certain operations are fast while others are slow, and why framework designers make specific architectural choices.
 """
@@ -1390,18 +1308,6 @@ def test_module():
 
     print("✅ Two-layer neural network computation works!")
 
-    # Test gradient attributes are preserved and functional
-    print("🧪 Integration Test: Gradient System Readiness...")
-    grad_tensor = Tensor([1, 2, 3], requires_grad=True)
-    result = grad_tensor + 5
-    assert grad_tensor.requires_grad == True, "requires_grad not preserved"
-    assert grad_tensor.grad is None, "grad should still be None"
-
-    # Test backward() doesn't crash (even though it does nothing)
-    grad_tensor.backward()  # Should not raise any exception
-
-    print("✅ Gradient system ready for Module 05!")
-
     # Test complex shape manipulations
     print("🧪 Integration Test: Complex Shape Operations...")
     data = Tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
@@ -1577,7 +1483,7 @@ def custom_activation(tensor):
 operation—from simple addition to complex attention mechanisms—will use this class. The fact
 that it works exactly like NumPy means you've built something production-ready.
 
-In the next modules, you'll add activations, layers, and autograd on top of this foundation.
+Your Tensor is ready for machine learning operations.
 Every operation you just implemented will be called millions of times during training!
 """
 
@@ -1624,21 +1530,15 @@ Congratulations! You've built the foundational Tensor class that powers all mach
 ### Key Accomplishments
 - **Built a complete Tensor class** with arithmetic operations, matrix multiplication, and shape manipulation
 - **Implemented broadcasting semantics** that match NumPy for automatic shape alignment
-- **Created dormant gradient features** that will activate in Module 05 (autograd)
+- **Created reduction operations** (sum, mean, max) for loss computation and pooling
 - **Added comprehensive ASCII diagrams** showing tensor operations visually
-- **All methods defined INSIDE the class** (no monkey-patching) for clean, maintainable code
 - **All tests pass ✅** (validated by `test_module()`)
 
 ### Systems Insights Discovered
 - **Memory scaling**: Matrix operations create new tensors (3× memory during computation)
 - **Broadcasting efficiency**: NumPy's automatic shape alignment vs. explicit operations
+- **Cache behavior**: Row-wise access is faster than column-wise due to memory layout
 - **Shape validation trade-offs**: Clear errors vs. performance in tight loops
-- **Architecture decisions**: Dormant features vs. inheritance for clean evolution
-
-### Ready for Next Steps
-Your Tensor implementation enables all future modules! The dormant gradient features will spring to life in Module 05, and every neural network component will build on this foundation.
 
 Export with: `tito module complete 01_tensor`
-
-**Next**: Module 02 will add activation functions (ReLU, Sigmoid, GELU) that bring intelligence to neural networks by introducing nonlinearity!
 """

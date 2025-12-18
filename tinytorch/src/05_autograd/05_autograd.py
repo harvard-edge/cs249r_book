@@ -1366,6 +1366,19 @@ def enable_autograd(quiet=False):
         # Silently return if already enabled - no need to warn
         return
 
+    # ===== STEP 1: Add gradient infrastructure to Tensor =====
+    # Store original __init__ to extend it
+    _original_init = Tensor.__init__
+
+    def gradient_aware_init(self, data, requires_grad=False):
+        """Extended Tensor init that supports gradient tracking."""
+        _original_init(self, data)
+        self.requires_grad = requires_grad
+        self.grad = None
+
+    # Replace __init__ with gradient-aware version
+    Tensor.__init__ = gradient_aware_init
+
     # Store original operations
     # These are guaranteed to exist from Module 01 (Tensor class)
     _original_add = Tensor.__add__
@@ -1379,6 +1392,19 @@ def enable_autograd(quiet=False):
     _original_transpose = Tensor.transpose
     _original_reshape = Tensor.reshape
 
+    # Helper to safely check requires_grad (handles tensors created before enable_autograd)
+    def _get_requires_grad(tensor):
+        """Safely get requires_grad, defaulting to False for pre-autograd tensors."""
+        return getattr(tensor, 'requires_grad', False) if isinstance(tensor, Tensor) else False
+
+    def _ensure_grad_attrs(tensor):
+        """Ensure tensor has gradient attributes (for tensors created before enable_autograd)."""
+        if isinstance(tensor, Tensor):
+            if not hasattr(tensor, 'requires_grad'):
+                tensor.requires_grad = False
+            if not hasattr(tensor, 'grad'):
+                tensor.grad = None
+
     # Enhanced operations that track gradients
     def tracked_add(self, other):
         """
@@ -1387,15 +1413,20 @@ def enable_autograd(quiet=False):
         Enhances the original __add__ method to build computation graphs
         when requires_grad=True for any input.
         """
+        # Ensure self has gradient attributes
+        _ensure_grad_attrs(self)
+
         # Convert scalar to Tensor if needed
         if not isinstance(other, Tensor):
             other = Tensor(other)
+        _ensure_grad_attrs(other)
 
         # Call original operation
         result = _original_add(self, other)
+        _ensure_grad_attrs(result)
 
         # Track gradient if needed
-        if self.requires_grad or other.requires_grad:
+        if _get_requires_grad(self) or _get_requires_grad(other):
             result.requires_grad = True
             result._grad_fn = AddBackward(self, other)
 
@@ -1408,17 +1439,21 @@ def enable_autograd(quiet=False):
         Enhances the original __mul__ method to build computation graphs
         when requires_grad=True for any input.
         """
+        _ensure_grad_attrs(self)
+
         # Convert scalar to Tensor if needed for consistency
         if not isinstance(other, Tensor):
             other_tensor = Tensor(other)
         else:
             other_tensor = other
+        _ensure_grad_attrs(other_tensor)
 
         # Call original operation
         result = _original_mul(self, other)
+        _ensure_grad_attrs(result)
 
         # Track gradient if needed
-        if self.requires_grad or (isinstance(other, Tensor) and other.requires_grad):
+        if _get_requires_grad(self) or _get_requires_grad(other_tensor):
             result.requires_grad = True
             result._grad_fn = MulBackward(self, other)
 
@@ -1431,11 +1466,15 @@ def enable_autograd(quiet=False):
         Enhances the original matmul method to build computation graphs
         when requires_grad=True for any input.
         """
+        _ensure_grad_attrs(self)
+        _ensure_grad_attrs(other)
+
         # Call original matmul from Module 01
         result = _original_matmul(self, other)
+        _ensure_grad_attrs(result)
 
         # Track gradient if needed
-        if self.requires_grad or other.requires_grad:
+        if _get_requires_grad(self) or _get_requires_grad(other):
             result.requires_grad = True
             result._grad_fn = MatmulBackward(self, other)
 
@@ -1448,11 +1487,14 @@ def enable_autograd(quiet=False):
         Enhances the original transpose method to build computation graphs
         when requires_grad=True for the input.
         """
+        _ensure_grad_attrs(self)
+
         # Call original transpose from Module 01
         result = _original_transpose(self, dim0, dim1)
+        _ensure_grad_attrs(result)
 
         # Track gradient if needed
-        if self.requires_grad:
+        if _get_requires_grad(self):
             result.requires_grad = True
             result._grad_fn = TransposeBackward(self, dim0, dim1)
 
@@ -1465,13 +1507,15 @@ def enable_autograd(quiet=False):
         Enhances the original reshape method to build computation graphs
         when requires_grad=True for the input.
         """
+        _ensure_grad_attrs(self)
         original_shape = self.shape
 
         # Call original reshape from Module 01
         result = _original_reshape(self, *shape)
+        _ensure_grad_attrs(result)
 
         # Track gradient if needed
-        if self.requires_grad:
+        if _get_requires_grad(self):
             result.requires_grad = True
             result._grad_fn = ReshapeBackward(self, original_shape)
 
@@ -1484,15 +1528,19 @@ def enable_autograd(quiet=False):
         Enhances the original __sub__ method to build computation graphs
         when requires_grad=True for any input.
         """
+        _ensure_grad_attrs(self)
+
         # Convert scalar to Tensor if needed
         if not isinstance(other, Tensor):
             other = Tensor(other)
+        _ensure_grad_attrs(other)
 
         # Call original operation
         result = _original_sub(self, other)
+        _ensure_grad_attrs(result)
 
         # Track gradient if needed
-        if self.requires_grad or other.requires_grad:
+        if _get_requires_grad(self) or _get_requires_grad(other):
             result.requires_grad = True
             result._grad_fn = SubBackward(self, other)
 
@@ -1505,15 +1553,19 @@ def enable_autograd(quiet=False):
         Enhances the original __truediv__ method to build computation graphs
         when requires_grad=True for any input.
         """
+        _ensure_grad_attrs(self)
+
         # Convert scalar to Tensor if needed
         if not isinstance(other, Tensor):
             other = Tensor(other)
+        _ensure_grad_attrs(other)
 
         # Call original operation
         result = _original_div(self, other)
+        _ensure_grad_attrs(result)
 
         # Track gradient if needed
-        if self.requires_grad or other.requires_grad:
+        if _get_requires_grad(self) or _get_requires_grad(other):
             result.requires_grad = True
             result._grad_fn = DivBackward(self, other)
 
@@ -1526,11 +1578,14 @@ def enable_autograd(quiet=False):
         Enhances the original __getitem__ method to build computation graphs
         when requires_grad=True for the input.
         """
+        _ensure_grad_attrs(self)
+
         # Call original __getitem__ from Module 01
         result = _original_getitem(self, key)
+        _ensure_grad_attrs(result)
 
         # Track gradient if needed
-        if self.requires_grad:
+        if _get_requires_grad(self):
             result.requires_grad = True
             result._grad_fn = SliceBackward(self, key)
 
@@ -1543,10 +1598,12 @@ def enable_autograd(quiet=False):
         Creates a new sum method that builds computation graphs
         when requires_grad=True.
         """
+        _ensure_grad_attrs(self)
+
         result_data = np.sum(self.data, axis=axis, keepdims=keepdims)
         result = Tensor(result_data)
 
-        if self.requires_grad:
+        if _get_requires_grad(self):
             result.requires_grad = True
             result._grad_fn = SumBackward(self)
 
@@ -1573,8 +1630,11 @@ def enable_autograd(quiet=False):
         print(x.grad)  # [3.0]
         ```
         """
+        # Ensure gradient attributes exist
+        _ensure_grad_attrs(self)
+
         # Only compute gradients if required
-        if not self.requires_grad:
+        if not _get_requires_grad(self):
             return
 
         # Initialize gradient if not provided (for scalar outputs)

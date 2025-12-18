@@ -1,4 +1,4 @@
-# Module 09: Spatial
+# Module 09: Convolutions
 
 :::{admonition} Module Info
 :class: note
@@ -12,6 +12,34 @@
 
 If you can train an MLP on MNIST using your training loop and DataLoader, you're ready.
 :::
+
+`````{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F09_convolutions%2F09_convolutions.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/09_convolutions/09_convolutions.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/09_convolutions.mp3" type="audio/mpeg">
+</audio>
+```
+
+````
+`````
 
 ## Overview
 

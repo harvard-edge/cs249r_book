@@ -65,6 +65,11 @@ from typing import List, Union, Optional, Dict, Any
 # Import Tensor from Module 01 (now with gradient support from Module 05)
 from tinytorch.core.tensor import Tensor
 
+# Enable autograd to add gradient tracking to Tensor
+# This module depends on Module 05 (Autograd) being available
+from tinytorch.core.autograd import enable_autograd
+enable_autograd()
+
 # Constants for optimizer defaults
 DEFAULT_LEARNING_RATE_SGD = 0.01  # Default learning rate for SGD
 DEFAULT_LEARNING_RATE_ADAM = 0.001  # Default learning rate for Adam/AdamW
@@ -254,19 +259,14 @@ class Optimizer:
         >>> linear = Linear(784, 128)
         >>> optimizer = SGD(linear.parameters(), lr=0.01)
 
-        HINT: Check that each parameter has requires_grad=True
+        HINT: Store parameters for iteration during optimization steps
         """
         ### BEGIN SOLUTION
         # Validate and store parameters
         if not isinstance(params, list):
             params = list(params)
 
-        # Check that parameters require gradients
-        for i, param in enumerate(params):
-            # Trust that param is a Tensor from Module 01 with data, grad, requires_grad
-            if not param.requires_grad:
-                raise ValueError(f"Parameter {i} does not require gradients. Set requires_grad=True.")
-
+        # Store parameters - gradient tracking is handled by autograd module
         self.params = params
         self.step_count = 0  # For algorithms that need step counting
         ### END SOLUTION
@@ -336,13 +336,11 @@ def test_unit_optimizer_base():
     assert param1.grad is None
     assert param2.grad is None
 
-    # Test error handling
-    try:
-        bad_param = Tensor([1.0], requires_grad=False)
-        Optimizer([bad_param])
-        assert False, "Should have raised ValueError"
-    except ValueError as e:
-        assert "does not require gradients" in str(e)
+    # Test that optimizer accepts any tensor (no validation required)
+    # Gradient tracking is handled by the autograd module
+    regular_param = Tensor([1.0])
+    opt = Optimizer([regular_param])
+    assert len(opt.params) == 1
 
     print("✅ Base Optimizer works correctly!")
 

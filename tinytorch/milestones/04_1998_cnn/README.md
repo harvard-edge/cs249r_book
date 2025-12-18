@@ -19,7 +19,7 @@ CNNs that exploit spatial structure in images:
 
 ## Required Modules
 
-**Run after Module 09** (Spatial operations: Conv2d + Pooling)
+**Run after Module 09** (Convolutions: Conv2d + Pooling)
 
 | Module | Component | What It Provides |
 |--------|-----------|------------------|
@@ -31,7 +31,7 @@ CNNs that exploit spatial structure in images:
 | Module 06 | Optimizers | YOUR SGD/Adam optimizers |
 | Module 07 | Training | YOUR end-to-end training loop |
 | Module 08 | DataLoader | YOUR data batching |
-| **Module 09** | **Spatial** | **YOUR Conv2d + MaxPool2d** |
+| **Module 09** | **Convolutions** | **YOUR Conv2d + MaxPool2d** |
 
 ## Milestone Structure
 
