@@ -4,7 +4,13 @@
 <img src="_static/images/tito.png" alt="TinyTorch" style="width: 100%;">
 </div>
 
-Everyone wants to be an astronaut 🧑‍. Very few want to be the rocket scientist .
+`````{only} html
+Everyone wants to be an astronaut 🧑‍🚀. Very few want to be the rocket scientist 🚀.
+`````
+
+`````{only} latex
+Everyone wants to be an astronaut. Very few want to be the rocket scientist.
+`````
 
 In machine learning, we see the same pattern. Everyone wants to train models, run inference, deploy AI. Very few want to understand how the frameworks actually work. Even fewer want to build one.
 
