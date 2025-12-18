@@ -268,7 +268,26 @@ class Tensor:
     """
 
     def __init__(self, data):
-        """Create a new tensor from data."""
+        """Create a new tensor from data.
+
+        TODO: Initialize a Tensor by wrapping data in a NumPy array and setting attributes.
+
+        APPROACH:
+        1. Convert data to NumPy array with dtype=float32
+        2. Store the array as self.data
+        3. Set self.shape from the array's shape
+        4. Set self.size from the array's size
+        5. Set self.dtype from the array's dtype
+
+        EXAMPLE:
+        >>> t = Tensor([1, 2, 3])
+        >>> print(t.shape)
+        (3,)
+        >>> print(t.size)
+        3
+
+        HINT: Use np.array(data, dtype=np.float32) to convert data to NumPy array
+        """
         ### BEGIN SOLUTION
         self.data = np.array(data, dtype=np.float32)
         self.shape = self.data.shape
@@ -300,7 +319,25 @@ class Tensor:
         return self.data.nbytes
 
     def __add__(self, other):
-        """Add two tensors element-wise with broadcasting support."""
+        """Add two tensors element-wise with broadcasting support.
+
+        TODO: Implement element-wise addition that works with both Tensors and scalars.
+
+        APPROACH:
+        1. Check if other is a Tensor (use isinstance)
+        2. If Tensor: add self.data + other.data
+        3. If scalar: add self.data + other (broadcasting)
+        4. Wrap result in new Tensor
+
+        EXAMPLE:
+        >>> a = Tensor([1, 2, 3])
+        >>> b = Tensor([4, 5, 6])
+        >>> c = a + b
+        >>> print(c.data)
+        [5. 7. 9.]
+
+        HINT: NumPy's + operator handles broadcasting automatically
+        """
         ### BEGIN SOLUTION
         if isinstance(other, Tensor):
             return Tensor(self.data + other.data)
@@ -309,7 +346,25 @@ class Tensor:
         ### END SOLUTION
 
     def __sub__(self, other):
-        """Subtract two tensors element-wise."""
+        """Subtract two tensors element-wise.
+
+        TODO: Implement element-wise subtraction (same pattern as __add__).
+
+        APPROACH:
+        1. Check if other is a Tensor
+        2. If Tensor: subtract self.data - other.data
+        3. If scalar: subtract self.data - other
+        4. Return new Tensor with result
+
+        EXAMPLE:
+        >>> a = Tensor([5, 7, 9])
+        >>> b = Tensor([1, 2, 3])
+        >>> c = a - b
+        >>> print(c.data)
+        [4. 5. 6.]
+
+        HINT: Follow the same pattern as __add__ but with subtraction
+        """
         ### BEGIN SOLUTION
         if isinstance(other, Tensor):
             return Tensor(self.data - other.data)
@@ -318,7 +373,25 @@ class Tensor:
         ### END SOLUTION
 
     def __mul__(self, other):
-        """Multiply two tensors element-wise (NOT matrix multiplication)."""
+        """Multiply two tensors element-wise (NOT matrix multiplication).
+
+        TODO: Implement element-wise multiplication (same pattern as __add__).
+
+        APPROACH:
+        1. Check if other is a Tensor
+        2. If Tensor: multiply self.data * other.data
+        3. If scalar: multiply self.data * other
+        4. Return new Tensor with result
+
+        EXAMPLE:
+        >>> a = Tensor([1, 2, 3])
+        >>> b = Tensor([4, 5, 6])
+        >>> c = a * b
+        >>> print(c.data)
+        [ 4. 10. 18.]
+
+        HINT: Element-wise multiplication is *, not matrix multiplication (@)
+        """
         ### BEGIN SOLUTION
         if isinstance(other, Tensor):
             return Tensor(self.data * other.data)
@@ -327,7 +400,25 @@ class Tensor:
         ### END SOLUTION
 
     def __truediv__(self, other):
-        """Divide two tensors element-wise."""
+        """Divide two tensors element-wise.
+
+        TODO: Implement element-wise division (same pattern as __add__).
+
+        APPROACH:
+        1. Check if other is a Tensor
+        2. If Tensor: divide self.data / other.data
+        3. If scalar: divide self.data / other
+        4. Return new Tensor with result
+
+        EXAMPLE:
+        >>> a = Tensor([4, 6, 8])
+        >>> b = Tensor([2, 2, 2])
+        >>> c = a / b
+        >>> print(c.data)
+        [2. 3. 4.]
+
+        HINT: Division creates float results automatically due to float32 dtype
+        """
         ### BEGIN SOLUTION
         if isinstance(other, Tensor):
             return Tensor(self.data / other.data)
@@ -336,7 +427,31 @@ class Tensor:
         ### END SOLUTION
 
     def matmul(self, other):
-        """Matrix multiplication of two tensors."""
+        """Matrix multiplication of two tensors.
+
+        TODO: Implement matrix multiplication with shape validation.
+
+        APPROACH:
+        1. Validate other is a Tensor (raise TypeError if not)
+        2. Check for scalar cases (0D tensors) - use element-wise multiply
+        3. For 2D+ matrices: validate inner dimensions match (shape[-1] == shape[-2])
+        4. For 2D matrices: use explicit nested loops (educational)
+        5. For batched (3D+): use np.matmul for correctness
+        6. Return result wrapped in Tensor
+
+        EXAMPLE:
+        >>> a = Tensor([[1, 2], [3, 4]])  # 2×2
+        >>> b = Tensor([[5, 6], [7, 8]])  # 2×2
+        >>> c = a.matmul(b)
+        >>> print(c.data)
+        [[19. 22.]
+         [43. 50.]]
+
+        HINTS:
+        - Inner dimensions must match: (M, K) @ (K, N) = (M, N)
+        - For 2D case: use np.dot(a[i, :], b[:, j]) for each output element
+        - Raise ValueError with clear message if shapes incompatible
+        """
         ### BEGIN SOLUTION
         if not isinstance(other, Tensor):
             raise TypeError(f"Expected Tensor for matrix multiplication, got {type(other)}")
@@ -383,7 +498,26 @@ class Tensor:
         return self.matmul(other)
 
     def __getitem__(self, key):
-        """Enable indexing and slicing operations on Tensors."""
+        """Enable indexing and slicing operations on Tensors.
+
+        TODO: Implement indexing and slicing that returns a new Tensor.
+
+        APPROACH:
+        1. Use NumPy indexing: self.data[key]
+        2. If result is not an ndarray, wrap in np.array
+        3. Return result wrapped in new Tensor
+
+        EXAMPLE:
+        >>> t = Tensor([[1, 2, 3], [4, 5, 6]])
+        >>> row = t[0]  # First row
+        >>> print(row.data)
+        [1. 2. 3.]
+        >>> element = t[0, 1]  # Single element
+        >>> print(element.data)
+        2.0
+
+        HINT: NumPy's indexing already handles all complex cases (slicing, fancy indexing)
+        """
         ### BEGIN SOLUTION
         result_data = self.data[key]
         if not isinstance(result_data, np.ndarray):
@@ -392,7 +526,32 @@ class Tensor:
         ### END SOLUTION
 
     def reshape(self, *shape):
-        """Reshape tensor to new dimensions."""
+        """Reshape tensor to new dimensions.
+
+        TODO: Reshape tensor while preserving total element count.
+
+        APPROACH:
+        1. Handle both reshape(2, 3) and reshape((2, 3)) calling styles
+        2. If -1 in shape, infer that dimension from total size
+        3. Validate total elements match: np.prod(new_shape) == self.size
+        4. Use np.reshape to create new view
+        5. Return result wrapped in new Tensor
+
+        EXAMPLE:
+        >>> t = Tensor([1, 2, 3, 4, 5, 6])
+        >>> reshaped = t.reshape(2, 3)
+        >>> print(reshaped.data)
+        [[1. 2. 3.]
+         [4. 5. 6.]]
+        >>> auto = t.reshape(2, -1)  # Infers -1 as 3
+        >>> print(auto.shape)
+        (2, 3)
+
+        HINTS:
+        - Use isinstance(shape[0], (tuple, list)) to detect tuple input
+        - For -1: unknown_dim = self.size // known_size
+        - Raise ValueError if total elements don't match
+        """
         ### BEGIN SOLUTION
         if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
             new_shape = tuple(shape[0])
@@ -420,7 +579,30 @@ class Tensor:
         ### END SOLUTION
 
     def transpose(self, dim0=None, dim1=None):
-        """Transpose tensor dimensions."""
+        """Transpose tensor dimensions.
+
+        TODO: Swap tensor dimensions (default: swap last two dimensions).
+
+        APPROACH:
+        1. If no dims specified: swap last two dimensions (most common case)
+        2. For 1D tensors: return copy (no transpose needed)
+        3. If both dims specified: swap those specific dimensions
+        4. Use np.transpose with axes list to perform the swap
+        5. Return result wrapped in new Tensor
+
+        EXAMPLE:
+        >>> t = Tensor([[1, 2, 3], [4, 5, 6]])  # 2×3
+        >>> transposed = t.transpose()
+        >>> print(transposed.data)
+        [[1. 4.]
+         [2. 5.]
+         [3. 6.]]  # 3×2
+
+        HINTS:
+        - Create axes list: [0, 1, 2, ...] then swap positions
+        - For default: axes[-2], axes[-1] = axes[-1], axes[-2]
+        - Use np.transpose(self.data, axes)
+        """
         ### BEGIN SOLUTION
         if dim0 is None and dim1 is None:
             if len(self.shape) < 2:
@@ -439,21 +621,82 @@ class Tensor:
         ### END SOLUTION
 
     def sum(self, axis=None, keepdims=False):
-        """Sum tensor along specified axis."""
+        """Sum tensor along specified axis.
+
+        TODO: Sum all elements or along specific axes.
+
+        APPROACH:
+        1. Use np.sum with axis and keepdims parameters
+        2. axis=None sums all elements (scalar result)
+        3. axis=N sums along dimension N
+        4. keepdims=True preserves original number of dimensions
+        5. Return result wrapped in Tensor
+
+        EXAMPLE:
+        >>> t = Tensor([[1, 2, 3], [4, 5, 6]])
+        >>> total = t.sum()
+        >>> print(total.data)
+        21.0
+        >>> col_sum = t.sum(axis=0)
+        >>> print(col_sum.data)
+        [5. 7. 9.]
+
+        HINT: np.sum(data, axis=axis, keepdims=keepdims) does all the work
+        """
         ### BEGIN SOLUTION
         result = np.sum(self.data, axis=axis, keepdims=keepdims)
         return Tensor(result)
         ### END SOLUTION
 
     def mean(self, axis=None, keepdims=False):
-        """Compute mean of tensor along specified axis."""
+        """Compute mean of tensor along specified axis.
+
+        TODO: Calculate average of elements along axis (same pattern as sum).
+
+        APPROACH:
+        1. Use np.mean with axis and keepdims parameters
+        2. axis=None averages all elements
+        3. axis=N averages along dimension N
+        4. Return result wrapped in Tensor
+
+        EXAMPLE:
+        >>> t = Tensor([[1, 2, 3], [4, 5, 6]])
+        >>> avg = t.mean()
+        >>> print(avg.data)
+        3.5
+        >>> col_mean = t.mean(axis=0)
+        >>> print(col_mean.data)
+        [2.5 3.5 4.5]
+
+        HINT: Follow the same pattern as sum() but with np.mean
+        """
         ### BEGIN SOLUTION
         result = np.mean(self.data, axis=axis, keepdims=keepdims)
         return Tensor(result)
         ### END SOLUTION
 
     def max(self, axis=None, keepdims=False):
-        """Find maximum values along specified axis."""
+        """Find maximum values along specified axis.
+
+        TODO: Find maximum element(s) along axis (same pattern as sum).
+
+        APPROACH:
+        1. Use np.max with axis and keepdims parameters
+        2. axis=None finds maximum of all elements
+        3. axis=N finds maximum along dimension N
+        4. Return result wrapped in Tensor
+
+        EXAMPLE:
+        >>> t = Tensor([[1, 2, 3], [4, 5, 6]])
+        >>> maximum = t.max()
+        >>> print(maximum.data)
+        6.0
+        >>> row_max = t.max(axis=1)
+        >>> print(row_max.data)
+        [3. 6.]
+
+        HINT: Follow the same pattern as sum() and mean() but with np.max
+        """
         ### BEGIN SOLUTION
         result = np.max(self.data, axis=axis, keepdims=keepdims)
         return Tensor(result)
