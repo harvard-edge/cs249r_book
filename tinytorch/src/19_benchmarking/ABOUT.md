@@ -8,7 +8,7 @@
 This module assumes familiarity with the complete TinyTorch stack (Modules 01-13), profiling (Module 14), and optimization techniques (Modules 15-18). You should understand how to build, profile, and optimize models before tackling systematic benchmarking and statistical comparison of optimizations.
 :::
 
-```{only} html
+`````{only} html
 ````{grid} 1 2 3 3
 :gutter: 3
 
@@ -25,13 +25,16 @@ Browse the implementation code on GitHub.
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
-:link: NOTEBOOKLM_LINK_HERE
 
-Listen to an AI-generated overview and take a quiz.
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/19_benchmarking.mp3" type="audio/mpeg">
+</audio>
 ```
 
 ````
-```
+`````
 
 ## Overview
 
@@ -478,7 +481,6 @@ for model_name, result in results.items():
     print(f"{model_name}: {result.mean*1000:.2f}ms ± {result.std*1000:.2f}ms")
 ```
 ````
-```
 
 ````{tab-item} MLPerf (Industry Standard)
 ```python
@@ -496,7 +498,6 @@ lg.StartTest(sut, qsl, settings)
 # Results include latency percentiles, throughput, accuracy
 ```
 ````
-```
 `````
 
 Let's understand the comparison:

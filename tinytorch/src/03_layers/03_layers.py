@@ -165,9 +165,9 @@ Let's build our layer system step by step. We'll implement two essential layer t
 
 ### Key Design Principles:
 - All methods defined INSIDE classes (no monkey-patching)
-- Parameter tensors have requires_grad=True (ready for Module 05)
 - Forward methods return new tensors, preserving immutability
 - parameters() method enables optimizer integration
+- Gradient tracking will be added in Module 05 (Autograd)
 """
 
 # %% [markdown]
@@ -211,7 +211,7 @@ class Layer:
         Return list of trainable parameters.
 
         Returns:
-            List of Tensor objects with requires_grad=True
+            List of Tensor objects (weights and biases)
         """
         return []  # Base class has no parameters
 
@@ -282,7 +282,7 @@ class Linear(Layer):
         APPROACH:
         1. Create weight matrix (in_features, out_features) with Xavier scaling
         2. Create bias vector (out_features,) initialized to zeros if bias=True
-        3. Set requires_grad=True for parameters (ready for Module 05)
+        3. Store as Tensor objects for use in forward pass
 
         EXAMPLE:
         >>> layer = Linear(784, 10)  # MNIST classifier final layer
@@ -303,12 +303,12 @@ class Linear(Layer):
         # Xavier/Glorot initialization for stable gradients
         scale = np.sqrt(XAVIER_SCALE_FACTOR / in_features)
         weight_data = np.random.randn(in_features, out_features) * scale
-        self.weight = Tensor(weight_data, requires_grad=True)
+        self.weight = Tensor(weight_data)
 
         # Initialize bias to zeros or None
         if bias:
             bias_data = np.zeros(out_features)
-            self.bias = Tensor(bias_data, requires_grad=True)
+            self.bias = Tensor(bias_data)
         else:
             self.bias = None
         ### END SOLUTION
@@ -390,8 +390,6 @@ def test_unit_linear_layer():
     assert layer.out_features == 256
     assert layer.weight.shape == (784, 256)
     assert layer.bias.shape == (256,)
-    assert layer.weight.requires_grad == True
-    assert layer.bias.requires_grad == True
 
     # Test Xavier initialization (weights should be reasonably scaled)
     weight_std = np.std(layer.weight.data)
@@ -467,35 +465,32 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🔬 Gradient Preparation Tests: Linear Layer
-Tests to ensure Linear layer is ready for gradient-based training (Module 05).
+### 🔬 Parameter Collection Tests: Linear Layer
+Tests to ensure Linear layer parameters can be collected for optimization.
 """
 
-# %% nbgrader={"grade": true, "grade_id": "test-linear-grad-prep", "locked": true, "points": 5}
-def test_gradient_preparation_linear():
-    """🔬 Test Linear layer is ready for gradients (Module 05)."""
-    print("🔬 Gradient Preparation Test: Linear Layer...")
+# %% nbgrader={"grade": true, "grade_id": "test-linear-params", "locked": true, "points": 5}
+def test_parameter_collection_linear():
+    """🔬 Test Linear layer parameter collection."""
+    print("🔬 Parameter Collection Test: Linear Layer...")
 
     layer = Linear(10, 5)
 
-    # Verify requires_grad is set
-    assert layer.weight.requires_grad == True, "Weight should require gradients"
-    assert layer.bias.requires_grad == True, "Bias should require gradients"
-
-    # Verify gradient placeholders exist (even if None initially)
-    assert hasattr(layer.weight, 'grad'), "Weight should have grad attribute"
-    assert hasattr(layer.bias, 'grad'), "Bias should have grad attribute"
-
     # Verify parameter collection works
     params = layer.parameters()
-    assert len(params) == 2, "Should return 2 parameters"
-    assert all(p.requires_grad for p in params), "All parameters should require gradients"
+    assert len(params) == 2, "Should return 2 parameters (weight and bias)"
+    assert params[0].shape == (10, 5), "First param should be weight"
+    assert params[1].shape == (5,), "Second param should be bias"
 
-    print("✅ Layer ready for gradient-based training!")
+    # Test layer without bias
+    layer_no_bias = Linear(10, 5, bias=False)
+    params_no_bias = layer_no_bias.parameters()
+    assert len(params_no_bias) == 1, "Should return 1 parameter (weight only)"
+
+    print("✅ Parameter collection works correctly!")
 
 if __name__ == "__main__":
-    test_gradient_preparation_linear()
-
+    test_parameter_collection_linear()
 
 
 # %% [markdown]
@@ -596,7 +591,7 @@ class Dropout(Layer):
 
         APPROACH:
         1. If training=False or p=0, return input unchanged
-        2. If p=1, return zeros (preserve requires_grad)
+        2. If p=1, return zeros
         3. Otherwise: create random mask, apply it, scale by 1/(1-p)
 
         EXAMPLE:
@@ -616,8 +611,8 @@ class Dropout(Layer):
             return x
 
         if self.p == DROPOUT_MAX_PROB:
-            # Drop everything (preserve requires_grad for gradient flow)
-            return Tensor(np.zeros_like(x.data), requires_grad=x.requires_grad)
+            # Drop everything
+            return Tensor(np.zeros_like(x.data))
 
         # During training, apply dropout
         keep_prob = 1.0 - self.p
@@ -625,9 +620,9 @@ class Dropout(Layer):
         # Create random mask: True where we keep elements
         mask = np.random.random(x.data.shape) < keep_prob
 
-        # Apply mask and scale using Tensor operations to preserve gradients!
-        mask_tensor = Tensor(mask.astype(np.float32), requires_grad=False)  # Mask doesn't need gradients
-        scale = Tensor(np.array(1.0 / keep_prob), requires_grad=False)
+        # Apply mask and scale
+        mask_tensor = Tensor(mask.astype(np.float32))
+        scale = Tensor(np.array(1.0 / keep_prob))
 
         # Use Tensor operations: x * mask * scale
         output = x * mask_tensor * scale
@@ -1015,7 +1010,7 @@ def test_module():
     print("Running unit tests...")
     test_unit_linear_layer()
     test_edge_cases_linear()
-    test_gradient_preparation_linear()
+    test_parameter_collection_linear()
     test_unit_dropout_layer()
 
     print("\nRunning integration scenarios...")
@@ -1054,10 +1049,6 @@ def test_module():
     all_params = layer1.parameters() + layer2.parameters() + layer3.parameters()
     expected_params = 6  # 3 weights + 3 biases from 3 Linear layers
     assert len(all_params) == expected_params, f"Expected {expected_params} parameters, got {len(all_params)}"
-
-    # Test all parameters have requires_grad=True
-    for param in all_params:
-        assert param.requires_grad == True, "All parameters should have requires_grad=True"
 
     # Test individual layer functionality
     test_x = Tensor(np.random.randn(4, 784))

@@ -14,7 +14,7 @@
 If you can multiply matrices and understand why matrix multiplication is expensive, you're ready.
 :::
 
-```{only} html
+`````{only} html
 ````{grid} 1 2 3 3
 :gutter: 3
 
@@ -31,13 +31,16 @@ Browse the implementation code on GitHub.
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
-:link: NOTEBOOKLM_LINK_HERE
 
-Listen to an AI-generated overview and take a quiz.
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/18_acceleration.mp3" type="audio/mpeg">
+</audio>
 ```
 
 ````
-```
+`````
 
 ## Overview
 
@@ -399,7 +402,6 @@ h = vectorized_matmul(x, w)
 output = fused_gelu(h)
 ```
 ````
-```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -420,7 +422,6 @@ def fused_gelu(x):
 output = fused_gelu(h)
 ```
 ````
-```
 `````
 
 Let's walk through the key differences:

@@ -13,7 +13,7 @@
 If you can multiply two matrices by hand and write a Python class, you're ready.
 :::
 
-```{only} html
+`````{only} html
 ````{grid} 1 2 3 3
 :gutter: 3
 
@@ -30,13 +30,16 @@ Browse the implementation code on GitHub.
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
-:link: NOTEBOOKLM_LINK_HERE
 
-Listen to an AI-generated overview and take a quiz.
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/01_tensor.mp3" type="audio/mpeg">
+</audio>
 ```
 
 ````
-```
+`````
 
 ## Overview
 
@@ -93,16 +96,16 @@ flowchart LR
 output = x.matmul(W) + b  # Matrix multiplication + bias (used in every neural network)
 ```
 
-### What You're NOT Building (Yet)
+### What You're NOT Building
 
 To keep this module focused, you will **not** implement:
 
 - GPU support (NumPy runs on CPU only)
-- Automatic differentiation (that's Module 05: Autograd)
+- Automatic differentiation
 - Hundreds of tensor operations (PyTorch has 2000+, you'll build ~15 core ones)
 - Memory optimization tricks (PyTorch uses lazy evaluation, memory pools, etc.)
 
-**You are building the conceptual foundation.** Speed optimizations come later.
+**You are building the conceptual foundation.**
 
 ## API Reference
 
@@ -111,10 +114,9 @@ This section provides a quick reference for the Tensor class you'll build. Think
 ### Constructor
 
 ```python
-Tensor(data, requires_grad=False)
+Tensor(data)
 ```
 - `data`: list, numpy array, or scalar
-- `requires_grad`: enables gradient tracking (activated in Module 05)
 
 ### Properties
 
@@ -126,7 +128,6 @@ Your Tensor wraps a NumPy array and exposes several properties that describe its
 | `shape` | `tuple` | Dimensions, e.g., `(2, 3)` |
 | `size` | `int` | Total number of elements |
 | `dtype` | `np.dtype` | Data type (float32) |
-| `grad` | `Tensor` | Gradient storage (Module 05) |
 
 ### Arithmetic Operations
 
@@ -413,13 +414,7 @@ Your Tensor is the foundation for everything that follows in TinyTorch. Every su
 ```
 Module 01: Tensor (THIS MODULE)
     ↓ provides foundation
-Module 02: Activations (ReLU, Sigmoid operate on Tensors)
-    ↓ uses tensors
-Module 03: Layers (Linear, Conv2d store weights as Tensors)
-    ↓ uses tensors
-Module 05: Autograd (adds .grad attribute to Tensors)
-    ↓ enhances tensors
-Module 06: Optimizers (updates Tensor parameters)
+    All other modules build on this
 ```
 
 ## Common Errors & Debugging
@@ -481,7 +476,6 @@ Your TinyTorch Tensor and PyTorch's `torch.Tensor` share the same conceptual des
 | **Backend** | NumPy (Python) | C++/CUDA |
 | **Speed** | 1x (baseline) | 10-100x faster |
 | **GPU** | ✗ CPU only | ✓ CUDA, Metal, ROCm |
-| **Autograd** | Dormant (Module 05) | Full computation graph |
 | **Operations** | ~15 core ops | 2000+ operations |
 
 ### Code Comparison
@@ -508,7 +502,6 @@ x = torch.tensor([[1, 2], [3, 4]], dtype=torch.float32)
 y = x + 2
 z = x @ w
 loss = z.mean()
-loss.backward()  # You'll build this in Module 05!
 ```
 ````
 `````
@@ -520,7 +513,6 @@ Let's walk through each line to understand the comparison:
 - **Line 4 (Broadcasting)**: Both handle `x + 2` identically, broadcasting the scalar across all elements. Same semantics, same result.
 - **Line 5 (Matrix multiply)**: TinyTorch uses `.matmul()` method; PyTorch supports both `.matmul()` and the `@` operator. The operation is identical.
 - **Line 6 (Reduction)**: Both use `.mean()` to reduce the tensor to a scalar. Reductions like this are fundamental to computing loss values.
-- **Line 7 (Autograd)**: PyTorch includes `.backward()` for automatic differentiation. You'll implement this yourself in Module 05, gaining deep insight into how gradients flow through computation graphs.
 
 ```{tip} What's Identical
 
@@ -622,24 +614,9 @@ For students who want to understand the academic foundations and mathematical un
 
 - **BLAS (Basic Linear Algebra Subprograms)** - Lawson et al. (1979). The foundation of all high-performance matrix operations. Your `np.matmul` ultimately calls BLAS routines optimized over 40+ years. Understanding BLAS levels (1, 2, 3) explains why matmul is special. [ACM TOMS](https://doi.org/10.1145/355841.355847)
 
-- **Automatic Differentiation in ML** - Baydin et al. (2018). Survey of automatic differentiation techniques that will become relevant in Module 05. [JMLR](https://www.jmlr.org/papers/v18/17-468.html)
+- **Automatic Differentiation in ML** - Baydin et al. (2018). Survey of automatic differentiation techniques. [JMLR](https://www.jmlr.org/papers/v18/17-468.html)
 
 ### Additional Resources
 
 - **Textbook**: "Deep Learning" by Goodfellow, Bengio, and Courville - Chapter 2 covers linear algebra foundations including tensor operations
 - **Documentation**: [PyTorch Tensor Tutorial](https://pytorch.org/tutorials/beginner/basics/tensorqs_tutorial.html) - See how production frameworks implement similar concepts
-
-## What's Next
-
-```{seealso} Coming Up: Module 02 - Activations
-
-Implement ReLU, Sigmoid, Tanh, and Softmax. You'll apply element-wise operations to your Tensor and learn why these functions are essential for neural networks to learn complex patterns.
-```
-
-**Preview - How Your Tensor Gets Used in Future Modules:**
-
-| Module | What It Does | Your Tensor In Action |
-|--------|--------------|----------------------|
-| **02: Activations** | Element-wise functions | `ReLU()(x)` transforms your tensor |
-| **03: Layers** | Neural network building blocks | `Linear(784, 128)` stores weights as YOUR Tensor |
-| **05: Autograd** | Automatic gradients | `y.backward()` computes gradients into `x.grad` |

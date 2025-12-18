@@ -66,7 +66,6 @@ from typing import List, Optional, Tuple
 
 # Import from previous modules - following dependency chain
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.autograd import EmbeddingBackward
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
@@ -278,8 +277,7 @@ class Embedding:
         # Xavier initialization for better gradient flow
         limit = math.sqrt(6.0 / (vocab_size + embed_dim))
         self.weight = Tensor(
-            np.random.uniform(-limit, limit, (vocab_size, embed_dim)),
-            requires_grad=True
+            np.random.uniform(-limit, limit, (vocab_size, embed_dim))
         )
 
     def forward(self, indices: Tensor) -> Tensor:
@@ -303,14 +301,7 @@ class Embedding:
         # This is equivalent to one-hot multiplication but much more efficient
         embedded = self.weight.data[indices.data.astype(int)]
 
-        # Create result tensor with gradient tracking
-        result = Tensor(embedded, requires_grad=self.weight.requires_grad)
-
-        # Attach backward function for gradient computation (following TinyTorch protocol)
-        if result.requires_grad:
-            result._grad_fn = EmbeddingBackward(self.weight, indices)
-
-        return result
+        return Tensor(embedded)
 
     def __call__(self, indices: Tensor) -> Tensor:
         """Allows the embedding to be called like a function."""
@@ -355,7 +346,7 @@ def test_unit_embedding():
 
     # Test 4: Parameter access
     params = embed.parameters()
-    assert all(p.requires_grad for p in params), "All parameters should require gradients"
+    assert len(params) == 1, "Should have 1 parameter"
 
     print("✅ Embedding layer works correctly!")
 
@@ -451,8 +442,7 @@ class PositionalEncoding:
         # Smaller initialization than token embeddings since these are additive
         limit = math.sqrt(2.0 / embed_dim)
         self.position_embeddings = Tensor(
-            np.random.uniform(-limit, limit, (max_seq_len, embed_dim)),
-            requires_grad=True
+            np.random.uniform(-limit, limit, (max_seq_len, embed_dim))
         )
 
     def forward(self, x: Tensor) -> Tensor:
@@ -481,19 +471,13 @@ class PositionalEncoding:
             )
 
         # Slice position embeddings for this sequence length using Tensor slicing
-        # This now preserves gradient flow (as of Module 01 update with __getitem__)
-        pos_embeddings = self.position_embeddings[:seq_len]  # (seq_len, embed_dim) - gradients preserved!
+        pos_embeddings = self.position_embeddings[:seq_len]  # (seq_len, embed_dim)
 
         # Reshape to add batch dimension: (1, seq_len, embed_dim)
-        # Need to use .data for reshaping temporarily, then wrap in Tensor
         pos_data = pos_embeddings.data[np.newaxis, :, :]
-        pos_embeddings_batched = Tensor(pos_data, requires_grad=pos_embeddings.requires_grad)
+        pos_embeddings_batched = Tensor(pos_data)
 
-        # Copy gradient function if it exists (to preserve backward connection)
-        if hasattr(pos_embeddings, '_grad_fn') and pos_embeddings._grad_fn is not None:
-            pos_embeddings_batched._grad_fn = pos_embeddings._grad_fn
-
-        # Add positional information - gradients flow through both x and pos_embeddings!
+        # Add positional information
         result = x + pos_embeddings_batched
 
         return result
@@ -931,7 +915,7 @@ class EmbeddingLayer:
 
             # Reshape to add batch dimension
             pos_data = pos_embeddings.data[np.newaxis, :, :]
-            pos_embeddings_batched = Tensor(pos_data, requires_grad=False)  # Sinusoidal are fixed
+            pos_embeddings_batched = Tensor(pos_data)  # Sinusoidal are fixed
 
             output = token_embeds + pos_embeddings_batched
         else:

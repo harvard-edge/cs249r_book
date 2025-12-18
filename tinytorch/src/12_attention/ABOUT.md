@@ -15,7 +15,7 @@
 If you can explain why `softmax(x).sum(axis=-1)` equals 1.0 and how embeddings convert token IDs to dense vectors, you're ready.
 :::
 
-```{only} html
+`````{only} html
 ````{grid} 1 2 3 3
 :gutter: 3
 
@@ -32,13 +32,16 @@ Browse the implementation code on GitHub.
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
-:link: NOTEBOOKLM_LINK_HERE
 
-Listen to an AI-generated overview and take a quiz.
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/12_attention.mp3" type="audio/mpeg">
+</audio>
 ```
 
 ````
-```
+`````
 
 ## Overview
 
@@ -395,7 +398,6 @@ mask = Tensor(np.tril(np.ones((2, 10, 10))))
 output_masked = mha.forward(x, mask)
 ```
 ````
-```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -417,7 +419,6 @@ mask = torch.triu(torch.ones(10, 10) * float('-inf'), diagonal=1)
 output_masked, _ = mha(x, x, x, attn_mask=mask)
 ```
 ````
-```
 `````
 
 Let's walk through the key differences:

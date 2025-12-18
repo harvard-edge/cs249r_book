@@ -435,8 +435,8 @@ class LayerNorm:
         self.eps = eps
 
         # Learnable parameters: scale and shift
-        self.gamma = Tensor(np.ones(normalized_shape), requires_grad=True)  # Scale parameter
-        self.beta = Tensor(np.zeros(normalized_shape), requires_grad=True)  # Shift parameter
+        self.gamma = Tensor(np.ones(normalized_shape))  # Scale parameter
+        self.beta = Tensor(np.zeros(normalized_shape))  # Shift parameter
         ### END SOLUTION
 
     def forward(self, x):
@@ -465,10 +465,8 @@ class LayerNorm:
         diff = x - mean
         variance = (diff * diff).mean(axis=-1, keepdims=True)
 
-        # Normalize - use Tensor operations to preserve gradients!
-        # Add eps as a Tensor for proper gradient flow
-        eps_tensor = Tensor(np.array(self.eps), requires_grad=False)
-        std = Tensor(np.sqrt(variance.data + self.eps), requires_grad=variance.requires_grad)
+        # Normalize
+        std = Tensor(np.sqrt(variance.data + self.eps))
         normalized = (x - mean) / std
 
         # Apply learnable transformation

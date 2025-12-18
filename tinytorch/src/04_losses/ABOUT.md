@@ -13,7 +13,7 @@
 If you can build a simple neural network that takes input and produces output, you're ready to learn how to measure its quality.
 :::
 
-```{only} html
+`````{only} html
 ````{grid} 1 2 3 3
 :gutter: 3
 
@@ -30,13 +30,16 @@ Browse the implementation code on GitHub.
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
-:link: NOTEBOOKLM_LINK_HERE
 
-Listen to an AI-generated overview and take a quiz.
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/04_losses.mp3" type="audio/mpeg">
+</audio>
 ```
 
 ````
-```
+`````
 
 ## Overview
 
@@ -354,7 +357,6 @@ labels = Tensor([0, 1])
 loss = ce_loss(logits, labels)
 ```
 ````
-```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -374,7 +376,6 @@ labels = torch.tensor([0, 1])
 loss = ce_loss(logits, labels)
 ```
 ````
-```
 `````
 
 Let's walk through the key similarities and differences:

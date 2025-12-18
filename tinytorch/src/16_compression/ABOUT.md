@@ -13,7 +13,7 @@
 If you can profile a model's parameters and understand weight distributions, you're ready.
 :::
 
-```{only} html
+`````{only} html
 ````{grid} 1 2 3 3
 :gutter: 3
 
@@ -30,13 +30,16 @@ Browse the implementation code on GitHub.
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
-:link: NOTEBOOKLM_LINK_HERE
 
-Listen to an AI-generated overview and take a quiz.
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/16_compression.mp3" type="audio/mpeg">
+</audio>
 ```
 
 ````
-```
+`````
 
 ## Overview
 
@@ -406,7 +409,6 @@ sparsity = measure_sparsity(model)  # Returns 80.0 (percentage)
 print(f"Sparsity: {sparsity:.1f}%")
 ```
 ````
-```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -434,7 +436,6 @@ sparsity = zero_params / total_params
 print(f"Sparsity: {sparsity:.1%}")
 ```
 ````
-```
 `````
 
 Let's walk through the key differences:

@@ -91,7 +91,7 @@ sys.path.append(project_root)
 from tinytorch.core.tensor import Tensor              # Module 02: YOU built this!
 from tinytorch.core.layers import Linear             # Module 04: YOU built this!
 from tinytorch.core.activations import ReLU, Softmax  # Module 03: YOU built this!
-from tinytorch.core.spatial import Conv2d, MaxPool2D, BatchNorm2d  # Module 09: YOU built this!
+from tinytorch.core.spatial import Conv2d, MaxPool2d, BatchNorm2d  # Module 09: YOU built this!
 from tinytorch.core.optimizers import Adam            # Module 07: YOU built this!
 from tinytorch.core.dataloader import DataLoader, Dataset  # Module 10: YOU built this!
 from tinytorch.core.dataloader import RandomHorizontalFlip, RandomCrop, Compose  # Module 08: Data Augmentation!
@@ -232,7 +232,7 @@ class CIFARCNN:
         self.bn1 = BatchNorm2d(32)  # Module 09: YOUR BatchNorm! Stabilizes training
         self.conv2 = Conv2d(in_channels=32, out_channels=64, kernel_size=(3, 3))  # Module 09!
         self.bn2 = BatchNorm2d(64)  # Module 09: YOUR BatchNorm!
-        self.pool = MaxPool2D(pool_size=(2, 2))  # Module 09: YOUR pooling!
+        self.pool = MaxPool2d(pool_size=(2, 2))  # Module 09: YOUR pooling!
 
         # Activation functions
         self.relu = ReLU()  # Module 03: YOUR activation!

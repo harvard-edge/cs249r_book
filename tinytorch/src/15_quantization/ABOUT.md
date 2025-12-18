@@ -14,7 +14,7 @@
 If you can profile a model's memory usage and understand the cost of FP32 storage, you're ready.
 :::
 
-```{only} html
+`````{only} html
 ````{grid} 1 2 3 3
 :gutter: 3
 
@@ -31,13 +31,16 @@ Browse the implementation code on GitHub.
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
-:link: NOTEBOOKLM_LINK_HERE
 
-Listen to an AI-generated overview and take a quiz.
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/15_quantization.mp3" type="audio/mpeg">
+</audio>
 ```
 
 ````
-```
+`````
 
 ## Overview
 
@@ -324,7 +327,6 @@ quantize_model(model, calibration_data)
 output = model.forward(x)  # 4× less memory!
 ```
 ````
-```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -349,7 +351,6 @@ model_quantized = quantization.convert(model_prepared)
 output = model_quantized(x)  # 4× less memory!
 ```
 ````
-```
 `````
 
 Let's walk through the key differences:
