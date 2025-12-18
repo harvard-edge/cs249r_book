@@ -13,15 +13,15 @@ This breakthrough proved machines could improve themselves through training.
 Now that you've completed training modules, let's see the SAME architecture
 actually LEARN! Watch random weights → intelligent predictions through training.
 
-✅ REQUIRED MODULES (Run after Module 07):
+✅ REQUIRED MODULES (Run after Module 08):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Module 01 (Tensor)        : YOUR data structure
   Module 02 (Activations)   : YOUR sigmoid activation
   Module 03 (Layers)        : YOUR Linear layer
   Module 04 (Losses)        : YOUR loss function (BinaryCrossEntropyLoss)
-  Module 05 (Autograd)      : YOUR automatic differentiation
-  Module 06 (Optimizers)    : YOUR SGD optimizer
-  Module 07 (Training)      : YOUR training loop
+  Module 06 (Autograd)      : YOUR automatic differentiation
+  Module 07 (Optimizers)    : YOUR SGD optimizer
+  Module 08 (Training)      : YOUR training loop
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🏗️ ARCHITECTURE (Single-Layer Perceptron):
@@ -32,7 +32,7 @@ actually LEARN! Watch random weights → intelligent predictions through trainin
     └─────────────┘     └─────────────┘     └─────────────┘     └─────────┘
            ↑                   ↑
            │                   │ Gradients flow backward!
-           │                   │ (YOUR Module 05 Autograd)
+           │                   │ (YOUR Module 06 Autograd)
            └───────────────────┘
 
 # =============================================================================
@@ -42,13 +42,13 @@ actually LEARN! Watch random weights → intelligent predictions through trainin
 # ┌─────────────────────┬────────────────────────────────┬─────────────────────────────┐
 # │ What You Built      │ How It's Used Here             │ Systems Impact              │
 # ├─────────────────────┼────────────────────────────────┼─────────────────────────────┤
-# │ Module 05: Autograd │ Computes ∂Loss/∂w for each     │ Enables automatic learning! │
+# │ Module 06: Autograd │ Computes ∂Loss/∂w for each     │ Enables automatic learning! │
 # │                     │ weight automatically           │ No manual derivatives       │
 # │                     │                                │                             │
-# │ Module 06: SGD      │ Updates weights: w = w - lr*∂L │ The learning algorithm!     │
+# │ Module 07: SGD      │ Updates weights: w = w - lr*∂L │ The learning algorithm!     │
 # │                     │ after each batch               │                             │
 # │                     │                                │                             │
-# │ Module 07: Training │ Orchestrates forward → loss →  │ The complete learning       │
+# │ Module 08: Training │ Orchestrates forward → loss →  │ The complete learning       │
 # │                     │ backward → update cycle        │ loop you control!           │
 # └─────────────────────┴────────────────────────────────┴─────────────────────────────┘
 #

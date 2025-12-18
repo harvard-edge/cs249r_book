@@ -24,9 +24,9 @@ TinyTalks is PERFECT for learning:
   Module 02 (Activations)   : YOUR ReLU and GELU activations
   Module 03 (Layers)        : YOUR Linear layers
   Module 04 (Losses)        : YOUR CrossEntropyLoss
-  Module 05 (Autograd)      : YOUR automatic differentiation
-  Module 06 (Optimizers)    : YOUR Adam optimizer
-  Module 08 (DataLoader)    : YOUR data batching
+  Module 05 (DataLoader)    : YOUR data batching
+  Module 06 (Autograd)      : YOUR automatic differentiation
+  Module 07 (Optimizers)    : YOUR Adam optimizer
   Module 10 (Tokenization)  : YOUR CharTokenizer for text→numbers
   Module 11 (Embeddings)    : YOUR token & positional embeddings
   Module 12 (Attention)     : YOUR multi-head self-attention
@@ -796,8 +796,8 @@ def main():
         console.print("  - Module 02 (Activations)")
         console.print("  - Module 03 (Layers)")
         console.print("  - Module 04 (Losses)")
-        console.print("  - Module 05 (Autograd)")
-        console.print("  - Module 06 (Optimizers)")
+        console.print("  - Module 06 (Autograd)")
+        console.print("  - Module 07 (Optimizers)")
         console.print("  - Module 10 (Tokenization)")
         console.print("  - Module 11 (Embeddings)")
         console.print("  - Module 12 (Attention)")
@@ -894,8 +894,8 @@ def main():
     console.print("  ✓ YOUR Activations (Module 02)")
     console.print("  ✓ YOUR Linear layers (Module 03)")
     console.print("  ✓ YOUR CrossEntropyLoss (Module 04)")
-    console.print("  ✓ YOUR Autograd system (Module 05)")
-    console.print("  ✓ YOUR Adam optimizer (Module 06)")
+    console.print("  ✓ YOUR Autograd system (Module 06)")
+    console.print("  ✓ YOUR Adam optimizer (Module 07)")
     console.print("  ✓ YOUR CharTokenizer (Module 10)")
     console.print("  ✓ YOUR Embeddings (Module 11)")
     console.print("  ✓ YOUR Multi-Head Attention (Module 12)")

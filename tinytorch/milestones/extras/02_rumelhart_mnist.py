@@ -13,14 +13,14 @@ modern deep learning era.
 Using YOUR Tiny🔥Torch implementations, you'll build a multi-layer perceptron that
 achieves 85-90%+ accuracy on MNIST digits - proving YOUR system can solve real vision!
 
-✅ REQUIRED MODULES (Run after Module 06):
+✅ REQUIRED MODULES (Run after Module 08):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Module 01 (Tensor)        : YOUR data structure with autodiff
   Module 02 (Activations)   : YOUR ReLU for deep networks
   Module 03 (Layers)        : YOUR Linear layers
   Module 04 (Losses)        : YOUR CrossEntropyLoss
-  Module 05 (Autograd)      : YOUR gradient computation
-  Module 06 (Optimizers)    : YOUR SGD optimizer
+  Module 06 (Autograd)      : YOUR gradient computation
+  Module 07 (Optimizers)    : YOUR SGD optimizer
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # =============================================================================
@@ -36,7 +36,7 @@ achieves 85-90%+ accuracy on MNIST digits - proving YOUR system can solve real v
 # │ Module 02: ReLU     │ Non-linearity between layers   │ Enables deep learning!      │
 # │                     │ (unlike sigmoid, no vanishing) │ Gradients flow through      │
 # │                     │                                │                             │
-# │ Module 05: Autograd │ Backprop through 3 layers      │ Chain rule handles depth    │
+# │ Module 06: Autograd │ Backprop through 3 layers      │ Chain rule handles depth    │
 # │                     │ automatically computed         │ automatically               │
 # │                     │                                │                             │
 # │ Module 04: CE Loss  │ Multi-class classification     │ 10-way digit prediction     │
@@ -94,7 +94,7 @@ from tinytorch.core.tensor import Tensor          # Module 02: YOU built this!
 from tinytorch.core.layers import Linear          # Module 04: YOU built this!
 from tinytorch.core.activations import ReLU, Softmax  # Module 03: YOU built this!
 from tinytorch.core.losses import CrossEntropyLoss  # Module 04: YOU built this!
-from tinytorch.core.optimizers import SGD          # Module 06: YOU built this!
+from tinytorch.core.optimizers import SGD          # Module 07: YOU built this!
 
 # Import dataset manager
 from data_manager import DatasetManager
@@ -194,7 +194,7 @@ def train_mnist_mlp(model, train_data, train_labels,
     print(f"   Dataset: {len(train_data)} training images")
     print(f"   Manual training loop - YOU control the process!")
     print(f"   Cross-entropy loss (Module 04)")
-    print(f"   SGD optimizer (Module 06)")
+    print(f"   SGD optimizer (Module 07)")
 
     # YOUR optimizer and loss function!
     optimizer = SGD(model.parameters(), lr=learning_rate)
