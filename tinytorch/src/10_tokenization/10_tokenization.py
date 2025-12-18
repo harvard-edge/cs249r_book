@@ -669,6 +669,13 @@ class BPETokenizer(Tokenizer):
         1. Store target vocabulary size
         2. Initialize empty vocabulary and merge rules
         3. Set up mappings for encoding/decoding
+
+        EXAMPLE:
+        >>> tokenizer = BPETokenizer(vocab_size=1000)
+        >>> tokenizer.vocab_size
+        1000
+
+        HINT: Initialize vocab and merges as empty lists, mappings as empty dicts
         """
         ### BEGIN SOLUTION
         self.vocab_size = vocab_size
@@ -692,6 +699,8 @@ class BPETokenizer(Tokenizer):
         EXAMPLE:
         >>> tokenizer._get_word_tokens("hello")
         ['h', 'e', 'l', 'l', 'o</w>']
+
+        HINT: Use list() to split word into characters, then modify the last element
         """
         ### BEGIN SOLUTION
         if not word:
@@ -716,6 +725,8 @@ class BPETokenizer(Tokenizer):
         EXAMPLE:
         >>> tokenizer._get_pairs(['h', 'e', 'l', 'l', 'o</w>'])
         {('h', 'e'), ('e', 'l'), ('l', 'l'), ('l', 'o</w>')}
+
+        HINT: Loop from 0 to len(word_tokens)-1 and create tuple pairs
         """
         ### BEGIN SOLUTION
         pairs = set()
@@ -736,10 +747,18 @@ class BPETokenizer(Tokenizer):
         3. Iteratively merge most frequent pairs
         4. Build final vocabulary and mappings
 
+        EXAMPLE:
+        >>> corpus = ["hello", "hello", "help"]
+        >>> tokenizer = BPETokenizer(vocab_size=20)
+        >>> tokenizer.train(corpus)
+        >>> len(tokenizer.vocab) <= 20
+        True
+
         HINTS:
-        - Start with character-level tokens
-        - Use frequency counts to guide merging
-        - Stop when vocabulary reaches target size
+        - Start with character-level tokens using _get_word_tokens()
+        - Use Counter to track word frequencies
+        - Count all pairs, merge most frequent, repeat until vocab_size reached
+        - Don't forget to call _build_mappings() at the end
         """
         ### BEGIN SOLUTION
         if vocab_size:
@@ -826,6 +845,13 @@ class BPETokenizer(Tokenizer):
         1. Start with character-level tokens
         2. Apply each merge rule in order
         3. Continue until no more merges possible
+
+        EXAMPLE:
+        >>> # After training, merges might be [('h','e'), ('l','l')]
+        >>> tokenizer._apply_merges(['h','e','l','l','o</w>'])
+        ['he','ll','o</w>']  # Applied both merges
+
+        HINT: For each merge pair, scan through tokens and replace adjacent pairs
         """
         ### BEGIN SOLUTION
         if not self.merges:
@@ -860,6 +886,16 @@ class BPETokenizer(Tokenizer):
         2. Convert each word to character tokens
         3. Apply BPE merges
         4. Convert to token IDs
+
+        EXAMPLE:
+        >>> tokenizer.encode("hello world")
+        [12, 45, 78]  # Token IDs after BPE merging
+
+        HINTS:
+        - Use text.split() for simple word splitting
+        - Use _get_word_tokens() to get character-level tokens for each word
+        - Use _apply_merges() to apply learned merge rules
+        - Use token_to_id dictionary with 0 (UNK) as default
         """
         ### BEGIN SOLUTION
         if not self.vocab:
@@ -896,6 +932,15 @@ class BPETokenizer(Tokenizer):
         1. Convert IDs to tokens
         2. Join tokens together
         3. Clean up word boundaries and markers
+
+        EXAMPLE:
+        >>> tokenizer.decode([12, 45, 78])
+        "hello world"  # Reconstructed text
+
+        HINTS:
+        - Use id_to_token dictionary with '<UNK>' as default
+        - Join all tokens into single string with ''.join()
+        - Replace '</w>' markers with spaces for word boundaries
         """
         ### BEGIN SOLUTION
         if not self.id_to_token:
@@ -1051,9 +1096,16 @@ def tokenize_dataset(texts: List[str], tokenizer: Tokenizer, max_length: int = N
     2. Apply max_length truncation if specified
     3. Return list of tokenized sequences
 
+    EXAMPLE:
+    >>> texts = ["hello world", "tokenize this"]
+    >>> tokenizer = CharTokenizer(['h','e','l','o',' ','w','r','d','t','k','n','i','z','s'])
+    >>> tokenized = tokenize_dataset(texts, tokenizer, max_length=10)
+    >>> all(len(seq) <= 10 for seq in tokenized)
+    True
+
     HINTS:
-    - Handle empty texts gracefully
-    - Truncate from the end if too long
+    - Handle empty texts gracefully (empty list is fine)
+    - Truncate from the end if too long: tokens[:max_length]
     """
     ### BEGIN SOLUTION
     tokenized = []
@@ -1080,6 +1132,18 @@ def analyze_tokenization(texts: List[str], tokenizer: Tokenizer) -> Dict[str, fl
     2. Compute sequence length statistics
     3. Calculate compression ratio
     4. Return analysis dictionary
+
+    EXAMPLE:
+    >>> texts = ["hello", "world"]
+    >>> tokenizer = CharTokenizer(['h','e','l','o','w','r','d'])
+    >>> stats = analyze_tokenization(texts, tokenizer)
+    >>> 'vocab_size' in stats and 'avg_sequence_length' in stats
+    True
+
+    HINTS:
+    - Use np.mean() for average sequence length
+    - Compression ratio = total_characters / total_tokens
+    - Return dict with vocab_size, avg_sequence_length, max_sequence_length, etc.
     """
     ### BEGIN SOLUTION
     all_tokens = []
