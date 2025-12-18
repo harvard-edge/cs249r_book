@@ -357,6 +357,20 @@ class Linear(Layer):
         1. Start with weight (always present)
         2. Add bias if it exists
         3. Return as list for optimizer
+
+        EXAMPLE:
+        >>> layer = Linear(10, 5)
+        >>> params = layer.parameters()
+        >>> len(params)
+        2  # [weight, bias]
+        >>> layer_no_bias = Linear(10, 5, bias=False)
+        >>> len(layer_no_bias.parameters())
+        1  # [weight only]
+
+        HINTS:
+        - Create list starting with self.weight
+        - Check if self.bias is not None before appending
+        - Return the complete list
         """
         ### BEGIN SOLUTION
         params = [self.weight]
@@ -564,13 +578,25 @@ class Dropout(Layer):
         """
         Initialize dropout layer.
 
-        TODO: Store dropout probability
+        TODO: Store dropout probability and validate range
+
+        APPROACH:
+        1. Validate p is between 0.0 and 1.0 (inclusive)
+        2. Raise ValueError if out of range
+        3. Store p as instance attribute
 
         Args:
             p: Probability of zeroing each element (0.0 = no dropout, 1.0 = zero everything)
 
         EXAMPLE:
         >>> dropout = Dropout(0.5)  # Zero 50% of elements during training
+        >>> dropout.p
+        0.5
+
+        HINTS:
+        - Use DROPOUT_MIN_PROB and DROPOUT_MAX_PROB constants for validation
+        - Check: DROPOUT_MIN_PROB <= p <= DROPOUT_MAX_PROB
+        - Raise descriptive ValueError if invalid
         """
         ### BEGIN SOLUTION
         if not DROPOUT_MIN_PROB <= p <= DROPOUT_MAX_PROB:
