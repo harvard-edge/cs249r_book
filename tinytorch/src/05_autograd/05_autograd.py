@@ -29,7 +29,7 @@ Modules 01-04 → Autograd → Training (Module 06-07)
 (forward pass) (backward pass) (learning loops)
 ```
 
-## Learning Objectives ⭐⭐
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. **Enhance Tensor** with automatic differentiation capabilities
 2. **Build computation graphs** that track operations for gradient flow
@@ -74,7 +74,7 @@ EPSILON = 1e-7  # Small perturbation for numerical gradient computation
 
 # %% [markdown]
 """
-## Introduction: What is Automatic Differentiation?
+## 💡 Introduction: What is Automatic Differentiation?
 
 Automatic differentiation (autograd) is the magic that makes neural networks learn. Instead of manually computing gradients for every parameter, autograd tracks operations and automatically computes gradients via the chain rule.
 
@@ -123,7 +123,7 @@ Each operation records how to compute its backward pass. The chain rule connects
 
 # %% [markdown]
 """
-## Foundations: The Chain Rule in Action
+## 📐 Foundations: The Chain Rule in Action
 
 ### Mathematical Foundation
 For composite functions: f(g(x)), the derivative is:
@@ -177,7 +177,7 @@ Memory Cost: 2× parameters (data + gradients) + graph overhead
 
 # %% [markdown]
 """
-## Implementation: Building the Autograd Engine
+## 🏗️ Implementation: Building the Autograd Engine
 
 Let's implement the autograd system step by step. We'll enhance the existing Tensor class and create supporting infrastructure.
 
@@ -389,6 +389,7 @@ class AddBackward(Function):
         - Check isinstance(tensor, Tensor) and tensor.requires_grad before computing
         - Return None for inputs that don't require gradients
         """
+        ### BEGIN SOLUTION
         a, b = self.saved_tensors
         grad_a = grad_b = None
 
@@ -401,6 +402,7 @@ class AddBackward(Function):
             grad_b = grad_output
 
         return grad_a, grad_b
+        ### END SOLUTION
 
 # %% [markdown]
 """
@@ -480,6 +482,7 @@ class MulBackward(Function):
         - Check if b is a Tensor or scalar before accessing .data
         - Use b.data if Tensor, or b directly if scalar
         """
+        ### BEGIN SOLUTION
         a, b = self.saved_tensors
         grad_a = grad_b = None
 
@@ -495,6 +498,7 @@ class MulBackward(Function):
             grad_b = grad_output * a.data
 
         return grad_a, grad_b
+        ### END SOLUTION
 
 # %% [markdown]
 """
@@ -550,6 +554,7 @@ class SubBackward(Function):
         - ∂(a-b)/∂b = -1 (gradient is negated for second operand)
         - The negative sign is crucial for correct gradient flow
         """
+        ### BEGIN SOLUTION
         a, b = self.saved_tensors
         grad_a = grad_b = None
 
@@ -560,6 +565,7 @@ class SubBackward(Function):
             grad_b = -grad_output  # ∂(a-b)/∂b = -1 (note the negative!)
 
         return grad_a, grad_b
+        ### END SOLUTION
 
 # %% [markdown]
 """
@@ -618,6 +624,7 @@ class DivBackward(Function):
         - Use b.data if Tensor, or b directly if scalar
         - b² means b.data ** 2 for tensors
         """
+        ### BEGIN SOLUTION
         a, b = self.saved_tensors
         grad_a = grad_b = None
 
@@ -633,6 +640,7 @@ class DivBackward(Function):
             grad_b = -grad_output * a.data / (b.data ** 2)
 
         return grad_a, grad_b
+        ### END SOLUTION
 
 # %% [markdown]
 """
@@ -723,6 +731,7 @@ class MatmulBackward(Function):
         - This preserves batch dimensions for 3D+ tensors
         - Use np.matmul for the actual matrix multiplication
         """
+        ### BEGIN SOLUTION
         a, b = self.saved_tensors
         grad_a = grad_b = None
 
@@ -745,6 +754,7 @@ class MatmulBackward(Function):
             grad_b = np.matmul(a_T, grad_output)
 
         return grad_a, grad_b
+        ### END SOLUTION
 
 # %% nbgrader={"grade": false, "grade_id": "transpose-backward", "solution": true}
 #| export
@@ -810,6 +820,7 @@ class TransposeBackward(Function):
         - For default transpose, swap axes[-2] and axes[-1]
         - Return as single-element tuple: (grad_x,)
         """
+        ### BEGIN SOLUTION
         x, = self.saved_tensors
         grad_x = None
 
@@ -830,6 +841,7 @@ class TransposeBackward(Function):
                 grad_x = np.transpose(grad_output, axes)
 
         return (grad_x,)
+        ### END SOLUTION
 
 # %% nbgrader={"grade": false, "grade_id": "permute-backward", "solution": true}
 #| export
@@ -890,6 +902,7 @@ class PermuteBackward(Function):
         - Simply apply np.transpose with inverse_axes
         - Return as single-element tuple: (grad_x,)
         """
+        ### BEGIN SOLUTION
         x, = self.saved_tensors
         grad_x = None
 
@@ -898,6 +911,7 @@ class PermuteBackward(Function):
             grad_x = np.transpose(grad_output, self.inverse_axes)
 
         return (grad_x,)
+        ### END SOLUTION
 
 # %% nbgrader={"grade": false, "grade_id": "embedding-backward", "solution": true}
 #| export
@@ -964,6 +978,7 @@ class EmbeddingBackward(Function):
         - Reshape grad_output to match: (num_indices, embedding_dim)
         - Return as single-element tuple: (grad_weight,)
         """
+        ### BEGIN SOLUTION
         weight, = self.saved_tensors
         grad_weight = None
 
@@ -979,6 +994,7 @@ class EmbeddingBackward(Function):
             np.add.at(grad_weight, indices_flat, grad_output_reshaped)
 
         return (grad_weight,)
+        ### END SOLUTION
 
 #| export
 
@@ -1056,6 +1072,7 @@ class SliceBackward(Function):
         - This automatically handles all slice types (single index, ranges, tuples)
         - Return as single-element tuple: (grad_input,)
         """
+        ### BEGIN SOLUTION
         tensor, = self.saved_tensors
         grad_input = None
 
@@ -1068,6 +1085,7 @@ class SliceBackward(Function):
             grad_input[self.key] = grad_output
 
         return (grad_input,)
+        ### END SOLUTION
 
 # %% nbgrader={"grade": false, "grade_id": "reshape-backward", "solution": true}
 #| export
@@ -1130,6 +1148,7 @@ class ReshapeBackward(Function):
         - Use .reshape() method on grad_output numpy array
         - Return as single-element tuple: (grad_x,)
         """
+        ### BEGIN SOLUTION
         x, = self.saved_tensors
         grad_x = None
 
@@ -1138,6 +1157,7 @@ class ReshapeBackward(Function):
             grad_x = grad_output.reshape(self.original_shape)
 
         return (grad_x,)
+        ### END SOLUTION
 
 # %% [markdown]
 """
@@ -1213,12 +1233,14 @@ class SumBackward(Function):
         - Multiply ones by grad_output (broadcasting handles scalar/tensor)
         - Return as single-element tuple: (grad_result,)
         """
+        ### BEGIN SOLUTION
         tensor, = self.saved_tensors
 
         if isinstance(tensor, Tensor) and tensor.requires_grad:
             # Gradient is 1 for all elements, scaled by grad_output
             return np.ones_like(tensor.data) * grad_output,
         return None,
+        ### END SOLUTION
 
 # %% [markdown]
 """
@@ -1265,7 +1287,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Enhancing Tensor with Autograd Capabilities
+## 🏗️ Enhancing Tensor with Autograd Capabilities
 
 Now we'll enhance the existing Tensor class to use these gradient functions and build computation graphs automatically.
 
@@ -1352,6 +1374,7 @@ class ReLUBackward(Function):
         - Use boolean mask: tensor.data > 0
         - Convert to float32 for gradient computation
         """
+        ### BEGIN SOLUTION
         tensor, = self.saved_tensors
 
         if isinstance(tensor, Tensor) and tensor.requires_grad:
@@ -1359,6 +1382,7 @@ class ReLUBackward(Function):
             relu_grad = (tensor.data > 0).astype(np.float32)
             return grad_output * relu_grad,
         return None,
+        ### END SOLUTION
 
 
 # %% nbgrader={"grade": false, "grade_id": "sigmoid-backward", "solution": true}
@@ -1409,6 +1433,7 @@ class SigmoidBackward(Function):
         - Output is already computed and saved in self.output_data
         - This avoids recomputing sigmoid during backward pass
         """
+        ### BEGIN SOLUTION
         tensor, = self.saved_tensors
 
         if isinstance(tensor, Tensor) and tensor.requires_grad:
@@ -1416,6 +1441,7 @@ class SigmoidBackward(Function):
             sigmoid_grad = self.output_data * (1 - self.output_data)
             return grad_output * sigmoid_grad,
         return None,
+        ### END SOLUTION
 
 
 # %% nbgrader={"grade": false, "grade_id": "softmax-backward", "solution": true}
@@ -1479,6 +1505,7 @@ class SoftmaxBackward(Function):
         - Use keepdims=True in np.sum to maintain dimensions for broadcasting
         - Vectorized formula: softmax * (grad_output - sum(grad_output * softmax))
         """
+        ### BEGIN SOLUTION
         tensor, = self.saved_tensors
 
         if isinstance(tensor, Tensor) and tensor.requires_grad:
@@ -1490,6 +1517,7 @@ class SoftmaxBackward(Function):
 
             return (grad_x,)
         return (None,)
+        ### END SOLUTION
 
 
 # %% nbgrader={"grade": false, "grade_id": "gelu-backward", "solution": true}
@@ -1534,6 +1562,7 @@ class GELUBackward(Function):
         - Use tanh approximation for numerical stability
         - Formula: 0.5 * (1 + tanh(...)) + 0.5 * x * sech²(...) * d(tanh_arg)/dx
         """
+        ### BEGIN SOLUTION
         tensor, = self.saved_tensors
 
         if isinstance(tensor, Tensor) and tensor.requires_grad:
@@ -1552,6 +1581,7 @@ class GELUBackward(Function):
 
             return (grad_output * gelu_grad,)
         return (None,)
+        ### END SOLUTION
 
 
 # %% nbgrader={"grade": false, "grade_id": "mse-backward", "solution": true}
@@ -1597,6 +1627,7 @@ class MSEBackward(Function):
         - N = self.num_samples (total number of elements)
         - Multiply by grad_output for chain rule
         """
+        ### BEGIN SOLUTION
         predictions, = self.saved_tensors
 
         if isinstance(predictions, Tensor) and predictions.requires_grad:
@@ -1605,6 +1636,7 @@ class MSEBackward(Function):
 
             return grad * grad_output,
         return None,
+        ### END SOLUTION
 
 
 # %% nbgrader={"grade": false, "grade_id": "bce-backward", "solution": true}
@@ -1650,6 +1682,7 @@ class BCEBackward(Function):
         - Clip predictions to avoid log(0) instability
         - Divide by N for mean loss
         """
+        ### BEGIN SOLUTION
         predictions, = self.saved_tensors
 
         if isinstance(predictions, Tensor) and predictions.requires_grad:
@@ -1662,6 +1695,7 @@ class BCEBackward(Function):
 
             return grad * grad_output,
         return None,
+        ### END SOLUTION
 
 
 # %% nbgrader={"grade": false, "grade_id": "ce-backward", "solution": true}
@@ -1718,6 +1752,7 @@ class CrossEntropyBackward(Function):
         - Use stable softmax: subtract max before exp
         - Create one_hot: zeros array, set target indices to 1.0
         """
+        ### BEGIN SOLUTION
         logits, = self.saved_tensors
 
         if isinstance(logits, Tensor) and logits.requires_grad:
@@ -1737,6 +1772,7 @@ class CrossEntropyBackward(Function):
 
             return grad * grad_output,
         return None,
+        ### END SOLUTION
 
 
 # %% nbgrader={"grade": false, "grade_id": "enable-autograd", "solution": true}
@@ -2263,7 +2299,7 @@ enable_autograd(quiet=True)
 
 # %% [markdown]
 """
-## 🔥 DANGER: In-Place Operations Break Autograd
+## ⚠️ DANGER: In-Place Operations Break Autograd
 
 **THIS IS THE MOST COMMON SILENT FAILURE IN TINYTORCH!**
 
@@ -2628,7 +2664,7 @@ These questions prepare you for Module 06 (Optimizers), where you'll use these g
 
 # %% [markdown]
 """
-## 🎯 Aha Moment: Gradients Flow Automatically
+## ⭐ Aha Moment: Gradients Flow Automatically
 
 **What you built:** An autograd engine that computes gradients through computation graphs.
 
@@ -2669,7 +2705,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: Autograd Engine
+## 🚀 MODULE SUMMARY: Autograd Engine
 
 Congratulations! You've built the gradient engine that makes neural networks learn!
 

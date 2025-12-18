@@ -29,7 +29,7 @@ Gradients → Optimizers → Training
 (Module 05)  (Module 06)  (Module 07)
 ```
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement SGD with momentum for stable gradient descent
 2. Build Adam optimizer with adaptive learning rates
@@ -81,7 +81,7 @@ DEFAULT_WEIGHT_DECAY_ADAMW = 0.01  # Default weight decay for AdamW
 
 # %% [markdown]
 """
-## Introduction: What are Optimizers?
+## 💡 Introduction: What are Optimizers?
 
 Optimizers are the engines that drive neural network learning. They take gradients computed from your loss function and use them to update model parameters toward better solutions. Think of optimization as navigating a complex landscape where you're trying to find the lowest valley (minimum loss).
 
@@ -133,7 +133,7 @@ But sophisticated optimizers do much more than basic gradient descent!
 
 # %% [markdown]
 """
-## Foundations: Mathematical Background
+## 📐 Foundations: Mathematical Background
 
 ### Understanding Momentum: The Physics of Optimization
 
@@ -214,7 +214,7 @@ Why it matters:
 
 # %% [markdown]
 """
-## Implementation: Building Optimizers
+## 🏗️ Implementation: Building Optimizers
 
 Now we'll implement each optimizer step by step, following the pattern: understand the algorithm → implement it → test it immediately. Each optimizer builds on the foundation of the previous one.
 
@@ -349,7 +349,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## SGD - Stochastic Gradient Descent
+## 🏗️ SGD - Stochastic Gradient Descent
 
 SGD is the foundation of neural network perf. It implements the simple but powerful idea: "move in the direction opposite to the gradient."
 
@@ -643,7 +643,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Adam - Adaptive Moment Estimation
+## 🏗️ Adam - Adaptive Moment Estimation
 
 Adam solves a fundamental problem with SGD: different parameters often need different learning rates. Think of tuning a complex system where some knobs need gentle adjustments and others need bold changes.
 
@@ -896,7 +896,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## AdamW - Adam with Decoupled Weight Decay
+## 🏗️ AdamW - Adam with Decoupled Weight Decay
 
 AdamW fixes a subtle but important bug in Adam's weight decay implementation. The bug affects how regularization interacts with adaptive learning rates.
 
@@ -1142,7 +1142,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Integration: Bringing It Together
+## 🔧 Integration: Bringing It Together
 
 Now let's see how our optimizers perform in realistic scenarios. We'll compare their behavior on the same optimization problem to understand their different characteristics.
 
@@ -1164,7 +1164,7 @@ fixed LR           adaptive LR          adaptive LR + decay
 
 # %% [markdown]
 """
-## Systems Analysis: Optimizer Performance and Memory
+## 📊 Systems Analysis: Optimizer Performance and Memory
 
 Different optimizers have very different resource requirements. Understanding these trade-offs is crucial for production ML systems.
 
@@ -1527,7 +1527,7 @@ There's no universally best optimizer—only the right choice for your constrain
 
 # %% [markdown]
 """
-## 🎯 Aha Moment: Optimizers Update Weights
+## ⭐ Aha Moment: Optimizers Update Weights
 
 **What you built:** Optimization algorithms (SGD, Adam) that update neural network weights.
 
@@ -1568,7 +1568,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: Optimizers
+## 🚀 MODULE SUMMARY: Optimizers
 
 Congratulations! You've built sophisticated optimization algorithms that power modern neural network training!
 

@@ -31,7 +31,7 @@ Profiling (14) → Quantization (15) → Compression (16) → Memoization (17)
 (measure memory) (reduce precision)  (reduce parameters) (cache compute)
 ```
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement INT8 quantization with proper scaling
 2. Build quantization-aware training for minimal accuracy loss
@@ -89,7 +89,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔬 Motivation: Why Quantization Matters
+## 💡 Motivation: Why Quantization Matters
 
 Before we learn quantization, let's profile a model to see how much memory
 FP32 weights actually consume. This will show us why reduced precision matters.
@@ -155,7 +155,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Introduction - The Memory Wall Problem
+## 💡 Introduction - The Memory Wall Problem
 
 Imagine trying to fit a library in your backpack. Neural networks face the same challenge - models are getting huge, but devices have limited memory!
 
@@ -231,7 +231,7 @@ Today you'll build the production-quality quantization system that makes all thi
 
 # %% [markdown]
 """
-## Foundations - The Mathematics of Compression
+## 📐 Foundations - The Mathematics of Compression
 
 ### Understanding the Core Challenge
 
@@ -344,7 +344,7 @@ INT8 gives us 4× memory reduction with <1% accuracy loss - the perfect balance 
 
 # %% [markdown]
 """
-## Implementation - Building the Quantization Engine
+## 🏗️ Implementation - Building the Quantization Engine
 
 ### Our Implementation Strategy
 
@@ -625,7 +625,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## QuantizedLinear - The Heart of Efficient Networks
+## 🏗️ QuantizedLinear - The Heart of Efficient Networks
 
 ### Why We Need Quantized Layers
 
@@ -924,7 +924,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Integration - Scaling to Full Neural Networks
+## 🔧 Integration - Scaling to Full Neural Networks
 
 ### The Model Quantization Challenge
 
@@ -1194,10 +1194,9 @@ Output Dictionary:
 - **Minimal overhead** - quantization parameters are tiny
 """
 
-# %% nbgrader={"grade": false, "grade_id": "compare_model_sizes", "solution": true}
-#| export
+# %% nbgrader={"grade": false, "grade_id": "analyze_model_sizes", "solution": true}
 
-def compare_model_sizes(original_model, quantized_model) -> Dict[str, float]:
+def analyze_model_sizes(original_model, quantized_model) -> Dict[str, float]:
     """
     Compare memory usage between original and quantized models.
 
@@ -1221,7 +1220,7 @@ def compare_model_sizes(original_model, quantized_model) -> Dict[str, float]:
     >>> layer2 = Linear(50, 10)
     >>> model = Sequential(layer1, layer2)
     >>> quantize_model(model)
-    >>> stats = compare_model_sizes(model, model)  # Same model after in-place quantization
+    >>> stats = analyze_model_sizes(model, model)  # Same model after in-place quantization
     >>> print(f"Reduced to {stats['reduction_ratio']:.1f}x smaller")
     Reduced to 4.0x smaller
 
@@ -1275,9 +1274,9 @@ def compare_model_sizes(original_model, quantized_model) -> Dict[str, float]:
     ### END SOLUTION
 
 # %% nbgrader={"grade": true, "grade_id": "test-compare-sizes", "locked": true, "points": 5}
-def test_unit_compare_model_sizes():
-    """🔬 Test model size comparison."""
-    print("🔬 Unit Test: Model Size Comparison...")
+def test_unit_analyze_model_sizes():
+    """🔬 Test model size analysis."""
+    print("🔬 Unit Test: Model Size Analysis...")
 
     # Create and quantize a model for testing (using Sequential from tinytorch.core.layers)
     layer1_orig = Linear(100, 50)
@@ -1301,8 +1300,8 @@ def test_unit_compare_model_sizes():
 
     quantize_model(quantized_model)
 
-    # Compare sizes
-    comparison = compare_model_sizes(original_model, quantized_model)
+    # Analyze sizes
+    comparison = analyze_model_sizes(original_model, quantized_model)
 
     # Verify compression achieved
     assert comparison['compression_ratio'] > 2.0, "Should achieve significant compression"
@@ -1310,15 +1309,15 @@ def test_unit_compare_model_sizes():
 
     print(f"  Compression ratio: {comparison['compression_ratio']:.1f}×")
     print(f"  Memory saved: {comparison['memory_saved_percent']:.1f}%")
-    print("✅ Model size comparison works correctly!")
+    print("✅ Model size analysis works correctly!")
 
 # Run test immediately when developing this module
 if __name__ == "__main__":
-    test_unit_compare_model_sizes()
+    test_unit_analyze_model_sizes()
 
 # %% [markdown]
 """
-## Systems Analysis - Quantization in Production
+## 📊 Systems Analysis - Quantization in Production
 
 Now let's measure the real-world impact of quantization through systematic analysis.
 """
@@ -1550,7 +1549,7 @@ This analysis reveals which strategies work best for different deployment scenar
 
 # %% [markdown]
 """
-## Measuring Quantization Savings with Profiler
+## 📊 Measuring Quantization Savings with Profiler
 
 Now let's use the **Profiler** tool from Module 14 to measure the actual memory savings from quantization. This demonstrates end-to-end workflow: profile baseline (M14) → apply quantization (M15) → measure savings (M14+M15).
 
@@ -1627,7 +1626,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Verification: Prove Quantization Works
+## 🔧 Verification: Prove Quantization Works
 
 Before running the full integration test, let's create a verification function that
 proves quantization actually reduces memory using real `.nbytes` measurements.
@@ -1694,7 +1693,7 @@ def verify_quantization_works(original_model, quantized_model):
 
 # %% [markdown]
 """
-## Module Integration Test
+## 🧪 Module Integration Test
 
 Final validation that our quantization system works correctly across all components.
 """
@@ -1720,7 +1719,7 @@ def test_module():
     test_unit_dequantize_int8()
     test_unit_quantized_linear()
     test_unit_quantize_model()
-    test_unit_compare_model_sizes()
+    test_unit_analyze_model_sizes()
 
     print("\nRunning integration scenarios...")
 
@@ -1785,7 +1784,7 @@ def test_module():
                     layer.q_bias, layer.bias_scale, layer.bias_zero_point
                 )
 
-    memory_comparison = compare_model_sizes(original_model, model)
+    memory_comparison = analyze_model_sizes(original_model, model)
     assert memory_comparison['compression_ratio'] > 2.0, "Insufficient compression achieved"
 
     print(f"✅ Compression achieved: {memory_comparison['compression_ratio']:.1f}×")
@@ -1828,7 +1827,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏁 Consolidated Quantization Classes for Export
+## 🔧 Consolidated Quantization Classes for Export
 
 Now that we've implemented all quantization components, let's create consolidated classes
 for export to the tinytorch package. This allows milestones to use the complete quantization system.
@@ -1919,7 +1918,7 @@ class Quantizer:
 
 # %% [markdown]
 """
-## 🎯 Aha Moment: Quantization Shrinks Models
+## ⭐ Aha Moment: Quantization Shrinks Models
 
 **What you built:** Quantization that converts FP32 weights to INT8, reducing model size by 4×.
 
@@ -1967,7 +1966,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: Quantization
+## 🚀 MODULE SUMMARY: Quantization
 
 Congratulations! You've built a complete INT8 quantization system that can reduce model size by 4× with minimal accuracy loss!
 

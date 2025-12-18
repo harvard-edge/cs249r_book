@@ -29,7 +29,7 @@ Modules 01-13 → Optimization Suite (14-18) → Benchmarking (19) → Submissio
 (Framework)     (Performance Tools)            (Measurement)       (Results)
 ```
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this capstone, you will:
 1. **Use** Module 19's benchmarking tools to measure model performance comprehensively
 2. **Apply** optimization techniques from Modules 14-18 to improve baseline models
@@ -71,7 +71,7 @@ submission.save("my_submission.json")
 
 # %% [markdown]
 """
-## Introduction: From Framework to Reproducible Results
+## 💡 Introduction: From Framework to Reproducible Results
 
 Over the past 19 modules, you built a complete ML framework from the ground up. You implemented tensors, layers, optimizers, loss functions, and advanced optimization techniques. But building a framework is only half the story.
 
@@ -141,7 +141,7 @@ print("📊 Ready to benchmark and submit results")
 
 # %% [markdown]
 """
-## Foundations: The Science of Benchmarking
+## 📐 Foundations: The Science of Benchmarking
 
 Before we build our submission system, let's understand what makes a good benchmark and why standardized reporting matters.
 
@@ -329,7 +329,7 @@ Now let's build it!
 
 # %% [markdown]
 """
-## Building a Simple Benchmark Model
+## 🏗️ Building a Simple Benchmark Model
 
 For this capstone, we'll use a simple MLP model. This keeps the focus on the benchmarking workflow rather than model complexity.
 
@@ -431,7 +431,7 @@ This small model is perfect for demonstrating optimization impact without long b
 
 # %% [markdown]
 """
-## Benchmark Report Class
+## 🏗️ Benchmark Report Class
 
 The BenchmarkReport class encapsulates all benchmark results and provides methods for comprehensive measurement and professional reporting.
 
@@ -600,7 +600,7 @@ This design decision makes our submissions JSON-compatible without custom encode
 
 # %% [markdown]
 """
-## Submission Generation
+## 🏗️ Submission Generation
 
 The core function that generates a standardized JSON submission from benchmark results.
 
@@ -823,7 +823,7 @@ In production ML, schema validation is what makes benchmarks trustworthy and com
 
 # %% [markdown]
 """
-## Complete Example Workflow
+## 🔧 Complete Example Workflow
 
 This section demonstrates the complete workflow from model to submission.
 Students can modify this to benchmark their own models!
@@ -928,7 +928,7 @@ Production ML Workflow:
 
 # %% [markdown]
 """
-## Advanced Workflow - Using TinyTorch Optimization APIs
+## 🔧 Advanced Workflow - Using TinyTorch Optimization APIs
 
 This section demonstrates using the complete optimization pipeline from Modules 14-19:
 - Module 14 (Profiling): Measure baseline performance and identify bottlenecks
@@ -1120,7 +1120,7 @@ This tells other engineers EXACTLY what you did, so they can reproduce or build 
 
 # %% [markdown]
 """
-## Module Testing
+## 🧪 Module Testing
 
 Individual unit tests for each component, following TinyTorch testing patterns.
 
@@ -1864,14 +1864,14 @@ Congratulations! You've gone from implementing basic tensors to understanding en
 
 # %% [markdown]
 """
-## Main Execution
+## 🔧 Main Execution
 
 When run as a script, this demonstrates the complete workflow.
 """
 
 # %% [markdown]
 """
-## 🎯 Aha Moment: You Built a Complete ML System
+## ⭐ Aha Moment: You Built a Complete ML System
 
 **What you built:** A professional benchmarking and submission system for your TinyTorch models.
 
@@ -1915,7 +1915,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: Capstone - Benchmarking & Submission
+## 🚀 MODULE SUMMARY: Capstone - Benchmarking & Submission
 
 Congratulations! You've completed the TinyTorch capstone by building a professional benchmarking and submission system!
 

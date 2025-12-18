@@ -29,7 +29,7 @@ Tensor → Activations → Layers
 (data)   (intelligence) (architecture)
 ```
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement 5 core activation functions (Sigmoid, ReLU, Tanh, GELU, Softmax)
 2. Understand how nonlinearity enables neural network intelligence
@@ -104,7 +104,7 @@ __all__ = ['Sigmoid', 'ReLU', 'Tanh', 'GELU', 'Softmax']
 
 # %% [markdown]
 """
-## Introduction - What Makes Neural Networks Intelligent?
+## 💡 Introduction - What Makes Neural Networks Intelligent?
 
 Consider two scenarios:
 
@@ -141,7 +141,7 @@ This is how deep networks build intelligence from simple mathematical operations
 
 # %% [markdown]
 """
-## Mathematical Foundations
+## 📐 Mathematical Foundations
 
 Each activation function serves a different purpose in neural networks:
 
@@ -158,7 +158,7 @@ Let's implement each one with clear explanations and immediate testing!
 
 # %% [markdown]
 """
-## Implementation - Building Activation Functions
+## 🏗️ Implementation - Building Activation Functions
 
 ### 🏗️ Implementation Pattern
 
@@ -177,7 +177,7 @@ class ActivationName:
 
 # %% [markdown]
 """
-## Sigmoid - The Probability Gatekeeper
+## 🏗️ Sigmoid - The Probability Gatekeeper
 
 Sigmoid maps any real number to the range (0, 1), making it perfect for probabilities and binary decisions.
 
@@ -312,7 +312,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## ReLU - The Sparsity Creator
+## 🏗️ ReLU - The Sparsity Creator
 
 ReLU (Rectified Linear Unit) is the most popular activation function. It simply removes negative values, creating sparsity that makes neural networks more efficient.
 
@@ -437,7 +437,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Tanh - The Zero-Centered Alternative
+## 🏗️ Tanh - The Zero-Centered Alternative
 
 Tanh (hyperbolic tangent) is like sigmoid but centered around zero, mapping inputs to (-1, 1). This zero-centering helps with gradient flow during training.
 
@@ -560,7 +560,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## GELU - The Smooth Modern Choice
+## 🏗️ GELU - The Smooth Modern Choice
 
 GELU (Gaussian Error Linear Unit) is a smooth approximation to ReLU that's become popular in modern architectures like transformers. Unlike ReLU's sharp corner, GELU is smooth everywhere.
 
@@ -692,7 +692,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Softmax - The Probability Distributor
+## 🏗️ Softmax - The Probability Distributor
 
 Softmax converts any vector into a valid probability distribution. All outputs are positive and sum to exactly 1.0, making it essential for multi-class classification.
 
@@ -838,7 +838,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Integration - Bringing It Together
+## 🔧 Integration - Bringing It Together
 
 Now let's test how all our activation functions work together and understand their different behaviors.
 """
@@ -1062,7 +1062,7 @@ You've built activations that are both correct AND production-ready!
 
 # %% [markdown]
 """
-## Real-World Production Context
+## 📊 Real-World Production Context
 
 Now that you've implemented these activations, let's understand how they're used in real ML systems.
 
@@ -1183,7 +1183,7 @@ class Sigmoid:
 
 # %% [markdown]
 """
-## 🎯 Aha Moment: Activations Transform Data
+## ⭐ Aha Moment: Activations Transform Data
 
 **What you built:** Five activation functions that introduce nonlinearity to neural networks.
 
@@ -1225,7 +1225,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: Activations
+## 🚀 MODULE SUMMARY: Activations
 
 Congratulations! You've built the intelligence engine of neural networks!
 

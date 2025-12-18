@@ -29,7 +29,7 @@ NumPy Arrays → Tensor → Activations (Module 02)
 (raw data)   (ML ops)  (intelligence)
 ```
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement a complete Tensor class with fundamental operations
 2. Understand tensors as the universal data structure in ML
@@ -93,7 +93,7 @@ that every other TinyTorch component depends on.
 
 # %% [markdown]
 """
-## Introduction: What is a Tensor?
+## 💡 Introduction: What is a Tensor?
 
 A tensor is a multi-dimensional array that serves as the fundamental data structure in machine learning. Think of it as a universal container that can hold data in different dimensions:
 
@@ -135,7 +135,7 @@ Raw Data → Preprocessing → Tensor Creation → Model Forward Pass → Loss C
 
 # %% [markdown]
 """
-## Foundations: Mathematical Background
+## 📐 Foundations: Mathematical Background
 
 ### Core Operations We'll Implement
 
@@ -189,7 +189,7 @@ This memory layout affects performance in real ML workloads - algorithms that ac
 
 # %% [markdown]
 """
-## Implementation: Building Tensor Foundation
+## 🏗️ Implementation: Building Tensor Foundation
 
 Let's build our Tensor class step by step, testing each component as we go.
 
@@ -749,7 +749,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Element-wise Arithmetic Operations
+## 🏗️ Element-wise Arithmetic Operations
 
 Element-wise operations are the workhorses of neural network computation. They apply the same operation to corresponding elements in tensors, often with broadcasting to handle different shapes elegantly.
 
@@ -885,7 +885,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Matrix Multiplication: The Heart of Neural Networks
+## 🏗️ Matrix Multiplication: The Heart of Neural Networks
 
 Matrix multiplication is fundamentally different from element-wise multiplication. It's the operation that gives neural networks their power to transform and combine information across features.
 
@@ -1035,7 +1035,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Shape Manipulation: Reshape and Transpose
+## 🏗️ Shape Manipulation: Reshape and Transpose
 
 Neural networks constantly change tensor shapes to match layer requirements. Understanding these operations is crucial for data flow through networks.
 
@@ -1201,7 +1201,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Reduction Operations: Aggregating Information
+## 🏗️ Reduction Operations: Aggregating Information
 
 Reduction operations collapse dimensions by aggregating data, which is essential for computing statistics, losses, and preparing data for different layers.
 
@@ -1361,7 +1361,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Systems Analysis: Memory Layout and Performance
+## 📊 Systems Analysis: Memory Layout and Performance
 
 Let's understand ONE key systems concept: **memory layout and cache behavior**.
 
@@ -1436,7 +1436,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Integration: Bringing It Together
+## 🔧 Integration: Bringing It Together
 
 Let's test how our Tensor operations work together in realistic scenarios that mirror neural network computations. This integration demonstrates that our individual operations combine correctly for complex ML workflows.
 
@@ -1718,7 +1718,7 @@ def custom_activation(tensor):
 
 # %% [markdown]
 """
-## 🎯 Aha Moment: Your Tensor Works Like NumPy
+## ⭐ Aha Moment: Your Tensor Works Like NumPy
 
 **What you built:** A complete Tensor class with arithmetic operations and matrix multiplication.
 
@@ -1766,7 +1766,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: Tensor Foundation
+## 🚀 MODULE SUMMARY: Tensor Foundation
 
 Congratulations! You've built the foundational Tensor class that powers all machine learning operations!
 

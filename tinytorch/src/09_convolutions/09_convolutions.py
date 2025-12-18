@@ -29,7 +29,7 @@ Training Pipeline → Spatial Operations → CNN (Milestone 03)
     (MLPs)            (Conv/Pool)        (Computer Vision)
 ```
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement Conv2d with explicit loops to understand O(N²M²K²) complexity
 2. Build pooling operations (Max and Average) for spatial reduction
@@ -73,7 +73,7 @@ DEFAULT_PADDING = 0  # Default padding for convolutions
 
 # %% [markdown]
 """
-## Introduction - What are Spatial Operations?
+## 💡 Introduction - What are Spatial Operations?
 
 Spatial operations transform machine learning from working with simple vectors to understanding images and spatial patterns. When you look at a photo, your brain naturally processes spatial relationships - edges, textures, objects. Spatial operations give neural networks this same capability.
 
@@ -119,7 +119,7 @@ Convolution achieves dramatic parameter reduction (1000× fewer!) while preservi
 
 # %% [markdown]
 """
-## Mathematical Foundations
+## 📐 Mathematical Foundations
 
 ### Understanding Convolution Step by Step
 
@@ -202,7 +202,7 @@ This is why kernel size matters enormously - a 7×7 kernel would require 5.4× m
 
 # %% [markdown]
 """
-## Implementation - Building Spatial Operations
+## 🏗️ Implementation - Building Spatial Operations
 
 Now we'll implement convolution step by step, using explicit loops so you can see and feel the computational complexity. This helps you understand why modern optimizations matter!
 
@@ -544,7 +544,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Pooling Operations - Spatial Dimension Reduction
+## 🏗️ Pooling Operations - Spatial Dimension Reduction
 
 Pooling operations compress spatial information while keeping the most important features. Think of them as creating "thumbnail summaries" of local regions.
 
@@ -1008,7 +1008,7 @@ class AvgPool2d:
 
 # %% [markdown]
 """
-## Batch Normalization - Stabilizing Deep Network Training
+## 🏗️ Batch Normalization - Stabilizing Deep Network Training
 
 Batch Normalization (BatchNorm) is one of the most important techniques for training deep networks. It normalizes activations across the batch dimension, dramatically improving training stability and speed.
 
@@ -1392,7 +1392,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Systems Analysis - Understanding Spatial Operation Performance
+## 📊 Systems Analysis - Understanding Spatial Operation Performance
 
 Now let's analyze the computational complexity and memory trade-offs of spatial operations. This analysis reveals why certain design choices matter for real-world performance.
 
@@ -1508,7 +1508,7 @@ def analyze_pooling_effects():
 
 # %% [markdown]
 """
-## Integration - Building a Complete CNN
+## 🔧 Integration - Building a Complete CNN
 
 Now let's combine convolution and pooling into a complete CNN architecture. You'll see how spatial operations work together to transform raw pixels into meaningful features.
 
@@ -1844,7 +1844,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Module Integration Test
+## 🧪 Module Integration Test
 
 Final validation that everything works together correctly.
 """
@@ -1966,7 +1966,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Main Execution Block
+## 🔧 Main Execution Block
 
 Running all module components including systems analysis and final validation.
 """
@@ -2052,7 +2052,7 @@ Why do mobile ML models prefer depthwise-separable convolutions over standard Co
 
 # %% [markdown]
 """
-## 🎯 Aha Moment: Convolution Extracts Features
+## ⭐ Aha Moment: Convolution Extracts Features
 
 **What you built:** Convolutional layers that process spatial data like images.
 
@@ -2092,9 +2092,9 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Module Summary
+## 🎯 Module Summary
 
-## 🎯 MODULE SUMMARY: Spatial Operations
+## 🚀 MODULE SUMMARY: Spatial Operations
 
 Congratulations! You've built the spatial processing foundation that powers computer vision!
 

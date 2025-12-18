@@ -29,7 +29,7 @@ Optimizers (Module 06) → Training (Module 07) → DataLoader (Module 08)
 (parameter updates)     (complete loops)      (efficient batching)
 ```
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement a complete Trainer class with train/eval modes
 2. Build learning rate scheduling and gradient clipping
@@ -81,7 +81,7 @@ DEFAULT_TOTAL_EPOCHS = 100  # Default total epochs for learning rate schedule
 
 # %% [markdown]
 """
-## 🏗️ Introduction - What is Training?
+## 💡 Introduction - What is Training?
 
 Training is where the magic happens - it's the process that transforms a randomly initialized neural network into an intelligent system that can solve problems. Think of training as teaching: you show the model examples, it makes predictions, you measure how wrong it is, and then you adjust its parameters to do better next time.
 
@@ -1285,7 +1285,7 @@ Use only knowledge from Modules 01-07 to answer these questions:
 
 # %% [markdown]
 """
-## 🎯 Aha Moment: Training Just Works
+## ⭐ Aha Moment: Training Just Works
 
 **What you built:** A complete training infrastructure with Trainer, schedulers, and checkpoints.
 
@@ -1340,7 +1340,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: Training
+## 🚀 MODULE SUMMARY: Training
 
 Congratulations! You've built a complete training infrastructure that orchestrates the entire machine learning training process!
 

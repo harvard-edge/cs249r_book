@@ -147,7 +147,7 @@ Restore INT8 tensor to FP32 using quantization parameters.
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `quantize_model` | `quantize_model(model, calibration_data=None)` | Quantize all Linear layers in-place |
-| `compare_model_sizes` | `compare_model_sizes(original, quantized)` | Measure compression ratio and memory saved |
+| `analyze_model_sizes` | `analyze_model_sizes(original, quantized)` | Measure compression ratio and memory saved |
 
 ## Core Concepts
 

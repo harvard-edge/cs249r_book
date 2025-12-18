@@ -32,7 +32,7 @@ Training Loop → DataLoader → Batched Data → Model
 (Module 07)    (Module 08)  (optimized)   (ready to learn)
 ```
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Understand the data pipeline: individual samples → batches → training
 2. Implement Dataset abstraction and TensorDataset for tensor-based data
@@ -75,7 +75,7 @@ from tinytorch.core.tensor import Tensor
 
 # %% [markdown]
 """
-## Understanding the Data Pipeline
+## 💡 Understanding the Data Pipeline
 
 Before we implement anything, let's understand what happens when neural networks "eat" data. The journey from raw data to trained models follows a specific pipeline that every ML engineer must master.
 
@@ -213,7 +213,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## TensorDataset - When Data Lives in Memory
+## 🏗️ TensorDataset - When Data Lives in Memory
 
 Now let's implement TensorDataset, the most common dataset type for when your data is already loaded into tensors. This is perfect for datasets like MNIST where you can fit everything in memory.
 
@@ -428,7 +428,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## DataLoader - The Batch Factory
+## 🏗️ DataLoader - The Batch Factory
 
 Now we build the DataLoader, the component that transforms individual dataset samples into the batches that neural networks crave. This is where data loading becomes a systems challenge.
 
@@ -657,7 +657,7 @@ class DataLoader:
 
 # %% [markdown]
 """
-## Data Augmentation - Preventing Overfitting Through Variety
+## 🏗️ Data Augmentation - Preventing Overfitting Through Variety
 
 Data augmentation is one of the most effective techniques for improving model generalization. By applying random transformations during training, we artificially expand the dataset and force the model to learn robust, invariant features.
 
@@ -1138,7 +1138,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Working with Real Datasets
+## 🔧 Working with Real Datasets
 
 Now that you've built the DataLoader abstraction, you're ready to use it with real data!
 
@@ -1242,7 +1242,7 @@ You've built the **data loading infrastructure** that powers all modern ML:
 
 # %% [markdown]
 """
-## Systems Analysis - Data Pipeline Performance
+## 📊 Systems Analysis - Data Pipeline Performance
 
 **Note:** This section provides performance analysis tools for understanding DataLoader behavior. The analysis functions are defined below but not run automatically. To explore performance characteristics, uncomment and run `analyze_dataloader_performance()` or `analyze_memory_usage()` manually.
 
@@ -1478,7 +1478,7 @@ def analyze_collation_overhead():
 
 # %% [markdown]
 """
-## Common Pitfalls and Best Practices
+## ⚠️ Common Pitfalls and Best Practices
 
 Before we move to integration testing, let's cover common mistakes students and practitioners make with data loading:
 
@@ -1575,7 +1575,7 @@ These patterns will save you hours of debugging and help you build robust traini
 
 # %% [markdown]
 """
-## Integration Testing
+## 🔧 Integration Testing
 
 Let's test how our DataLoader integrates with a complete training workflow, simulating real ML pipeline usage.
 """
@@ -1952,7 +1952,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: DataLoader
+## 🚀 MODULE SUMMARY: DataLoader
 
 Congratulations! You've built a complete data loading pipeline for ML training!
 
