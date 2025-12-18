@@ -18,22 +18,24 @@ If you can multiply two matrices by hand and write a Python class, you're ready.
 :gutter: 3
 
 ```{grid-item-card} 🚀 Launch Binder
-:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F01_tensor%2F01_tensor.ipynb
 
-Run interactively in your browser. No setup required.
+Run interactively in your browser.
+
+<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F01_tensor%2F01_tensor.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
 ```
 
 ```{grid-item-card} 📄 View Source
-:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/01_tensor/01_tensor.py
 
-Browse the implementation code on GitHub.
+Browse the source code on GitHub.
+
+<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/01_tensor/01_tensor.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #6b7280; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
 
 Listen to an AI-generated overview.
 
-<audio controls style="width: 100%; margin-top: 8px;">
+<audio controls style="width: 100%; height: 54px; margin-top: auto;">
   <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/01_tensor.mp3" type="audio/mpeg">
 </audio>
 ```
