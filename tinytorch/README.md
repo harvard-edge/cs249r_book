@@ -102,8 +102,8 @@ Build your framework through four progressive parts:
 
 | Part | Modules | What You Build |
 |------|---------|----------------|
-| **I. Foundations** | 01-07 | Tensors, activations, layers, losses, autograd, optimizers, training |
-| **II. Vision** | 08-09 | DataLoaders, Conv2d, CNNs for image classification |
+| **I. Foundations** | 01-08 | Tensors, activations, layers, losses, dataloader, autograd, optimizers, training |
+| **II. Vision** | 09 | Conv2d, CNNs for image classification |
 | **III. Language** | 10-13 | Tokenization, embeddings, attention, transformers |
 | **IV. Optimization** | 14-20 | Profiling, quantization, compression, acceleration, benchmarking, capstone |
 
@@ -173,10 +173,10 @@ TinyTorch/
 │   ├── 02_activations/         # Module 02: ReLU, Softmax activations
 │   ├── 03_layers/              # Module 03: Linear layers, Module system
 │   ├── 04_losses/              # Module 04: MSE, CrossEntropy losses
-│   ├── 05_autograd/            # Module 05: Automatic differentiation
-│   ├── 06_optimizers/          # Module 06: SGD, Adam optimizers
-│   ├── 07_training/            # Module 07: Complete training loops
-│   ├── 08_dataloader/          # Module 08: Efficient data pipelines
+│   ├── 05_dataloader/          # Module 05: Efficient data pipelines
+│   ├── 06_autograd/            # Module 06: Automatic differentiation
+│   ├── 07_optimizers/          # Module 07: SGD, Adam optimizers
+│   ├── 08_training/            # Module 08: Complete training loops
 │   ├── 09_convolutions/        # Module 09: Conv2d, MaxPool2d, CNNs
 │   ├── 10_tokenization/        # Module 10: Text processing
 │   ├── 11_embeddings/          # Module 11: Token & positional embeddings

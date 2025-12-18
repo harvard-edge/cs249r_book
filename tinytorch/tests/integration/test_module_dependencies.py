@@ -6,8 +6,8 @@ Tests how each module interfaces with modules that came before it
 
 # Module dependency graph for TinyTorch
 # Current module structure:
-# 01_tensor, 02_activations, 03_layers, 04_losses, 05_autograd,
-# 06_optimizers, 07_training, 08_dataloader, 09_convolutions,
+# 01_tensor, 02_activations, 03_layers, 04_losses, 05_dataloader,
+# 06_autograd, 07_optimizers, 08_training, 09_convolutions,
 # 10_tokenization, 11_embeddings, 12_attention, 13_transformers,
 # 14_profiling, 15_quantization, 16_compression, 17_memoization,
 # 18_acceleration, 19_benchmarking, 20_capstone
@@ -16,10 +16,10 @@ MODULE_DEPENDENCIES = {
     "02_activations": ["01_tensor"],  # Needs Tensor
     "03_layers": ["01_tensor"],  # Needs Tensor
     "04_losses": ["01_tensor"],  # Needs Tensor
-    "05_autograd": ["01_tensor"],  # Core dependency on Tensor
-    "06_optimizers": ["01_tensor", "05_autograd"],  # Needs Tensor and autograd
-    "07_training": ["01_tensor", "05_autograd", "06_optimizers"],  # Training loop deps
-    "08_dataloader": ["01_tensor"],  # Needs Tensor
+    "05_dataloader": ["01_tensor"],  # Needs Tensor
+    "06_autograd": ["01_tensor"],  # Core dependency on Tensor
+    "07_optimizers": ["01_tensor", "06_autograd"],  # Needs Tensor and autograd
+    "08_training": ["01_tensor", "06_autograd", "07_optimizers"],  # Training loop deps
     "09_convolutions": ["01_tensor", "03_layers"],  # Needs Tensor and Layer base
     "10_tokenization": ["01_tensor"],  # Needs Tensor
     "11_embeddings": ["01_tensor"],  # Needs Tensor
