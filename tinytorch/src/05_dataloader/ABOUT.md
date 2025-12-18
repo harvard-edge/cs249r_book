@@ -1,11 +1,11 @@
-# Module 08: DataLoader
+# Module 05: DataLoader
 
 :::{admonition} Module Info
 :class: note
 
-**ARCHITECTURE TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-07
+**FOUNDATION TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-04
 
-**Prerequisites:** You should be comfortable with tensors, activations, layers, losses, autograd, optimizers, and training loops from Modules 01-07. This module assumes you understand the training loop pattern and why batching matters for efficient gradient descent.
+**Prerequisites:** You should be comfortable with tensors, activations, layers, and losses from Modules 01-04. This module introduces data loading infrastructure that will be used by autograd, optimizers, and training loops in the following modules.
 :::
 
 `````{only} html
@@ -16,14 +16,14 @@
 
 Run interactively in your browser.
 
-<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F08_dataloader%2F08_dataloader.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
+<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F05_dataloader%2F05_dataloader.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
 ```
 
 ```{grid-item-card} 📄 View Source
 
 Browse the source code on GitHub.
 
-<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/08_dataloader/08_dataloader.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #6b7280; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
+<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/05_dataloader/05_dataloader.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #6b7280; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
@@ -31,7 +31,7 @@ Browse the source code on GitHub.
 Listen to an AI-generated overview.
 
 <audio controls style="width: 100%; height: 54px; margin-top: auto;">
-  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/08_dataloader.mp3" type="audio/mpeg">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/05_dataloader.mp3" type="audio/mpeg">
 </audio>
 ```
 
@@ -630,25 +630,25 @@ For students who want to understand the academic foundations and engineering dec
 
 ## What's Next
 
-```{seealso} Coming Up: Module 09 - Convolutions
+```{seealso} Coming Up: Module 06 - Autograd
 
-Implement Conv2d, MaxPool2d, and Flatten layers to build convolutional neural networks. You'll apply your DataLoader to image datasets and discover why CNNs revolutionized computer vision.
+Implement automatic differentiation that computes gradients through computation graphs. Your DataLoader will feed batches to models, and autograd will enable learning from those batches.
 ```
 
 **Preview - How Your DataLoader Gets Used in Future Modules:**
 
 | Module | What It Does | Your DataLoader In Action |
 |--------|--------------|--------------------------|
+| **06: Autograd** | Automatic differentiation | Tensors from DataLoader flow through computation graphs |
+| **08: Training** | Complete training loops | `for batch in loader:` orchestrates the full training process |
 | **09: Convolutions** | Convolutional layers for images | `for images, labels in loader:` feed batches to CNNs |
-| **10: Tokenization** | Text processing | `DataLoader(text_dataset)` batch sentences |
-| **13: Transformers** | Attention mechanisms | Large batch sizes enabled by efficient data loading |
 
 ## Get Started
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/08_dataloader/08_dataloader.ipynb)** - Run interactively in browser, no setup required
-- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/08_dataloader/08_dataloader.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/05_dataloader/05_dataloader.ipynb)** - Run interactively in browser, no setup required
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/05_dataloader/05_dataloader.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

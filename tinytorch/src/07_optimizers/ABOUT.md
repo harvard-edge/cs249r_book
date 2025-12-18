@@ -1,12 +1,13 @@
-# Module 06: Optimizers
+# Module 07: Optimizers
 
 :::{admonition} Module Info
 :class: note
 
-**FOUNDATION TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-05
+**FOUNDATION TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-06
 
-**Prerequisites: Modules 01-05** means you need:
+**Prerequisites: Modules 01-06** means you need:
 - Tensor operations and parameter storage
+- DataLoader for efficient batch processing
 - Understanding of forward/backward passes (autograd)
 - Why gradients point toward higher loss
 
@@ -21,14 +22,14 @@ If you understand how `loss.backward()` computes gradients and why we need to up
 
 Run interactively in your browser.
 
-<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F06_optimizers%2F06_optimizers.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
+<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F07_optimizers%2F07_optimizers.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
 ```
 
 ```{grid-item-card} 📄 View Source
 
 Browse the source code on GitHub.
 
-<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/06_optimizers/06_optimizers.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #6b7280; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
+<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/07_optimizers/07_optimizers.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #6b7280; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
@@ -36,7 +37,7 @@ Browse the source code on GitHub.
 Listen to an AI-generated overview.
 
 <audio controls style="width: 100%; height: 54px; margin-top: auto;">
-  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/06_optimizers.mp3" type="audio/mpeg">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/07_optimizers.mp3" type="audio/mpeg">
 </audio>
 ```
 
@@ -104,12 +105,12 @@ optimizer.zero_grad()  # Clear gradients for next iteration
 
 To keep this module focused, you will **not** implement:
 
-- Learning rate schedules (that's Module 07: Training)
+- Learning rate schedules (that's Module 08: Training)
 - Gradient clipping (PyTorch provides this via `torch.nn.utils.clip_grad_norm_`)
 - Second-order optimizers like L-BFGS (rarely used in deep learning due to memory cost)
 - Distributed optimizer sharding (production frameworks use techniques like ZeRO)
 
-**You are building the core optimization algorithms.** Advanced training techniques come in Module 07.
+**You are building the core optimization algorithms.** Advanced training techniques come in Module 08.
 
 ## API Reference
 
@@ -532,7 +533,7 @@ For students who want to understand the academic foundations and mathematical un
 
 ## What's Next
 
-```{seealso} Coming Up: Module 07 - Training
+```{seealso} Coming Up: Module 08 - Training
 
 Combine optimizers with training loops to actually train neural networks. You'll implement learning rate scheduling, checkpointing, and the complete training/validation workflow that makes everything work together.
 ```
@@ -541,16 +542,16 @@ Combine optimizers with training loops to actually train neural networks. You'll
 
 | Module | What It Does | Your Optimizers In Action |
 |--------|--------------|---------------------------|
-| **07: Training** | Complete training loops | `for epoch in range(10): loss.backward(); optimizer.step()` |
-| **08: DataLoader** | Batch data processing | `optimizer.step()` updates after each batch of data |
+| **08: Training** | Complete training loops | `for epoch in range(10): loss.backward(); optimizer.step()` |
 | **09: Convolutions** | Convolutional networks | `AdamW` optimizes millions of CNN parameters efficiently |
+| **13: Transformers** | Attention mechanisms | Large models require careful optimizer selection |
 
 ## Get Started
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/06_optimizers/06_optimizers.ipynb)** - Run interactively in browser, no setup required
-- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/06_optimizers/06_optimizers.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/07_optimizers/07_optimizers.ipynb)** - Run interactively in browser, no setup required
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/07_optimizers/07_optimizers.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

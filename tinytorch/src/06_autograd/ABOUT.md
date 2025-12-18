@@ -1,15 +1,16 @@
-# Module 05: Autograd
+# Module 06: Autograd
 
 :::{admonition} Module Info
 :class: note
 
-**FOUNDATION TIER** | Difficulty: ●●●○ | Time: 6-8 hours | Prerequisites: 01-04
+**FOUNDATION TIER** | Difficulty: ●●●○ | Time: 6-8 hours | Prerequisites: 01-05
 
-**Prerequisites: Modules 01-04** means you need:
+**Prerequisites: Modules 01-05** means you need:
 - Tensor operations (matmul, broadcasting, reductions)
 - Activation functions (understanding non-linearity)
 - Neural network layers (what gradients flow through)
 - Loss functions (the "why" behind gradients)
+- DataLoader for efficient batch processing
 
 If you can compute a forward pass through a neural network manually and understand why we need to minimize loss, you're ready.
 :::
@@ -22,14 +23,14 @@ If you can compute a forward pass through a neural network manually and understa
 
 Run interactively in your browser.
 
-<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F05_autograd%2F05_autograd.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
+<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F06_autograd%2F06_autograd.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
 ```
 
 ```{grid-item-card} 📄 View Source
 
 Browse the source code on GitHub.
 
-<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/05_autograd/05_autograd.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #6b7280; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
+<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/06_autograd/06_autograd.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #6b7280; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
@@ -37,7 +38,7 @@ Browse the source code on GitHub.
 Listen to an AI-generated overview.
 
 <audio controls style="width: 100%; height: 54px; margin-top: auto;">
-  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/05_autograd.mp3" type="audio/mpeg">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/06_autograd.mp3" type="audio/mpeg">
 </audio>
 ```
 
@@ -596,7 +597,7 @@ For students who want to understand the academic foundations and mathematical un
 
 ## What's Next
 
-```{seealso} Coming Up: Module 06 - Optimizers
+```{seealso} Coming Up: Module 07 - Optimizers
 
 Implement SGD, Adam, and other optimization algorithms that use your autograd gradients to update parameters and train neural networks. You'll complete the training loop and make your networks learn from data.
 ```
@@ -605,16 +606,16 @@ Implement SGD, Adam, and other optimization algorithms that use your autograd gr
 
 | Module | What It Does | Your Autograd In Action |
 |--------|--------------|------------------------|
-| **06: Optimizers** | Update parameters using gradients | `optimizer.step()` uses `param.grad` computed by backward() |
-| **07: Training** | Complete training loops | `loss.backward()` → `optimizer.step()` → repeat |
+| **07: Optimizers** | Update parameters using gradients | `optimizer.step()` uses `param.grad` computed by backward() |
+| **08: Training** | Complete training loops | `loss.backward()` → `optimizer.step()` → repeat |
 | **12: Attention** | Multi-head self-attention | Gradients flow through Q, K, V projections automatically |
 
 ## Get Started
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/05_autograd/05_autograd.ipynb)** - Run interactively in browser, no setup required
-- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/05_autograd/05_autograd.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/06_autograd/06_autograd.ipynb)** - Run interactively in browser, no setup required
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/06_autograd/06_autograd.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

@@ -1,11 +1,11 @@
-# Module 07: Training
+# Module 08: Training
 
 :::{admonition} Module Info
 :class: note
 
-**FOUNDATION TIER** | Difficulty: ●●○○ | Time: 5-7 hours | Prerequisites: 01-06
+**FOUNDATION TIER** | Difficulty: ●●○○ | Time: 5-7 hours | Prerequisites: 01-07
 
-By completing Modules 01-06, you've built all the fundamental components: tensors, activations, layers, losses, autograd, and optimizers. Each piece works perfectly in isolation, but real machine learning requires orchestrating these components into a cohesive training process. This module provides that orchestration.
+By completing Modules 01-07, you've built all the fundamental components: tensors, activations, layers, losses, dataloader, autograd, and optimizers. Each piece works perfectly in isolation, but real machine learning requires orchestrating these components into a cohesive training process. This module provides that orchestration.
 :::
 
 `````{only} html
@@ -16,14 +16,14 @@ By completing Modules 01-06, you've built all the fundamental components: tensor
 
 Run interactively in your browser.
 
-<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F07_training%2F07_training.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
+<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F08_training%2F08_training.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
 ```
 
 ```{grid-item-card} 📄 View Source
 
 Browse the source code on GitHub.
 
-<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/07_training/07_training.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #6b7280; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
+<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/08_training/08_training.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #6b7280; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
@@ -31,7 +31,7 @@ Browse the source code on GitHub.
 Listen to an AI-generated overview.
 
 <audio controls style="width: 100%; height: 54px; margin-top: auto;">
-  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/07_training.mp3" type="audio/mpeg">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/08_training.mp3" type="audio/mpeg">
 </audio>
 ```
 
@@ -114,12 +114,11 @@ for epoch in range(100):
 
 To keep this module focused, you will **not** implement:
 
-- DataLoader for efficient batching (that's Module 08: DataLoader)
 - Distributed training across multiple GPUs (PyTorch uses `DistributedDataParallel`)
 - Mixed precision training (PyTorch Automatic Mixed Precision requires specialized tensor types)
 - Advanced schedulers like warmup or cyclical learning rates (production frameworks offer dozens of variants)
 
-**You are building the core training orchestration.** Efficient data loading comes next.
+**You are building the core training orchestration.** Spatial operations for computer vision come next.
 
 ## API Reference
 
@@ -679,25 +678,25 @@ For students who want to understand the academic foundations and advanced traini
 
 ## What's Next
 
-```{seealso} Coming Up: Module 08 - DataLoader
+```{seealso} Coming Up: Module 09 - Convolutions
 
-Implement efficient data loading with batching, shuffling, and iteration. Your Trainer currently requires pre-batched data. Module 08 adds automatic batching from raw datasets, completing the training infrastructure needed for the MLP milestone.
+Implement Conv2d, MaxPool2d, and Flatten layers to build convolutional neural networks. Your Trainer will orchestrate training CNNs on image datasets, enabling the CNN milestone.
 ```
 
 **Preview - How Your Training Infrastructure Gets Used:**
 
 | Module | What It Does | Your Trainer In Action |
 |--------|--------------|------------------------|
-| **08: DataLoader** | Efficient batching and shuffling | `trainer.train_epoch(dataloader)` with automatic batching |
 | **09: Convolutions** | Convolutional layers for images | Train CNNs with same `trainer.train_epoch()` loop |
 | **Milestone: MLP** | Complete MNIST digit recognition | `trainer` orchestrates full training pipeline |
+| **Milestone: CNN** | Complete CIFAR-10 classification | Train vision models with your training infrastructure |
 
 ## Get Started
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/07_training/07_training.ipynb)** - Run interactively in browser, no setup required
-- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/07_training/07_training.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/08_training/08_training.ipynb)** - Run interactively in browser, no setup required
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/08_training/08_training.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress
