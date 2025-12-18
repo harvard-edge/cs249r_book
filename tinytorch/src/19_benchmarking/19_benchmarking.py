@@ -53,7 +53,7 @@ The TorchPerf Olympics is your capstone competition! Choose your event:
 - 🏋️‍♂️ **All-Around**: Best balanced performance across all metrics
 - 🚀 **Extreme Push**: Most aggressive optimization while staying viable
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement professional benchmarking infrastructure with statistical rigor
 2. Learn to combine optimization techniques strategically (order matters!)
@@ -90,7 +90,7 @@ results = benchmark.run_latency_benchmark()
 
 # %% [markdown]
 """
-## Introduction - What is Fair Benchmarking?
+## 💡 Introduction - What is Fair Benchmarking?
 
 Benchmarking in ML systems isn't just timing code - it's about making fair, reproducible comparisons that guide real optimization decisions. Think of it like standardized testing: everyone takes the same test under the same conditions.
 
@@ -98,7 +98,7 @@ Consider comparing three models: a base CNN, a quantized version, and a pruned v
 
 The challenge: ML models have multiple competing objectives (accuracy vs speed vs memory), measurements can be noisy, and "faster" depends on your hardware and use case.
 
-## Benchmarking as a Systems Engineering Discipline
+## 💡 Benchmarking as a Systems Engineering Discipline
 
 Professional ML benchmarking requires understanding measurement uncertainty and controlling for confounding factors:
 
@@ -121,7 +121,7 @@ This module builds infrastructure that addresses all these challenges while gene
 
 # %% [markdown]
 """
-## Mathematical Foundations - Statistics for Performance Engineering
+## 📐 Mathematical Foundations - Statistics for Performance Engineering
 
 Benchmarking is applied statistics. We measure noisy processes (model inference) and need to extract reliable insights about their true performance characteristics.
 
@@ -248,7 +248,7 @@ class OlympicEvent(Enum):
 
 # %% [markdown]
 """
-## Implementation - Building Professional Benchmarking Infrastructure
+## 🏗️ Implementation - Building Professional Benchmarking Infrastructure
 
 We'll build a comprehensive benchmarking system that handles statistical analysis, multi-dimensional comparison, and automated reporting. Each component builds toward production-quality evaluation tools.
 
@@ -272,7 +272,7 @@ Each level adds capability while maintaining statistical rigor at the foundation
 
 # %% [markdown]
 """
-## BenchmarkResult - Statistical Analysis Container
+## 🏗️ BenchmarkResult - Statistical Analysis Container
 
 Before measuring anything, we need a robust container that stores measurements and computes statistical properties. This is the foundation of all our benchmarking.
 
@@ -409,7 +409,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## High-Precision Timing Infrastructure
+## 🏗️ High-Precision Timing Infrastructure
 
 Accurate timing is the foundation of performance benchmarking. System clocks have different precision and behavior, so we need a robust timing mechanism.
 
@@ -524,7 +524,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Benchmark Class - Core Measurement Engine
+## 🏗️ Benchmark Class - Core Measurement Engine
 
 The Benchmark class implements the core measurement logic for different metrics. It handles the complex orchestration of multiple models, datasets, and measurement protocols.
 
@@ -812,7 +812,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## BenchmarkSuite - Comprehensive Multi-Metric Evaluation
+## 🏗️ BenchmarkSuite - Comprehensive Multi-Metric Evaluation
 
 The BenchmarkSuite orchestrates multiple benchmark types and generates comprehensive reports. This is where individual measurements become actionable engineering insights.
 
@@ -1243,7 +1243,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## TinyMLPerf - Standardized Industry Benchmarking
+## 🏗️ TinyMLPerf - Standardized Industry Benchmarking
 
 TinyMLPerf provides standardized benchmarks that enable fair comparison across different systems, similar to how MLPerf works for larger models. This is crucial for reproducible research and industry adoption.
 
@@ -1678,13 +1678,13 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Integration - Building Complete Benchmark Workflows
+## 🔧 Integration - Building Complete Benchmark Workflows
 
 Now we'll integrate all our benchmarking components into complete workflows that demonstrate professional ML systems evaluation. This integration shows how to combine statistical rigor with practical insights.
 
 The integration layer connects individual measurements into actionable engineering insights. This is where benchmarking becomes a decision-making tool rather than just data collection.
 
-## Workflow Architecture
+## 🔧 Workflow Architecture
 
 ```
 Integration Workflow Pipeline:
@@ -1705,7 +1705,7 @@ This workflow helps answer questions like:
 
 # %% [markdown]
 """
-## Optimization Comparison Engine
+## 🏗️ Optimization Comparison Engine
 
 Before implementing the comparison function, let's understand what makes optimization comparison challenging and valuable.
 
@@ -1750,7 +1750,7 @@ This principled approach ensures recommendations match real deployment needs.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-comparison", "solution": true}
-def compare_optimization_techniques(base_model: Any, optimized_models: List[Any],
+def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any],
                                   datasets: List[Any]) -> Dict[str, Any]:
     """
     Compare base model against various optimization techniques.
@@ -1773,7 +1773,7 @@ def compare_optimization_techniques(base_model: Any, optimized_models: List[Any]
 
     EXAMPLE:
     >>> models = [base_model, quantized_model, pruned_model, distilled_model]
-    >>> results = compare_optimization_techniques(base_model, models[1:], datasets)
+    >>> results = analyze_optimization_techniques(base_model, models[1:], datasets)
     >>> print(results['recommendations'])
 
     HINTS:
@@ -1942,7 +1942,7 @@ def compare_optimization_techniques(base_model: Any, optimized_models: List[Any]
 
 def test_unit_optimization_comparison():
     """🔬 Test optimization comparison functionality."""
-    print("🔬 Unit Test: compare_optimization_techniques...")
+    print("🔬 Unit Test: analyze_optimization_techniques...")
 
     # Create mock models with different characteristics
     class MockModel:
@@ -1964,7 +1964,7 @@ def test_unit_optimization_comparison():
     datasets = [{"test": "data"}]
 
     # Run comparison
-    results = compare_optimization_techniques(base_model, [quantized_model, pruned_model], datasets)
+    results = analyze_optimization_techniques(base_model, [quantized_model, pruned_model], datasets)
 
     # Verify results structure
     assert 'base_model' in results
@@ -1982,14 +1982,14 @@ def test_unit_optimization_comparison():
     assert 'for_accuracy_preservation' in recommendations
     assert 'for_balanced_deployment' in recommendations
 
-    print("✅ compare_optimization_techniques works correctly!")
+    print("✅ analyze_optimization_techniques works correctly!")
 
 if __name__ == "__main__":
     test_unit_optimization_comparison()
 
 # %% [markdown]
 """
-## Systems Analysis - Benchmark Variance and Optimization Trade-offs
+## 📊 Systems Analysis - Benchmark Variance and Optimization Trade-offs
 
 Understanding measurement variance and optimization trade-offs through systematic analysis.
 """
@@ -2076,7 +2076,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## MLPerf Principles - Industry-Standard Benchmarking
+## 📊 MLPerf Principles - Industry-Standard Benchmarking
 
 MLPerf (created by MLCommons) is the industry-standard ML benchmarking framework. Understanding these principles grounds your capstone competition in professional methodology.
 
@@ -2102,7 +2102,7 @@ MLPerf (created by MLCommons) is the industry-standard ML benchmarking framework
 
 # %% [markdown]
 """
-## Combination Strategies - Preparing for TorchPerf Olympics
+## 📊 Combination Strategies - Preparing for TorchPerf Olympics
 
 Strategic optimization combines multiple techniques for different competition objectives. The order matters: quantize-then-prune may preserve accuracy better, while prune-then-quantize may be faster.
 
@@ -2130,7 +2130,7 @@ Baseline:           Accuracy: 89%, Latency: 45ms, Memory: 12MB
 
 # %% [markdown]
 """
-## Module Integration Test
+## 🧪 Module Integration Test
 
 Final validation that our complete benchmarking system works correctly and integrates properly with all TinyTorch components.
 
@@ -2266,7 +2266,7 @@ def test_module():
 
     # Test 5: Optimization comparison
     print("  Testing optimization comparison...")
-    comparison_results = compare_optimization_techniques(
+    comparison_results = analyze_optimization_techniques(
         models[0], models[1:], datasets[:1]
     )
 
@@ -2324,7 +2324,7 @@ If a model achieves 89% accuracy (target: 90%) and 120ms latency (target: <100ms
 - How would you prioritize optimization? [accuracy first/latency first/balanced]
 
 ### Question 5: Optimization Comparison Analysis
-Your compare_optimization_techniques() generates recommendations for different use cases.
+Your analyze_optimization_techniques() generates recommendations for different use cases.
 Given three optimized models:
 - Quantized: 0.8× memory, 2× speed, 0.95× accuracy
 - Pruned: 0.3× memory, 1.5× speed, 0.98× accuracy
@@ -2338,7 +2338,7 @@ For a mobile app with 50MB model size limit and <100ms latency requirement:
 
 # %% [markdown]
 """
-## 🎯 Aha Moment: Measurement Enables Optimization
+## ⭐ Aha Moment: Measurement Enables Optimization
 
 **What you built:** A benchmarking system with warmup, statistics, and reproducibility.
 
@@ -2388,7 +2388,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: Benchmarking
+## 🚀 MODULE SUMMARY: Benchmarking
 
 Congratulations! You've built a professional benchmarking system that rivals industry-standard evaluation frameworks!
 

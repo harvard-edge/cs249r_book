@@ -32,7 +32,7 @@ Training Loop → DataLoader → Batched Data → Model
 (Module 07)    (Module 08)  (optimized)   (ready to learn)
 ```
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Understand the data pipeline: individual samples → batches → training
 2. Implement Dataset abstraction and TensorDataset for tensor-based data
@@ -75,7 +75,7 @@ from tinytorch.core.tensor import Tensor
 
 # %% [markdown]
 """
-## Understanding the Data Pipeline
+## 💡 Understanding the Data Pipeline
 
 Before we implement anything, let's understand what happens when neural networks "eat" data. The journey from raw data to trained models follows a specific pipeline that every ML engineer must master.
 
@@ -213,7 +213,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## TensorDataset - When Data Lives in Memory
+## 🏗️ TensorDataset - When Data Lives in Memory
 
 Now let's implement TensorDataset, the most common dataset type for when your data is already loaded into tensors. This is perfect for datasets like MNIST where you can fit everything in memory.
 
@@ -323,7 +323,23 @@ class TensorDataset(Dataset):
         ### END SOLUTION
 
     def __len__(self) -> int:
-        """Return number of samples (size of first dimension)."""
+        """
+        Return number of samples (size of first dimension).
+
+        TODO: Return the total number of samples in the dataset
+
+        APPROACH:
+        1. Access the first tensor from self.tensors
+        2. Return length of its data (first dimension size)
+
+        EXAMPLE:
+        >>> features = Tensor([[1, 2], [3, 4], [5, 6]])  # 3 samples
+        >>> labels = Tensor([0, 1, 0])
+        >>> dataset = TensorDataset(features, labels)
+        >>> print(len(dataset))  # 3
+
+        HINT: All tensors have same first dimension (validated in __init__)
+        """
         ### BEGIN SOLUTION
         return len(self.tensors[0].data)
         ### END SOLUTION
@@ -332,11 +348,29 @@ class TensorDataset(Dataset):
         """
         Return tuple of tensor slices at given index.
 
+        TODO: Return the sample at the given index
+
+        APPROACH:
+        1. Validate index is within bounds
+        2. Extract data at index from each tensor
+        3. Wrap each slice in a Tensor and return as tuple
+
         Args:
             idx: Sample index
 
         Returns:
             Tuple containing tensor[idx] for each input tensor
+
+        EXAMPLE:
+        >>> features = Tensor([[1, 2], [3, 4], [5, 6]])
+        >>> labels = Tensor([0, 1, 0])
+        >>> dataset = TensorDataset(features, labels)
+        >>> sample = dataset[1]
+        >>> # Returns: (Tensor([3, 4]), Tensor(1))
+
+        HINTS:
+        - Check idx < len(self) to prevent out-of-bounds access
+        - Use generator expression with tuple() for clean syntax
         """
         ### BEGIN SOLUTION
         if idx >= len(self) or idx < 0:
@@ -394,7 +428,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## DataLoader - The Batch Factory
+## 🏗️ DataLoader - The Batch Factory
 
 Now we build the DataLoader, the component that transforms individual dataset samples into the batches that neural networks crave. This is where data loading becomes a systems challenge.
 
@@ -510,14 +544,50 @@ class DataLoader:
         ### END SOLUTION
 
     def __len__(self) -> int:
-        """Return number of batches per epoch."""
+        """
+        Return number of batches per epoch.
+
+        TODO: Calculate the number of batches based on dataset size and batch_size
+
+        APPROACH:
+        1. Use ceiling division: (dataset_size + batch_size - 1) // batch_size
+        2. This ensures we count the last partial batch
+
+        EXAMPLE:
+        >>> dataset = TensorDataset(Tensor([[1], [2], [3], [4], [5]]))
+        >>> loader = DataLoader(dataset, batch_size=2)
+        >>> print(len(loader))  # 3 (batches: [2, 2, 1])
+
+        HINT: Ceiling division handles uneven splits correctly
+        """
         ### BEGIN SOLUTION
         # Calculate number of complete batches
         return (len(self.dataset) + self.batch_size - 1) // self.batch_size
         ### END SOLUTION
 
     def __iter__(self) -> Iterator:
-        """Return iterator over batches."""
+        """
+        Return iterator over batches.
+
+        TODO: Implement iteration that yields batches of data
+
+        APPROACH:
+        1. Create list of indices [0, 1, 2, ..., len(dataset)-1]
+        2. Shuffle indices if self.shuffle is True
+        3. Group indices into chunks of batch_size
+        4. For each chunk, retrieve samples and collate into batch
+
+        EXAMPLE:
+        >>> dataset = TensorDataset(Tensor([[1], [2], [3], [4]]))
+        >>> loader = DataLoader(dataset, batch_size=2)
+        >>> for batch in loader:
+        ...     print(batch[0].shape)  # (2, 1)
+
+        HINTS:
+        - Use random.shuffle() to randomize indices
+        - Use range(0, len(indices), batch_size) to create chunks
+        - Call self._collate_batch() to convert list of samples to batch tensors
+        """
         ### BEGIN SOLUTION
         # Create list of indices
         indices = list(range(len(self.dataset)))
@@ -539,11 +609,30 @@ class DataLoader:
         """
         Collate individual samples into batch tensors.
 
+        TODO: Stack individual sample tensors into batch tensors
+
+        APPROACH:
+        1. Handle empty batch edge case
+        2. Determine how many tensors per sample (e.g., 2 for features + labels)
+        3. For each tensor position, extract all samples at that position
+        4. Stack them using np.stack() to create batch dimension
+        5. Wrap result in Tensor and return tuple
+
         Args:
             batch: List of sample tuples from dataset
 
         Returns:
             Tuple of batched tensors
+
+        EXAMPLE:
+        >>> # batch = [(Tensor([1,2]), Tensor(0)),
+        ...            (Tensor([3,4]), Tensor(1))]
+        >>> # Returns: (Tensor([[1,2], [3,4]]), Tensor([0, 1]))
+
+        HINTS:
+        - Use len(batch[0]) to get number of tensors per sample
+        - Extract .data from each tensor before stacking
+        - np.stack() creates new axis at position 0 (batch dimension)
         """
         ### BEGIN SOLUTION
         if len(batch) == 0:
@@ -568,7 +657,7 @@ class DataLoader:
 
 # %% [markdown]
 """
-## Data Augmentation - Preventing Overfitting Through Variety
+## 🏗️ Data Augmentation - Preventing Overfitting Through Variety
 
 Data augmentation is one of the most effective techniques for improving model generalization. By applying random transformations during training, we artificially expand the dataset and force the model to learn robust, invariant features.
 
@@ -651,8 +740,14 @@ class RandomHorizontalFlip:
 
         TODO: Store flip probability
 
+        APPROACH:
+        1. Validate probability is in range [0, 1]
+        2. Store p as instance variable
+
         EXAMPLE:
         >>> flip = RandomHorizontalFlip(p=0.5)  # 50% chance to flip
+
+        HINT: Raise ValueError if p is outside valid range
         """
         ### BEGIN SOLUTION
         if not 0.0 <= p <= 1.0:
@@ -720,9 +815,15 @@ class RandomCrop:
 
         TODO: Store crop parameters
 
+        APPROACH:
+        1. Convert size to tuple if it's an int (for square crops)
+        2. Store size and padding as instance variables
+
         EXAMPLE:
         >>> crop = RandomCrop(32, padding=4)  # CIFAR-10 standard
         >>> # Pads to 40x40, then crops back to 32x32
+
+        HINT: Handle both int and tuple sizes for flexibility
         """
         ### BEGIN SOLUTION
         if isinstance(size, int):
@@ -1037,7 +1138,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Working with Real Datasets
+## 🔧 Working with Real Datasets
 
 Now that you've built the DataLoader abstraction, you're ready to use it with real data!
 
@@ -1141,7 +1242,7 @@ You've built the **data loading infrastructure** that powers all modern ML:
 
 # %% [markdown]
 """
-## Systems Analysis - Data Pipeline Performance
+## 📊 Systems Analysis - Data Pipeline Performance
 
 **Note:** This section provides performance analysis tools for understanding DataLoader behavior. The analysis functions are defined below but not run automatically. To explore performance characteristics, uncomment and run `analyze_dataloader_performance()` or `analyze_memory_usage()` manually.
 
@@ -1377,7 +1478,7 @@ def analyze_collation_overhead():
 
 # %% [markdown]
 """
-## Common Pitfalls and Best Practices
+## ⚠️ Common Pitfalls and Best Practices
 
 Before we move to integration testing, let's cover common mistakes students and practitioners make with data loading:
 
@@ -1474,7 +1575,7 @@ These patterns will save you hours of debugging and help you build robust traini
 
 # %% [markdown]
 """
-## Integration Testing
+## 🔧 Integration Testing
 
 Let's test how our DataLoader integrates with a complete training workflow, simulating real ML pipeline usage.
 """
@@ -1851,7 +1952,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: DataLoader
+## 🚀 MODULE SUMMARY: DataLoader
 
 Congratulations! You've built a complete data loading pipeline for ML training!
 

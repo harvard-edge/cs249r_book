@@ -29,7 +29,7 @@ Layers → Losses → Autograd
 (predictions) (error measurement) (learning signals)
 ```
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement MSELoss for regression problems
 2. Implement CrossEntropyLoss for classification problems
@@ -109,11 +109,11 @@ EPSILON = 1e-7  # Small value to prevent log(0) and numerical instability
 
 # %% [markdown]
 """
-## Introduction - What Are Loss Functions?
+## 💡 Introduction - What Are Loss Functions?
 
 Loss functions are the mathematical conscience of machine learning. They measure the distance between what your model predicts and what actually happened. Without loss functions, models have no way to improve - they're like athletes training without knowing their score.
 
-## The Three Essential Loss Functions
+## 💡 The Three Essential Loss Functions
 
 Think of loss functions as different ways to measure "wrongness" - each optimized for different types of problems:
 
@@ -180,9 +180,9 @@ Each loss function creates a different "error landscape" that guides learning in
 
 # %% [markdown]
 """
-## Mathematical Foundations
+## 📐 Mathematical Foundations
 
-## Mean Squared Error (MSE)
+## 📐 Mean Squared Error (MSE)
 The foundation of regression, MSE measures the average squared distance between predictions and targets:
 
 ```
@@ -194,7 +194,7 @@ MSE = (1/N) * Σ(prediction_i - target_i)²
 - Heavily penalizes large errors (error of 2 becomes 4, error of 10 becomes 100)
 - Creates smooth gradients for optimization
 
-## Cross-Entropy Loss
+## 📐 Cross-Entropy Loss
 For classification, we need to measure how wrong our probability distributions are:
 
 ```
@@ -210,7 +210,7 @@ log_softmax(x) = x - log(Σ exp(x_i))
 
 This prevents exp(large_number) from exploding to infinity.
 
-## Binary Cross-Entropy
+## 📐 Binary Cross-Entropy
 A specialized case where we have only two classes:
 ```
 BCE = -(target * log(prediction) + (1-target) * log(1-prediction))
@@ -221,14 +221,14 @@ The mathematics naturally handles both "positive" and "negative" cases in a sing
 
 # %% [markdown]
 """
-## Implementation - Building Loss Functions
+## 🏗️ Implementation - Building Loss Functions
 
 Let's implement our loss functions with proper numerical stability and clear educational structure.
 """
 
 # %% [markdown]
 """
-## Log-Softmax - The Numerically Stable Foundation
+## 🏗️ Log-Softmax - The Numerically Stable Foundation
 
 Before implementing loss functions, we need a reliable way to compute log-softmax. This function is the numerically stable backbone of classification losses.
 
@@ -337,7 +337,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## MSELoss - Measuring Continuous Prediction Quality
+## 🏗️ MSELoss - Measuring Continuous Prediction Quality
 
 Mean Squared Error is the workhorse of regression problems. It measures how far your continuous predictions are from the true values.
 
@@ -491,7 +491,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## CrossEntropyLoss - Measuring Classification Confidence
+## 🏗️ CrossEntropyLoss - Measuring Classification Confidence
 
 Cross-entropy loss is the gold standard for multi-class classification. It measures how wrong your probability predictions are and heavily penalizes confident mistakes.
 
@@ -677,7 +677,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## BinaryCrossEntropyLoss - Measuring Yes/No Decision Quality
+## 🏗️ BinaryCrossEntropyLoss - Measuring Yes/No Decision Quality
 
 Binary Cross-Entropy is specialized for yes/no decisions. It's like regular cross-entropy but optimized for the special case of exactly two classes.
 
@@ -879,11 +879,11 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Integration - Bringing It Together
+## 🔧 Integration - Bringing It Together
 
 Now let's test how our loss functions work together with real data scenarios and explore their behavior with different types of predictions.
 
-## Real-World Loss Function Usage Patterns
+## 🔧 Real-World Loss Function Usage Patterns
 
 Understanding when and why to use each loss function is crucial for ML engineering success:
 
@@ -909,7 +909,7 @@ BCE: Spam detection, fraud detection, medical diagnosis
 CE:  Image classification, language modeling, multiclass text classification
 ```
 
-## Loss Function Behavior Comparison
+## 🔧 Loss Function Behavior Comparison
 
 Each loss function creates different learning pressures on your model:
 
@@ -928,13 +928,13 @@ BCE/CE: Logarithmic growth, explodes with confident wrong predictions
 """
 
 # %% nbgrader={"grade": false, "grade_id": "loss_comparison", "solution": true}
-def compare_loss_behaviors():
+def analyze_loss_behaviors():
     """
-    🔬 Compare how different loss functions behave with various prediction patterns.
+    📊 Compare how different loss functions behave with various prediction patterns.
 
     This helps students understand when to use each loss function.
     """
-    print("🔬 Integration Test: Loss Function Behavior Comparison...")
+    print("📊 Analysis: Loss Function Behavior Comparison...")
 
     # Initialize loss functions
     mse_loss = MSELoss()
@@ -1026,16 +1026,16 @@ def analyze_loss_sensitivity():
 
 # Run integration analysis when developing
 if __name__ == "__main__":
-    compare_loss_behaviors()
+    analyze_loss_behaviors()
     analyze_loss_sensitivity()
 
 # %% [markdown]
 """
-## Systems Analysis - Understanding Loss Function Performance
+## 📊 Systems Analysis - Understanding Loss Function Performance
 
 Loss functions seem simple, but they have important computational and numerical properties that affect training performance. Let's analyze the systems aspects.
 
-## Computational Complexity Analysis
+## 📊 Computational Complexity Analysis
 
 Different loss functions have different computational costs, especially at scale:
 
@@ -1068,7 +1068,7 @@ Cross-entropy is C times more expensive than MSE!
 For ImageNet (C=1000), CE is 1000x more expensive than MSE.
 ```
 
-## Memory Layout and Access Patterns
+## 📊 Memory Layout and Access Patterns
 
 ```
 Memory Usage Patterns:
@@ -1187,11 +1187,11 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Production Context - How Loss Functions Scale
+## 📊 Production Context - How Loss Functions Scale
 
 Understanding how loss functions behave in production helps make informed engineering decisions about model architecture and training strategies.
 
-## Loss Function Scaling Challenges
+## 📊 Loss Function Scaling Challenges
 
 As models grow larger, loss function bottlenecks become critical:
 
@@ -1211,7 +1211,7 @@ Memory grows as B*C for cross-entropy!
 At scale, vocabulary (C) dominates everything.
 ```
 
-## Engineering Optimizations in Production
+## 📊 Engineering Optimizations in Production
 
 ```
 Common Production Optimizations:
@@ -1622,7 +1622,7 @@ These questions test your systems understanding of loss functions - not just "ho
 
 # %% [markdown]
 """
-## 🎯 Aha Moment: Loss Guides Learning
+## ⭐ Aha Moment: Loss Guides Learning
 
 **What you built:** Loss functions that measure how wrong predictions are.
 
@@ -1669,7 +1669,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: Losses
+## 🚀 MODULE SUMMARY: Losses
 
 Congratulations! You've built the measurement system that enables all machine learning!
 

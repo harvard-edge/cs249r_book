@@ -29,7 +29,7 @@ Optimizers (Module 06) → Training (Module 07) → DataLoader (Module 08)
 (parameter updates)     (complete loops)      (efficient batching)
 ```
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement a complete Trainer class with train/eval modes
 2. Build learning rate scheduling and gradient clipping
@@ -81,7 +81,7 @@ DEFAULT_TOTAL_EPOCHS = 100  # Default total epochs for learning rate schedule
 
 # %% [markdown]
 """
-## 🏗️ Introduction - What is Training?
+## 💡 Introduction - What is Training?
 
 Training is where the magic happens - it's the process that transforms a randomly initialized neural network into an intelligent system that can solve problems. Think of training as teaching: you show the model examples, it makes predictions, you measure how wrong it is, and then you adjust its parameters to do better next time.
 
@@ -497,16 +497,28 @@ class Trainer:
     TODO: Implement complete Trainer class
 
     APPROACH:
-    1. Store model, optimizer, loss function, and optional scheduler
-    2. train_epoch(): Loop through data, compute loss, update parameters
-    3. evaluate(): Similar loop but without gradient updates
-    4. save/load_checkpoint(): Persist training state for resumption
+    1. __init__(): Store model, optimizer, loss_fn, scheduler, and grad_clip_norm
+    2. train_epoch(): Loop through dataloader, forward → loss → backward → step
+    3. evaluate(): Similar loop but set model.training=False, no grad updates
+    4. save/load_checkpoint(): Use pickle to persist/restore all training state
 
-    DESIGN PATTERNS:
-    - Context managers for train/eval modes
-    - Gradient accumulation for effective large batch sizes
-    - Progress tracking for monitoring
-    - Flexible scheduling integration
+    EXAMPLE:
+    >>> model = SimpleModel()
+    >>> optimizer = SGD(model.parameters(), lr=0.01)
+    >>> trainer = Trainer(model, optimizer, MSELoss())
+    >>> # Training data: list of (input, target) tuples
+    >>> data = [(Tensor([[1.0]]), Tensor([[2.0]]))]
+    >>> loss = trainer.train_epoch(data)
+    >>> eval_loss, accuracy = trainer.evaluate(data)
+    >>> trainer.save_checkpoint('/tmp/checkpoint.pkl')
+
+    HINTS:
+    - In train_epoch(), set model.training = True at start
+    - For gradient accumulation, scale loss by 1/accumulation_steps
+    - Use clip_grad_norm() before optimizer.step() if grad_clip_norm is set
+    - Update scheduler after each epoch: optimizer.lr = scheduler.get_lr(epoch)
+    - In evaluate(), set model.training = False and don't update gradients
+    - Checkpoints should include: epoch, step, model state, optimizer state, scheduler state, history
     """
     ### BEGIN SOLUTION
     def __init__(self, model, optimizer, loss_fn, scheduler=None, grad_clip_norm=None):
@@ -1273,7 +1285,7 @@ Use only knowledge from Modules 01-07 to answer these questions:
 
 # %% [markdown]
 """
-## 🎯 Aha Moment: Training Just Works
+## ⭐ Aha Moment: Training Just Works
 
 **What you built:** A complete training infrastructure with Trainer, schedulers, and checkpoints.
 
@@ -1328,7 +1340,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: Training
+## 🚀 MODULE SUMMARY: Training
 
 Congratulations! You've built a complete training infrastructure that orchestrates the entire machine learning training process!
 

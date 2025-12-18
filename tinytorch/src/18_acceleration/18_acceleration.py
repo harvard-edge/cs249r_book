@@ -38,7 +38,7 @@ Before starting, verify:
 - [ ] Module 05 (Autograd): Gradients work
 - [ ] Module 09 (Convolutions): Conv2d works (optional)
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement vectorized operations for maximum throughput
 2. Create fused operations to reduce memory bandwidth
@@ -78,7 +78,7 @@ BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
 
 # %% [markdown]
 """
-## 🔬 Motivation: Why Acceleration Matters
+## 💡 Motivation: Why Acceleration Matters
 
 Before we learn acceleration techniques, let's understand the performance gap.
 Neural networks often underutilize hardware due to:
@@ -92,7 +92,7 @@ We'll fix these issues with vectorization and kernel fusion, achieving 2-5× spe
 
 # %% [markdown]
 """
-## Introduction - The Performance Challenge
+## 💡 Introduction - The Performance Challenge
 
 Modern neural networks face two fundamental bottlenecks that limit their speed:
 
@@ -155,7 +155,7 @@ from tinytorch.core.tensor import Tensor
 
 # %% [markdown]
 """
-## Foundations - Vectorization: From Loops to Lightning
+## 📐 Foundations - Vectorization: From Loops to Lightning
 
 ### The SIMD Revolution
 
@@ -332,7 +332,7 @@ def test_unit_vectorized_matmul():
 
 # %% [markdown]
 """
-## Implementation - Kernel Fusion: Eliminating Memory Bottlenecks
+## 🏗️ Implementation - Kernel Fusion: Eliminating Memory Bottlenecks
 
 ### The Memory Bandwidth Crisis
 
@@ -632,7 +632,7 @@ def test_unit_fusion_speedup():
 
 # %% [markdown]
 """
-## Cache-Aware Matrix Multiplication
+## 🏗️ Cache-Aware Matrix Multiplication
 
 For large matrices that don't fit in cache, we need **tiling** (also called blocking).
 This breaks the computation into cache-sized chunks for better performance.
@@ -762,7 +762,7 @@ def test_unit_tiled_matmul():
 
 # %% [markdown]
 """
-## Systems Analysis - Performance Scaling Patterns
+## 📊 Systems Analysis - Performance Scaling Patterns
 
 Let's analyze how our acceleration techniques perform across different scenarios and understand their scaling characteristics.
 """
@@ -975,7 +975,7 @@ def analyze_memory_efficiency():
 
 # %% [markdown]
 """
-## Optimization Insights - Production Acceleration Strategy
+## 📊 Optimization Insights - Production Acceleration Strategy
 
 Understanding when and how to apply different acceleration techniques in real-world scenarios.
 """
@@ -1142,7 +1142,7 @@ def analyze_acceleration_decision_framework():
 
 # %% [markdown]
 """
-## Measuring Acceleration Gains with Profiler
+## 📊 Measuring Acceleration Gains with Profiler
 
 Now let's use the **Profiler** tool you built in Module 15 to measure the actual performance improvements from vectorization. This demonstrates the full workflow: build profiling tools (M15), apply optimizations (M16), measure gains (M15+M16).
 
@@ -1269,7 +1269,7 @@ For edge deployment (memory critical, stability required, hardware diverse):
 
 # %% [markdown]
 """
-## Module Integration Test
+## 🧪 Module Integration Test
 
 Final validation that all acceleration components work together correctly.
 """
@@ -1422,7 +1422,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 Aha Moment: Vectorization and Fusion Speed Things Up
+## ⭐ Aha Moment: Vectorization and Fusion Speed Things Up
 
 **What you built:** Vectorized operations and fused kernels that reduce memory traffic.
 
@@ -1470,7 +1470,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: Acceleration
+## 🚀 MODULE SUMMARY: Acceleration
 
 Congratulations! You've mastered the fundamental techniques for accelerating neural networks!
 

@@ -29,7 +29,7 @@ Tokenization → Embeddings → Positional Encoding → Attention (Module 12)
 (discrete)     (dense)      (position-aware)     (context-aware)
 ```
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement embedding layers for token-to-vector conversion
 2. Understand learnable vs fixed positional encodings
@@ -73,7 +73,7 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
-## Introduction - Why Embeddings?
+## 💡 Introduction - Why Embeddings?
 
 Neural networks operate on dense vectors, but language consists of discrete tokens. Embeddings are the crucial bridge that converts discrete tokens into continuous, learnable vector representations that capture semantic meaning.
 
@@ -125,7 +125,7 @@ The choice of embedding strategy dramatically affects:
 
 # %% [markdown]
 """
-## Foundations - Embedding Strategies
+## 📐 Foundations - Embedding Strategies
 
 Different embedding approaches make different trade-offs between memory, semantic understanding, and computational efficiency.
 
@@ -226,7 +226,7 @@ The combination enables transformers to understand both meaning and order!
 
 # %% [markdown]
 """
-## Implementation - Building Embedding Systems
+## 🏗️ Implementation - Building Embedding Systems
 
 Let's implement embedding systems from basic token lookup to sophisticated position-aware representations. We'll start with the core embedding layer and work up to complete systems.
 """
@@ -1028,7 +1028,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Systems Analysis - Embedding Trade-offs
+## 📊 Systems Analysis - Embedding Trade-offs
 
 Understanding the performance implications of different embedding strategies is crucial for building efficient NLP systems that scale to production workloads.
 """
@@ -1211,7 +1211,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Module Integration Test
+## 🧪 Module Integration Test
 
 Let's test our complete embedding system to ensure everything works together correctly.
 """
@@ -1373,7 +1373,7 @@ Your complete EmbeddingLayer combines token and positional embeddings.
 
 # %% [markdown]
 """
-## 🎯 Aha Moment: Tokens Become Vectors
+## ⭐ Aha Moment: Tokens Become Vectors
 
 **What you built:** An embedding layer that converts token IDs to dense vectors.
 
@@ -1414,7 +1414,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: Embeddings
+## 🚀 MODULE SUMMARY: Embeddings
 
 Congratulations! You've built a complete embedding system that transforms discrete tokens into learnable representations!
 

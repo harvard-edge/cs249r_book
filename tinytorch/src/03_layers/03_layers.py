@@ -56,7 +56,7 @@ This module imports directly from the TinyTorch package (`from tinytorch.core.*`
 **Assumption**: Modules 01 (Tensor) and 02 (Activations) have been completed and exported to the package.
 If you see import errors, ensure you've run `tito export` after completing previous modules.
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement Linear layers with proper weight initialization
 2. Add Dropout for regularization during training
@@ -104,7 +104,7 @@ DROPOUT_MAX_PROB = 1.0  # Maximum dropout probability (drop everything)
 
 # %% [markdown]
 """
-## Introduction: What are Neural Network Layers?
+## 💡 Introduction: What are Neural Network Layers?
 
 Neural network layers are the fundamental building blocks that transform data as it flows through a network. Each layer performs a specific computation:
 
@@ -123,7 +123,7 @@ Each layer learns its own piece of the puzzle. Linear layers learn which feature
 
 # %% [markdown]
 """
-## Foundations: Mathematical Background
+## 📐 Foundations: Mathematical Background
 
 ### Linear Layer Mathematics
 A linear layer implements: **y = xW + b**
@@ -156,7 +156,7 @@ Memory usage: 4 bytes/param × 203,530 = ~814KB for weights alone
 
 # %% [markdown]
 """
-## Implementation: Building Layer Foundation
+## 🏗️ Implementation: Building Layer Foundation
 
 Let's build our layer system step by step. We'll implement two essential layer types:
 
@@ -357,6 +357,20 @@ class Linear(Layer):
         1. Start with weight (always present)
         2. Add bias if it exists
         3. Return as list for optimizer
+
+        EXAMPLE:
+        >>> layer = Linear(10, 5)
+        >>> params = layer.parameters()
+        >>> len(params)
+        2  # [weight, bias]
+        >>> layer_no_bias = Linear(10, 5, bias=False)
+        >>> len(layer_no_bias.parameters())
+        1  # [weight only]
+
+        HINTS:
+        - Create list starting with self.weight
+        - Check if self.bias is not None before appending
+        - Return the complete list
         """
         ### BEGIN SOLUTION
         params = [self.weight]
@@ -564,13 +578,25 @@ class Dropout(Layer):
         """
         Initialize dropout layer.
 
-        TODO: Store dropout probability
+        TODO: Store dropout probability and validate range
+
+        APPROACH:
+        1. Validate p is between 0.0 and 1.0 (inclusive)
+        2. Raise ValueError if out of range
+        3. Store p as instance attribute
 
         Args:
             p: Probability of zeroing each element (0.0 = no dropout, 1.0 = zero everything)
 
         EXAMPLE:
         >>> dropout = Dropout(0.5)  # Zero 50% of elements during training
+        >>> dropout.p
+        0.5
+
+        HINTS:
+        - Use DROPOUT_MIN_PROB and DROPOUT_MAX_PROB constants for validation
+        - Check: DROPOUT_MIN_PROB <= p <= DROPOUT_MAX_PROB
+        - Raise descriptive ValueError if invalid
         """
         ### BEGIN SOLUTION
         if not DROPOUT_MIN_PROB <= p <= DROPOUT_MAX_PROB:
@@ -642,7 +668,7 @@ class Dropout(Layer):
 
 # %% [markdown]
 """
-## Sequential - Layer Container for Composition
+## 🏗️ Sequential - Layer Container for Composition
 
 `Sequential` chains layers together, calling forward() on each in order.
 
@@ -784,7 +810,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Integration: Bringing It Together
+## 🔧 Integration: Bringing It Together
 
 Now that we've built both layer types, let's see how they work together to create a complete neural network architecture. We'll manually compose a realistic 3-layer MLP for MNIST digit classification.
 
@@ -839,7 +865,7 @@ Parameter Breakdown (Manual Layer Composition):
 
 # %% [markdown]
 """
-## Systems Analysis: Memory and Performance
+## 📊 Systems Analysis: Memory and Performance
 
 Now let's analyze the systems characteristics of our layer implementations. Understanding memory usage and computational complexity helps us build efficient neural networks.
 
@@ -1137,7 +1163,7 @@ You're deploying a 3-layer network (784→256→128→10) to a mobile device:
 
 # %% [markdown]
 """
-## Main Execution Block
+## 🔧 Main Execution Block
 
 This block runs when the module is executed directly, orchestrating all tests and analyses.
 """
@@ -1166,7 +1192,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 Aha Moment: Layers Transform Shapes
+## ⭐ Aha Moment: Layers Transform Shapes
 
 **What you built:** Linear layers that transform data from one dimension to another.
 
@@ -1207,7 +1233,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: Layers
+## 🚀 MODULE SUMMARY: Layers
 
 Congratulations! You've built the fundamental building blocks that make neural networks possible!
 

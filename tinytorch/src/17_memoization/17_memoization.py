@@ -29,7 +29,7 @@ Profiling (14) → Quantization (16) → Memoization (17) → Acceleration (18)
 (measure O(n²))  (reduce precision)   (cache K,V → O(n))  (optimize execution)
 ```
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Understand memoization as a general optimization pattern (cache results, avoid recomputation)
 2. Apply memoization to transformers through KV caching
@@ -73,7 +73,7 @@ _MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
-## 🔬 Motivation: Why Memoization Matters for Transformers
+## 💡 Motivation: Why Memoization Matters for Transformers
 
 Before we learn KV caching, let's profile transformer generation to understand
 the problem we're solving. We'll see O(n²) growth in latency as we generate text.
@@ -161,7 +161,7 @@ def profile_naive_generation():
 
 # %% [markdown]
 """
-## 🎯 Understanding the Autoregressive Generation Problem
+## 💡 Understanding the Autoregressive Generation Problem
 
 ### The Core Inefficiency
 
@@ -213,7 +213,7 @@ This inefficiency makes production LLM serving economically impossible without o
 
 # %% [markdown]
 """
-## 🧮 Part 2: The Key-Value Caching Insight
+## 📐 Part 2: The Key-Value Caching Insight
 
 ### Mathematical Foundation
 
@@ -710,7 +710,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 Cache-Aware Generation
+## 🏗️ Cache-Aware Generation
 
 ### Integration Strategy
 
@@ -750,7 +750,7 @@ for each new token:
 
 # %% [markdown]
 """
-## 🎯 Non-Invasive Integration with Existing Models
+## 🏗️ Non-Invasive Integration with Existing Models
 
 ### The Challenge
 
@@ -1234,7 +1234,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Systems Analysis - KV Cache Performance
+## 📊 Systems Analysis - KV Cache Performance
 
 Now let's analyze the performance characteristics and trade-offs of KV caching.
 """
@@ -1379,7 +1379,7 @@ def analyze_kvcache_speedup():
 
 # %% [markdown]
 """
-## Module Integration Test
+## 🧪 Module Integration Test
 
 Final validation that everything works together correctly before module completion.
 """
@@ -1535,7 +1535,7 @@ ChatGPT serves millions of users. Each user's conversation needs its own KV cach
 
 # %% [markdown]
 """
-## 🎯 Aha Moment: KV Cache Avoids Recomputation
+## ⭐ Aha Moment: KV Cache Avoids Recomputation
 
 **What you built:** A KV Cache that stores key-value pairs to avoid redundant attention computation.
 
@@ -1584,7 +1584,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: KV Caching (Memoization)
+## 🚀 MODULE SUMMARY: KV Caching (Memoization)
 
 Congratulations! You've built the optimization that makes production language models economically viable!
 

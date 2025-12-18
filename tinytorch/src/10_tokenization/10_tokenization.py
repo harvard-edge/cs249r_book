@@ -38,7 +38,7 @@ DataLoader → Tokenization → Embeddings
 (batching)   (text→numbers)  (learnable representations)
 ```
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement character-based tokenization for simple text processing
 2. Build a BPE (Byte Pair Encoding) tokenizer for efficient text representation
@@ -99,7 +99,7 @@ KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
 
 # %% [markdown]
 """
-## Introduction - Why Tokenization?
+## 💡 Introduction - Why Tokenization?
 
 Neural networks operate on numbers, but humans communicate with text. Tokenization is the crucial bridge that converts text into numerical sequences that models can process.
 
@@ -151,7 +151,7 @@ The choice of tokenization strategy dramatically affects:
 
 # %% [markdown]
 """
-## Foundations - Tokenization Strategies
+## 📐 Foundations - Tokenization Strategies
 
 Different tokenization approaches make different trade-offs between vocabulary size, sequence length, and semantic understanding.
 
@@ -258,7 +258,7 @@ The sweet spot for most applications is BPE with 10K-50K vocabulary size.
 
 # %% [markdown]
 """
-## Implementation - Building Tokenization Systems
+## 🏗️ Implementation - Building Tokenization Systems
 
 Let's implement tokenization systems from simple character-based to sophisticated BPE. We'll start with the base interface and work our way up to advanced algorithms.
 """
@@ -669,6 +669,13 @@ class BPETokenizer(Tokenizer):
         1. Store target vocabulary size
         2. Initialize empty vocabulary and merge rules
         3. Set up mappings for encoding/decoding
+
+        EXAMPLE:
+        >>> tokenizer = BPETokenizer(vocab_size=1000)
+        >>> tokenizer.vocab_size
+        1000
+
+        HINT: Initialize vocab and merges as empty lists, mappings as empty dicts
         """
         ### BEGIN SOLUTION
         self.vocab_size = vocab_size
@@ -692,6 +699,8 @@ class BPETokenizer(Tokenizer):
         EXAMPLE:
         >>> tokenizer._get_word_tokens("hello")
         ['h', 'e', 'l', 'l', 'o</w>']
+
+        HINT: Use list() to split word into characters, then modify the last element
         """
         ### BEGIN SOLUTION
         if not word:
@@ -716,6 +725,8 @@ class BPETokenizer(Tokenizer):
         EXAMPLE:
         >>> tokenizer._get_pairs(['h', 'e', 'l', 'l', 'o</w>'])
         {('h', 'e'), ('e', 'l'), ('l', 'l'), ('l', 'o</w>')}
+
+        HINT: Loop from 0 to len(word_tokens)-1 and create tuple pairs
         """
         ### BEGIN SOLUTION
         pairs = set()
@@ -736,10 +747,18 @@ class BPETokenizer(Tokenizer):
         3. Iteratively merge most frequent pairs
         4. Build final vocabulary and mappings
 
+        EXAMPLE:
+        >>> corpus = ["hello", "hello", "help"]
+        >>> tokenizer = BPETokenizer(vocab_size=20)
+        >>> tokenizer.train(corpus)
+        >>> len(tokenizer.vocab) <= 20
+        True
+
         HINTS:
-        - Start with character-level tokens
-        - Use frequency counts to guide merging
-        - Stop when vocabulary reaches target size
+        - Start with character-level tokens using _get_word_tokens()
+        - Use Counter to track word frequencies
+        - Count all pairs, merge most frequent, repeat until vocab_size reached
+        - Don't forget to call _build_mappings() at the end
         """
         ### BEGIN SOLUTION
         if vocab_size:
@@ -826,6 +845,13 @@ class BPETokenizer(Tokenizer):
         1. Start with character-level tokens
         2. Apply each merge rule in order
         3. Continue until no more merges possible
+
+        EXAMPLE:
+        >>> # After training, merges might be [('h','e'), ('l','l')]
+        >>> tokenizer._apply_merges(['h','e','l','l','o</w>'])
+        ['he','ll','o</w>']  # Applied both merges
+
+        HINT: For each merge pair, scan through tokens and replace adjacent pairs
         """
         ### BEGIN SOLUTION
         if not self.merges:
@@ -860,6 +886,16 @@ class BPETokenizer(Tokenizer):
         2. Convert each word to character tokens
         3. Apply BPE merges
         4. Convert to token IDs
+
+        EXAMPLE:
+        >>> tokenizer.encode("hello world")
+        [12, 45, 78]  # Token IDs after BPE merging
+
+        HINTS:
+        - Use text.split() for simple word splitting
+        - Use _get_word_tokens() to get character-level tokens for each word
+        - Use _apply_merges() to apply learned merge rules
+        - Use token_to_id dictionary with 0 (UNK) as default
         """
         ### BEGIN SOLUTION
         if not self.vocab:
@@ -896,6 +932,15 @@ class BPETokenizer(Tokenizer):
         1. Convert IDs to tokens
         2. Join tokens together
         3. Clean up word boundaries and markers
+
+        EXAMPLE:
+        >>> tokenizer.decode([12, 45, 78])
+        "hello world"  # Reconstructed text
+
+        HINTS:
+        - Use id_to_token dictionary with '<UNK>' as default
+        - Join all tokens into single string with ''.join()
+        - Replace '</w>' markers with spaces for word boundaries
         """
         ### BEGIN SOLUTION
         if not self.id_to_token:
@@ -990,7 +1035,7 @@ Final:    "tokenization" → ['token','ization']  # 2 tokens vs 13 characters!
 
 # %% [markdown]
 """
-## Integration - Bringing It Together
+## 🔧 Integration - Bringing It Together
 
 Now let's build utility functions that make tokenization easy to use in practice. These tools will help you tokenize datasets, analyze performance, and choose the right strategy.
 
@@ -1051,9 +1096,16 @@ def tokenize_dataset(texts: List[str], tokenizer: Tokenizer, max_length: int = N
     2. Apply max_length truncation if specified
     3. Return list of tokenized sequences
 
+    EXAMPLE:
+    >>> texts = ["hello world", "tokenize this"]
+    >>> tokenizer = CharTokenizer(['h','e','l','o',' ','w','r','d','t','k','n','i','z','s'])
+    >>> tokenized = tokenize_dataset(texts, tokenizer, max_length=10)
+    >>> all(len(seq) <= 10 for seq in tokenized)
+    True
+
     HINTS:
-    - Handle empty texts gracefully
-    - Truncate from the end if too long
+    - Handle empty texts gracefully (empty list is fine)
+    - Truncate from the end if too long: tokens[:max_length]
     """
     ### BEGIN SOLUTION
     tokenized = []
@@ -1080,6 +1132,18 @@ def analyze_tokenization(texts: List[str], tokenizer: Tokenizer) -> Dict[str, fl
     2. Compute sequence length statistics
     3. Calculate compression ratio
     4. Return analysis dictionary
+
+    EXAMPLE:
+    >>> texts = ["hello", "world"]
+    >>> tokenizer = CharTokenizer(['h','e','l','o','w','r','d'])
+    >>> stats = analyze_tokenization(texts, tokenizer)
+    >>> 'vocab_size' in stats and 'avg_sequence_length' in stats
+    True
+
+    HINTS:
+    - Use np.mean() for average sequence length
+    - Compression ratio = total_characters / total_tokens
+    - Return dict with vocab_size, avg_sequence_length, max_sequence_length, etc.
     """
     ### BEGIN SOLUTION
     all_tokens = []
@@ -1140,7 +1204,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Systems Analysis - Tokenization Trade-offs
+## 📊 Systems Analysis - Tokenization Trade-offs
 
 Understanding the performance implications of different tokenization strategies is crucial for building efficient NLP systems.
 """
@@ -1462,7 +1526,7 @@ Real-World Production Examples:
 
 # %% [markdown]
 """
-## Module Integration Test
+## 🧪 Module Integration Test
 
 Let's test our complete tokenization system to ensure everything works together.
 """
@@ -1576,7 +1640,7 @@ Your BPE tokenizer handles unknown words by decomposing into subwords.
 
 # %% [markdown]
 """
-## 🎯 Aha Moment: Text Becomes Tokens
+## ⭐ Aha Moment: Text Becomes Tokens
 
 **What you built:** Tokenizers that convert text into numerical sequences.
 
@@ -1631,7 +1695,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: Tokenization
+## 🚀 MODULE SUMMARY: Tokenization
 
 Congratulations! You've built a complete tokenization system for converting text to numerical representations!
 

@@ -29,7 +29,7 @@ Profiling (14) → Quantization (15) → Compression (16) → Memoization (17) �
 (measure size)   (reduce precision)  (remove weights)   (cache compute)   (speed up compute)
 ```
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement magnitude-based and structured pruning
 2. Build knowledge distillation for model compression
@@ -110,7 +110,7 @@ output = layer2.forward(x)
 
 # %% [markdown]
 """
-## 🔬 Motivation: Why Compression Matters
+## 💡 Motivation: Why Compression Matters
 
 Before we learn compression, let's profile a model to analyze its weight
 distribution. We'll discover that many weights are tiny and might not matter much!
@@ -180,7 +180,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Introduction: What is Model Compression?
+## 💡 Introduction: What is Model Compression?
 
 Imagine you have a massive library with millions of books, but you only reference 10% of them regularly. Model compression is like creating a curated collection that keeps the essential knowledge while dramatically reducing storage space.
 
@@ -230,7 +230,7 @@ Think of compression like optimizing a recipe - you want to keep the essential i
 
 # %% [markdown]
 """
-## Foundations: Mathematical Background
+## 📐 Foundations: Mathematical Background
 
 Understanding the mathematics behind compression helps us choose the right technique for each situation and predict their effects on model performance.
 
@@ -317,7 +317,7 @@ Reconstruction Error:
 
 # %% [markdown]
 """
-## Sparsity Measurement - Understanding Model Density
+## 🏗️ Sparsity Measurement - Understanding Model Density
 
 Before we can compress models, we need to understand how dense they are. Sparsity measurement tells us what percentage of weights are zero (or effectively zero).
 
@@ -416,7 +416,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Magnitude-Based Pruning - Removing Small Weights
+## 🏗️ Magnitude-Based Pruning - Removing Small Weights
 
 Magnitude pruning is the simplest and most intuitive compression technique. It's based on the observation that weights with small magnitudes contribute little to the model's output.
 
@@ -573,7 +573,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Structured Pruning - Hardware-Friendly Compression
+## 🏗️ Structured Pruning - Hardware-Friendly Compression
 
 While magnitude pruning creates scattered zeros throughout the network, structured pruning removes entire computational units (channels, neurons, heads). This creates sparsity patterns that modern hardware can actually accelerate.
 
@@ -746,7 +746,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Low-Rank Approximation - Matrix Compression Through Factorization
+## 🏗️ Low-Rank Approximation - Matrix Compression Through Factorization
 
 Low-rank approximation discovers that large weight matrices often contain redundant information that can be captured with much smaller matrices through mathematical decomposition.
 
@@ -896,7 +896,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Knowledge Distillation - Learning from Teacher Models
+## 🏗️ Knowledge Distillation - Learning from Teacher Models
 
 Knowledge distillation is like having an expert teacher simplify complex concepts for a student. The large "teacher" model shares its knowledge with a smaller "student" model, achieving similar performance with far fewer parameters.
 
@@ -1145,7 +1145,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Integration: Complete Compression Pipeline
+## 🔧 Integration: Complete Compression Pipeline
 
 Now let's combine all our compression techniques into a unified system that can apply multiple methods and track their cumulative effects.
 
@@ -1314,7 +1314,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Systems Analysis - Compression Techniques
+## 📊 Systems Analysis - Compression Techniques
 
 Understanding the real-world effectiveness of different compression techniques through systematic measurement and comparison.
 
@@ -1325,7 +1325,7 @@ The fundamental challenge in model compression is balancing three competing obje
 
 # %% [markdown]
 """
-## Measuring Compression Impact with Profiler
+## 📊 Measuring Compression Impact with Profiler
 
 Now let's use the **Profiler** tool from Module 14 to measure the actual parameter reduction from pruning. This demonstrates the complete workflow: profile baseline (M14) → apply compression (M16) → measure impact (M14+M16).
 
@@ -1403,7 +1403,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Advanced Systems Analysis - Compression Techniques
+## 📊 Advanced Systems Analysis - Compression Techniques
 
 Understanding the real-world effectiveness of different compression techniques.
 """
@@ -1512,7 +1512,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏁 Consolidated Compression Classes for Export
+## 🔧 Consolidated Compression Classes for Export
 
 Now that we've implemented all compression techniques, let's create a consolidated class
 for export to the tinytorch package. This allows milestones to use the complete compression system.
@@ -1625,7 +1625,7 @@ For deploying on a mobile device with 50MB model limit and 100ms latency require
 
 # %% [markdown]
 """
-## Verification: Prove Pruning Works
+## 🔧 Verification: Prove Pruning Works
 
 Before running the full integration test, let's create a verification function that
 proves pruning actually creates zeros using real zero counting.
@@ -1691,7 +1691,7 @@ def verify_pruning_works(model, target_sparsity=0.8):
 
 # %% [markdown]
 """
-## Module Integration Test
+## 🧪 Module Integration Test
 
 Final validation that all compression techniques work together correctly.
 """
@@ -1805,7 +1805,7 @@ if __name__ == "__main__":
     test_module()
     print("✅ Module validation complete!")
 """
-## 🎯 Aha Moment: Pruning Removes Unimportant Weights
+## ⭐ Aha Moment: Pruning Removes Unimportant Weights
 
 **What you built:** Pruning that zeros out small weights, creating sparse models.
 
@@ -1849,7 +1849,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: Compression
+## 🚀 MODULE SUMMARY: Compression
 
 Congratulations! You've built a comprehensive model compression system that can dramatically reduce model size while preserving intelligence!
 

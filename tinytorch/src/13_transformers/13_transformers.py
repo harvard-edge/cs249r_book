@@ -29,7 +29,7 @@ Tokenization + Embeddings + Attention → Transformers → Language Generation
 (text→numbers)  (learnable vectors) (sequence modeling)  (complete models)
 ```
 
-## Learning Objectives
+## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement complete TransformerBlock with attention, MLP, and layer normalization
 2. Build full GPT architecture with multiple transformer blocks
@@ -115,7 +115,7 @@ from tinytorch.core.transformer import TransformerBlock, GPT, LayerNorm, MLP
 
 # %% [markdown]
 """
-## Introduction: What are Transformers?
+## 💡 Introduction: What are Transformers?
 
 Transformers are the revolutionary architecture that powers modern AI language models like GPT, ChatGPT, and Claude. The key breakthrough is **self-attention**, which allows every token in a sequence to directly interact with every other token, creating rich contextual understanding.
 
@@ -196,7 +196,7 @@ Before transformers, language models used RNNs or CNNs that processed text seque
 
 # %% [markdown]
 """
-## Foundations: Essential Transformer Mathematics
+## 📐 Foundations: Essential Transformer Mathematics
 
 ### Layer Normalization: The Stability Engine
 
@@ -326,7 +326,7 @@ Output Tensor (batch, seq_len, embed_dim)
 
 # %% [markdown]
 """
-## Implementation: Building Transformer Components
+## 🏗️ Implementation: Building Transformer Components
 
 Now we'll implement each transformer component with a clear understanding of their role in the overall architecture. We'll follow the pattern: **Explanation → Implementation → Test** for each component.
 
@@ -1367,7 +1367,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Integration: Complete Transformer Workflow
+## 🔧 Integration: Complete Transformer Workflow
 
 Now that we've built all the components, let's see how they work together in a complete language modeling pipeline. This demonstrates the full power of the transformer architecture.
 
@@ -1466,7 +1466,7 @@ def demonstrate_transformer_integration():
 
 # %% [markdown]
 """
-## Systems Analysis: Parameter Scaling and Memory
+## 📊 Systems Analysis: Parameter Scaling and Memory
 
 Transformer models scale dramatically with size, leading to both opportunities and challenges. Let's analyze the computational and memory requirements to understand why training large language models requires massive infrastructure.
 
@@ -1732,7 +1732,7 @@ Your generate() method processes the full sequence for each new token.
 
 # %% [markdown]
 """
-## 🎯 Aha Moment: Transformer Processes Sequences
+## ⭐ Aha Moment: Transformer Processes Sequences
 
 **What you built:** A complete transformer block with attention, MLPs, and residual connections.
 
@@ -1787,7 +1787,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 MODULE SUMMARY: Transformers
+## 🚀 MODULE SUMMARY: Transformers
 
 Congratulations! You've built the complete transformer architecture that powers modern language models like GPT, Claude, and ChatGPT!
 
