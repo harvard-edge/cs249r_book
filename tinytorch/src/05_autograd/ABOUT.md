@@ -14,7 +14,7 @@
 If you can compute a forward pass through a neural network manually and understand why we need to minimize loss, you're ready.
 :::
 
-```{only} html
+`````{only} html
 ````{grid} 1 2 3 3
 :gutter: 3
 
@@ -31,13 +31,16 @@ Browse the implementation code on GitHub.
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
-:link: NOTEBOOKLM_LINK_HERE
 
-Listen to an AI-generated overview and take a quiz.
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/05_autograd.mp3" type="audio/mpeg">
+</audio>
 ```
 
 ````
-```
+`````
 
 ## Overview
 
@@ -428,7 +431,6 @@ print(f"x.grad: {x.grad}")  # ∂loss/∂x
 print(f"W.grad: {W.grad}")  # ∂loss/∂W
 ```
 ````
-```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -450,7 +452,6 @@ print(f"x.grad: {x.grad}")
 print(f"W.grad: {W.grad}")
 ```
 ````
-```
 `````
 
 Let's walk through the comparison line by line:

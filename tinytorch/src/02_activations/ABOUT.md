@@ -13,7 +13,7 @@
 If you can create a Tensor and perform element-wise arithmetic (`x + y`, `x * 2`), you're ready.
 :::
 
-```{only} html
+`````{only} html
 ````{grid} 1 2 3 3
 :gutter: 3
 
@@ -30,13 +30,16 @@ Browse the implementation code on GitHub.
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
-:link: NOTEBOOKLM_LINK_HERE
 
-Listen to an AI-generated overview and take a quiz.
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/02_activations.mp3" type="audio/mpeg">
+</audio>
 ```
 
 ````
-```
+`````
 
 ## Overview
 
@@ -380,7 +383,6 @@ softmax = Softmax()
 probs = softmax(logits)  # [0.09, 0.24, 0.67], sum = 1
 ```
 ````
-```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -399,7 +401,6 @@ logits = torch.tensor([[1, 2, 3]], dtype=torch.float32)
 probs = F.softmax(logits, dim=-1)  # [0.09, 0.24, 0.67], sum = 1
 ```
 ````
-```
 `````
 
 Let's walk through the key similarities and differences:

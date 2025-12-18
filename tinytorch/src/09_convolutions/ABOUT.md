@@ -13,7 +13,7 @@
 If you can train an MLP on MNIST using your training loop and DataLoader, you're ready.
 :::
 
-```{only} html
+`````{only} html
 ````{grid} 1 2 3 3
 :gutter: 3
 
@@ -30,13 +30,16 @@ Browse the implementation code on GitHub.
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
-:link: NOTEBOOKLM_LINK_HERE
 
-Listen to an AI-generated overview and take a quiz.
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/09_convolutions.mp3" type="audio/mpeg">
+</audio>
 ```
 
 ````
-```
+`````
 
 ## Overview
 
@@ -492,7 +495,6 @@ x = relu(conv2(x))       # (32, 128, 112, 112)
 x = pool(x)              # (32, 128, 56, 56)
 ```
 ````
-```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -513,7 +515,6 @@ x = relu(conv2(x))
 x = pool(x)
 ```
 ````
-```
 `````
 
 Let's walk through each line to understand the comparison:

@@ -13,7 +13,7 @@
 The core benchmarking functionality (Parts 1-4) works with just Modules 01-13 and 19. Modules 14-18 enable the advanced optimization workflow (Part 4b), which demonstrates how to integrate all TinyTorch components. If optimization modules aren't available, the system gracefully degrades to baseline benchmarking only.
 :::
 
-```{only} html
+`````{only} html
 ````{grid} 1 2 3 3
 :gutter: 3
 
@@ -30,13 +30,16 @@ Browse the implementation code on GitHub.
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
-:link: NOTEBOOKLM_LINK_HERE
 
-Listen to an AI-generated overview and take a quiz.
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/20_capstone.mp3" type="audio/mpeg">
+</audio>
 ```
 
 ````
-```
+`````
 
 ## Overview
 
@@ -438,7 +441,6 @@ submission = generate_submission(
 save_submission(submission, "results.json")
 ```
 ````
-```
 
 ````{tab-item} Production MLflow
 ```python
@@ -462,7 +464,6 @@ with mlflow.start_run(run_name="optimized"):
 # Compare experiments in MLflow UI
 ```
 ````
-```
 `````
 
 Let's walk through the comparison line by line:

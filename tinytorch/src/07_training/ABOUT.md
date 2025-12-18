@@ -8,7 +8,7 @@
 By completing Modules 01-06, you've built all the fundamental components: tensors, activations, layers, losses, autograd, and optimizers. Each piece works perfectly in isolation, but real machine learning requires orchestrating these components into a cohesive training process. This module provides that orchestration.
 :::
 
-```{only} html
+`````{only} html
 ````{grid} 1 2 3 3
 :gutter: 3
 
@@ -25,13 +25,16 @@ Browse the implementation code on GitHub.
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
-:link: NOTEBOOKLM_LINK_HERE
 
-Listen to an AI-generated overview and take a quiz.
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/07_training.mp3" type="audio/mpeg">
+</audio>
 ```
 
 ````
-```
+`````
 
 ## Overview
 
@@ -485,7 +488,6 @@ for epoch in range(100):
         trainer.save_checkpoint(f"ckpt_{epoch}.pkl")
 ```
 ````
-```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -504,7 +506,6 @@ trainer.fit(model, train_dataloader, val_dataloader)
 # Lightning handles the loop, checkpointing, and callbacks automatically
 ```
 ````
-```
 `````
 
 Let's walk through the key similarities and differences:

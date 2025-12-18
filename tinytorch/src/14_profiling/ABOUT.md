@@ -13,7 +13,7 @@
 **Why these prerequisites**: You'll profile models built in Modules 1-13. Understanding the implementations helps you interpret profiling results (e.g., why attention is memory-bound).
 :::
 
-```{only} html
+`````{only} html
 ````{grid} 1 2 3 3
 :gutter: 3
 
@@ -30,13 +30,16 @@ Browse the implementation code on GitHub.
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
-:link: NOTEBOOKLM_LINK_HERE
 
-Listen to an AI-generated overview and take a quiz.
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/14_profiling.mp3" type="audio/mpeg">
+</audio>
 ```
 
 ````
-```
+`````
 
 ## Overview
 
@@ -295,7 +298,6 @@ print(f"Bottleneck: {profile['bottleneck']}")
 print(f"GFLOP/s: {profile['gflops_per_second']:.2f}")
 ```
 ````
-```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -318,7 +320,6 @@ flops = FlopCountAnalysis(model, input_tensor)
 print(f"FLOPs: {flops.total()}")
 ```
 ````
-```
 `````
 
 Let's walk through the comparison:

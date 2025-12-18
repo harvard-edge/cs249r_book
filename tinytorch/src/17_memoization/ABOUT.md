@@ -13,7 +13,7 @@
 This module introduces optimization techniques that make production language model inference economically viable. If you understand how transformers compute attention and why it's expensive, you're ready to learn how to make inference dramatically faster.
 :::
 
-```{only} html
+`````{only} html
 ````{grid} 1 2 3 3
 :gutter: 3
 
@@ -30,13 +30,16 @@ Browse the implementation code on GitHub.
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
-:link: NOTEBOOKLM_LINK_HERE
 
-Listen to an AI-generated overview and take a quiz.
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/17_memoization.mp3" type="audio/mpeg">
+</audio>
 ```
 
 ````
-```
+`````
 
 ## Overview
 
@@ -413,7 +416,6 @@ for _ in range(100):
 cache.reset()
 ```
 ````
-```
 
 ````{tab-item} ⚡ PyTorch
 ```python
@@ -432,7 +434,6 @@ outputs = model.generate(
 # Automatically reset between generate() calls
 ```
 ````
-```
 `````
 
 Let's examine each approach to understand the similarities and differences:

@@ -13,7 +13,7 @@
 If you can explain how a tokenizer converts "hello" to token IDs and how to multiply matrices, you're ready.
 :::
 
-```{only} html
+`````{only} html
 ````{grid} 1 2 3 3
 :gutter: 3
 
@@ -30,13 +30,16 @@ Browse the implementation code on GitHub.
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
-:link: NOTEBOOKLM_LINK_HERE
 
-Listen to an AI-generated overview and take a quiz.
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/11_embeddings.mp3" type="audio/mpeg">
+</audio>
 ```
 
 ````
-```
+`````
 
 ## Overview
 
@@ -466,7 +469,6 @@ embed_layer = EmbeddingLayer(
 position_aware = embed_layer(tokens)
 ```
 ````
-```
 
 ````{tab-item} PyTorch
 ```python
@@ -496,7 +498,6 @@ embed_layer = EmbeddingWithPosition(50000, 512, 2048)
 position_aware = embed_layer(tokens)
 ```
 ````
-```
 `````
 
 Let's walk through each section to understand the comparison:
