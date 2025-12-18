@@ -497,16 +497,28 @@ class Trainer:
     TODO: Implement complete Trainer class
 
     APPROACH:
-    1. Store model, optimizer, loss function, and optional scheduler
-    2. train_epoch(): Loop through data, compute loss, update parameters
-    3. evaluate(): Similar loop but without gradient updates
-    4. save/load_checkpoint(): Persist training state for resumption
+    1. __init__(): Store model, optimizer, loss_fn, scheduler, and grad_clip_norm
+    2. train_epoch(): Loop through dataloader, forward → loss → backward → step
+    3. evaluate(): Similar loop but set model.training=False, no grad updates
+    4. save/load_checkpoint(): Use pickle to persist/restore all training state
 
-    DESIGN PATTERNS:
-    - Context managers for train/eval modes
-    - Gradient accumulation for effective large batch sizes
-    - Progress tracking for monitoring
-    - Flexible scheduling integration
+    EXAMPLE:
+    >>> model = SimpleModel()
+    >>> optimizer = SGD(model.parameters(), lr=0.01)
+    >>> trainer = Trainer(model, optimizer, MSELoss())
+    >>> # Training data: list of (input, target) tuples
+    >>> data = [(Tensor([[1.0]]), Tensor([[2.0]]))]
+    >>> loss = trainer.train_epoch(data)
+    >>> eval_loss, accuracy = trainer.evaluate(data)
+    >>> trainer.save_checkpoint('/tmp/checkpoint.pkl')
+
+    HINTS:
+    - In train_epoch(), set model.training = True at start
+    - For gradient accumulation, scale loss by 1/accumulation_steps
+    - Use clip_grad_norm() before optimizer.step() if grad_clip_norm is set
+    - Update scheduler after each epoch: optimizer.lr = scheduler.get_lr(epoch)
+    - In evaluate(), set model.training = False and don't update gradients
+    - Checkpoints should include: epoch, step, model state, optimizer state, scheduler state, history
     """
     ### BEGIN SOLUTION
     def __init__(self, model, optimizer, loss_fn, scheduler=None, grad_clip_norm=None):
