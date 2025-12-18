@@ -8,6 +8,34 @@
 By completing Modules 01-06, you've built all the fundamental components: tensors, activations, layers, losses, autograd, and optimizers. Each piece works perfectly in isolation, but real machine learning requires orchestrating these components into a cohesive training process. This module provides that orchestration.
 :::
 
+`````{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F07_training%2F07_training.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/07_training/07_training.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/07_training.mp3" type="audio/mpeg">
+</audio>
+```
+
+````
+`````
+
 ## Overview
 
 Training is where all your previous work comes together. You've built tensors that can store data, layers that transform inputs, loss functions that measure error, autograd that computes gradients, and optimizers that update parameters. But these components don't connect themselves. The training loop is the conductor that orchestrates this symphony: forward passes flow data through layers, loss functions measure mistakes, backward passes compute gradients, and optimizers improve parameters. Repeat this cycle thousands of times and your randomly initialized network learns to solve problems.
@@ -659,7 +687,7 @@ Implement efficient data loading with batching, shuffling, and iteration. Your T
 | Module | What It Does | Your Trainer In Action |
 |--------|--------------|------------------------|
 | **08: DataLoader** | Efficient batching and shuffling | `trainer.train_epoch(dataloader)` with automatic batching |
-| **09: Spatial** | Convolutional layers for images | Train CNNs with same `trainer.train_epoch()` loop |
+| **09: Convolutions** | Convolutional layers for images | Train CNNs with same `trainer.train_epoch()` loop |
 | **Milestone: MLP** | Complete MNIST digit recognition | `trainer` orchestrates full training pipeline |
 
 ## Get Started

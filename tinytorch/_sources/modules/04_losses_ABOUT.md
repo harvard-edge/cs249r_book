@@ -13,6 +13,34 @@
 If you can build a simple neural network that takes input and produces output, you're ready to learn how to measure its quality.
 :::
 
+`````{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F04_losses%2F04_losses.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/04_losses/04_losses.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/04_losses.mp3" type="audio/mpeg">
+</audio>
+```
+
+````
+`````
+
 ## Overview
 
 Loss functions are the mathematical conscience of machine learning. Every neural network needs to know when it's right and when it's wrong. Loss functions provide that feedback by measuring the distance between what your model predicts and what actually happened. Without loss functions, models have no way to improve - they're like athletes training without knowing their score.

@@ -8,6 +8,34 @@
 **Prerequisites:** You should be comfortable with tensors, activations, layers, losses, autograd, optimizers, and training loops from Modules 01-07. This module assumes you understand the training loop pattern and why batching matters for efficient gradient descent.
 :::
 
+`````{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F08_dataloader%2F08_dataloader.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/08_dataloader/08_dataloader.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/08_dataloader.mp3" type="audio/mpeg">
+</audio>
+```
+
+````
+`````
+
 ## Overview
 
 Training a neural network on 50,000 images presents an immediate systems challenge: you cannot load all data into memory simultaneously, and even if you could, processing one sample at a time wastes GPU parallelism. The DataLoader solves this by transforming raw datasets into batches that feed efficiently into training loops.
@@ -600,7 +628,7 @@ For students who want to understand the academic foundations and engineering dec
 
 ## What's Next
 
-```{seealso} Coming Up: Module 09 - Spatial
+```{seealso} Coming Up: Module 09 - Convolutions
 
 Implement Conv2d, MaxPool2d, and Flatten layers to build convolutional neural networks. You'll apply your DataLoader to image datasets and discover why CNNs revolutionized computer vision.
 ```
@@ -609,7 +637,7 @@ Implement Conv2d, MaxPool2d, and Flatten layers to build convolutional neural ne
 
 | Module | What It Does | Your DataLoader In Action |
 |--------|--------------|--------------------------|
-| **09: Spatial** | Convolutional layers for images | `for images, labels in loader:` feed batches to CNNs |
+| **09: Convolutions** | Convolutional layers for images | `for images, labels in loader:` feed batches to CNNs |
 | **10: Tokenization** | Text processing | `DataLoader(text_dataset)` batch sentences |
 | **13: Transformers** | Attention mechanisms | Large batch sizes enabled by efficient data loading |
 

@@ -13,6 +13,34 @@
 If you can profile a model's parameters and understand weight distributions, you're ready.
 :::
 
+`````{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F16_compression%2F16_compression.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/16_compression/16_compression.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/16_compression.mp3" type="audio/mpeg">
+</audio>
+```
+
+````
+`````
+
 ## Overview
 
 Model compression is the art of making neural networks smaller and faster while preserving their intelligence. Modern language models occupy 100GB+ of storage, but mobile devices have less than 1GB available for models. Edge devices have even tighter constraints at under 100MB. Compression techniques bridge this gap, enabling deployment of powerful models on resource-constrained devices.

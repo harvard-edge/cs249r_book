@@ -13,6 +13,34 @@
 If you can explain how a tokenizer converts "hello" to token IDs and how to multiply matrices, you're ready.
 :::
 
+`````{only} html
+````{grid} 1 2 3 3
+:gutter: 3
+
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F11_embeddings%2F11_embeddings.ipynb
+
+Run interactively in your browser. No setup required.
+```
+
+```{grid-item-card} 📄 View Source
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/11_embeddings/11_embeddings.py
+
+Browse the implementation code on GitHub.
+```
+
+```{grid-item-card} 🎧 Audio Overview
+
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; margin-top: 8px;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/11_embeddings.mp3" type="audio/mpeg">
+</audio>
+```
+
+````
+`````
+
 ## Overview
 
 Embeddings are the crucial bridge between discrete tokens and continuous neural network operations. Your tokenizer from Module 10 converts text into token IDs like `[42, 7, 15]`, but neural networks operate on dense vectors of real numbers. Embeddings transform each integer token ID into a learned dense vector that captures semantic meaning. By the end of this module, you'll implement the embedding systems that power modern language models, from basic lookup tables to sophisticated positional encodings.
