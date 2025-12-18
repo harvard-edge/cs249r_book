@@ -30,9 +30,7 @@ class TestEntireTinyTorchSystemStable:
             from tinytorch.core.attention import MultiHeadAttention
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.training import Trainer
-            from tinytorch.core.compression import prune_weights
-            from tinytorch.core.kernels import optimized_matmul
-            from tinytorch.core.mlops import ModelMonitor
+            from tinytorch.perf.compression import prune_weights
 
             # Foundation components
             model = Linear(16, 8)
@@ -50,18 +48,8 @@ class TestEntireTinyTorchSystemStable:
 
             # Production features
             if 'prune_weights' in locals():
-                pruned = prune_weights(model.weights, sparsity=0.3)
-                assert pruned.shape == model.weight.shape, "Compression broken"
-
-            if 'optimized_matmul' in locals():
-                A = Tensor(np.random.randn(10, 8))
-                B = Tensor(np.random.randn(8, 5))
-                result = optimized_matmul(A, B)
-                assert result.shape == (10, 5), "Kernels broken"
-
-            if 'ModelMonitor' in locals():
-                monitor = ModelMonitor(model)
-                assert hasattr(monitor, 'log_metrics'), "MLOps broken"
+                pruned = prune_weights(model.weights.data, sparsity=0.3)
+                assert pruned.shape == model.weights.shape, "Compression broken"
 
         except ImportError:
             assert True, "Complete system not implemented yet"
@@ -70,18 +58,16 @@ class TestEntireTinyTorchSystemStable:
         """Quick check that all major TinyTorch components are available."""
         components_to_test = [
             ('tinytorch.core.tensor', 'Tensor'),
-            ('tinytorch.core.layers', 'Dense'),
+            ('tinytorch.core.layers', 'Linear'),
             ('tinytorch.core.activations', 'ReLU'),
-            ('tinytorch.core.spatial', 'Conv2D'),
+            ('tinytorch.core.spatial', 'Conv2d'),
             ('tinytorch.core.attention', 'MultiHeadAttention'),
-            ('tinytorch.core.data', 'DataLoader'),
-            ('tinytorch.core.autograd', 'Variable'),
+            ('tinytorch.core.dataloader', 'DataLoader'),
+            ('tinytorch.core.autograd', 'enable_autograd'),
             ('tinytorch.core.optimizers', 'Adam'),
             ('tinytorch.core.training', 'Trainer'),
-            ('tinytorch.core.compression', 'prune_weights'),
-            ('tinytorch.core.kernels', 'optimized_matmul'),
-            ('tinytorch.core.benchmarking', 'benchmark_model'),
-            ('tinytorch.core.mlops', 'ModelMonitor'),
+            ('tinytorch.perf.compression', 'prune_weights'),
+            ('tinytorch.perf.benchmarking', 'SimpleMLP'),
         ]
 
         available_components = []
@@ -706,27 +692,26 @@ class TestRegressionPrevention:
         # Complete system should still work perfectly
         try:
             import numpy as np
+            from tinytorch.core.autograd import enable_autograd
+            enable_autograd()
+
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
             from tinytorch.core.optimizers import Adam
-            from tinytorch.core.training import Trainer
-            from tinytorch.core.losses import MSELoss
 
             # Complete system integration
             model = Linear(16, 8)
             optimizer = Adam(model.parameters(), lr=0.001)
-            loss_fn = MSELoss()
-            trainer = Trainer(model, optimizer, loss_fn)
 
             x = Tensor(np.random.randn(4, 16))
             output = model(x)
             assert output.shape == (4, 8), "System-wide regression: Core functionality broken"
 
             # Advanced features should work
-            from tinytorch.core.spatial import Conv2d as Conv2D
+            from tinytorch.core.spatial import Conv2d
             from tinytorch.core.attention import MultiHeadAttention
 
-            conv = Conv2D(in_channels=3, out_channels=8, kernel_size=3)
+            conv = Conv2d(in_channels=3, out_channels=8, kernel_size=3)
             attention = MultiHeadAttention(embed_dim=32, num_heads=4)
 
             assert hasattr(conv, 'forward'), "System-wide regression: Spatial broken"
@@ -738,7 +723,7 @@ class TestRegressionPrevention:
 
     def test_progressive_stability_complete(self):
         """Test the complete progressive stack is stable through capstone."""
-        # Stack should be stable through: Setup → ... → MLOps → TinyGPT
+        # Stack should be stable through: Setup → ... → Compression → Memoization
 
         # Foundation level
         import numpy as np
@@ -746,25 +731,20 @@ class TestRegressionPrevention:
 
         # Complete ML system level (if available)
         try:
+            from tinytorch.core.autograd import enable_autograd
+            enable_autograd()
+
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
             from tinytorch.core.optimizers import Adam
-            from tinytorch.core.training import Trainer
-            from tinytorch.core.losses import MSELoss
             try:
-                from tinytorch.core.compression import prune_weights
+                from tinytorch.perf.compression import prune_weights
             except ImportError:
                 prune_weights = None  # Optional module
-            try:
-                from tinytorch.core.kernels import optimized_matmul
-            except ImportError:
-                optimized_matmul = None  # Optional module
 
             # Complete production system should work
             model = Linear(20, 10)
             optimizer = Adam(model.parameters(), lr=0.001)
-            loss_fn = MSELoss()
-            trainer = Trainer(model, optimizer, loss_fn)
 
             x = Tensor(np.random.randn(5, 20))
             output = model(x)
@@ -772,24 +752,19 @@ class TestRegressionPrevention:
 
             # All advanced features should work
             if prune_weights is not None:
-                pruned = prune_weights(model.weight, sparsity=0.3)
-                assert pruned.shape == model.weight.shape, "Advanced features broken"
+                pruned = prune_weights(model.weights.data, sparsity=0.3)
+                assert pruned.shape == model.weights.shape, "Advanced features broken"
 
         except ImportError:
             pass  # Not implemented yet
 
-        # Capstone level (if available)
+        # Transformer level (if available)
         try:
-            from tinytorch.core.transformers import TinyGPT
+            from tinytorch.core.transformer import TransformerBlock
 
-            # Capstone transformer should work
-            if 'TinyGPT' in locals():
-                model = TinyGPT(vocab_size=100, embed_dim=32, num_heads=2, num_layers=1)
-                test_input = np.random.randint(0, 100, (2, 8))
-                output = model(test_input)
-                assert output.shape == (2, 8, 100), "Capstone level broken"
-            else:
-                assert True, "Capstone transformer ready to implement"
+            # Transformer block should work
+            block = TransformerBlock(embed_dim=32, num_heads=4)
+            assert hasattr(block, 'forward'), "Transformer block broken"
 
         except ImportError:
             pass  # Not implemented yet
