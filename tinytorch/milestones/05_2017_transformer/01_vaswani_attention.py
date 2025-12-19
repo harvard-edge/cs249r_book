@@ -376,7 +376,7 @@ def train_epoch(model, dataloader, optimizer, loss_fn):
         pred = np.argmax(logits.data, axis=-1)
         for i in range(batch_size):
             if np.array_equal(pred[i], target_batch.data[i]):
-            correct_sequences += 1
+                correct_sequences += 1
         total_samples += batch_size
 
     return total_loss / total_samples, (correct_sequences / total_samples) * 100
