@@ -12,7 +12,7 @@ algorithm for training multi-layer networks - and XOR became trivial!
 Watch a multi-layer network SOLVE the "impossible" XOR problem that stumped AI for
 17 years. The secret? Hidden layers + backpropagation (which YOU just built!).
 
-✅ REQUIRED MODULES (Run after Module 07):
+✅ REQUIRED MODULES (Run after Module 08):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Module 01 (Tensor)        : YOUR data structure with autodiff
   Module 02 (Activations)   : YOUR ReLU and Sigmoid (non-linearity!)
@@ -21,6 +21,7 @@ Watch a multi-layer network SOLVE the "impossible" XOR problem that stumped AI f
   Module 06 (Autograd)      : YOUR backpropagation through hidden layers
   Module 07 (Optimizers)    : YOUR SGD optimizer
   Module 08 (Training)      : YOUR training loop
+  (Module 05 DataLoader skipped: XOR has only 4 points, no batching needed)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🏗️ ARCHITECTURE (The Multi-Layer Solution):
