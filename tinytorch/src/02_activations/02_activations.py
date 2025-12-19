@@ -170,7 +170,7 @@ class ActivationName:
         # Return new Tensor with result
 
     def backward(self, grad: Tensor) -> Tensor:
-        # Stub for Module 05 - gradient computation
+        # Stub for Module 06 - gradient computation
         pass
 ```
 """
@@ -270,8 +270,8 @@ class Sigmoid:
         return self.forward(x)
 
     def backward(self, grad: Tensor) -> Tensor:
-        """Compute gradient (implemented in Module 05)."""
-        pass  # Will implement backward pass in Module 05
+        """Compute gradient (implemented in Module 06)."""
+        pass  # Will implement backward pass in Module 06
 
 # %% [markdown]
 """
@@ -389,8 +389,8 @@ class ReLU:
         return self.forward(x)
 
     def backward(self, grad: Tensor) -> Tensor:
-        """Compute gradient (implemented in Module 05)."""
-        pass  # Will implement backward pass in Module 05
+        """Compute gradient (implemented in Module 06)."""
+        pass  # Will implement backward pass in Module 06
 
 # %% [markdown]
 """
@@ -511,8 +511,8 @@ class Tanh:
         return self.forward(x)
 
     def backward(self, grad: Tensor) -> Tensor:
-        """Compute gradient (implemented in Module 05)."""
-        pass  # Will implement backward pass in Module 05
+        """Compute gradient (implemented in Module 06)."""
+        pass  # Will implement backward pass in Module 06
 
 # %% [markdown]
 """
@@ -643,8 +643,8 @@ class GELU:
         return self.forward(x)
 
     def backward(self, grad: Tensor) -> Tensor:
-        """Compute gradient (implemented in Module 05)."""
-        pass  # Will implement backward pass in Module 05
+        """Compute gradient (implemented in Module 06)."""
+        pass  # Will implement backward pass in Module 06
 
 # %% [markdown]
 """
@@ -1005,12 +1005,12 @@ Your implementation: Uses max subtraction in Softmax.forward()
 ```
 Problem: Large negative gradient → weights become negative → ReLU always outputs 0
 Solution: Monitor dead neuron percentage, use LeakyReLU variants
-Your implementation: Basic ReLU (watch for this in Module 07 training)
+Your implementation: Basic ReLU (watch for this in Module 08 training)
 ```
 
 ### Gradient Behavior Preview
 
-While you'll implement gradients in Module 05, understanding gradient characteristics helps:
+While you'll implement gradients in Module 06, understanding gradient characteristics helps:
 
 **ReLU gradient: Sharp discontinuity**
 - Gradient = 1 if x > 0, else 0
@@ -1038,7 +1038,7 @@ While you'll implement gradients in Module 05, understanding gradient characteri
 - All activations: Same size as input (element-wise operations)
 - Softmax temporary buffers: exp array + sum array (small overhead)
 
-**Backward pass memory (Module 05):**
+**Backward pass memory (Module 06):**
 - Must cache inputs for gradient computation
 - 2× memory per activation layer (input + gradient)
 - For 1000-layer network: Memory adds up!
@@ -1151,7 +1151,7 @@ Input → Attention → Linear+GELU → Linear+GELU → Output
 **Memory Impact:**
 - All activations: Minimal memory overhead (output same size as input)
 - Softmax: Slightly higher (temporary buffers for exp and sum)
-- For autograd (Module 05): Must cache inputs for backward pass
+- For autograd (Module 06): Must cache inputs for backward pass
 
 ### Integration with TinyTorch
 
@@ -1171,9 +1171,9 @@ class Linear:
         return out
 ```
 
-**Module 05 (Autograd)**: Will add gradient computation
+**Module 06 (Autograd)**: Will add gradient computation
 ```python
-# Coming in Module 05
+# Coming in Module 06
 class Sigmoid:
     def backward(self, grad):
         # ∂sigmoid/∂x = sigmoid(x) * (1 - sigmoid(x))

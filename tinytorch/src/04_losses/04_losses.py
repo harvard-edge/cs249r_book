@@ -21,7 +21,7 @@ Welcome to Module 04! Today you'll implement the mathematical functions that mea
 ## 🔗 Prerequisites & Progress
 **You've Built**: Tensors (data), Activations (intelligence), Layers (architecture)
 **You'll Build**: Loss functions that measure prediction quality
-**You'll Enable**: The feedback signal needed for training (Module 05: Autograd)
+**You'll Enable**: The feedback signal needed for training (Module 06: Autograd)
 
 **Connection Map**:
 ```
@@ -81,9 +81,9 @@ from tinytorch.core.losses import MSELoss, CrossEntropyLoss, BinaryCrossEntropyL
 
 **Dependency Flow**:
 ```
-Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers) → Module 04 (Losses) → Module 05 (Autograd)
-     ↓                      ↓                         ↓                    ↓                    ↓
-  Foundation          Nonlinearity              Architecture        Error Measurement      Gradient Flow
+Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers) → Module 04 (Losses) → Module 05 (DataLoader) → Module 06 (Autograd)
+     ↓                      ↓                         ↓                    ↓                    ↓                      ↓
+  Foundation          Nonlinearity              Architecture        Error Measurement      Data Pipelines       Gradient Flow
 ```
 
 **Import Strategy**:
@@ -450,7 +450,7 @@ class MSELoss:
 
     def backward(self) -> Tensor:
         """
-        Compute gradients (implemented in Module 05: Autograd).
+        Compute gradients (implemented in Module 06: Autograd).
 
         For now, this is a stub that students can ignore.
         """
@@ -631,7 +631,7 @@ class CrossEntropyLoss:
 
     def backward(self) -> Tensor:
         """
-        Compute gradients (implemented in Module 05: Autograd).
+        Compute gradients (implemented in Module 06: Autograd).
 
         For now, this is a stub that students can ignore.
         """
@@ -833,7 +833,7 @@ class BinaryCrossEntropyLoss:
 
     def backward(self) -> Tensor:
         """
-        Compute gradients (implemented in Module 05: Autograd).
+        Compute gradients (implemented in Module 06: Autograd).
 
         For now, this is a stub that students can ignore.
         """
@@ -1681,8 +1681,8 @@ Congratulations! You've built the measurement system that enables all machine le
 - All tests pass ✅ (validated by `test_module()`)
 
 ### Ready for Next Steps
-Your loss functions provide the essential feedback signal for learning. These "error measurements" will become the starting point for backpropagation in Module 05!
+Your loss functions provide the essential feedback signal for learning. These "error measurements" will become the starting point for backpropagation in Module 06 (Autograd)!
 Export with: `tito module complete 04`
 
-**Next**: Module 05 will add automatic differentiation - the magic that computes how to improve predictions!
+**Next**: Module 05 will add DataLoader for efficient data pipelines, then Module 06 adds automatic differentiation!
 """

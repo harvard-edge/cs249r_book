@@ -842,7 +842,7 @@ def enable_kv_cache(model):
     7. Return the cache object
 
     This function demonstrates **non-invasive optimization** - adding capabilities
-    to existing systems without breaking them. Similar to how Module 05 (Autograd)
+    to existing systems without breaking them. Similar to how Module 06 (Autograd)
     uses enable_autograd() to add gradient tracking to Tensors.
 
     Args:

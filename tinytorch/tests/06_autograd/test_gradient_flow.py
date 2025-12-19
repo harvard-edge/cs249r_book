@@ -17,7 +17,7 @@ from tinytorch.core.tensor import Tensor
 from tinytorch.core.autograd import enable_autograd
 from tinytorch.core.activations import GELU
 # Import transformer to ensure mean/sqrt monkey-patches are applied
-from tinytorch.models import transformer
+from tinytorch.core import transformer
 
 
 def test_arithmetic_gradient_flow():
