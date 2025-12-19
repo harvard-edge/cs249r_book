@@ -37,6 +37,7 @@ As you complete modules, you unlock milestones that recreate landmark moments in
 
 ## Step 1: Install & Setup (2 Minutes)
 
+## Linux
 ```bash
 # Install TinyTorch (run from a project folder like ~/projects)
 curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
@@ -45,6 +46,17 @@ curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
 cd tinytorch
 source .venv/bin/activate
 tito setup
+```
+
+## Windows
+```powershell
+# Install TinyTorch (run from a project folder like ~/projects)
+iwr -useb mlsysbook.ai/tinytorch/install.ps1 | powershell -ExecutionPolicy Bypass
+
+# Activate and verify
+cd tinytorch
+.venv/Scripts/Activate.ps1
+tito setup 
 ```
 
 **What this does:**
