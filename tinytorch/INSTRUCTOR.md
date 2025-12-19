@@ -180,7 +180,7 @@ def memory_footprint(self):
 - Shows understanding of memory calculation
 - Missing proper dtype handling
 
-### Module 05: Autograd - Backward Pass
+### Module 06: Autograd - Backward Pass
 
 **Excellent Solution (9-10 points)**:
 ```python

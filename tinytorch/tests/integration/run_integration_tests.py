@@ -213,7 +213,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Run TinyTorch integration tests")
-    parser.add_argument("module", help="Module number (e.g., 05_dense)")
+    parser.add_argument("module", help="Module number (e.g., 05_dataloader)")
     parser.add_argument("--quiet", action="store_true", help="Suppress detailed output")
     args = parser.parse_args()
 
@@ -233,5 +233,5 @@ if __name__ == "__main__":
     else:
         # Default: run module 05 tests as example
         runner = IntegrationTestRunner()
-        report = runner.run_module_tests("05_dense")
+        report = runner.run_module_tests("05_dataloader")
         runner.print_report(report)

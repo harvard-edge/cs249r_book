@@ -1,5 +1,5 @@
 """
-Module 06: Optimizer Core Tests
+Module 07: Optimizer Core Tests
 ================================
 
 These tests verify that optimizers correctly update model parameters.
@@ -21,8 +21,8 @@ WHAT WE TEST:
 CONNECTION TO OTHER MODULES:
 ----------------------------
 - Uses Tensor (Module 01) - optimizers update tensor.data
-- Uses autograd (Module 05) - optimizers read tensor.grad
-- Enables Training (Module 07) - optimizers make learning possible
+- Uses autograd (Module 06) - optimizers read tensor.grad
+- Enables Training (Module 08) - optimizers make learning possible
 """
 
 import pytest

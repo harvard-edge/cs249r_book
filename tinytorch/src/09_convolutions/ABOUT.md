@@ -7,7 +7,7 @@
 
 **Prerequisites: Modules 01-08** assumes you have:
 - Built the complete training pipeline (Modules 01-07)
-- Implemented DataLoader for batch processing (Module 08)
+- Implemented DataLoader for batch processing (Module 05)
 - Understanding of parameter initialization, forward/backward passes, and optimization
 
 If you can train an MLP on MNIST using your training loop and DataLoader, you're ready.

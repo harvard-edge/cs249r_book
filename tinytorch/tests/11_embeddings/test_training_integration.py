@@ -1,5 +1,5 @@
 """
-Module 11: Training - Integration Tests
+Module 08: Training - Integration Tests
 Tests that complete training loops work with all system components
 """
 

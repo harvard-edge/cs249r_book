@@ -1564,9 +1564,9 @@ Data → Tensor (M01) → Layers (M03) → Model → Training (M07)
 1. **Dependency Management** - Each module imports from previous modules, creating a proper dependency graph
 2. **API Consistency** - Tensor operations work the same whether in Module 01 or Module 18
 3. **Composability** - Complex systems (transformers) built from simple primitives (linear layers)
-4. **Progressive Enhancement** - Module 05 activated gradients dormant since Module 01
+4. **Progressive Enhancement** - Module 06 activated gradients dormant since Module 01
 
-**Reflection Question:** When you imported `from tinytorch.core.tensor import Tensor` in Module 15 (Quantization), the Tensor already had gradient tracking from Module 05. How does this "single source of truth" design simplify system integration compared to having separate BasicTensor and GradTensor classes?
+**Reflection Question:** When you imported `from tinytorch.core.tensor import Tensor` in Module 15 (Quantization), the Tensor already had gradient tracking from Module 06. How does this "single source of truth" design simplify system integration compared to having separate BasicTensor and GradTensor classes?
 
 ### Benchmarking Methodology: Science Meets Engineering
 

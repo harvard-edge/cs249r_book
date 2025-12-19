@@ -32,7 +32,7 @@ Micrograd demonstrated that automatic differentiationâ€”the heart of modern MLâ€
 
 **When to use micrograd**: Perfect 2-hour introduction before starting TinyTorch
 
-**Connection to TinyTorch**: Module 05 (Autograd) teaches the same core concepts with systems engineering focus
+**Connection to TinyTorch**: Module 06 (Autograd) teaches the same core concepts with systems engineering focus
 
 
 ### nanoGPT

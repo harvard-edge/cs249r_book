@@ -1,8 +1,8 @@
 """
 Module 04: Progressive Integration Tests
-Tests that Module 05 (Linear/Networks) works correctly AND that the entire foundation stack works.
+Tests that Module 04 (Losses) works correctly AND that the entire foundation stack works.
 
-DEPENDENCY CHAIN: 01_setup → 02_tensor → 03_activations → 04_layers → 05_dense
+DEPENDENCY CHAIN: 01_tensor → 02_activations → 03_layers → 04_losses → 05_dataloader
 This is the FOUNDATION MILESTONE - everything should work together for neural networks!
 """
 

@@ -1,5 +1,5 @@
 """
-Module 08: DataLoader - Core Functionality Tests
+Module 05: DataLoader - Core Functionality Tests
 =================================================
 
 WHY DATALOADER MATTERS:

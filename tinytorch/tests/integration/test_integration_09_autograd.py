@@ -1,5 +1,5 @@
 """
-Integration test for Module 09: Autograd
+Integration test for Module 06: Autograd
 
 Validates that the autograd module integrates correctly with the TinyTorch package.
 This is a quick validation test, not a comprehensive capability test.

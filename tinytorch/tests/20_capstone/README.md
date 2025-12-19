@@ -36,7 +36,7 @@ The capstone tests verify that all 19 previous modules work together to build pr
 ### Priority 6: Gradient Flow
 - **test_deep_network_gradient_flow**: Gradients flow through all layer types
 - **test_gradient_accumulation_correctness**: Shared parameters accumulate gradients
-- Validates: Module 05 autograd across all modules
+- Validates: Module 06 autograd across all modules
 
 ### Priority 7: Memory & Performance
 - **test_memory_efficiency**: Memory usage is reasonable

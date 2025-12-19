@@ -93,7 +93,7 @@ Enter
 Sleep 4s  # Let viewers see modules 01-06 are completed
 
 # ==============================================================================
-# STEP 2: UNLOCK MILESTONE - Complete module 07 (Training)
+# STEP 2: UNLOCK MILESTONE - Complete module 08 (Training)
 # ==============================================================================
 
 Type "tito module complete 07"

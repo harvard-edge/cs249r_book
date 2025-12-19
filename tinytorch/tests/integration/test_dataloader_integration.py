@@ -18,7 +18,7 @@ try:
     from tinytorch.data.loader import Dataset, TensorDataset, DataLoader
 except (ImportError, ModuleNotFoundError):
     # Module not exported yet, use dev version
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'modules', 'source', '08_dataloader'))
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'modules', 'source', '05_dataloader'))
     from dataloader_dev import Dataset, TensorDataset, DataLoader
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'modules', 'source', '01_tensor'))
     from tensor_dev import Tensor

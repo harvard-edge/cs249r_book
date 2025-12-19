@@ -178,7 +178,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Complete module workflow")
-    parser.add_argument("module", help="Module name (e.g., 05_dense)")
+    parser.add_argument("module", help="Module name (e.g., 05_dataloader)")
     parser.add_argument("--skip-test", action="store_true",
                       help="Skip integration tests")
 

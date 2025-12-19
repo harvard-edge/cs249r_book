@@ -17,7 +17,7 @@ it production-ready. Every technique uses YOUR implementations!
 ✅ REQUIRED MODULES (Run after Module 19):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Module 01-03: Tensor, Activations, Layers - YOUR base model
-  Module 07: Training - YOUR trained model from earlier milestones
+  Module 08: Training - YOUR trained model from earlier milestones
   Module 14: Profiling - YOUR Profiler class
   Module 15: Quantization - YOUR Quantizer class
   Module 16: Compression - YOUR Compressor class

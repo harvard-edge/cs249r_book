@@ -232,13 +232,12 @@ class TinyTorchStatusAnalyzer:
                     '15_mlops': 'ProductionMLOpsProfiler',
                     '16_capstone': 'ProductionMLSystemProfiler',
                     '07_attention': 'AttentionEfficiencyProfiler',
-                    '09_autograd': 'AutogradSystemsProfiler',
-                    '11_training': 'TrainingPipelineProfiler',
-                    '03_activations': 'ActivationProfiler',
-                    '04_layers': 'LayerArchitectureProfiler',
-                    '05_dense': 'NetworkStabilityMonitor',
-                    '09_convolutions': 'ConvolutionProfiler',
-                    '08_dataloader': 'DataPipelineProfiler'
+                    '06_autograd': 'AutogradSystemsProfiler',
+                    '08_training': 'TrainingPipelineProfiler',
+                    '02_activations': 'ActivationProfiler',
+                    '03_layers': 'LayerArchitectureProfiler',
+                    '05_dataloader': 'DataPipelineProfiler',
+                    '09_convolutions': 'ConvolutionProfiler'
                 }
 
                 if module_name in required_profilers:

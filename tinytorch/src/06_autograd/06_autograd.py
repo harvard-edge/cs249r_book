@@ -14,19 +14,19 @@
 
 # %% [markdown]
 """
-# Module 05: Autograd ⚡ - The Gradient Engine
+# Module 06: Autograd ⚡ - The Gradient Engine
 
-Welcome to Module 05! Today you'll awaken the gradient engine and unlock automatic differentiation.
+Welcome to Module 06! Today you'll awaken the gradient engine and unlock automatic differentiation.
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Tensor operations, activations, layers, and loss functions
+**You've Built**: Tensor operations, activations, layers, losses, and DataLoader
 **You'll Build**: The autograd system that computes gradients automatically
 **You'll Enable**: Learning! Training! The ability to optimize neural networks!
 
 **Connection Map**:
 ```
-Modules 01-04 → Autograd → Training (Module 06-07)
-(forward pass) (backward pass) (learning loops)
+Modules 01-05 → Autograd → Optimizers → Training
+(forward pass)  (Module 06)  (Module 07)  (Module 08)
 ```
 
 ## 🎯 Learning Objectives
@@ -41,7 +41,7 @@ By the end of this module, you will:
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/05_autograd/autograd_dev.py`
+**Learning Side:** You work in `modules/06_autograd/autograd_dev.py`
 **Building Side:** Code exports to `tinytorch.core.autograd`
 
 ```python
@@ -2385,7 +2385,7 @@ If your gradients look wrong or you get mysterious errors:
 PyTorch explicitly disables gradient tracking during parameter updates to allow safe in-place operations:
 
 ```python
-# PyTorch pattern (we'll implement this in Module 06: Optimizers)
+# PyTorch pattern (we'll implement this in Module 07: Optimizers)
 with torch.no_grad():
     W -= 0.01 * W.grad  # Safe inside no_grad context
 ```
@@ -2549,7 +2549,7 @@ def test_module():
 
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
-    print("Run: tito module complete 05_autograd")
+    print("Run: tito module complete 06_autograd")
 
 # Test function defined above, will be called in main block
 
@@ -2659,7 +2659,7 @@ After answering these questions, consider:
 3. **How does this connect to Module 01?** Why did we include requires_grad, grad, and backward() from the start?
 4. **What production patterns emerged?** What choices would you make differently for a research prototype vs. production system?
 
-These questions prepare you for Module 06 (Optimizers), where you'll use these gradients to actually update parameters and train models!
+These questions prepare you for Module 07 (Optimizers), where you'll use these gradients to actually update parameters and train models!
 """
 
 # %% [markdown]
@@ -2738,9 +2738,9 @@ print(f"x.grad: {x.grad}")  # Gradient w.r.t. x
 print(f"W.grad: {W.grad}")  # Gradient w.r.t. W
 ```
 
-Export with: `tito module complete 05_autograd`
+Export with: `tito module complete 06_autograd`
 
-**Next**: Module 06 will add optimizers (SGD, Adam) that use these gradients to actually train neural networks! 🎯
+**Next**: Module 07 will add optimizers (SGD, Adam) that use these gradients to actually train neural networks! 🎯
 
 ### 📈 Progress: Autograd ✓
 ```
@@ -2748,8 +2748,8 @@ Export with: `tito module complete 05_autograd`
 ✅ Module 02: Activations (Non-linearities)
 ✅ Module 03: Layers (Building blocks)
 ✅ Module 04: Losses (Training objectives)
-✅ Module 05: Autograd (Gradient engine) ← YOU ARE HERE
-🔄 Module 06: Optimizers (Learning algorithms)
-🔄 Module 07: Training (Complete training loops)
+✅ Module 06: Autograd (Gradient engine) ← YOU ARE HERE
+🔄 Module 07: Optimizers (Learning algorithms)
+🔄 Module 08: Training (Complete training loops)
 ```
 """

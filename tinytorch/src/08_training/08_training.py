@@ -14,19 +14,19 @@
 
 # %% [markdown]
 """
-# Module 07: Training - Complete Learning Loops
+# Module 08: Training - Complete Learning Loops
 
-Welcome to Module 07! You're about to build the complete training infrastructure that brings neural networks to life through end-to-end learning.
+Welcome to Module 08! You're about to build the complete training infrastructure that brings neural networks to life through end-to-end learning.
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Tensors, activations, layers, losses, gradients, and optimizers
+**You've Built**: Tensors, activations, layers, losses, DataLoader, gradients, and optimizers
 **You'll Build**: Complete training loops with checkpointing, scheduling, and gradient management
 **You'll Enable**: Full model training pipeline for the MLP milestone
 
 **Connection Map**:
 ```
-Optimizers (Module 06) → Training (Module 07) → DataLoader (Module 08)
-(parameter updates)     (complete loops)      (efficient batching)
+DataLoader → Autograd → Optimizers → Training → Convolutions
+(Module 05)  (Module 06)  (Module 07)  (Module 08)  (Module 09)
 ```
 
 ## 🎯 Learning Objectives
@@ -41,7 +41,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/07_training/training_dev.py`
+**Learning Side:** You work in `modules/08_training/training_dev.py`
 **Building Side:** Code exports to `tinytorch.core.training`
 
 ```python
@@ -722,7 +722,7 @@ class Trainer:
         state = {}
         # Trust optimizer has lr attribute (from Modules 06)
         state['lr'] = self.optimizer.lr
-        # Use explicit API for momentum state (Module 06)
+        # Use explicit API for momentum state (Module 07)
         # All optimizers with momentum support have get_momentum_state() method
         if hasattr(self.optimizer, 'has_momentum') and self.optimizer.has_momentum():
             momentum_state = self.optimizer.get_momentum_state()
@@ -735,7 +735,7 @@ class Trainer:
         if 'lr' in state:
             # Trust optimizer has lr attribute (from Modules 06)
             self.optimizer.lr = state['lr']
-        # Use explicit API for momentum state (Module 06)
+        # Use explicit API for momentum state (Module 07)
         # All optimizers with momentum support have set_momentum_state() method
         if 'momentum_buffers' in state:
             if hasattr(self.optimizer, 'has_momentum') and self.optimizer.has_momentum():
@@ -795,7 +795,7 @@ def test_unit_trainer():
 
     # Create trainer with REAL components
     model = SimpleModel()
-    optimizer = SGD(model.parameters(), lr=0.01)  # Real SGD from Module 06
+    optimizer = SGD(model.parameters(), lr=0.01)  # Real SGD from Module 07
     loss_fn = MSELoss()  # Real MSELoss from Module 04
     scheduler = CosineSchedule(max_lr=0.1, min_lr=0.01, total_epochs=10)
 
@@ -1179,7 +1179,7 @@ def test_module():
 
     # Create integrated system with REAL components
     model = SimpleModel()
-    optimizer = SGD(model.parameters(), lr=0.01)  # Real SGD from Module 06
+    optimizer = SGD(model.parameters(), lr=0.01)  # Real SGD from Module 07
     loss_fn = MSELoss()  # Real MSELoss from Module 04
     scheduler = CosineSchedule(max_lr=0.1, min_lr=0.001, total_epochs=3)
 
@@ -1371,7 +1371,7 @@ Your training implementation enables sophisticated model training with proper sc
 
 **Export with:** `tito module complete 07`
 
-**Next**: Module 08 will add DataLoader for efficient data pipeline management, completing the full training infrastructure needed for the MLP milestone!
+**Next**: Module 09 (Convolutions) will add spatial neural network operations, enabling CNN architectures for computer vision!
 
 **🎓 You now understand the complete training infrastructure that powers modern ML systems!**
 """

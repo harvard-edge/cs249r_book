@@ -8,9 +8,10 @@ Runs all tests for the core modules needed for the training milestone:
   02_activations - Activation functions
   03_layers      - Neural network layers
   04_losses      - Loss functions
-  05_autograd    - Automatic differentiation
-  06_optimizers  - SGD, Adam, etc.
-  07_training    - Training loops
+  05_dataloader  - Data loading and batching
+  06_autograd    - Automatic differentiation
+  07_optimizers  - SGD, Adam, etc.
+  08_training    - Training loops
 
 This script runs all tests and provides a comprehensive summary.
 """

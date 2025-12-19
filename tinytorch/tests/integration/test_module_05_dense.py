@@ -1,5 +1,5 @@
 """
-Integration Tests for Module 05: Dense/Networks
+Integration Tests for Module 05: DataLoader
 These tests verify that the module exports correctly and works as expected.
 Run with pytest for detailed reporting.
 """

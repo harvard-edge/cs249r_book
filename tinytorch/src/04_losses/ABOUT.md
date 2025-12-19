@@ -47,7 +47,7 @@ Listen to an AI-generated overview.
 
 Loss functions are the mathematical conscience of machine learning. Every neural network needs to know when it's right and when it's wrong. Loss functions provide that feedback by measuring the distance between what your model predicts and what actually happened. Without loss functions, models have no way to improve - they're like athletes training without knowing their score.
 
-In this module, you'll implement three essential loss functions: Mean Squared Error (MSE) for regression, Cross-Entropy for multi-class classification, and Binary Cross-Entropy for binary decisions. You'll also master the log-sum-exp trick, a crucial numerical stability technique that prevents computational overflow with large numbers. These implementations will serve as the foundation for Module 05: Autograd, where gradients flow backward from these loss values to update model parameters.
+In this module, you'll implement three essential loss functions: Mean Squared Error (MSE) for regression, Cross-Entropy for multi-class classification, and Binary Cross-Entropy for binary decisions. You'll also master the log-sum-exp trick, a crucial numerical stability technique that prevents computational overflow with large numbers. These implementations will serve as the foundation for Module 06: Autograd, where gradients flow backward from these loss values to update model parameters.
 
 By the end, you'll understand not just how to compute loss, but why different problems require different loss functions, and how numerical stability shapes production ML systems.
 
@@ -102,7 +102,7 @@ loss = criterion(predictions, targets)  # Scalar feedback signal for learning
 
 To keep this module focused, you will **not** implement:
 
-- Gradient computation (that's Module 05: Autograd)
+- Gradient computation (that's Module 06: Autograd)
 - Advanced loss variants (Focal Loss, Label Smoothing, Huber Loss)
 - Hierarchical or sampled softmax for large vocabularies (PyTorch optimization)
 - Custom reduction strategies beyond mean
@@ -172,7 +172,7 @@ Loss functions transform the abstract question "how good is my model?" into a co
 
 The key insight is that loss functions must be differentiable - you need to know not just the current error, but which direction to move parameters to reduce that error. This is why we use squared differences instead of absolute differences in MSE: the square function has a smooth derivative that points toward improvement.
 
-Every training iteration follows the same pattern: forward pass produces predictions, loss function measures error, backward pass (Module 05) computes how to improve. The loss value itself becomes a single number summarizing model quality across an entire batch of examples.
+Every training iteration follows the same pattern: forward pass produces predictions, loss function measures error, backward pass (Module 06) computes how to improve. The loss value itself becomes a single number summarizing model quality across an entire batch of examples.
 
 ### Mean Squared Error
 
@@ -574,18 +574,18 @@ For students who want to understand the academic foundations and explore deeper:
 
 ## What's Next
 
-```{seealso} Coming Up: Module 05 - Autograd
+```{seealso} Coming Up: Module 05 - DataLoader
 
-Implement automatic differentiation to compute gradients of your loss functions. You'll build the computational graph that tracks operations and use the chain rule to flow gradients backward through your network - the foundation of all deep learning optimization.
+Build efficient data pipelines that handle batching, shuffling, and iteration over your datasets. DataLoader prepares your training data so that autograd and training loops can consume it efficiently.
 ```
 
 **Preview - How Your Loss Functions Get Used in Future Modules:**
 
 | Module | What It Does | Your Loss In Action |
 |--------|--------------|---------------------|
-| **05: Autograd** | Automatic differentiation | `loss.backward()` computes gradients |
-| **06: Optimizers** | Parameter updates | `optimizer.step()` uses loss gradients to improve weights |
-| **07: Training** | Complete training loop | `loss = criterion(outputs, targets)` measures progress |
+| **06: Autograd** | Automatic differentiation | `loss.backward()` computes gradients |
+| **07: Optimizers** | Parameter updates | `optimizer.step()` uses loss gradients to improve weights |
+| **08: Training** | Complete training loop | `loss = criterion(outputs, targets)` measures progress |
 
 ## Get Started
 

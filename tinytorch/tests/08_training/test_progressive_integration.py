@@ -1,8 +1,8 @@
 """
-Module 07: Progressive Integration Tests
-Tests that Module 07 (Training) works correctly AND that the entire prior stack works.
+Module 08: Progressive Integration Tests
+Tests that Module 08 (Training) works correctly AND that the entire prior stack works.
 
-DEPENDENCY CHAIN: 01_tensor → 02_activations → 03_layers → 04_losses → 05_autograd → 06_optimizers → 07_training
+DEPENDENCY CHAIN: 01_tensor → 02_activations → 03_layers → 04_losses → 05_dataloader → 06_autograd → 07_optimizers → 08_training
 This is where we enable complete training loops for neural networks.
 """
 
@@ -38,7 +38,7 @@ class TestPriorStackStillWorking:
             assert True, "Foundation not implemented yet"
 
     def test_autograd_stable(self):
-        """Verify Module 09 (Autograd) still works."""
+        """Verify Module 06 (Autograd) still works."""
         try:
             from tinytorch.core.autograd import Variable, backward
             from tinytorch.core.tensor import Tensor
@@ -56,8 +56,8 @@ class TestPriorStackStillWorking:
             assert True, "Autograd not implemented yet"
 
 
-class TestModule10OptimizersCore:
-    """Test Module 10 (Optimizers) core functionality."""
+class TestModule07OptimizersCore:
+    """Test Module 07 (Optimizers) core functionality."""
 
     def test_sgd_optimizer_creation(self):
         """Test SGD optimizer creation and basic functionality."""

@@ -1,5 +1,5 @@
 """
-Module 05: Autograd - Core Functionality Tests
+Module 06: Autograd - Core Functionality Tests
 ===============================================
 
 These tests verify automatic differentiation works correctly.

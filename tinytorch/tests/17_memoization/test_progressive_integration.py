@@ -581,16 +581,16 @@ class TestTinyTorchGraduationReadiness:
 
         # Students should understand PyTorch concepts because they built them:
         pytorch_concepts_mastered = {
-            'torch.Tensor': 'Built in Module 02',
-            'torch.nn.Module': 'Built in Module 04',
-            'torch.nn.functional': 'Built in Module 03',
-            'torch.optim': 'Built in Module 10',
-            'torch.utils.data': 'Built in Module 08',
-            'torch.autograd': 'Built in Module 09',
-            'torch.nn.attention': 'Built in Module 07',
-            'torch.jit': 'Built in Module 13 (kernels)',
-            'torch.quantization': 'Built in Module 12',
-            'torch.distributed': 'Built in Module 15 (MLOps)',
+            'torch.Tensor': 'Built in Module 01',
+            'torch.nn.Module': 'Built in Module 03',
+            'torch.nn.functional': 'Built in Module 02',
+            'torch.optim': 'Built in Module 07',
+            'torch.utils.data': 'Built in Module 05',
+            'torch.autograd': 'Built in Module 06',
+            'torch.nn.attention': 'Built in Module 12',
+            'torch.jit': 'Built in Module 18 (acceleration)',
+            'torch.quantization': 'Built in Module 15',
+            'torch.distributed': 'Built in Module 19 (MLOps)',
         }
 
         # They understand the systems behind the abstractions

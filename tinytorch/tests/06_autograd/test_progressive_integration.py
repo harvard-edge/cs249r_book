@@ -1,8 +1,8 @@
 """
-Module 05: Progressive Integration Tests
-Tests that Module 05 (Autograd) works correctly AND that the entire prior stack works.
+Module 06: Progressive Integration Tests
+Tests that Module 06 (Autograd) works correctly AND that the entire prior stack works.
 
-DEPENDENCY CHAIN: 01_tensor → 02_activations → 03_layers → 04_losses → 05_autograd
+DEPENDENCY CHAIN: 01_tensor → 02_activations → 03_layers → 04_losses → 05_dataloader → 06_autograd
 This is where we enable automatic differentiation for gradient-based learning.
 """
 
@@ -15,10 +15,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
 class TestPriorStackStillWorking:
-    """Quick regression checks that prior modules (01→07) still work."""
+    """Quick regression checks that prior modules (01→05) still work."""
 
     def test_foundation_stack_stable(self):
-        """Verify foundation stack (01→05) remains stable."""
+        """Verify foundation stack (01→06) remains stable."""
         # Environment (Module 01)
         assert sys.version_info >= (3, 8), "Foundation broken: Python version"
 
@@ -37,7 +37,7 @@ class TestPriorStackStillWorking:
             assert True, "Foundation not implemented yet"
 
     def test_advanced_stack_stable(self):
-        """Verify advanced modules (06→07) still work."""
+        """Verify advanced modules (07→08) still work."""
         try:
             from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.attention import MultiHeadAttention
@@ -53,8 +53,8 @@ class TestPriorStackStillWorking:
             assert True, "Advanced stack not implemented yet"
 
 
-class TestModule08DataLoaderCore:
-    """Test Module 08 (DataLoader) core functionality."""
+class TestModule05DataLoaderCore:
+    """Test Module 05 (DataLoader) core functionality."""
 
     def test_dataset_creation(self):
         """Test basic dataset creation works."""
@@ -331,7 +331,7 @@ class TestRealWorldDataCapability:
 
 
 class TestRegressionPrevention:
-    """Ensure previous modules still work after Module 08 development."""
+    """Ensure previous modules still work after Module 06 (Autograd) development."""
 
     def test_no_foundation_regression(self):
         """Verify foundation stack (01→05) unchanged."""

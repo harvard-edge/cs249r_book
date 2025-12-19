@@ -1,5 +1,5 @@
 """
-Checkpoint 10: Training (After Module 11 - Training)
+Checkpoint 10: Training (After Module 08 - Training)
 Question: "Can I build complete training loops for end-to-end learning?"
 """
 

@@ -18,7 +18,7 @@ def test_dense_module_integration():
     warnings.filterwarnings("ignore")
 
     results = {
-        "module_name": "05_dense",
+        "module_name": "05_dataloader",
         "integration_type": "dense_validation",
         "tests": [],
         "success": True,

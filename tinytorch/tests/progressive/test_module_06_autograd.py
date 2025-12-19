@@ -1,5 +1,5 @@
 """
-Module 05: Autograd - Progressive Testing
+Module 06: Autograd - Progressive Testing
 ==========================================
 
 🎯 LEARNING OBJECTIVES:
@@ -509,13 +509,13 @@ class TestCommonMistakes:
 
 if __name__ == "__main__":
     print("=" * 70)
-    print("Module 05: Autograd - Progressive Tests")
+    print("Module 06: Autograd - Progressive Tests")
     print("=" * 70)
     print()
     print("To run these tests:")
-    print("  pytest tests/progressive/test_module_05_autograd.py -v")
+    print("  pytest tests/progressive/test_module_06_autograd.py -v")
     print()
     print("Or via tito:")
-    print("  tito module test 05")
+    print("  tito module test 06")
     print()
     pytest.main([__file__, "-v"])

@@ -1,15 +1,15 @@
 """
-Module 08: Progressive Integration Tests
-Tests that Module 08 (DataLoader) works correctly AND that Foundation tier (01→07) still works.
+Module 05: Progressive Integration Tests
+Tests that Module 05 (DataLoader) works correctly AND that Foundation tier (01→04) still works.
 
-DEPENDENCY CHAIN: 01_tensor → ... → 07_training → 08_dataloader
+DEPENDENCY CHAIN: 01_tensor → ... → 04_losses → 05_dataloader
 This is where we enable efficient data loading for training.
 
 🎯 WHAT THIS TESTS:
-- Module 08: Dataset abstraction, batching, shuffling, data pipelines
+- Module 05: Dataset abstraction, batching, shuffling, data pipelines
 - Integration: DataLoader works with Foundation tier modules
-- Regression: Complete ML pipeline (01→08) still works correctly
-- Preparation: Ready for CNNs (Module 09) and advanced architectures
+- Regression: Complete ML pipeline still works correctly
+- Preparation: Ready for Autograd (Module 06) and subsequent training infrastructure
 
 💡 FOR STUDENTS: If tests fail, check:
 1. Does your Variable class exist in tinytorch.core.autograd?
@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 class TestCompleteMLPipelineStillWorks:
     """
-    🔄 REGRESSION CHECK: Verify complete ML pipeline (01→08) still works after autograd development.
+    🔄 REGRESSION CHECK: Verify ML pipeline works with DataLoader.
 
     💡 If these fail: You may have broken something in the ML pipeline while implementing autograd.
     🔧 Fix: Check that autograd doesn't interfere with basic forward pass functionality.
@@ -115,15 +115,12 @@ class TestCompleteMLPipelineStillWorks:
             🔍 IMPORT ERROR: {str(e)}
 
             🔧 PIPELINE REQUIREMENTS:
-            All previous modules (01→08) must be working:
+            Modules 01-05 must be working:
             1. Tensor operations (Module 01)
             2. Activation functions (Module 02)
             3. Layer infrastructure (Module 03)
             4. Losses (Module 04)
-            5. Autograd (Module 05)
-            6. Optimizers (Module 06)
-            7. Training loops (Module 07)
-            8. Data loading (Module 08)
+            5. Data loading (Module 05)
 
             💡 DEBUG STEPS:
             1. Test each module individually
@@ -241,7 +238,7 @@ class TestCompleteMLPipelineStillWorks:
 
 class TestModule09AutogradCore:
     """
-    🆕 NEW FUNCTIONALITY: Test Module 09 (Autograd) core implementation.
+    🆕 NEW FUNCTIONALITY: Test Module 06 (Autograd) core implementation.
 
     💡 What you're implementing: Automatic differentiation for gradient-based learning.
     🎯 Goal: Enable gradient computation for neural network training.
@@ -766,7 +763,7 @@ class TestModule09Completion:
         □ Optimization readiness
         □ Memory efficient implementation
 
-        🎯 SUCCESS = Ready for Module 10: Optimizers!
+        🎯 SUCCESS = Ready for Module 07: Optimizers!
         """
         autograd_capabilities = {
             "Tensor gradient tracking": False,

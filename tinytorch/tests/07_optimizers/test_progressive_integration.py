@@ -1,15 +1,15 @@
 """
-Module 06: Progressive Integration Tests
-Tests that Module 06 (Optimizers) works correctly AND that the foundation stack (01→05) still works.
+Module 07: Progressive Integration Tests
+Tests that Module 07 (Optimizers) works correctly AND that the foundation stack (01→06) still works.
 
-DEPENDENCY CHAIN: 01_tensor → 02_activations → 03_layers → 04_losses → 05_autograd → 06_optimizers
+DEPENDENCY CHAIN: 01_tensor → 02_activations → 03_layers → 04_losses → 05_dataloader → 06_autograd → 07_optimizers
 This is where we enable learning through sophisticated optimization algorithms.
 
 🎯 WHAT THIS TESTS:
-- Module 06: SGD, Adam, AdamW optimizers with momentum and adaptive learning
-- Integration: Optimizers work with gradients from autograd (Module 05)
-- Regression: Foundation stack (01→05) still works correctly
-- Preparation: Ready for training loops (Module 07)
+- Module 07: SGD, Adam, AdamW optimizers with momentum and adaptive learning
+- Integration: Optimizers work with gradients from autograd (Module 06)
+- Regression: Foundation stack (01→06) still works correctly
+- Preparation: Ready for training loops (Module 08)
 
 💡 FOR STUDENTS: If tests fail, check:
 1. Does your SGD class exist in tinytorch.core.optimizers?
@@ -72,7 +72,7 @@ class TestFoundationStackStillWorks:
 
     def test_gradient_computation_stable(self):
         """
-        ✅ TEST: Gradient computation from Module 05 still works
+        ✅ TEST: Gradient computation from Module 06 still works
         """
         try:
             from tinytorch.core.tensor import Tensor
@@ -104,7 +104,7 @@ class TestFoundationStackStillWorks:
 
 class TestModule06OptimizersCore:
     """
-    🆕 NEW FUNCTIONALITY: Test Module 06 (Optimizers) core implementation.
+    🆕 NEW FUNCTIONALITY: Test Module 07 (Optimizers) core implementation.
 
     💡 What you're implementing: Optimization algorithms that update parameters using gradients.
     🎯 Goal: Enable neural networks to learn from their mistakes.
@@ -400,7 +400,7 @@ class TestRegressionPrevention:
                 f"Autograd broken. Expected {expected_grad}, got {x.grad.data}"
 
         except Exception as e:
-            assert False, f"Module 05 (autograd) broken: {str(e)}"
+            assert False, f"Module 06 (autograd) broken: {str(e)}"
 
     def test_progressive_compatibility(self):
         """Test that all foundation modules work together."""

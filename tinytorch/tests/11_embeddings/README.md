@@ -25,7 +25,7 @@ The file `test_progressive_integration.py` tests **Module 12 (Compression)** ins
 └──────────────┘                          │
                                           ▼
 ┌──────────────┐                   ┌─────────────┐
-│ Module 05    │ Gradient tracking │  Module 11  │
+│ Module 06    │ Gradient tracking │  Module 11  │
 │ Autograd     │◄──────────────────│ Embeddings  │
 └──────────────┘                   └─────────────┘
                                           ▲

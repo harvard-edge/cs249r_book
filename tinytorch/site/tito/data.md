@@ -395,7 +395,7 @@ Or restore from backup:
 
 5. **Version control for code**:
  ```bash
- git commit -m "Completed Module 05: Autograd"
+ git commit -m "Completed Module 05: DataLoader"
  ```
  `.tito/` is gitignored - use git for code versions
 

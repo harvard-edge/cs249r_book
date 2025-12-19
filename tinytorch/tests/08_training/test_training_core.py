@@ -1,5 +1,5 @@
 """
-Module 07: Training - Core Functionality Tests
+Module 08: Training - Core Functionality Tests
 ===============================================
 
 WHY TRAINING MATTERS:

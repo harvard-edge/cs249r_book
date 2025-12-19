@@ -167,7 +167,7 @@ Let's build our layer system step by step. We'll implement two essential layer t
 - All methods defined INSIDE classes (no monkey-patching)
 - Forward methods return new tensors, preserving immutability
 - parameters() method enables optimizer integration
-- Gradient tracking will be added in Module 05 (Autograd)
+- Gradient tracking will be added in Module 06 (Autograd)
 """
 
 # %% [markdown]

@@ -14,19 +14,19 @@
 
 # %% [markdown]
 """
-# Module 06: Optimizers - Sophisticated Learning Algorithms
+# Module 07: Optimizers - Sophisticated Learning Algorithms
 
-Welcome to Module 06! You'll build optimizers that enable neural networks to learn from gradients using sophisticated algorithms.
+Welcome to Module 07! You'll build optimizers that enable neural networks to learn from gradients using sophisticated algorithms.
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Tensor with gradients (Modules 01-05)
+**You've Built**: Tensor with gradients (Modules 01-06)
 **You'll Build**: SGD, Adam, and AdamW optimizers with sophisticated momentum and adaptive learning
 **You'll Enable**: Modern optimization algorithms that power state-of-the-art neural networks
 
 **Connection Map**:
 ```
 Gradients → Optimizers → Training
-(Module 05)  (Module 06)  (Module 07)
+(Module 06)  (Module 07)  (Module 08)
 ```
 
 ## 🎯 Learning Objectives
@@ -40,7 +40,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/06_optimizers/optimizers_dev.py`
+**Learning Side:** You work in `modules/07_optimizers/optimizers_dev.py`
 **Building Side:** Code exports to `tinytorch.core.optimizers`
 
 ```python
@@ -52,7 +52,7 @@ from tinytorch.core.optimizers import SGD, Adam, AdamW
 - **Learning:** Complete optimization system for modern neural network training
 - **Production:** Proper organization like PyTorch's torch.optim with all optimization algorithms together
 - **Consistency:** All optimization logic and parameter updating in core.optimizers
-- **Integration:** Works seamlessly with gradients from Module 05 for complete training capability
+- **Integration:** Works seamlessly with gradients from Module 06 for complete training capability
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
@@ -62,11 +62,11 @@ from tinytorch.core.optimizers import SGD, Adam, AdamW
 import numpy as np
 from typing import List, Union, Optional, Dict, Any
 
-# Import Tensor from Module 01 (now with gradient support from Module 05)
+# Import Tensor from Module 01 (now with gradient support from Module 06)
 from tinytorch.core.tensor import Tensor
 
 # Enable autograd to add gradient tracking to Tensor
-# This module depends on Module 05 (Autograd) being available
+# This module depends on Module 06 (Autograd) being available
 from tinytorch.core.autograd import enable_autograd
 enable_autograd()
 
@@ -457,7 +457,7 @@ class SGD(Optimizer):
         Check if this optimizer uses momentum.
 
         This explicit API method replaces the need for hasattr() checks
-        in checkpointing code (Module 07).
+        in checkpointing code (Module 08).
 
         Returns:
             bool: True if momentum is enabled (momentum > 0), False otherwise
@@ -1452,7 +1452,7 @@ def test_module():
 
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
-    print("Run: tito module complete 06_optimizers")
+    print("Run: tito module complete 07_optimizers")
 
 # %% [markdown]
 """
@@ -1580,9 +1580,9 @@ Congratulations! You've built sophisticated optimization algorithms that power m
 - All tests pass ✅ (validated by `test_module()`)
 
 ### Ready for Next Steps
-Your optimizer implementations enable sophisticated neural network training! With gradients from Module 05 and optimizers from Module 06, you're ready to build complete training loops.
+Your optimizer implementations enable sophisticated neural network training! With gradients from Module 06 and optimizers from Module 07, you're ready to build complete training loops.
 
-Export with: `tito module complete 06_optimizers`
+Export with: `tito module complete 07_optimizers`
 
-**Next**: Module 07 will add training loops, learning rate scheduling, and checkpointing for complete end-to-end neural network training!
+**Next**: Module 08 will add training loops, learning rate scheduling, and checkpointing for complete end-to-end neural network training!
 """

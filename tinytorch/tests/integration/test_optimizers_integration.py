@@ -5,7 +5,7 @@ Tests that optimizers correctly integrate with:
 - Module 01: Tensor operations
 - Module 02: Activation functions
 - Module 03: Layers (Linear, Sequential)
-- Module 05: Autograd (Tensor with gradients)
+- Module 06: Autograd (Tensor with gradients)
 - Module 04: Losses (MSE, CrossEntropy)
 """
 

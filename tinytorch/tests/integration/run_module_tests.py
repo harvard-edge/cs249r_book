@@ -203,7 +203,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Run module integration tests")
-    parser.add_argument("module", help="Module name (e.g., 05_dense)")
+    parser.add_argument("module", help="Module name (e.g., 05_dataloader)")
     parser.add_argument("--json", action="store_true", help="Output JSON report")
 
     args = parser.parse_args()

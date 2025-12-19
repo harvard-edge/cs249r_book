@@ -17,19 +17,19 @@
 
 # %% [markdown]
 """
-# Module 08: DataLoader - Efficient Data Pipeline for ML Training
+# Module 05: DataLoader - Efficient Data Pipeline for ML Training
 
-Welcome to Module 08! You're about to build the data loading infrastructure that transforms how ML models consume data during training.
+Welcome to Module 05! You're about to build the data loading infrastructure that transforms how ML models consume data during training.
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Tensor operations, activations, layers, losses, autograd, optimizers, and training loops
+**You've Built**: Tensor operations, activations, layers, and losses
 **You'll Build**: Dataset abstraction, DataLoader with batching/shuffling, and real dataset support
-**You'll Enable**: Efficient data pipelines that feed hungry neural networks with properly formatted batches
+**You'll Enable**: Efficient data pipelines that will feed hungry neural networks with properly formatted batches
 
 **Connection Map**:
 ```
-Training Loop → DataLoader → Batched Data → Model
-(Module 07)    (Module 08)  (optimized)   (ready to learn)
+Losses → DataLoader → Autograd → Optimizers → Training
+(Module 04)  (Module 05)  (Module 06)  (Module 07)  (Module 08)
 ```
 
 ## 🎯 Learning Objectives
@@ -44,7 +44,7 @@ Let's transform scattered data into organized learning batches!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/08_dataloader/dataloader_dev.py`
+**Learning Side:** You work in `modules/05_dataloader/dataloader_dev.py`
 **Building Side:** Code exports to `tinytorch.data.loader`
 
 ```python
@@ -1147,7 +1147,7 @@ Now that you've built the DataLoader abstraction, you're ready to use it with re
 TinyTorch separates **mechanics** (this module) from **application** (examples/milestones):
 
 ```
-Module 08 (DataLoader)          Examples & Milestones
+Module 05 (DataLoader)          Examples & Milestones
 ┌──────────────────────┐       ┌────────────────────────┐
 │ Dataset abstraction  │       │ Real MNIST digits      │
 │ TensorDataset impl   │  ───> │ CIFAR-10 images        │
@@ -1971,7 +1971,7 @@ Congratulations! You've built a complete data loading pipeline for ML training!
 
 ### Ready for Next Steps
 Your DataLoader implementation enables efficient training of CNNs and larger models with proper data pipeline management.
-Export with: `tito export 08_dataloader`
+Export with: `tito export 05_dataloader`
 
 **Apply your knowledge:**
 - Milestone 03: Train MLP on real MNIST digits

@@ -399,7 +399,7 @@ Let's walk through each line to understand the comparison:
 
 - **Line 1 (Import)**: TinyTorch exposes optimizers from `tinytorch.core.optimizers`; PyTorch uses `torch.optim`. The namespace structure mirrors production frameworks.
 - **Line 4 (Creation)**: Both use identical syntax: `Adam(model.parameters(), lr=0.001)`. The `model.parameters()` method returns an iterable of tensors with `requires_grad=True`.
-- **Line 7-8 (Training)**: The loss computation and backward pass are identical. Your autograd system from Module 05 computes gradients just like PyTorch.
+- **Line 7-8 (Training)**: The loss computation and backward pass are identical. Your autograd system from Module 06 computes gradients just like PyTorch.
 - **Line 9 (Update)**: Both call `optimizer.step()` to update parameters using computed gradients. The update rules are mathematically identical.
 - **Line 10 (Clear)**: Both call `optimizer.zero_grad()` to clear gradients before the next iteration. Without this, gradients would accumulate across batches.
 

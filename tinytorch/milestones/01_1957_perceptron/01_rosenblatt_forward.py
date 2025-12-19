@@ -405,9 +405,9 @@ def main():
     # Next steps
     next_steps = (
         "[bold]Complete Modules 05-07 to unlock TRAINING:[/bold]\n\n"
-        "  [cyan]•[/cyan] Module 05 (Autograd):   Calculate gradients automatically\n"
-        "  [cyan]•[/cyan] Module 06 (Optimizers): Update weights intelligently\n"
-        "  [cyan]•[/cyan] Module 07 (Training):   Put it all together\n\n"
+        "  [cyan]•[/cyan] Module 06 (Autograd):   Calculate gradients automatically\n"
+        "  [cyan]•[/cyan] Module 07 (Optimizers): Update weights intelligently\n"
+        "  [cyan]•[/cyan] Module 08 (Training):   Put it all together\n\n"
         "[dim]Then return to this SAME perceptron and watch it achieve 95%+!\n"
         "You'll see random → intelligent through the power of learning![/dim]"
     )

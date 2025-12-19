@@ -18,9 +18,9 @@ Watch a multi-layer network SOLVE the "impossible" XOR problem that stumped AI f
   Module 02 (Activations)   : YOUR ReLU and Sigmoid (non-linearity!)
   Module 03 (Layers)        : YOUR Linear layers (multiple layers!)
   Module 04 (Losses)        : YOUR loss function
-  Module 05 (Autograd)      : YOUR backpropagation through hidden layers
-  Module 06 (Optimizers)    : YOUR SGD optimizer
-  Module 07 (Training)      : YOUR training loop
+  Module 06 (Autograd)      : YOUR backpropagation through hidden layers
+  Module 07 (Optimizers)    : YOUR SGD optimizer
+  Module 08 (Training)      : YOUR training loop
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🏗️ ARCHITECTURE (The Multi-Layer Solution):
@@ -111,7 +111,7 @@ console = Console()
 # │ Module 04: Loss     │ BinaryCrossEntropy measures    │ Guides learning toward      │
 # │                     │ how wrong predictions are      │ correct XOR outputs         │
 # │                     │                                │                             │
-# │ Module 05: Autograd │ .backward() computes gradients │ Gradients flow through      │
+# │ Module 06: Autograd │ .backward() computes gradients │ Gradients flow through      │
 # │                     │ for BOTH layers automatically  │ hidden layer to inputs!     │
 # │                     │                                │                             │
 # │ Module 06: SGD      │ Updates 13 parameters          │ Adjusts weights to minimize │

@@ -51,20 +51,20 @@ def get_module_integration_tests(module_name: str):
     if "04_layers" in deps:
         tests.append(("test_layer_integration", test_layer_integration))
 
-    if "05_dense" in deps:
-        tests.append(("test_dense_integration", test_dense_integration))
+    if "05_dataloader" in deps:
+        tests.append(("test_dataloader_integration", test_dataloader_integration))
 
-    if "10_autograd" in deps:
+    if "06_autograd" in deps:
         tests.append(("test_autograd_integration", test_autograd_integration))
 
-    if "11_optimizers" in deps:
+    if "07_optimizers" in deps:
         tests.append(("test_optimizer_integration", test_optimizer_integration))
 
     # Module-specific integration tests
-    if module_name == "05_dense":
-        tests.append(("test_dense_with_tensor", test_dense_with_tensor))
-        tests.append(("test_dense_with_activations", test_dense_with_activations))
-        tests.append(("test_multi_layer_network", test_multi_layer_network))
+    if module_name == "05_dataloader":
+        tests.append(("test_dataloader_with_tensor", test_dataloader_with_tensor))
+        tests.append(("test_dataloader_with_batching", test_dataloader_with_batching))
+        tests.append(("test_dataloader_pipeline", test_dataloader_pipeline))
 
     elif module_name == "09_convolutions":
         tests.append(("test_conv2d_with_tensor", test_conv2d_with_tensor))
