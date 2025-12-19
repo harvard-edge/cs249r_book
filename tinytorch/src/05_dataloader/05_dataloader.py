@@ -44,8 +44,8 @@ Let's transform scattered data into organized learning batches!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/05_dataloader/dataloader_dev.py`
-**Building Side:** Code exports to `tinytorch.data.loader`
+**Learning Side:** You work in `modules/05_dataloader/dataloader.ipynb`
+**Building Side:** Code exports to `tinytorch.core.dataloader`
 
 ```python
 # How to use this module:
