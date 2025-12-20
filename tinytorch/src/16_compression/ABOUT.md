@@ -6,7 +6,7 @@
 **OPTIMIZATION TIER** | Difficulty: ●●●○ | Time: 5-7 hours | Prerequisites: 01-14
 
 **Prerequisites: Modules 01-14** means you should have:
-- Built tensors, layers, and the complete training pipeline (Modules 01-07)
+- Built tensors, layers, and the complete training pipeline (Modules 01-08)
 - Implemented profiling tools to measure model characteristics (Module 14)
 - Comfort with weight distributions, parameter counting, and memory analysis
 

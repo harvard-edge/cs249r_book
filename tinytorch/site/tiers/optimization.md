@@ -165,7 +165,7 @@ After completing the Optimization tier, you'll be able to:
 ## Prerequisites
 
 **Required**:
-- ** Architecture Tier** (Modules 08-13) completed
+- ** Architecture Tier** (Modules 09-13) completed
 - Understanding of CNNs and/or transformers
 - Experience training models on real datasets
 - Basic understanding of systems concepts (memory, CPU/GPU, throughput)
@@ -284,8 +284,8 @@ tito module start 14_profiling
 
 **Or explore other tiers:**
 
-- **[ Foundation Tier](foundation)** (Modules 01-07): Mathematical foundations
-- **[ Architecture Tier](architecture)** (Modules 08-13): CNNs and transformers
+- **[Foundation Tier](foundation)** (Modules 01-08): Mathematical foundations
+- **[Architecture Tier](architecture)** (Modules 09-13): CNNs and transformers
 - **[ Torch Olympics](olympics)** (Module 20): Final integration challenge
 
 

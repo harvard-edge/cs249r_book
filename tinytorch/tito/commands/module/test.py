@@ -205,7 +205,7 @@ class ModuleTestCommand(BaseCommand):
         # Map module numbers to relevant integration tests
         # Each module inherits tests from earlier modules (progressive testing)
         integration_test_map = {
-            # Foundation modules (01-07)
+            # Foundation modules (01-08)
             1: ["test_basic_integration.py"],
             2: ["test_basic_integration.py"],
             3: ["test_layers_integration.py"],
@@ -214,7 +214,7 @@ class ModuleTestCommand(BaseCommand):
             6: ["test_training_flow.py"],
             7: ["test_training_flow.py"],
 
-            # Architecture modules (08-13)
+            # Architecture modules (09-13)
             8: ["test_dataloader_integration.py"],
             9: ["test_cnn_integration.py"],
             10: [],  # Tokenization: self-contained, no integration deps

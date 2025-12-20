@@ -1,6 +1,6 @@
 # Milestone 02: The XOR Crisis (1969)
 
-**FOUNDATION TIER** | Difficulty: 2/4 | Time: 30-60 min | Prerequisites: Modules 01-06
+**FOUNDATION TIER** | Difficulty: 2/4 | Time: 30-60 min | Prerequisites: Modules 01-08
 
 ## Overview
 

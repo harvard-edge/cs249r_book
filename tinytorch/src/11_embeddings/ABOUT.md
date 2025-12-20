@@ -3,9 +3,9 @@
 :::{admonition} Module Info
 :class: note
 
-**ARCHITECTURE TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-07, 10
+**ARCHITECTURE TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-08, 10
 
-**Prerequisites: Modules 01-07 and 10** means you should understand:
+**Prerequisites: Modules 01-08 and 10** means you should understand:
 - Tensor operations (shape manipulation, matrix operations, broadcasting)
 - Training fundamentals (forward/backward, optimization)
 - Tokenization (converting text to token IDs, vocabularies)

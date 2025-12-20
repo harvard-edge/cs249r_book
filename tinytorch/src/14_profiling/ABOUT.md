@@ -6,7 +6,7 @@
 **OPTIMIZATION TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-13
 
 **Prerequisites: Modules 01-13** means you should have:
-- Built the complete ML stack (Modules 01-07)
+- Built the complete ML stack (Modules 01-08)
 - Implemented CNN architectures (Module 09) or Transformers (Modules 10-13)
 - Models to profile and optimize
 
