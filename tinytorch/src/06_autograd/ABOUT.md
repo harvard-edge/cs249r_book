@@ -38,7 +38,7 @@ Browse the source code on GitHub.
 Listen to an AI-generated overview.
 
 <audio controls style="width: 100%; height: 54px; margin-top: auto;">
-  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/06_autograd.mp3" type="audio/mpeg">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/05_autograd.mp3" type="audio/mpeg">
 </audio>
 ```
 
