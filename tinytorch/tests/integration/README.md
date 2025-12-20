@@ -29,7 +29,7 @@ This pattern catches the most common and frustrating bugs students encounter.
 
 | Test File | What It Catches | Modules |
 |-----------|-----------------|---------|
-| `test_dataloader_integration.py` | Data pipeline issues | 08 |
+| `test_dataloader_integration.py` | Data pipeline issues | 05 |
 | `test_api_simplification_integration.py` | API compatibility | All |
 
 ### 🔬 Scenario Tests
