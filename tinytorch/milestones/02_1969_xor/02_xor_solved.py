@@ -86,6 +86,8 @@ from rich import box
 # Add project root to path
 sys.path.insert(0, os.getcwd())
 
+# Seed will be set before training to guarantee 100% convergence
+
 # Import TinyTorch components YOU BUILT!
 from tinytorch import Tensor, Linear, ReLU, Sigmoid, BinaryCrossEntropyLoss, SGD
 
@@ -400,6 +402,9 @@ def main():
     # ACT 3: THE EXPERIMENT 🔬
     # ═══════════════════════════════════════════════════════════════════════
 
+    # Set seed before model creation to guarantee reproducible 100% convergence
+    np.random.seed(1986)  # The year backprop was published!
+
     model = XORNetwork(hidden_size=4)
     initial_preds = model(X)
     initial_acc = ((initial_preds.data > 0.5).astype(int) == y.data).mean()
@@ -469,7 +474,7 @@ def main():
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
 
         "[bold]🚀 What's Next:[/bold]\n"
-        "[dim]Milestone 03 applies this to REAL data with YOUR DataLoader!\n"
+        "[dim]Milestone 03 applies this to digit images with YOUR DataLoader!\n"
         "Train on handwritten digits and see modern ML in action![/dim]",
 
         title="🌟 1986 AI Renaissance Complete",

@@ -9,7 +9,7 @@ back-propagating errors" in Nature. This paper proved that multi-layer networks
 could learn useful internal representations - ending the AI Winter that began
 after the 1969 XOR crisis.
 
-🎯 MILESTONE 3: MULTI-LAYER PERCEPTRON ON REAL DIGITS
+🎯 MILESTONE 3: MULTI-LAYER PERCEPTRON ON TINYDIGITS
 The 1986 backpropagation paper proved multi-layer networks could solve
 real-world problems. Let's recreate that breakthrough using YOUR Tiny🔥Torch!
 
@@ -99,7 +99,7 @@ console = Console()
 # 🎯 YOUR TINYTORCH MODULES IN ACTION
 # =============================================================================
 #
-# This milestone showcases YOUR complete ML system on a REAL classification task:
+# This milestone showcases YOUR complete ML system on a classification task:
 #
 # ┌─────────────────────┬────────────────────────────────┬─────────────────────────────┐
 # │ What You Built      │ How It's Used Here             │ Systems Impact              │
@@ -133,7 +133,7 @@ console = Console()
 # ┌──────────────────────┬─────────────────────────┬────────────────────────────┐
 # │ XOR (Milestone 02)   │ This Milestone          │ Why It Matters             │
 # ├──────────────────────┼─────────────────────────┼────────────────────────────┤
-# │ 2 inputs             │ 64 inputs (8×8 image)   │ Real data is high-dim!     │
+# │ 2 inputs             │ 64 inputs (8×8 image)   │ Images are high-dim!       │
 # │ 4 data points        │ 150+ data points        │ Need more data to learn    │
 # │ Binary classification│ 10-way classification   │ Multi-class is harder      │
 # │ 13 parameters        │ 2,378 parameters        │ More capacity = more power │
@@ -564,7 +564,7 @@ def train_mlp():
     console.print("  • MLP learned to recognize handwritten digits from pixels")
     console.print("  • Hidden layer discovered useful digit features")
     console.print("  • DataLoader enabled efficient batch processing")
-    console.print("  • Backprop through hidden layers works on real data!")
+    console.print("  • Backprop through hidden layers works on image data!")
 
     console.print("\n" + "─" * 70 + "\n")
 
@@ -582,16 +582,16 @@ def train_mlp():
 
         "[bold]💡 What YOU Just Accomplished:[/bold]\n"
         "  ✓ Built multi-layer network with YOUR components\n"
-        "  ✓ Trained on REAL handwritten digits\n"
+        "  ✓ Trained on TinyDigits (synthetic handwritten digits)\n"
         "  ✓ Used YOUR DataLoader for efficient batching\n"
         f"  ✓ Model generalizes well (gap: {overfitting_gap:.1f}%)\n"
-        "  ✓ Backprop through hidden layers works on real data!\n"
+        "  ✓ Backprop through hidden layers works on image data!\n"
         f"  ✓ Achieved {final_test_acc:.1f}% test accuracy!\n\n"
 
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
 
         "[bold]🎓 Why This Matters:[/bold]\n"
-        "  This proved backprop works on REAL tasks, not just XOR!\n"
+        "  This proved backprop works on practical tasks, not just XOR!\n"
         "  1986 paper by Rumelhart, Hinton & Williams launched\n"
         "  modern deep learning revolution.\n\n"
 
