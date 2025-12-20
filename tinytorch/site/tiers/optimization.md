@@ -234,10 +234,24 @@ Note the progression: general-purpose optimization (acceleration) comes before d
 
 ### Why This Order?
 
-1. **Profiling (14)**: Always measure before optimizing
-2. **Model-level (15-16)**: Change the model (one-time transformation)
-3. **Runtime (17-18)**: Change execution (applied during inference)
-4. **Benchmarking (19)**: Validate improvements systematically
+The Optimization tier follows **Measure → Transform → Execute → Validate**:
+
+```
+Profile (14) → Model-Level (15-16) → Runtime (17-18) → Benchmark (19)
+   ↓              ↓                      ↓                ↓
+ "What's slow?"  "Shrink the model"   "Speed up execution"  "Did it work?"
+```
+
+**Why Model-Level before Runtime?**
+
+Model-level optimizations (quantization, pruning) are *one-time transformations* you apply before deployment. Runtime optimizations (acceleration, memoization) are *ongoing techniques* applied during every inference. It makes sense to first prepare the model, then optimize how it runs.
+
+**Why Acceleration (17) before Memoization (18)?**
+
+- **Acceleration** teaches general-purpose optimization: vectorization, cache locality, kernel fusion. These techniques apply to *any* numerical computation—matrix multiplication, convolutions, attention, everything.
+- **Memoization** (KV-cache) is domain-specific optimization for transformer autoregressive generation. It only applies to transformers generating sequences.
+
+The pedagogical principle: **general before specific**. Once you understand how to make any code fast (acceleration), you can appreciate the specialized optimization that makes LLM inference economically viable (KV-cache).
 
 Both tracks start from **Module 14 (Profiling)** and converge at **Module 19 (Benchmarking)**.
 

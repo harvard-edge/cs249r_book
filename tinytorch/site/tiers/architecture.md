@@ -43,6 +43,37 @@ graph TB
 ```
 
 
+## Why This Order?
+
+The Architecture tier branches into two parallel tracks—**Vision** and **Language**—because these domains have fundamentally different data structures and operations. But both follow the same principle: **build components in the order they compose**.
+
+### Vision Track: Spatial Processing (09)
+
+**Convolutions (09)** stands alone because CNNs have a relatively simple pipeline:
+- Images come in, convolutions extract spatial features, pooling reduces dimensions
+- One module gives you everything needed for computer vision
+
+### Language Track: Sequential Processing (10-13)
+
+**Tokenization (10) → Embeddings (11) → Attention (12) → Transformers (13)**
+
+Language requires more infrastructure, and the order is non-negotiable:
+1. **Tokenization** converts text to integers—you can't process raw strings
+2. **Embeddings** convert integers to vectors—attention needs continuous representations
+3. **Attention** computes context-aware representations—the core transformer operation
+4. **Transformers** compose attention with MLPs and normalization—the complete architecture
+
+Each step transforms the data representation:
+```
+"hello" → [72, 101, 108, 108, 111] → [[0.1, 0.3, ...], [...]] → attention → output
+  text       token IDs                  embeddings           transformer
+```
+
+### Why Not Merge Them?
+
+Vision and language students have different goals. A computer vision engineer building image classifiers doesn't need tokenization; an NLP engineer building chatbots doesn't need convolutions. Parallel tracks let students focus on their domain while building on shared foundations.
+
+
 ## Module Details
 
 ### 09. Convolutions - Convolutional Neural Networks

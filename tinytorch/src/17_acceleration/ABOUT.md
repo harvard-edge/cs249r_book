@@ -52,6 +52,18 @@ This module teaches you hardware-aware optimization through vectorization and ke
 
 Acceleration isn't about clever algorithms. It's about understanding how processors work and writing code that exploits their design.
 
+## Why Acceleration Before Memoization?
+
+The Optimization tier divides into **model-level** (15-16) and **runtime** (17-18) optimizations:
+
+- **Model-level** (Quantization, Compression): Change the model itself
+- **Runtime** (Acceleration, Memoization): Change how execution happens
+
+Within runtime optimizations, **Acceleration comes first** because:
+1. **General before specific**: Vectorization and kernel fusion apply to ANY numerical computation—matrix multiplication, convolutions, attention, everything
+2. **Memoization (KV-cache)** is domain-specific: it only applies to transformer autoregressive generation
+3. Once you understand general speedup techniques, you can appreciate the specialized optimization that makes LLM inference economically viable
+
 ## Learning Objectives
 
 ```{tip} By completing this module, you will:

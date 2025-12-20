@@ -44,6 +44,38 @@ graph TB
 ```
 
 
+## Why This Order?
+
+The Foundation tier follows a deliberate **Forward Pass → Learning → Training** progression that mirrors how neural networks actually work:
+
+### Phase 1: Forward Pass Components (01-04)
+
+**Tensors (01) → Activations (02) → Layers (03) → Losses (04)**
+
+You must build things in the order data flows through them:
+1. **Tensors** are the data structure—you can't do anything without them
+2. **Activations** transform tensors non-linearly—needed before layers can create interesting functions
+3. **Layers** combine tensors and activations into parameterized transformations
+4. **Losses** measure how wrong predictions are—needed before you can learn
+
+At this point, you can do a complete forward pass: `input → layer → activation → loss`.
+
+### Phase 2: Learning Infrastructure (05-07)
+
+**DataLoader (05) → Autograd (06) → Optimizers (07)**
+
+Now you need the infrastructure to learn from data:
+5. **DataLoader** provides efficient data batching—real training needs this before autograd
+6. **Autograd** computes gradients automatically—the engine that makes learning possible
+7. **Optimizers** use gradients to update parameters—SGD, Adam, and friends
+
+### Phase 3: Complete Training (08)
+
+**Training (08)** integrates everything into a complete learning loop.
+
+This order isn't arbitrary—it's the minimal dependency chain. You can't build optimizers without autograd (no gradients), can't build autograd without losses (nothing to differentiate), can't build losses without layers (no predictions). Each module unlocks the next.
+
+
 ## Module Details
 
 ### 01. Tensor - The Foundation of Everything

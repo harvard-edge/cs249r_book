@@ -51,6 +51,20 @@ Memoization solves this by caching computation results for reuse. In transformer
 
 In this module, you'll implement a production-grade KV cache system that makes transformer inference practical at scale. You'll discover why every deployed language model uses this technique.
 
+## Why Memoization After Acceleration?
+
+The Optimization tier divides runtime optimizations into:
+
+- **Acceleration (17)**: General-purpose speedups that apply to ANY computation
+- **Memoization (18)**: Domain-specific optimization for transformer generation
+
+**Why this order?** Pedagogically, you learn general techniques before specialized applications:
+
+1. **Acceleration** teaches universal concepts: vectorization, cache locality, kernel fusion. These apply to matrix multiplication, convolutions, attention—everything.
+2. **Memoization (KV-cache)** is specialized: it only helps autoregressive transformer generation, trading O(n) memory for O(n²) → O(n) speedup.
+
+Once you understand how to make any code fast (Module 17), you can appreciate this elegant optimization that makes ChatGPT and Claude economically viable (Module 18).
+
 ## Learning Objectives
 
 ```{tip} By completing this module, you will:

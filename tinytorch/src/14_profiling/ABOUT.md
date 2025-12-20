@@ -51,6 +51,26 @@ Every optimization decision starts with measurement. Is your model memory-bound 
 
 By the end, you'll have built the same measurement infrastructure used by production ML teams to make data-driven optimization decisions.
 
+## The Optimization Tier Flow
+
+Profiling (Module 14) is the gateway to the Optimization tier, which follows **Measure → Transform → Validate**:
+
+```
+Profiling (14) → Model-Level (15-16) → Runtime (17-18) → Benchmarking (19)
+     ↓                  ↓                    ↓                  ↓
+ "What's slow?"   "Shrink the model"   "Speed up execution"  "Did it work?"
+```
+
+**Model-Level Optimizations (15-16)**: Change the model itself
+- Quantization: FP32 → INT8 for 4× compression
+- Compression: Prune unnecessary weights
+
+**Runtime Optimizations (17-18)**: Change how execution happens
+- Acceleration: Vectorization, kernel fusion (general-purpose)
+- Memoization: KV-cache for transformers (domain-specific)
+
+You can't optimize what you can't measure. That's why profiling comes first.
+
 ## Learning Objectives
 
 ```{tip} By completing this module, you will:
