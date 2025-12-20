@@ -32,8 +32,8 @@ SOURCE_MAPPINGS = {
     ("perf", "profiling"): "src/14_profiling/14_profiling.py",
     ("perf", "quantization"): "src/15_quantization/15_quantization.py",
     ("perf", "compression"): "src/16_compression/16_compression.py",
-    ("perf", "memoization"): "src/17_memoization/17_memoization.py",
-    ("perf", "acceleration"): "src/18_acceleration/18_acceleration.py",
+    ("perf", "acceleration"): "src/17_acceleration/17_acceleration.py",
+    ("perf", "memoization"): "src/18_memoization/18_memoization.py",
     ("bench",): "src/19_benchmarking/19_benchmarking.py",
     ("capstone",): "src/20_capstone/20_capstone.py",
 }

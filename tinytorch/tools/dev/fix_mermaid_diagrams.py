@@ -31,8 +31,8 @@ MODULE_NAMES = {
     "14": "Profiling",
     "15": "Quantization",
     "16": "Compression",
-    "17": "Memoization",
-    "18": "Acceleration",
+    "17": "Acceleration",
+    "18": "Memoization",
     "19": "Benchmarking",
     "20": "Capstone",
 }

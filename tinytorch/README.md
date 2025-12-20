@@ -185,8 +185,8 @@ TinyTorch/
 │   ├── 14_profiling/           # Module 14: Performance analysis
 │   ├── 15_quantization/        # Module 15: Model compression (precision reduction)
 │   ├── 16_compression/         # Module 16: Pruning & distillation
-│   ├── 17_memoization/         # Module 17: KV-cache/memoization
-│   ├── 18_acceleration/        # Module 18: Hardware optimization
+│   ├── 17_acceleration/        # Module 17: Hardware optimization
+│   ├── 18_memoization/         # Module 18: KV-cache/memoization
 │   ├── 19_benchmarking/        # Module 19: Performance measurement
 │   └── 20_capstone/            # Module 20: Complete ML systems
 │

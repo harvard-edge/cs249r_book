@@ -228,8 +228,8 @@ class ModuleTestCommand(BaseCommand):
             14: [],  # Profiling: observational, no integration changes
             15: [],  # Quantization: tested in module-specific tests
             16: [],  # Compression: tested in module-specific tests
-            17: [],  # Memoization: tested in module-specific tests
-            18: [],  # Acceleration: tested in module-specific tests
+            17: [],  # Acceleration: tested in module-specific tests
+            18: [],  # Memoization: tested in module-specific tests
             19: [],  # Benchmarking: tested in module-specific tests
 
             # Capstone (20) - runs comprehensive validation
