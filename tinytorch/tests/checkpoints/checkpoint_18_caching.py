@@ -1,5 +1,5 @@
 """
-Checkpoint 18: Caching (After Module 18 - Caching)
+Checkpoint 18: Caching (After Module 18 - Memoization)
 Question: "Can I transform O(N²) to O(N) complexity with intelligent caching?"
 """
 

@@ -160,8 +160,8 @@ class ModuleCompletionOrchestrator:
             "01_tensor", "02_activations", "03_layers", "04_losses", "05_dataloader",
             "06_autograd", "07_optimizers", "08_training", "09_convolutions",
             "10_tokenization", "11_embeddings", "12_attention", "13_transformers",
-            "14_profiling", "15_quantization", "16_compression", "17_memoization",
-            "18_acceleration", "19_benchmarking", "20_capstone"
+            "14_profiling", "15_quantization", "16_compression", "17_acceleration",
+            "18_memoization", "19_benchmarking", "20_capstone"
         ]
 
         try:

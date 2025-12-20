@@ -130,8 +130,8 @@ def test_profiling_does_not_break_training():
 | 14 Profiling | Profiler + training loop |
 | 15 Quantization | Quantized model accuracy |
 | 16 Compression | Compressed model still trains |
-| 17 Memoization | Cached ops maintain correctness |
-| 18 Acceleration | Accelerated ops match baseline |
+| 17 Acceleration | Accelerated ops match baseline |
+| 18 Memoization | Cached ops maintain correctness |
 
 ### How to Fill Gaps
 

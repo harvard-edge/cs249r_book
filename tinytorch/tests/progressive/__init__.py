@@ -30,8 +30,8 @@ MODULE_DEPENDENCIES = {
     "14": ["01"],                                # Profiling is mostly standalone
     "15": ["01", "03"],                          # Quantization needs Tensor, Layers
     "16": ["01", "03"],                          # Compression needs Tensor, Layers
-    "17": ["01", "12", "13"],                    # Memoization (KV-cache) needs Attention, Transformers
-    "18": ["01"],                                # Acceleration is mostly standalone
+    "17": ["01"],                                # Acceleration is mostly standalone
+    "18": ["01", "12", "13"],                    # Memoization (KV-cache) needs Attention, Transformers
     "19": ["01"],                                # Benchmarking is mostly standalone
     "20": ["01", "02", "03", "04", "05", "06", "07", "08"],  # Capstone needs core modules
 }

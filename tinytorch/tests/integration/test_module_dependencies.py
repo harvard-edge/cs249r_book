@@ -9,8 +9,8 @@ Tests how each module interfaces with modules that came before it
 # 01_tensor, 02_activations, 03_layers, 04_losses, 05_dataloader,
 # 06_autograd, 07_optimizers, 08_training, 09_convolutions,
 # 10_tokenization, 11_embeddings, 12_attention, 13_transformers,
-# 14_profiling, 15_quantization, 16_compression, 17_memoization,
-# 18_acceleration, 19_benchmarking, 20_capstone
+# 14_profiling, 15_quantization, 16_compression, 17_acceleration,
+# 18_memoization, 19_benchmarking, 20_capstone
 MODULE_DEPENDENCIES = {
     "01_tensor": [],  # No dependencies - foundation
     "02_activations": ["01_tensor"],  # Needs Tensor
@@ -28,8 +28,8 @@ MODULE_DEPENDENCIES = {
     "14_profiling": ["01_tensor"],  # Performance analysis
     "15_quantization": ["01_tensor"],  # Optimization techniques
     "16_compression": ["01_tensor"],  # Optimization techniques
-    "17_memoization": ["01_tensor"],  # Optimization techniques
-    "18_acceleration": ["01_tensor"],  # Optimization techniques
+    "17_acceleration": ["01_tensor"],  # Runtime optimization (general)
+    "18_memoization": ["01_tensor"],  # Runtime optimization (transformer-specific)
     "19_benchmarking": ["01_tensor"],  # Performance testing
     "20_capstone": ["01_tensor", "09_convolutions", "13_transformers"]  # Full stack
 }

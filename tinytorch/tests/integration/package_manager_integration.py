@@ -45,8 +45,8 @@ class PackageManagerIntegration:
             "14_profiling": "test_integration_14_profiling",
             "15_quantization": "test_integration_15_quantization",
             "16_compression": "test_integration_16_compression",
-            "17_memoization": "test_integration_17_memoization",
-            "18_acceleration": "test_integration_18_acceleration",
+            "17_acceleration": "test_integration_17_acceleration",
+            "18_memoization": "test_integration_18_memoization",
             "19_benchmarking": "test_integration_19_benchmarking",
             "20_capstone": "test_integration_20_capstone",
         }

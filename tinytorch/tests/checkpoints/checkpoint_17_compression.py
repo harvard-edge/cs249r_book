@@ -1,5 +1,5 @@
 """
-Checkpoint 17: Compression (After Module 17 - Compression)
+Checkpoint 16: Compression (After Module 16 - Compression)
 Question: "Can I remove 70% of parameters while maintaining accuracy?"
 """
 
@@ -25,7 +25,7 @@ def test_checkpoint_17_compression():
         from tinytorch.core.networks import Sequential
         from tinytorch.nn.utils.prune import MagnitudePruner, prune_conv_filters, CompressionAnalyzer
     except ImportError as e:
-        pytest.fail(f"❌ Cannot import compression classes - complete Module 17 first: {e}")
+        pytest.fail(f"❌ Cannot import compression classes - complete Module 16 first: {e}")
 
     # Test 1: Magnitude-based pruning
     print("✂️ Testing magnitude-based pruning...")

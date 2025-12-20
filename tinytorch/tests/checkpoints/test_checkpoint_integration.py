@@ -33,9 +33,9 @@ class CheckpointValidator:
             "tests": ["test_convolution", "test_tokenization", "test_embeddings", "test_attention", "test_transformers"]
         },
         "optimization": {
-            "modules": ["14_profiling", "15_quantization", "16_compression", "17_memoization", "18_acceleration", "19_benchmarking"],
+            "modules": ["14_profiling", "15_quantization", "16_compression", "17_acceleration", "18_memoization", "19_benchmarking"],
             "capability": "Can optimize models for production deployment",
-            "tests": ["test_profiling", "test_quantization", "test_compression", "test_memoization", "test_acceleration", "test_benchmarking"]
+            "tests": ["test_profiling", "test_quantization", "test_compression", "test_acceleration", "test_memoization", "test_benchmarking"]
         },
         "capstone": {
             "modules": ["20_capstone"],
