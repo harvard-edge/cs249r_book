@@ -1,1 +1,0 @@
-../../src/18_acceleration/ABOUT.md

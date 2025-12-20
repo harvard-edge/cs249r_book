@@ -1,1 +1,0 @@
-../../src/07_training/ABOUT.md
