@@ -27,9 +27,9 @@ Character-level transformer models for text generation:
 | Module 02 | Activations | YOUR ReLU/GELU activations |
 | Module 03 | Layers | YOUR Linear layers |
 | Module 04 | Losses | YOUR CrossEntropyLoss |
-| Module 05 | Autograd | YOUR automatic differentiation |
-| Module 06 | Optimizers | YOUR Adam optimizer |
-| Module 08 | DataLoader | YOUR data batching |
+| Module 05 | DataLoader | YOUR data batching |
+| Module 06 | Autograd | YOUR automatic differentiation |
+| Module 07 | Optimizers | YOUR Adam optimizer |
 | **Module 10** | **Tokenization** | **YOUR CharTokenizer** |
 | **Module 11** | **Embeddings** | **YOUR token + positional embeddings** |
 | **Module 12** | **Attention** | **YOUR multi-head self-attention** |

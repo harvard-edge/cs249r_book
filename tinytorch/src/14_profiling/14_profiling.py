@@ -32,7 +32,7 @@ All Modules (01-13) → Profiling (14) → Optimization Techniques (15-18)
 **Before starting this module, verify:**
 - [ ] Module 01 (Tensor): Core tensor operations
 - [ ] Module 03 (Layers): Linear layer implementation
-- [ ] Module 08 (Spatial): Convolutional operations
+- [ ] Module 09 (Spatial): Convolutional operations
 
 This module can work standalone with minimal Tensor implementation, but
 full functionality requires previous modules for realistic profiling scenarios

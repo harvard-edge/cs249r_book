@@ -27,8 +27,8 @@ Images --> Flatten --> Linear --> ReLU --> Linear --> ReLU --> Linear --> Classe
 | Module | Component | What It Provides |
 |--------|-----------|------------------|
 | 01-04 | Foundation | Tensor, Activations, Layers, Losses |
-| 05-07 | Training | Autograd, Optimizers, Training loops |
-| 08 | DataLoader | YOUR batching and data pipeline |
+| 05 | DataLoader | YOUR batching and data pipeline |
+| 06-08 | Training Infrastructure | Autograd, Optimizers, Training loops |
 
 ## Running the Milestone
 
@@ -80,9 +80,9 @@ Every component comes from YOUR implementations:
 | `Linear` | Module 03 | YOUR fully-connected layers |
 | `ReLU` | Module 02 | YOUR activation functions |
 | `CrossEntropyLoss` | Module 04 | YOUR loss computation |
-| `backward()` | Module 05 | YOUR autograd engine |
-| `SGD` | Module 06 | YOUR optimizer |
-| `DataLoader` | Module 08 | YOUR batching pipeline |
+| `DataLoader` | Module 05 | YOUR batching pipeline |
+| `backward()` | Module 06 | YOUR autograd engine |
+| `SGD` | Module 07 | YOUR optimizer |
 
 **No PyTorch. No TensorFlow. Just YOUR code learning to read handwritten digits.**
 

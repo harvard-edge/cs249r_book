@@ -355,9 +355,9 @@ tito olympics logo
 
 **Or review prerequisites:**
 
-- **[ Foundation Tier](foundation)** (Modules 01-07)
-- **[ Architecture Tier](architecture)** (Modules 08-13)
-- **[ Optimization Tier](optimization)** (Modules 14-19)
+- **[Foundation Tier](foundation)** (Modules 01-08)
+- **[Architecture Tier](architecture)** (Modules 09-13)
+- **[Optimization Tier](optimization)** (Modules 14-19)
 
 
 **[← Back to Home](../intro)**

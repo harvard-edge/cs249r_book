@@ -2,7 +2,7 @@
 Module 10: Progressive Integration Tests
 Tests that Module 10 (Tokenization) works correctly AND that Foundation + Architecture tier work.
 
-DEPENDENCY CHAIN: 01_tensor → ... → 08_dataloader → 09_convolutions → 10_tokenization
+DEPENDENCY CHAIN: 01_tensor → ... → 05_dataloader → ... → 08_training → 09_convolutions → 10_tokenization
 This is where text processing begins for NLP pipelines.
 """
 
@@ -42,7 +42,7 @@ class TestPriorStackStillWorking:
             assert True, "ML pipeline not implemented yet"
 
     def test_optimization_stable(self):
-        """Verify Module 10 (Optimizers) still works."""
+        """Verify Module 07 (Optimizers) still works."""
         try:
             from tinytorch.core.optimizers import SGD, Adam
             from tinytorch.core.layers import Linear
@@ -59,8 +59,8 @@ class TestPriorStackStillWorking:
             assert True, "Optimizers not implemented yet"
 
 
-class TestModule11TrainingCore:
-    """Test Module 11 (Training) core functionality."""
+class TestModule08TrainingCore:
+    """Test Module 08 (Training) core functionality."""
 
     def test_training_loop_creation(self):
         """Test basic training loop functionality."""

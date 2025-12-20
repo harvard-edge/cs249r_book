@@ -198,7 +198,7 @@ tito module start 01
 
 **Example**:
 ```bash
-tito module start 05 # Start Module 05 (Autograd)
+tito module start 05 # Start Module 05 (DataLoader)
 ```
 
 Jupyter Lab opens with the generated notebook for Module 05
@@ -242,7 +242,7 @@ tito module complete 01
 
 **Example**:
 ```bash
-tito module complete 05 # Export Module 05 (Autograd)
+tito module complete 05 # Export Module 05 (DataLoader)
 ```
 
 **After exporting**:
@@ -281,7 +281,7 @@ tito module status
  Module 02: Activations (completed 2025-11-16)
  Module 03: Layers (completed 2025-11-16)
  Module 04: Losses (not started)
- Module 05: Autograd (not started)
+ Module 05: DataLoader (not started)
 
 Progress: 3/20 modules (15%)
 

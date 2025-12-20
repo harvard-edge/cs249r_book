@@ -27,7 +27,7 @@ Tokens --> Embeddings --> [Attention --> FFN] x N --> Output
 
 | Module | Component | What It Provides |
 |--------|-----------|------------------|
-| 01-08 | Foundation + Training | Complete training pipeline |
+| 01-08 | Foundation + Training | Tensor, Layers, DataLoader, Training |
 | 10 | Tokenization | YOUR CharTokenizer |
 | 11 | Embeddings | YOUR token + positional embeddings |
 | 12 | Attention | YOUR multi-head self-attention |

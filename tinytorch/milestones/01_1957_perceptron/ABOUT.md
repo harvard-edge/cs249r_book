@@ -28,7 +28,7 @@ Input (features) --> Linear --> Sigmoid --> Output (0 or 1)
 | 02 | Activations | YOUR sigmoid activation |
 | 03 | Layers | YOUR Linear layer |
 | 04 | Losses | YOUR loss functions |
-| 05-07 | Training | YOUR autograd + optimizer (Part 2 only) |
+| 06-08 | Training Infrastructure | YOUR autograd + optimizer (Part 2 only) |
 
 ## Running the Milestone
 
@@ -39,7 +39,7 @@ cd milestones/01_1957_perceptron
 python 01_rosenblatt_forward.py
 # Expected: ~50% accuracy (random guessing)
 
-# Part 2: See the solution (after Module 07)
+# Part 2: See the solution (after Module 08)
 python 02_rosenblatt_trained.py
 # Expected: 95%+ accuracy (learned pattern)
 ```

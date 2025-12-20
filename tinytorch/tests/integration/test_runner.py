@@ -203,8 +203,8 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Run TinyTorch integration tests")
-    parser.add_argument("module", nargs='?', default="05_dense",
-                      help="Module number (e.g., 05_dense)")
+    parser.add_argument("module", nargs='?', default="05_dataloader",
+                      help="Module number (e.g., 05_dataloader)")
     parser.add_argument("--save", action="store_true",
                       help="Save report to JSON file")
     parser.add_argument("--quiet", action="store_true",

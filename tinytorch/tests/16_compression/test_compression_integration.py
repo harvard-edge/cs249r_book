@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Integration tests for Module 17: Compression
+Integration tests for Module 16: Compression
 Tests pruning, knowledge distillation, and model compression
 """
 

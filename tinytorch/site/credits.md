@@ -18,7 +18,7 @@ TinyTorch's pedagogical DNA comes from MiniTorch's brilliant "build a framework 
 
 **When to use MiniTorch**: Excellent complement for deep mathematical understanding of autodifferentiation
 
-**Connection to TinyTorch**: Modules 05-07 (Autograd, Optimizers, Training) share philosophical DNA with MiniTorch's core pedagogy
+**Connection to TinyTorch**: Modules 06-08 (Autograd, Optimizers, Training) share philosophical DNA with MiniTorch's core pedagogy
 
 
 ### micrograd
@@ -32,7 +32,7 @@ Micrograd demonstrated that automatic differentiationâ€”the heart of modern MLâ€
 
 **When to use micrograd**: Perfect 2-hour introduction before starting TinyTorch
 
-**Connection to TinyTorch**: Module 05 (Autograd) teaches the same core concepts with systems engineering focus
+**Connection to TinyTorch**: Module 06 (Autograd) teaches the same core concepts with systems engineering focus
 
 
 ### nanoGPT

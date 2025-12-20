@@ -123,7 +123,7 @@ This document summarizes key organizational decisions and learnings from TinyTor
 
 ### 6. Three-Tier Architecture Organization
 
-**Evolution**: Modules organized into Foundation (01-07), Architecture (08-13), Optimization (14-19), Olympics (20) tiers.
+**Evolution**: Modules organized into Foundation (01-08), Architecture (09-13), Optimization (14-19), Olympics (20) tiers.
 
 **Key Decision**:
 - **Tier-Based Progression**: Students cannot skip tiers; architectures require foundation mastery

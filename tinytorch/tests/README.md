@@ -34,7 +34,7 @@ These tests validate that each module works correctly in isolation.
 
 **Philosophy**: When these tests fail, the error message should teach the student what went wrong and how to fix it.
 
-### ⚡ Autograd Edge Cases (`05_autograd/`)
+### ⚡ Autograd Edge Cases (`06_autograd/`)
 **Purpose**: Stress-test autograd system
 **Scope**: Autograd internals and edge cases
 **Files**:
@@ -101,7 +101,7 @@ When adding a test, ask:
 - **Is it testing one module?** → Put in `XX_modulename/`
 - **Is it testing modules working together?** → Put in `integration/`
 - **Is it teaching debugging?** → Put in `debugging/`
-- **Is it an autograd edge case?** → Put in `05_autograd/`
+- **Is it an autograd edge case?** → Put in `06_autograd/`
 
 ## Most Important Tests
 

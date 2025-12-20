@@ -385,12 +385,12 @@ class ModuleWorkflowCommand(BaseCommand):
     def _get_milestone_for_module(self, module_num: int) -> Optional[tuple]:
         """Get the milestone this module contributes to."""
         milestones = [
-            ("01", "Perceptron (1957)", [1]),
-            ("02", "XOR Crisis (1969)", [1, 2]),
-            ("03", "MLP Revival (1986)", [1, 2, 3, 4, 5, 6, 7]),
-            ("04", "CNN Revolution (1998)", [1, 2, 3, 4, 5, 6, 7, 8, 9]),
-            ("05", "Transformer Era (2017)", [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13]),  # Skip convolutions/dataloader for attention
-            ("06", "MLPerf (2018)", list(range(1, 20))),
+            ("01", "Perceptron (1957)", [1, 2, 3]),  # Forward pass only
+            ("02", "XOR Crisis (1969)", [1, 2, 3]),  # Forward pass to show limits
+            ("03", "MLP Revival (1986)", [1, 2, 3, 4, 5, 6, 7, 8]),  # Full training infrastructure
+            ("04", "CNN Revolution (1998)", [1, 2, 3, 4, 5, 6, 7, 8, 9]),  # Full training + Convolutions
+            ("05", "Transformer Era (2017)", [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]),  # Full training + NLP (skip convolutions)
+            ("06", "MLPerf (2018)", list(range(1, 20))),  # All modules
         ]
 
         for mid, mname, required in milestones:

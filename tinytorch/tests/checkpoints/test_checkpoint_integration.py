@@ -23,19 +23,19 @@ class CheckpointValidator:
     # Module structure: 01_tensor through 20_capstone
     CHECKPOINTS = {
         "foundation": {
-            "modules": ["01_tensor", "02_activations", "03_layers", "04_losses", "05_autograd", "06_optimizers", "07_training"],
+            "modules": ["01_tensor", "02_activations", "03_layers", "04_losses", "05_dataloader", "06_autograd", "07_optimizers", "08_training"],
             "capability": "Can build complete training pipeline from tensors to optimization",
-            "tests": ["test_tensor", "test_activations", "test_layers", "test_losses", "test_autograd", "test_optimizers", "test_training"]
+            "tests": ["test_tensor", "test_activations", "test_layers", "test_losses", "test_dataloader", "test_autograd", "test_optimizers", "test_training"]
         },
         "architecture": {
-            "modules": ["08_dataloader", "09_convolutions", "10_tokenization", "11_embeddings", "12_attention", "13_transformers"],
+            "modules": ["09_convolutions", "10_tokenization", "11_embeddings", "12_attention", "13_transformers"],
             "capability": "Can design CNNs for vision and Transformers for language",
-            "tests": ["test_dataloader", "test_convolution", "test_tokenization", "test_embeddings", "test_attention", "test_transformers"]
+            "tests": ["test_convolution", "test_tokenization", "test_embeddings", "test_attention", "test_transformers"]
         },
         "optimization": {
-            "modules": ["14_profiling", "15_quantization", "16_compression", "17_memoization", "18_acceleration", "19_benchmarking"],
+            "modules": ["14_profiling", "15_quantization", "16_compression", "17_acceleration", "18_memoization", "19_benchmarking"],
             "capability": "Can optimize models for production deployment",
-            "tests": ["test_profiling", "test_quantization", "test_compression", "test_memoization", "test_acceleration", "test_benchmarking"]
+            "tests": ["test_profiling", "test_quantization", "test_compression", "test_acceleration", "test_memoization", "test_benchmarking"]
         },
         "capstone": {
             "modules": ["20_capstone"],

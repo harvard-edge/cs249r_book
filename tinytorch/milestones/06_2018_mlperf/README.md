@@ -20,7 +20,7 @@ A complete MLPerf-style optimization pipeline that takes YOUR networks from prev
 | Module 14 | Profiling | YOUR profiler for measurement |
 | Module 15 | Quantization | YOUR INT8/FP16 implementations |
 | Module 16 | Compression | YOUR pruning techniques |
-| Module 17 | Memoization | YOUR KV-cache for generation |
+| Module 17 | Acceleration | YOUR vectorized operations |
 
 ## Milestone Structure
 
@@ -45,7 +45,7 @@ Uses YOUR implementations:
 - **Module 11 (Embeddings)**: Token embeddings
 - **Module 12 (Attention)**: Multi-head attention
 - **Module 14 (Profiling)**: Measure speedup
-- **Module 17 (KV Cache)**: Cache K,V for 6-10× speedup
+- **Module 18 (KV Cache)**: Cache K,V for 6-10× speedup
 
 Networks from:
 - MinimalTransformer (Milestone 05)

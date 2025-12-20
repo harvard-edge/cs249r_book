@@ -16,7 +16,7 @@ TinyTorch takes you from basic tensors to production-ready ML systems through 20
 
 - **Architecture (purple)**: Apply your foundation to real problems. DataLoader feeds data efficiently, then you choose your path: Convolutions for images or Transformers for text (Tokenization → Embeddings → Attention → Transformers).
 
-- **Optimization (orange)**: Make it fast. Profile to find bottlenecks, then apply quantization, compression, memoization, or acceleration. Benchmarking measures your improvements.
+- **Optimization (orange)**: Make it fast. Profile to find bottlenecks, then apply quantization, compression, acceleration, or memoization. Benchmarking measures your improvements.
 
 <div>
 
@@ -25,7 +25,7 @@ TinyTorch takes you from basic tensors to production-ready ML systems through 20
 :caption: "**TinyTorch Module Flow.** The 20 modules progress through three tiers: Foundation (blue) builds core ML primitives, Architecture (purple) applies them to vision and language tasks, and Optimization (orange) makes systems production-ready."
 
 graph LR
-    subgraph F["FOUNDATION (01-07)"]
+    subgraph F["FOUNDATION (01-08)"]
         direction TB
         T["Tensor"] --> A["Activations"]
         A --> L["Layers"]
@@ -35,7 +35,7 @@ graph LR
         Opt --> Train["Training"]
     end
 
-    subgraph Arch["ARCHITECTURE (08-13)"]
+    subgraph Arch["ARCHITECTURE (09-13)"]
         direction TB
         Data["DataLoader"]
         Data --> Conv["CNNs"]
@@ -126,8 +126,7 @@ Concrete outcomes at each major checkpoint:
 | After Module | You'll Have Built | Historical Context |
 |--------------|-------------------|-------------------|
 | **01-04** | Working Perceptron classifier | Rosenblatt 1957 |
-| **01-06** | MLP solving XOR (hidden layers!) | AI Winter breakthrough 1969→1986 |
-| **01-08** | Complete training pipeline with DataLoader | Backpropagation era |
+| **01-08** | MLP solving XOR + complete training pipeline | AI Winter breakthrough 1969→1986 |
 | **01-09** | CNN with convolutions and pooling | LeNet-5 (1998) |
 | **01-13** | GPT model with autoregressive generation | "Attention Is All You Need" (2017) |
 | **01-19** | Optimized, quantized, accelerated system | Production ML today |

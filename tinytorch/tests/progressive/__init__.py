@@ -18,22 +18,22 @@ MODULE_DEPENDENCIES = {
     "02": ["01"],                                # Activations need Tensor
     "03": ["01", "02"],                          # Layers need Tensor, Activations
     "04": ["01", "02", "03"],                    # Losses need Tensor, Activations, Layers
-    "05": ["01", "02", "03", "04"],              # Autograd needs all foundation
-    "06": ["01", "02", "03", "04", "05"],        # Optimizers need Autograd
-    "07": ["01", "02", "03", "04", "05", "06"],  # Training needs Optimizers
-    "08": ["01"],                                # DataLoader mainly needs Tensor
-    "09": ["01", "02", "03", "05"],              # Convolutions needs Tensor, Layers, Autograd
+    "05": ["01"],                                # DataLoader mainly needs Tensor
+    "06": ["01", "02", "03", "04", "05"],        # Autograd needs foundation + DataLoader
+    "07": ["01", "02", "03", "04", "05", "06"],  # Optimizers need Autograd
+    "08": ["01", "02", "03", "04", "05", "06", "07"],  # Training needs Optimizers
+    "09": ["01", "02", "03", "06"],              # Convolutions needs Tensor, Layers, Autograd
     "10": ["01"],                                # Tokenization mainly needs Tensor
-    "11": ["01", "05", "10"],                    # Embeddings need Tensor, Autograd, Tokenization
-    "12": ["01", "03", "05", "11"],              # Attention needs Layers, Autograd, Embeddings
-    "13": ["01", "03", "05", "11", "12"],        # Transformers need Attention
+    "11": ["01", "06", "10"],                    # Embeddings need Tensor, Autograd, Tokenization
+    "12": ["01", "03", "06", "11"],              # Attention needs Layers, Autograd, Embeddings
+    "13": ["01", "03", "06", "11", "12"],        # Transformers need Attention
     "14": ["01"],                                # Profiling is mostly standalone
     "15": ["01", "03"],                          # Quantization needs Tensor, Layers
     "16": ["01", "03"],                          # Compression needs Tensor, Layers
-    "17": ["01", "12", "13"],                    # Memoization (KV-cache) needs Attention, Transformers
-    "18": ["01"],                                # Acceleration is mostly standalone
+    "17": ["01"],                                # Acceleration is mostly standalone
+    "18": ["01", "12", "13"],                    # Memoization (KV-cache) needs Attention, Transformers
     "19": ["01"],                                # Benchmarking is mostly standalone
-    "20": ["01", "02", "03", "04", "05", "06", "07"],  # Capstone needs core modules
+    "20": ["01", "02", "03", "04", "05", "06", "07", "08"],  # Capstone needs core modules
 }
 
 # What each module should provide (for capability testing)

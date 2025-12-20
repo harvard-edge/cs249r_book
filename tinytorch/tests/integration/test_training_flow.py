@@ -12,7 +12,7 @@ Tests that the complete training pipeline works:
 These tests catch issues that unit tests miss - where modules
 work individually but fail when connected.
 
-Modules tested: 01-07 (Tensor → Training)
+Modules tested: 01-08 (Tensor → Training)
 """
 
 import pytest

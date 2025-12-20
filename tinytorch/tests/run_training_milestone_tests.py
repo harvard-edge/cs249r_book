@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test Runner for Training Milestone (Modules 01-07)
+Test Runner for Training Milestone (Modules 01-08)
 ===================================================
 
 Runs all tests for the core modules needed for the training milestone:
@@ -8,9 +8,10 @@ Runs all tests for the core modules needed for the training milestone:
   02_activations - Activation functions
   03_layers      - Neural network layers
   04_losses      - Loss functions
-  05_autograd    - Automatic differentiation
-  06_optimizers  - SGD, Adam, etc.
-  07_training    - Training loops
+  05_dataloader  - Data loading and batching
+  06_autograd    - Automatic differentiation
+  07_optimizers  - SGD, Adam, etc.
+  08_training    - Training loops
 
 This script runs all tests and provides a comprehensive summary.
 """
@@ -30,9 +31,10 @@ MODULES = [
     ("02_activations", "Activations"),
     ("03_layers", "Layers"),
     ("04_losses", "Losses"),
-    ("05_autograd", "Autograd"),
-    ("06_optimizers", "Optimizers"),
-    ("07_training", "Training"),
+    ("05_dataloader", "DataLoader"),
+    ("06_autograd", "Autograd"),
+    ("07_optimizers", "Optimizers"),
+    ("08_training", "Training"),
 ]
 
 def run_module_tests(module_dir: str) -> dict:
@@ -112,7 +114,7 @@ def run_module_tests(module_dir: str) -> dict:
 def main():
     console.print(Panel.fit(
         "[bold cyan]Training Milestone Test Suite[/bold cyan]\n"
-        "[dim]Testing modules 01-07 for training readiness[/dim]",
+        "[dim]Testing modules 01-08 for training readiness[/dim]",
         border_style="cyan"
     ))
 
@@ -215,7 +217,7 @@ def main():
     if total_failed == 0 and total_tests > 0:
         console.print(Panel.fit(
             "[bold green]🎉 ALL TESTS PASSED![/bold green]\n"
-            f"All {total_tests} tests across modules 01-07 are passing.\n"
+            f"All {total_tests} tests across modules 01-08 are passing.\n"
             "Training milestone is ready!",
             border_style="green"
         ))

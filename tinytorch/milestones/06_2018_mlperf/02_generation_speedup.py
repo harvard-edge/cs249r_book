@@ -43,7 +43,7 @@ WITHOUT KV Cache (Slow):              WITH KV Cache (Fast):
   Module 12 (Attention)     : YOUR multi-head attention
   Module 13 (Transformer)   : YOUR transformer block
   Module 14 (Profiling)     : YOUR profiler to measure speedup
-  Module 17 (Memoization)   : YOUR KV cache implementation
+  Module 18 (Memoization)   : YOUR KV cache implementation
 
 📊 EXPECTED RESULTS:
   | Generation Mode      | Time/Token | Speedup | Memory  |
@@ -112,7 +112,7 @@ def main():
 
         # KV Cache
         from tinytorch.perf.memoization import KVCache
-        console.print("  [green]✓[/green] KVCache (YOUR Module 17)")
+        console.print("  [green]✓[/green] KVCache (YOUR Module 18)")
 
     except ImportError as e:
         console.print(Panel(
@@ -220,7 +220,7 @@ def main():
 
     console.print(Panel(
         "[bold green]⚡ STEP 2: Benchmark WITH YOUR KV Cache[/bold green]\n"
-        "Using the cache you built in Module 17",
+        "Using the cache you built in Module 18",
         border_style="green"
     ))
 
@@ -234,7 +234,7 @@ def main():
         head_dim=head_dim
     )
 
-    console.print(f"  [green]✓[/green] Created KVCache (YOUR Module 17)")
+    console.print(f"  [green]✓[/green] Created KVCache (YOUR Module 18)")
     console.print(f"  Cache shape: batch=1, layers=1, heads={num_heads}, max_seq={max_seq_len}")
 
     times_with_cache = []
@@ -329,7 +329,7 @@ def main():
         "  • YOUR Embedding (Module 11)\n"
         "  • YOUR MultiHeadAttention (Module 12)\n"
         "  • YOUR Profiler (Module 14)\n"
-        "  • YOUR KVCache (Module 17)\n\n"
+        "  • YOUR KVCache (Module 18)\n\n"
         f"[bold]Result: {speedup:.1f}× faster generation![/bold]\n\n"
         "[cyan]What you learned:[/cyan]\n"
         "  ✅ Why autoregressive generation is O(N²)\n"

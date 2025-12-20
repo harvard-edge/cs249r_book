@@ -6,8 +6,8 @@
 **ARCHITECTURE TIER** | Difficulty: ●●●○ | Time: 6-8 hours | Prerequisites: 01-08
 
 **Prerequisites: Modules 01-08** assumes you have:
-- Built the complete training pipeline (Modules 01-07)
-- Implemented DataLoader for batch processing (Module 08)
+- Built the complete training pipeline (Modules 01-08)
+- Implemented DataLoader for batch processing (Module 05)
 - Understanding of parameter initialization, forward/backward passes, and optimization
 
 If you can train an MLP on MNIST using your training loop and DataLoader, you're ready.
@@ -696,7 +696,7 @@ Shift from spatial processing (images) to sequential processing (text). You'll i
 | Module | What It Does | Your Spatial Ops In Action |
 |--------|--------------|---------------------------|
 | **Milestone 3: CNN** | Complete CNN for CIFAR-10 | Stack your Conv2d and MaxPool2d for image classification |
-| **Module 18: Acceleration** | Optimize convolution | Replace loops with im2col and vectorized operations |
+| **Module 17: Acceleration** | Optimize convolution | Replace loops with im2col and vectorized operations |
 | **Vision Projects** | Object detection, segmentation | Your spatial foundations scale to advanced architectures |
 
 ## Get Started

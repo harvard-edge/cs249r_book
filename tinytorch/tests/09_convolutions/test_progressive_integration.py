@@ -1,8 +1,8 @@
 """
 Module 09: Progressive Integration Tests
-Tests that Module 09 (Convolutions) works correctly AND that Foundation + DataLoader work.
+Tests that Module 09 (Convolutions) works correctly AND that Foundation + Training work.
 
-DEPENDENCY CHAIN: 01_tensor → ... → 07_training → 08_dataloader → 09_convolutions
+DEPENDENCY CHAIN: 01_tensor → ... → 05_dataloader → 06_autograd → 07_optimizers → 08_training → 09_convolutions
 This is where CNNs enable computer vision through spatial feature extraction.
 """
 
@@ -31,7 +31,7 @@ class TestPriorStackStillWorking:
             assert True, "Tensor foundation not implemented yet"
 
     def test_spatial_operations_stable(self):
-        """Verify Module 06 (Spatial) operations still work."""
+        """Verify Module 09 (Convolutions/Spatial) operations still work."""
         try:
             from tinytorch.core.spatial import Conv2d, MaxPool2d
 
@@ -46,8 +46,8 @@ class TestPriorStackStillWorking:
             assert True, "Spatial operations not implemented yet"
 
 
-class TestModule07AttentionCore:
-    """Test Module 07 (Attention) core functionality."""
+class TestModule12AttentionCore:
+    """Test Module 12 (Attention) core functionality."""
 
     def test_attention_mechanism_creation(self):
         """Test basic attention mechanism works."""

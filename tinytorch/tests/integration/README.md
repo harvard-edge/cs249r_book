@@ -20,7 +20,7 @@ This pattern catches the most common and frustrating bugs students encounter.
 
 | Test File | What It Catches | Modules |
 |-----------|-----------------|---------|
-| `test_gradient_flow.py` | Broken backpropagation | 01-07 |
+| `test_gradient_flow.py` | Broken backpropagation | 01-08 |
 | `test_training_flow.py` | Training loop failures | 05-07 |
 | `test_nlp_pipeline_flow.py` | NLP stack issues | 10-13 |
 | `test_cnn_integration.py` | CNN gradient issues | 09 |
@@ -29,7 +29,7 @@ This pattern catches the most common and frustrating bugs students encounter.
 
 | Test File | What It Catches | Modules |
 |-----------|-----------------|---------|
-| `test_dataloader_integration.py` | Data pipeline issues | 08 |
+| `test_dataloader_integration.py` | Data pipeline issues | 05 |
 | `test_api_simplification_integration.py` | API compatibility | All |
 
 ### 🔬 Scenario Tests
@@ -130,8 +130,8 @@ def test_profiling_does_not_break_training():
 | 14 Profiling | Profiler + training loop |
 | 15 Quantization | Quantized model accuracy |
 | 16 Compression | Compressed model still trains |
-| 17 Memoization | Cached ops maintain correctness |
-| 18 Acceleration | Accelerated ops match baseline |
+| 17 Acceleration | Accelerated ops match baseline |
+| 18 Memoization | Cached ops maintain correctness |
 
 ### How to Fill Gaps
 

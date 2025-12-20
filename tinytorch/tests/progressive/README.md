@@ -14,12 +14,13 @@ Module 01: Tensor        ← Foundation: if this breaks, everything breaks
 Module 02: Activations   ← Builds on Tensor
 Module 03: Layers        ← Uses Tensor + Activations
 Module 04: Losses        ← Uses Tensor + Layers
-Module 05: Autograd      ← Core: patches Tensor with gradient tracking
+Module 05: DataLoader    ← Data pipelines for training
+Module 06: Autograd      ← Core: patches Tensor with gradient tracking
 ...and so on
 ```
 
-When you're working on Module 05 (Autograd), a bug could:
-- Break Autograd itself (Module 05 tests catch this)
+When you're working on Module 06 (Autograd), a bug could:
+- Break Autograd itself (Module 06 tests catch this)
 - Break Tensor operations (Module 01 regression tests catch this)
 - Break how Layers integrate with Autograd (integration tests catch this)
 
@@ -103,7 +104,8 @@ tito module test 05
 # 2. Module 02 regression tests (are Activations still OK?)
 # 3. Module 03 regression tests (are Layers still OK?)
 # 4. Module 04 regression tests (are Losses still OK?)
-# 5. Module 05 capability tests (does Autograd work?)
+# 5. Module 05 capability tests (does DataLoader work?)
+# 6. Module 06 capability tests (does Autograd work?)
 # 6. Integration tests (do they all work together?)
 ```
 

@@ -1,5 +1,5 @@
 """
-Checkpoint 9: Optimization (After Module 10 - Optimizers)
+Checkpoint 9: Optimization (After Module 07 - Optimizers)
 Question: "Can I optimize neural networks with sophisticated algorithms?"
 """
 

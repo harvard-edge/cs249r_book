@@ -1,6 +1,6 @@
 # Milestone 02: The XOR Crisis (1969)
 
-**FOUNDATION TIER** | Difficulty: 2/4 | Time: 30-60 min | Prerequisites: Modules 01-06
+**FOUNDATION TIER** | Difficulty: 2/4 | Time: 30-60 min | Prerequisites: Modules 01-08
 
 ## Overview
 
@@ -42,8 +42,10 @@ These 4 points **cannot** be separated by a single line. No amount of training c
 | 02 | Activations | YOUR sigmoid/ReLU |
 | 03 | Layers | YOUR Linear layers |
 | 04 | Losses | YOUR loss functions |
-| 05 | Autograd | YOUR automatic differentiation |
-| 06 | Optimizers | YOUR SGD optimizer |
+| 05 | DataLoader | YOUR data pipeline |
+| 06 | Autograd | YOUR automatic differentiation |
+| 07 | Optimizers | YOUR SGD optimizer |
+| 08 | Training | YOUR training loop |
 
 ## Running the Milestone
 

@@ -21,7 +21,7 @@ This is exactly how GPT works - predict the next token!
   Module 01 (Tensor)          : YOUR data structure with autograd
   Module 02 (Activations)     : YOUR ReLU activation
   Module 03 (Layers)          : YOUR Linear layers
-  Module 06 (Optimizers)      : YOUR Adam optimizer
+  Module 07 (Optimizers)      : YOUR Adam optimizer
   Module 11 (Embeddings)      : YOUR token + positional embeddings
   Module 12 (Attention)       : YOUR multi-head self-attention
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

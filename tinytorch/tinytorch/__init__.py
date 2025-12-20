@@ -40,32 +40,32 @@ try:
 except ImportError:
     MSELoss = CrossEntropyLoss = BinaryCrossEntropyLoss = None
 
-# Module 05: Autograd - Enable if available
-try:
-    from .core.autograd import enable_autograd
-    enable_autograd()
-except ImportError:
-    pass
-
-# Module 06: Optimizers
-try:
-    from .core.optimizers import SGD, Adam, AdamW
-except ImportError:
-    SGD = Adam = AdamW = None
-
-# Module 07: Training
-try:
-    from .core.training import Trainer, CosineSchedule, clip_grad_norm
-except ImportError:
-    Trainer = CosineSchedule = clip_grad_norm = None
-
-# Module 08: Data Loading
+# Module 05: Data Loading
 try:
     from .core.dataloader import Dataset, TensorDataset, DataLoader
     from .core.dataloader import RandomHorizontalFlip, RandomCrop, Compose
 except ImportError:
     Dataset = TensorDataset = DataLoader = None
     RandomHorizontalFlip = RandomCrop = Compose = None
+
+# Module 06: Autograd - Enable if available
+try:
+    from .core.autograd import enable_autograd
+    enable_autograd()
+except ImportError:
+    pass
+
+# Module 07: Optimizers
+try:
+    from .core.optimizers import SGD, Adam, AdamW
+except ImportError:
+    SGD = Adam = AdamW = None
+
+# Module 08: Training
+try:
+    from .core.training import Trainer, CosineSchedule, clip_grad_norm
+except ImportError:
+    Trainer = CosineSchedule = clip_grad_norm = None
 
 # Module 09: Convolutions (CNN)
 try:

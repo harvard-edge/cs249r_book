@@ -119,12 +119,12 @@ probabilities = softmax(logits)  # Converts to probability distribution (sums to
 
 To keep this module focused, you will **not** implement:
 
-- Gradient computation (that's Module 05: Autograd - `backward()` methods are stubs for now)
+- Gradient computation (that's Module 06: Autograd - `backward()` methods are stubs for now)
 - Learnable parameters (activations are fixed mathematical functions)
 - Advanced variants (LeakyReLU, ELU, Swish - PyTorch has dozens, you'll build the core five)
 - GPU acceleration (your NumPy implementation runs on CPU)
 
-**You are building the nonlinear transformations.** Automatic differentiation comes in Module 05.
+**You are building the nonlinear transformations.** Automatic differentiation comes in Module 06.
 
 ## API Reference
 
@@ -144,7 +144,7 @@ class ActivationName:
         return self.forward(x)
 
     def backward(self, grad: Tensor) -> Tensor:
-        # Stub for Module 05
+        # Stub for Module 06
         pass
 ```
 
@@ -230,7 +230,7 @@ This simplicity is ReLU's greatest strength. The operation is a single compariso
 
 ReLU creates **sparsity**. When half your activations are exactly zero, computations become faster (multiplying by zero is free) and models generalize better (sparse representations are less prone to overfitting). In a 1000-neuron layer, ReLU typically activates 300-500 neurons, effectively creating a smaller, specialized network for each input.
 
-The discontinuity at zero is both a feature and a bug. During training (Module 05), you'll discover that ReLU's gradient is exactly 1 for positive inputs and exactly 0 for negative inputs. This prevents the vanishing gradient problem that plagued sigmoid-based networks. But it creates a new problem: **dying ReLU**. If a neuron's weights shift such that it always receives negative inputs, it will output zero forever, and the zero gradient means it can never recover.
+The discontinuity at zero is both a feature and a bug. During training (Module 08), you'll discover that ReLU's gradient is exactly 1 for positive inputs and exactly 0 for negative inputs. This prevents the vanishing gradient problem that plagued sigmoid-based networks. But it creates a new problem: **dying ReLU**. If a neuron's weights shift such that it always receives negative inputs, it will output zero forever, and the zero gradient means it can never recover.
 
 Despite this limitation, ReLU remains the default choice for hidden layers in CNNs and feedforward networks. Its speed and effectiveness at preventing vanishing gradients make it hard to beat.
 
@@ -306,7 +306,7 @@ exp(x - max) / Σ exp(x - max) = exp(x) / Σ exp(x)
 
 Softmax amplifies differences. If the input is `[1, 2, 3]`, the output is approximately `[0.09, 0.24, 0.67]`. The largest input gets 67% of the probability mass, even though it's only 3× larger than the smallest input. This is because exponentials grow superlinearly. In classification, this is desirable: you want the network to be confident when it's confident.
 
-But softmax's coupling is a gotcha. When you change one input, all outputs change because they're normalized by the same sum. This means the gradient involves a Jacobian matrix, not just element-wise derivatives. You'll see this complexity when you implement `backward()` in Module 05.
+But softmax's coupling is a gotcha. When you change one input, all outputs change because they're normalized by the same sum. This means the gradient involves a Jacobian matrix, not just element-wise derivatives. You'll see this complexity when you implement `backward()` in Module 06.
 
 ### Choosing Activations
 
@@ -357,7 +357,7 @@ Your TinyTorch activations and PyTorch's `torch.nn.functional` activations imple
 | **Backend** | NumPy (Python/C) | C++/CUDA kernels |
 | **Speed** | 1× (CPU baseline) | 10-100× faster (GPU) |
 | **Numerical Stability** | ✓ Max subtraction (Softmax), clipping (Sigmoid) | ✓ Same techniques |
-| **Autograd** | Stubs (Module 05) | Full gradient computation |
+| **Autograd** | Stubs (Module 06) | Full gradient computation |
 | **Variants** | 5 core activations | 30+ variants (LeakyReLU, PReLU, Mish, etc.) |
 
 ### Code Comparison
@@ -440,7 +440,7 @@ A batch of 32 samples passes through a hidden layer with 4096 neurons and ReLU a
 
 32 × 4096 × 4 bytes = **524,288 bytes ≈ 512 KB**
 
-This is the activation memory for ONE layer. A 100-layer network needs 50 MB just to store activations for one forward pass. This is why activation memory dominates training memory usage (you'll see this in Module 05 when you cache activations for backpropagation).
+This is the activation memory for ONE layer. A 100-layer network needs 50 MB just to store activations for one forward pass. This is why activation memory dominates training memory usage (you'll see this in Module 06 when you cache activations for backpropagation).
 ```
 
 **Q2: Computational Cost**
@@ -557,7 +557,7 @@ Implement Linear layers that combine your Tensor operations with your activation
 |--------|--------------|---------------------------|
 | **03: Layers** | Neural network building blocks | `Linear(x)` followed by `ReLU()(output)` |
 | **04: Losses** | Training objectives | Softmax probabilities feed into cross-entropy loss |
-| **05: Autograd** | Automatic gradients | `relu.backward(grad)` computes activation gradients |
+| **06: Autograd** | Automatic gradients | `relu.backward(grad)` computes activation gradients |
 
 ## Get Started
 

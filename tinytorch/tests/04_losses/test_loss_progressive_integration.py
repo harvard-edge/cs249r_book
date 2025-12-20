@@ -58,7 +58,7 @@ class TestLossGradientFlow:
             assert not np.isnan(loss.data), "Loss should not be NaN"
             assert not np.isinf(loss.data), "Loss should not be Inf"
 
-            # Verify network parameters exist (ready for gradient flow in Module 05)
+            # Verify network parameters exist (ready for gradient flow in Module 06)
             assert hasattr(layer1, 'weight'), "Layer1 should have weight for gradients"
             assert hasattr(layer1, 'bias'), "Layer1 should have bias for gradients"
             assert hasattr(layer2, 'weight'), "Layer2 should have weight for gradients"
@@ -374,7 +374,7 @@ class TestLossLayerIntegration:
             print("   - Module 01 (Tensor)")
             print("   - Module 02 (Activations)")
             print("   - Module 03 (Layers)")
-            print("   Ready for Module 05 (Autograd)!")
+            print("   Ready for Module 05 (DataLoader) and Module 06 (Autograd)!")
 
         except ImportError as e:
             print(f"⚠️ Loss-layer integration test skipped: {e}")
@@ -510,7 +510,7 @@ def test_module_04_losses_integration():
     print("   ✅ Complete pipeline integration")
     print("   ✅ Edge cases (zeros, perfect predictions)")
     print("\n🚀 Module 04 is ready for production use!")
-    print("   Next: Module 05 will add autograd for automatic differentiation\n")
+    print("   Next: Module 05 will add DataLoader for data pipelines, then Module 06 adds autograd\n")
 
 
 if __name__ == "__main__":

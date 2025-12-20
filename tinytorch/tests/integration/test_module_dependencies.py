@@ -6,20 +6,20 @@ Tests how each module interfaces with modules that came before it
 
 # Module dependency graph for TinyTorch
 # Current module structure:
-# 01_tensor, 02_activations, 03_layers, 04_losses, 05_autograd,
-# 06_optimizers, 07_training, 08_dataloader, 09_convolutions,
+# 01_tensor, 02_activations, 03_layers, 04_losses, 05_dataloader,
+# 06_autograd, 07_optimizers, 08_training, 09_convolutions,
 # 10_tokenization, 11_embeddings, 12_attention, 13_transformers,
-# 14_profiling, 15_quantization, 16_compression, 17_memoization,
-# 18_acceleration, 19_benchmarking, 20_capstone
+# 14_profiling, 15_quantization, 16_compression, 17_acceleration,
+# 18_memoization, 19_benchmarking, 20_capstone
 MODULE_DEPENDENCIES = {
     "01_tensor": [],  # No dependencies - foundation
     "02_activations": ["01_tensor"],  # Needs Tensor
     "03_layers": ["01_tensor"],  # Needs Tensor
     "04_losses": ["01_tensor"],  # Needs Tensor
-    "05_autograd": ["01_tensor"],  # Core dependency on Tensor
-    "06_optimizers": ["01_tensor", "05_autograd"],  # Needs Tensor and autograd
-    "07_training": ["01_tensor", "05_autograd", "06_optimizers"],  # Training loop deps
-    "08_dataloader": ["01_tensor"],  # Needs Tensor
+    "05_dataloader": ["01_tensor"],  # Needs Tensor
+    "06_autograd": ["01_tensor"],  # Core dependency on Tensor
+    "07_optimizers": ["01_tensor", "06_autograd"],  # Needs Tensor and autograd
+    "08_training": ["01_tensor", "05_dataloader", "06_autograd", "07_optimizers"],  # Training loop deps
     "09_convolutions": ["01_tensor", "03_layers"],  # Needs Tensor and Layer base
     "10_tokenization": ["01_tensor"],  # Needs Tensor
     "11_embeddings": ["01_tensor"],  # Needs Tensor
@@ -28,8 +28,8 @@ MODULE_DEPENDENCIES = {
     "14_profiling": ["01_tensor"],  # Performance analysis
     "15_quantization": ["01_tensor"],  # Optimization techniques
     "16_compression": ["01_tensor"],  # Optimization techniques
-    "17_memoization": ["01_tensor"],  # Optimization techniques
-    "18_acceleration": ["01_tensor"],  # Optimization techniques
+    "17_acceleration": ["01_tensor"],  # Runtime optimization (general)
+    "18_memoization": ["01_tensor"],  # Runtime optimization (transformer-specific)
     "19_benchmarking": ["01_tensor"],  # Performance testing
     "20_capstone": ["01_tensor", "09_convolutions", "13_transformers"]  # Full stack
 }
@@ -51,20 +51,20 @@ def get_module_integration_tests(module_name: str):
     if "04_layers" in deps:
         tests.append(("test_layer_integration", test_layer_integration))
 
-    if "05_dense" in deps:
-        tests.append(("test_dense_integration", test_dense_integration))
+    if "05_dataloader" in deps:
+        tests.append(("test_dataloader_integration", test_dataloader_integration))
 
-    if "10_autograd" in deps:
+    if "06_autograd" in deps:
         tests.append(("test_autograd_integration", test_autograd_integration))
 
-    if "11_optimizers" in deps:
+    if "07_optimizers" in deps:
         tests.append(("test_optimizer_integration", test_optimizer_integration))
 
     # Module-specific integration tests
-    if module_name == "05_dense":
-        tests.append(("test_dense_with_tensor", test_dense_with_tensor))
-        tests.append(("test_dense_with_activations", test_dense_with_activations))
-        tests.append(("test_multi_layer_network", test_multi_layer_network))
+    if module_name == "05_dataloader":
+        tests.append(("test_dataloader_with_tensor", test_dataloader_with_tensor))
+        tests.append(("test_dataloader_with_batching", test_dataloader_with_batching))
+        tests.append(("test_dataloader_pipeline", test_dataloader_pipeline))
 
     elif module_name == "09_convolutions":
         tests.append(("test_conv2d_with_tensor", test_conv2d_with_tensor))

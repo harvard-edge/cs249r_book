@@ -20,10 +20,10 @@ features from real-world photographs!
   Module 02 (Activations)   : YOUR ReLU for feature extraction
   Module 03 (Layers)        : YOUR Linear layers for classification
   Module 04 (Losses)        : YOUR CrossEntropy loss
-  Module 05 (Autograd)      : YOUR gradient computation
-  Module 06 (Optimizers)    : YOUR Adam optimizer
-  Module 07 (Training)      : YOUR training loops
-  Module 08 (DataLoader)    : YOUR Dataset/DataLoader for batching!  <-- SHOWCASED HERE
+  Module 05 (DataLoader)    : YOUR Dataset/DataLoader for batching!  <-- SHOWCASED HERE
+  Module 06 (Autograd)      : YOUR gradient computation
+  Module 07 (Optimizers)    : YOUR Adam optimizer
+  Module 08 (Training)      : YOUR training loops
   Module 09 (Convolutions)  : YOUR Conv2D, MaxPool2D, Flatten
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -92,9 +92,9 @@ from tinytorch.core.tensor import Tensor              # Module 02: YOU built thi
 from tinytorch.core.layers import Linear             # Module 04: YOU built this!
 from tinytorch.core.activations import ReLU, Softmax  # Module 03: YOU built this!
 from tinytorch.core.spatial import Conv2d, MaxPool2d, BatchNorm2d  # Module 09: YOU built this!
-from tinytorch.core.optimizers import Adam            # Module 07: YOU built this!
-from tinytorch.core.dataloader import DataLoader, Dataset  # Module 10: YOU built this!
-from tinytorch.core.dataloader import RandomHorizontalFlip, RandomCrop, Compose  # Module 08: Data Augmentation!
+from tinytorch.core.optimizers import Adam            # Module 07: YOUR optimizer!
+from tinytorch.core.dataloader import DataLoader, Dataset  # Module 05: YOU built this!
+from tinytorch.core.dataloader import RandomHorizontalFlip, RandomCrop, Compose  # Module 05: Data Augmentation!
 
 # Import dataset manager
 from data_manager import DatasetManager
@@ -117,14 +117,14 @@ from data_manager import DatasetManager
 # │ Module 03: Linear   │ Classification head            │ Maps 2304 spatial features  │
 # │                     │ (2304→256→10)                  │ to 10 class probabilities   │
 # │                     │                                │                             │
-# │ Module 05: Autograd │ .backward() computes all       │ Chain rule through conv,    │
+# │ Module 05: DataLoader│ Batches 50,000 images into    │ Memory: 0.2MB/batch vs      │
+# │ ★ SHOWCASED HERE ★  │ digestible chunks + shuffle    │ 150MB loading all at once   │
+# │                     │                                │                             │
+# │ Module 06: Autograd │ .backward() computes all       │ Chain rule through conv,    │
 # │                     │ gradients automatically        │ pool, linear layers         │
 # │                     │                                │                             │
-# │ Module 06: Adam     │ Updates 600K+ parameters       │ Adaptive learning rates     │
+# │ Module 07: Adam     │ Updates 600K+ parameters       │ Adaptive learning rates     │
 # │                     │ with momentum and scaling      │ per parameter               │
-# │                     │                                │                             │
-# │ Module 08: DataLoader│ Batches 50,000 images into    │ Memory: 0.2MB/batch vs      │
-# │ ★ SHOWCASED HERE ★  │ digestible chunks + shuffle    │ 150MB loading all at once   │
 # │                     │                                │                             │
 # │ Module 09: Conv2d   │ Extracts spatial features      │ Local connectivity +        │
 # │            MaxPool2d│ with 3×3 kernels, reduces      │ weight sharing = 100×       │
@@ -134,13 +134,13 @@ from data_manager import DatasetManager
 # =============================================================================
 
 # =============================================================================
-# 🆕 WHAT'S NEW SINCE MODULE 07 (MNIST MLP)
+# 🆕 WHAT'S NEW SINCE MODULE 08 (Training)
 # =============================================================================
 #
-# You've built MNIST MLPs before. This milestone adds significant new capabilities:
+# You've built training loops before. This milestone adds significant new capabilities:
 #
 # ┌──────────────────┬─────────────────────┬────────────────────────────┐
-# │ Module 07        │ This Milestone      │ Why It Matters             │
+# │ Module 08        │ This Milestone      │ Why It Matters             │
 # ├──────────────────┼─────────────────────┼────────────────────────────┤
 # │ Linear layers    │ + Conv2d layers     │ Spatial structure preserved│
 # │ Simple batching  │ + DataLoader class  │ Shuffling + memory control │
@@ -156,22 +156,22 @@ from data_manager import DatasetManager
 
 
 # =============================================================================
-# DATASET CLASS - Your Module 08 Enables This Pattern
+# DATASET CLASS - Your Module 05 Enables This Pattern
 # =============================================================================
 # The Dataset abstraction YOU built defines a contract: __len__() and __getitem__().
 # This simple interface lets YOUR DataLoader handle any data source uniformly.
 
 class CIFARDataset(Dataset):
-    """Custom CIFAR-10 Dataset using YOUR Dataset interface from Module 10!
+    """Custom CIFAR-10 Dataset using YOUR Dataset interface from Module 05!
 
-    Now with data augmentation support using YOUR transforms from Module 08!
+    Now with data augmentation support using YOUR transforms from Module 05!
     """
 
     def __init__(self, data, labels, transform=None):
         """Initialize with data, labels, and optional transforms."""
         self.data = data
         self.labels = labels
-        self.transform = transform  # Module 08: YOUR augmentation transforms!
+        self.transform = transform  # Module 05: YOUR augmentation transforms!
 
     def __getitem__(self, idx):
         """Get a single sample - YOUR Dataset interface!"""
@@ -195,7 +195,7 @@ class CIFARDataset(Dataset):
         return 10
 
 
-# Training augmentation using YOUR transforms from Module 08!
+# Training augmentation using YOUR transforms from Module 05!
 train_transforms = Compose([
     RandomHorizontalFlip(p=0.5),   # 50% chance to flip - cars/animals look similar flipped!
     RandomCrop(32, padding=4),      # Random crop with 4px padding - simulates translation
@@ -324,7 +324,7 @@ def visualize_dataloader(train_size, test_size, batch_size):
         last_batch_size = batch_size
 
     print("\n" + "=" * 70)
-    print("📦 YOUR DataLoader in Action (Module 08)")
+    print("📦 YOUR DataLoader in Action (Module 05)")
     print("=" * 70)
     print()
     print("  Dataset Configuration:")
@@ -414,9 +414,9 @@ def train_cifar_cnn(model, train_loader, epochs=3, learning_rate=0.001):
     print("\n🚀 Training CIFAR-10 CNN with YOUR Tiny🔥Torch!")
     print(f"   Dataset: {len(train_loader.dataset)} color images")
     print(f"   Batch size: {train_loader.batch_size}")
-    print(f"   YOUR DataLoader (Module 10) handles batching!")
+    print(f"   YOUR DataLoader (Module 05) handles batching!")
     print(f"   YOUR BatchNorm (Module 09) uses batch statistics!")
-    print(f"   YOUR Adam optimizer (Module 07)")
+    print(f"   YOUR Adam optimizer (Module 07)!")
 
     # Set model to training mode - BatchNorm uses batch statistics
     model.train()
@@ -652,8 +652,8 @@ def main():
         test_labels = test_labels[:500]
         print("   (Using subset for quick testing)")
 
-    # Step 2: Create Datasets and DataLoaders using YOUR Module 08!
-    print("\n📦 Creating YOUR Dataset and DataLoader (Module 08)...")
+    # Step 2: Create Datasets and DataLoaders using YOUR Module 05!
+    print("\n📦 Creating YOUR Dataset and DataLoader (Module 05)...")
 
     # Training with augmentation - YOUR transforms!
     train_dataset = CIFARDataset(train_data, train_labels, transform=train_transforms)

@@ -9,7 +9,7 @@ This is where we create reusable building blocks for neural networks.
 - Module 03: Layer base class and interface design
 - Integration: Layers work with tensors and activations from previous modules
 - Regression: Previous modules (01→03) still work correctly
-- Preparation: Foundation ready for Module 05 (Dense networks)
+- Preparation: Foundation ready for Module 05 (DataLoader)
 
 💡 FOR STUDENTS: If tests fail, check:
 1. Does your Layer base class exist in tinytorch.core.layers?
@@ -417,7 +417,7 @@ class TestProgressiveStackIntegration:
         - Layer returns Tensor objects
         - Tensor operations work within layers
 
-        💡 This is crucial for Module 05 (Dense layers)
+        💡 This is crucial for Module 05 (DataLoader)
         """
         try:
             from tinytorch.core.layers import Layer
@@ -554,7 +554,7 @@ class TestProgressiveStackIntegration:
         - Layers (04) working
         - All components work together
 
-        🎯 MILESTONE: Ready for Module 05 (Dense Networks)!
+        🎯 MILESTONE: Ready for Module 05 (DataLoader)!
         """
         try:
             # Import all components
@@ -625,7 +625,7 @@ class TestNeuralNetworkReadiness:
     """
     🧠 NEURAL NETWORK READINESS: Test foundation is ready for real neural networks.
 
-    💡 These tests verify you have everything needed for Module 05 (Dense Networks).
+    💡 These tests verify you have everything needed for Module 05 (DataLoader).
     🎯 Goal: Confirm the foundation supports building actual neural networks.
     """
 
@@ -775,7 +775,7 @@ class TestNeuralNetworkReadiness:
         - Activation functions
         - Output generation
 
-        🎯 MILESTONE: Ready for Module 05 Dense Networks!
+        🎯 MILESTONE: Ready for Module 05 DataLoader!
         """
         try:
             from tinytorch.core.tensor import Tensor
@@ -873,7 +873,7 @@ class TestModuleCompletionReadiness:
         □ Integration with previous modules
         □ Ready for inheritance (Dense, Conv2D, etc.)
 
-        🎯 SUCCESS = Ready for Module 05: Dense Networks!
+        🎯 SUCCESS = Ready for Module 05: DataLoader!
         """
         completion_checklist = {
             "Layer base class exists": False,
@@ -979,7 +979,7 @@ class TestModuleCompletionReadiness:
         ✅ Integration with foundation
         ✅ Ready for neural networks
 
-        🚀 READY FOR MODULE 05: DENSE NETWORKS!
+        🚀 READY FOR MODULE 05: DATALOADER!
 
         💡 What you can now do:
         - Inherit from Layer to create Dense layers

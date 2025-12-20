@@ -21,7 +21,7 @@
 - The book explains *why* PyTorch, TensorFlow, and JAX make certain design decisions
 - Together, they provide both hands-on implementation and theoretical understanding
 
-**When to use it**: Read in parallel with TinyTorch. When you implement Module 05 (Autograd), read the book's chapter on automatic differentiation to understand the systems engineering behind your code.
+**When to use it**: Read in parallel with TinyTorch. When you implement Module 06 (Autograd), read the book's chapter on automatic differentiation to understand the systems engineering behind your code.
 
 
 ## Related Academic Courses

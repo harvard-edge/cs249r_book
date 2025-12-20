@@ -12,16 +12,9 @@ import os
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-# Try to import from package, fall back to dev module if not exported yet
-try:
-    from tinytorch import Tensor
-    from tinytorch.data.loader import Dataset, TensorDataset, DataLoader
-except (ImportError, ModuleNotFoundError):
-    # Module not exported yet, use dev version
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'modules', 'source', '08_dataloader'))
-    from dataloader_dev import Dataset, TensorDataset, DataLoader
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'modules', 'source', '01_tensor'))
-    from tensor_dev import Tensor
+# Import from TinyTorch package
+from tinytorch import Tensor
+from tinytorch.core.dataloader import Dataset, TensorDataset, DataLoader
 
 
 def test_training_workflow_integration():

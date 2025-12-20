@@ -9,7 +9,7 @@ Required modules:
 - Module 01-08: Core MLP functionality (from MNIST test)
 - Module 09: Convolutions (Conv2d, MaxPool2d)
 - Module 10: DataLoader for efficient batch processing
-- Module 11: CNN training capabilities
+- Module 08: Training capabilities for CNN
 
 This demonstrates the milestone: "Can train CNNs on CIFAR-10"
 """

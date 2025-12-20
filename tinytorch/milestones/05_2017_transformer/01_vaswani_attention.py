@@ -20,8 +20,9 @@ by passing THREE increasingly difficult challenges.
   Module 02 (Activations)   : YOUR ReLU activation
   Module 03 (Layers)        : YOUR Linear layers
   Module 04 (Losses)        : YOUR CrossEntropyLoss
-  Module 05 (Autograd)      : YOUR automatic differentiation
-  Module 06 (Optimizers)    : YOUR Adam optimizer
+  Module 05 (DataLoader)    : YOUR Dataset/DataLoader for batching
+  Module 06 (Autograd)      : YOUR automatic differentiation
+  Module 07 (Optimizers)    : YOUR Adam optimizer
   Module 11 (Embeddings)    : YOUR token & positional embeddings  <-- NEW!
   Module 12 (Attention)     : YOUR multi-head self-attention      <-- NEW!
   Module 13 (Transformer)   : YOUR transformer blocks             <-- NEW!
@@ -111,6 +112,7 @@ sys.path.insert(0, os.getcwd())
 # Import TinyTorch components YOU BUILT!
 from tinytorch import Tensor, Linear, ReLU, CrossEntropyLoss
 from tinytorch.core.optimizers import Adam
+from tinytorch.core.dataloader import Dataset, DataLoader  # Module 05: YOUR DataLoader!
 from tinytorch.core.embeddings import Embedding, PositionalEncoding
 from tinytorch.core.attention import MultiHeadAttention
 from tinytorch.core.transformer import LayerNorm
@@ -141,6 +143,9 @@ console = Console()
 # │                     │                                │                             │
 # │ Module 03: Linear   │ Q, K, V projections + FFN      │ 4× width expansion in FFN   │
 # │                     │ + output projection            │ (standard transformer)      │
+# │                     │                                │                             │
+# │ Module 05: DataLoader│ Batches sequence data         │ Efficient training with     │
+# │                     │ for transformer training       │ shuffled mini-batches       │
 # │                     │                                │                             │
 # │ Module 11: Embedding│ Token → Dense vector           │ Learned representations     │
 # │ ★ NEW MODULE ★      │ + Positional encoding          │ with position information   │
@@ -255,6 +260,33 @@ REVERSE_TOKEN = 27  # [R] prefix
 COPY_TOKEN = 28     # [C] prefix
 
 
+# =============================================================================
+# 📦 SEQUENCE DATASET - Using YOUR DataLoader from Module 05
+# =============================================================================
+
+class SequenceDataset(Dataset):
+    """
+    Dataset for sequence-to-sequence tasks using YOUR Dataset interface.
+    
+    This shows how YOUR DataLoader handles sequence data for transformers,
+    enabling efficient batched training with shuffling.
+    """
+    
+    def __init__(self, data):
+        """
+        Args:
+            data: List of (input_seq, target_seq) tuples
+        """
+        self.data = data
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, idx):
+        input_seq, target_seq = self.data[idx]
+        return Tensor(input_seq), Tensor(target_seq)
+
+
 def tokens_to_letters(tokens, skip_special=True):
     """Convert token indices to readable letters."""
     result = []
@@ -317,34 +349,37 @@ def generate_mixed_data(num_samples, seq_len=6):
     return dataset
 
 
-def train_epoch(model, dataset, optimizer, loss_fn):
-    """Train for one epoch."""
+def train_epoch(model, dataloader, optimizer, loss_fn):
+    """Train for one epoch using YOUR DataLoader."""
     total_loss = 0.0
     correct_sequences = 0
+    total_samples = 0
 
-    np.random.shuffle(dataset)
+    # Use YOUR DataLoader for batched training!
+    for input_batch, target_batch in dataloader:
+        batch_size = input_batch.shape[0]
 
-    for input_seq, target_seq in dataset:
-        input_tensor = Tensor(input_seq.reshape(1, -1))
-        target_tensor = Tensor(target_seq.reshape(1, -1))
+        logits = model(input_batch)
 
-        logits = model(input_tensor)
-
+        # Reshape for loss computation
         logits_2d = logits.reshape(-1, model.vocab_size)
-        target_1d = target_tensor.reshape(-1)
+        target_1d = target_batch.reshape(-1)
         loss = loss_fn(logits_2d, target_1d)
 
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
 
-        total_loss += loss.data
+        total_loss += loss.data * batch_size
 
-        pred = np.argmax(logits.data, axis=-1).flatten()
-        if np.array_equal(pred, target_seq):
-            correct_sequences += 1
+        # Check sequence accuracy per sample in batch
+        pred = np.argmax(logits.data, axis=-1)
+        for i in range(batch_size):
+            if np.array_equal(pred[i], target_batch.data[i]):
+                correct_sequences += 1
+        total_samples += batch_size
 
-    return total_loss / len(dataset), (correct_sequences / len(dataset)) * 100
+    return total_loss / total_samples, (correct_sequences / total_samples) * 100
 
 
 def evaluate(model, dataset):
@@ -364,8 +399,8 @@ def evaluate(model, dataset):
     return (correct / len(dataset)) * 100, predictions
 
 
-def run_challenge(name, model, train_data, test_data, optimizer, loss_fn, epochs, target_acc):
-    """Run a single challenge."""
+def run_challenge(name, model, train_data, test_data, optimizer, loss_fn, epochs, target_acc, batch_size=16):
+    """Run a single challenge using YOUR DataLoader."""
     console.print(f"\n[bold cyan]{'='*60}[/bold cyan]")
     console.print(f"[bold]{name}[/bold]")
     console.print(f"[bold cyan]{'='*60}[/bold cyan]\n")
@@ -375,6 +410,11 @@ def run_challenge(name, model, train_data, test_data, optimizer, loss_fn, epochs
     for inp, tgt in train_data[:3]:
         console.print(f"  {tokens_to_letters(inp)} -> {tokens_to_letters(tgt)}")
     console.print()
+
+    # Create DataLoader for training (YOUR Module 05!)
+    train_dataset = SequenceDataset(train_data)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    console.print(f"[dim]DataLoader: {len(train_dataset)} samples, batch_size={batch_size}, {len(train_loader)} batches[/dim]\n")
 
     # Training
     with Progress(
@@ -389,7 +429,7 @@ def run_challenge(name, model, train_data, test_data, optimizer, loss_fn, epochs
 
         best_acc = 0
         for epoch in range(epochs):
-            train_loss, train_acc = train_epoch(model, list(train_data), optimizer, loss_fn)
+            train_loss, train_acc = train_epoch(model, train_loader, optimizer, loss_fn)
             test_acc, _ = evaluate(model, test_data)
             best_acc = max(best_acc, test_acc)
 

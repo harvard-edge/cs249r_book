@@ -17,12 +17,12 @@ it production-ready. Every technique uses YOUR implementations!
 ✅ REQUIRED MODULES (Run after Module 19):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Module 01-03: Tensor, Activations, Layers - YOUR base model
-  Module 07: Training - YOUR trained model from earlier milestones
+  Module 08: Training - YOUR trained model from earlier milestones
   Module 14: Profiling - YOUR Profiler class
   Module 15: Quantization - YOUR Quantizer class
   Module 16: Compression - YOUR Compressor class
-  Module 17: Memoization - YOUR KVCache class
-  Module 18: Acceleration - YOUR vectorized operations
+  Module 17: Acceleration - YOUR vectorized operations
+  Module 18: Memoization - YOUR KVCache class
   Module 19: Benchmarking - YOUR TinyMLPerf class
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -124,10 +124,10 @@ console = Console()
 # │ Module 16: Compressor│ Magnitude pruning + sparsity  │ 2-4× compression by         │
 # │ ★ OPTIMIZATION ★    │ representation                 │ removing small weights      │
 # │                     │                                │                             │
-# │ Module 17: KVCache  │ Caches attention computations  │ Faster inference for        │
+# │ Module 17: Accel    │ Vectorized ops, fused kernels  │ Faster execution through    │
 # │ ★ OPTIMIZATION ★    │ for transformer models         │ autoregressive generation   │
 # │                     │                                │                             │
-# │ Module 18: Accel    │ Vectorized ops, fused kernels  │ Faster execution through    │
+# │ Module 18: KVCache  │ Caches attention computations  │ Faster inference for        │
 # │ ★ OPTIMIZATION ★    │ optimized implementations      │ hardware-aware code         │
 # │                     │                                │                             │
 # │ Module 19: TinyMLPerf│ Scientific benchmarking       │ Rigorous before/after       │
@@ -197,13 +197,13 @@ def main():
         from tinytorch.perf.compression import Compressor
         console.print("  [green]✓[/green] Compressor (YOUR Module 16 implementation)")
 
-        # YOUR KV Cache (Module 17)
-        from tinytorch.perf.memoization import KVCache
-        console.print("  [green]✓[/green] KVCache (YOUR Module 17 implementation)")
-
-        # YOUR Acceleration (Module 18)
+        # YOUR Acceleration (Module 17)
         from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu
-        console.print("  [green]✓[/green] vectorized_matmul, fused_gelu (YOUR Module 18 implementation)")
+        console.print("  [green]✓[/green] vectorized_matmul, fused_gelu (YOUR Module 17 implementation)")
+
+        # YOUR KV Cache (Module 18)
+        from tinytorch.perf.memoization import KVCache
+        console.print("  [green]✓[/green] KVCache (YOUR Module 18 implementation)")
 
         # YOUR Benchmarking (Module 19)
         from tinytorch.perf.benchmarking import Benchmark, TinyMLPerf
@@ -472,11 +472,11 @@ def main():
     console.print()
 
     # ========================================================================
-    # STEP 4: KV CACHE (Using YOUR Module 17 - Transformers Only)
+    # STEP 4: KV CACHE (Using YOUR Module 18 - Transformers Only)
     # ========================================================================
 
     console.print(Panel(
-        "[bold cyan]⚡ STEP 4: KV Cache with YOUR Module 17[/bold cyan]\n"
+        "[bold cyan]⚡ STEP 4: KV Cache with YOUR Module 18[/bold cyan]\n"
         "Using KVCache for transformer generation speedup\n"
         "Caches K,V to avoid recomputation during autoregressive generation",
         border_style="cyan"
@@ -498,7 +498,7 @@ def main():
         # Show cache statistics
         cache_memory = kv_cache.batch_size * kv_cache.max_seq_len * kv_cache.num_layers * kv_cache.num_heads * kv_cache.head_dim * 2 * 4  # K+V, float32
 
-        table = Table(title="⚡ KV Cache Stats (YOUR Module 17)", box=box.ROUNDED)
+        table = Table(title="⚡ KV Cache Stats (YOUR Module 18)", box=box.ROUNDED)
         table.add_column("Property", style="cyan")
         table.add_column("Value", style="yellow")
         table.add_column("Notes", style="dim")
@@ -519,11 +519,11 @@ def main():
     console.print()
 
     # ========================================================================
-    # STEP 5: ACCELERATION (Using YOUR Module 18)
+    # STEP 5: ACCELERATION (Using YOUR Module 17)
     # ========================================================================
 
     console.print(Panel(
-        "[bold magenta]🚀 STEP 5: Acceleration with YOUR Module 18[/bold magenta]\n"
+        "[bold magenta]🚀 STEP 5: Acceleration with YOUR Module 17[/bold magenta]\n"
         "Using vectorized operations for compute speedup\n"
         "BLAS-optimized matmul and fused operations",
         border_style="magenta"
@@ -548,7 +548,7 @@ def main():
         C_vectorized = vectorized_matmul(A, B)
     vectorized_time = (time.time() - start) * 1000  # ms
 
-    table = Table(title="🚀 Acceleration Results (YOUR Module 18)", box=box.ROUNDED)
+    table = Table(title="🚀 Acceleration Results (YOUR Module 17)", box=box.ROUNDED)
     table.add_column("Operation", style="cyan")
     table.add_column("Time (100 runs)", style="yellow")
     table.add_column("Notes", style="dim")
@@ -700,10 +700,10 @@ def main():
         f"✅ [cyan]YOUR Compression (Module 16):[/cyan]\n"
         f"   • Pruned to {sparsity_after:.0%} sparsity\n"
         f"   • {abs(baseline_acc - pruned_acc):.1f}% accuracy impact\n\n"
-        f"✅ [cyan]YOUR KV Cache (Module 17):[/cyan]\n"
+        f"✅ [cyan]YOUR KV Cache (Module 18):[/cyan]\n"
         f"   • Pre-allocated cache for transformer generation\n"
         f"   • ~N× speedup for sequence length N\n\n"
-        f"✅ [cyan]YOUR Acceleration (Module 18):[/cyan]\n"
+        f"✅ [cyan]YOUR Acceleration (Module 17):[/cyan]\n"
         f"   • BLAS-optimized matrix operations\n"
         f"   • Vectorized compute kernels\n\n"
         f"💡 [yellow]Challenge: Combine All Techniques![/yellow]\n"
@@ -721,8 +721,8 @@ def main():
         "  • Module 14: Profiler\n"
         "  • Module 15: Quantizer\n"
         "  • Module 16: Compressor\n"
-        "  • Module 17: KVCache\n"
-        "  • Module 18: vectorized_matmul\n"
+        "  • Module 17: vectorized_matmul\n"
+        "  • Module 18: KVCache\n"
         "  • Module 19: Benchmark\n\n"
         "[bold]Everything you built... now works together![/bold]\n\n"
         "[cyan]What you learned:[/cyan]\n"

@@ -78,9 +78,9 @@ def test_regression_subtraction_has_backward():
     """
     Regression test for Issue #3: Subtraction had no backward pass.
 
-    Bug: Tensor.__sub__ not patched by Module 05, no gradient flow.
-    Fix: Added SubBackward class and patched __sub__ in Module 05.
-    Commit: Module 05 fixes
+    Bug: Tensor.__sub__ not patched by Module 06, no gradient flow.
+    Fix: Added SubBackward class and patched __sub__ in Module 06.
+    Commit: Module 06 fixes
     """
     print("Testing regression: subtraction backward...")
 
@@ -105,9 +105,9 @@ def test_regression_division_has_backward():
     """
     Regression test for Issue #4: Division had no backward pass.
 
-    Bug: Tensor.__truediv__ not patched by Module 05, no gradient flow.
-    Fix: Added DivBackward class and patched __truediv__ in Module 05.
-    Commit: Module 05 fixes
+    Bug: Tensor.__truediv__ not patched by Module 06, no gradient flow.
+    Fix: Added DivBackward class and patched __truediv__ in Module 06.
+    Commit: Module 06 fixes
     """
     print("Testing regression: division backward...")
 
@@ -213,9 +213,9 @@ def test_regression_transpose_has_backward():
     """
     Regression test for Issue #8: Transpose had no backward pass.
 
-    Bug: Tensor.transpose() not patched by Module 05, no gradient flow.
-    Fix: Added TransposeBackward class and patched transpose in Module 05.
-    Commit: Module 05 fixes (TransposeBackward)
+    Bug: Tensor.transpose() not patched by Module 06, no gradient flow.
+    Fix: Added TransposeBackward class and patched transpose in Module 06.
+    Commit: Module 06 fixes (TransposeBackward)
     """
     print("Testing regression: transpose backward...")
 
@@ -243,8 +243,8 @@ def test_regression_matmul_backward_uses_matmul():
     Regression test for Issue #9: MatmulBackward used np.dot for gradients.
 
     Bug: MatmulBackward used np.dot which doesn't handle batched 3D+ tensors.
-    Fix: Changed to np.matmul and np.swapaxes in Module 05.
-    Commit: Module 05 fixes (MatmulBackward batched)
+    Fix: Changed to np.matmul and np.swapaxes in Module 06.
+    Commit: Module 06 fixes (MatmulBackward batched)
     """
     print("Testing regression: MatmulBackward batched operations...")
 

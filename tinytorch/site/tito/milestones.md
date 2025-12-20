@@ -34,9 +34,10 @@ tito module complete 01 # Tensor
 tito module complete 02 # Activations
 tito module complete 03 # Layers
 tito module complete 04 # Losses
-tito module complete 05 # Autograd
-tito module complete 06 # Optimizers
-tito module complete 07 # Training
+tito module complete 05 # DataLoader
+tito module complete 06 # Autograd
+tito module complete 07 # Optimizers
+tito module complete 08 # Training
 
 # 2. See what milestones you can run
 tito milestone list
@@ -178,7 +179,7 @@ tito milestone run 02
 
 **What**: Backpropagation breakthrough - train deep networks on MNIST
 
-**Requires**: Modules 01-07 (Complete Foundation Tier)
+**Requires**: Modules 01-08 (Complete Foundation Tier)
 
 **What you'll do**: Train a multi-layer perceptron to recognize handwritten digits (95%+ accuracy)
 
@@ -345,7 +346,7 @@ TinyTorch tracks progress in three ways (all are related but distinct):
 ### Relationship Between Systems
 
 ```
-Complete Modules (01-07)
+Complete Modules (01-08)
  ↓
 Unlock Milestone 03
  ↓
@@ -362,8 +363,8 @@ Capability Unlocked (optional checkpoint system)
 
 While you can technically skip around, the tier structure is designed for progressive learning:
 
-- **Foundation Tier (01-07)**: Required for first milestone
-- **Architecture Tier (08-13)**: Build on Foundation
+- **Foundation Tier (01-08)**: Required for first milestone
+- **Architecture Tier (09-13)**: Build on Foundation
 - **Optimization Tier (14-19)**: Build on Architecture
 
 ### 2. Test as You Go

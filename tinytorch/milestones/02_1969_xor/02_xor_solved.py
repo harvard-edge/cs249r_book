@@ -8,19 +8,20 @@ After the 1969 XOR crisis killed neural networks, research funding dried up for 
 a decade. Then in 1986, Rumelhart, Hinton, and Williams published the backpropagation
 algorithm for training multi-layer networks - and XOR became trivial!
 
-🎯 MILESTONE 2 PART 2: THE SOLUTION (After Modules 01-07)
+🎯 MILESTONE 2 PART 2: THE SOLUTION (After Modules 01-08)
 Watch a multi-layer network SOLVE the "impossible" XOR problem that stumped AI for
 17 years. The secret? Hidden layers + backpropagation (which YOU just built!).
 
-✅ REQUIRED MODULES (Run after Module 07):
+✅ REQUIRED MODULES (Run after Module 08):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Module 01 (Tensor)        : YOUR data structure with autodiff
   Module 02 (Activations)   : YOUR ReLU and Sigmoid (non-linearity!)
   Module 03 (Layers)        : YOUR Linear layers (multiple layers!)
   Module 04 (Losses)        : YOUR loss function
-  Module 05 (Autograd)      : YOUR backpropagation through hidden layers
-  Module 06 (Optimizers)    : YOUR SGD optimizer
-  Module 07 (Training)      : YOUR training loop
+  Module 06 (Autograd)      : YOUR backpropagation through hidden layers
+  Module 07 (Optimizers)    : YOUR SGD optimizer
+  Module 08 (Training)      : YOUR training loop
+  (Module 05 DataLoader skipped: XOR has only 4 points, no batching needed)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🏗️ ARCHITECTURE (The Multi-Layer Solution):
@@ -111,7 +112,7 @@ console = Console()
 # │ Module 04: Loss     │ BinaryCrossEntropy measures    │ Guides learning toward      │
 # │                     │ how wrong predictions are      │ correct XOR outputs         │
 # │                     │                                │                             │
-# │ Module 05: Autograd │ .backward() computes gradients │ Gradients flow through      │
+# │ Module 06: Autograd │ .backward() computes gradients │ Gradients flow through      │
 # │                     │ for BOTH layers automatically  │ hidden layer to inputs!     │
 # │                     │                                │                             │
 # │ Module 06: SGD      │ Updates 13 parameters          │ Adjusts weights to minimize │

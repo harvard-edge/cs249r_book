@@ -468,7 +468,7 @@ class Tensor:
 
         # Educational implementation: explicit loops to show what matrix multiplication does
         # This is intentionally slower than np.matmul to demonstrate the value of vectorization
-        # In Module 18 (Acceleration), students will learn to use optimized BLAS operations
+        # In Module 17 (Acceleration), students will learn to use optimized BLAS operations
 
         a = self.data
         b = other.data

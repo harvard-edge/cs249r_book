@@ -1,5 +1,5 @@
 """
-Integration Tests for Module 05: Dense/Networks
+Integration Tests for Module 05: DataLoader
 These tests verify that the module exports correctly and works as expected.
 Run with pytest for detailed reporting.
 """
@@ -24,7 +24,7 @@ class TestDenseModuleExports:
     def test_dense_is_callable(self):
         """Test Dense can be instantiated."""
         from tinytorch.core.layers import Linear as Dense
-        layer = Linear(10, 5)
+        layer = Dense(10, 5)
         assert layer is not None, "Should create Dense layer instance"
         assert hasattr(layer, 'forward'), "Dense should have forward method"
 
@@ -38,7 +38,7 @@ class TestDenseLayerFunctionality:
         from tinytorch.core.tensor import Tensor
 
         # Create layer
-        layer = Linear(10, 5)
+        layer = Dense(10, 5)
 
         # Create input
         batch_size = 32
@@ -56,7 +56,7 @@ class TestDenseLayerFunctionality:
         from tinytorch.core.layers import Linear as Dense
         from tinytorch.core.tensor import Tensor
 
-        layer = Linear(10, 5, bias=True)
+        layer = Dense(10, 5, bias=True)
         assert hasattr(layer, 'bias'), "Layer should have bias"
         assert layer.bias is not None, "Bias should be initialized"
 
@@ -69,7 +69,7 @@ class TestDenseLayerFunctionality:
         from tinytorch.core.layers import Linear as Dense
         from tinytorch.core.tensor import Tensor
 
-        layer = Linear(10, 5, bias=False)
+        layer = Dense(10, 5, bias=False)
         assert layer.bias is None, "Bias should be None when disabled"
 
         x = Tensor(np.random.randn(1, 10))
@@ -81,7 +81,7 @@ class TestDenseLayerFunctionality:
         from tinytorch.core.layers import Linear as Dense
         from tinytorch.core.tensor import Tensor
 
-        layer = Linear(10, 5)
+        layer = Dense(10, 5)
         x = Tensor(np.random.randn(4, 10))
 
         # Test both forward() and __call__()
@@ -114,9 +114,9 @@ class TestNetworkComposition:
         from tinytorch.core.tensor import Tensor
 
         # Build network manually (without Sequential)
-        layer1 = Linear(784, 128)
+        layer1 = Dense(784, 128)
         relu = ReLU()
-        layer2 = Linear(128, 10)
+        layer2 = Dense(128, 10)
         sigmoid = Sigmoid()
 
         # Test forward pass through all layers
@@ -146,9 +146,9 @@ class TestXORCapability:
         from tinytorch.core.tensor import Tensor
 
         # XOR network: 2 -> 4 -> 1
-        hidden = Linear(2, 4)
+        hidden = Dense(2, 4)
         relu = ReLU()
-        output = Linear(4, 1)
+        output = Dense(4, 1)
         sigmoid = Sigmoid()
 
         # XOR inputs

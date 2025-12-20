@@ -44,7 +44,7 @@ class TestAdvancedTrainingFeatures:  # ← WRONG MODULE!
 Module 10: Progressive Integration Tests
 Tests that Module 10 (Tokenization) works correctly...  # ← CORRECT!
 
-DEPENDENCY CHAIN: 01_tensor → ... → 08_dataloader → 10_tokenization → 11_embeddings  # ← CORRECT!
+DEPENDENCY CHAIN: 01_tensor → ... → 05_dataloader → ... → 08_training → 09_convolutions → 10_tokenization  # ← CORRECT!
 This is where we enable text processing for NLP tasks.  # ← CORRECT!
 """
 

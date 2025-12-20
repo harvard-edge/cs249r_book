@@ -226,19 +226,19 @@ class TinyTorchStatusAnalyzer:
 
                 # Check for required profiler classes
                 required_profilers = {
-                    '12_compression': 'CompressionSystemsProfiler',
-                    '13_kernels': 'KernelOptimizationProfiler',
-                    '14_benchmarking': 'ProductionBenchmarkingProfiler',
-                    '15_mlops': 'ProductionMLOpsProfiler',
-                    '16_capstone': 'ProductionMLSystemProfiler',
-                    '07_attention': 'AttentionEfficiencyProfiler',
-                    '09_autograd': 'AutogradSystemsProfiler',
-                    '11_training': 'TrainingPipelineProfiler',
-                    '03_activations': 'ActivationProfiler',
-                    '04_layers': 'LayerArchitectureProfiler',
-                    '05_dense': 'NetworkStabilityMonitor',
+                    # Foundation tier (01-08)
+                    '02_activations': 'ActivationProfiler',
+                    '03_layers': 'LayerArchitectureProfiler',
+                    '05_dataloader': 'DataPipelineProfiler',
+                    '06_autograd': 'AutogradSystemsProfiler',
+                    '08_training': 'TrainingPipelineProfiler',
+                    # Architecture tier (09-13)
                     '09_convolutions': 'ConvolutionProfiler',
-                    '08_dataloader': 'DataPipelineProfiler'
+                    '12_attention': 'AttentionEfficiencyProfiler',
+                    # Optimization tier (14-20)
+                    '16_compression': 'CompressionSystemsProfiler',
+                    '19_benchmarking': 'ProductionBenchmarkingProfiler',
+                    '20_capstone': 'ProductionMLSystemProfiler',
                 }
 
                 if module_name in required_profilers:

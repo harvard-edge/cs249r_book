@@ -21,7 +21,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear as Dense
+from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU
 from tinytorch.core.training import CrossEntropyLoss
 

@@ -344,7 +344,7 @@ class TestFullJourney:
     def test_milestone_01_runs_successfully(self):
         """
         Test that milestone 01 can run successfully.
-        Requires: Module 01-07 completed and exported.
+        Requires: Module 01-08 completed and exported.
         """
         # Check if prerequisite modules are available
         try:

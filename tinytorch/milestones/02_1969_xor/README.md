@@ -14,7 +14,7 @@ A demonstration of perceptron limitations and the multi-layer solution:
 
 ## Required Modules
 
-**Run after Module 07** (Training capability)
+**Run after Module 08** (Training capability)
 
 | Module | Component | What It Provides |
 |--------|-----------|------------------|
@@ -22,9 +22,9 @@ A demonstration of perceptron limitations and the multi-layer solution:
 | Module 02 | Activations | YOUR sigmoid/ReLU activations |
 | Module 03 | Layers | YOUR Linear layers |
 | Module 04 | Losses | YOUR loss functions |
-| Module 05 | Autograd | YOUR automatic differentiation |
-| Module 06 | Optimizers | YOUR SGD optimizer |
-| Module 07 | Training | YOUR end-to-end training loop |
+| Module 06 | Autograd | YOUR automatic differentiation |
+| Module 07 | Optimizers | YOUR SGD optimizer |
+| Module 08 | Training | YOUR end-to-end training loop |
 
 ## Milestone Structure
 
@@ -87,10 +87,10 @@ The XOR crisis wasn't about perceptrons being broken - it was about needing **de
 ```bash
 cd milestones/02_1969_xor
 
-# Step 1: Experience the crisis (run after Module 07)
+# Step 1: Experience the crisis (run after Module 08)
 python 01_xor_crisis.py
 
-# Step 2: See the solution (run after Module 07)
+# Step 2: See the solution (run after Module 08)
 python 02_xor_solved.py
 ```
 

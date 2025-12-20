@@ -94,7 +94,7 @@ Each test reports **specific, measurable success criteria**:
 - Full spectrum: 5-100× speedups from naive loops to optimized libraries
 - Backend system: Smart dispatch works with minimal overhead
 
-**Module 17 (Quantization)**:
+**Module 15 (Quantization)**:
 - Memory reduction: 3-4× reduction in model size
 - Inference speedup: Faster execution (hardware dependent)
 - Accuracy preservation: <5% degradation in model quality
@@ -176,13 +176,13 @@ Test optimization reliability:
 - Structured vs unstructured pruning tradeoffs
 - Magnitude-based pruning is simple but effective
 
-**KV Caching (Module 17)**:
+**KV Caching (Module 18)**:
 - Complexity reduction: Demonstrable O(N²) → O(N) improvement
 - Memory growth: Linear scaling validates cache design
 - Practical speedups: Most visible in longer sequences (>32 tokens)
 - Implementation complexity: Easy to introduce subtle bugs
 
-**Acceleration (Module 18)**:
+**Acceleration (Module 17)**:
 - NumPy vs naive loops: 10-100× speedups easily achievable
 - Cache blocking: 20-50% improvements on appropriate workloads
 - Backend dispatch: Can add 5-20% overhead if not implemented carefully
