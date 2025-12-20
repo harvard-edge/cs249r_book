@@ -692,8 +692,8 @@ Implement loss functions (MSELoss, CrossEntropyLoss) that measure prediction err
 | Module | What It Does | Your Layers In Action |
 |--------|--------------|----------------------|
 | **04: Losses** | Measure prediction error | `loss = CrossEntropyLoss()(model(x), y)` |
-| **05: Autograd** | Compute gradients | `loss.backward()` fills `layer.weight.grad` |
-| **06: Optimizers** | Update parameters | `optimizer.step()` uses `layer.parameters()` |
+| **06: Autograd** | Compute gradients | `loss.backward()` fills `layer.weight.grad` |
+| **07: Optimizers** | Update parameters | `optimizer.step()` uses `layer.parameters()` |
 
 ## Get Started
 

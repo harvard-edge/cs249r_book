@@ -28,7 +28,7 @@ Input (features) --> Linear --> Sigmoid --> Output (0 or 1)
 | 02 | Activations | YOUR sigmoid activation |
 | 03 | Layers | YOUR Linear layer |
 | 04 | Losses | YOUR loss functions |
-| 06-08 | Training | YOUR autograd + optimizer (Part 2 only) |
+| 06-08 | Training Infrastructure | YOUR autograd + optimizer (Part 2 only) |
 
 ## Running the Milestone
 

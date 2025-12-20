@@ -557,7 +557,7 @@ Implement Linear layers that combine your Tensor operations with your activation
 |--------|--------------|---------------------------|
 | **03: Layers** | Neural network building blocks | `Linear(x)` followed by `ReLU()(output)` |
 | **04: Losses** | Training objectives | Softmax probabilities feed into cross-entropy loss |
-| **05: Autograd** | Automatic gradients | `relu.backward(grad)` computes activation gradients |
+| **06: Autograd** | Automatic gradients | `relu.backward(grad)` computes activation gradients |
 
 ## Get Started
 

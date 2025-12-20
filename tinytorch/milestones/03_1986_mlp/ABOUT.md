@@ -28,7 +28,7 @@ Images --> Flatten --> Linear --> ReLU --> Linear --> ReLU --> Linear --> Classe
 |--------|-----------|------------------|
 | 01-04 | Foundation | Tensor, Activations, Layers, Losses |
 | 05 | DataLoader | YOUR batching and data pipeline |
-| 06-08 | Training | Autograd, Optimizers, Training loops |
+| 06-08 | Training Infrastructure | Autograd, Optimizers, Training loops |
 
 ## Running the Milestone
 

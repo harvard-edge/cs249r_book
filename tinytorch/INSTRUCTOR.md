@@ -544,11 +544,11 @@ ls submitted/*/MODULE/
 | 2 | 02 Activations | Non-linearity Functions |
 | 3 | 03 Layers | Neural Network Components |
 | 4 | 04 Losses | Optimization Objectives |
-| 5 | 05 Autograd | Automatic Differentiation |
-| 6 | 06 Optimizers | Training Algorithms |
-| 7 | 07 Training | Complete Training Loop |
-| 8 | Midterm Project | Build and Train Network |
-| 9 | 08 DataLoader | Data Pipeline |
+| 5 | 05 DataLoader | Data Pipeline |
+| 6 | 06 Autograd | Automatic Differentiation |
+| 7 | 07 Optimizers | Training Algorithms |
+| 8 | 08 Training | Complete Training Loop |
+| 9 | Midterm Project | Build and Train Network |
 | 10 | 09 Spatial | Convolutions, CNNs |
 | 11 | 10 Tokenization | Text Processing |
 | 12 | 11 Embeddings | Word Representations |

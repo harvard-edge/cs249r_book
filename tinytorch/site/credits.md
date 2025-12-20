@@ -18,7 +18,7 @@ TinyTorch's pedagogical DNA comes from MiniTorch's brilliant "build a framework 
 
 **When to use MiniTorch**: Excellent complement for deep mathematical understanding of autodifferentiation
 
-**Connection to TinyTorch**: Modules 05-07 (Autograd, Optimizers, Training) share philosophical DNA with MiniTorch's core pedagogy
+**Connection to TinyTorch**: Modules 06-08 (Autograd, Optimizers, Training) share philosophical DNA with MiniTorch's core pedagogy
 
 
 ### micrograd

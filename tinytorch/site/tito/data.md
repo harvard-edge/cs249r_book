@@ -165,10 +165,10 @@ Module Progress:
  02 Activations
  03 Layers
  04 Losses
- 05 Autograd
- 06 Optimizers
- 07 Training
- 08 DataLoader
+ 05 DataLoader
+ 06 Autograd
+ 07 Optimizers
+ 08 Training
  09 Convolutions
  10 Normalization
  ...
