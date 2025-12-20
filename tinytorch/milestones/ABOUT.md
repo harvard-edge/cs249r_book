@@ -21,7 +21,7 @@ This isn't a demo - it's proof that you understand ML systems engineering from t
 | **1986** | MLP Revival | Multi-class vision (95%+ MNIST) | Module 08 |
 | **1998** | CNN Revolution | Convolutions (70%+ CIFAR-10) | Module 09 |
 | **2017** | Transformers | Language generation with attention | Module 13 |
-| **2018** | MLPerf | Production optimization pipeline | Module 18 |
+| **2018** | MLPerf | Production optimization pipeline | Module 19 |
 
 ## Why Milestones Transform Learning
 

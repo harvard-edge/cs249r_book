@@ -17,7 +17,7 @@ transforms O(n²) generation to O(n) - measuring the 6-10× speedup scientifical
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Module 01-13 (Core)         : YOUR complete transformer stack
   Module 14 (Profiling)       : YOUR profiler measures parameters & memory
-  Module 17 (Memoization)     : YOUR KV-cache for generation speedup
+  Module 18 (Memoization)     : YOUR KV-cache for generation speedup
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🏗️ PROFILING WORKFLOW:
@@ -51,7 +51,7 @@ transforms O(n²) generation to O(n) - measuring the 6-10× speedup scientifical
 # │ Module 14: Profiler │ Counts parameters, measures    │ Scientific measurement      │
 # │                     │ memory and latency             │ enables data-driven opt     │
 # │                     │                                │                             │
-# │ Module 17: KV Cache │ Caches keys/values across      │ Transforms O(n²) → O(n)     │
+# │ Module 18: KV Cache │ Caches keys/values across      │ Transforms O(n²) → O(n)     │
 # │                     │ generation steps               │ 6-10× speedup!              │
 # │                     │                                │                             │
 # │ Module 13: GPT      │ Transformer model being        │ Production models need      │
@@ -395,7 +395,7 @@ def main():
         "• Profile different model sizes\n"
         "• Compare different architectures\n\n"
         "[dim]Data-driven optimization > guesswork![/dim]",
-        title="[bold]Module 17 Complete[/bold]",
+        title="[bold]Module 18 Complete[/bold]",
         border_style="green",
         box=box.DOUBLE
     ))

@@ -26,12 +26,12 @@ Learning Objectives:
 - Batch multiple sequences for throughput
 - Use stop tokens and max length effectively
 
-✅ REQUIRED MODULES (Run after Module 18):
+✅ REQUIRED MODULES (Run after Module 18 or later):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Module 13 (Transformers)  : YOUR transformer implementation
   Module 14 (Profiling)     : YOUR profiling to measure speedup
-  Module 17 (Memoization)   : YOUR KV-cache implementation
-  Module 18 (Acceleration)  : YOUR batching strategies
+  Module 17 (Acceleration)  : YOUR vectorized operations
+  Module 18 (Memoization)   : YOUR KV-cache implementation
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🏗️ GENERATION PIPELINE:
@@ -73,10 +73,10 @@ Learning Objectives:
 # │ Module 14: Profiler │ Measures tokens/sec, latency   │ Quantify optimization gains │
 # │                     │ before and after optimization  │ with scientific rigor       │
 # │                     │                                │                             │
-# │ Module 17: KV Cache │ Caches key/value matrices      │ 6-10× speedup by avoiding   │
+# │ Module 17: Accel    │ Vectorized ops, optimized ops  │ 2-10× speedup through       │
 # │                     │ across generation steps        │ redundant attention compute │
 # │                     │                                │                             │
-# │ Module 18: Batching │ Processes multiple sequences   │ 2-4× additional throughput  │
+# │ Module 18: KV Cache │ Caches key/value matrices      │ 6-10× speedup by avoiding   │
 # │                     │ simultaneously                 │ by amortizing overhead      │
 # └─────────────────────┴────────────────────────────────┴─────────────────────────────┘
 #
@@ -107,8 +107,8 @@ console = Console()
 
 def main():
     console.print("[bold red]TODO:[/bold red] This milestone will be implemented after:")
-    console.print("  ✅ Module 17 (Memoization/KV-Cache)")
-    console.print("  ✅ Module 18 (Acceleration/Batching)")
+    console.print("  ✅ Module 17 (Acceleration/Vectorization)")
+    console.print("  ✅ Module 18 (Memoization/KV-Cache)")
     console.print()
     console.print("[dim]This is a placeholder for generation optimization.[/dim]")
 

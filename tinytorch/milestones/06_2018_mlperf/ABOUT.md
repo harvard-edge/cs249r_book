@@ -28,8 +28,8 @@ Measure --> Optimize --> Validate --> Repeat
 | 14 | Profiling | YOUR measurement tools |
 | 15 | Quantization | YOUR INT8/FP16 implementations |
 | 16 | Compression | YOUR pruning techniques |
-| 17 | Memoization | YOUR KV-cache for generation |
-| 18 | Acceleration | YOUR inference optimizations |
+| 17 | Acceleration | YOUR vectorized operations |
+| 18 | Memoization | YOUR KV-cache for generation |
 
 ## Running the Milestone
 
@@ -85,7 +85,7 @@ Result: 10× faster, 8× smaller, 2% accuracy cost - achieved in days.
 - YOUR Profiler (Module 14) identifies real bottlenecks (not assumed ones)
 - YOUR Quantization (Module 15) reduces memory 4×
 - YOUR Pruning (Module 16) reduces parameters 50%+
-- YOUR KV-Cache (Module 17) speeds up generation 10×
+- YOUR KV-Cache (Module 18) speeds up generation 10×
 
 The complete workflow - measure, optimize, validate - using YOUR tools.
 
@@ -101,7 +101,7 @@ The complete workflow - measure, optimize, validate - using YOUR tools.
 - 50-90% sparsity often achievable
 - Structured pruning enables actual speedup
 
-### KV-Cache (Module 17)
+### KV-Cache (Module 18)
 - Cache key/value projections during generation
 - Avoid recomputing attention for previous tokens
 - Critical for transformer inference speed
