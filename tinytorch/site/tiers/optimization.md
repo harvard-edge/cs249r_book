@@ -19,7 +19,7 @@ The Optimization tier teaches you how to make ML systems fast, small, and deploy
 
 ```{mermaid}
 :align: center
-:caption: "**Optimization Module Flow.** Starting from profiling, two parallel tracks address size reduction (quantization, compression) and speed improvement (memoization, acceleration), converging at benchmarking."
+:caption: "**Optimization Module Flow.** Starting from profiling, two parallel tracks: model-level (quantization, compression) and runtime (acceleration, memoization), converging at benchmarking."
 graph TB
  A[️ Architecture<br/>CNNs + Transformers]
 
@@ -31,8 +31,8 @@ graph TB
  M15 --> SMALL[ Smaller Models<br/>4-16× size reduction]
  M16 --> SMALL
 
- M14 --> M17[17. Memoization<br/>KV-cache for inference]
- M17 --> M18[18. Acceleration<br/>Batching + optimizations]
+ M14 --> M17[17. Acceleration<br/>Vectorization + fusion]
+ M17 --> M18[18. Memoization<br/>KV-cache for inference]
 
  M18 --> FAST[ Faster Inference<br/>12-40× speedup]
 
@@ -95,7 +95,20 @@ graph TB
 **Impact**: Combined with quantization, achieve 8-16× compression (quantize + prune).
 
 
-### 17. Memoization - KV-Cache for Fast Generation
+### 17. Acceleration - Vectorization and Fusion
+
+**What it is**: Vectorized operations, SIMD utilization, and kernel fusion for maximum hardware efficiency.
+
+**Why it matters**: Naive implementations waste 90%+ of hardware capability. Vectorization and fusion eliminate redundant memory traffic and exploit hardware parallelism for 10-100× speedups.
+
+**What you'll build**: Vectorized matrix multiplication, fused operations (like fused_gelu), and cache-optimal memory access patterns.
+
+**Systems focus**: Cache locality, SIMD utilization, memory bandwidth optimization, loop tiling
+
+**Impact**: Convolution speedup from naive loops to near-BLAS performance.
+
+
+### 18. Memoization - KV-Cache for Fast Generation
 
 **What it is**: Caching key-value pairs in transformers to avoid recomputing attention for previously generated tokens.
 
@@ -106,19 +119,6 @@ graph TB
 **Systems focus**: Cache management, memory vs speed trade-offs, incremental computation
 
 **Impact**: Text generation goes from 0.5 tokens/sec → 50+ tokens/sec.
-
-
-### 18. Acceleration - Batching and Beyond
-
-**What it is**: Batching multiple requests, operation fusion, and other inference optimizations.
-
-**Why it matters**: Production systems serve multiple users simultaneously. Batching amortizes overhead across requests, achieving near-linear throughput scaling.
-
-**What you'll build**: Dynamic batching, operation fusion, and inference server patterns.
-
-**Systems focus**: Throughput vs latency, memory pooling, request scheduling
-
-**Impact**: Combined with KV-cache, achieve 12-40× faster inference than naive implementations.
 
 
 ### 19. Benchmarking - Systematic Measurement
@@ -210,19 +210,34 @@ python 03_generation_opts.py # KV-cache + batching (12-40× faster)
 **What makes this special**: You'll have built the entire optimization pipeline from scratch—profiling tools, quantization engine, pruning algorithms, caching systems, and benchmarking infrastructure.
 
 
-## Two Optimization Tracks
+## Two Optimization Categories
 
-The Optimization tier has two parallel focuses:
+The Optimization tier follows a deliberate pedagogical structure: **Measure → Model-Level → Runtime → Validate**.
 
-**Size Optimization (Modules 15-16)**:
-- Quantization (INT8 compression)
-- Pruning (removing parameters)
-- Goal: Smaller models for deployment
+### Model-Level Optimizations (Modules 15-16)
 
-**Speed Optimization (Modules 17-18)**:
-- Memoization (KV-cache)
-- Acceleration (batching, fusion)
-- Goal: Faster inference for production
+These techniques **change the model itself**—they permanently modify weights and architecture:
+
+- **Quantization (15)**: Convert FP32 weights to INT8 for 4× compression
+- **Compression (16)**: Prune unnecessary parameters for 2-10× size reduction
+
+After model-level optimization, you have a different (smaller, faster) model.
+
+### Runtime Optimizations (Modules 17-18)
+
+These techniques **change how execution happens** without modifying model weights:
+
+- **Acceleration (17)**: Vectorization exploits SIMD instructions; kernel fusion eliminates memory traffic. These apply to ANY numerical computation.
+- **Memoization (18)**: KV-cache is domain-specific optimization for transformer inference, trading memory for O(n²) → O(n) speedup.
+
+Note the progression: general-purpose optimization (acceleration) comes before domain-specific optimization (KV-cache). This matches the pedagogical principle of teaching foundational concepts before specialized applications.
+
+### Why This Order?
+
+1. **Profiling (14)**: Always measure before optimizing
+2. **Model-level (15-16)**: Change the model (one-time transformation)
+3. **Runtime (17-18)**: Change execution (applied during inference)
+4. **Benchmarking (19)**: Validate improvements systematically
 
 Both tracks start from **Module 14 (Profiling)** and converge at **Module 19 (Benchmarking)**.
 

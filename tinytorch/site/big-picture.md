@@ -16,7 +16,7 @@ TinyTorch takes you from basic tensors to production-ready ML systems through 20
 
 - **Architecture (purple)**: Apply your foundation to real problems. DataLoader feeds data efficiently, then you choose your path: Convolutions for images or Transformers for text (Tokenization → Embeddings → Attention → Transformers).
 
-- **Optimization (orange)**: Make it fast. Profile to find bottlenecks, then apply quantization, compression, memoization, or acceleration. Benchmarking measures your improvements.
+- **Optimization (orange)**: Make it fast. Profile to find bottlenecks, then apply quantization, compression, acceleration, or memoization. Benchmarking measures your improvements.
 
 <div>
 
