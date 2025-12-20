@@ -3,9 +3,9 @@
 :::{admonition} Module Info
 :class: note
 
-**ARCHITECTURE TIER** | Difficulty: ●●○○ | Time: 4-6 hours | Prerequisites: 01-07
+**ARCHITECTURE TIER** | Difficulty: ●●○○ | Time: 4-6 hours | Prerequisites: 01-08
 
-**Prerequisites: Foundation tier (Modules 01-07)** means you should have completed:
+**Prerequisites: Foundation tier (Modules 01-08)** means you should have completed:
 - Tensor operations (Module 01)
 - Basic neural network components (Modules 02-04)
 - Training fundamentals (Modules 05-07)

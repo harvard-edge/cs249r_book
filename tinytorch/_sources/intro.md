@@ -214,12 +214,12 @@ Four progressive tiers take you from foundations to production systems:
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin: 1.5rem 0 2rem 0; max-width: 1100px;">
 
 <a href="tiers/foundation.html" style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #1976d2; text-decoration: none; display: block;">
-<h3 style="margin: 0 0 0.5rem 0; color: #0d47a1; font-size: 1rem; font-weight: 600;">Foundation (01-07)</h3>
+<h3 style="margin: 0 0 0.5rem 0; color: #0d47a1; font-size: 1rem; font-weight: 600;">Foundation (01-08)</h3>
 <p style="margin: 0; color: #1565c0; font-size: 0.9rem;">Tensors, autograd, layers, training loops</p>
 </a>
 
 <a href="tiers/architecture.html" style="background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #7b1fa2; text-decoration: none; display: block;">
-<h3 style="margin: 0 0 0.5rem 0; color: #4a148c; font-size: 1rem; font-weight: 600;">Architecture (08-13)</h3>
+<h3 style="margin: 0 0 0.5rem 0; color: #4a148c; font-size: 1rem; font-weight: 600;">Architecture (09-13)</h3>
 <p style="margin: 0; color: #6a1b9a; font-size: 0.9rem;">CNNs, attention, transformers, GPT</p>
 </a>
 

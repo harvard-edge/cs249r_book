@@ -6,7 +6,7 @@
 **OPTIMIZATION TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-13
 
 **Prerequisites: Modules 01-13** means you should have:
-- Built the complete ML stack (Modules 01-07)
+- Built the complete ML stack (Modules 01-08)
 - Implemented CNN architectures (Module 09) or Transformers (Modules 10-13)
 - Models to profile and optimize
 
@@ -50,6 +50,26 @@ Profiling is the foundation of performance optimization. Before making a model f
 Every optimization decision starts with measurement. Is your model memory-bound or compute-bound? Which layers consume the most resources? How does batch size affect throughput? Your profiler will answer these questions with data, not guesses, enabling the targeted optimizations in later modules.
 
 By the end, you'll have built the same measurement infrastructure used by production ML teams to make data-driven optimization decisions.
+
+## The Optimization Tier Flow
+
+Profiling (Module 14) is the gateway to the Optimization tier, which follows **Measure → Transform → Validate**:
+
+```
+Profiling (14) → Model-Level (15-16) → Runtime (17-18) → Benchmarking (19)
+     ↓                  ↓                    ↓                  ↓
+ "What's slow?"   "Shrink the model"   "Speed up execution"  "Did it work?"
+```
+
+**Model-Level Optimizations (15-16)**: Change the model itself
+- Quantization: FP32 → INT8 for 4× compression
+- Compression: Prune unnecessary weights
+
+**Runtime Optimizations (17-18)**: Change how execution happens
+- Acceleration: Vectorization, kernel fusion (general-purpose)
+- Memoization: KV-cache for transformers (domain-specific)
+
+You can't optimize what you can't measure. That's why profiling comes first.
 
 ## Learning Objectives
 
@@ -464,7 +484,7 @@ Implement quantization to reduce model size and accelerate inference. You'll use
 |--------|--------------|------------------------|
 | **15: Quantization** | Reduce precision to INT8 | `profile_layer()` identifies quantization candidates |
 | **16: Compression** | Prune and compress weights | `count_parameters()` measures compression ratio |
-| **17: Memoization** | Cache attention computations | `measure_latency()` validates speedup |
+| **17: Acceleration** | Vectorize computations | `measure_latency()` validates speedup |
 
 ## Get Started
 

@@ -1,14 +1,13 @@
-# Architecture Tier (Modules 08-13)
+# Architecture Tier (Modules 09-13)
 
 **Build modern neural architectures—from computer vision to language models.**
 
 
 ## What You'll Learn
 
-The Architecture tier teaches you how to build the neural network architectures that power modern AI. You'll implement CNNs for computer vision, transformers for language understanding, and the data loading infrastructure needed to train on real datasets.
+The Architecture tier teaches you how to build the neural network architectures that power modern AI. You'll implement CNNs for computer vision and transformers for language understanding, building on the foundational training infrastructure from the previous tier.
 
 **By the end of this tier, you'll understand:**
-- How data loaders efficiently feed training data to models
 - Why convolutional layers are essential for computer vision
 - How attention mechanisms enable transformers to understand sequences
 - What embeddings do to represent discrete tokens as continuous vectors
@@ -19,14 +18,11 @@ The Architecture tier teaches you how to build the neural network architectures 
 
 ```{mermaid}
 :align: center
-:caption: "**Architecture Module Flow.** Two parallel tracks branch from Foundation: vision (DataLoader, Convolutions) and language (Tokenization through Transformers)."
+:caption: "**Architecture Module Flow.** Two parallel tracks branch from Foundation: vision (Convolutions) and language (Tokenization through Transformers)."
 graph TB
- F[ Foundation<br/>Tensor, Autograd, Training]
+ F[ Foundation<br/>Tensor, DataLoader, Autograd, Training]
 
- F --> M08[08. DataLoader<br/>Efficient data pipelines]
  F --> M09[09. Convolutions<br/>Conv2d + Pooling]
-
- M08 --> M09
  M09 --> VISION[ Computer Vision<br/>CNNs unlock spatial intelligence]
 
  F --> M10[10. Tokenization<br/>Text → integers]
@@ -37,7 +33,6 @@ graph TB
  M13 --> LLM[ Language Models<br/>Transformers generate text]
 
  style F fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
- style M08 fill:#f3e5f5,stroke:#7b1fa2,stroke-width:3px
  style M09 fill:#f3e5f5,stroke:#7b1fa2,stroke-width:3px
  style M10 fill:#e1bee7,stroke:#6a1b9a,stroke-width:3px
  style M11 fill:#e1bee7,stroke:#6a1b9a,stroke-width:3px
@@ -48,18 +43,38 @@ graph TB
 ```
 
 
+## Why This Order?
+
+The Architecture tier branches into two parallel tracks—**Vision** and **Language**—because these domains have fundamentally different data structures and operations. But both follow the same principle: **build components in the order they compose**.
+
+### Vision Track: Spatial Processing (09)
+
+**Convolutions (09)** stands alone because CNNs have a relatively simple pipeline:
+- Images come in, convolutions extract spatial features, pooling reduces dimensions
+- One module gives you everything needed for computer vision
+
+### Language Track: Sequential Processing (10-13)
+
+**Tokenization (10) → Embeddings (11) → Attention (12) → Transformers (13)**
+
+Language requires more infrastructure, and the order is non-negotiable:
+1. **Tokenization** converts text to integers—you can't process raw strings
+2. **Embeddings** convert integers to vectors—attention needs continuous representations
+3. **Attention** computes context-aware representations—the core transformer operation
+4. **Transformers** compose attention with MLPs and normalization—the complete architecture
+
+Each step transforms the data representation:
+```
+"hello" → [72, 101, 108, 108, 111] → [[0.1, 0.3, ...], [...]] → attention → output
+  text       token IDs                  embeddings           transformer
+```
+
+### Why Not Merge Them?
+
+Vision and language students have different goals. A computer vision engineer building image classifiers doesn't need tokenization; an NLP engineer building chatbots doesn't need convolutions. Parallel tracks let students focus on their domain while building on shared foundations.
+
+
 ## Module Details
-
-### 08. DataLoader - Efficient Data Pipelines
-
-**What it is**: Infrastructure for loading, batching, and shuffling training data efficiently.
-
-**Why it matters**: Real ML systems train on datasets that don't fit in memory. DataLoaders handle batching, shuffling, and parallel data loading—essential for efficient training.
-
-**What you'll build**: A DataLoader that supports batching, shuffling, and dataset iteration with proper memory management.
-
-**Systems focus**: Memory efficiency, batching strategies, I/O optimization
-
 
 ### 09. Convolutions - Convolutional Neural Networks
 
@@ -124,7 +139,7 @@ graph TB
 
 ```{mermaid}
 :align: center
-:caption: "**Architecture Tier Milestones.** After completing modules 08-13, you unlock computer vision (1998 CNN) and language understanding (2017 Transformer) breakthroughs."
+:caption: "**Architecture Tier Milestones.** After completing modules 09-13, you unlock computer vision (1998 CNN) and language understanding (2017 Transformer) breakthroughs."
 timeline
  title Historical Achievements Unlocked
  1998 : CNN Revolution : 75%+ accuracy on CIFAR-10 with spatial intelligence
@@ -142,8 +157,8 @@ After completing the Architecture tier, you'll be able to:
 ## Prerequisites
 
 **Required**:
-- ** Foundation Tier** (Modules 01-07) completed
-- Understanding of tensors, autograd, and training loops
+- ** Foundation Tier** (Modules 01-08) completed
+- Understanding of tensors, data loaders, autograd, and training loops
 - Basic understanding of images (height, width, channels)
 - Basic understanding of text/language concepts
 
@@ -199,8 +214,8 @@ python 01_vaswani_generation.py # Text generation with YOUR transformer
 
 The Architecture tier splits into two parallel paths that can be learned in any order:
 
-**Vision Track (Modules 08-09)**:
-- DataLoader → Convolutions (Conv2d + Pooling)
+**Vision Track (Module 09)**:
+- Convolutions (Conv2d + Pooling)
 - Enables computer vision applications
 - Culminates in CNN milestone
 
@@ -209,7 +224,7 @@ The Architecture tier splits into two parallel paths that can be learned in any 
 - Enables natural language processing
 - Culminates in Transformer milestone
 
-**Recommendation**: Complete both tracks in order (08→09→10→11→12→13), but you can prioritize the track that interests you more.
+**Recommendation**: Complete both tracks in order (09→10→11→12→13), but you can prioritize the track that interests you more.
 
 
 ## Next Steps
@@ -217,8 +232,8 @@ The Architecture tier splits into two parallel paths that can be learned in any 
 **Ready to build modern architectures?**
 
 ```bash
-# Start the Architecture tier
-tito module start 08_dataloader
+# Start the Architecture tier with vision
+tito module start 09_convolutions
 
 # Or jump to language models
 tito module start 10_tokenization
@@ -226,7 +241,7 @@ tito module start 10_tokenization
 
 **Or explore other tiers:**
 
-- **[ Foundation Tier](foundation)** (Modules 01-07): Mathematical foundations
+- **[ Foundation Tier](foundation)** (Modules 01-08): Mathematical foundations
 - **[ Optimization Tier](optimization)** (Modules 14-19): Production-ready performance
 - **[ Torch Olympics](olympics)** (Module 20): Compete in ML systems challenges
 

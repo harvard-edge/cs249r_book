@@ -113,8 +113,8 @@ output = layer2(x)
 
 To keep this module focused, you will **not** implement:
 
-- Automatic gradient computation (that's Module 05: Autograd)
-- Parameter optimization (that's Module 06: Optimizers)
+- Automatic gradient computation (that's Module 06: Autograd)
+- Parameter optimization (that's Module 07: Optimizers)
 - Hundreds of layer types (PyTorch has Conv2d, LSTM, Attention - you'll build Linear and Dropout)
 - Automatic training/eval mode switching (PyTorch's `model.train()` - you'll manually pass `training` flag)
 
@@ -245,7 +245,7 @@ def __init__(self, in_features, out_features, bias=True):
         self.bias = None
 ```
 
-The `requires_grad=True` flag marks these tensors for gradient computation in Module 05. Even though you haven't built autograd yet, your layers are already prepared for it. Bias starts at zero because the weight initialization already handles the scale, and zero is a neutral starting point for per-class adjustments.
+The `requires_grad=True` flag marks these tensors for gradient computation in Module 06. Even though you haven't built autograd yet, your layers are already prepared for it. Bias starts at zero because the weight initialization already handles the scale, and zero is a neutral starting point for per-class adjustments.
 
 For Linear(1000, 10), the scale is `sqrt(1/1000) ≈ 0.032`. For Linear(10, 1000), the scale is `sqrt(1/10) ≈ 0.316`. Layers with more inputs get smaller initial weights because each input contributes to the output, and you want their combined effect to remain stable.
 
@@ -269,7 +269,7 @@ layer1 = Linear(784, 256)
 layer2 = Linear(256, 10)
 
 all_params = layer1.parameters() + layer2.parameters()
-# In Module 06, you'll pass all_params to optimizer.step()
+# In Module 07, you'll pass all_params to optimizer.step()
 ```
 
 Each Linear layer independently manages its own parameters. The Sequential container extends this pattern by collecting parameters from all its contained layers, enabling hierarchical composition.
@@ -692,8 +692,8 @@ Implement loss functions (MSELoss, CrossEntropyLoss) that measure prediction err
 | Module | What It Does | Your Layers In Action |
 |--------|--------------|----------------------|
 | **04: Losses** | Measure prediction error | `loss = CrossEntropyLoss()(model(x), y)` |
-| **05: Autograd** | Compute gradients | `loss.backward()` fills `layer.weight.grad` |
-| **06: Optimizers** | Update parameters | `optimizer.step()` uses `layer.parameters()` |
+| **06: Autograd** | Compute gradients | `loss.backward()` fills `layer.weight.grad` |
+| **07: Optimizers** | Update parameters | `optimizer.step()` uses `layer.parameters()` |
 
 ## Get Started
 

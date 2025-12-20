@@ -149,10 +149,9 @@ As you complete more modules, you unlock more milestones:
 
 | Modules Completed | Milestone Unlocked | What You Recreate |
 |-------------------|-------------------|-------------------|
-| 01-03 | `perceptron` | The 1957 Perceptron |
-| 01-05 | `backprop` | 1986 Backpropagation |
-| 01-07 | `lenet` | 1989 LeNet CNN |
-| 01-09 | `alexnet` | 2012 AlexNet |
+| 01-04 | `perceptron` | The 1957 Perceptron |
+| 01-08 | `backprop` | 1986 Backpropagation |
+| 01-09 | `lenet` | 1998 LeNet CNN |
 | 01-13 | `transformer` | 2017 Transformer |
 | 01-19 | `mlperf` | MLPerf Benchmarks |
 
@@ -188,8 +187,8 @@ TinyTorch has 20 modules organized in progressive tiers:
 
 | Tier | Modules | Focus | Time Estimate |
 |------|---------|-------|---------------|
-| **Foundation** | 01-07 | Core ML infrastructure (tensors, autograd, training) | ~15-20 hours |
-| **Architecture** | 08-13 | Neural architectures (data loading, CNNs, transformers) | ~18-24 hours |
+| **Foundation** | 01-08 | Core ML infrastructure (tensors, dataloader, autograd, training) | ~18-24 hours |
+| **Architecture** | 09-13 | Neural architectures (CNNs, transformers) | ~15-20 hours |
 | **Optimization** | 14-19 | Production optimization (profiling, quantization) | ~18-24 hours |
 | **Capstone** | 20 | Torch Olympics Competition | ~8-10 hours |
 
