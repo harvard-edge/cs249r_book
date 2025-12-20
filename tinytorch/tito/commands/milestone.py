@@ -74,16 +74,16 @@ MILESTONE_SCRIPTS = {
                 "name": "XOR Solved",
                 "script": "milestones/02_1969_xor/02_xor_solved.py",
                 "description": "Hidden layers + backprop SOLVE the impossible XOR problem!",
-                "required_modules": [1, 2, 3, 4, 5, 6]  # Core training modules
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8]  # Full training: Tensor through Training
             },
             {
                 "name": "TinyDigits",
                 "script": "milestones/03_1986_mlp/01_rumelhart_tinydigits.py",
                 "description": "Scale up to real data - handwritten digit recognition",
-                "required_modules": [1, 2, 3, 4, 5, 6, 8]  # + DataLoader (08)
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8]  # Full training infrastructure
             }
         ],
-        "required_modules": [1, 2, 3, 4, 5, 6],  # Minimum for Part 1 (XOR Solved)
+        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8],  # Full training for XOR Solved
         "description": "Solve XOR with hidden layers, then train on real data",
         "historical_context": "Rumelhart, Hinton & Williams (Nature, 1986) ended the AI Winter",
         "emoji": "🎓"
@@ -98,16 +98,16 @@ MILESTONE_SCRIPTS = {
                 "name": "TinyDigits",
                 "script": "milestones/04_1998_cnn/01_lecun_tinydigits.py",
                 "description": "Prove CNNs > MLPs on synthetic 8x8 digits (works offline)",
-                "required_modules": [1, 2, 3, 4, 5, 6, 9]  # Core + Spatial (no DataLoader needed)
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 9]  # Full training + Convolutions
             },
             {
                 "name": "CIFAR-10",
                 "script": "milestones/04_1998_cnn/02_lecun_cifar10.py",
                 "description": "Scale to natural images with YOUR DataLoader (requires download)",
-                "required_modules": [1, 2, 3, 4, 5, 6, 8, 9]  # Core + DataLoader + Spatial
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 9]  # Full training + Convolutions
             }
         ],
-        "required_modules": [1, 2, 3, 4, 5, 6, 9],  # Minimum for Part 1 (no DataLoader)
+        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 9],  # Full training + Convolutions
         "description": "Build LeNet for digit recognition, then scale to natural images",
         "historical_context": "Yann LeCun's convolutional networks revolutionized computer vision",
         "emoji": "👁️"
@@ -118,7 +118,7 @@ MILESTONE_SCRIPTS = {
         "year": 2017,
         "title": "Attention is All You Need",
         "script": "milestones/05_2017_transformer/01_vaswani_attention.py",
-        "required_modules": [1, 2, 3, 4, 5, 6, 11, 12, 13],  # + Embeddings, Attention, Transformers
+        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13],  # Full training + Embeddings, Attention, Transformers
         "description": "Prove attention works with sequence reversal",
         "historical_context": "Vaswani et al. revolutionized NLP",
         "emoji": "🤖"
@@ -133,16 +133,16 @@ MILESTONE_SCRIPTS = {
                 "name": "Model Compression",
                 "script": "milestones/06_2018_mlperf/01_optimization_olympics.py",
                 "description": "Profiling + Quantization + Pruning on MLP",
-                "required_modules": [1, 2, 3, 4, 5, 6, 14, 15, 16, 17, 18, 19]  # Core + Optimization (no Transformer)
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 14, 15, 16, 17, 18, 19]  # Full training + Optimization tier
             },
             {
                 "name": "Generation Speedup",
                 "script": "milestones/06_2018_mlperf/02_generation_speedup.py",
-                "description": "KV Caching for 10× faster Transformer",
-                "required_modules": [1, 2, 3, 11, 12, 14, 17]  # Core + Embeddings + Attention + Profiler + KVCache
+                "description": "KV Caching for 10x faster Transformer",
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 14, 18]  # Full training + Embeddings + Attention + Profiler + Memoization (18)
             }
         ],
-        "required_modules": [1, 2, 3, 4, 5, 6, 14, 15, 16, 17, 18, 19],  # Minimum for Part 1
+        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 14, 15, 16, 17, 18, 19],  # Full training + Optimization tier
         "description": "Compress and accelerate your neural network",
         "historical_context": "MLPerf standardized ML benchmarks",
         "emoji": "🏆"

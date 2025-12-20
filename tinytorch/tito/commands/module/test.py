@@ -210,17 +210,17 @@ class ModuleTestCommand(BaseCommand):
             2: ["test_basic_integration.py"],
             3: ["test_layers_integration.py"],
             4: ["test_loss_gradients.py"],
-            5: ["test_gradient_flow.py"],
-            6: ["test_training_flow.py"],
-            7: ["test_training_flow.py"],
+            5: ["test_dataloader_integration.py"],  # DataLoader
+            6: ["test_gradient_flow.py"],  # Autograd
+            7: ["test_training_flow.py"],  # Optimizers
+            8: ["test_training_flow.py"],  # Training
 
             # Architecture modules (09-13)
-            8: ["test_dataloader_integration.py"],
             9: ["test_cnn_integration.py"],
             10: [],  # Tokenization: self-contained, no integration deps
             11: [],  # Embeddings: tested in NLP pipeline (module 12)
-            12: ["test_nlp_pipeline_flow.py"],
-            13: ["test_nlp_pipeline_flow.py"],
+            12: ["test_nlp_pipeline_flow.py"],  # Attention
+            13: ["test_nlp_pipeline_flow.py"],  # Transformers
 
             # Performance modules (14-19) - build on all previous
             # These use the same integration tests to ensure optimizations
