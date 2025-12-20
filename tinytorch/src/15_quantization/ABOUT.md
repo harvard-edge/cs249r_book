@@ -527,7 +527,7 @@ Implement model pruning and weight compression techniques. You'll build structur
 | Module | What It Does | Quantization In Action |
 |--------|--------------|------------------------|
 | **16: Compression** | Prune unnecessary weights | `quantize_model(pruned_model)` → 16× total compression |
-| **18: Acceleration** | Optimize kernel fusion | `accelerate(quantized_model)` → 8× faster inference |
+| **17: Acceleration** | Optimize kernel fusion | `accelerate(quantized_model)` → 8× faster inference |
 | **20: Capstone** | Deploy optimized models | Full pipeline: prune → quantize → accelerate → deploy |
 
 ## Get Started

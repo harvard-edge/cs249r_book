@@ -25,8 +25,8 @@ Welcome to Module 16! You're about to build model compression techniques that ma
 
 **Connection Map**:
 ```
-Profiling (14) → Quantization (15) → Compression (16) → Memoization (17) → Acceleration (18)
-(measure size)   (reduce precision)  (remove weights)   (cache compute)   (speed up compute)
+Profiling (14) → Quantization (15) → Compression (16) → Acceleration (17) → Memoization (18)
+(measure size)   (reduce precision)  (remove weights)   (speed up compute) (cache compute)
 ```
 
 ## 🎯 Learning Objectives
@@ -1880,5 +1880,5 @@ Congratulations! You've built a comprehensive model compression system that can 
 Your compression implementation enables efficient model deployment across diverse hardware constraints!
 Export with: `tito module complete 16`
 
-**Next**: Module 17 will add memoization and caching strategies to optimize repeated computations, building on compression for maximum efficiency!
+**Next**: Module 17 will add acceleration techniques including vectorization and kernel fusion, building on compression for maximum efficiency!
 """

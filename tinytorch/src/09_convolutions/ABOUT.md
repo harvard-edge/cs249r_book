@@ -696,7 +696,7 @@ Shift from spatial processing (images) to sequential processing (text). You'll i
 | Module | What It Does | Your Spatial Ops In Action |
 |--------|--------------|---------------------------|
 | **Milestone 3: CNN** | Complete CNN for CIFAR-10 | Stack your Conv2d and MaxPool2d for image classification |
-| **Module 18: Acceleration** | Optimize convolution | Replace loops with im2col and vectorized operations |
+| **Module 17: Acceleration** | Optimize convolution | Replace loops with im2col and vectorized operations |
 | **Vision Projects** | Object detection, segmentation | Your spatial foundations scale to advanced architectures |
 
 ## Get Started

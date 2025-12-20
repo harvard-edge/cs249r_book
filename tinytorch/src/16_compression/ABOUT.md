@@ -584,7 +584,7 @@ For students who want to understand the academic foundations and explore compres
 
 ## What's Next
 
-```{seealso} Coming Up: Module 17 - Memoization
+```{seealso} Coming Up: Module 17 - Acceleration
 
 Implement caching and memoization strategies to eliminate redundant computations. You'll cache repeated forward passes, attention patterns, and embedding lookups for dramatic speedups in production inference.
 ```
@@ -593,8 +593,8 @@ Implement caching and memoization strategies to eliminate redundant computations
 
 | Module | What It Does | Your Compression In Action |
 |--------|--------------|---------------------------|
-| **17: Memoization** | Cache repeated computations | `compress_model()` before caching for memory efficiency |
-| **18: Acceleration** | Optimize computation kernels | Structured sparsity enables vectorized operations |
+| **17: Acceleration** | Optimize computation kernels | Structured sparsity enables vectorized operations |
+| **18: Memoization** | Cache repeated computations | `compress_model()` before caching for memory efficiency |
 | **19: Benchmarking** | Measure end-to-end performance | Compare dense vs sparse model throughput |
 
 ## Get Started

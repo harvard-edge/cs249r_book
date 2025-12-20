@@ -27,8 +27,8 @@ Welcome to Quantization! Today you'll learn how to reduce model precision from F
 
 **Connection Map**:
 ```
-Profiling (14) → Quantization (15) → Compression (16) → Memoization (17)
-(measure memory) (reduce precision)  (reduce parameters) (cache compute)
+Profiling (14) → Quantization (15) → Compression (16) → Acceleration (17)
+(measure memory) (reduce precision)  (reduce parameters) (vectorize)
 ```
 
 ## 🎯 Learning Objectives

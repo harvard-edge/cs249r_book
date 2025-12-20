@@ -464,7 +464,7 @@ Implement quantization to reduce model size and accelerate inference. You'll use
 |--------|--------------|------------------------|
 | **15: Quantization** | Reduce precision to INT8 | `profile_layer()` identifies quantization candidates |
 | **16: Compression** | Prune and compress weights | `count_parameters()` measures compression ratio |
-| **17: Memoization** | Cache attention computations | `measure_latency()` validates speedup |
+| **17: Acceleration** | Vectorize computations | `measure_latency()` validates speedup |
 
 ## Get Started
 

@@ -19,7 +19,7 @@
 Welcome to the TinyTorch capstone! You've built an entire ML framework from scratch across 19 modules. Now it's time to demonstrate your work by benchmarking a model and generating a submission that showcases your framework's capabilities.
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Complete ML framework with profiling (M14), quantization (M15), compression (M16), memoization (M17), acceleration (M18), and benchmarking (M19)
+**You've Built**: Complete ML framework with profiling (M14), quantization (M15), compression (M16), acceleration (M17), memoization (M18), and benchmarking (M19)
 **You'll Build**: Professional benchmark submission workflow with standardized reporting
 **You'll Enable**: Shareable, reproducible results demonstrating framework performance
 
@@ -934,8 +934,8 @@ This section demonstrates using the complete optimization pipeline from Modules 
 - Module 14 (Profiling): Measure baseline performance and identify bottlenecks
 - Module 15 (Quantization): Reduce precision from FP32 to INT8
 - Module 16 (Compression): Prune low-magnitude weights
-- Module 17 (Memoization): Cache repeated computations
-- Module 18 (Acceleration): Use optimized kernels
+- Module 17 (Acceleration): Use optimized kernels
+- Module 18 (Memoization): Cache repeated computations
 - Module 19 (Benchmarking): Professional measurement infrastructure
 
 This is the COMPLETE story: Profile → Optimize → Benchmark → Submit
@@ -967,8 +967,8 @@ def run_optimization_workflow_example():
     print("  📊 Module 14: Profiling")
     print("  🔢 Module 15: Quantization (optional - API imported for demonstration)")
     print("  ✂️  Module 16: Compression (optional - API imported for demonstration)")
-    print("  💾 Module 17: Memoization (optional - API imported for demonstration)")
-    print("  ⚡ Module 18: Acceleration (optional - API imported for demonstration)")
+    print("  ⚡ Module 17: Acceleration (optional - API imported for demonstration)")
+    print("  💾 Module 18: Memoization (optional - API imported for demonstration)")
     print("  📈 Module 19: Benchmarking")
     print("  📝 Module 20: Submission Generation")
 
@@ -1029,8 +1029,8 @@ def run_optimization_workflow_example():
     print("\n  📚 Students can apply these optimizations:")
     print("     - Module 15: quantize_model(model, bits=8)")
     print("     - Module 16: magnitude_prune(model, sparsity=0.5)")
-    print("     - Module 17: enable_kv_cache(model)  # For transformers")
-    print("     - Module 18: Use accelerated ops (vectorized_matmul, etc.)")
+    print("     - Module 17: Use accelerated ops (vectorized_matmul, etc.)")
+    print("     - Module 18: enable_kv_cache(model)  # For transformers")
     print("\n  💡 For this demo, we'll simulate an optimized model")
     print("     (Students can replace this with real optimizations!)")
 
@@ -1562,7 +1562,7 @@ Data → Tensor (M01) → Layers (M03) → Model → Training (M07)
 **Systems Integration Lessons:**
 
 1. **Dependency Management** - Each module imports from previous modules, creating a proper dependency graph
-2. **API Consistency** - Tensor operations work the same whether in Module 01 or Module 18
+2. **API Consistency** - Tensor operations work the same whether in Module 01 or Module 20
 3. **Composability** - Complex systems (transformers) built from simple primitives (linear layers)
 4. **Progressive Enhancement** - Module 06 activated gradients dormant since Module 01
 
