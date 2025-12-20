@@ -1,4 +1,4 @@
-# Module 17: Memoization
+# Module 18: Memoization
 
 :::{admonition} Module Info
 :class: note
@@ -21,14 +21,14 @@ This module introduces optimization techniques that make production language mod
 
 Run interactively in your browser.
 
-<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F17_memoization%2F17_memoization.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
+<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F18_memoization%2F18_memoization.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
 ```
 
 ```{grid-item-card} 📄 View Source
 
 Browse the source code on GitHub.
 
-<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/17_memoization/17_memoization.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #6b7280; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
+<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/18_memoization/18_memoization.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #6b7280; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
 ```
 
 ```{grid-item-card} 🎧 Audio Overview
@@ -36,7 +36,7 @@ Browse the source code on GitHub.
 Listen to an AI-generated overview.
 
 <audio controls style="width: 100%; height: 54px; margin-top: auto;">
-  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/17_memoization.mp3" type="audio/mpeg">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/18_memoization.mp3" type="audio/mpeg">
 </audio>
 ```
 
@@ -593,7 +593,7 @@ For students who want to understand the academic foundations and production impl
 
 ## What's Next
 
-```{seealso} Coming Up: Module 18 - Acceleration
+```{seealso} Coming Up: Module 19 - Benchmarking
 
 Implement kernel fusion, operator batching, and CPU/GPU optimization techniques. You'll combine multiple operations to reduce memory bandwidth bottlenecks and maximize hardware utilization.
 ```
@@ -603,15 +603,15 @@ Implement kernel fusion, operator batching, and CPU/GPU optimization techniques.
 | Module | What It Does | Works with Memoization |
 |--------|--------------|------------------------|
 | **15: Quantization** | Reduce precision to save memory | `KVCache with int8 keys/values → 4x memory reduction` |
-| **18: Acceleration** | Optimize computation kernels | `Fused attention + KV cache → minimal memory traffic` |
+| **17: Acceleration** | Optimize computation kernels | `Fused attention + KV cache → minimal memory traffic` |
 | **19: Benchmarking** | Measure end-to-end performance | `Profile cache hit rates and speedup gains` |
 
 ## Get Started
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/17_memoization/17_memoization.ipynb)** - Run interactively in browser, no setup required
-- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/17_memoization/17_memoization.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/18_memoization/18_memoization.ipynb)** - Run interactively in browser, no setup required
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/18_memoization/18_memoization.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

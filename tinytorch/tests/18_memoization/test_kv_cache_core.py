@@ -1,5 +1,5 @@
 """
-Module 17: KV Cache (Memoization) Core Tests
+Module 18: KV Cache (Memoization) Core Tests
 =============================================
 
 These tests verify that KV caching works for efficient inference.

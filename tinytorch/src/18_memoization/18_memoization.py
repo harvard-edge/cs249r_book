@@ -14,9 +14,9 @@
 
 # %% [markdown]
 """
-# Module 17: Memoization - Computational Reuse for Inference
+# Module 18: Memoization - Computational Reuse for Inference
 
-Welcome to Module 17! You'll implement memoization - a fundamental optimization pattern. We'll apply it to transformers through KV caching for 10-15x faster text generation.
+Welcome to Module 18! You'll implement memoization, a fundamental optimization pattern. We'll apply it to transformers through KV caching for 10-15x faster text generation.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete transformer architecture (Module 13) and profiling tools (Module 14)
@@ -25,8 +25,8 @@ Welcome to Module 17! You'll implement memoization - a fundamental optimization 
 
 **Connection Map**:
 ```
-Profiling (14) → Quantization (16) → Memoization (17) → Acceleration (18)
-(measure O(n²))  (reduce precision)   (cache K,V → O(n))  (optimize execution)
+Profiling (14) → Quantization (15) → Acceleration (17) → Memoization (18)
+(measure O(n²))  (reduce precision)   (vectorize)        (cache K,V → O(n))
 ```
 
 ## 🎯 Learning Objectives
@@ -41,7 +41,7 @@ Let's make inference blazingly fast through computational reuse!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/17_memoization/kvcaching_dev.py`
+**Learning Side:** You work in `modules/18_memoization/kvcaching_dev.py`
 **Building Side:** Code exports to `tinytorch.generation.kv_cache`
 
 ```python
@@ -754,16 +754,16 @@ for each new token:
 
 ### The Challenge
 
-We built KV caching in Module 17 (this module), but our transformer (Modules 12-13) doesn't know about it!
+We built KV caching in Module 18 (this module), but our transformer (Modules 12-13) doesn't know about it!
 
 **❌ BAD Solution**: Go back and modify Module 12 (MultiHeadAttention)
 - Breaks "forward-only" learning (students shouldn't revisit old modules)
-- Makes Module 12 depend on Module 17 (wrong dependency direction!)
+- Makes Module 12 depend on Module 18 (wrong dependency direction!)
 - Violates clean module boundaries
 
-**✅ GOOD Solution**: Module 17 ADDS caching to existing models without modification!
+**✅ GOOD Solution**: Module 18 ADDS caching to existing models without modification!
 - Use composition + monkey-patching (like `enable_autograd()`)
-- Module 17 wraps/enhances Module 12, not modifies it
+- Module 18 wraps/enhances Module 12, not modifies it
 - Students learn systems engineering: "Add capabilities, don't break old code"
 
 ### Using KV Cache in Practice
@@ -874,7 +874,7 @@ def enable_kv_cache(model):
 
     Pedagogical Note:
         This teaches students that optimizations can be LAYERED on top of
-        working systems. Module 17 doesn't break Modules 12-13; it enhances them!
+        working systems. Module 18 doesn't break Modules 12-13; it enhances them!
     """
     ### BEGIN SOLUTION
     import types
@@ -1172,7 +1172,7 @@ def disable_kv_cache(model):
 
 Let's verify that `enable_kv_cache()` works without breaking the model!
 
-**This is an integration test** - it tests Module 17 enhancing Modules 12-13 without modification.
+**This is an integration test** - it tests Module 18 enhancing Modules 12-13 without modification.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-noninvasive", "locked": true, "points": 10}
@@ -1640,7 +1640,7 @@ The technique you implemented is mathematically identical to the caching in prod
 
 # %% [markdown]
 """
-## 🎓 Module 17 Complete!
+## 🎓 Module 18 Complete!
 
 You've implemented KV caching - the critical optimization that makes production language models economically viable!
 
@@ -1654,11 +1654,11 @@ You've implemented KV caching - the critical optimization that makes production 
 
 ### Key Systems Engineering Lesson
 
-**Module 17 doesn't modify Modules 12-13 - it ENHANCES them!**
+**Module 18 doesn't modify Modules 12-13 - it ENHANCES them!**
 
 This teaches the critical principle: **Add capabilities forward, never break backward.**
 - Old code keeps working (Module 12 unchanged)
-- New code adds optimization (Module 17 layers on top)
+- New code adds optimization (Module 18 layers on top)
 - Clean separation of concerns (caching is separate from attention logic)
 
 ### Performance Impact
@@ -1690,7 +1690,7 @@ Watch the tokens/sec metric jump from ~40 to ~500! 🚀
 
 ---
 
-**Congratulations! You've completed Module 17: KV Caching (Memoization)!**
+**Congratulations! You've completed Module 18: KV Caching (Memoization)!**
 
 You now understand the optimization that makes ChatGPT, Claude, and all production LLMs possible. This is THE technique that transformed language models from research toys into products used by millions of people every day.
 

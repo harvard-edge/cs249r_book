@@ -17,9 +17,9 @@
 
 # %% [markdown]
 """
-# Module 18: Acceleration - Hardware-Aware Optimization
+# Module 17: Acceleration - Hardware-Aware Optimization
 
-Welcome to Module 18! You're about to master the art of neural network acceleration through vectorization and kernel fusion.
+Welcome to Module 17! You're about to master the art of neural network acceleration through vectorization and kernel fusion.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete neural network foundation with tensors (01), autograd (05), layers (03), training (07), and CNNs (09)
@@ -28,8 +28,8 @@ Welcome to Module 18! You're about to master the art of neural network accelerat
 
 **Connection Map**:
 ```
-Layers (03) → Training (07) → CNNs (09) → Acceleration (18) → Advanced Optimization
-(building blocks) (learning)   (spatial)  (speed up)         (future modules)
+Layers (03) → Training (08) → CNNs (09) → Acceleration (17) → Memoization (18)
+(building blocks) (learning)   (spatial)  (speed up)         (KV-cache)
 ```
 
 **Prerequisites**: Modules 01-15 must be working
@@ -49,7 +49,7 @@ Let's optimize for speed!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/18_acceleration/acceleration_dev.py`
+**Learning Side:** You work in `modules/17_acceleration/acceleration_dev.py`
 **Building Side:** Code exports to `tinytorch.perf.acceleration`
 
 ```python
@@ -1150,7 +1150,7 @@ This is how professional ML engineers work: profile → optimize → measure →
 """
 
 # %% nbgrader={"grade": false, "grade_id": "demo-profiler-acceleration", "solution": true}
-# Import Profiler from Module 14 (Module 18 comes after Module 14)
+# Import Profiler from Module 14 (Module 17 comes after Module 14)
 from tinytorch.perf.profiling import Profiler
 
 def demo_acceleration_with_profiler():

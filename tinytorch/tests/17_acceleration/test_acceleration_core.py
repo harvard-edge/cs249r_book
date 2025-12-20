@@ -1,5 +1,5 @@
 """
-Module 18: Acceleration Core Tests
+Module 17: Acceleration Core Tests
 ===================================
 
 These tests verify optimization techniques for faster inference.

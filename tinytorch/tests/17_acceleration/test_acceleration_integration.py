@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Integration tests for Module 18: Acceleration
+Integration tests for Module 17: Acceleration
 Tests operator fusion, kernel optimization, and hardware acceleration
 """
 

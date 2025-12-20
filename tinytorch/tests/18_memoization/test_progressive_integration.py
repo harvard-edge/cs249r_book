@@ -588,7 +588,7 @@ class TestTinyTorchGraduationReadiness:
             'torch.utils.data': 'Built in Module 05',
             'torch.autograd': 'Built in Module 06',
             'torch.nn.attention': 'Built in Module 12',
-            'torch.jit': 'Built in Module 18 (acceleration)',
+            'torch.jit': 'Built in Module 17 (acceleration)',
             'torch.quantization': 'Built in Module 15',
             'torch.distributed': 'Built in Module 19 (MLOps)',
         }
