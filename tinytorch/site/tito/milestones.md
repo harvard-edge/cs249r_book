@@ -34,9 +34,10 @@ tito module complete 01 # Tensor
 tito module complete 02 # Activations
 tito module complete 03 # Layers
 tito module complete 04 # Losses
-tito module complete 05 # Autograd
-tito module complete 06 # Optimizers
-tito module complete 07 # Training
+tito module complete 05 # DataLoader
+tito module complete 06 # Autograd
+tito module complete 07 # Optimizers
+tito module complete 08 # Training
 
 # 2. See what milestones you can run
 tito milestone list

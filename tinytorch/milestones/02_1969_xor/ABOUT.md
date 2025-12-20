@@ -42,8 +42,10 @@ These 4 points **cannot** be separated by a single line. No amount of training c
 | 02 | Activations | YOUR sigmoid/ReLU |
 | 03 | Layers | YOUR Linear layers |
 | 04 | Losses | YOUR loss functions |
-| 05 | Autograd | YOUR automatic differentiation |
-| 06 | Optimizers | YOUR SGD optimizer |
+| 05 | DataLoader | YOUR data pipeline |
+| 06 | Autograd | YOUR automatic differentiation |
+| 07 | Optimizers | YOUR SGD optimizer |
+| 08 | Training | YOUR training loop |
 
 ## Running the Milestone
 

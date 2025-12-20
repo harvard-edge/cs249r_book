@@ -389,7 +389,7 @@ def main():
     print("🎯 MNIST MLP 1986 - Real Vision with YOUR Deep Network!")
     print("   Historical significance: Backprop enables deep learning")
     print("   YOUR achievement: 85-90% accuracy on real handwritten digits")
-    print("   Components used: YOUR complete ML system (Modules 01-06)")
+    print("   Components used: YOUR complete ML system (Modules 01-08)")
 
     # Show MNIST visualization
     if args.visualize:

@@ -22,7 +22,7 @@
 Welcome to Module 17! You're about to master the art of neural network acceleration through vectorization and kernel fusion.
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Complete neural network foundation with tensors (01), autograd (05), layers (03), training (07), and CNNs (09)
+**You've Built**: Complete neural network foundation with tensors (01), layers (03), autograd (06), training (08), and CNNs (09)
 **You'll Build**: Acceleration techniques including vectorization and operation fusion
 **You'll Enable**: Hardware-efficient execution for production deployment
 

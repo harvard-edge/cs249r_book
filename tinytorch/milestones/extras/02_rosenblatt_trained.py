@@ -8,7 +8,7 @@ In 1957, Frank Rosenblatt created the Perceptron - the first machine that could
 LEARN from examples. Before this, all pattern recognition was hand-coded!
 This breakthrough proved machines could improve themselves through training.
 
-🎯 MILESTONE 1 PART 2: TRAINED PERCEPTRON (After Modules 01-07)
+🎯 MILESTONE 1 PART 2: TRAINED PERCEPTRON (After Modules 01-08)
 
 Now that you've completed training modules, let's see the SAME architecture
 actually LEARN! Watch random weights → intelligent predictions through training.

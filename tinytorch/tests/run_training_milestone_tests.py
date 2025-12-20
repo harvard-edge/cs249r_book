@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test Runner for Training Milestone (Modules 01-07)
+Test Runner for Training Milestone (Modules 01-08)
 ===================================================
 
 Runs all tests for the core modules needed for the training milestone:
@@ -114,7 +114,7 @@ def run_module_tests(module_dir: str) -> dict:
 def main():
     console.print(Panel.fit(
         "[bold cyan]Training Milestone Test Suite[/bold cyan]\n"
-        "[dim]Testing modules 01-07 for training readiness[/dim]",
+        "[dim]Testing modules 01-08 for training readiness[/dim]",
         border_style="cyan"
     ))
 
@@ -217,7 +217,7 @@ def main():
     if total_failed == 0 and total_tests > 0:
         console.print(Panel.fit(
             "[bold green]🎉 ALL TESTS PASSED![/bold green]\n"
-            f"All {total_tests} tests across modules 01-07 are passing.\n"
+            f"All {total_tests} tests across modules 01-08 are passing.\n"
             "Training milestone is ready!",
             border_style="green"
         ))

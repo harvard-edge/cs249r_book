@@ -8,7 +8,7 @@ After the 1969 XOR crisis killed neural networks, research funding dried up for 
 a decade. Then in 1986, Rumelhart, Hinton, and Williams published the backpropagation
 algorithm for training multi-layer networks - and XOR became trivial!
 
-🎯 MILESTONE 2 PART 2: THE SOLUTION (After Modules 01-07)
+🎯 MILESTONE 2 PART 2: THE SOLUTION (After Modules 01-08)
 Watch a multi-layer network SOLVE the "impossible" XOR problem that stumped AI for
 17 years. The secret? Hidden layers + backpropagation (which YOU just built!).
 
