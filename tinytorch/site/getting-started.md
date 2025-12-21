@@ -194,7 +194,7 @@ TinyTorch has 20 modules organized in progressive tiers:
 
 **Total: ~60-80 hours** over 14-18 weeks (4-6 hours/week pace).
 
-**See [Foundation Tier Overview](tiers/foundation)** for detailed module descriptions.
+See the module descriptions in this guide for detailed prerequisites and learning objectives.
 
 ## Join the Community (Optional)
 
@@ -204,7 +204,7 @@ After setup, join the global TinyTorch community:
 tito community login        # Join the community
 ```
 
-See **[Community Guide](community.md)** for complete features.
+The community features include progress tracking and connecting with other builders.
 
 ## For Instructors & TAs
 

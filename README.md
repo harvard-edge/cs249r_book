@@ -37,9 +37,9 @@ This repository contains an **open source textbook** and **hands-on framework** 
 
 > **Mission:** Accessible AI systems education for anyone, anywhere.
 
-### The Learning Path
+### The Learning Ecosystem
 
-We believe in learning by doing. Read the textbook, then progress through hands-on labs of increasing depth:
+We believe in learning by doing. Read the textbook, then pick your path:
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────┐
@@ -51,23 +51,26 @@ We believe in learning by doing. Read the textbook, then progress through hands-
 │                                                                               │
 └───────────────────────────────────────┬───────────────────────────────────────┘
                                         │
-                                        ▼
+                          ┌─────────────┼─────────────┐
+                          │             │             │
+                          ▼             ▼             ▼
 ┌───────────────────────────────────────────────────────────────────────────────┐
-│                               HANDS-ON ACTIVITY                               │
+│                            HANDS-ON ACTIVITIES                                │
+│                           (pick one or all)                                   │
 │                                                                               │
 │     ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐     │
 │     │                 │      │                 │      │                 │     │
 │     │    SOFTWARE     │      │    TINYTORCH    │      │    HARDWARE     │     │
-│     │    CO-LABS      │ ───▶ │    FRAMEWORK    │ ───▶ │      LABS       │     │
+│     │    CO-LABS      │      │    FRAMEWORK    │      │      LABS       │     │
 │     │                 │      │                 │      │                 │     │
 │     │ Explore         │      │ Build           │      │ Deploy          │     │
 │     │ tradeoffs       │      │ from scratch    │      │ to devices      │     │
 │     │                 │      │                 │      │                 │     │
-│     │ (coming 2026)   │      │ Learn hows TF & │      │ Arduino, Pi     │     │
+│     │ (coming 2026)   │      │ Learn how TF &  │      │ Arduino, Pi     │     │
 │     │                 │      │ PyTorch work    │      │ Edge devices    │     │
 │     └─────────────────┘      └─────────────────┘      └─────────────────┘     │
 │                                                                               │
-│           EXPLORE        ───▶       BUILD        ───▶      DEPLOY             │
+│           EXPLORE                  BUILD                   DEPLOY             │
 │                                                                               │
 └───────────────────────────────────────┬───────────────────────────────────────┘
                                         │
@@ -84,13 +87,18 @@ We believe in learning by doing. Read the textbook, then progress through hands-
 └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-| Step | Component | What You Do | Link |
-|------|-----------|-------------|------|
+| | Component | What You Do | Link |
+|--|-----------|-------------|------|
 | **READ** | [📖 Textbook](https://mlsysbook.ai) | Understand ML systems concepts | [book/](book/README.md) |
 | **EXPLORE** | 🔮 Software Co-Labs | Experiment with system tradeoffs | *Coming 2026* |
 | **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch) | Implement a complete ML framework from scratch | [tinytorch/](tinytorch/README.md) |
 | **DEPLOY** | [🔧 Hardware Labs](https://mlsysbook.ai/contents/labs/labs.html) | Ship models to real edge devices | [labs/](book/quarto/contents/labs/) |
 | **PROVE** | 🏆 AI Olympics | Compete and benchmark across all tracks | *Coming 2026* |
+
+**What each path teaches:**
+- **EXPLORE** teaches *why* — Understand tradeoffs. Change batch sizes, precision, model architectures and see how latency, memory, and accuracy shift.
+- **BUILD** teaches *how* — Understand internals. Implement autograd, optimizers, and attention from scratch to see how TensorFlow and PyTorch actually work.
+- **DEPLOY** teaches *where* — Understand constraints. Face real memory limits, power budgets, and latency requirements on actual hardware.
 
 ---
 
