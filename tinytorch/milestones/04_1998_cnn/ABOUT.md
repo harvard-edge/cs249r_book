@@ -1,11 +1,11 @@
 # Milestone 04: The CNN Revolution (1998)
 
-:::{admonition} Milestone Info
+:::{admonition} What You'll Learn
 :class: note
 
-**ARCHITECTURE TIER** | Prerequisites: Modules 01-09
-
-This milestone runs YOUR implementations from Foundation and Architecture modules. After completing Module 09 (Convolutions), your Conv2d and MaxPool2d layers are ready to achieve 75%+ accuracy on CIFAR-10.
+- Why spatial structure matters: 100× fewer parameters, 50% better accuracy
+- How weight sharing enables translation invariance
+- The hierarchical feature learning that powers all computer vision
 :::
 
 ## Overview

@@ -1,11 +1,11 @@
 # Milestone 05: The Transformer Era (2017)
 
-:::{admonition} Milestone Info
+:::{admonition} What You'll Learn
 :class: note
 
-**ARCHITECTURE TIER** | Prerequisites: Modules 01-13
-
-This milestone runs YOUR implementations from Foundation and Architecture modules. After completing Module 13 (Transformers), your attention mechanism and transformer blocks are ready to generate coherent text.
+- Why attention beats sequential processing (direct access, no bottleneck)
+- How transformers handle long-range dependencies that defeat RNNs
+- The architecture that powers GPT, BERT, and every modern LLM
 :::
 
 ## Overview

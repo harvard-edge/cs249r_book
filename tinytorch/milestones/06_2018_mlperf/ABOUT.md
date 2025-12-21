@@ -1,11 +1,11 @@
 # Milestone 06: MLPerf - The Optimization Era (2018)
 
-:::{admonition} Milestone Info
+:::{admonition} What You'll Learn
 :class: note
 
-**OPTIMIZATION TIER** | Prerequisites: Modules 01-18
-
-This milestone runs YOUR implementations from all three tiers. After completing the Optimization modules, your profiling, quantization, compression, and acceleration tools are ready to compress models 8x and speed up inference 10x.
+- The systematic optimization workflow: measure, optimize, validate, repeat
+- Why profiling before optimizing beats heroic rewrites
+- How to achieve 8× compression and 10× speedup with minimal accuracy loss
 :::
 
 ## Overview

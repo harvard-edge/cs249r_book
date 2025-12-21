@@ -1,11 +1,11 @@
 # Milestone 03: The MLP Revival (1986)
 
-:::{admonition} Milestone Info
+:::{admonition} What You'll Learn
 :class: note
 
-**FOUNDATION TIER** | Prerequisites: Modules 01-08
-
-This milestone runs YOUR implementations from the Foundation modules. After completing Modules 01-08, your training pipeline is ready to achieve 95%+ accuracy on MNIST, recreating the breakthrough that ended the AI Winter.
+- How networks automatically discover features (edges, patterns) you never programmed
+- Why representation learning is the foundation of deep learning's power
+- That YOUR code can achieve 95%+ accuracy on a real benchmark
 :::
 
 ## Overview

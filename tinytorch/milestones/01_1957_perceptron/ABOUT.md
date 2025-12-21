@@ -1,11 +1,11 @@
 # Milestone 01: The Perceptron (1957)
 
-:::{admonition} Milestone Info
+:::{admonition} What You'll Learn
 :class: note
 
-**FOUNDATION TIER** | Prerequisites: Modules 01-04
-
-This milestone runs YOUR implementations from the Foundation modules. After completing Modules 01-04, your Tensor, Activations, Layers, and Losses are ready to recreate the first trainable neural network.
+- Why random weights produce random results (and training fixes this)
+- How gradient descent transforms guessing into learning
+- The fundamental loop that powers all neural network training
 :::
 
 ## Overview

@@ -1,11 +1,11 @@
 # Milestone 02: The XOR Crisis (1969)
 
-:::{admonition} Milestone Info
+:::{admonition} What You'll Learn
 :class: note
 
-**FOUNDATION TIER** | Prerequisites: Modules 01-08
-
-This milestone runs YOUR implementations from the Foundation modules. After completing Modules 01-08, your complete training pipeline is ready to demonstrate why single-layer networks fail on XOR and how hidden layers solve it.
+- Why single-layer networks have fundamental mathematical limits
+- How hidden layers enable non-linear decision boundaries
+- Why "deep" learning is called DEEP
 :::
 
 ## Overview
