@@ -1,6 +1,12 @@
 # Milestone 06: MLPerf - The Optimization Era (2018)
 
-**OPTIMIZATION TIER** | Difficulty: 4/4 | Time: 60-120 min | Prerequisites: Modules 01-18
+:::{admonition} Milestone Info
+:class: note
+
+**OPTIMIZATION TIER** | Prerequisites: Modules 01-18
+
+This milestone runs YOUR implementations from all three tiers. After completing the Optimization modules, your profiling, quantization, compression, and acceleration tools are ready to compress models 8x and speed up inference 10x.
+:::
 
 ## Overview
 
@@ -33,6 +39,15 @@ Measure --> Optimize --> Validate --> Repeat
 
 ## Running the Milestone
 
+:::{admonition} Before You Begin
+:class: tip
+Ensure all prerequisite modules are complete. Check your progress with:
+```bash
+tito module status
+```
+Modules 01-18 must show as completed before running this milestone.
+:::
+
 ```bash
 cd milestones/06_2018_mlperf
 
@@ -47,7 +62,7 @@ python 02_generation_speedup.py
 
 ## Expected Results
 
-### Static Model Optimization (Script 01)
+**Static Model Optimization (Script 01)**
 
 | Optimization | Size | Accuracy | Notes |
 |--------------|------|----------|-------|
@@ -55,7 +70,7 @@ python 02_generation_speedup.py
 | + Quantization (INT8) | 25% | 84-89% | 4x smaller |
 | + Pruning (50%) | 12.5% | 82-87% | 8x smaller total |
 
-### Generation Speedup (Script 02)
+**Generation Speedup (Script 02)**
 
 | Mode | Time/Token | Speedup |
 |------|------------|---------|
@@ -87,36 +102,33 @@ Result: 10× faster, 8× smaller, 2% accuracy cost - achieved in days.
 - YOUR Pruning (Module 16) reduces parameters 50%+
 - YOUR KV-Cache (Module 18) speeds up generation 10×
 
-The complete workflow - measure, optimize, validate - using YOUR tools.
+The complete workflow, measure, optimize, validate, using YOUR tools.
 
-## Optimization Techniques
+## YOUR Code Powers This
 
-### Quantization (Module 15)
-- FP32 --> INT8: 4x memory reduction
-- Minimal accuracy impact for most models
-- Enables deployment on edge devices
+This is the capstone of the entire TinyTorch journey. Every optimization tool comes from YOUR implementations:
 
-### Pruning (Module 16)
-- Remove low-magnitude weights
-- 50-90% sparsity often achievable
-- Structured pruning enables actual speedup
+| Component | Your Module | What It Does |
+|-----------|-------------|--------------|
+| `Profiler` | Module 14 | YOUR measurement and bottleneck identification |
+| `quantize()` | Module 15 | YOUR INT8/FP16 conversion |
+| `prune()` | Module 16 | YOUR weight pruning |
+| `vectorize()` | Module 17 | YOUR accelerated operations |
+| `KVCache` | Module 18 | YOUR key-value caching for generation |
 
-### KV-Cache (Module 18)
-- Cache key/value projections during generation
-- Avoid recomputing attention for previous tokens
-- Critical for transformer inference speed
+**No external optimization libraries. Just YOUR code making models production-ready.**
+
+## Historical Context
+
+MLPerf (MLCommons) standardized ML benchmarking across hardware and software stacks. Before MLPerf, comparing ML systems was nearly impossible: different datasets, metrics, and conditions.
+
+The "Optimization Era" marks when ML engineering became as important as ML research. Building a model is step one; deploying it efficiently is where production value lives.
 
 ## Systems Insights
 
 - **Memory**: 4-16x compression achievable without significant accuracy loss
 - **Latency**: 10-40x speedup with caching + batching
 - **Trade-offs**: Every optimization has an accuracy/speed/memory trade-off
-
-## Historical Context
-
-MLPerf (MLCommons) standardized ML benchmarking across hardware and software stacks. Before MLPerf, comparing ML systems was nearly impossible - different datasets, metrics, and conditions.
-
-The "Optimization Era" marks when ML engineering became as important as ML research. Building a model is step one; deploying it efficiently is where production value lives.
 
 ## What's Next
 

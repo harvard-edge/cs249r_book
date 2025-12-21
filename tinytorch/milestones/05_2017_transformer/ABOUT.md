@@ -1,6 +1,12 @@
 # Milestone 05: The Transformer Era (2017)
 
-**ARCHITECTURE TIER** | Difficulty: 4/4 | Time: 60-120 min | Prerequisites: Modules 01-13
+:::{admonition} Milestone Info
+:class: note
+
+**ARCHITECTURE TIER** | Prerequisites: Modules 01-13
+
+This milestone runs YOUR implementations from Foundation and Architecture modules. After completing Module 13 (Transformers), your attention mechanism and transformer blocks are ready to generate coherent text.
+:::
 
 ## Overview
 
@@ -35,21 +41,35 @@ Tokens --> Embeddings --> [Attention --> FFN] x N --> Output
 
 ## Running the Milestone
 
+:::{admonition} Before You Begin
+:class: tip
+Ensure all prerequisite modules are complete. Check your progress with:
+```bash
+tito module status
+```
+Modules 01-13 must show as completed before running this milestone.
+:::
+
 ```bash
 cd milestones/05_2017_transformer
 
-# Step 0: Prove attention works (~30 seconds)
+# Step 0: Prove attention works
 python 00_vaswani_attention_proof.py
 # Expected: 95%+ on sequence reversal
 
-# Step 1: Q&A generation (3-5 min)
+# Step 1: Q&A generation
 python 01_vaswani_generation.py --epochs 5
 # Expected: Loss < 1.5, coherent responses
 
-# Step 2: Dialogue generation (3-5 min)
+# Step 2: Dialogue generation
 python 02_vaswani_dialogue.py --epochs 5
 # Expected: Context-aware responses
 ```
+
+:::{admonition} Why Start with Script 00?
+:class: note
+Script 00 is the critical validation. Sequence reversal is practically impossible without working attention, gives instant feedback (30 seconds), and is binary pass/fail (95%+ or broken). If 00 fails, debug your attention. If 00 passes, 01-02 will work.
+:::
 
 ## Expected Results
 
@@ -79,12 +99,6 @@ This solves the fundamental RNN problems:
 - Vanishing gradients → Direct connections (better long-range)
 - Fixed hidden state → Dynamic attention (no bottleneck)
 
-## Systems Insights
-
-- **Memory**: O(n^2) for attention matrix (sequence length squared)
-- **Compute**: Highly parallelizable (unlike RNNs)
-- **Architecture**: Position info via embeddings (no inherent ordering)
-
 ## YOUR Code Powers This
 
 This is the capstone of the Architecture Tier. Every component comes from YOUR implementations:
@@ -100,15 +114,6 @@ This is the capstone of the Architecture Tier. Every component comes from YOUR i
 
 **No PyTorch. No HuggingFace. Just YOUR code generating coherent text.**
 
-## Why Start with Attention Proof?
-
-Script 00 is the **critical validation**. Sequence reversal is:
-- **Practically impossible** without working attention
-- **Instant** feedback (30 seconds)
-- **Binary** pass/fail (95%+ or broken)
-
-If 00 fails, debug your attention. If 00 passes, 01-02 will work.
-
 ## Historical Context
 
 The original "Attention Is All You Need" paper used sequence-to-sequence tasks like translation. TinyTalks provides a similar Q&A format at character level.
@@ -118,6 +123,12 @@ This architecture (with scaling) powers:
 - BERT, RoBERTa, T5
 - Vision Transformers (ViT)
 - Multimodal models (CLIP, Flamingo)
+
+## Systems Insights
+
+- **Memory**: O(n²) for attention matrix (sequence length squared)
+- **Compute**: Highly parallelizable (unlike RNNs)
+- **Architecture**: Position info via embeddings (no inherent ordering)
 
 ## What's Next
 

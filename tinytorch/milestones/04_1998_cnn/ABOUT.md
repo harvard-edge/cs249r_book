@@ -1,6 +1,12 @@
 # Milestone 04: The CNN Revolution (1998)
 
-**ARCHITECTURE TIER** | Difficulty: 3/4 | Time: 60-120 min | Prerequisites: Modules 01-09
+:::{admonition} Milestone Info
+:class: note
+
+**ARCHITECTURE TIER** | Prerequisites: Modules 01-09
+
+This milestone runs YOUR implementations from Foundation and Architecture modules. After completing Module 09 (Convolutions), your Conv2d and MaxPool2d layers are ready to achieve 75%+ accuracy on CIFAR-10.
+:::
 
 ## Overview
 
@@ -29,14 +35,23 @@ Images --> Conv --> ReLU --> Pool --> Conv --> ReLU --> Pool --> Flatten --> Lin
 
 ## Running the Milestone
 
+:::{admonition} Before You Begin
+:class: tip
+Ensure all prerequisite modules are complete. Check your progress with:
+```bash
+tito module status
+```
+Modules 01-09 must show as completed before running this milestone.
+:::
+
 ```bash
 cd milestones/04_1998_cnn
 
-# Part 1: TinyDigits (works offline, 5-7 min)
+# Part 1: TinyDigits (works offline)
 python 01_lecun_tinydigits.py
 # Expected: ~90% accuracy (vs ~80% MLP)
 
-# Part 2: CIFAR-10 (requires download, 30-60 min)
+# Part 2: CIFAR-10 (requires download)
 python 02_lecun_cifar10.py
 # Expected: 65-75% accuracy
 ```
@@ -64,21 +79,24 @@ A CNN understands spatial structure:
 
 **100× fewer parameters. 50% better accuracy.** That's what happens when architecture matches reality.
 
-## Systems Insights
+Part 1 validates YOUR implementations on TinyDigits. But Part 2 is where everything comes together at scale. 50,000 natural color images. 32×32×3 = 3,072 dimensions per image. 10 diverse categories (airplanes, cars, birds, cats, ships...). This is HARD.
 
-- **Memory**: ~1M parameters (weight sharing dramatically reduces vs dense)
-- **Compute**: Convolution is compute-intensive but highly parallelizable
-- **Architecture**: Hierarchical feature learning (edges --> textures --> objects)
-
-## What Part 2 Proves
-
-Part 1 validates YOUR implementations on TinyDigits. But Part 2 is where everything comes together at scale.
-
-50,000 natural color images. 32×32×3 = 3,072 dimensions per image. 10 diverse categories (airplanes, cars, birds, cats, ships...). This is HARD.
-
-Watch YOUR DataLoader stream batches from disk. Watch YOUR Conv2d layers extract features - first layer finds edges, second layer finds textures, third layer finds object parts. Watch YOUR MaxPool2d reduce dimensions while preserving features. Watch YOUR training loop iterate for 30-60 minutes.
+Watch YOUR DataLoader stream batches from disk. Watch YOUR Conv2d layers extract features: first layer finds edges, second layer finds textures, third layer finds object parts. Watch YOUR MaxPool2d reduce dimensions while preserving features.
 
 When you see "Test Accuracy: 72%," realize what just happened: YOUR implementations, running on YOUR computer, just achieved computer vision that rivals early ImageNet-era results. You didn't download a pretrained model. You built the framework AND trained the model. That's systems engineering.
+
+## YOUR Code Powers This
+
+| Component | Your Module | What It Does |
+|-----------|-------------|--------------|
+| `Tensor` | Module 01 | Stores images and feature maps |
+| `Conv2d` | Module 09 | YOUR convolutional layers |
+| `MaxPool2d` | Module 09 | YOUR pooling layers |
+| `ReLU` | Module 02 | YOUR activation functions |
+| `Linear` | Module 03 | YOUR classifier head |
+| `CrossEntropyLoss` | Module 04 | YOUR loss computation |
+| `DataLoader` | Module 05 | YOUR batching pipeline |
+| `backward()` | Module 06 | YOUR autograd engine |
 
 ## Historical Context
 
@@ -87,6 +105,12 @@ LeNet-5 was deployed by the US Postal Service for handwritten zip code recogniti
 CIFAR-10 (2009) became the standard benchmark before ImageNet. CNNs achieving 70%+ on CIFAR demonstrated the architecture was ready for larger challenges.
 
 The 2012 "ImageNet moment" (AlexNet) used the same CNN principles, just scaled up with GPUs.
+
+## Systems Insights
+
+- **Memory**: ~1M parameters (weight sharing dramatically reduces vs dense)
+- **Compute**: Convolution is compute-intensive but highly parallelizable
+- **Architecture**: Hierarchical feature learning (edges → textures → objects)
 
 ## What's Next
 
