@@ -37,6 +37,8 @@ Measure --> Optimize --> Validate --> Repeat
 
 ## Running the Milestone
 
+Ensure Modules 01-18 are completed. Check with `tito module status`.
+
 ```bash
 cd milestones/06_2018_mlperf
 
