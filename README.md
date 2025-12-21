@@ -254,9 +254,9 @@ cd book
 ```bash
 cd tinytorch
 
-# One-command setup
-tito setup
+# Quick setup
 source .venv/bin/activate
+tito setup
 
 # Start building
 tito module start 01
