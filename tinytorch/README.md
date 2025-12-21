@@ -2,249 +2,276 @@
 
 # Tiny🔥Torch
 
-### The Hands-On Lab Environment for Machine Learning Systems
+### Build Your Own ML Framework From Scratch
 
-[![ML Systems Book](https://img.shields.io/badge/textbook-mlsysbook.ai-blue?logo=bookstack)](https://mlsysbook.ai)
-[![Docs](https://img.shields.io/badge/labs-tinytorch-orange?logo=jupyter)](https://mlsysbook.ai/tinytorch)
+[![Status](https://img.shields.io/badge/status-preview-orange?logo=github)](https://github.com/harvard-edge/cs249r_book/discussions/1076)
+[![Docs](https://img.shields.io/badge/docs-mlsysbook.ai-blue?logo=readthedocs)](https://mlsysbook.ai/tinytorch)
 [![Python](https://img.shields.io/badge/python-3.8+-3776ab?logo=python&logoColor=white)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Harvard](https://img.shields.io/badge/Harvard-CS249r-A51C30)](https://mlsysbook.ai)
+[![Harvard](https://img.shields.io/badge/Harvard-CS249r-A51C30?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6TTIgMTdsMTAgNSAxMC01TTIgMTJsMTAgNSAxMC01Ii8+PC9zdmc+)](https://mlsysbook.ai)
+
+**Most ML courses teach you to *use* frameworks. TinyTorch teaches you to *build* them.**
+
+[The Vision](#why-tinytorch) · [20 Modules](#-20-progressive-modules) · [Share Feedback](https://github.com/harvard-edge/cs249r_book/discussions/1076)
 
 </div>
 
 ---
 
-**[Machine Learning Systems](https://mlsysbook.ai)** is the textbook.
-**TinyTorch** is where you build what you read.
+> 🚧 **Preview Release** — TinyTorch is functional but evolving. We're sharing early to shape the direction with community input rather than building in isolation.
+>
+> 📅 **Classroom Ready**: Summer/Fall 2026 · **Right Now**: [We want your feedback](#-help-shape-tinytorch)
 
 ---
 
-## The ML Systems Learning Ecosystem
+## Why TinyTorch?
 
-```
-                    ┌─────────────────────────────────────────────────────────────┐
-                    │                    MACHINE LEARNING SYSTEMS                 │
-                    │                        mlsysbook.ai                         │
-                    │                                                             │
-                    │   The comprehensive textbook for ML systems engineering     │
-                    └─────────────────────────────┬───────────────────────────────┘
-                                                  │
-                                                  │ Read the theory
-                                                  ▼
-        ┌─────────────────────────────────────────────────────────────────────────────────────┐
-        │                                                                                     │
-        │   ┌───────────────────────┐    ┌───────────────────────┐    ┌───────────────────┐   │
-        │   │                       │    │                       │    │                   │   │
-        │   │    Tiny🔥Torch        │    │    Hardware Labs      │    │  Software Co-Labs │   │
-        │   │                       │    │                       │    │                   │   │
-        │   │  Build the framework  │    │  Deploy to devices    │    │  Scale with cloud │   │
-        │   │  from scratch         │    │  Arduino, Raspberry   │    │  (coming soon)    │   │
-        │   │                       │    │  Pi, Edge devices     │    │                   │   │
-        │   │  ► Tensors → Autograd │    │                       │    │                   │   │
-        │   │  ► CNNs → Transformers│    │  ► Image recognition  │    │  ► Distributed    │   │
-        │   │  ► Quantization → KV$ │    │  ► Keyword spotting   │    │  ► Production     │   │
-        │   │                       │    │  ► Motion detection   │    │  ► MLOps          │   │
-        │   │                       │    │                       │    │                   │   │
-        │   └───────────┬───────────┘    └───────────┬───────────┘    └─────────┬─────────┘   │
-        │               │                            │                          │             │
-        │               └────────────────────────────┼──────────────────────────┘             │
-        │                                            │                                        │
-        │                                            ▼                                        │
-        │                              ┌─────────────────────────┐                            │
-        │                              │                         │                            │
-        │                              │     Torch Olympics      │                            │
-        │                              │                         │                            │
-        │                              │   Compete. Benchmark.   │                            │
-        │                              │   Prove what you built. │                            │
-        │                              │                         │                            │
-        │                              └─────────────────────────┘                            │
-        │                                                                                     │
-        └─────────────────────────────────────────────────────────────────────────────────────┘
-```
+Everyone wants to be an astronaut 🧑‍🚀. Very few want to be the rocket scientist 🚀.
 
-**The Learning Path:**
+In machine learning, we see the same pattern. Everyone wants to train models, run inference, deploy AI. Very few want to understand how the frameworks actually work. Even fewer want to build one.
 
-1. **[Read the Textbook](https://mlsysbook.ai)** — Understand ML systems concepts
-2. **[Build in TinyTorch](https://mlsysbook.ai/tinytorch)** — Implement what you learned from scratch
-3. **[Deploy to Hardware](https://mlsysbook.ai/contents/labs/labs.html)** — Run models on real embedded devices
-4. **Compete in Olympics** — Prove mastery through benchmarked competition
+**The world is full of users. We do not have enough builders.**
 
-Just as Patterson & Hennessy pairs with RISC-V for computer architecture, ML Systems pairs with TinyTorch for machine learning.
+### The Solution: AI Bricks 🧱
+
+TinyTorch teaches you the **AI bricks**—the stable engineering foundations you can use to build any AI system.
+
+- **Small enough to learn from**: bite-sized code that runs even on a Raspberry Pi
+- **Big enough to matter**: showing the real architecture of how frameworks are built
+
+A Harvard University course that transforms you from framework user to systems engineer, giving you the deep understanding needed to optimize, debug, and innovate at the foundation of AI.
 
 ---
 
-## What You Build
+## What You'll Build
 
-A **complete ML framework from scratch** that runs the same code as PyTorch:
+A **complete ML framework** capable of:
 
-```python
-# After completing TinyTorch, this is YOUR code:
-from tinytorch.nn import Linear, Conv2d, Transformer
-from tinytorch.optim import Adam
-from tinytorch import Tensor
+🎯 **North Star Achievement**: Train CNNs for image classification
+- Real computer vision on standard benchmark datasets
+- Built entirely from scratch using only NumPy
+- Competitive performance with modern frameworks
 
-model = Transformer(vocab=1000, d_model=64, n_heads=4)
-optimizer = Adam(model.parameters())
+**Additional Capabilities**:
+- GPT-style language models with attention mechanisms
+- Modern optimizers (Adam, SGD) with learning rate scheduling
+- Performance profiling, optimization, and competitive benchmarking
 
-for batch in dataloader:
-    loss = model(batch.x, batch.y)
-    loss.backward()   # You built this
-    optimizer.step()  # You built this too
-```
-
-**No PyTorch. No TensorFlow. Everything is code you wrote.**
+**No dependencies on PyTorch or TensorFlow - everything is YOUR code!**
 
 ---
 
-## 20 Modules Across Three Tiers
+## 🛠 Help Shape TinyTorch
 
-| Tier | Modules | Textbook Chapters | What You Build |
-|------|---------|-------------------|----------------|
-| **Foundation** | 01-08 | DL Primer, Training, Frameworks | Tensors, autograd, optimizers, training loops |
-| **Architecture** | 09-13 | DNN Architectures | CNNs, tokenization, attention, transformers |
-| **Optimization** | 14-19 | Efficient AI, Optimizations, Benchmarking | Profiling, quantization, compression, KV-cache |
-| **Capstone** | 20 | — | Torch Olympics competition |
+We're sharing TinyTorch early because we'd rather shape the direction with community input than build in isolation. Before diving into code, we want to hear from you:
 
-Each module follows the textbook:
-> **Read** the chapter → **Build** in TinyTorch → **Deploy** to hardware (optional)
+**If you're a student:**
+→ What hands-on labs or projects would help you learn ML systems?
 
----
+**If you teach:**
+→ What would make TinyTorch easy to bring into a course?
 
-## Historical Milestones
+**If you're a practitioner:**
+→ What real-world systems tasks should we simulate?
 
-Validate your implementation by recreating landmark ML achievements:
+**For everyone:**
+→ What natural extensions belong in this "AI bricks" model?
 
-| Year | Milestone | What You Prove |
-|------|-----------|----------------|
-| 1958 | Rosenblatt's Perceptron | Your tensors and layers work |
-| 1969 | XOR Solution | Your multi-layer networks learn non-linear functions |
-| 1986 | Backpropagation | Your autograd computes gradients correctly |
-| 1998 | LeNet CNN | Your convolutions classify images |
-| 2017 | Transformer | Your attention mechanism generates text |
-| 2018+ | MLPerf | Your optimizations achieve competitive benchmarks |
-
-These aren't toy demos—they're historically significant achievements rebuilt with YOUR framework.
-
----
-
-## Torch Olympics
-
-*Coming Soon*
-
-The capstone competition where you optimize the framework you built:
-
-| Track | Challenge |
-|-------|-----------|
-| **Vision** | Highest CIFAR accuracy with your Conv2d |
-| **Language** | Best text generation with your transformer |
-| **Speed** | Fastest inference with your optimizations |
-| **Compression** | Smallest model that still works |
-
-Compete using code you wrote, not someone else's framework.
+📣 **[Share your thoughts in the discussion →](https://github.com/harvard-edge/cs249r_book/discussions/1076)**
 
 ---
 
 ## Current Status
 
-> **Preview Release** — TinyTorch is functional but evolving. We're sharing early to gather community feedback.
-
 | Ready | In Progress | Coming Soon |
 |-------|-------------|-------------|
-| All 20 modules | Documentation polish | NBGrader integration |
-| 600+ tests | Instructor resources | Torch Olympics leaderboard |
-| `tito` CLI | Textbook cross-references | Software Co-Labs |
-| Historical milestones | | Binder/Colab support |
+| ✅ All 20 modules implemented | 🔧 Documentation polish | 📅 NBGrader integration |
+| ✅ Complete test suite (600+ tests) | 🔧 Edge case handling | 📅 Community leaderboard |
+| ✅ `tito` CLI for workflows | 🔧 Instructor resources | 📅 Binder/Colab support |
+| ✅ Historical milestone scripts | | |
 
-**Classroom Target**: Fall 2026
+**Want to explore the code?** [Browse the repository structure](#repository-structure) to see how modules are organized.
+
+**Adventurous early adopter?** Local installation works, but expect rough edges. See the [setup guide](site/getting-started.md).
 
 ---
 
-## Getting Started
+## 20 Progressive Modules
 
-### For Students
+Build your framework through four progressive parts:
 
-1. **Read the textbook chapter** at [mlsysbook.ai](https://mlsysbook.ai)
-2. **Complete the TinyTorch module** for that chapter
-3. **Validate with milestones** to prove your implementation works
+| Part | Modules | What You Build |
+|------|---------|----------------|
+| **I. Foundations** | 01-08 | Tensors, activations, layers, losses, dataloader, autograd, optimizers, training |
+| **II. Vision** | 09 | Conv2d, CNNs for image classification |
+| **III. Language** | 10-13 | Tokenization, embeddings, attention, transformers |
+| **IV. Optimization** | 14-20 | Profiling, quantization, compression, acceleration, benchmarking, capstone |
 
-```bash
-git clone https://github.com/harvard-edge/tinytorch
-cd tinytorch
-pip install -e .
+Each module asks: **"Can I build this capability from scratch?"**
+
+📖 **[Full curriculum and module details →](https://mlsysbook.ai/tinytorch)**
+
+---
+
+## Historical Milestones
+
+As you progress, unlock recreations of landmark ML achievements:
+
+| Year | Milestone | Your Achievement |
+|------|-----------|------------------|
+| 1957 | Perceptron | Binary classification with gradient descent |
+| 1969 | XOR Crisis | Multi-layer networks solve non-linear problems |
+| 1986 | Backpropagation | Multi-layer network training |
+| 1998 | CNN Revolution | **Image classification with convolutions** |
+| 2017 | Transformer Era | Language generation with self-attention |
+| 2018+ | MLPerf | Production-ready optimization |
+
+**These aren't toy demos** - they're historically significant ML achievements rebuilt with YOUR framework!
+
+---
+
+## Learning Philosophy
+
+```python
+# Traditional Course:
+import torch
+model.fit(X, y)  # Magic happens
+
+# TinyTorch:
+# You implement every component
+# You measure memory usage
+# You optimize performance
+# You understand the systems
 ```
 
-See the [Getting Started Guide](https://mlsysbook.ai/tinytorch/getting-started.html) for detailed setup.
+**Why Build Your Own Framework?**
+- **Deep Understanding** - Know exactly what `loss.backward()` does
+- **Systems Thinking** - Understand memory, compute, and scaling
+- **Debugging Skills** - Fix problems at any level of the stack
+- **Production Ready** - Learn patterns used in real ML systems
 
-### For Instructors
+---
 
-TinyTorch supports multiple integration models:
+## Documentation
 
-| Model | Modules | Use Case |
-|-------|---------|----------|
-| **Full Course** | All 20 | Standalone ML systems course |
-| **Half Semester** | 01-09 | Foundation + CNNs |
-| **Optimization Focus** | 14-19 | Add-on to existing ML course |
-| **Self-Paced** | Any | Professional development |
-
-See the [Instructor Guide](INSTRUCTOR.md) for curriculum integration.
+| Audience | Resources |
+|----------|-----------|
+| **Students** | [Course Website](https://mlsysbook.ai/tinytorch) ・ [Getting Started](site/getting-started.md) |
+| **Instructors** | [Instructor Guide](INSTRUCTOR.md) |
+| **Contributors** | [Contributing Guide](CONTRIBUTING.md) |
 
 ---
 
 ## Repository Structure
 
 ```
-tinytorch/
-├── src/                    # Source modules (01-20)
-├── modules/                # Generated Jupyter notebooks
-├── tinytorch/              # Your built framework (import from here)
-├── milestones/             # Historical validation scripts
-├── tests/                  # 600+ tests
-├── site/                   # Course website
-└── tito/                   # CLI tool
+TinyTorch/
+├── src/                        # 💻 Python source files (developers/contributors edit here)
+│   ├── 01_tensor/              # Module 01: Tensor operations from scratch
+│   │   ├── 01_tensor.py        # Python source (version controlled)
+│   │   └── ABOUT.md            # Conceptual overview & learning objectives
+│   ├── 02_activations/         # Module 02: ReLU, Softmax activations
+│   ├── 03_layers/              # Module 03: Linear layers, Module system
+│   ├── 04_losses/              # Module 04: MSE, CrossEntropy losses
+│   ├── 05_dataloader/          # Module 05: Efficient data pipelines
+│   ├── 06_autograd/            # Module 06: Automatic differentiation
+│   ├── 07_optimizers/          # Module 07: SGD, Adam optimizers
+│   ├── 08_training/            # Module 08: Complete training loops
+│   ├── 09_convolutions/        # Module 09: Conv2d, MaxPool2d, CNNs
+│   ├── 10_tokenization/        # Module 10: Text processing
+│   ├── 11_embeddings/          # Module 11: Token & positional embeddings
+│   ├── 12_attention/           # Module 12: Multi-head attention
+│   ├── 13_transformers/        # Module 13: Complete transformer blocks
+│   ├── 14_profiling/           # Module 14: Performance analysis
+│   ├── 15_quantization/        # Module 15: Model compression (precision reduction)
+│   ├── 16_compression/         # Module 16: Pruning & distillation
+│   ├── 17_acceleration/        # Module 17: Hardware optimization
+│   ├── 18_memoization/         # Module 18: KV-cache/memoization
+│   ├── 19_benchmarking/        # Module 19: Performance measurement
+│   └── 20_capstone/            # Module 20: Complete ML systems
+│
+├── modules/                    # 📓 Generated notebooks (learners work here)
+│   ├── 01_tensor/              # Auto-generated from src/
+│   │   ├── 01_tensor.ipynb     # Jupyter notebook for learning
+│   │   ├── README.md           # Practical implementation guide
+│   │   └── tensor.py           # Your implementation
+│   └── ...                     # (20 module directories)
+│
+├── site/                       # 🌐 Course website & documentation (Jupyter Book)
+│   ├── intro.md                # Landing page
+│   ├── _toc.yml                # Site navigation (links to modules)
+│   ├── _config.yml             # HTML website configuration
+│   ├── chapters/               # Course content chapters
+│   └── modules/                # Module documentation
+│
+├── milestones/                 # 🏆 Historical ML evolution - prove what you built!
+│   ├── 01_1957_perceptron/     # Rosenblatt's first trainable network
+│   ├── 02_1969_xor/            # Minsky's challenge & multi-layer solution
+│   ├── 03_1986_mlp/            # Backpropagation & MNIST digits
+│   ├── 04_1998_cnn/            # LeCun's CNNs & CIFAR-10
+│   ├── 05_2017_transformer/    # Attention mechanisms & language
+│   └── 06_2018_mlperf/         # Modern optimization & profiling
+│
+├── tito/                       # 🎛️ CLI tool for streamlined workflows
+│   ├── main.py                 # Entry point
+│   ├── commands/               # 23 command modules
+│   └── core/                   # Core utilities
+│
+├── tinytorch/                  # 📦 Generated package (import from here)
+│   ├── core/                   # Core ML components
+│   └── ...                     # Your built framework!
+│
+└── tests/                      # ✅ Comprehensive test suite (600+ tests)
 ```
 
----
-
-## Related Educational Frameworks
-
-We acknowledge other excellent educational frameworks:
-
-- **[MiniTorch](https://minitorch.github.io/)** — Cornell's autodiff-focused framework
-- **[micrograd](https://github.com/karpathy/micrograd)** — Karpathy's tiny autograd engine
-- **[tinygrad](https://github.com/tinygrad/tinygrad)** — Hotz's minimalist deep learning
-
-**TinyTorch's distinction**: It's the lab environment for the [Machine Learning Systems](https://mlsysbook.ai) textbook, with 20 progressive modules covering the full stack from tensors to deployment optimization.
+**Key workflow**: `src/*.py` → `modules/*.ipynb` → `tinytorch/*.py`
 
 ---
 
-## Contributing
+## Join the Community
 
-TinyTorch is part of the open [ML Systems Book](https://mlsysbook.ai) project. We welcome contributions:
+TinyTorch is part of the [ML Systems Book](https://mlsysbook.ai) ecosystem. We're building an open community of learners and educators passionate about ML systems.
 
-- Report issues or suggest improvements
-- Contribute modules, tests, or documentation
-- Share how you're using TinyTorch in your course
+**Ways to get involved:**
+- ⭐ Star this repo to show support
+- 💬 Join [Discussions](https://github.com/harvard-edge/cs249r_book/discussions) to ask questions
+- 🐛 Report issues or suggest improvements
+- 🤝 Contribute modules, fixes, or documentation
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
+## Related Projects
+
+"TinyTorch" is a popular name for educational ML frameworks. We acknowledge excellent projects with similar names:
+
+- [tinygrad](https://github.com/tinygrad/tinygrad) - George Hotz's minimalist framework
+- [micrograd](https://github.com/karpathy/micrograd) - Andrej Karpathy's tiny autograd
+- [MiniTorch](https://minitorch.github.io/) - Cornell's educational framework
+
+**Our TinyTorch** distinguishes itself through its 20-module curriculum, NBGrader integration, ML systems focus, and connection to the [ML Systems Book](https://mlsysbook.ai) ecosystem.
+
+---
+
 ## Acknowledgments
 
-Created by [Prof. Vijay Janapa Reddi](https://vijay.seas.harvard.edu) at Harvard University as the hands-on companion to [Machine Learning Systems](https://mlsysbook.ai).
+Created by [Prof. Vijay Janapa Reddi](https://vijay.seas.harvard.edu) at Harvard University.
+
+Special thanks to students and contributors who helped build this framework.
 
 ---
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
 <div align="center">
 
-**[Textbook](https://mlsysbook.ai)** · **[TinyTorch Labs](https://mlsysbook.ai/tinytorch)** · **[Hardware Labs](https://mlsysbook.ai/contents/labs/labs.html)** · **[Discussions](https://github.com/harvard-edge/cs249r_book/discussions)**
+**[📖 Full Documentation](https://mlsysbook.ai/tinytorch)** ・ **[💬 Discussions](https://github.com/harvard-edge/cs249r_book/discussions)** ・ **[🌐 ML Systems Book](https://mlsysbook.ai)**
 
-*Read the book. Build the framework. Deploy to hardware.*
+**Start Small. Go Deep. Build ML Systems.**
 
 </div>
