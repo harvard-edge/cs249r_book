@@ -37,15 +37,60 @@ This repository contains an **open source textbook** and **hands-on framework** 
 
 > **Mission:** Accessible AI systems education for anyone, anywhere.
 
-### What's Here
+### The Learning Path
 
-**Read → Experiment → Build**
+We believe in learning by doing. Read the textbook, then progress through hands-on labs of increasing depth:
 
-| Component                      | Description                                                                                                                                               | Getting Started                            |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| **[📖 Book](book/)**           | The Machine Learning Systems textbook that walks through design, optimization, deployment, edge computing, and responsible AI in a clear, end-to-end way  | [book/README.md](book/README.md)           |
-| **[Tiny🔥Torch](tinytorch/)** | A from-scratch ML framework that lets you build the full stack yourself, piece by piece, and learn how real systems work under the hood                   | [tinytorch/README.md](tinytorch/README.md) |
-| **[🔮 Collabs](collabs/)**           | Hands-on Colab simulations that let you experiment with ML systems, explore tradeoffs, and see how design decisions ripple through a working microchamber | *Coming Summer 2026*                              |
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                                                                                     │
+│                         📖  MACHINE LEARNING SYSTEMS                                │
+│                              Read the Textbook                                      │
+│                                                                                     │
+│                    Theory • Concepts • Best Practices                               │
+│                                                                                     │
+└─────────────────────────────────────┬───────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                              HANDS-ON LABS                                          │
+│                                                                                     │
+│     ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐           │
+│     │                 │      │                 │      │                 │           │
+│     │ 🔮 SOFTWARE     │      │ 🔥 TINYTORCH    │      │ 🔧 HARDWARE     │           │
+│     │    CO-LABS      │ ───▶ │                 │ ───▶ │    LABS         │           │
+│     │                 │      │                 │      │                 │           │
+│     │ Explore         │      │ Build           │      │ Deploy          │           │
+│     │ tradeoffs       │      │ from scratch    │      │ to devices      │           │
+│     │                 │      │                 │      │                 │           │
+│     │ (coming 2026)   │      │ 20 modules      │      │ Arduino, Pi     │           │
+│     │                 │      │                 │      │ Edge devices    │           │
+│     └─────────────────┘      └─────────────────┘      └─────────────────┘           │
+│                                                                                     │
+│           EXPLORE        ───▶       BUILD        ───▶      DEPLOY                   │
+│                                                                                     │
+└─────────────────────────────────────┬───────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                                                                                     │
+│                            🏆  AI OLYMPICS                                          │
+│                              Prove Mastery                                          │
+│                                                                                     │
+│     Compete across all tracks • University teams • Public leaderboards              │
+│                                                                                     │
+│                              (coming 2026)                                          │
+│                                                                                     │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+| Step | Component | What You Do | Link |
+|------|-----------|-------------|------|
+| **READ** | [📖 Textbook](https://mlsysbook.ai) | Understand ML systems concepts | [book/](book/README.md) |
+| **EXPLORE** | 🔮 Software Co-Labs | Experiment with system tradeoffs | *Coming 2026* |
+| **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch) | Implement a complete ML framework from scratch | [tinytorch/](tinytorch/README.md) |
+| **DEPLOY** | [🔧 Hardware Labs](https://mlsysbook.ai/contents/labs/labs.html) | Ship models to real edge devices | [labs/](book/quarto/contents/labs/) |
+| **PROVE** | 🏆 AI Olympics | Compete and benchmark across all tracks | *Coming 2026* |
 
 ---
 
@@ -104,18 +149,15 @@ This project is part of a broader personal mission to **educate one million lear
 
 ## Start Here
 
-**For Readers:**
-1. Read [Chapter 1](https://www.mlsysbook.ai/contents/core/introduction/introduction.html) and the overview
-2. Skim the [Benchmarking chapter](https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html) to know what to measure
-3. Pick a [TinyML kit](https://www.mlsysbook.ai/contents/labs/kits.html) and run a lab
+Follow the learning path that matches your goals:
 
-**For Builders:**
-1. Clone this repo and explore [TinyTorch](tinytorch/)
-2. Start with Module 01 (Tensors) and build your way up
-3. Train a CNN on CIFAR-10 with code you wrote from scratch
+**READ** → Start with the [textbook](https://mlsysbook.ai). Try [Chapter 1](https://www.mlsysbook.ai/contents/core/introduction/introduction.html) and the [Benchmarking chapter](https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html).
 
-**For Everyone:**
-- Say hello in [Introduce Yourself](https://github.com/harvard-edge/cs249r_book/discussions). I will do my best to reply.
+**BUILD** → Follow the [TinyTorch getting started guide](https://mlsysbook.ai/tinytorch/getting-started.html). Begin with Module 01 (Tensors) and work your way up to training CNNs and transformers with code you wrote from scratch.
+
+**DEPLOY** → Pick a [hardware kit](https://www.mlsysbook.ai/contents/labs/kits.html) and run the labs. Ship real models to Arduino, Raspberry Pi, or other edge devices.
+
+**Say hello** → Introduce yourself in [Discussions](https://github.com/harvard-edge/cs249r_book/discussions). I'll do my best to reply.
 
 ---
 
@@ -160,7 +202,8 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 | Resource | Description |
 |---|---|
 | [📖 **Textbook**](https://mlsysbook.ai) | Interactive online textbook |
-| [🔥 **TinyTorch**](https://tinytorch.ai) | Educational ML framework (Early Access) |
+| [🔥 **TinyTorch**](https://mlsysbook.ai/tinytorch) | Build ML frameworks from scratch |
+| [🔧 **Hardware Labs**](https://mlsysbook.ai/contents/labs/labs.html) | Deploy to Arduino, Raspberry Pi, edge devices |
 | [🌐 **Ecosystem**](https://mlsysbook.org) | Resources, workshops, and community |
 | [💬 **Discussions**](https://github.com/harvard-edge/cs249r_book/discussions) | Questions and ideas |
 
