@@ -1,7 +1,7 @@
 # Milestone 02: The XOR Crisis (1969)
 
 :::{admonition} What You'll Learn
-:class: note
+:class: tip
 
 - Why single-layer networks have fundamental mathematical limits
 - How hidden layers enable non-linear decision boundaries

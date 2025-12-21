@@ -1,7 +1,7 @@
 # Milestone 04: The CNN Revolution (1998)
 
 :::{admonition} What You'll Learn
-:class: note
+:class: tip
 
 - Why spatial structure matters: 100× fewer parameters, 50% better accuracy
 - How weight sharing enables translation invariance

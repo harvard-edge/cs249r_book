@@ -1,7 +1,7 @@
 # Milestone 03: The MLP Revival (1986)
 
 :::{admonition} What You'll Learn
-:class: note
+:class: tip
 
 - How networks automatically discover features (edges, patterns) you never programmed
 - Why representation learning is the foundation of deep learning's power

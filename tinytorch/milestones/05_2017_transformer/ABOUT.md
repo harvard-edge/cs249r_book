@@ -1,7 +1,7 @@
 # Milestone 05: The Transformer Era (2017)
 
 :::{admonition} What You'll Learn
-:class: note
+:class: tip
 
 - Why attention beats sequential processing (direct access, no bottleneck)
 - How transformers handle long-range dependencies that defeat RNNs

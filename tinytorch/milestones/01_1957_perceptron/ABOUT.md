@@ -1,7 +1,7 @@
 # Milestone 01: The Perceptron (1957)
 
 :::{admonition} What You'll Learn
-:class: note
+:class: tip
 
 - Why random weights produce random results (and training fixes this)
 - How gradient descent transforms guessing into learning

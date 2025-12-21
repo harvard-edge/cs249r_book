@@ -1,7 +1,7 @@
 # Milestone 06: MLPerf - The Optimization Era (2018)
 
 :::{admonition} What You'll Learn
-:class: note
+:class: tip
 
 - The systematic optimization workflow: measure, optimize, validate, repeat
 - Why profiling before optimizing beats heroic rewrites
