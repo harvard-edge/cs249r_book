@@ -36,7 +36,11 @@ Images --> Flatten --> Linear --> ReLU --> Linear --> ReLU --> Linear --> Classe
 
 ## Running the Milestone
 
-Ensure Modules 01-08 are completed. Check with `tito module status`.
+Before running, ensure you have completed Modules 01-08. You can check your progress:
+
+```bash
+tito module status
+```
 
 ```bash
 cd milestones/03_1986_mlp

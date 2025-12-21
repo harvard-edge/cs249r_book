@@ -53,7 +53,11 @@ These 4 points **cannot** be separated by a single line. No amount of training c
 
 ## Running the Milestone
 
-Ensure Modules 01-08 are completed. Check with `tito module status`.
+Before running, ensure you have completed Modules 01-08. You can check your progress:
+
+```bash
+tito module status
+```
 
 ```bash
 cd milestones/02_1969_xor

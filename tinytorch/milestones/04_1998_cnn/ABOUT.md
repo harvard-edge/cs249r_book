@@ -33,7 +33,11 @@ Images --> Conv --> ReLU --> Pool --> Conv --> ReLU --> Pool --> Flatten --> Lin
 
 ## Running the Milestone
 
-Ensure Modules 01-09 are completed. Check with `tito module status`.
+Before running, ensure you have completed Modules 01-09. You can check your progress:
+
+```bash
+tito module status
+```
 
 ```bash
 cd milestones/04_1998_cnn

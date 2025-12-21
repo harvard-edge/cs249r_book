@@ -39,7 +39,11 @@ Tokens --> Embeddings --> [Attention --> FFN] x N --> Output
 
 ## Running the Milestone
 
-Ensure Modules 01-13 are completed. Check with `tito module status`.
+Before running, ensure you have completed Modules 01-13. You can check your progress:
+
+```bash
+tito module status
+```
 
 ```bash
 cd milestones/05_2017_transformer
