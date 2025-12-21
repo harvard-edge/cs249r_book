@@ -42,46 +42,46 @@ This repository contains an **open source textbook** and **hands-on framework** 
 We believe in learning by doing. Read the textbook, then progress through hands-on labs of increasing depth:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                                                                                     │
-│                         📖  MACHINE LEARNING SYSTEMS                                │
-│                              Read the Textbook                                      │
-│                                                                                     │
-│                    Theory • Concepts • Best Practices                               │
-│                                                                                     │
-└─────────────────────────────────────┬───────────────────────────────────────────────┘
-                                      │
-                                      ▼
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                              HANDS-ON LABS                                          │
-│                                                                                     │
-│     ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐           │
-│     │                 │      │                 │      │                 │           │
-│     │ 🔮 SOFTWARE     │      │ 🔥 TINYTORCH    │      │ 🔧 HARDWARE     │           │
-│     │    CO-LABS      │ ───▶ │                 │ ───▶ │    LABS         │           │
-│     │                 │      │                 │      │                 │           │
-│     │ Explore         │      │ Build           │      │ Deploy          │           │
-│     │ tradeoffs       │      │ from scratch    │      │ to devices      │           │
-│     │                 │      │                 │      │                 │           │
-│     │ (coming 2026)   │      │ 20 modules      │      │ Arduino, Pi     │           │
-│     │                 │      │                 │      │ Edge devices    │           │
-│     └─────────────────┘      └─────────────────┘      └─────────────────┘           │
-│                                                                                     │
-│           EXPLORE        ───▶       BUILD        ───▶      DEPLOY                   │
-│                                                                                     │
-└─────────────────────────────────────┬───────────────────────────────────────────────┘
-                                      │
-                                      ▼
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                                                                                     │
-│                            🏆  AI OLYMPICS                                          │
-│                              Prove Mastery                                          │
-│                                                                                     │
-│     Compete across all tracks • University teams • Public leaderboards              │
-│                                                                                     │
-│                              (coming 2026)                                          │
-│                                                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                                                                               │
+│                           MACHINE LEARNING SYSTEMS                            │
+│                              Read the Textbook                                │
+│                                                                               │
+│                    Theory • Concepts • Best Practices                         │
+│                                                                               │
+└───────────────────────────────────────┬───────────────────────────────────────┘
+                                        │
+                                        ▼
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                               HANDS-ON ACTIVITY                               │
+│                                                                               │
+│     ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐     │
+│     │                 │      │                 │      │                 │     │
+│     │    SOFTWARE     │      │    TINYTORCH    │      │    HARDWARE     │     │
+│     │    CO-LABS      │ ───▶ │    FRAMEWORK    │ ───▶ │      LABS       │     │
+│     │                 │      │                 │      │                 │     │
+│     │ Explore         │      │ Build           │      │ Deploy          │     │
+│     │ tradeoffs       │      │ from scratch    │      │ to devices      │     │
+│     │                 │      │                 │      │                 │     │
+│     │ (coming 2026)   │      │ Learn hows TF & │      │ Arduino, Pi     │     │
+│     │                 │      │ PyTorch work    │      │ Edge devices    │     │
+│     └─────────────────┘      └─────────────────┘      └─────────────────┘     │
+│                                                                               │
+│           EXPLORE        ───▶       BUILD        ───▶      DEPLOY             │
+│                                                                               │
+└───────────────────────────────────────┬───────────────────────────────────────┘
+                                        │
+                                        ▼
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                                                                               │
+│                                  AI OLYMPICS                                  │
+│                                 Prove Mastery                                 │
+│                                                                               │
+│       Compete across all tracks • University teams • Public leaderboards      │
+│                                                                               │
+│                                (coming 2026)                                  │
+│                                                                               │
+└───────────────────────────────────────────────────────────────────────────────┘
 ```
 
 | Step | Component | What You Do | Link |
