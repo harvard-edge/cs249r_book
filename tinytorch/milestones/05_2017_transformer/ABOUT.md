@@ -41,15 +41,6 @@ Tokens --> Embeddings --> [Attention --> FFN] x N --> Output
 
 ## Running the Milestone
 
-:::{admonition} Before You Begin
-:class: tip
-Ensure all prerequisite modules are complete. Check your progress with:
-```bash
-tito module status
-```
-Modules 01-13 must show as completed before running this milestone.
-:::
-
 ```bash
 cd milestones/05_2017_transformer
 

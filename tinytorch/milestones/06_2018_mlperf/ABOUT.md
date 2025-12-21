@@ -39,15 +39,6 @@ Measure --> Optimize --> Validate --> Repeat
 
 ## Running the Milestone
 
-:::{admonition} Before You Begin
-:class: tip
-Ensure all prerequisite modules are complete. Check your progress with:
-```bash
-tito module status
-```
-Modules 01-18 must show as completed before running this milestone.
-:::
-
 ```bash
 cd milestones/06_2018_mlperf
 

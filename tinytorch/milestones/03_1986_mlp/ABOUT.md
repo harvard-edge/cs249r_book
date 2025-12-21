@@ -38,15 +38,6 @@ Images --> Flatten --> Linear --> ReLU --> Linear --> ReLU --> Linear --> Classe
 
 ## Running the Milestone
 
-:::{admonition} Before You Begin
-:class: tip
-Ensure all prerequisite modules are complete. Check your progress with:
-```bash
-tito module status
-```
-Modules 01-08 must show as completed before running this milestone.
-:::
-
 ```bash
 cd milestones/03_1986_mlp
 

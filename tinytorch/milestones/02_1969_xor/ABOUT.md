@@ -55,15 +55,6 @@ These 4 points **cannot** be separated by a single line. No amount of training c
 
 ## Running the Milestone
 
-:::{admonition} Before You Begin
-:class: tip
-Ensure all prerequisite modules are complete. Check your progress with:
-```bash
-tito module status
-```
-Modules 01-08 must show as completed before running this milestone.
-:::
-
 ```bash
 cd milestones/02_1969_xor
 

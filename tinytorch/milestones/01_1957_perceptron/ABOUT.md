@@ -38,15 +38,6 @@ Input (features) --> Linear --> Sigmoid --> Output (0 or 1)
 
 ## Running the Milestone
 
-:::{admonition} Before You Begin
-:class: tip
-Ensure all prerequisite modules are complete. Check your progress with:
-```bash
-tito module status
-```
-Modules 01-04 must show as completed for Part 1. Modules 01-08 must show as completed for Part 2.
-:::
-
 ```bash
 cd milestones/01_1957_perceptron
 
