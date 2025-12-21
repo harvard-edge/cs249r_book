@@ -1,6 +1,12 @@
 # Milestone 03: The MLP Revival (1986)
 
-**FOUNDATION TIER** | Difficulty: 2/4 | Time: 45-90 min | Prerequisites: Modules 01-08
+:::{admonition} Milestone Info
+:class: note
+
+**FOUNDATION TIER** | Prerequisites: Modules 01-08
+
+This milestone runs YOUR implementations from the Foundation modules. After completing Modules 01-08, your training pipeline is ready to achieve 95%+ accuracy on MNIST, recreating the breakthrough that ended the AI Winter.
+:::
 
 ## Overview
 
@@ -32,14 +38,23 @@ Images --> Flatten --> Linear --> ReLU --> Linear --> ReLU --> Linear --> Classe
 
 ## Running the Milestone
 
+:::{admonition} Before You Begin
+:class: tip
+Ensure all prerequisite modules are complete. Check your progress with:
+```bash
+tito module status
+```
+Modules 01-08 must show as completed before running this milestone.
+:::
+
 ```bash
 cd milestones/03_1986_mlp
 
-# Part 1: Quick validation (3-5 min)
+# Part 1: Quick validation
 python 01_rumelhart_tinydigits.py
 # Expected: 75-85% accuracy
 
-# Part 2: Full MNIST benchmark (10-15 min)
+# Part 2: Full MNIST benchmark
 python 02_rumelhart_mnist.py
 # Expected: 94-97% accuracy
 ```
@@ -64,12 +79,6 @@ This is **representation learning**, the foundation of deep learning's power:
 
 **The moment you realize**: Your ~100 lines of TinyTorch code just replicated the breakthrough that ended the AI Winter.
 
-## Systems Insights
-
-- **Memory**: ~100K parameters for MNIST (reasonable for 1986 hardware)
-- **Compute**: Dense matrix operations dominate training time
-- **Architecture**: Each hidden layer learns increasingly abstract features
-
 ## YOUR Code Powers This
 
 Every component comes from YOUR implementations:
@@ -91,6 +100,12 @@ Every component comes from YOUR implementations:
 MNIST (1998) became THE benchmark for evaluating learning algorithms. MLPs hitting 95%+ proved neural networks were viable for real problems.
 
 The backpropagation paper has been cited over 50,000 times and is considered one of the most influential papers in computer science.
+
+## Systems Insights
+
+- **Memory**: ~100K parameters for MNIST (reasonable for 1986 hardware)
+- **Compute**: Dense matrix operations dominate training time
+- **Architecture**: Each hidden layer learns increasingly abstract features
 
 ## What's Next
 

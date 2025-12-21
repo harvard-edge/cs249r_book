@@ -1,6 +1,12 @@
 # Milestone 01: The Perceptron (1957)
 
-**FOUNDATION TIER** | Difficulty: 1/4 | Time: 30-60 min | Prerequisites: Modules 01-04
+:::{admonition} Milestone Info
+:class: note
+
+**FOUNDATION TIER** | Prerequisites: Modules 01-04
+
+This milestone runs YOUR implementations from the Foundation modules. After completing Modules 01-04, your Tensor, Activations, Layers, and Losses are ready to recreate the first trainable neural network.
+:::
 
 ## Overview
 
@@ -32,14 +38,23 @@ Input (features) --> Linear --> Sigmoid --> Output (0 or 1)
 
 ## Running the Milestone
 
+:::{admonition} Before You Begin
+:class: tip
+Ensure all prerequisite modules are complete. Check your progress with:
+```bash
+tito module status
+```
+Modules 01-04 must show as completed for Part 1. Modules 01-08 must show as completed for Part 2.
+:::
+
 ```bash
 cd milestones/01_1957_perceptron
 
-# Part 1: See the problem (after Module 04)
+# Part 1: See the problem
 python 01_rosenblatt_forward.py
 # Expected: ~50% accuracy (random guessing)
 
-# Part 2: See the solution (after Module 08)
+# Part 2: See the solution
 python 02_rosenblatt_trained.py
 # Expected: 95%+ accuracy (learned pattern)
 ```
@@ -75,6 +90,21 @@ optimizer.step()                # YOUR optimizer learns from mistakes
 Run script 01 and watch YOUR Linear layer make random guesses - 50% accuracy, no better than a coin flip. Now run script 02. Same architecture. Same data. But now YOUR autograd engine computes gradients, YOUR optimizer updates weights. Within seconds, accuracy climbs: 60%... 75%... 85%... 95%+.
 
 **You just watched YOUR implementation learn.** This is the moment Rosenblatt proved machines could improve through experience. And you recreated it with your own code.
+
+## YOUR Code Powers This
+
+| Component | Your Module | What It Does |
+|-----------|-------------|--------------|
+| `Tensor` | Module 01 | Stores inputs and weights |
+| `Sigmoid` | Module 02 | YOUR activation function |
+| `Linear` | Module 03 | YOUR fully-connected layer |
+| `BCELoss` | Module 04 | YOUR loss computation |
+| `backward()` | Module 06 | YOUR autograd engine |
+| `SGD` | Module 07 | YOUR optimizer |
+
+## Historical Context
+
+The Perceptron was funded by the US Navy and received enormous media attention. Rosenblatt's 1958 paper introduced the core concepts of trainable weights and gradient-based learning that still power modern neural networks. The initial hype was followed by the "AI Winter" when limitations became apparent, but the fundamental insight that machines could learn from data proved correct.
 
 ## Systems Insights
 
