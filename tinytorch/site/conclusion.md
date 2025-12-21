@@ -110,4 +110,4 @@ You chose to be both. You did not just fly the rocket. You built it. And now you
 
 ---
 
-*Return to the [Community](community.md) to share your journey, or explore the [MLSysBook](https://mlsysbook.ai) for the full textbook.*
+*Share your journey with the TinyTorch community, or explore the [MLSysBook](https://mlsysbook.ai) for the full textbook.*
