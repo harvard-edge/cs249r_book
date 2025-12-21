@@ -1,12 +1,10 @@
 # Milestone 01: The Perceptron (1957)
 
-:::{admonition} What You'll Learn
-:class: tip
-
+```{tip} What You'll Learn
 - Why random weights produce random results (and training fixes this)
 - How gradient descent transforms guessing into learning
 - The fundamental loop that powers all neural network training
-:::
+```
 
 ## Overview
 

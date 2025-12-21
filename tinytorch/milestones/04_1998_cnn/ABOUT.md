@@ -1,12 +1,10 @@
 # Milestone 04: The CNN Revolution (1998)
 
-:::{admonition} What You'll Learn
-:class: tip
-
+```{tip} What You'll Learn
 - Why spatial structure matters: 100× fewer parameters, 50% better accuracy
 - How weight sharing enables translation invariance
 - The hierarchical feature learning that powers all computer vision
-:::
+```
 
 ## Overview
 

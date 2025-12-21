@@ -1,12 +1,10 @@
 # Milestone 05: The Transformer Era (2017)
 
-:::{admonition} What You'll Learn
-:class: tip
-
+```{tip} What You'll Learn
 - Why attention beats sequential processing (direct access, no bottleneck)
 - How transformers handle long-range dependencies that defeat RNNs
 - The architecture that powers GPT, BERT, and every modern LLM
-:::
+```
 
 ## Overview
 
