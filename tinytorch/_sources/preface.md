@@ -136,6 +136,8 @@ Take your time. The goal is not to finish fast. The goal is to understand deeply
 
 TinyTorch is part of a larger effort to educate a million learners at the edge of AI. The [Machine Learning Systems](https://mlsysbook.ai) textbook provides the conceptual foundation. TinyTorch provides the hands-on implementation experience. Together, they form a complete path into ML systems engineering.
 
+This approach follows a long tradition in systems education: from SICP's "build to understand" philosophy, to xv6's transparent operating system, to Nachos and Pintos. The pedagogical principles behind TinyTorch are detailed in our [research paper](https://github.com/harvard-edge/TinyTorch/blob/main/paper/paper.pdf), which positions this work within decades of CS education research.
+
 The next generation of engineers cannot rely on magic. They need to see how everything fits together, from tensors all the way to systems. They need to feel that the world of ML systems is not an unreachable tower but something they can open, shape, and build.
 
 That is what TinyTorch offers: the confidence that comes from building something real.
