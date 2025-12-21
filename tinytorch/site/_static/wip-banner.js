@@ -7,21 +7,34 @@ document.addEventListener('DOMContentLoaded', function() {
     // Only inject if not already present
     if (document.getElementById('tinytorch-bar')) return;
 
+    // Calculate base path for relative URLs based on current page location
+    // If we're in a subdirectory (modules/, tiers/, tito/), we need "../" to reach root
+    const path = window.location.pathname;
+    const tinytorchIndex = path.indexOf('/tinytorch/');
+    let siteRoot = '';
+    if (tinytorchIndex !== -1) {
+        // Get the path after /tinytorch/
+        const subPath = path.substring(tinytorchIndex + '/tinytorch/'.length);
+        // Count directory levels (exclude the .html file itself)
+        const dirs = subPath.split('/').filter(p => p && !p.endsWith('.html'));
+        siteRoot = '../'.repeat(dirs.length);
+    }
+
     const barHTML = `
         <div class="tinytorch-bar" id="tinytorch-bar">
             <div class="tinytorch-bar-content">
                 <div class="tinytorch-bar-left">
-                    <a href="intro.html" class="tinytorch-bar-brand">
+                    <a href="${siteRoot}intro.html" class="tinytorch-bar-brand">
                         Tiny<span class="brand-fire">🔥</span>Torch
                     </a>
                     <span class="tinytorch-bar-badge">Under Construction</span>
                 </div>
                 <div class="tinytorch-bar-links">
-                    <a href="_static/downloads/TinyTorch-Guide.pdf" class="download-link" title="Download Course Guide (PDF)">
+                    <a href="${siteRoot}_static/downloads/TinyTorch-Guide.pdf" class="download-link" title="Download Course Guide (PDF)">
                         <span class="link-icon">↓</span>
                         <span class="link-text">Guide</span>
                     </a>
-                    <a href="_static/downloads/TinyTorch-Paper.pdf" class="download-link" title="Download Research Paper (PDF)">
+                    <a href="${siteRoot}_static/downloads/TinyTorch-Paper.pdf" class="download-link" title="Download Research Paper (PDF)">
                         <span class="link-icon">↓</span>
                         <span class="link-text">Paper</span>
                     </a>
@@ -37,7 +50,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <span class="link-icon">⭐</span>
                         <span class="link-text">Star</span>
                     </a>
-                    <a href="community/?action=join" target="_blank">
+                    <a href="${siteRoot}community.html" target="_blank">
                         <span class="link-icon">🌍</span>
                         <span class="link-text">Community</span>
                     </a>
