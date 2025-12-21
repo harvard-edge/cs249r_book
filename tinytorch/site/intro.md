@@ -31,7 +31,7 @@ From tensors to systems. An educational framework for building and optimizing ML
   <a href="https://github.com/harvard-edge/cs249r_book?tab=readme-ov-file#support-this-work" target="_blank" style="display: inline-flex; align-items: center; gap: 0.4rem; color: #6b7280; font-size: 0.85rem; text-decoration: none;">
     <span>⭐</span>
     <span id="star-count-hero" style="font-weight: 600;">...</span>
-    <span>learners · every ⭐ helps fund free ML education</span>
+    <span>learners · every ⭐ helps support free ML education</span>
   </a>
 </div>
 
@@ -271,7 +271,7 @@ Four progressive tiers take you from foundations to production systems:
     Add yourself to the map • Share your progress • Connect with builders
   </p>
   <p style="color: #fbbf24; margin: 0 0 1.5rem 0; font-size: 0.9rem;">
-    Part of the <a href="https://github.com/harvard-edge/cs249r_book?tab=readme-ov-file#support-this-work" target="_blank" style="color: #fbbf24; text-decoration: underline;">MLSysBook</a> project — every ⭐ helps fund free ML education
+    Part of the <a href="https://github.com/harvard-edge/cs249r_book?tab=readme-ov-file#support-this-work" target="_blank" style="color: #fbbf24; text-decoration: underline;">MLSysBook</a> project — every ⭐ helps support free ML education
   </p>
   <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; align-items: center;">
     <a href="community/"
