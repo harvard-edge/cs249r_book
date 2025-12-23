@@ -1,5 +1,5 @@
 import { injectStyles } from './modules/styles.js';
-import { renderLayout, updateNavState } from './modules/ui.js?v=2';
+import { renderLayout, updateNavState } from './modules/ui.js?v=3';
 import { getSession } from './modules/state.js?v=2';
 import { openModal, closeModal, handleToggle, handleAuth, handleLogout, setMode, verifySession } from './modules/auth.js?v=2';
 import { openProfileModal, closeProfileModal, handleProfileUpdate, geocodeAndSetCoordinates } from './modules/profile.js';
@@ -12,6 +12,27 @@ import { getBasePath } from './modules/config.js';
 
     // 2. Render Layout
     renderLayout();
+
+    // 2.5 Check for Social Login Callback
+    const urlParams = new URLSearchParams(window.location.search);
+    const accessToken = urlParams.get('access_token');
+    const refreshToken = urlParams.get('refresh_token');
+    const emailParam = urlParams.get('email');
+
+    if (accessToken && refreshToken) {
+        localStorage.setItem("tinytorch_token", accessToken);
+        localStorage.setItem("tinytorch_refresh_token", refreshToken);
+        
+        if (emailParam) {
+             localStorage.setItem("tinytorch_user", JSON.stringify({ email: emailParam }));
+        }
+
+        // Clean the URL
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, newUrl);
+        
+        updateNavState();
+    }
 
     // 3. Verify Session (Async)
     verifySession();

@@ -524,6 +524,66 @@ export function injectStyles() {
                 right: 20px;
             }
         }
+
+        /* --- Social Login Styles --- */
+        .social-login-separator {
+            display: flex;
+            align-items: center;
+            text-align: center;
+            margin: 20px 0;
+            color: #888;
+            font-size: 0.85rem;
+        }
+        .social-login-separator::before,
+        .social-login-separator::after {
+            content: '';
+            flex: 1;
+            border-bottom: 1px solid #ddd;
+        }
+        .social-login-separator span {
+            padding: 0 10px;
+        }
+
+        .social-login-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .social-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 10px;
+            border-radius: 10px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            font-size: 0.95rem;
+            border: 1px solid #ddd;
+        }
+
+        .social-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .google-btn {
+            background: #fff;
+            color: #333;
+        }
+        .github-btn {
+            background: #24292e;
+            color: #fff;
+            border-color: #24292e;
+        }
+        
+        .social-icon {
+            width: 20px;
+            height: 20px;
+        }
     `;
     document.head.appendChild(style);
 }
