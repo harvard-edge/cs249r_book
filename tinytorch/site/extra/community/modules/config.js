@@ -1,5 +1,7 @@
 // Configuration
 export const SUPABASE_URL = "https://zrvmjrxhokwwmjacyhpq.supabase.co/functions/v1";
+export const SUPABASE_PROJECT_URL = "https://zrvmjrxhokwwmjacyhpq.supabase.co";
+export const SUPABASE_ANON_KEY = "sb_publishable_AP2UzNWC3T1GQGjtuTr_PQ_9q6l7AC0";
 export const NETLIFY_URL = "https://tinytorch.netlify.app";
 
 // URL Base Path Logic for Community Site Hosting
