@@ -1,7 +1,25 @@
-import { NETLIFY_URL, SUPABASE_URL, getBasePath } from './config.js';
+import { NETLIFY_URL, SUPABASE_URL, SUPABASE_PROJECT_URL, SUPABASE_ANON_KEY, getBasePath } from './config.js';
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
 import { updateNavState } from './ui.js?v=2';
 import { closeProfileModal, openProfileModal } from './profile.js';
 import { getSession, forceLogin, clearSession } from './state.js?v=2';
+
+// Initialize Supabase Client
+const supabase = createClient(SUPABASE_PROJECT_URL, SUPABASE_ANON_KEY);
+export { supabase };
+
+export async function signInWithSocial(provider) {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: provider,
+        options: {
+            redirectTo: window.location.href
+        }
+    });
+    if (error) {
+        console.error('Social login error:', error);
+        alert('Login failed: ' + error.message);
+    }
+}
 
 let currentMode = 'signup';
 
@@ -233,10 +251,12 @@ export async function handleAuth(e) {
     }
 }
 
-export function handleLogout() {
+export async function handleLogout() {
     const basePath = getBasePath();
     if (confirm('Are you sure you want to logout?')) {
+        await supabase.auth.signOut();
         localStorage.removeItem("tinytorch_token");
+        localStorage.removeItem("tinytorch_refresh_token");
         localStorage.removeItem("tinytorch_user");
         updateNavState();
         closeProfileModal();
