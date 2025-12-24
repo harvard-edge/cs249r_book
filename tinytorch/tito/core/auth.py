@@ -34,7 +34,7 @@ AUTH_CALLBACK_PATH = "/callback"
 CREDENTIALS_FILE_NAME = "credentials.json"
 
 # Determine credentials directory (Standard Python way)
-CREDENTIALS_DIR = os.getenv("TINOTORCH_CREDENTIALS_DIR", str(Path.home() / ".tinytorch"))
+CREDENTIALS_DIR = os.getenv("TINYTORCH_CREDENTIALS_DIR", str(Path.home() / ".tinytorch"))
 
 
 # --- Storage Logic ---
@@ -300,7 +300,7 @@ class AuthReceiver:
         self.thread = threading.Thread(target=serve_with_error_handling, daemon=True)
         self.thread.start()
         time.sleep(0.2)
-        
+
         # Determine the callback host for URL construction
         self.callback_host = _get_callback_host()
 
@@ -332,7 +332,7 @@ class AuthReceiver:
             raise Exception(f"Server failed to start on port {self.port}")
 
         return self.port
-    
+
     def get_redirect_url(self) -> str:
         """Get the full redirect URL that should work from the browser."""
         return f"http://{self.callback_host}:{self.port}{AUTH_CALLBACK_PATH}"
