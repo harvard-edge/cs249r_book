@@ -9,7 +9,7 @@
 #
 # WHAT THIS SCRIPT DOES
 # ---------------------
-#   1. Checks prerequisites (git, Python 3.8+, venv module)
+#   1. Checks prerequisites (git, Python 3.10+, venv module)
 #   2. Asks where to install (default: ./tinytorch)
 #   3. Shows installation plan and asks for confirmation
 #   4. Downloads TinyTorch via git sparse checkout (minimal download)
@@ -42,7 +42,7 @@
 # REQUIREMENTS
 # ------------
 #   - git (any recent version)
-#   - Python 3.8 or higher
+#   - Python 3.10 or higher
 #   - Python venv module (usually included; on Debian/Ubuntu: apt install python3-venv)
 #   - Internet connection to GitHub
 #
@@ -129,18 +129,7 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Find the Python 3 command (python3 or python)
-get_python_cmd() {
-    if command_exists python3; then
-        echo "python3"
-    elif command_exists python && python --version 2>&1 | grep -q "Python 3"; then
-        echo "python"
-    else
-        echo ""
-    fi
-}
-
-# Check if Python version is 3.8+
+# Check if Python version is 3.10+
 check_python_version() {
     local python_cmd="$1"
     local version major minor
@@ -148,13 +137,34 @@ check_python_version() {
     major=$($python_cmd -c "import sys; print(sys.version_info.major)" 2>/dev/null)
     minor=$($python_cmd -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
 
-    if [ "$major" -ge 3 ] && [ "$minor" -ge 8 ]; then
+    # Check for Python 3.10+ (Required for modern type hints)
+    if [ "$major" -eq 3 ] && [ "$minor" -ge 10 ]; then
+        echo "$version"
+        return 0
+    elif [ "$major" -gt 3 ]; then
         echo "$version"
         return 0
     else
         echo "$version"
         return 1
     fi
+}
+
+# Find the best Python command (prioritize newer versions)
+get_python_cmd() {
+    # Check specific versions first to avoid system default (often 3.9 on Mac)
+    local candidates=("python3.13" "python3.12" "python3.11" "python3.10" "python3" "python")
+    
+    for cmd in "${candidates[@]}"; do
+        if command_exists "$cmd"; then
+            # Verify this specific candidate actually meets the version requirement
+            if check_python_version "$cmd" >/dev/null 2>&1; then
+                echo "$cmd"
+                return 0
+            fi
+        fi
+    done
+    echo ""
 }
 
 # ============================================================================
@@ -201,19 +211,22 @@ check_prerequisites() {
         errors=$((errors + 1))
     fi
 
-    # Check for Python 3.8+
+    # Check for Python 3.10+
     PYTHON_CMD=$(get_python_cmd)
     if [ -n "$PYTHON_CMD" ]; then
-        if PY_VERSION=$(check_python_version "$PYTHON_CMD"); then
-            print_success "Python $PY_VERSION"
-        else
-            print_error "Python $PY_VERSION found, but 3.8+ required"
-            echo "  Upgrade: https://python.org/downloads"
-            errors=$((errors + 1))
-        fi
+        # We know it's good because get_python_cmd validates it, but we run check again to get the version string
+        PY_VERSION=$(check_python_version "$PYTHON_CMD")
+        print_success "Python $PY_VERSION ($PYTHON_CMD)"
     else
-        print_error "Python 3 not found"
-        echo "  Install: https://python.org/downloads"
+        # Diagnostic: Check if they have ANY python, just too old
+        if command_exists python3; then
+             CURRENT_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
+             print_error "Found Python $CURRENT_VER, but 3.10+ is required"
+             echo "  (TinyTorch uses modern type hints like 'str | None')"
+        else
+             print_error "Python 3.10+ not found"
+        fi
+        echo "  Install: https://python.org/downloads or 'brew install python@3.11'"
         errors=$((errors + 1))
     fi
 
@@ -313,77 +326,15 @@ do_install() {
     TEMP_DIR=""
 
     # -------------------------------------------------------------------------
-    # Clean up dev-only files that students don't need
-    #
-    # KEEP (students need these):
-    #   src/           - Module source notebooks
-    #   tinytorch/     - Package where student code goes
-    #   tito/          - CLI tool source
-    #   milestones/    - Historical ML recreations
-    #   modules/       - Working directory (cleared, populated by tito)
-    #   tests/         - Test suites for student code
-    #   datasets/      - Sample datasets (tinydigits, tinytalks)
-    #   bin/           - CLI entry point script
-    #   requirements.txt, pyproject.toml - Package dependencies
-    #   settings.ini   - nbdev config (needed for exports)
-    #   README.md, LICENSE - Documentation
-    #
-    # REMOVE (dev-only):
-    # -------------------------------------------------------------------------
-    rm -rf "$INSTALL_DIR/paper" \
-           "$INSTALL_DIR/instructor" \
-           "$INSTALL_DIR/site" \
-           "$INSTALL_DIR/scripts" \
-           "$INSTALL_DIR/tools" \
-           "$INSTALL_DIR/binder" \
-           "$INSTALL_DIR/etc" \
-           "$INSTALL_DIR/assignments" \
-           "$INSTALL_DIR/benchmark_results" \
-           "$INSTALL_DIR/.git-hooks" \
-           "$INSTALL_DIR/.claude" \
-           "$INSTALL_DIR/.cursor" \
-           "$INSTALL_DIR/.vscode" \
-           "$INSTALL_DIR/Makefile" \
-           "$INSTALL_DIR/activate.sh" \
-           "$INSTALL_DIR/setup-dev.sh" \
-           "$INSTALL_DIR/setup-environment.sh" \
-           "$INSTALL_DIR/CONTRIBUTING.md" \
-           "$INSTALL_DIR/INSTRUCTOR.md" \
-           "$INSTALL_DIR/MANIFEST.in" \
-           "$INSTALL_DIR/.pre-commit-config.yaml" \
-           "$INSTALL_DIR/.shared-ai-rules.md" \
-           "$INSTALL_DIR/.tinyrc" \
-           "$INSTALL_DIR/.editorconfig" \
-           "$INSTALL_DIR/.gitattributes" \
-           "$INSTALL_DIR/settings.json" \
-           "$INSTALL_DIR/.tinytorch" \
-           2>/dev/null || true
-
-    # Clear modules/ folder - students populate this via tito CLI exports
-    if [ -d "$INSTALL_DIR/modules" ]; then
-        find "$INSTALL_DIR/modules" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null || true
-    fi
-
-    # Reset progress tracking - students start fresh
-    rm -f "$INSTALL_DIR/progress.json" 2>/dev/null || true
-    rm -rf "$INSTALL_DIR/.tito" 2>/dev/null || true
-
-    # Clear tinytorch/core/ implementation files - students build these
-    # Keep __init__.py files (package structure)
-    if [ -d "$INSTALL_DIR/tinytorch/core" ]; then
-        find "$INSTALL_DIR/tinytorch/core" -name "*.py" ! -name "__init__.py" -type f -delete 2>/dev/null || true
-    fi
-
-    print_success "Downloaded TinyTorch ${DIM}(${COMMIT_HASH})${NC}"
-
-    # -------------------------------------------------------------------------
     # Step 2: Create Python virtual environment
     # -------------------------------------------------------------------------
     echo -e "${BLUE}[2/4]${NC} Creating Python environment..."
     cd "$INSTALL_DIR"
+    
+    # Use the detected 3.10+ command explicitly
     $PYTHON_CMD -m venv .venv
     source .venv/bin/activate
-    print_success "Created virtual environment"
+    print_success "Created virtual environment using $PYTHON_CMD"
 
     # -------------------------------------------------------------------------
     # Step 3: Install dependencies
