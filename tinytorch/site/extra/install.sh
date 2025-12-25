@@ -9,7 +9,7 @@
 #
 # WHAT THIS SCRIPT DOES
 # ---------------------
-#   1. Checks prerequisites (git, Python 3.8+, venv module)
+#   1. Checks prerequisites (git, Python 3.10+, venv module)
 #   2. Asks where to install (default: ./tinytorch)
 #   3. Shows installation plan and asks for confirmation
 #   4. Downloads TinyTorch via git sparse checkout (minimal download)
@@ -42,7 +42,7 @@
 # REQUIREMENTS
 # ------------
 #   - git (any recent version)
-#   - Python 3.8 or higher
+#   - Python 3.10 or higher
 #   - Python venv module (usually included; on Debian/Ubuntu: apt install python3-venv)
 #   - Internet connection to GitHub
 #
@@ -129,18 +129,7 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Find the Python 3 command (python3 or python)
-get_python_cmd() {
-    if command_exists python3; then
-        echo "python3"
-    elif command_exists python && python --version 2>&1 | grep -q "Python 3"; then
-        echo "python"
-    else
-        echo ""
-    fi
-}
-
-# Check if Python version is 3.8+
+# Check if Python version is 3.10+
 check_python_version() {
     local python_cmd="$1"
     local version major minor
@@ -148,13 +137,34 @@ check_python_version() {
     major=$($python_cmd -c "import sys; print(sys.version_info.major)" 2>/dev/null)
     minor=$($python_cmd -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
 
-    if [ "$major" -ge 3 ] && [ "$minor" -ge 8 ]; then
+    # Check for Python 3.10+ (Required for modern type hints)
+    if [ "$major" -eq 3 ] && [ "$minor" -ge 10 ]; then
+        echo "$version"
+        return 0
+    elif [ "$major" -gt 3 ]; then
         echo "$version"
         return 0
     else
         echo "$version"
         return 1
     fi
+}
+
+# Find the best Python command (prioritize newer versions)
+get_python_cmd() {
+    # Check specific versions first to avoid system default (often 3.9 on Mac)
+    local candidates=("python3.13" "python3.12" "python3.11" "python3.10" "python3" "python")
+    
+    for cmd in "${candidates[@]}"; do
+        if command_exists "$cmd"; then
+            # Verify this specific candidate actually meets the version requirement
+            if check_python_version "$cmd" >/dev/null 2>&1; then
+                echo "$cmd"
+                return 0
+            fi
+        fi
+    done
+    echo ""
 }
 
 # ============================================================================
@@ -201,19 +211,22 @@ check_prerequisites() {
         errors=$((errors + 1))
     fi
 
-    # Check for Python 3.8+
+    # Check for Python 3.10+
     PYTHON_CMD=$(get_python_cmd)
     if [ -n "$PYTHON_CMD" ]; then
-        if PY_VERSION=$(check_python_version "$PYTHON_CMD"); then
-            print_success "Python $PY_VERSION"
-        else
-            print_error "Python $PY_VERSION found, but 3.8+ required"
-            echo "  Upgrade: https://python.org/downloads"
-            errors=$((errors + 1))
-        fi
+        # We know it's good because get_python_cmd validates it, but we run check again to get the version string
+        PY_VERSION=$(check_python_version "$PYTHON_CMD")
+        print_success "Python $PY_VERSION ($PYTHON_CMD)"
     else
-        print_error "Python 3 not found"
-        echo "  Install: https://python.org/downloads"
+        # Diagnostic: Check if they have ANY python, just too old
+        if command_exists python3; then
+             CURRENT_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
+             print_error "Found Python $CURRENT_VER, but 3.10+ is required"
+             echo "  (TinyTorch uses modern type hints like 'str | None')"
+        else
+             print_error "Python 3.10+ not found"
+        fi
+        echo "  Install: https://python.org/downloads or 'brew install python@3.11'"
         errors=$((errors + 1))
     fi
 
@@ -381,9 +394,11 @@ do_install() {
     # -------------------------------------------------------------------------
     echo -e "${BLUE}[2/4]${NC} Creating Python environment..."
     cd "$INSTALL_DIR"
+    
+    # Use the detected 3.10+ command explicitly
     $PYTHON_CMD -m venv .venv
     source .venv/bin/activate
-    print_success "Created virtual environment"
+    print_success "Created virtual environment using $PYTHON_CMD"
 
     # -------------------------------------------------------------------------
     # Step 3: Install dependencies
