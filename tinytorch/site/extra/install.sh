@@ -326,6 +326,70 @@ do_install() {
     TEMP_DIR=""
 
     # -------------------------------------------------------------------------
+    # Clean up dev-only files that students don't need
+    #
+    # KEEP (students need these):
+    #   src/           - Module source notebooks
+    #   tinytorch/     - Package where student code goes
+    #   tito/          - CLI tool source
+    #   milestones/    - Historical ML recreations
+    #   modules/       - Working directory (cleared, populated by tito)
+    #   tests/         - Test suites for student code
+    #   datasets/      - Sample datasets (tinydigits, tinytalks)
+    #   bin/           - CLI entry point script
+    #   requirements.txt, pyproject.toml - Package dependencies
+    #   settings.ini   - nbdev config (needed for exports)
+    #   README.md, LICENSE - Documentation
+    #
+    # REMOVE (dev-only):
+    # -------------------------------------------------------------------------
+    rm -rf "$INSTALL_DIR/paper" \
+           "$INSTALL_DIR/instructor" \
+           "$INSTALL_DIR/site" \
+           "$INSTALL_DIR/scripts" \
+           "$INSTALL_DIR/tools" \
+           "$INSTALL_DIR/binder" \
+           "$INSTALL_DIR/etc" \
+           "$INSTALL_DIR/assignments" \
+           "$INSTALL_DIR/benchmark_results" \
+           "$INSTALL_DIR/.git-hooks" \
+           "$INSTALL_DIR/.claude" \
+           "$INSTALL_DIR/.cursor" \
+           "$INSTALL_DIR/.vscode" \
+           "$INSTALL_DIR/Makefile" \
+           "$INSTALL_DIR/activate.sh" \
+           "$INSTALL_DIR/setup-dev.sh" \
+           "$INSTALL_DIR/setup-environment.sh" \
+           "$INSTALL_DIR/CONTRIBUTING.md" \
+           "$INSTALL_DIR/INSTRUCTOR.md" \
+           "$INSTALL_DIR/MANIFEST.in" \
+           "$INSTALL_DIR/.pre-commit-config.yaml" \
+           "$INSTALL_DIR/.shared-ai-rules.md" \
+           "$INSTALL_DIR/.tinyrc" \
+           "$INSTALL_DIR/.editorconfig" \
+           "$INSTALL_DIR/.gitattributes" \
+           "$INSTALL_DIR/settings.json" \
+           "$INSTALL_DIR/.tinytorch" \
+           2>/dev/null || true
+
+    # Clear modules/ folder - students populate this via tito CLI exports
+    if [ -d "$INSTALL_DIR/modules" ]; then
+        find "$INSTALL_DIR/modules" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null || true
+    fi
+
+    # Reset progress tracking - students start fresh
+    rm -f "$INSTALL_DIR/progress.json" 2>/dev/null || true
+    rm -rf "$INSTALL_DIR/.tito" 2>/dev/null || true
+
+    # Clear tinytorch/core/ implementation files - students build these
+    # Keep __init__.py files (package structure)
+    if [ -d "$INSTALL_DIR/tinytorch/core" ]; then
+        find "$INSTALL_DIR/tinytorch/core" -name "*.py" ! -name "__init__.py" -type f -delete 2>/dev/null || true
+    fi
+
+    print_success "Downloaded TinyTorch ${DIM}(${COMMIT_HASH})${NC}"
+
+    # -------------------------------------------------------------------------
     # Step 2: Create Python virtual environment
     # -------------------------------------------------------------------------
     echo -e "${BLUE}[2/4]${NC} Creating Python environment..."
