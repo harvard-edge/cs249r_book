@@ -396,7 +396,7 @@ end
 
 -- Initialize the filter with Meta handler
 function Meta(meta)
-  if quarto.doc.is_format("pdf") then
+  if quarto.doc.is_format("pdf") or quarto.doc.is_format("titlepage-pdf") then
     local filter_metadata = meta["filter-metadata"]
     if filter_metadata and filter_metadata["part-summaries"] then
       local config = filter_metadata["part-summaries"]
