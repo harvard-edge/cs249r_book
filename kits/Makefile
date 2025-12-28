@@ -19,7 +19,7 @@ build:
 # Build PDF with cover page
 pdf:
 	@echo "📄 Building Hardware Kits PDF..."
-	quarto render --to titlepage-pdf --profile pdf
+	quarto render --profile pdf
 	@echo "✅ PDF build complete: _build/pdf/"
 
 # Preview the site locally
