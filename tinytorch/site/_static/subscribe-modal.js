@@ -16,8 +16,6 @@
             <div class="modal-header">
               <div class="modal-brand-row">
                 <span class="modal-brand-item">📚 MLSysBook</span>
-                <span class="modal-brand-plus">+</span>
-                <span class="modal-brand-item">🔥 TinyTorch</span>
               </div>
               <h2 class="modal-title">Stay in the Loop</h2>
               <p class="modal-subtitle">Get updates on new chapters, hands-on labs, and ML systems resources.</p>
