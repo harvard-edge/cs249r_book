@@ -2,6 +2,7 @@
 # Hardware Kits Build System
 # =============================================================================
 # Part of the MLSysBook ecosystem
+# Uses symlink switching between HTML and PDF configs (like the book)
 # =============================================================================
 
 .PHONY: all build html pdf preview clean help
@@ -13,18 +14,22 @@ all: html
 html: build
 build:
 	@echo "🔧 Building Hardware Kits HTML site..."
+	ln -sf config/_quarto-html.yml _quarto.yml
 	quarto render
 	@echo "✅ Build complete: _build/"
 
 # Build PDF with cover page
 pdf:
 	@echo "📄 Building Hardware Kits PDF..."
-	quarto render --profile pdf
+	ln -sf config/_quarto-pdf.yml _quarto.yml
+	quarto render --to titlepage-pdf
+	ln -sf config/_quarto-html.yml _quarto.yml
 	@echo "✅ PDF build complete: _build/pdf/"
 
 # Preview the site locally
 preview:
 	@echo "👀 Starting preview server..."
+	ln -sf config/_quarto-html.yml _quarto.yml
 	quarto preview
 
 # Clean build artifacts
