@@ -31,11 +31,13 @@
 
 ---
 
-**We are rushing to build AI systems. We are not engineering them.**
+## Mission
+
+**The world is rushing to build AI systems. It is not engineering them.**
 
 > **AI engineering is the discipline of building efficient, reliable, safe, and robust intelligent systems in the real world.**
 
-**Our mission:** Establish AI engineering as a discipline, the way software engineering and computer engineering became foundational fields.
+**Our mission:** Establish AI engineering as a discipline, the way software engineering and computer engineering became foundational fields. We believe the long term impact of AI will be shaped by engineers who know how to turn ideas into working systems.
 
 ---
 
@@ -45,7 +47,23 @@ This repository is the open learning stack for AI systems engineering: the textb
 
 We turn principles into practice, from theory to code to hardware.
 
-### The Learning Stack
+---
+
+## Start Here
+
+Follow the learning path that matches your goals:
+
+**READ** → Start with the [textbook](https://mlsysbook.ai). Try [Chapter 1](https://www.mlsysbook.ai/contents/core/introduction/introduction.html) and the [Benchmarking chapter](https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html).
+
+**BUILD** → Follow the [TinyTorch getting started guide](https://mlsysbook.ai/tinytorch/getting-started.html). Begin with Module 01 (Tensors) and work your way up to training CNNs and transformers with code you wrote from scratch.
+
+**DEPLOY** → Pick a [hardware kit](https://mlsysbook.ai/kits) and run the labs. Ship real models to Arduino, Raspberry Pi, or other edge devices.
+
+**Say hello** → Introduce yourself in [Discussions](https://github.com/harvard-edge/cs249r_book/discussions). We will do our best to reply.
+
+---
+
+## The Learning Stack
 
 Read the textbook, then pick your path:
 
@@ -113,20 +131,6 @@ Read the textbook, then pick your path:
 
 ---
 
-## Start Here
-
-Follow the learning path that matches your goals:
-
-**READ** → Start with the [textbook](https://mlsysbook.ai). Try [Chapter 1](https://www.mlsysbook.ai/contents/core/introduction/introduction.html) and the [Benchmarking chapter](https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html).
-
-**BUILD** → Follow the [TinyTorch getting started guide](https://mlsysbook.ai/tinytorch/getting-started.html). Begin with Module 01 (Tensors) and work your way up to training CNNs and transformers with code you wrote from scratch.
-
-**DEPLOY** → Pick a [hardware kit](https://mlsysbook.ai/kits) and run the labs. Ship real models to Arduino, Raspberry Pi, or other edge devices.
-
-**Say hello** → Introduce yourself in [Discussions](https://github.com/harvard-edge/cs249r_book/discussions). We will do our best to reply.
-
----
-
 ## What You Will Learn
 
 This textbook teaches you to think at the intersection of machine learning and systems engineering. Each chapter bridges algorithmic concepts with the infrastructure that makes them work in practice.
@@ -175,16 +179,6 @@ We use the same loop for research and teaching: define the system problem, build
 | **Measure** | Benchmarks, suites, metrics | Benchmarking chapter, assignments |
 | **Build** | Reference systems, compilers, runtimes | TinyTorch modules, co-labs |
 | **Deploy** | Hardware targets, constraints, reliability | Hardware labs, kits |
-
----
-
-## Why This Project Exists
-
-*Students learn how to train ML models, but few are taught how to engineer the systems that make those models useful in practice. As AI capabilities grow, progress will depend less on developing new algorithms and more on developing the engineers who can design scalable, efficient, and responsible systems that bring those algorithms to life.*
-
-This project is part of a broader personal mission to **educate one million learners worldwide** in the foundations of AI systems engineering. The long term impact of AI will be shaped by a generation of engineers and builders who know how to turn ideas into working systems.
-
-**— Vijay Janapa Reddi**
 
 ---
 
