@@ -137,19 +137,16 @@ export async function fetchUserProfile() {
 
 function populateProfileForm(data) {
     const profileDisplayNameInput = document.getElementById('profileDisplayName');
-    const profileAvatarUrlInput = document.getElementById('profileAvatarUrl');
     const profileIsPublicCheckbox = document.getElementById('profileIsPublic');
     const profileFullNameInput = document.getElementById('profileFullName');
     const profileSummaryTextarea = document.getElementById('profileSummary');
     const profileLocationInput = document.getElementById('profileLocation');
     const profileInstitutionInput = document.getElementById('profileInstitution');
     const profileWebsitesInput = document.getElementById('profileWebsites');
-    const avatarPreview = document.getElementById('avatarPreview');
     const profileLatitude = document.getElementById('profileLatitude');
     const profileLongitude = document.getElementById('profileLongitude');
 
     profileDisplayNameInput.value = data.display_name || '';
-    profileAvatarUrlInput.value = data.avatar || data.avatar_url || '';
 
     profileFullNameInput.value = data.full_name || '';
     profileSummaryTextarea.value = data.bio || data.summary || '';
@@ -161,10 +158,6 @@ function populateProfileForm(data) {
 
     const sites = data.website || data.websites;
     profileWebsitesInput.value = Array.isArray(sites) ? sites.join(', ') : (sites || '');
-
-    if(avatarPreview) {
-         avatarPreview.src = data.avatar || '';
-    }
 }
 
 export async function handleProfileUpdate(e) {
@@ -177,7 +170,6 @@ export async function handleProfileUpdate(e) {
     }
 
     const profileDisplayNameInput = document.getElementById('profileDisplayName');
-    const profileAvatarUrlInput = document.getElementById('profileAvatarUrl');
     const profileFullNameInput = document.getElementById('profileFullName');
     const profileSummaryTextarea = document.getElementById('profileSummary');
     const profileLocationInput = document.getElementById('profileLocation');
@@ -188,7 +180,6 @@ export async function handleProfileUpdate(e) {
 
     const updatedProfile = {
         display_name: profileDisplayNameInput.value,
-        avatar: profileAvatarUrlInput.value,
         full_name: profileFullNameInput.value,
         summary: profileSummaryTextarea.value,
         location: profileLocationInput.value,

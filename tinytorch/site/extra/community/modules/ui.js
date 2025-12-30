@@ -139,30 +139,6 @@ export function renderLayout() {
                         <input type="text" class="profile-input" id="profileDisplayName" placeholder="Display Name">
                     </div>
 
-                    <!-- Avatar Section -->
-                    <div class="profile-form-group">
-                        <label class="profile-label">Avatar:</label>
-                        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 10px;">
-                            <img id="avatarPreview" src="" alt="Preview" style="width: 60px; height: 60px; border-radius: 50%; object-fit: cover; background: #eee; border: 1px solid #ddd;">
-                            <div style="display: flex; flex-direction: column; gap: 5px;">
-                                <button type="button" id="btnUpload" style="font-size: 0.8rem; padding: 4px 8px; cursor: pointer;">Upload Image</button>
-                                <button type="button" id="btnCamera" style="font-size: 0.8rem; padding: 4px 8px; cursor: pointer;">Use Camera</button>
-                            </div>
-                            <input type="file" id="fileInput" accept="image/*" style="display: none;">
-                        </div>
-
-                        <!-- Camera UI (Hidden) -->
-                        <div id="cameraContainer" style="display: none; margin-bottom: 10px; text-align: center;">
-                            <video id="cameraVideo" autoplay playsinline style="width: 100%; max-width: 300px; background: #000; border-radius: 8px;"></video>
-                            <br>
-                            <button type="button" id="btnSnap" style="margin-top: 5px; background: #ff6600; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">Take Photo</button>
-                            <button type="button" id="btnStopCamera" style="margin-top: 5px; background: #666; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">Cancel</button>
-                            <canvas id="cameraCanvas" style="display: none;"></canvas>
-                        </div>
-
-                        <input type="text" class="profile-input" id="profileAvatarUrl" placeholder="https://example.com/avatar.jpg or Data URL">
-                    </div>
-
                     <div class="profile-form-group">
                         <label for="profileFullName" class="profile-label">Full Name:</label>
                         <input type="text" class="profile-input" id="profileFullName" placeholder="Your Full Name">
