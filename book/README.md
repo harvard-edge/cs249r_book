@@ -1,19 +1,86 @@
-# Machine Learning Systems - Book
+# Machine Learning Systems
 
-*Build instructions for contributors*
+*Principles and Practices of Engineering Artificially Intelligent Systems*
 
-[![Book](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&label=Build&logo=githubactions)](https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml)
+[![Build](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&label=Build&logo=githubactions)](https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml)
 [![Website](https://img.shields.io/badge/Read-mlsysbook.ai-blue)](https://mlsysbook.ai)
+[![PDF](https://img.shields.io/badge/Download-PDF-red)](https://mlsysbook.ai/pdf)
+[![EPUB](https://img.shields.io/badge/Download-EPUB-green)](https://mlsysbook.ai/epub)
 
-This directory contains the MLSysBook textbook source and build system.
+**[Read Online](https://mlsysbook.ai)** | **[PDF](https://mlsysbook.ai/pdf)** | **[EPUB](https://mlsysbook.ai/epub)**
 
-**[📖 Read Online](https://mlsysbook.ai)** • **[📄 PDF](https://mlsysbook.ai/pdf)** • **[📓 EPUB](https://mlsysbook.ai/epub)**
+---
+
+## What This Is
+
+The ML Systems textbook teaches you how to engineer AI systems that work in the real world. It bridges machine learning theory with systems engineering practice, covering everything from neural network fundamentals to production deployment.
+
+This directory contains the textbook source and build system for contributors.
+
+---
+
+## What You Will Learn
+
+| ML Concepts | Systems Engineering |
+|-------------|---------------------|
+| Neural networks and deep learning | Memory hierarchies and caching |
+| Model architectures (CNNs, Transformers) | Hardware accelerators (GPUs, TPUs, NPUs) |
+| Training and optimization | Distributed systems and parallelism |
+| Inference and deployment | Power and thermal management |
+| Compression and quantization | Latency, throughput, and efficiency |
+
+### The ML ↔ Systems Bridge
+
+| You know... | You will learn... |
+|-------------|-------------------|
+| How to train a model | How training scales across GPU clusters |
+| That quantization shrinks models | How INT8 math maps to silicon |
+| What a transformer is | Why KV-cache dominates memory |
+| Models run on GPUs | How schedulers balance latency vs throughput |
+| Edge devices have limits | How to co-design models and hardware |
+
+### Book Structure
+
+| Part | Focus | Chapters |
+|------|-------|----------|
+| **Foundations** | ML and systems basics | Introduction, ML Primer, DL Primer, AI Acceleration |
+| **Workflow** | Production pipeline | Workflows, Data Engineering, Frameworks |
+| **Training** | Learning at scale | Training, Distributed Training, Efficient AI |
+| **Deployment** | Real-world systems | Inference, On-Device AI, Hardware Benchmarking, Ops |
+| **Advanced** | Frontier topics | Privacy, Security, Responsible AI, Sustainable AI, Genertic AI, Frontiers |
+
+---
+
+## What Makes This Book Different
+
+**Systems first**: Start with hardware constraints and work up to algorithms, not the other way around.
+
+**Production focus**: Every concept connects to real deployment scenarios, not just research benchmarks.
+
+**Open and evolving**: Community-driven updates keep content current with a fast-moving field.
+
+**Hands-on companion**: Pair with [TinyTorch](../tinytorch/) to build what you learn from scratch.
 
 ---
 
 ## Quick Start
 
+### For Readers
+
 ```bash
+# Read online
+open https://mlsysbook.ai
+
+# Download formats
+curl -O https://mlsysbook.ai/pdf
+curl -O https://mlsysbook.ai/epub
+```
+
+### For Contributors
+
+```bash
+cd book
+
 # First time setup
 ./binder setup
 ./binder doctor
@@ -55,7 +122,19 @@ book/
 
 ---
 
+## Documentation
+
+| Audience | Resources |
+|----------|-----------|
+| **Readers** | [Online Book](https://mlsysbook.ai) ・ [PDF](https://mlsysbook.ai/pdf) ・ [EPUB](https://mlsysbook.ai/epub) |
+| **Contributors** | [CONTRIBUTING.md](docs/CONTRIBUTING.md) ・ [BUILD.md](docs/BUILD.md) |
+| **Developers** | [DEVELOPMENT.md](docs/DEVELOPMENT.md) ・ [BINDER.md](docs/BINDER.md) |
+
+---
+
 ## Contributing
+
+We welcome contributions! See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for guidelines.
 
 1. **Fork and clone** the repository
 2. **Set up** your environment: `./binder setup`
@@ -64,25 +143,21 @@ book/
 5. **Preview** your changes: `./binder preview <chapter>`
 6. **Submit a PR** with a clear description
 
-### Documentation
-
-- [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) - Contribution guide
-- [docs/BUILD.md](docs/BUILD.md) - Build system details
-- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) - Development guide
-- [docs/BINDER.md](docs/BINDER.md) - CLI documentation
-
 ---
 
 ## Related
 
-- **[Root README](../README.md)** - Project overview and what you will learn
-- **[TinyTorch](../tinytorch/)** - Hands-on ML framework companion
-- **[Website](https://mlsysbook.ai)** - Read the book online
+| Component | Description |
+|-----------|-------------|
+| **[Main README](../README.md)** | Project overview and ecosystem |
+| **[TinyTorch](../tinytorch/)** | Build ML frameworks from scratch |
+| **[Hardware Kits](../kits/)** | Deploy to Arduino, Raspberry Pi, edge devices |
+| **[Website](https://mlsysbook.ai)** | Read the book online |
 
 ---
 
 ## License
 
-Book content is licensed under **Creative Commons Attribution–NonCommercial–ShareAlike 4.0 International** (CC BY-NC-SA 4.0).
+Book content is licensed under **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International** (CC BY-NC-SA 4.0).
 
 See [LICENSE.md](../LICENSE.md) for details.
