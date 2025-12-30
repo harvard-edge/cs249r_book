@@ -14,6 +14,7 @@ export function updateNavState() {
     const authBtnElement = document.getElementById('authBtn');
     const navDashboard = document.getElementById('navDashboardBtn');
     const navCommunity = document.getElementById('navCommunityBtn');
+    const navArena = document.getElementById('navArenaBtn');
 
     if (authBtnElement) {
         authBtnElement.className = btnClass;
@@ -23,7 +24,8 @@ export function updateNavState() {
 
     // Show/Hide Extra Icons
     if (navDashboard) navDashboard.style.display = isLoggedIn ? 'flex' : 'none';
-    if (navCommunity) navCommunity.style.display = isLoggedIn ? 'flex' : 'none';
+    if (navCommunity) navCommunity.style.display = 'flex';
+    if (navArena) navArena.style.display = 'flex';
 }
 
 export function renderLayout() {
@@ -35,6 +37,7 @@ export function renderLayout() {
 
     const footprintsIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-footprints-icon lucide-footprints"><path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4"/><path d="M4 13h4"/></svg>`;
     const globeIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-earth-icon lucide-earth"><path d="M21.54 15H17a2 2 0 0 0-2 2v4.54"/><path d="M7 3.34V5a3 3 0 0 0 3 3a2 2 0 0 1 2 2c0 1.1.9 2 2 2a2 2 0 0 0 2-2c0-1.1.9-2 2-2h3.17"/><path d="M11 21.95V18a2 2 0 0 0-2-2a2 2 0 0 1-2-2v-1a2 2 0 0 0-2-2H2.05"/><circle cx="12" cy="12" r="10"/></svg>`;
+    const arenaIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-layout-grid"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>`;
 
     const currentIcon = isLoggedIn ? logoutIcon : userIcon;
     const btnText = isLoggedIn ? `Logout of ${userEmail}` : 'Create Account';
@@ -64,6 +67,10 @@ export function renderLayout() {
                 ${footprintsIcon}
             </a>
 
+            <a href="${basePath}/arena.html" class="nav-icon-btn" id="navArenaBtn" style="display: flex;" title="Arena">
+                ${arenaIcon}
+            </a>
+
             <a href="${basePath}/community.html" class="nav-icon-btn" id="navCommunityBtn" style="display: flex;" title="Community">
                 ${globeIcon}
             </a>
@@ -75,6 +82,9 @@ export function renderLayout() {
             <a href="${basePath}/events.html" class="nav-item">Events</a>
             <a href="${basePath}/community.html" class="nav-item">
                 <span>Community</span>
+            </a>
+            <a href="${basePath}/arena.html" class="nav-item">
+                <span>Arena</span>
             </a>
             <a href="${basePath}/dashboard.html" class="nav-item nav-item-restricted">
                 <span>Dashboard</span>
@@ -127,30 +137,6 @@ export function renderLayout() {
                     <div class="profile-form-group">
                         <label for="profileDisplayName" class="profile-label">Display Name:</label>
                         <input type="text" class="profile-input" id="profileDisplayName" placeholder="Display Name">
-                    </div>
-
-                    <!-- Avatar Section -->
-                    <div class="profile-form-group">
-                        <label class="profile-label">Avatar:</label>
-                        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 10px;">
-                            <img id="avatarPreview" src="" alt="Preview" style="width: 60px; height: 60px; border-radius: 50%; object-fit: cover; background: #eee; border: 1px solid #ddd;">
-                            <div style="display: flex; flex-direction: column; gap: 5px;">
-                                <button type="button" id="btnUpload" style="font-size: 0.8rem; padding: 4px 8px; cursor: pointer;">Upload Image</button>
-                                <button type="button" id="btnCamera" style="font-size: 0.8rem; padding: 4px 8px; cursor: pointer;">Use Camera</button>
-                            </div>
-                            <input type="file" id="fileInput" accept="image/*" style="display: none;">
-                        </div>
-
-                        <!-- Camera UI (Hidden) -->
-                        <div id="cameraContainer" style="display: none; margin-bottom: 10px; text-align: center;">
-                            <video id="cameraVideo" autoplay playsinline style="width: 100%; max-width: 300px; background: #000; border-radius: 8px;"></video>
-                            <br>
-                            <button type="button" id="btnSnap" style="margin-top: 5px; background: #ff6600; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">Take Photo</button>
-                            <button type="button" id="btnStopCamera" style="margin-top: 5px; background: #666; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">Cancel</button>
-                            <canvas id="cameraCanvas" style="display: none;"></canvas>
-                        </div>
-
-                        <input type="text" class="profile-input" id="profileAvatarUrl" placeholder="https://example.com/avatar.jpg or Data URL">
                     </div>
 
                     <div class="profile-form-group">

@@ -35,37 +35,39 @@
 
 **The world is rushing to build AI systems. It is not engineering them.**
 
-> **AI engineering is the discipline of building efficient, reliable, safe, and robust intelligent systems in the real world.**
+That gap is what we mean by AI engineering.
 
-**Our mission:** Establish AI engineering as a discipline, the way software engineering and computer engineering became foundational fields. We believe the long term impact of AI will be shaped by engineers who know how to turn ideas into working systems.
+**AI engineering is the discipline of building efficient, reliable, safe, and robust intelligent systems that operate in the real world, not just models in isolation.**
+
+**Our mission:** Establish AI engineering as a foundational discipline, alongside software engineering and computer engineering, by teaching how to design, build, and evaluate end to end intelligent systems. The long term impact of AI will be shaped by engineers who can turn ideas into working, dependable systems.
 
 ---
 
-## About the Ecosystem
+## What’s in this repo
 
-This repository is the open learning stack for AI systems engineering: the textbook, TinyTorch, and labs that connect system principles to running code and real devices. It began in Harvard's CS249r course by [Prof. Vijay Janapa Reddi](https://vijay.seas.harvard.edu). Today, it supports classrooms, study groups, and independent learners around the world.
+This repository is the open learning stack for AI systems engineering.
 
-We turn principles into practice, from theory to code to hardware.
+It includes the textbook source, TinyTorch, hardware kits, and upcoming co-labs that connect principles to runnable code and real devices.
 
 ---
 
 ## Start Here
 
-Follow the learning path that matches your goals:
+Choose a path based on your goal.
 
-**READ** → Start with the [textbook](https://mlsysbook.ai). Try [Chapter 1](https://www.mlsysbook.ai/contents/core/introduction/introduction.html) and the [Benchmarking chapter](https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html).
+**READ** Start with the [textbook](https://mlsysbook.ai). Try [Chapter 1](https://www.mlsysbook.ai/contents/core/introduction/introduction.html) and the [Benchmarking chapter](https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html).
 
-**BUILD** → Follow the [TinyTorch getting started guide](https://mlsysbook.ai/tinytorch/getting-started.html). Begin with Module 01 (Tensors) and work your way up to training CNNs and transformers with code you wrote from scratch.
+**BUILD** Start TinyTorch with the [getting started guide](https://mlsysbook.ai/tinytorch/getting-started.html). Begin with Module 01 and work up from CNNs to transformers and the MLPerf benchmarks.
 
-**DEPLOY** → Pick a [hardware kit](https://mlsysbook.ai/kits) and run the labs. Ship real models to Arduino, Raspberry Pi, or other edge devices.
+**DEPLOY** Pick a [hardware kit](https://mlsysbook.ai/kits) and run the labs on Arduino, Raspberry Pi, and other edge devices.
 
-**Say hello** → Introduce yourself in [Discussions](https://github.com/harvard-edge/cs249r_book/discussions). We will do our best to reply.
+**CONNECT** Say hello in [Discussions](https://github.com/harvard-edge/cs249r_book/discussions). We will do our best to reply.
 
 ---
 
 ## The Learning Stack
 
-Read the textbook, then pick your path:
+The learning stack below shows how the textbook connects to hands on work and deployment. Read the textbook, then pick your path:
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────┐
@@ -184,41 +186,41 @@ We use the same loop for research and teaching: define the system problem, build
 
 ## Support This Work
 
-We are tracking our way to **1 million learners by 2030**. Every star, share, and contribution helps us get there.
+We are working toward **1 million learners by 2030** so that AI engineering becomes a shared, teachable discipline, not a collection of isolated practices. Every star, share, and contribution helps move this effort forward.
 
 ### Why GitHub Stars Matter
 
 <div align="center">
 
-*What gets measured gets done.* Every star represents a learner or believer in accessible AI education.
+*What gets measured gets improved.*
+
+Each star is a learner, educator, or supporter who believes AI systems should be engineered with rigor and real world constraints in mind.
 
 [![Stars](https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold)](https://github.com/harvard-edge/cs249r_book/stargazers)
 
 [![Star History Chart](https://api.star-history.com/svg?repos=harvard-edge/cs249r_book&type=Date)](https://star-history.com/#harvard-edge/cs249r_book&Date)
 
-1 ✓ → 10 ✓ → 100 ✓ → 1,000 ✓ → **10,000 ✓** → 100,000 by 2026 → ... → **1M by 2030**
+1 learner → 10 learners → 100 learners → 1,000 learners → **10,000 learners** → 100,000 learners → **1M learners**
 
 </div>
 
-**Here's how it works:** Organizations like the [EDGE AI Foundation](https://edgeaifoundation.org) watch open source education projects. When they see a growing, active community, they contribute funding. Your star is not just a bookmark. It is a vote that sponsors notice.
+Stars are not the goal. They are a signal.
 
-That funding goes directly to [Open Collective](https://opencollective.com/mlsysbook) and supports initiatives like [TinyML4D](https://tinyml.seas.harvard.edu/4D) workshops in developing countries, TinyML kits for underserved classrooms, and infrastructure to keep this resource free for everyone.
+A visible, growing community makes it easier for universities, foundations, and industry partners to adopt this material, donate hardware, and fund workshops. That momentum lowers the barrier for the next institution, the next classroom, and the next cohort of learners.
 
-One click. Real impact.
+Support raised through this signal flows into [Open Collective](https://opencollective.com/mlsysbook) and funds concrete outcomes such as TinyML4D workshops, hardware kits for underserved classrooms, and the infrastructure required to keep this resource free and open.
 
-<div align="center">
+One click can unlock the next classroom, the next contributor, and the next generation of AI engineers.
 
 ### Fund the Mission
+
+<div align="center">
 
 All contributions go to [Open Collective](https://opencollective.com/mlsysbook), a transparent fund that supports educational outreach.
 
 [![Open Collective](https://img.shields.io/badge/💝%20Support%20AI%20Education-Open%20Collective-blue.svg?style=for-the-badge)](https://opencollective.com/mlsysbook)
 
 </div>
-
-### For Industry Partners
-
-If you want to help grow AI systems engineering as a discipline through curriculum, benchmarks, and hands-on tooling, reach out via [Discussions](https://github.com/harvard-edge/cs249r_book/discussions) or [Open Collective](https://opencollective.com/mlsysbook).
 
 ---
 
