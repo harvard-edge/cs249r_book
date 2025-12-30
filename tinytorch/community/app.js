@@ -1,7 +1,7 @@
 import { injectStyles } from './modules/styles.js';
-import { renderLayout, updateNavState } from './modules/ui.js?v=2';
+import { renderLayout, updateNavState } from './modules/ui.js?v=3';
 import { getSession } from './modules/state.js?v=2';
-import { openModal, closeModal, handleToggle, handleAuth, handleLogout, setMode, verifySession } from './modules/auth.js?v=2';
+import { openModal, closeModal, handleToggle, handleAuth, handleLogout, setMode, verifySession, signInWithSocial, supabase } from './modules/auth.js?v=3';
 import { openProfileModal, closeProfileModal, handleProfileUpdate, geocodeAndSetCoordinates } from './modules/profile.js';
 import { setupCameraEvents } from './modules/camera.js';
 import { getBasePath } from './modules/config.js';
@@ -13,8 +13,40 @@ import { getBasePath } from './modules/config.js';
     // 2. Render Layout
     renderLayout();
 
-    // 3. Verify Session (Async)
-    verifySession();
+    // 2.5 Attach Social Login Listeners
+    const btnGoogle = document.getElementById('btn-login-google');
+    const btnGithub = document.getElementById('btn-login-github');
+    
+    if (btnGoogle) {
+        btnGoogle.addEventListener('click', (e) => { 
+            e.preventDefault(); 
+            signInWithSocial('google'); 
+        });
+    }
+    if (btnGithub) {
+        btnGithub.addEventListener('click', (e) => { 
+            e.preventDefault(); 
+            signInWithSocial('github'); 
+        });
+    }
+
+    // 2.6 Check for Supabase Session & Verify
+    supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session) {
+             localStorage.setItem("tinytorch_token", session.access_token);
+             if (session.refresh_token) localStorage.setItem("tinytorch_refresh_token", session.refresh_token);
+             if (session.user) localStorage.setItem("tinytorch_user", JSON.stringify(session.user));
+             
+             // Clean URL hash if present (Supabase puts tokens there)
+             if (window.location.hash && window.location.hash.includes('access_token')) {
+                 window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+             }
+             
+             updateNavState();
+        }
+        // 3. Verify Session (Async)
+        verifySession();
+    });
 
     // 4. Add Event Listeners
     const menuBtn = document.getElementById('menuBtn');
