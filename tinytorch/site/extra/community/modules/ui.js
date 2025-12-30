@@ -14,6 +14,7 @@ export function updateNavState() {
     const authBtnElement = document.getElementById('authBtn');
     const navDashboard = document.getElementById('navDashboardBtn');
     const navCommunity = document.getElementById('navCommunityBtn');
+    const navArena = document.getElementById('navArenaBtn');
 
     if (authBtnElement) {
         authBtnElement.className = btnClass;
@@ -23,7 +24,8 @@ export function updateNavState() {
 
     // Show/Hide Extra Icons
     if (navDashboard) navDashboard.style.display = isLoggedIn ? 'flex' : 'none';
-    if (navCommunity) navCommunity.style.display = isLoggedIn ? 'flex' : 'none';
+    if (navCommunity) navCommunity.style.display = 'flex';
+    if (navArena) navArena.style.display = 'flex';
 }
 
 export function renderLayout() {
@@ -35,6 +37,7 @@ export function renderLayout() {
 
     const footprintsIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-footprints-icon lucide-footprints"><path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4"/><path d="M4 13h4"/></svg>`;
     const globeIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-earth-icon lucide-earth"><path d="M21.54 15H17a2 2 0 0 0-2 2v4.54"/><path d="M7 3.34V5a3 3 0 0 0 3 3a2 2 0 0 1 2 2c0 1.1.9 2 2 2a2 2 0 0 0 2-2c0-1.1.9-2 2-2h3.17"/><path d="M11 21.95V18a2 2 0 0 0-2-2a2 2 0 0 1-2-2v-1a2 2 0 0 0-2-2H2.05"/><circle cx="12" cy="12" r="10"/></svg>`;
+    const arenaIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-layout-grid"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>`;
 
     const currentIcon = isLoggedIn ? logoutIcon : userIcon;
     const btnText = isLoggedIn ? `Logout of ${userEmail}` : 'Create Account';
@@ -64,6 +67,10 @@ export function renderLayout() {
                 ${footprintsIcon}
             </a>
 
+            <a href="${basePath}/arena.html" class="nav-icon-btn" id="navArenaBtn" style="display: flex;" title="Arena">
+                ${arenaIcon}
+            </a>
+
             <a href="${basePath}/community.html" class="nav-icon-btn" id="navCommunityBtn" style="display: flex;" title="Community">
                 ${globeIcon}
             </a>
@@ -75,6 +82,9 @@ export function renderLayout() {
             <a href="${basePath}/events.html" class="nav-item">Events</a>
             <a href="${basePath}/community.html" class="nav-item">
                 <span>Community</span>
+            </a>
+            <a href="${basePath}/arena.html" class="nav-item">
+                <span>Arena</span>
             </a>
             <a href="${basePath}/dashboard.html" class="nav-item nav-item-restricted">
                 <span>Dashboard</span>

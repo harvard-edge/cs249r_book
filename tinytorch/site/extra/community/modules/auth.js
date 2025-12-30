@@ -30,29 +30,22 @@ export async function refreshToken() {
     }
 
     try {
-        const refreshRes = await fetch(`${NETLIFY_URL}/api/auth/refresh`, { 
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ refreshToken })
-        });
+        const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
 
-        if (!refreshRes.ok) { 
-            return false; 
+        if (error || !data.session) {
+            console.error("Supabase refresh failed:", error);
+            return false;
         }
 
-        const refreshData = await refreshRes.json();
-        const session = refreshData.session || refreshData; 
-
-        if (session && session.access_token) {
-            localStorage.setItem("tinytorch_token", session.access_token);
-            if (session.refresh_token) {
-                localStorage.setItem("tinytorch_refresh_token", session.refresh_token);
-            }
-            if (session.user) {
-                localStorage.setItem("tinytorch_user", JSON.stringify(session.user));
-            }
-            return session.access_token;
+        const session = data.session;
+        localStorage.setItem("tinytorch_token", session.access_token);
+        if (session.refresh_token) {
+            localStorage.setItem("tinytorch_refresh_token", session.refresh_token);
         }
+        if (session.user) {
+            localStorage.setItem("tinytorch_user", JSON.stringify(session.user));
+        }
+        return session.access_token;
     } catch (e) {
         console.error("Token refresh failed", e);
     }
