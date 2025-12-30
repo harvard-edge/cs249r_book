@@ -1,0 +1,101 @@
+name: '📦 Kits Build PDF'
+
+# =============================================================================
+# PDF Build Workflow for Hardware Kits
+# =============================================================================
+# Builds Hardware Kits PDF using Quarto and uploads as artifact.
+# PDF is injected into the site during deployment (not committed to repo).
+#
+# Use: Actions → Kits Build PDF → Run workflow
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  # Can be called by publish workflows
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to checkout (branch, tag, or SHA)"
+        type: string
+        required: false
+        default: ''
+    outputs:
+      pdf_built:
+        description: "Whether the PDF was built successfully"
+        value: ${{ jobs.build-pdf.result == 'success' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build-pdf:
+    name: '📚 Build Hardware Kits PDF'
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/harvard-edge/cs249r_book/quarto-linux:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: 🔧 Setup Quarto PDF Profile
+        working-directory: kits
+        run: |
+          # Symlink PDF configuration
+          ln -sf config/_quarto-pdf.yml _quarto.yml
+
+      - name: 📚 Build PDF with LuaLaTeX
+        working-directory: kits
+        run: |
+          quarto render --to titlepage-pdf
+          ls -la _build/pdf/
+
+      - name: 📦 Compress PDF
+        working-directory: kits
+        run: |
+          # Install ghostscript if not present
+          apt-get update && apt-get install -y ghostscript || true
+
+          # Compress PDF for web distribution
+          python3 ../book/quarto/publish/compress_pdf.py \
+            --input _build/pdf/Hardware-Kits.pdf \
+            --output _build/pdf/Hardware-Kits-compressed.pdf \
+            --quality ebook \
+            --verbose
+
+          # Replace original with compressed version
+          mv _build/pdf/Hardware-Kits-compressed.pdf _build/pdf/Hardware-Kits.pdf
+
+      - name: 📤 Upload PDF Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kits-PDF
+          path: kits/_build/pdf/Hardware-Kits.pdf
+          retention-days: 90
+
+  summary:
+    name: '📊 Build Summary'
+    runs-on: ubuntu-latest
+    needs: [build-pdf]
+    if: always()
+
+    steps:
+      - name: 📊 Generate Summary
+        run: |
+          echo "## 🔧 Hardware Kits PDF Build" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| PDF | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 📚 Hardware Kits | ${{ needs.build-pdf.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Usage" >> $GITHUB_STEP_SUMMARY
+          echo "PDF is uploaded as artifact and will be injected during site deployment." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To deploy with this PDF, run the appropriate publish workflow:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Live**: Kits Publish (Live)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dev**: Kits Publish (Dev)" >> $GITHUB_STEP_SUMMARY
