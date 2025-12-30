@@ -35,17 +35,19 @@
 
 **The world is rushing to build AI systems. It is not engineering them.**
 
-> **AI engineering is the discipline of building efficient, reliable, safe, and robust intelligent systems in the real world.**
+> **AI engineering is the discipline of building efficient, reliable, safe, and robust intelligent systems that operate in the real world, not just models in isolation.**
 
-**Our mission:** Establish AI engineering as a discipline, the way software engineering and computer engineering became foundational fields. We believe the long term impact of AI will be shaped by engineers who know how to turn ideas into working systems.
+**Our mission:** Establish AI engineering as a foundational discipline, alongside software engineering and computer engineering, by teaching how to design, build, and evaluate end-to-end intelligent systems. The long-term impact of AI will be shaped by engineers who can turn ideas into working, dependable systems.
 
 ---
 
 ## About the Ecosystem
 
-This repository is the open learning stack for AI systems engineering: the textbook, TinyTorch, and labs that connect system principles to running code and real devices. It began in Harvard's CS249r course by [Prof. Vijay Janapa Reddi](https://vijay.seas.harvard.edu). Today, it supports classrooms, study groups, and independent learners around the world.
+This repository is the open learning stack for AI systems engineering. It brings together the textbook, TinyTorch, TinyML hardware kits, and upcoming Co labs that connect system principles to running code and real devices.
 
-We turn principles into practice, from theory to code to hardware.
+The ecosystem began in Harvard’s CS249r course and has grown to support classrooms, study groups, and independent learners around the world.
+
+We focus on turning principles into practice, moving deliberately from theory to software to hardware.
 
 ---
 
