@@ -31,15 +31,41 @@
 
 ---
 
-## About This Project
+## Mission
 
-This repository contains an **open source textbook** and **hands-on framework** for learning how to engineer AI systems. It began in Harvard's CS249r course by [Prof. Vijay Janapa Reddi](https://vijay.seas.harvard.edu). Today, it supports classrooms, study groups, and independent learners around the world.
+**The world is rushing to build AI systems. It is not engineering them.**
 
-> **Mission:** Accessible AI systems education for anyone, anywhere.
+> **AI engineering is the discipline of building efficient, reliable, safe, and robust intelligent systems in the real world.**
 
-### The Learning Ecosystem
+**Our mission:** Establish AI engineering as a discipline, the way software engineering and computer engineering became foundational fields. We believe the long term impact of AI will be shaped by engineers who know how to turn ideas into working systems.
 
-We believe in learning by doing. Read the textbook, then pick your path:
+---
+
+## About the Ecosystem
+
+This repository is the open learning stack for AI systems engineering: the textbook, TinyTorch, and labs that connect system principles to running code and real devices. It began in Harvard's CS249r course by [Prof. Vijay Janapa Reddi](https://vijay.seas.harvard.edu). Today, it supports classrooms, study groups, and independent learners around the world.
+
+We turn principles into practice, from theory to code to hardware.
+
+---
+
+## Start Here
+
+Follow the learning path that matches your goals:
+
+**READ** → Start with the [textbook](https://mlsysbook.ai). Try [Chapter 1](https://www.mlsysbook.ai/contents/core/introduction/introduction.html) and the [Benchmarking chapter](https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html).
+
+**BUILD** → Follow the [TinyTorch getting started guide](https://mlsysbook.ai/tinytorch/getting-started.html). Begin with Module 01 (Tensors) and work your way up to training CNNs and transformers with code you wrote from scratch.
+
+**DEPLOY** → Pick a [hardware kit](https://mlsysbook.ai/kits) and run the labs. Ship real models to Arduino, Raspberry Pi, or other edge devices.
+
+**Say hello** → Introduce yourself in [Discussions](https://github.com/harvard-edge/cs249r_book/discussions). We will do our best to reply.
+
+---
+
+## The Learning Stack
+
+Read the textbook, then pick your path:
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────┐
@@ -63,11 +89,14 @@ We believe in learning by doing. Read the textbook, then pick your path:
 │     │    SOFTWARE     │      │    TINYTORCH    │      │    HARDWARE     │     │
 │     │    CO-LABS      │      │    FRAMEWORK    │      │      LABS       │     │
 │     │                 │      │                 │      │                 │     │
-│     │ Explore         │      │ Build           │      │ Deploy          │     │
-│     │ tradeoffs       │      │ from scratch    │      │ to devices      │     │
+│     │ EXPLORE         │      │ BUILD           │      │ DEPLOY          │     │
 │     │                 │      │                 │      │                 │     │
-│     │ (coming 2026)   │      │ Learn how TF &  │      │ Arduino, Pi     │     │
-│     │                 │      │ PyTorch work    │      │ Edge devices    │     │
+│     │ Run controlled  │      │ Understand      │      │ Engineer under  │     │
+│     │ experiments on  │      │ frameworks by   │      │ real constraints│     │
+│     │ latency, memory,│      │ implementing    │      │ memory, power,  │     │
+│     │ energy, cost    │      │ them            │      │ timing, safety  │     │
+│     │                 │      │                 │      │                 │     │
+│     │ (coming 2026)   │      │                 │      │ Arduino, Pi     │     │
 │     └─────────────────┘      └─────────────────┘      └─────────────────┘     │
 │                                                                               │
 │           EXPLORE                  BUILD                   DEPLOY             │
@@ -90,9 +119,9 @@ We believe in learning by doing. Read the textbook, then pick your path:
 | | Component | What You Do | Link |
 |--|-----------|-------------|------|
 | **READ** | [📖 Textbook](https://mlsysbook.ai) | Understand ML systems concepts | [book/](book/README.md) |
-| **EXPLORE** | 🔮 Software Co-Labs | Experiment with system tradeoffs | *Coming 2026* |
-| **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch) | Implement a complete ML framework from scratch | [tinytorch/](tinytorch/README.md) |
-| **DEPLOY** | [🔧 Hardware Labs](https://mlsysbook.ai/contents/labs/labs.html) | Ship models to real edge devices | [labs/](book/quarto/contents/labs/) |
+| **EXPLORE** | 🔮 Software Co-Labs | Run controlled experiments on latency, memory, energy, cost | *Coming 2026* |
+| **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch) | Understand frameworks by implementing them | [tinytorch/](tinytorch/README.md) |
+| **DEPLOY** | [🔧 Hardware Kits](https://mlsysbook.ai/kits) | Engineer under real constraints: memory, power, timing, safety | [kits/](kits/README.md) |
 | **PROVE** | 🏆 AI Olympics | Compete and benchmark across all tracks | *Coming 2026* |
 
 **What each path teaches:**
@@ -131,41 +160,25 @@ This textbook teaches you to think at the intersection of machine learning and s
 
 ---
 
-## What Makes This Book Different
+## What Makes This Different
 
-This project is a living textbook. I keep it updated as the field grows, with community input along the way.
+This is a living textbook. We keep it updated as the field grows, with community input along the way.
 
-AI may feel like it is moving at lightning speed, but the engineering building blocks that make it work do not change as quickly as the headlines. This book is built around those stable foundations.
+AI may feel like it is moving at lightning speed, but the engineering building blocks that make it work do not change as quickly as the headlines. This project is built around those stable foundations.
 
 Think of it like LEGO. New sets arrive all the time, but the bricks themselves stay the same. Once you learn how the bricks fit together, you can build anything. Here, those "AI bricks" are the solid systems principles that make AI work.
 
 Whether you are reading a chapter, running a lab, or sharing feedback, you are helping make these ideas more accessible to the next learner.
 
-Thank you for being a part of the story.
+### Research to Teaching Loop
 
----
+We use the same loop for research and teaching: define the system problem, build a reference implementation, benchmark it, then turn it into curriculum and tooling so others can reproduce and extend it.
 
-## Why This Project Exists
-
-*Students learn how to train ML models, but few are taught how to engineer the systems that make those models useful in practice. As AI capabilities grow, progress will depend less on developing new algorithms and more on developing the engineers who can design scalable, efficient, and responsible systems that bring those algorithms to life.*
-
-This project is part of a broader personal mission to **educate one million learners worldwide** in the foundations of AI systems engineering. The long term impact of AI will be shaped by a generation of engineers and builders who know how to turn ideas into working systems.
-
-**— Vijay Janapa Reddi**
-
----
-
-## Start Here
-
-Follow the learning path that matches your goals:
-
-**READ** → Start with the [textbook](https://mlsysbook.ai). Try [Chapter 1](https://www.mlsysbook.ai/contents/core/introduction/introduction.html) and the [Benchmarking chapter](https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html).
-
-**BUILD** → Follow the [TinyTorch getting started guide](https://mlsysbook.ai/tinytorch/getting-started.html). Begin with Module 01 (Tensors) and work your way up to training CNNs and transformers with code you wrote from scratch.
-
-**DEPLOY** → Pick a [hardware kit](https://www.mlsysbook.ai/contents/labs/kits.html) and run the labs. Ship real models to Arduino, Raspberry Pi, or other edge devices.
-
-**Say hello** → Introduce yourself in [Discussions](https://github.com/harvard-edge/cs249r_book/discussions). I'll do my best to reply.
+| Loop Step | Research Artifacts | Teaching Artifacts |
+|-----------|-------------------|-------------------|
+| **Measure** | Benchmarks, suites, metrics | Benchmarking chapter, assignments |
+| **Build** | Reference systems, compilers, runtimes | TinyTorch modules, co-labs |
+| **Deploy** | Hardware targets, constraints, reliability | Hardware labs, kits |
 
 ---
 
@@ -187,9 +200,9 @@ We are tracking our way to **1 million learners by 2030**. Every star, share, an
 
 </div>
 
-**Here's how it works:** Organizations like the [EDGE AI Foundation](https://edgeaifoundation.org) watch open source education projects. When they see a growing, active community, they contribute funding. Your star isn't just a bookmark—it's a vote that sponsors notice.
+**Here's how it works:** Organizations like the [EDGE AI Foundation](https://edgeaifoundation.org) watch open source education projects. When they see a growing, active community, they contribute funding. Your star is not just a bookmark. It is a vote that sponsors notice.
 
-That funding goes directly to [Open Collective](https://opencollective.com/mlsysbook) or sponsors initiatives like [TinyML4D](https://tinyml.seas.harvard.edu/4D) workshops in developing countries, TinyML kits for underserved classrooms, and infrastructure to keep this resource free for everyone.
+That funding goes directly to [Open Collective](https://opencollective.com/mlsysbook) and supports initiatives like [TinyML4D](https://tinyml.seas.harvard.edu/4D) workshops in developing countries, TinyML kits for underserved classrooms, and infrastructure to keep this resource free for everyone.
 
 One click. Real impact.
 
@@ -203,6 +216,10 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 </div>
 
+### For Industry Partners
+
+If you want to help grow AI systems engineering as a discipline through curriculum, benchmarks, and hands-on tooling, reach out via [Discussions](https://github.com/harvard-edge/cs249r_book/discussions) or [Open Collective](https://opencollective.com/mlsysbook).
+
 ---
 
 ## Community and Resources
@@ -211,7 +228,7 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 |---|---|
 | [📖 **Textbook**](https://mlsysbook.ai) | Interactive online textbook |
 | [🔥 **TinyTorch**](https://mlsysbook.ai/tinytorch) | Build ML frameworks from scratch |
-| [🔧 **Hardware Labs**](https://mlsysbook.ai/contents/labs/labs.html) | Deploy to Arduino, Raspberry Pi, edge devices |
+| [🔧 **Hardware Kits**](https://mlsysbook.ai/kits) | Deploy to Arduino, Raspberry Pi, edge devices |
 | [🌐 **Ecosystem**](https://mlsysbook.org) | Resources, workshops, and community |
 | [💬 **Discussions**](https://github.com/harvard-edge/cs249r_book/discussions) | Questions and ideas |
 
@@ -219,58 +236,15 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 ## Contributing
 
-We welcome contributions to both the book and TinyTorch!
+We welcome contributions to the book, TinyTorch, and hardware kits!
 
 | I want to... | Go here |
 |--------------|---------|
 | Fix a typo or improve a chapter | [book/docs/CONTRIBUTING.md](book/docs/CONTRIBUTING.md) |
 | Add a TinyTorch module or fix a bug | [tinytorch/CONTRIBUTING.md](tinytorch/CONTRIBUTING.md) |
+| Improve hardware labs | [kits/README.md](kits/README.md) |
 | Report an issue | [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues) |
 | Ask a question | [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions) |
-
----
-
-## Quick Start
-
-### For Readers
-```bash
-# Read online
-open https://mlsysbook.ai
-
-# Download PDF
-curl -O https://mlsysbook.ai/pdf
-
-# Download EPUB
-curl -O https://mlsysbook.ai/epub
-```
-
-### For Book Contributors
-```bash
-cd book
-
-# First time setup
-./binder setup
-./binder doctor
-
-# Daily workflow
-./binder clean
-./binder build
-./binder preview intro
-```
-
-### For TinyTorch Learners
-```bash
-cd tinytorch
-
-# Quick setup
-source .venv/bin/activate
-tito setup
-
-# Start building
-tito module start 01
-```
-
-See [book/README.md](book/README.md) and [tinytorch/README.md](tinytorch/README.md) for detailed instructions.
 
 ---
 
