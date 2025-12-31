@@ -168,8 +168,25 @@ export function renderLayout() {
                 </form>
             </div>
         </div>
+
+        <!-- Message Modal (Generic) -->
+        <div class="message-overlay" id="messageOverlay">
+            <div class="message-modal">
+                <h3 class="message-title" id="messageTitle">Notification</h3>
+                <p class="message-body" id="messageBody">Message goes here.</p>
+                <button class="message-btn" id="messageBtn">OK</button>
+            </div>
+        </div>
     `;
 
     document.body.insertAdjacentHTML('afterbegin', layoutHTML);
     updateNavState();
+    
+    // Attach close handler for message modal
+    const msgBtn = document.getElementById('messageBtn');
+    if (msgBtn) {
+        msgBtn.addEventListener('click', () => {
+            document.getElementById('messageOverlay').classList.remove('active');
+        });
+    }
 }
