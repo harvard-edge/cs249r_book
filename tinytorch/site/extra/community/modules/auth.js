@@ -157,6 +157,28 @@ export function handleToggle() {
     }
 }
 
+export function showMessageModal(title, body, onCloseCallback = null) {
+    const overlay = document.getElementById('messageOverlay');
+    const titleEl = document.getElementById('messageTitle');
+    const bodyEl = document.getElementById('messageBody');
+    const btnEl = document.getElementById('messageBtn');
+    
+    if (overlay && titleEl && bodyEl) {
+        titleEl.textContent = title;
+        bodyEl.textContent = body;
+        overlay.classList.add('active');
+        
+        // Remove previous listeners to avoid duplicates if reused
+        const newBtn = btnEl.cloneNode(true);
+        btnEl.parentNode.replaceChild(newBtn, btnEl);
+        
+        newBtn.addEventListener('click', () => {
+            overlay.classList.remove('active');
+            if (onCloseCallback) onCloseCallback();
+        });
+    }
+}
+
 export async function handleAuth(e) {
     e.preventDefault();
     const emailInput = document.getElementById('authEmail');
@@ -168,8 +190,12 @@ export async function handleAuth(e) {
     const email = emailInput.value;
     const password = passwordInput.value;
     authError.style.display = 'none';
+    
+    // Save original text
+    const originalBtnText = authSubmit.textContent;
+    // Show spinner
     authSubmit.disabled = true;
-    authSubmit.textContent = 'Processing...';
+    authSubmit.innerHTML = '<div class="spinner"></div>';
 
     try {
         let endpoint, body;
@@ -201,7 +227,7 @@ export async function handleAuth(e) {
 
         if (currentMode === 'forgot') {
                 if (response.ok) {
-                    alert(data.message || 'If an account exists, a reset link has been sent.');
+                    showMessageModal('Reset Link Sent', data.message || 'If an account exists, a reset link has been sent.');
                     setMode('login');
                 } else {
                     throw new Error(data.error || 'Failed to send reset link');
@@ -227,8 +253,16 @@ export async function handleAuth(e) {
                     }
                 }
             } else {
-                alert('If an account exists for this email, we have sent you a login link. Otherwise, please check your email to confirm your signup.');
-                window.location.href = basePath + '/dashboard.html';
+                // Signup Success - Show Message Modal
+                // We close the auth modal first so it doesn't overlap
+                closeModal();
+                showMessageModal(
+                    'Check your Email', 
+                    'If you don\'t already have an account, we have sent you an email. Please check your inbox to confirm your signup.',
+                    () => {
+                        window.location.href = basePath + '/dashboard.html';
+                    }
+                );
             }
         }
 
@@ -238,6 +272,7 @@ export async function handleAuth(e) {
         authError.style.display = 'block';
     } finally {
         authSubmit.disabled = false;
+        // Restore button text based on current mode, as logic might have changed mode or just finished
         if (currentMode === 'login') authSubmit.textContent = 'Login';
         else if (currentMode === 'signup') authSubmit.textContent = 'Create Account';
         else authSubmit.textContent = 'Send Reset Link';
@@ -251,6 +286,7 @@ export async function handleLogout() {
         localStorage.removeItem("tinytorch_token");
         localStorage.removeItem("tinytorch_refresh_token");
         localStorage.removeItem("tinytorch_user");
+        sessionStorage.removeItem("tinytorch_location_checked");
         updateNavState();
         closeProfileModal();
         window.location.href = basePath + '/index.html';

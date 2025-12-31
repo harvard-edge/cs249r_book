@@ -1,6 +1,6 @@
 // Satellite Configuration
 const satelliteConfig = {
-    radius: 90, 
+    radius: 90,
     rotationSpeed: 0.005,
     tilt: 0.3
 };
@@ -9,7 +9,7 @@ let satelliteGroup;
 let satelliteBody;
 let solarPanels;
 let satUsers = [];
-let tooltipSelection; 
+let tooltipSelection;
 let currentAngle = 0;
 let originX = 0;
 let originY = 0;
@@ -26,10 +26,10 @@ export function initCloud(svgSelection, width, height, tooltipSel) {
 
     // Draw Satellite Structure (Outline Style)
     solarPanels = satelliteGroup.append("g").attr("class", "solar-panels");
-    
-    const panelWidth = 75; 
+
+    const panelWidth = 75;
     const panelHeight = 30;
-    
+
     // Left Panel
     solarPanels.append("rect")
         .attr("x", -panelWidth - 35)
@@ -37,7 +37,7 @@ export function initCloud(svgSelection, width, height, tooltipSel) {
         .attr("width", panelWidth)
         .attr("height", panelHeight)
         .attr("fill", "rgba(255,255,255,0.1)")
-        .attr("stroke", "#333") 
+        .attr("stroke", "#333")
         .attr("stroke-width", 1.5)
         .attr("rx", 2);
 
@@ -51,7 +51,7 @@ export function initCloud(svgSelection, width, height, tooltipSel) {
         .attr("stroke", "#333")
         .attr("stroke-width", 1.5)
         .attr("rx", 2);
-        
+
     // Connecting Rod
     solarPanels.append("line")
         .attr("x1", -panelWidth - 35)
@@ -63,8 +63,8 @@ export function initCloud(svgSelection, width, height, tooltipSel) {
 
     // Central Body
     satelliteBody = satelliteGroup.append("circle")
-        .attr("r", 35) 
-        .attr("fill", "#fff") 
+        .attr("r", 35)
+        .attr("fill", "#fff")
         .attr("stroke", "#333")
         .attr("stroke-width", 2);
 
@@ -111,6 +111,59 @@ export function initCloud(svgSelection, width, height, tooltipSel) {
         .style("fill", "#777")
         .style("pointer-events", "none")
         .text("Launched: 12.2025 🔥");
+
+    // Location Update Hint Box
+    const noteGroup = hintGroup.append("g")
+        .attr("transform", "translate(-90, 12)");
+
+    // Shadow Rectangle (matching Hello World style)
+    noteGroup.append("rect")
+        .attr("x", 2)
+        .attr("y", 2)
+        .attr("width", 85)
+        .attr("height", 30)
+        .attr("fill", "rgba(255, 102, 0, 0.3)");
+
+    // Background Box
+    noteGroup.append("rect")
+        .attr("width", 85)
+        .attr("height", 30)
+        .attr("fill", "#fff")
+        .attr("stroke", "#555")
+        .attr("stroke-width", 0.8)
+        .attr("rx", 0);
+
+    // Text Content
+    const textElem = noteGroup.append("text")
+        .attr("x", 5)
+        .attr("y", 12)
+        .style("font-family", "Courier New")
+        .style("font-size", "7px")
+        .style("font-weight", "bold")
+        .style("fill", "#333")
+        .style("pointer-events", "all");
+
+    textElem.append("tspan")
+        .attr("x", 5)
+        .attr("dy", 0)
+        .text("Update location in");
+
+    const linkTspan = textElem.append("tspan")
+        .attr("x", 5)
+        .attr("dy", 10)
+        .style("fill", "#ff6600")
+        .style("text-decoration", "underline")
+        .style("cursor", "pointer")
+        .text("your profile")
+        .on("click", () => {
+            const authBtn = document.getElementById('authBtn');
+            if (authBtn) authBtn.click();
+        });
+
+    textElem.append("tspan")
+        .style("fill", "#333")
+        .style("text-decoration", "none")
+        .text("");
 }
 
 export function updateCloudUsers(users) {
@@ -118,7 +171,7 @@ export function updateCloudUsers(users) {
         // Random distribution inside the habitat
         const angle = Math.random() * Math.PI * 2;
         const radius = Math.random() * 25; // Keep within body r=35
-        
+
         return {
             ...d,
             lx: Math.cos(angle) * radius,
@@ -135,7 +188,7 @@ export function updateCloudUsers(users) {
         .append('circle')
         .attr('class', 'sat-marker')
         .attr('r', 3)
-        .attr("fill", "#2ecc71") 
+        .attr("fill", "#2ecc71")
         .attr("stroke", "#fff")
         .attr("stroke-width", 1)
         .style("cursor", "pointer")
@@ -151,13 +204,13 @@ export function updateCloudUsers(users) {
 
 export function animateCloud() {
     currentAngle += satelliteConfig.rotationSpeed;
-    
+
     // Rocking animation
-    const deg = Math.sin(currentAngle) * 15; 
-    
+    const deg = Math.sin(currentAngle) * 15;
+
     // Use stored origin coordinates to prevent jumping
     satelliteGroup.attr("transform", `translate(${originX}, ${originY}) rotate(${deg})`);
-    
+
     // Update markers
     const markers = satelliteGroup.selectAll('circle.sat-marker');
     markers
