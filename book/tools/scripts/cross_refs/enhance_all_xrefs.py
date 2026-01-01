@@ -154,7 +154,7 @@ def main():
     print("🚀 Enhancing All Cross-Reference Explanations")
     print("=" * 50)
 
-    base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
+    base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1")
 
     # Process all chapters
     chapters_to_process = [

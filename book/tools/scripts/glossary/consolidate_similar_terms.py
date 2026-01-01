@@ -81,7 +81,7 @@ def find_consolidation_rules() -> Dict[str, str]:
 
 def consolidate_chapter_glossaries():
     """Consolidate similar terms in all chapter glossary files."""
-    chapters_dir = Path('quarto/contents/core')
+    chapters_dir = Path('quarto/contents/vol1')
     consolidation_rules = find_consolidation_rules()
     total_consolidated = 0
 

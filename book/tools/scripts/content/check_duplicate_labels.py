@@ -342,7 +342,7 @@ repos:
       - id: check-duplicate-labels
         name: Check for duplicate Quarto labels
         entry: python3 scripts/find_duplicate_labels.py
-        args: ['-d', 'contents/core/', '--figures', '--tables', '--listings', '--quiet', '--strict']
+        args: ['-d', 'contents/vol1/', '--figures', '--tables', '--listings', '--quiet', '--strict']
         language: system
         files: '\\.qmd$'
         pass_filenames: false
@@ -356,25 +356,25 @@ def parse_args():
         epilog="""
 Examples:
   # Pre-commit usage (focused on critical types)
-  python3 find_duplicate_labels.py -d contents/core/ --figures --tables --listings --quiet --strict
+  python3 find_duplicate_labels.py -d contents/vol1/ --figures --tables --listings --quiet --strict
 
   # Check only figures and tables
-  python3 find_duplicate_labels.py -d contents/core/ --figures --tables
+  python3 find_duplicate_labels.py -d contents/vol1/ --figures --tables
 
   # Check only figures
-  python3 find_duplicate_labels.py -d contents/core/ --figures-only
+  python3 find_duplicate_labels.py -d contents/vol1/ --figures-only
 
   # Check all label types
-  python3 find_duplicate_labels.py -d contents/core/ --all-types
+  python3 find_duplicate_labels.py -d contents/vol1/ --all-types
 
   # Development usage with suggestions
-  python3 find_duplicate_labels.py -d contents/core/ --suggestions
+  python3 find_duplicate_labels.py -d contents/vol1/ --suggestions
 
   # JSON output for automation
-  python3 find_duplicate_labels.py -d contents/core/ --format json
+  python3 find_duplicate_labels.py -d contents/vol1/ --format json
 
 PRE-COMMIT INTEGRATION:
-  python3 find_duplicate_labels.py -d contents/core/ --figures --tables --listings --quiet --strict
+  python3 find_duplicate_labels.py -d contents/vol1/ --figures --tables --listings --quiet --strict
   Exit code 0 = no duplicates, 1 = duplicates found
 
   Add to .pre-commit-config.yaml:
@@ -383,7 +383,7 @@ PRE-COMMIT INTEGRATION:
         - id: check-duplicate-labels
           name: Check duplicate Quarto labels
           entry: python3 scripts/find_duplicate_labels.py
-          args: ['-d', 'contents/core/', '--figures', '--tables', '--listings', '--quiet', '--strict']
+          args: ['-d', 'contents/vol1/', '--figures', '--tables', '--listings', '--quiet', '--strict']
           language: system
           files: '\\.qmd$'
           pass_filenames: false

@@ -63,8 +63,8 @@ def process_file(filepath: Path, dry_run: bool = True) -> List[Tuple[int, str, s
 
 
 def main():
-    # Find all .qmd files in contents/core only
-    base_path = Path('/Users/VJ/GitHub/MLSysBook/quarto/contents/core')
+    # Find all .qmd files in contents/vol1 only
+    base_path = Path('/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1')
 
     if not base_path.exists():
         print(f"Error: {base_path} does not exist")

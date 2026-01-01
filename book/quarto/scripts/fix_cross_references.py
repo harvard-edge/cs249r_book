@@ -46,45 +46,45 @@ import sys
 from pathlib import Path
 
 # Chapter mapping from section IDs to their absolute paths from build root
-# These are stored as absolute paths from the build root (e.g., contents/core/...)
+# These are stored as absolute paths from the build root (e.g., contents/vol1/...)
 # and will be converted to relative paths based on each file's location
 # Update this when adding new chapters to the book
 CHAPTER_MAPPING = {
     # Top-level chapters
-    "sec-introduction": "contents/core/introduction/introduction.html#sec-introduction",
-    "sec-ml-systems": "contents/core/ml_systems/ml_systems.html#sec-ml-systems",
-    "sec-dl-primer": "contents/core/dl_primer/dl_primer.html#sec-dl-primer",
-    "sec-dnn-architectures": "contents/core/dnn_architectures/dnn_architectures.html#sec-dnn-architectures",
-    "sec-ai-workflow": "contents/core/workflow/workflow.html#sec-ai-workflow",
-    "sec-data-engineering": "contents/core/data_engineering/data_engineering.html#sec-data-engineering",
-    "sec-ai-frameworks": "contents/core/frameworks/frameworks.html#sec-ai-frameworks",
-    "sec-ai-training": "contents/core/training/training.html#sec-ai-training",
-    "sec-efficient-ai": "contents/core/efficient_ai/efficient_ai.html#sec-efficient-ai",
-    "sec-model-optimizations": "contents/core/optimizations/optimizations.html#sec-model-optimizations",
-    "sec-ai-acceleration": "contents/core/hw_acceleration/hw_acceleration.html#sec-ai-acceleration",
-    "sec-benchmarking-ai": "contents/core/benchmarking/benchmarking.html#sec-benchmarking-ai",
-    "sec-ml-operations": "contents/core/ops/ops.html#sec-ml-operations",
-    "sec-ondevice-learning": "contents/core/ondevice_learning/ondevice_learning.html#sec-ondevice-learning",
-    "sec-security-privacy": "contents/core/privacy_security/privacy_security.html#sec-security-privacy",
-    "sec-robust-ai": "contents/core/robust_ai/robust_ai.html#sec-robust-ai",
-    "sec-responsible-ai": "contents/core/responsible_ai/responsible_ai.html#sec-responsible-ai",
-    "sec-sustainable-ai": "contents/core/sustainable_ai/sustainable_ai.html#sec-sustainable-ai",
-    "sec-ai-good": "contents/core/ai_for_good/ai_for_good.html#sec-ai-good",
-    "sec-agi-systems": "contents/core/frontiers/frontiers.html#sec-agi-systems",
-    "sec-conclusion": "contents/core/conclusion/conclusion.html#sec-conclusion",
+    "sec-introduction": "contents/vol1/introduction/introduction.html#sec-introduction",
+    "sec-ml-systems": "contents/vol1/ml_systems/ml_systems.html#sec-ml-systems",
+    "sec-dl-primer": "contents/vol1/dl_primer/dl_primer.html#sec-dl-primer",
+    "sec-dnn-architectures": "contents/vol1/dnn_architectures/dnn_architectures.html#sec-dnn-architectures",
+    "sec-ai-workflow": "contents/vol1/workflow/workflow.html#sec-ai-workflow",
+    "sec-data-engineering": "contents/vol1/data_engineering/data_engineering.html#sec-data-engineering",
+    "sec-ai-frameworks": "contents/vol1/frameworks/frameworks.html#sec-ai-frameworks",
+    "sec-ai-training": "contents/vol1/training/training.html#sec-ai-training",
+    "sec-efficient-ai": "contents/vol1/efficient_ai/efficient_ai.html#sec-efficient-ai",
+    "sec-model-optimizations": "contents/vol1/optimizations/optimizations.html#sec-model-optimizations",
+    "sec-ai-acceleration": "contents/vol1/hw_acceleration/hw_acceleration.html#sec-ai-acceleration",
+    "sec-benchmarking-ai": "contents/vol1/benchmarking/benchmarking.html#sec-benchmarking-ai",
+    "sec-ml-operations": "contents/vol1/ops/ops.html#sec-ml-operations",
+    "sec-ondevice-learning": "contents/vol1/ondevice_learning/ondevice_learning.html#sec-ondevice-learning",
+    "sec-security-privacy": "contents/vol1/privacy_security/privacy_security.html#sec-security-privacy",
+    "sec-robust-ai": "contents/vol1/robust_ai/robust_ai.html#sec-robust-ai",
+    "sec-responsible-ai": "contents/vol1/responsible_ai/responsible_ai.html#sec-responsible-ai",
+    "sec-sustainable-ai": "contents/vol1/sustainable_ai/sustainable_ai.html#sec-sustainable-ai",
+    "sec-ai-good": "contents/vol1/ai_for_good/ai_for_good.html#sec-ai-good",
+    "sec-agi-systems": "contents/vol1/frontiers/frontiers.html#sec-agi-systems",
+    "sec-conclusion": "contents/vol1/conclusion/conclusion.html#sec-conclusion",
 
     # Subsections - AI Training chapter
-    "sec-ai-training-distributed-systems-8fe8": "contents/core/training/training.html#sec-ai-training-distributed-systems-8fe8",
-    "sec-ai-training-neural-network-computation-73f5": "contents/core/training/training.html#sec-ai-training-neural-network-computation-73f5",
-    "sec-ai-training-optimization-algorithms-506e": "contents/core/training/training.html#sec-ai-training-optimization-algorithms-506e",
+    "sec-ai-training-distributed-systems-8fe8": "contents/vol1/training/training.html#sec-ai-training-distributed-systems-8fe8",
+    "sec-ai-training-neural-network-computation-73f5": "contents/vol1/training/training.html#sec-ai-training-neural-network-computation-73f5",
+    "sec-ai-training-optimization-algorithms-506e": "contents/vol1/training/training.html#sec-ai-training-optimization-algorithms-506e",
 
     # Subsections - Efficient AI chapter
-    "sec-efficient-ai-ai-scaling-laws-a043": "contents/core/efficient_ai/efficient_ai.html#sec-efficient-ai-ai-scaling-laws-a043",
+    "sec-efficient-ai-ai-scaling-laws-a043": "contents/vol1/efficient_ai/efficient_ai.html#sec-efficient-ai-ai-scaling-laws-a043",
 
     # Subsections - Model Optimizations chapter
-    "sec-model-optimizations-neural-architecture-search-3915": "contents/core/optimizations/optimizations.html#sec-model-optimizations-neural-architecture-search-3915",
-    "sec-model-optimizations-numerical-precision-a93d": "contents/core/optimizations/optimizations.html#sec-model-optimizations-numerical-precision-a93d",
-    "sec-model-optimizations-pruning-3f36": "contents/core/optimizations/optimizations.html#sec-model-optimizations-pruning-3f36",
+    "sec-model-optimizations-neural-architecture-search-3915": "contents/vol1/optimizations/optimizations.html#sec-model-optimizations-neural-architecture-search-3915",
+    "sec-model-optimizations-numerical-precision-a93d": "contents/vol1/optimizations/optimizations.html#sec-model-optimizations-numerical-precision-a93d",
+    "sec-model-optimizations-pruning-3f36": "contents/vol1/optimizations/optimizations.html#sec-model-optimizations-pruning-3f36",
 
     # Lab sections - Arduino Nicla Vision
     "sec-setup-overview-dcdd": "contents/labs/arduino/nicla_vision/setup/setup.html#sec-setup-overview-dcdd",
@@ -224,7 +224,7 @@ def calculate_relative_path(from_file, to_path, build_dir, epub_mapping=None):
 
     Args:
         from_file: Path object of the source file
-        to_path: String path from build root (e.g., "contents/core/chapter/file.html#anchor")
+        to_path: String path from build root (e.g., "contents/vol1/chapter/file.html#anchor")
         build_dir: Path object of the build directory root
         epub_mapping: Optional dict mapping section IDs to EPUB chapter files
 

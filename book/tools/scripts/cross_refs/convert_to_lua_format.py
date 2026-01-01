@@ -18,7 +18,7 @@ from collections import defaultdict
 class CrossRefConverter:
 
     def __init__(self):
-        self.base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
+        self.base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1")
         self.chapters = [
             'introduction', 'ml_systems', 'dl_primer', 'dnn_architectures', 'workflow',
             'data_engineering', 'frameworks', 'training', 'efficient_ai', 'optimizations',

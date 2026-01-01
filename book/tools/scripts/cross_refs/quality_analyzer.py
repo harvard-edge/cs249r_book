@@ -20,7 +20,7 @@ class QualityAnalyzer:
 
     def __init__(self):
         self.prod_file = Path("/Users/VJ/GitHub/MLSysBook/quarto/data/cross_refs_production.json")
-        self.base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
+        self.base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1")
 
     def load_production_data(self) -> Dict:
         """Load production cross-reference data"""

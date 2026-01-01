@@ -388,27 +388,27 @@ chapter_order = []
 # Updated to match your actual file structure
 chapter_lookup = [
     # MAIN chapters
-    ("contents/core/introduction/introduction.qmd", "Introduction", 1),
-    ("contents/core/ml_systems/ml_systems.qmd", "ML Systems", 2),
-    ("contents/core/dl_primer/dl_primer.qmd", "DL Primer", 3),
-    ("contents/core/dnn_architectures/dnn_architectures.qmd", "DNN Architectures", 4),
-    ("contents/core/workflow/workflow.qmd", "AI Workflow", 5),
-    ("contents/core/data_engineering/data_engineering.qmd", "Data Engineering", 6),
-    ("contents/core/frameworks/frameworks.qmd", "AI Frameworks", 7),
-    ("contents/core/training/training.qmd", "AI Training", 8),
-    ("contents/core/efficient_ai/efficient_ai.qmd", "Efficient AI", 9),
-    ("contents/core/optimizations/optimizations.qmd", "Model Optimizations", 10),
-    ("contents/core/hw_acceleration/hw_acceleration.qmd", "AI Acceleration", 11),
-    ("contents/core/benchmarking/benchmarking.qmd", "Benchmarking AI", 12),
-    ("contents/core/ops/ops.qmd", "ML Operations", 13),
-    ("contents/core/ondevice_learning/ondevice_learning.qmd", "On-Device Learning", 14),
-    ("contents/core/privacy_security/privacy_security.qmd", "Security & Privacy", 15),
-    ("contents/core/robust_ai/robust_ai.qmd", "Robust AI", 16),
-    ("contents/core/responsible_ai/responsible_ai.qmd", "Responsible AI", 17),
-    ("contents/core/sustainable_ai/sustainable_ai.qmd", "Sustainable AI", 18),
-    ("contents/core/ai_for_good/ai_for_good.qmd", "AI for Good", 19),
-    ("contents/core/frontiers/frontiers.qmd", "Frontiers", 20),
-    ("contents/core/conclusion/conclusion.qmd", "Conclusion", 21),
+    ("contents/vol1/introduction/introduction.qmd", "Introduction", 1),
+    ("contents/vol1/ml_systems/ml_systems.qmd", "ML Systems", 2),
+    ("contents/vol1/dl_primer/dl_primer.qmd", "DL Primer", 3),
+    ("contents/vol1/dnn_architectures/dnn_architectures.qmd", "DNN Architectures", 4),
+    ("contents/vol1/workflow/workflow.qmd", "AI Workflow", 5),
+    ("contents/vol1/data_engineering/data_engineering.qmd", "Data Engineering", 6),
+    ("contents/vol1/frameworks/frameworks.qmd", "AI Frameworks", 7),
+    ("contents/vol1/training/training.qmd", "AI Training", 8),
+    ("contents/vol1/efficient_ai/efficient_ai.qmd", "Efficient AI", 9),
+    ("contents/vol1/optimizations/optimizations.qmd", "Model Optimizations", 10),
+    ("contents/vol1/hw_acceleration/hw_acceleration.qmd", "AI Acceleration", 11),
+    ("contents/vol1/benchmarking/benchmarking.qmd", "Benchmarking AI", 12),
+    ("contents/vol1/ops/ops.qmd", "ML Operations", 13),
+    ("contents/vol1/ondevice_learning/ondevice_learning.qmd", "On-Device Learning", 14),
+    ("contents/vol1/privacy_security/privacy_security.qmd", "Security & Privacy", 15),
+    ("contents/vol1/robust_ai/robust_ai.qmd", "Robust AI", 16),
+    ("contents/vol1/responsible_ai/responsible_ai.qmd", "Responsible AI", 17),
+    ("contents/vol1/sustainable_ai/sustainable_ai.qmd", "Sustainable AI", 18),
+    ("contents/vol1/ai_for_good/ai_for_good.qmd", "AI for Good", 19),
+    ("contents/vol1/frontiers/frontiers.qmd", "Frontiers", 20),
+    ("contents/vol1/conclusion/conclusion.qmd", "Conclusion", 21),
 
     # LAB sections
     ("contents/labs/overview.qmd", "Labs Overview", 100),
@@ -528,7 +528,7 @@ def extract_chapter_title(file_path):
                 return title
 
     # Final fallback: generate from path
-    if "contents/core/" in file_path:
+    if "contents/vol1/" in file_path:
         return f"Chapter: {base.replace('_', ' ').replace('.qmd', '').title()}"
     elif "contents/labs/" in file_path:
         return f"Lab: {base.replace('_', ' ').replace('.qmd', '').title()}"
@@ -802,11 +802,11 @@ def generate_demo_entry():
     real_files = [
         "quarto/contents/frontmatter/about/about.qmd",
         "quarto/contents/frontmatter/acknowledgements/acknowledgements.qmd",
-        "quarto/contents/core/dl_primer/dl_primer.qmd",
-        "quarto/contents/core/workflow/workflow.qmd",
-        "quarto/contents/core/training/training.qmd",
-        "quarto/contents/core/introduction/introduction.qmd",
-        "quarto/contents/core/benchmarking/benchmarking.qmd",
+        "quarto/contents/vol1/dl_primer/dl_primer.qmd",
+        "quarto/contents/vol1/workflow/workflow.qmd",
+        "quarto/contents/vol1/training/training.qmd",
+        "quarto/contents/vol1/introduction/introduction.qmd",
+        "quarto/contents/vol1/benchmarking/benchmarking.qmd",
         "quarto/contents/labs/arduino/nicla_vision/image_classification/image_classification.qmd",
         "quarto/contents/labs/raspi/setup/setup.qmd",
         "quarto/contents/backmatter/resources/phd_survival_guide.qmd"
@@ -815,7 +815,7 @@ def generate_demo_entry():
     # Try to get some real commit data for more realistic content
     try:
         # Get recent commit messages for some files
-        recent_commits = run_git_command(["git", "log", "--oneline", "-5", "--", "quarto/contents/core/dl_primer/dl_primer.qmd"], verbose=False)
+        recent_commits = run_git_command(["git", "log", "--oneline", "-5", "--", "quarto/contents/vol1/dl_primer/dl_primer.qmd"], verbose=False)
         if recent_commits:
             # Use real commit data if available
             pass

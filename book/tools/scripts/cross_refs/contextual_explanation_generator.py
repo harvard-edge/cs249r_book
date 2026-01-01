@@ -151,7 +151,7 @@ def main():
 
     args = parser.parse_args()
 
-    base_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
+    base_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1")
 
     if args.all:
         for chapter_dir in base_path.iterdir():

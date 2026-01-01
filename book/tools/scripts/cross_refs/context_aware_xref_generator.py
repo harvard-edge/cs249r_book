@@ -302,7 +302,7 @@ def main():
     generator = ContextAwareXRefGenerator()
 
     # Process introduction chapter as example
-    intro_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core/introduction/introduction.qmd")
+    intro_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1/introduction/introduction.qmd")
 
     if intro_path.exists():
         xrefs = generator.generate_chapter_xrefs(intro_path)

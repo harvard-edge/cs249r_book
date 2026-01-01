@@ -53,7 +53,7 @@ def add_section_titles_to_xrefs(xref_path: Path):
     return data, updates_made
 
 def main():
-    base_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
+    base_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1")
 
     # Process introduction
     intro_xrefs = base_path / "introduction/introduction_xrefs.json"

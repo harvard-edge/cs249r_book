@@ -8,7 +8,7 @@ from pathlib import Path
 def enhance_intro():
     """Enhance just the introduction chapter as a test"""
 
-    intro_file = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core/introduction/introduction_xrefs.json")
+    intro_file = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1/introduction/introduction_xrefs.json")
 
     with open(intro_file, 'r') as f:
         data = json.load(f)

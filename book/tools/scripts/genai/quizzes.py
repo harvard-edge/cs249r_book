@@ -38,13 +38,13 @@ MODES OF OPERATION:
 USAGE EXAMPLES:
 ---------------
 # Generate quizzes for a single chapter (uses OpenAI gpt-4o by default)
-python quizzes.py --mode generate -f contents/core/introduction/introduction.qmd
+python quizzes.py --mode generate -f contents/vol1/introduction/introduction.qmd
 
 # Generate quizzes using local Ollama instead
 python quizzes.py --mode generate -f chapter.qmd --provider ollama
 
 # Generate quizzes for all chapters in a directory
-python quizzes.py --mode generate -d contents/core/ --parallel
+python quizzes.py --mode generate -d contents/vol1/ --parallel
 
 # Review quizzes with GUI
 python quizzes.py --mode review -f introduction_quizzes.json
@@ -1918,7 +1918,7 @@ Integrate concepts from all previous chapters."""
         return context
 
 
-def extract_all_chapter_concepts(base_path="quarto/contents/core", verbose=False):
+def extract_all_chapter_concepts(base_path="quarto/contents/vol1", verbose=False):
     """Pre-extract all chapter topics_covered data for efficient quiz generation.
 
     Reads topics_covered from external YAML files referenced in chapter frontmatter.
@@ -1946,7 +1946,7 @@ def extract_all_chapter_concepts(base_path="quarto/contents/core", verbose=False
             ordered_files = get_qmd_order_from_quarto_yml(QUARTO_YML_PATH)
             # Extract chapter names from file paths
             for qmd_file in ordered_files:
-                # Extract chapter name from path like 'contents/core/introduction/introduction.qmd'
+                # Extract chapter name from path like 'contents/vol1/introduction/introduction.qmd'
                 parts = qmd_file.split('/')
                 if len(parts) >= 2:
                     chapter_name = parts[-2] if parts[-2] != parts[-1].replace('.qmd', '') else parts[-2]

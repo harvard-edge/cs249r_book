@@ -177,7 +177,7 @@ def main():
     print("🔧 Fixing Cross-Reference Issues")
     print("=" * 50)
 
-    base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
+    base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1")
 
     # Fix all chapters
     total_fixed = 0
