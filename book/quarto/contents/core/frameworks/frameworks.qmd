@@ -377,4 +377,663 @@ Neural network diagrams (wizualizacja) ≠ computational graphs (reprezentacja w
 **Static Computation Graph**: Dwufazowe wykonanie. Faza 1: zbuduj kompletny graf. Faza 2: wykonaj z danymi. Umożliwia globalną optymalizację ale komplikuje debugging.
 :::
 
-*[UWAGA: To jest tylko początek (~20% oryginalnego pliku). Pełna wersja to 3491 linii. Kontynuować?]*
+#### Runtime-Adaptive Computational Structure {#sec-ai-frameworks-runtimeadaptive-computational-structure-156d}
+
+**Dynamic graphs (PyTorch):** Model define-by-run. Graf budowany podczas wykonania.
+
+**Zalety:**
+- Flexibility w control flow (if/while/for działa naturalnie)
+- Debugging: standardowy Python debugger
+- Variable-length sequences: bez problemu
+- Research velocity: szybsze iteracje
+
+**Wady:**
+- Memory fragmentation (alokacja w runtime)
+- Brak global optimizations (compiler nie widzi pełnego grafu)
+- Overhead z graph construction przy każdym forward pass
+
+::: {#fig-mlfm-dynamic-graph-flow fig-env="figure" fig-pos="htb"}
+```{.tikz}
+\begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
+\tikzset{Line/.style={line width=1.0pt,black!50
+},
+  Box/.style={align=flush center,
+    inner xsep=2pt,
+    node distance=1.0,
+    draw=BlueLine,
+    line width=0.75pt,
+    fill=BlueL,
+    text width=18mm,
+    minimum width=18mm,
+    minimum height=10mm
+  },
+   Text/.style={%
+    inner sep=4pt,
+    draw=none,
+    line width=0.75pt,
+    fill=TextColor!80,
+    text=black,
+    font=\usefont{T1}{phv}{m}{n}\footnotesize,
+    align=flush center,
+    minimum width=7mm, minimum height=5mm
+  },
+}
+\node[Box,text width=12mm,minimum width=14mm,
+             fill=OliveL!70,draw=OliveLine](B1){Start};
+\node[Box,fill=VioletL,draw=VioletLine,right=of B1](B2){Operation 1};
+\node[Box,fill=GreenL,draw=GreenLine,right=of B2,
+            minimum height=14mm](B3){Operation 1 Executed};
+\node[Box,node distance=2.1,fill=VioletL,draw=VioletLine,right=of B3](B4){Operation 2};
+\node[Box,fill=GreenL,draw=GreenLine,right=of B4,
+            minimum height=14mm](B5){Operation 2 Executed};
+\node[Box,right=of B5,text width=12mm,minimum width=14mm,
+             fill=OliveL!70,draw=OliveLine](B6){End};
+%%
+\foreach \x/\y in{1/2,2/3,3/4,4/5,5/6}
+\draw[-latex,Line](B\x)--(B\y);
+\def\vi{15mm}
+\draw[thick]($(B1.east)!0.5!(B2.west)$)--++(90:\vi)
+node[Text]{Define\\ Operation};
+\draw[thick]($(B2.east)!0.5!(B3.west)$)--++(90:\vi)
+node[Text]{Execute\\ Operation};
+\draw[thick]($(B3.east)!0.5!(B4.west)$)--++(90:\vi)
+node[Text]{Define Next\\ Operation};
+\draw[thick]($(B4.east)!0.5!(B5.west)$)--++(90:\vi)
+node[Text]{Execute\\ Operation};
+\draw[thick]($(B5.east)!0.5!(B6.west)$)--++(90:\vi)
+node[Text](BB6){Repeat\\ Until Done};
+%
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=4mm,inner ysep=8mm,yshift=2mm,
+           fill=BackColor!80,fit=(B1)(B2)(BB6)(B6),line width=0.75pt](BB2){};
+\node[below=2pt of  BB2.north,anchor=north]{Runtime Execution};
+\end{tikzpicture}
+```
+**Dynamic Graph Execution**: Definiuj-wykonaj-powtórz. Każda operacja jest zdefiniowana, wykonana i skończona zanim przejdziesz do następnej. Umożliwia flexible model construction i immediate debugging.
+:::
+
+#### Framework Architecture Trade-offs {#sec-ai-frameworks-framework-architecture-tradeoffs-6f3c}
+
+**Static vs Dynamic - kluczowe różnice:**
+
++----------------------------------+------------------------------------------------------+-------------------------------------------------+
+| **Aspect**                       | **Static Graphs**                                    | **Dynamic Graphs**                              |
++:=================================+:=====================================================+:================================================+
+| **Memory Management**            | Precise allocation planning, optimized memory usage  | Flexible but likely less efficient allocation   |
++----------------------------------+------------------------------------------------------+-------------------------------------------------+
+| **Optimization Potential**       | Comprehensive graph-level optimizations possible     | Limited to local optimizations due to runtime   |
++----------------------------------+------------------------------------------------------+-------------------------------------------------+
+| **Hardware Utilization**         | Can generate highly optimized hardware-specific code | May sacrifice  hardware-specific optimizations  |
++----------------------------------+------------------------------------------------------+-------------------------------------------------+
+| **Development Experience**       | Requires more upfront planning, harder to debug      | Better debugging, faster iteration cycles       |
++----------------------------------+------------------------------------------------------+-------------------------------------------------+
+| **Debugging Workflow**           | Framework-specific tools, disconnected stack traces  | Standard Python debugging (pdb, print, inspect) |
++----------------------------------+------------------------------------------------------+-------------------------------------------------+
+| **Error Reporting**              | Execution-time errors disconnected from definition   | Intuitive stack traces pointing to exact lines  |
++----------------------------------+------------------------------------------------------+-------------------------------------------------+
+| **Research Velocity**            | Slower iteration due to define-then-run requirement  | Faster prototyping and model experimentation    |
++----------------------------------+------------------------------------------------------+-------------------------------------------------+
+| **Runtime Flexibility**          | Fixed computation structure                          | Can adapt to runtime conditions                 |
++----------------------------------+------------------------------------------------------+-------------------------------------------------+
+| **Production Performance**       | Generally better performance at scale                | May have overhead from graph construction       |
++----------------------------------+------------------------------------------------------+-------------------------------------------------+
+| **Integration with Legacy Code** | More separation between definition and execution     | Natural integration with imperative code        |
++----------------------------------+------------------------------------------------------+-------------------------------------------------+
+| **Memory Overhead**              | Lower memory overhead due to planned allocations     | Higher  overhead due to dynamic allocations     |
++----------------------------------+------------------------------------------------------+-------------------------------------------------+
+| **Deployment Complexity**        | Simpler deployment due to fixed structure            | May require additional runtime support          |
++----------------------------------+------------------------------------------------------+-------------------------------------------------+
+
+: **Graph Computation Modes**: Static = optymalizacja, Dynamic = flexibility. {#tbl-mlfm-graphs}
+
+##### Memory Management {#sec-ai-frameworks-memory-management-10a6}
+
+**Static graphs:** Pre-allocation możliwa. Framework widzi cały graf → planuje pamięć z góry → memory reuse, mniej fragmentacji. Dla dużych modeli kluczowe: 100GB/s dla małych modeli, >1TB/s dla LLM z miliardami parametrów.
+
+**Dynamic graphs:** Runtime allocation. Flexible ale higher overhead. Memory fragmentation problem dla long-running tasks. Utilization może spaść <50% przez suboptimal access patterns.
+
+##### Device Placement {#sec-ai-frameworks-device-placement-fb7e}
+
+**Static:** Pre-execution analysis → mapuj compute-intensive ops na odpowiedni hardware → minimize communication overhead. Dobry dla specialized hardware (TPU).
+
+**Dynamic:** Runtime placement. Adaptacja do changing conditions (hardware availability) ale trudniej optimizować fully → potencjalne inefficiencies w distributed setups.
+
+#### Graph-Based Gradient Computation Implementation {#sec-ai-frameworks-graphbased-gradient-computation-implementation-2731}
+
+**Kluczowy insight:** Computational graph ≠ tylko execution plan. To data structure która umożliwia reverse-mode automatic differentiation.
+
+**Forward pass:** Framework buduje graf gdzie każdy node = operacja + result + gradient info. Graf to faktyczna struktura w pamięci, nie wizualizacja.
+
+**Backward pass:** `loss.backward()` → reverse traversal grafu w reverse topological order → systematyczna aplikacja chain rule w każdym node.
+
+**Dlaczego to działa:** Graf structure enkoduje dependency relationships dla chain rule. Każdy edge = partial derivative. Reverse traversal automatycznie komponuje partial derivatives według chain rule.
+
+**Skalowalność:** Complexity liniowa względem liczby operacji (nie eksponencjalna względem liczby zmiennych). Graf zapewnia że każdy gradient jest obliczany dokładnie raz.
+
+### Automatic Differentiation {#sec-ai-frameworks-automatic-differentiation-e286}
+
+**Problem:** Oblicz pochodne przez złożone łańcuchy operacji matematycznych. Potrzebne do treningu - jak dostosować miliony parametrów aby poprawić performance modelu [@baydin2018].
+
+::: {#lst-auto_diff_intro lst-cap="**Automatic Differentiation**: Efektywne obliczanie gradientów dla złożonych funkcji, kluczowe dla optymalizacji parametrów sieci neuronowych."}
+```{.python}
+def f(x):
+    a = x * x  # Square
+    b = sin(x)  # Sine
+    return a * b  # Product
+```
+:::
+
+Nawet ten prosty przykład wymaga: product rule, chain rule, pochodne trigonometric functions. Dla sieci neuronowej z milionami operacji - manualna kalkulacja niemożliwa.
+
+[^fn-auto-diff]: **Automatic Differentiation**: Wynaleziony przez Robert Edwin Wengert (1964), osiąga machine precision derivatives przez aplikację chain rule na poziomie elementary operations, czyniąc trening sieci neuronowych computationally feasible dla sieci z milionami parametrów.
+
+**Jak AD działa:** Rozkłada funkcję na elementary operations:
+1. `a = x * x` → derivative: `d(x²)/dx = 2x`
+2. `b = sin(x)` → derivative: `d(sin(x))/dx = cos(x)`
+3. `result = a * b` → product rule: `d(uv)/dx = u(dv/dx) + v(du/dx)`
+
+Tracking kombinacji operacji + systematyczna aplikacja chain rule = exact derivatives przez całe obliczenie.
+
+#### Forward and Reverse Mode Differentiation {#sec-ai-frameworks-forward-reverse-mode-differentiation-f82b}
+
+Automatic differentiation ma 2 tryby: forward i reverse. Różne charakterystyki efficiency, memory usage, applicability.
+
+##### Forward Mode {#sec-ai-frameworks-forward-mode-3b45}
+
+**Idea:** Oblicz derivatives razem z original computation. Śledź jak zmiany propagują from input to output.
+
+::: {#lst-forward_mode_ad lst-cap="**Forward Mode Automatic Differentiation**: Oblicza derivatives obok function evaluations używając product rule."}
+```{.python}
+def f(x):  # Computing both value and derivative
+    # Step 1: x -> x²
+    a = x * x  # Value: x²
+    da = 2 * x  # Derivative: 2x
+
+    # Step 2: x -> sin(x)
+    b = sin(x)  # Value: sin(x)
+    db = cos(x)  # Derivative: cos(x)
+
+    # Step 3: Combine using product rule
+    result = a * b  # Value: x² * sin(x)
+    dresult = a * db + b * da  # Derivative: x²*cos(x) + sin(x)*2x
+
+    return result, dresult
+```
+:::
+
+**Implementation:** "Dual numbers" - każda liczba augmented derivative value.
+
+::: {#lst-forward_mode_dual lst-cap="**Forward Mode**: Oblicza derivatives obok values używając dual numbers."}
+```{.python}
+x = 2.0  # Initial value
+dx = 1.0  # Tracking derivative wrt x
+
+# Step 1: x²
+a = 4.0  # (2.0)²
+da = 4.0  # 2 * 2.0
+
+# Step 2: sin(x)
+b = 0.909  # sin(2.0)
+db = -0.416  # cos(2.0)
+
+# Final result
+result = 3.637  # 4.0 * 0.909
+dresult = 2.805  # 4.0 * (-0.416) + 0.909 * 4.0
+```
+:::
+
+**Performance characteristics:**
+- **Compute:** ~2x original computation dla jednej input variable
+- **Scaling:** Linearly z liczbą input variables (problem dla neural networks z thousands of weights)
+- **Memory:** Constant, predictable (dobry dla embedded systems)
+
+**Use cases:**
+- Sensitivity analysis (jak zmiana single pixel wpływa na prediction)
+- Feature importance (saliency maps)
+- Few inputs, many outputs
+
+Forward mode NIE jest primary choice dla training full neural networks (zbyt dużo input variables), ale przydatny dla analytical tasks.
+
+##### Reverse Mode {#sec-ai-frameworks-reverse-mode-086f}
+
+**Dlaczego reverse mode dominuje:** Training neural networks = jeden scalar output (loss) + derivatives względem milionów parameters (weights). Reverse mode exceptionally efficient dla tego pattern.
+
+::: {#lst-reverse_simple_nn lst-cap="**Reverse Mode**: Sieci neuronowe obliczają gradienty przez backward passes na layered computations."}
+```{.python}
+def simple_network(x, w1, w2):
+    # Forward pass
+    hidden = x * w1  # First layer multiplication
+    activated = max(0, hidden)  # ReLU activation
+    output = activated * w2  # Second layer multiplication
+    return output
+```
+:::
+
+**Forward pass:** Framework nie tylko oblicza values - buduje graf operacji śledząc intermediate results.
+
+::: {#lst-reverse_nn_forward lst-cap="**Forward Pass**: Oblicza intermediate states używając linear i non-linear transformations."}
+```{.python}
+x = 1.0
+w1 = 2.0
+w2 = 3.0
+
+hidden = 2.0  # x * w1 = 1.0 * 2.0
+activated = 2.0  # max(0, 2.0) = 2.0
+output = 6.0  # activated * w2 = 2.0 * 3.0
+```
+:::
+
+**Backward pass:** Gradienty obliczane w reverse topological order:
+
+::: {#lst-reverse_nn_backward lst-cap="**Backward Pass**: Kod oblicza gradienty dla weights, pokazując jak zmiany propagują backward przez layers."}
+```{.python}
+d_output = 1.0  # Start with derivative of output
+
+d_w2 = activated  # d_output * d(output)/d_w2 = 1.0 * 2.0 = 2.0
+d_activated = w2  # d_output * d(output)/d_activated = 1.0 * 3.0 = 3.0
+
+# ReLU gradient: 1 if input was > 0, 0 otherwise
+d_hidden = d_activated * (1 if hidden > 0 else 0)  # 3.0 * 1 = 3.0
+
+d_w1 = x * d_hidden  # 1.0 * 3.0 = 3.0
+d_x = w1 * d_hidden  # 2.0 * 3.0 = 6.0
+```
+:::
+
+**Key implementation considerations:**
+1. Framework must track dependencies między operations
+2. Intermediate values muszą być stored dla backward pass
+3. Gradient computations follow reverse topological order
+4. Każda operacja needs forward + backward implementation
+
+###### Memory Management Strategies {#sec-ai-frameworks-memory-management-strategies-dca8}
+
+**Problem:** Forward mode może discard intermediate values. Reverse mode MUSI store results z forward pass dla backward pass gradient computation.
+
+::: {#lst-reverse_memory lst-cap="**Reverse Mode Memory Management**: Stores intermediate values dla gradient computation podczas backpropagation."}
+```{.python}
+def deep_network(x, w1, w2, w3):
+    # Forward pass - must store intermediates
+    hidden1 = x * w1
+    activated1 = max(0, hidden1)  # Store for backward
+    hidden2 = activated1 * w2
+    activated2 = max(0, hidden2)  # Store for backward
+    output = activated2 * w3
+    return output
+```
+:::
+
+**Memory requirement:** Liniowy wzrost z głębokością sieci. Dla deep neural network processingu batch of images = gigabajty stored activations.
+
+**Strategies:**
+1. **Gradient checkpointing:** Selectively store tylko niektóre activations, reszta recompute podczas backward pass. Trade computation za memory.
+2. **Memory reuse:** Automatically detect gdy intermediate values mogą być freed
+3. **Mixed precision:** FP16 dla activations, FP32 dla gradients
+
+[^fn-gradient-checkpointing]: **Gradient Checkpointing**: Memory optimization która trades computation time za memory przez selective storing tylko certain intermediate activations podczas forward pass, potem recomputing discarded values podczas gradient computation. Może zredukować memory usage o 50-90% dla deep networks zwiększając training time tylko o 20-33%.
+
+::: {#lst-memory_strategies lst-cap="**Memory Management Strategies**: Checkpointing pozwala intermediate values być freed podczas treningu, redukując memory usage."}
+```{.python}
+def training_step(model, input_batch):
+    # Strategy 1: Checkpointing
+    with checkpoint_scope():
+        hidden1 = activation(layer1(input_batch))
+        # Framework might free some memory here
+        hidden2 = activation(layer2(hidden1))
+        output = layer3(hidden2)
+
+    # Strategy 2: Gradient accumulation
+    loss = compute_loss(output)
+    loss.backward()
+```
+:::
+
+###### Optimization Techniques {#sec-ai-frameworks-optimization-techniques-8564}
+
+**Operation fusion:** Zamiast osobne operacje dla każdej math operation, combine operations razem. Matrix multiplication + bias addition + ReLU → single fused kernel. Reduces memory transfers, improves hardware utilization.
+
+[^fn-operation-fusion]: **Operation Fusion**: Compiler optimization która combines multiple sequential operations w single kernel aby reduce memory bandwidth i latency. Np. fusing matrix multiplication, bias addition i ReLU activation może eliminate intermediate memory allocations i achieve 2-3x speedup na modern GPUs.
+
+**Compute graph optimization:** Framework może reorder operations, eliminate redundant computations, optimize memory layouts - ale tylko jeśli widzi cały graf (advantage static graphs).
+
+**Hardware-specific kernels:** Różne backward implementations dla różnego hardware (CPU vs GPU vs TPU). Framework automatycznie wybiera optimal implementation.
+
+#### Framework Implementation of Automatic Differentiation {#sec-ai-frameworks-framework-implementation-automatic-differentiation-289a}
+
+Frameworki expose AD przez high-level APIs maskując sophisticated machinery.
+
+**Typical API (PyTorch-style):**
+```python
+# Framework tracks operations transparently
+output = model(input)  # Forward pass
+loss = loss_function(output, target)
+loss.backward()  # Automatic backward pass - framework handles all AD
+optimizer.step()  # Parameter updates using computed gradients
+```
+
+Za kulisami framework musi:
+1. Track wszystkie operations podczas forward pass
+2. Build i maintain computational graph
+3. Manage memory dla intermediate values
+4. Schedule gradient computations efficiently
+5. Interface z hardware accelerators (GPU/TPU)
+
+**Higher-order gradients:** Computing derivatives of derivatives. Kluczowe dla niektórych optimization techniques (second-order methods). Framework must support nested AD.
+
+**Mixed-precision training:** FP16 dla speed, FP32 dla numerical stability. AD system musi handle różne precisions correctly.
+
+#### Framework-Specific Differentiation Strategies {#sec-ai-frameworks-frameworkspecific-differentiation-strategies-c906}
+
+Każdy framework implementuje AD inaczej. To wpływa na development workflows i performance.
+
+##### PyTorch's Dynamic Autograd System {#sec-ai-frameworks-pytorchs-dynamic-autograd-system-b679}
+
+**PyTorch:** Dynamic tape-based system. Graf budowany podczas execution.
+
+```python
+import torch
+
+# PyTorch builds computational graph during execution
+x = torch.tensor(2.0, requires_grad=True)
+y = torch.tensor(3.0, requires_grad=True)
+
+z = x * y  # Creates MulBackward node
+w = z + x  # Creates AddBackward node
+loss = w**2  # Creates PowBackward node
+
+# Graph exists only after forward pass completes
+loss.backward()  # Traverses dynamically built graph
+print(f"dx/dloss = {x.grad}")  # Immediate access to gradients
+```
+
+**Zalety:** Operations tracked automatically, natural Python control flow, gradients available immediately, variable-length computations handled naturally.
+
+**Wady:** Must maintain entire graph w memory until backward pass, nie można benefit z global graph optimizations.
+
+##### TensorFlow's Static Graph Optimization {#sec-ai-frameworks-tensorflows-static-graph-optimization-3f21}
+
+**TensorFlow 1.x:** Static graph approach. Separate graph construction od execution. (TensorFlow 2.x używa eager execution by default, ale `tf.function` compilation available).
+
+```python
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
+
+# Graph definition phase - no computation
+x = tf.placeholder(tf.float32, shape=())
+y = tf.placeholder(tf.float32, shape=())
+
+z = x * y
+w = z + x
+loss = w**2
+
+# Symbolic gradient computation during graph construction
+gradients = tf.gradients(loss, [x, y])
+
+# Execution phase - actual computation
+with tf.Session() as sess:
+    for step in range(1000):
+        grad_vals, loss_val = sess.run(
+            [gradients, loss], feed_dict={x: 2.0, y: 3.0}
+        )
+```
+
+**Zalety:** Complete graph analysis enables aggressive optimizations (operation fusion, memory layout optimization, parallel execution scheduling). Once compiled, efficient repeated execution. 2-3x performance improvements possible.
+
+**Wady:** More complex debugging workflows, limited flexibility dla dynamic computation patterns.
+
+##### JAX's Functional Differentiation {#sec-ai-frameworks-jaxs-functional-differentiation-4a45}
+
+**JAX:** Functional programming approach. Program transformation instead of operation tracking.
+
+```python
+import jax
+import jax.numpy as jnp
+
+# Pure function definition
+def compute_loss(params, x, y):
+    z = x * params["w1"] + y * params["w2"]
+    return z**2
+
+# JAX transforms functions rather than tracking operations
+grad_fn = jax.grad(compute_loss)  # Returns gradient function
+value_and_grad_fn = jax.value_and_grad(compute_loss)
+
+# Multiple gradient modes available
+forward_grad_fn = jax.jacfwd(compute_loss)  # Forward mode
+reverse_grad_fn = jax.jacrev(compute_loss)  # Reverse mode
+
+# Function transformations compose naturally
+batched_grad_fn = jax.vmap(grad_fn)  # Vectorized gradients
+jit_grad_fn = jax.jit(grad_fn)  # Compiled gradients
+
+# Execution with immutable parameters
+params = {"w1": 2.0, "w2": 3.0}
+gradients = grad_fn(params, 1.0, 2.0)
+```
+
+**Zalety:** Same function transformed dla different differentiation modes. Forward i reverse mode equally accessible. Powerful composition patterns. Functional purity enables mathematical reasoning.
+
+**Wady:** Requires functional programming discipline (immutable data, pure functions). Steeper learning curve.
+
+### Data Structures {#sec-ai-frameworks-data-structures-fe2d}
+
+Machine learning frameworks organizują numerical data przez specialized data structures. Najważniejsza: **Tensors**.
+
+#### Tensors {#sec-ai-frameworks-tensors-3577}
+
+:::{.callout-definition title="Tensor"}
+***Tensors*** = multidimensional arrays. Fundamental data structure w ML systems. Unified representation dla scalars, vectors, matrices i higher-dimensional data z hardware-optimized operations.
+:::
+
+**Hierarchy:**
+- 0D tensor (scalar): single value
+- 1D tensor (vector): sequence of values
+- 2D tensor (matrix): rows × columns
+- 3D+ tensor: nested structures (np. batch of images: batch × height × width × channels)
+
+**Framework tensor properties:**
+1. **Shape:** Dimensional structure (np. `[32, 224, 224, 3]` dla batch 32 images, 224×224, 3 color channels)
+2. **Dtype:** Data type (FP32, FP16, INT8, etc.)
+3. **Device:** Gdzie stored (CPU, GPU, TPU)
+4. **Strides:** Memory layout pattern (row-major vs column-major)
+5. **Gradient tracking:** Czy requires_grad dla automatic differentiation
+
+**Memory layout:** Physical memory jest linear. Tensors = multidimensional abstraction. **Strides** mapują multidimensional indices → linear memory addresses.
+
+**Operations:** Matrix multiplication, convolution, element-wise ops (add, multiply, ReLU), reduction ops (sum, mean, max), reshaping (view, transpose, permute).
+
+**Performance considerations:**
+- Contiguous memory access faster niż strided access
+- Hardware (GPU) preferuje określone layouts
+- Broadcast operations avoid explicit copying
+- In-place operations save memory ale break gradient tracking
+
+## Framework Architecture {#sec-ai-frameworks-framework-architecture-0982}
+
+Modern frameworks mają layered architecture:
+1. **User-facing API:** High-level (Keras, PyTorch Lightning, Hugging Face)
+2. **Core framework:** Graph construction, AD, optimization (TensorFlow, PyTorch, JAX)
+3. **Computation kernels:** Optimized implementations (cuDNN, cuBLAS, MKL)
+4. **Hardware layer:** CPU, GPU, TPU, custom accelerators
+
+**Modularity:** Możliwość swap components (np. różne backends dla Keras).
+
+## Framework Ecosystem {#sec-ai-frameworks-framework-ecosystem-4f2e}
+
+**PyTorch ecosystem:**
+- PyTorch Lightning: High-level training abstractions
+- torchvision, torchaudio, torchtext: Domain-specific utilities
+- ONNX export: Interoperability
+- torch.distributed: Multi-GPU/multi-node training
+
+**TensorFlow ecosystem:**
+- Keras: High-level API
+- TensorFlow Serving: Production serving
+- TensorFlow Lite: Mobile/embedded
+- TensorFlow.js: Browser deployment
+- TFX: End-to-end ML pipelines
+
+**JAX ecosystem:**
+- Flax: Neural network library
+- Optax: Optimization library
+- Haiku: Neural network modules
+
+## System Integration {#sec-ai-frameworks-system-integration-624f}
+
+Frameworks muszą integrate z:
+- **Data loading:** Efficient data pipelines (tf.data, torch.utils.data.DataLoader)
+- **Distributed training:** Horovod, PyTorch DDP, TensorFlow MirroredStrategy
+- **Monitoring:** TensorBoard, Weights & Biases, MLflow
+- **Deployment:** Docker, Kubernetes, cloud platforms (SageMaker, Vertex AI)
+- **Hardware:** CUDA, ROCm, Metal Performance Shaders
+
+## Major Framework Platform Analysis {#sec-ai-frameworks-major-framework-platform-analysis-6177}
+
+**TensorFlow:**
+- **Strengths:** Production deployment, mobile (TFLite), serving infrastructure, comprehensive ecosystem
+- **Weaknesses:** Historically complex API, steeper learning curve
+- **Use cases:** Production systems, mobile apps, distributed training at scale
+
+**PyTorch:**
+- **Strengths:** Research-friendly, Pythonic API, excellent debugging, dynamic graphs
+- **Weaknesses:** Historically worse production story (improving z TorchServe, torch.jit)
+- **Use cases:** Research, prototyping, academia
+
+**JAX:**
+- **Strengths:** Functional programming, composable transformations, automatic vectorization, TPU-first
+- **Weaknesses:** Smaller ecosystem, functional paradigm unfamiliar dla wielu
+- **Use cases:** Research requiring mathematical elegance, TPU deployment, high-performance computing
+
+**ONNX (Open Neural Network Exchange):**
+- Interoperability format między frameworks
+- Train w PyTorch, deploy w TensorFlow Serving (przez ONNX)
+- Runtime optimizations (ONNX Runtime)
+
+## Deployment Environment-Specific Frameworks {#sec-ai-frameworks-deployment-environmentspecific-frameworks-f333}
+
+### Distributed Computing {#sec-ai-frameworks-distributed-computing-platform-optimization-5423}
+
+**Ray:** Distributed computing framework. Distribute training across clusters. Automatic scaling, fault tolerance.
+
+**Horovod:** Distributed training library. Works z TensorFlow, PyTorch, JAX. Efficient multi-GPU/multi-node communication (NCCL, Gloo).
+
+### Production Serving {#sec-ai-frameworks-local-processing-lowlatency-optimization-6c65}
+
+**TensorFlow Serving:** Production-grade serving system. REST i gRPC APIs. Model versioning, batching, monitoring.
+
+**TorchServe:** PyTorch production serving. Similar capabilities dla PyTorch models.
+
+**NVIDIA Triton:** Multi-framework inference server. Supports TensorFlow, PyTorch, ONNX. GPU optimization, dynamic batching.
+
+### Mobile & Edge {#sec-ai-frameworks-resourceconstrained-device-optimization-2966}
+
+**TensorFlow Lite:** Mobile i embedded devices. Model optimization (quantization, pruning). Hardware acceleration delegates (GPU, NPU).
+
+**PyTorch Mobile:** PyTorch dla mobile. Supports iOS i Android.
+
+**Core ML (Apple):** Native iOS deployment. Optimized dla Apple Neural Engine.
+
+### Microcontrollers (TinyML) {#sec-ai-frameworks-microcontroller-embedded-system-implementation-5555}
+
+**TensorFlow Lite Micro:** Ultra-constrained devices (microcontrollers). KB memory footprint.
+
+**Edge Impulse:** End-to-end platform dla edge ML. Data collection → training → deployment.
+
+## Systematic Framework Selection Methodology {#sec-ai-frameworks-systematic-framework-selection-methodology-530e}
+
+**Factors:**
+
+1. **Model requirements:**
+   - Architecture complexity (standard vs custom)
+   - Dynamic vs static computation
+   - Model size i performance needs
+
+2. **Deployment target:**
+   - Cloud, edge, mobile, embedded?
+   - Latency requirements
+   - Hardware availability (GPU, TPU, NPU)
+
+3. **Development priorities:**
+   - Research velocity vs production performance
+   - Team expertise
+   - Debugging requirements
+
+4. **Ecosystem needs:**
+   - Pre-trained models availability
+   - Community support
+   - Integration requirements
+
+5. **Long-term viability:**
+   - Community size i activity
+   - Corporate backing
+   - License considerations
+
+**Decision matrix:**
+- **Research/Academia:** PyTorch (ease of use, debugging, flexibility)
+- **Production/Enterprise:** TensorFlow (deployment ecosystem, mobile support)
+- **High-performance computing:** JAX (TPU optimization, functional programming)
+- **Mobile:** TensorFlow Lite, Core ML
+- **Embedded:** TensorFlow Lite Micro
+
+## Systematic Framework Performance Assessment {#sec-ai-frameworks-systematic-framework-performance-assessment-30d3}
+
+**Benchmarking dimensions:**
+1. **Training speed:** Time per epoch, throughput (samples/sec)
+2. **Inference latency:** Single sample prediction time
+3. **Memory usage:** Peak memory during training/inference
+4. **Scalability:** Multi-GPU efficiency, distributed training overhead
+5. **Model accuracy:** Numerical precision differences
+
+**Standardized benchmarks:**
+- MLPerf Training i Inference
+- DAWNBench
+- Framework-specific benchmarks (TorchBench, TensorFlow benchmarks)
+
+**Real-world considerations:**
+- End-to-end pipeline performance (data loading, preprocessing, training, deployment)
+- Development velocity (time to prototype, debug, optimize)
+- Total cost of ownership (compute costs, development time, maintenance)
+
+## Common Framework Selection Misconceptions {#sec-ai-frameworks-common-framework-selection-misconceptions-afb3}
+
+**❌ "PyTorch tylko dla research, TensorFlow tylko dla production"**
+Reality: PyTorch ma TorchServe, torch.jit dla production. TensorFlow 2.x ma eager execution dla research.
+
+**❌ "Framework X jest zawsze szybszy niż Y"**
+Reality: Performance zależy od model architecture, hardware, optimization. Benchmarki pokazują mixed results.
+
+**❌ "Muszę użyć najnowszego framework"**
+Reality: Stable, well-supported framework często lepszy niż bleeding-edge. Ecosystem maturity matters.
+
+**❌ "Static graphs zawsze szybsze niż dynamic"**
+Reality: Modern frameworks (TF 2.x, PyTorch JIT) blur distinction. Difference often minimal z proper optimization.
+
+**❌ "Mogę łatwo switch framework później"**
+Reality: Migration jest costly. Architectural assumptions, custom ops, trained models - wszystko tied do framework. Choose carefully upfront.
+
+## Summary {#sec-ai-frameworks-summary-c1f4}
+
+**Key takeaways:**
+
+1. **Frameworki abstrahują complexity:** Automatic differentiation, hardware acceleration, distributed training - wszystko handled automatically.
+
+2. **Static vs Dynamic graphs = trade-off:** Optimization potential (static) vs flexibility (dynamic). Modern frameworks offer hybrid approaches.
+
+3. **Automatic differentiation = core capability:** Forward mode (few inputs, many outputs), Reverse mode (many inputs, one output - ideal dla neural networks).
+
+4. **Framework wybór = architectural decision:** PyTorch (research/flexibility), TensorFlow (production/mobile), JAX (HPC/mathematical elegance).
+
+5. **Deployment target matters:** Different frameworks optimize dla different targets (cloud, edge, mobile, embedded).
+
+6. **Ecosystem > raw performance:** Pre-trained models, community support, documentation często ważniejsze niż micro-benchmarks.
+
+7. **Migration jest trudny:** Architectural lock-in. Choose carefully based on long-term needs.
+
+**Praktyczne porady:**
+- Start z najpopularniejszym framework w swojej domain (PyTorch dla research, TensorFlow dla production mobile)
+- Don't cargo-cult - understand WHY framework suits your needs
+- Benchmark na YOUR models i hardware, nie synthetic benchmarks
+- Consider total cost: development time + compute costs + maintenance
+- Interoperability (ONNX) może help ale isn't free lunch
+
+**Final thought:** Frameworki evolve szybko. Principles (computational graphs, AD, hardware abstraction) remain constant. Understand fundamentals → adapt as tools change.
