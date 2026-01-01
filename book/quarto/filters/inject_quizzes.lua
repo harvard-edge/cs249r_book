@@ -162,7 +162,7 @@ local function handle_meta(meta)
   -- Get quiz configuration from global metadata
   local quiz_config = meta["quiz-config"] or {}
   local file_pattern = quiz_config["file-pattern"] or "*_quizzes.json"
-  local scan_directory = quiz_config["scan-directory"] or "contents/core"
+  local scan_directory = quiz_config["scan-directory"] or "contents"
   local auto_discover_pdf = quiz_config["auto-discover-pdf"] ~= false -- default to true
 
   -- Convert Meta objects to strings if needed

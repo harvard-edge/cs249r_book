@@ -33,7 +33,7 @@ local marked_terms = {}
 local function get_chapter_name()
   local info = pandoc.system.get_working_directory()
   if info then
-    -- Extract chapter name from path like .../core/introduction/
+    -- Extract chapter name from path like .../vol1/introduction/ or .../vol2/introduction/
     local chapter = info:match("/([^/]+)/?$")
     if chapter then
       return chapter
