@@ -111,7 +111,8 @@ local function get_chapter_name(doc)
   log_info("Input file: " .. input_file)
 
   -- Extract chapter name from path
-  chapter = string.match(input_file, "contents/core/([^/]+)/")
+  -- Extract chapter name from path like "contents/vol1/introduction/introduction.qmd" or "contents/vol2/..."
+  chapter = string.match(input_file, "contents/vol[12]/([^/]+)/")
   if not chapter then
     chapter = string.match(input_file, "([^/]+)/[^/]+%.qmd$")
   end
@@ -134,14 +135,24 @@ local function load_chapter_xrefs(chapter_name)
   end
 
   -- Construct path to chapter's xrefs file
-  local xrefs_path = "contents/core/" .. chapter_name .. "/" .. chapter_name .. "_xrefs.json"
+  -- Try vol1 first, then vol2
+  local xrefs_path = "contents/vol1/" .. chapter_name .. "/" .. chapter_name .. "_xrefs.json"
 
   log_info("Loading cross-references from: " .. xrefs_path)
 
   local json_content = read_file(xrefs_path)
   if not json_content then
-    -- Try alternative path if running from different directory
-    xrefs_path = "quarto/contents/core/" .. chapter_name .. "/" .. chapter_name .. "_xrefs.json"
+    -- Try vol2
+    xrefs_path = "contents/vol2/" .. chapter_name .. "/" .. chapter_name .. "_xrefs.json"
+    json_content = read_file(xrefs_path)
+  end
+  if not json_content then
+    -- Try alternative paths if running from different directory
+    xrefs_path = "quarto/contents/vol1/" .. chapter_name .. "/" .. chapter_name .. "_xrefs.json"
+    json_content = read_file(xrefs_path)
+  end
+  if not json_content then
+    xrefs_path = "quarto/contents/vol2/" .. chapter_name .. "/" .. chapter_name .. "_xrefs.json"
     json_content = read_file(xrefs_path)
   end
 
