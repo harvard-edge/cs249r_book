@@ -22,7 +22,7 @@ import time
 class CrossRefExperimentalFramework:
 
     def __init__(self):
-        self.base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
+        self.base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1")
         self.chapters = [
             'introduction', 'ml_systems', 'dl_primer', 'workflow', 'data_engineering',
             'frameworks', 'training', 'efficient_ai', 'optimizations', 'hw_acceleration',

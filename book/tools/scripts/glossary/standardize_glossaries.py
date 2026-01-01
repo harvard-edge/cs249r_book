@@ -63,7 +63,7 @@ def merge_definitions(definitions):
 
 def standardize_all_glossaries():
     """Standardize all glossary files."""
-    base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
+    base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1")
     json_files = list(base_dir.glob("**/*_glossary.json"))
 
     print(f"📚 Standardizing {len(json_files)} glossary files...")

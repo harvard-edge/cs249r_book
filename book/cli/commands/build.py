@@ -307,7 +307,7 @@ class BuildCommand:
                         files_to_render.append(str(rel_path))
                     except ValueError:
                         # If relative path fails, try to construct it
-                        files_to_render.append(f"contents/core/{chapter_name}/{chapter_name}.qmd")
+                        files_to_render.append(f"contents/vol1/{chapter_name}/{chapter_name}.qmd")
 
             # Show files that will be built
             console.print("[dim]📄 Files to be rendered:[/dim]")
@@ -467,7 +467,7 @@ class BuildCommand:
             except ValueError:
                 # Try to construct the path
                 chapter_name = chapter_file.stem
-                files_to_render.append(f"contents/core/{chapter_name}/{chapter_name}.qmd")
+                files_to_render.append(f"contents/vol1/{chapter_name}/{chapter_name}.qmd")
 
         console.print(f"[dim]📋 Files to render: {len(files_to_render)} files[/dim]")
 

@@ -200,7 +200,7 @@ def print_analysis(stats: Dict, all_connections: List, missing: List):
     print(f"\n✅ Analysis complete!")
 
 def main():
-    chapters_dir = Path('/Users/VJ/GitHub/MLSysBook/quarto/contents/core')
+    chapters_dir = Path('/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1')
 
     print("Loading cross-references...")
     xrefs = load_xrefs(chapters_dir)

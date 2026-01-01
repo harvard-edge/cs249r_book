@@ -137,7 +137,7 @@ def get_proper_explanation(target_chapter: str, connection_type: str, section_co
 def fix_introduction_explanations():
     """Fix all explanations in introduction chapter"""
 
-    xref_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core/introduction/introduction_xrefs.json")
+    xref_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1/introduction/introduction_xrefs.json")
 
     with open(xref_path) as f:
         data = json.load(f)

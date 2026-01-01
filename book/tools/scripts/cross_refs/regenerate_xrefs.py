@@ -32,7 +32,7 @@ def check_ollama():
 
 def clean_existing_xrefs():
     """Remove all existing _xrefs.json files"""
-    base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
+    base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1")
     count = 0
     for xref_file in base_dir.glob("**/*_xrefs.json"):
         xref_file.unlink()
@@ -64,7 +64,7 @@ def generate_xrefs_with_production_script():
 
 def enhance_with_llm():
     """Enhance cross-references with LLM explanations using Gemma 2"""
-    base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
+    base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1")
 
     print("\n🤖 Enhancing cross-references with Gemma 2 27B...")
 

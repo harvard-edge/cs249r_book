@@ -1979,7 +1979,7 @@ Instead, write DIRECT, ACTIVE statements:
 
         if needing_repair > 0:
             print(f"\n💡 To fix these issues, run:")
-            print(f"   python {__file__} --repair -d {' -d '.join(['contents/core/'])}")
+            print(f"   python {__file__} --repair -d {' -d '.join(['contents/vol1/'])}")
         else:
             print(f"\n✅ All captions look good!")
 
@@ -3532,7 +3532,7 @@ Instead, write DIRECT, ACTIVE statements:
                 print(f"  📊 {name:<25} │ {size_str:>8} │ {date_str}")
 
             print("=" * 60)
-            print("💡 Usage: python improve_figure_captions.py -d contents/core/ --model MODEL_NAME")
+            print("💡 Usage: python improve_figure_captions.py -d contents/vol1/ --model MODEL_NAME")
             return True
 
         except requests.exceptions.ConnectionError:
@@ -3932,39 +3932,39 @@ def main():
         epilog="""
 Examples:
   # Improve captions with LLM (recommended default):
-  python improve_figure_captions.py -d contents/core/
-  python improve_figure_captions.py --improve -d contents/core/
+  python improve_figure_captions.py -d contents/vol1/
+  python improve_figure_captions.py --improve -d contents/vol1/
 
   # Using different models:
-  python improve_figure_captions.py -d contents/core/ --model llama3.2:3b
-  python improve_figure_captions.py -i -d contents/core/ -m qwen2.5:14b
-  python improve_figure_captions.py -d contents/core/ --model mistral:7b
+  python improve_figure_captions.py -d contents/vol1/ --model llama3.2:3b
+  python improve_figure_captions.py -i -d contents/vol1/ -m qwen2.5:14b
+  python improve_figure_captions.py -d contents/vol1/ --model mistral:7b
 
   # Content filtering:
-  python improve_figure_captions.py -d contents/core/ --figures-only
-  python improve_figure_captions.py -d contents/core/ -F  # Short form
-  python improve_figure_captions.py -d contents/core/ --tables-only
-  python improve_figure_captions.py -d contents/core/ -T  # Short form
-  python improve_figure_captions.py -d contents/core/ --listings-only
-  python improve_figure_captions.py -d contents/core/ -L  # Short form
+  python improve_figure_captions.py -d contents/vol1/ --figures-only
+  python improve_figure_captions.py -d contents/vol1/ -F  # Short form
+  python improve_figure_captions.py -d contents/vol1/ --tables-only
+  python improve_figure_captions.py -d contents/vol1/ -T  # Short form
+  python improve_figure_captions.py -d contents/vol1/ --listings-only
+  python improve_figure_captions.py -d contents/vol1/ -L  # Short form
 
   # Analysis and utilities:
-  python improve_figure_captions.py --build-map -d contents/core/
-  python improve_figure_captions.py -b -d contents/core/
-  python improve_figure_captions.py --analyze -d contents/core/
-  python improve_figure_captions.py --repair -d contents/core/
+  python improve_figure_captions.py --build-map -d contents/vol1/
+  python improve_figure_captions.py -b -d contents/vol1/
+  python improve_figure_captions.py --analyze -d contents/vol1/
+  python improve_figure_captions.py --repair -d contents/vol1/
 
   # Content filtering with other modes:
-  python improve_figure_captions.py --analyze -d contents/core/ --figures-only
-  python improve_figure_captions.py --repair -d contents/core/ --tables-only
-  python improve_figure_captions.py --build-map -d contents/core/ --listings-only
-  python improve_figure_captions.py --build-map -d contents/core/ -F
+  python improve_figure_captions.py --analyze -d contents/vol1/ --figures-only
+  python improve_figure_captions.py --repair -d contents/vol1/ --tables-only
+  python improve_figure_captions.py --build-map -d contents/vol1/ --listings-only
+  python improve_figure_captions.py --build-map -d contents/vol1/ -F
 
   # Multiple directories:
-  python improve_figure_captions.py -d contents/core/ -d contents/frontmatter/ -m llama3.2:3b
+  python improve_figure_captions.py -d contents/vol1/ -d contents/frontmatter/ -m llama3.2:3b
 
   # Save detailed JSON output:
-  python improve_figure_captions.py -d contents/core/ --save-json
+  python improve_figure_captions.py -d contents/vol1/ --save-json
 """
     )
 

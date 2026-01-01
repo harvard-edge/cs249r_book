@@ -41,7 +41,7 @@ def extract_section_id_from_qmd(qmd_path):
 def build_simple_chapter_mapping():
     """Build mapping from chapter names to their actual section IDs."""
     project_root = Path(__file__).parent.parent.parent.parent
-    chapters_dir = project_root / "quarto/contents/core"
+    chapters_dir = project_root / "quarto/contents/vol1"
 
     chapter_mapping = {}
 

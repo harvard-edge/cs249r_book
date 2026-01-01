@@ -13,7 +13,7 @@ Usage:
     python check_list_formatting.py --fix path/to/file.qmd
 
     # Check all .qmd files in a directory
-    python check_list_formatting.py --check --recursive quarto/contents/core/
+    python check_list_formatting.py --check --recursive quarto/contents/vol1/
 """
 
 import argparse

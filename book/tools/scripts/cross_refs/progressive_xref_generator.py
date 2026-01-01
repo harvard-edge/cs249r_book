@@ -610,7 +610,7 @@ def main():
 
     generator = ProgressiveXRefGenerator(model=args.model)
 
-    base_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
+    base_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1")
 
     if args.all:
         # Process all chapters

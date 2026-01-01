@@ -7,8 +7,8 @@ Complete toolkit for domain adaptation and cross-reference generation using pypa
 
 MODES:
     Training Mode:
-        python3 cross_referencing.py --train -d ../../contents/core/ -o ./my_model
-        python3 cross_referencing.py --train --dirs ../../contents/core/ --output ./my_model --base-model sentence-t5-base --epochs 5
+        python3 cross_referencing.py --train -d ../../contents/vol1/ -o ./my_model
+        python3 cross_referencing.py --train --dirs ../../contents/vol1/ --output ./my_model --base-model sentence-t5-base --epochs 5
 
     Generation Mode (Domain-adapted):
         python3 cross_referencing.py -g -m ./t5-mlsys-domain-adapted -o cross_refs.json
@@ -264,13 +264,13 @@ def get_quarto_file_order(quiet: bool = False) -> List[str]:
 
         for chapter in chapters:
             if isinstance(chapter, str):
-                if chapter.endswith('.qmd') and 'contents/core/' in chapter:
+                if chapter.endswith('.qmd') and 'contents/vol1/' in chapter:
                     ordered_files.append(chapter)
             elif isinstance(chapter, dict):
                 # Handle 'part:' entries
                 if 'part' in chapter:
                     part_file = chapter['part']
-                    if part_file.endswith('.qmd') and 'contents/core/' in part_file:
+                    if part_file.endswith('.qmd') and 'contents/vol1/' in part_file:
                         ordered_files.append(part_file)
 
         # Extract commented chapters from raw content (YAML ignores these)
@@ -301,7 +301,7 @@ def get_quarto_file_order(quiet: bool = False) -> List[str]:
 
                     # Add if it's a core chapter file and not already in list
                     if (file_part.endswith('.qmd') and
-                        'contents/core/' in file_part and
+                        'contents/vol1/' in file_part and
                         file_part not in ordered_files):
                         ordered_files.append(file_part)
 
@@ -1561,19 +1561,19 @@ def main():
         epilog="""
 Examples:
     # Train a domain-adapted model with intelligent extraction
-    python3 cross_refs.py --train -d ../../contents/core/ -o ./t5-mlsys-domain-adapted
+    python3 cross_refs.py --train -d ../../contents/vol1/ -o ./t5-mlsys-domain-adapted
 
     # Generate with domain-adapted model (uses pypandoc by default)
-    python3 cross_refs.py -g -m ./t5-mlsys-domain-adapted -o cross_refs.json -d ../../contents/core/
+    python3 cross_refs.py -g -m ./t5-mlsys-domain-adapted -o cross_refs.json -d ../../contents/vol1/
 
     # Generate with base model (no training needed)
-    python3 cross_refs.py -g -m sentence-t5-base -o cross_refs.json -d ../../contents/core/
+    python3 cross_refs.py -g -m sentence-t5-base -o cross_refs.json -d ../../contents/vol1/
 
     # Generate with AI explanations (requires Ollama + any model)
-    python3 cross_refs.py -g -m sentence-t5-base -o cross_refs.json -d ../../contents/core/ --explain
+    python3 cross_refs.py -g -m sentence-t5-base -o cross_refs.json -d ../../contents/vol1/ --explain
 
     # Generate with specific ollama model for explanations
-    python3 cross_refs.py -g -m sentence-t5-base -o cross_refs.json -d ../../contents/core/ --explain --ollama-model gemma2:27b
+    python3 cross_refs.py -g -m sentence-t5-base -o cross_refs.json -d ../../contents/vol1/ --explain --ollama-model gemma2:27b
 
     # Test extraction methods
     python3 test_intelligent_extraction.py

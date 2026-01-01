@@ -197,7 +197,7 @@ def main():
         return 1
 
     # Find all xrefs files
-    base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
+    base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1")
     xref_files = list(base_dir.glob("**/*_xrefs.json"))
 
     print(f"\n📚 Found {len(xref_files)} chapters to enhance")

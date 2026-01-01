@@ -194,7 +194,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Enhance cross-references with LLM")
-    parser.add_argument('-d', '--chapters-dir', default='/Users/VJ/GitHub/MLSysBook/quarto/contents/core')
+    parser.add_argument('-d', '--chapters-dir', default='/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1')
     parser.add_argument('-m', '--model', default='llama3.1:8b')
     parser.add_argument('--test', action='store_true', help='Test LLM connection only')
 

@@ -87,7 +87,7 @@ def process_xrefs(file_path):
     return data, improvements_made
 
 def main():
-    base_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
+    base_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1")
 
     # Process introduction first as example
     intro_xrefs = base_path / "introduction/introduction_xrefs.json"

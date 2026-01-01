@@ -29,7 +29,7 @@ def add_target_sections(xref_path: Path):
     return data, updates
 
 def main():
-    base_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
+    base_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1")
 
     # Process introduction first
     intro_xrefs = base_path / "introduction/introduction_xrefs.json"

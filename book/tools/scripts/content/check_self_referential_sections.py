@@ -269,7 +269,7 @@ def main():
         epilog="""
 Examples:
   # Check a specific file
-  python check_self_referential_sections.py book/quarto/contents/core/frameworks/frameworks.qmd
+  python check_self_referential_sections.py book/quarto/contents/vol1/frameworks/frameworks.qmd
 
   # Check all files in a directory
   python check_self_referential_sections.py book/quarto/contents/
