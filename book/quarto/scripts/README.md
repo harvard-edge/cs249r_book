@@ -1,85 +1,194 @@
-# Post-Render Scripts
+# Quarto Configuration Management
 
-This directory contains scripts that run after Quarto builds to fix various issues.
+This directory contains scripts for managing Quarto book configurations and reducing code duplication across output formats (HTML, PDF, EPUB).
 
-## fix_cross_references.py
+## Overview
 
-### Problem It Solves
+The Quarto book project uses a **shared configuration system** that eliminates duplication by:
 
-When using **selective rendering** to speed up builds (only building index + introduction instead of all 20+ chapters), Quarto cannot resolve cross-references to chapters that weren't built. This results in broken references appearing as `?@sec-chapter-name` in the HTML output.
+1. **Shared Configuration Files** (`config/shared/`): Common settings used across all formats
+2. **Format-Specific Overrides** (`config/_quarto-{format}-overrides.yml`): Unique settings for each format
+3. **Configuration Generator** (`generate_config.py`): Merges shared configs with format-specific overrides
 
-This particularly affects:
-- **Glossary**: Contains 800+ cross-references to all chapters (hence the original script name)
-- **Introduction**: References many other chapters for context
-- **Any chapter** that references other chapters
+## Directory Structure
 
-### How It Works
-
-1. **Runs automatically** as a post-render hook after Quarto finishes building
-2. **Scans ALL HTML files** in the `_build/html/` directory
-3. **Finds unresolved references** that appear as `<strong>?@sec-xxx</strong>`
-4. **Converts them to proper links**: `<strong><a href="../path/to/chapter.html#sec-xxx">Chapter Title</a></strong>`
-
-### Configuration
-
-The script is configured as a post-render hook in the Quarto configuration files:
-
-```yaml
-# In config/_quarto-html.yml
-project:
-  post-render:
-    - scripts/clean_svgs.py
-    - scripts/fix_cross_references.py  # Fixes cross-references
+```
+book/quarto/
+├── config/
+│   ├── shared/                    # Shared configuration files
+│   │   ├── bibliography.yml       # Bibliography entries (all formats)
+│   │   ├── book-metadata.yml      # Book title, author, abstract, etc.
+│   │   ├── chapters.yml           # Chapter structure
+│   │   ├── crossref.yml           # Cross-reference settings
+│   │   ├── diagram.yml            # TikZ/diagram configuration
+│   │   └── filter-metadata.yml    # Filter metadata (quizzes, callouts, etc.)
+│   │
+│   ├── _quarto-html-overrides.yml # HTML-specific overrides
+│   ├── _quarto-pdf-overrides.yml  # PDF-specific overrides
+│   ├── _quarto-epub-overrides.yml # EPUB-specific overrides
+│   │
+│   ├── _quarto-html.yml           # Generated HTML config (DO NOT EDIT)
+│   ├── _quarto-pdf.yml            # Generated PDF config (DO NOT EDIT)
+│   └── _quarto-epub.yml           # Generated EPUB config (DO NOT EDIT)
+│
+└── scripts/
+    ├── generate_config.py         # Configuration generator script
+    └── README.md                  # This file
 ```
 
-### Maintenance
+## Usage
 
-When adding new chapters to the book:
+### Generating Configuration Files
 
-1. Add the chapter's section ID to `CHAPTER_MAPPING` dictionary
-2. Add the chapter's display title to `CHAPTER_TITLES` dictionary
-3. Ensure the section ID matches what's in the `.qmd` file (e.g., `{#sec-new-chapter}`)
-
-Example:
-```python
-CHAPTER_MAPPING = {
-    # ... existing chapters ...
-    "sec-new-chapter": "../core/new_chapter/new_chapter.html#sec-new-chapter",
-}
-
-CHAPTER_TITLES = {
-    # ... existing chapters ...
-    "sec-new-chapter": "New Chapter Title",
-}
-```
-
-### Manual Testing
+To generate configuration files from shared configs:
 
 ```bash
-# Test on all HTML files
-python3 scripts/fix_cross_references.py
+# Generate all formats (HTML, PDF, EPUB)
+python scripts/generate_config.py
 
-# Test on specific file
-python3 scripts/fix_cross_references.py _build/html/contents/backmatter/glossary/glossary.html
+# Generate specific format
+python scripts/generate_config.py html
+python scripts/generate_config.py pdf
+python scripts/generate_config.py epub
 ```
 
-### Output
+### Making Changes
 
-The script provides clear output showing what it fixed:
+**To modify shared settings** (affects all formats):
+1. Edit files in `config/shared/`
+2. Regenerate configs: `python scripts/generate_config.py`
 
-```
-🔗 [Cross-Reference Fix] Scanning 3 HTML files...
-✅ Fixed 850 cross-references in 2 files:
-   📄 contents/backmatter/glossary/glossary.html: 810 refs
-   📄 contents/core/introduction/introduction.html: 40 refs
-```
+**To modify format-specific settings**:
+1. Edit `config/_quarto-{format}-overrides.yml`
+2. Regenerate that format: `python scripts/generate_config.py {format}`
 
-## clean_svgs.py
+**Important**: Do NOT edit the generated `_quarto-{format}.yml` files directly. They are auto-generated and will be overwritten.
 
-Cleans up SVG files generated during the build process.
+## Configuration Files
 
----
+### Shared Configuration Files
 
-## Why These Scripts Exist
+#### `bibliography.yml`
+Contains all bibliography entries used across all formats. To add or remove bibliography files, edit this file.
 
-These post-render scripts enable **fast iterative development** by allowing selective chapter builds while maintaining a fully functional website with working cross-references. Without them, developers would need to build all 20+ chapters every time (taking minutes) just to test changes to a single chapter.
+#### `book-metadata.yml`
+Contains book metadata:
+- Title, subtitle, author information
+- Abstract
+- Cover image settings
+- Page footer configuration
+
+#### `chapters.yml`
+Defines the chapter structure. Note: EPUB uses a different structure with parts, which is defined in `_quarto-epub-overrides.yml`.
+
+#### `crossref.yml`
+Cross-reference configuration (appendix settings, custom reference types).
+
+#### `diagram.yml`
+TikZ and diagram engine configuration. Format-specific output settings (e.g., SVG for HTML) are applied automatically.
+
+#### `filter-metadata.yml`
+Filter metadata including:
+- Quiz configuration
+- Cross-reference injection settings
+- Part summaries
+- Custom numbered blocks (callouts) configuration
+
+Format-specific settings (like icon format, collapse behavior) are automatically applied by the generator.
+
+### Format-Specific Override Files
+
+These files contain only the unique settings for each format:
+
+- **HTML**: Website navigation, sidebar, navbar, HTML format options
+- **PDF**: PDF-specific format options, title page configuration, LaTeX includes
+- **EPUB**: EPUB metadata, part structure, EPUB format options
+
+## How It Works
+
+The `generate_config.py` script:
+
+1. **Loads shared configs**: Reads all files from `config/shared/` and merges them
+2. **Loads format overrides**: Reads format-specific override file
+3. **Merges configurations**: Deep merges shared config with format overrides
+4. **Applies format-specific logic**: Automatically sets format-specific values (e.g., icon format, collapse behavior)
+5. **Writes generated config**: Creates the final `_quarto-{format}.yml` file
+
+### Deep Merge Behavior
+
+- **Dictionaries**: Recursively merged (override values take precedence)
+- **Lists**: Completely replaced by override (no merging)
+- **Primitive values**: Override replaces base value
+
+## Benefits
+
+1. **Reduced Duplication**: Common settings defined once in shared configs
+2. **Consistency**: Changes to shared settings automatically apply to all formats
+3. **Maintainability**: Easier to update and maintain configuration
+4. **Flexibility**: Format-specific customizations remain easy to manage
+
+## Workflow Examples
+
+### Adding a New Bibliography File
+
+1. Edit `config/shared/bibliography.yml`
+2. Add the new `.bib` file path
+3. Run: `python scripts/generate_config.py`
+4. All formats (HTML, PDF, EPUB) now include the new bibliography
+
+### Changing Book Title
+
+1. Edit `config/shared/book-metadata.yml`
+2. Update the `title` field
+3. Run: `python scripts/generate_config.py`
+4. All formats now use the new title
+
+### Modifying HTML Navbar
+
+1. Edit `config/_quarto-html-overrides.yml`
+2. Update the `website.navbar` section
+3. Run: `python scripts/generate_config.py html`
+4. HTML config is updated
+
+### Adding a New Custom Callout Type
+
+1. Edit `config/shared/filter-metadata.yml`
+2. Add the new callout group and class definitions
+3. Run: `python scripts/generate_config.py`
+4. All formats now support the new callout type
+
+## Troubleshooting
+
+### Generated config doesn't match expected output
+
+1. Check that shared configs are correctly formatted YAML
+2. Verify format-specific overrides are properly structured
+3. Run with verbose output to see merge process
+
+### Format-specific setting not applied
+
+1. Check if the setting should be in shared config or format override
+2. Verify the override file is correctly named and located
+3. Ensure the generator's format-specific logic handles the setting
+
+### YAML parsing errors
+
+1. Validate YAML syntax using a YAML validator
+2. Check for indentation issues (YAML is sensitive to spacing)
+3. Verify all list items are properly formatted
+
+## Future Improvements
+
+Potential enhancements to the configuration system:
+
+- [ ] Validation of generated configs against Quarto schema
+- [ ] Automatic regeneration on shared config changes (pre-commit hook)
+- [ ] Support for environment-specific overrides (dev, staging, production)
+- [ ] Configuration diff tool to see what changed between generations
+- [ ] Integration with CI/CD to auto-generate configs on changes
+
+## Related Documentation
+
+- [Quarto Project Configuration](https://quarto.org/docs/projects/)
+- [Quarto Book Format](https://quarto.org/docs/books/)
+- [Quarto Website Format](https://quarto.org/docs/websites/)
