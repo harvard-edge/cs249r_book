@@ -41,13 +41,30 @@ This directory contains the textbook source and build system for contributors.
 
 ### Book Structure
 
+This textbook is organized into **two volumes** following the Hennessy & Patterson pedagogical model:
+
+| Volume | Theme | Focus |
+|--------|-------|-------|
+| **Volume I** | Build, Optimize, Operate | Single-machine ML systems, foundational principles |
+| **Volume II** | Scale, Distribute, Govern | Distributed systems at production scale |
+
+#### Volume I: Build, Optimize, Operate
+
 | Part | Focus | Chapters |
 |------|-------|----------|
-| **Foundations** | ML and systems basics | Introduction, ML Primer, DL Primer, AI Acceleration |
-| **Workflow** | Production pipeline | Workflows, Data Engineering, Frameworks |
-| **Training** | Learning at scale | Training, Distributed Training, Efficient AI |
-| **Deployment** | Real-world systems | Inference, On-Device AI, Hardware Benchmarking, Ops |
-| **Advanced** | Frontier topics | Privacy, Security, Responsible AI, Sustainable AI, Genertic AI, Frontiers |
+| **ML Foundations** | Core concepts | Introduction, ML Systems, DL Primer, Architectures |
+| **System Development** | Building blocks | Workflow, Data Engineering, Frameworks, Training |
+| **Model Optimization** | Making it fast | Efficient AI, Optimizations, HW Acceleration, Benchmarking |
+| **System Operations** | Making it work | MLOps, Responsible Engineering |
+
+#### Volume II: Scale, Distribute, Govern
+
+| Part | Focus | Chapters |
+|------|-------|----------|
+| **Foundations of Scale** | Infrastructure | Infrastructure, Storage, Communication |
+| **Distributed Systems** | Coordination | Distributed Training, Fault Tolerance, Inference, Edge Intelligence |
+| **Production Challenges** | Operations | On-device Learning, Privacy & Security, Robust AI, Ops at Scale |
+| **Responsible Deployment** | Trust | Responsible AI, Sustainable AI, AI for Good, Frontiers |
 
 ---
 
@@ -107,12 +124,12 @@ cd book
 book/
 ├── quarto/              # Book source (Quarto markdown)
 │   ├── contents/        # Chapter content
-│   │   ├── core/        # Core chapters
-│   │   ├── labs/        # Hands-on labs
+│   │   ├── vol1/        # Volume I: Build, Optimize, Operate
+│   │   ├── vol2/        # Volume II: Scale, Distribute, Govern
 │   │   ├── frontmatter/ # Preface, about, changelog
 │   │   └── backmatter/  # References, glossary
 │   ├── assets/          # Images, downloads
-│   └── _quarto.yml      # Quarto configuration
+│   └── config/          # Quarto configuration files
 ├── cli/                 # Binder CLI tool
 ├── docker/              # Development containers
 ├── docs/                # Documentation
