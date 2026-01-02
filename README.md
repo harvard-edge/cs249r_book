@@ -19,7 +19,7 @@
   <!-- Reader Navigation -->
   **[📖 Read Online](https://mlsysbook.ai)** •
   **[Tiny🔥Torch](https://mlsysbook.ai/tinytorch)** •
-  **[📄 Download PDF](https://mlsysbook.ai/pdf)** •
+  **[📄 Download PDF](https://mlsysbook.ai/assets/downloads/Machine-Learning-Systems.pdf)** •
   **[📓 Download EPUB](https://mlsysbook.ai/epub)** •
   **[🌐 Explore Ecosystem](https://mlsysbook.org)**
 
