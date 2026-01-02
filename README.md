@@ -151,14 +151,33 @@ This textbook teaches you to think at the intersection of machine learning and s
 
 ### Book Structure
 
+This textbook is organized into **two volumes** following the Hennessy & Patterson pedagogical model:
+
+| Volume | Theme | Focus |
+|--------|-------|-------|
+| **Volume I** | Build, Optimize, Operate | Single-machine ML systems, foundational principles |
+| **Volume II** | Scale, Distribute, Govern | Distributed systems at production scale |
+
+**Volume I** teaches you to *understand* ML systems (like "Computer Organization and Design").
+**Volume II** teaches you to *build* ML systems at scale (like "Computer Architecture").
+
+#### Volume I: Build, Optimize, Operate
+
 | Part | Focus | Chapters |
 |------|-------|----------|
-| **I. Foundations** | Core concepts | Introduction, ML Systems, DL Primer, Architectures |
-| **II. Design** | Building blocks | Workflow, Data Engineering, Frameworks, Training |
-| **III. Performance** | Making it fast | Efficient AI, Optimizations, HW Acceleration, Benchmarking |
-| **IV. Deployment** | Making it work | MLOps, On-device Learning, Privacy, Robustness |
-| **V. Trust** | Making it right | Responsible AI, Sustainable AI, AI for Good |
-| **VI. Frontiers** | What's next | Emerging trends and future directions |
+| **I. ML Foundations** | Core concepts | Introduction, ML Systems, DL Primer, Architectures |
+| **II. System Development** | Building blocks | Workflow, Data Engineering, Frameworks, Training |
+| **III. Model Optimization** | Making it fast | Efficient AI, Optimizations, HW Acceleration, Benchmarking |
+| **IV. System Operations** | Making it work | MLOps, Responsible Engineering |
+
+#### Volume II: Scale, Distribute, Govern
+
+| Part | Focus | Chapters |
+|------|-------|----------|
+| **I. Foundations of Scale** | Infrastructure | Infrastructure, Storage, Communication |
+| **II. Distributed Systems** | Coordination | Distributed Training, Fault Tolerance, Inference, Edge Intelligence |
+| **III. Production Challenges** | Operations | On-device Learning, Privacy & Security, Robust AI, Ops at Scale |
+| **IV. Responsible Deployment** | Trust | Responsible AI, Sustainable AI, AI for Good, Frontiers |
 
 ---
 
