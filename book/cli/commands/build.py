@@ -204,6 +204,34 @@ class BuildCommand:
             except:
                 pass
 
+    def build_volume(self, volume: str, format_type: str = "pdf") -> bool:
+        """Build all chapters in a specific volume.
+
+        Args:
+            volume: Volume to build ('vol1' or 'vol2')
+            format_type: Format to build ('pdf', 'epub')
+
+        Returns:
+            True if build succeeded, False otherwise
+        """
+        volume_name = "Volume I" if volume == "vol1" else "Volume II"
+        console.print(f"[magenta]📖 Building {volume_name} ({format_type.upper()})...[/magenta]")
+
+        # Get all chapters in this volume
+        chapter_files = self.chapter_discovery.get_volume_chapters(volume)
+
+        if not chapter_files:
+            console.print(f"[red]No chapters found in {volume}[/red]")
+            return False
+
+        console.print(f"[dim]Found {len(chapter_files)} chapters in {volume}[/dim]")
+
+        # Build using the same approach as build_chapters
+        return self.build_chapters(
+            [f"{volume}/{ch.stem}" for ch in chapter_files],
+            format_type
+        )
+
     def _build_both_formats(self) -> bool:
         """Build both HTML and PDF formats sequentially."""
         console.print("[blue]📚 Building both HTML and PDF formats...[/blue]")
