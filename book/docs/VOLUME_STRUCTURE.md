@@ -10,14 +10,14 @@
 
 This textbook is organized into two volumes following the Hennessy & Patterson pedagogical model:
 
-- **Volume I: Build, Optimize, Operate** - Foundational knowledge for single-machine ML systems
+- **Volume I: Build, Optimize, Deploy** - Foundational knowledge for single-machine ML systems
 - **Volume II: Scale, Distribute, Govern** - Advanced distributed systems at production scale
 
 Each volume stands alone as a complete learning experience while together forming a comprehensive treatment of the field.
 
 ---
 
-## Volume I: Build, Optimize, Operate
+## Volume I: Build, Optimize, Deploy
 
 ### Goal
 A reader completes Volume I and can competently build, optimize, and deploy ML systems on a single machine with awareness of responsible practices.
