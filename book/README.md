@@ -45,17 +45,17 @@ This textbook is organized into **two volumes** following the Hennessy & Patters
 
 | Volume | Theme | Focus |
 |--------|-------|-------|
-| **Volume I** | Build, Optimize, Operate | Single-machine ML systems, foundational principles |
+| **Volume I** | Build, Optimize, Deploy | Single-machine ML systems, foundational principles |
 | **Volume II** | Scale, Distribute, Govern | Distributed systems at production scale |
 
-#### Volume I: Build, Optimize, Operate
+#### Volume I: Build, Optimize, Deploy
 
 | Part | Focus | Chapters |
 |------|-------|----------|
-| **ML Foundations** | Core concepts | Introduction, ML Systems, DL Primer, Architectures |
-| **System Development** | Building blocks | Workflow, Data Engineering, Frameworks, Training |
-| **Model Optimization** | Making it fast | Efficient AI, Optimizations, HW Acceleration, Benchmarking |
-| **System Operations** | Making it work | MLOps, Responsible Engineering |
+| **Foundations** | Core concepts | Introduction, ML Systems, DL Primer, Architectures |
+| **Development** | Building blocks | Workflow, Data Engineering, Frameworks, Training |
+| **Optimization** | Making it fast | Efficient AI, Optimizations, HW Acceleration, Benchmarking |
+| **Deployment** | Making it work | Serving, MLOps, Responsible Engineering |
 
 #### Volume II: Scale, Distribute, Govern
 
@@ -124,7 +124,7 @@ cd book
 book/
 ├── quarto/              # Book source (Quarto markdown)
 │   ├── contents/        # Chapter content
-│   │   ├── vol1/        # Volume I: Build, Optimize, Operate
+│   │   ├── vol1/        # Volume I: Build, Optimize, Deploy
 │   │   ├── vol2/        # Volume II: Scale, Distribute, Govern
 │   │   ├── frontmatter/ # Preface, about, changelog
 │   │   └── backmatter/  # References, glossary
