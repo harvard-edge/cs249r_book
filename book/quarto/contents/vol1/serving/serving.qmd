@@ -13,7 +13,7 @@ glossary: serving_glossary.json
 :::
 
 \noindent
-![](images/png/serving.png){width=80%}
+![](images/png/cover_serving.png){width=80%}
 
 :::
 
@@ -234,6 +234,10 @@ This equation reveals why serving systems exhibit nonlinear behavior. At 50% uti
 
 : **Utilization-Latency Relationship**: Average wait time as a multiple of service time for an M/M/1 queue. The nonlinear relationship explains why systems that perform well at moderate load can suddenly violate SLOs when traffic increases. {#tbl-utilization-latency}
 
+The M/M/1 model assumes exponentially distributed service times, but ML inference typically has near-constant service time for fixed batch sizes, making the M/D/1 (deterministic service) model more accurate in practice. We use M/M/1 here because it yields closed-form solutions and produces conservative estimates. For M/D/1 queues, average wait time is approximately half of M/M/1 at the same utilization, which matters for capacity planning: M/M/1 analysis will slightly over-provision, erring on the side of meeting SLOs rather than violating them.[^fn-queuing-models]
+
+[^fn-queuing-models]: **Queuing Model Selection**: For deeper treatment of M/M/c (multi-server) and M/G/1 (general service distribution) queues applicable to ML serving, see Harchol-Balter's *Performance Modeling and Design of Computer Systems* [@harchol2013performance], particularly chapters on server farms and scheduling policies.
+
 ### Tail Latency {#sec-serving-tail-latency}
 
 Production SLOs typically specify percentile targets (p95, p99) rather than averages because tail latency determines user experience for the slowest requests [@dean2013tail]. For an M/M/1 queue, the p99 latency follows:
@@ -308,7 +312,11 @@ For requests that fan out to many backends, first send the request to a small su
 
 When load exceeds capacity, return approximate results rather than timing out. For classification, return cached predictions for similar inputs. For generative models, return shorter outputs. For ensemble systems, return predictions from a subset of models. This maintains responsiveness at the cost of some accuracy, which users often prefer to outright failures.
 
-These techniques become essential at scale when fan-out amplification makes individual server tail latency visible to users. Single-machine serving systems can implement hedged and tied requests across GPU streams or model replicas; distributed systems covered in @sec-inference-at-scale extend these patterns across nodes.
+**Admission Control**
+
+When traffic exceeds capacity, accepting all requests guarantees SLO violations for everyone. Admission control proactively rejects requests when queue depth exceeds a threshold, returning immediate 503 responses rather than accepting requests that will timeout. This sacrifices throughput to protect latency for admitted requests. The threshold typically equals 2-3× the service time multiplied by the number of workers. Adaptive admission control adjusts thresholds based on observed p99 latency, tightening when latency increases.
+
+These techniques become essential at scale when fan-out amplification makes individual server tail latency visible to users. Single-machine serving systems can implement hedged and tied requests across GPU streams or model replicas. The queuing analysis here assumes FIFO processing, but production systems often implement priority scheduling (deadline-aware, shortest-job-first) to further reduce tail latency for heterogeneous workloads [@harchol2013performance].
 
 ## Training-Serving Skew {#sec-serving-skew}
 
@@ -495,6 +503,14 @@ The mechanism works as follows: when a sequence generates its end-of-sequence to
 Systems implementing continuous batching, such as vLLM and TensorRT-LLM, achieve 2-4× higher throughput than traditional static batching [@agrawal2024sarathi]. The improvement comes from two sources: eliminating wasted compute on completed sequences and reducing average wait time for new requests. For production language model serving where response lengths vary from single tokens to thousands, continuous batching has become essential for cost-effective deployment.
 
 Memory management adds complexity to continuous batching. As sequences enter and exit the batch, the key-value cache that stores attention context must be dynamically allocated and freed. PagedAttention, introduced in vLLM, applies operating system paging concepts to manage this memory efficiently, avoiding fragmentation that would otherwise limit batch capacity [@kwon2023vllm]. These techniques represent the intersection of classical systems engineering with modern ML serving challenges.
+
+::: {.callout-note title="LLM Serving: Beyond the Fundamentals"}
+
+Language model serving introduces challenges beyond the batching and memory principles established here. The key-value cache that stores attention context scales with sequence length and batch size, often exceeding the model weights themselves in memory consumption. Techniques like speculative decoding use small draft models to propose multiple tokens that the target model verifies in parallel, achieving 2-3× latency reduction for interactive applications. Weight-only quantization (INT4 weights with FP16 activations) proves more effective than activation quantization for memory-bandwidth-bound LLM inference.
+
+These LLM-specific optimizations build directly on the foundations this chapter establishes: queuing theory governs request scheduling, batching tradeoffs determine throughput-latency curves, and precision selection follows the same accuracy-efficiency principles. The serving fundamentals apply universally; LLM serving adds domain-specific techniques atop this foundation.
+
+:::
 
 ### When Not to Batch {#sec-serving-no-batch}
 
