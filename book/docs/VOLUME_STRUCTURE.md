@@ -31,7 +31,7 @@ A reader completes Volume I and can competently build, optimize, and deploy ML s
 - Single semester "Introduction to ML Systems" course
 - Foundation for more advanced distributed systems or MLOps courses
 
-### Structure (15 chapters)
+### Structure (16 chapters)
 
 #### Part I: Foundations
 Establish the conceptual framework for understanding ML as a systems discipline.
@@ -68,9 +68,10 @@ Getting models into production responsibly.
 
 | Ch | Title | Purpose |
 |----|-------|---------|
-| 13 | ML Operations | Deployment, monitoring, CI/CD for ML |
-| 14 | Responsible Engineering | Ethics, safety, and professional practice |
-| 15 | Conclusion | Synthesis and bridge to Volume II |
+| 13 | Serving | Inference fundamentals, batching, latency optimization |
+| 14 | ML Operations | Deployment, monitoring, CI/CD for ML |
+| 15 | Responsible Engineering | Ethics, safety, and professional practice |
+| 16 | Conclusion | Synthesis and bridge to Volume II |
 
 ---
 
@@ -123,14 +124,14 @@ Real-world complexities of operating ML systems.
 | 9 | Privacy & Security | Differential privacy, secure computation, attacks |
 | 10 | Robust AI | Adversarial robustness, distribution shift |
 | 11 | ML Ops at Scale | Advanced MLOps, platform engineering |
+| 12 | Sustainable AI | Environmental impact, efficient computing |
 
 #### Part IV: Responsible Deployment
 Building ML systems that benefit society.
 
 | Ch | Title | Purpose |
 |----|-------|---------|
-| 12 | Responsible AI | Fairness, accountability, transparency |
-| 13 | Sustainable AI | Environmental impact, efficient computing |
+| 13 | Responsible AI | Fairness, accountability, transparency |
 | 14 | AI for Good | Applications for societal benefit |
 | 15 | Frontiers | Emerging trends, open problems |
 | 16 | Conclusion | Synthesis, future of the field |
@@ -166,7 +167,7 @@ When deciding where content belongs, ask: **What is the SCOPE of the system bein
 
 | Metric | Volume I | Volume II |
 |--------|----------|-----------|
-| Chapters | 15 | 16 |
+| Chapters | 16 | 16 |
 | Parts | 4 | 4 |
 | Focus | Single system | Distributed systems |
 | Prerequisite | None | Volume I |
