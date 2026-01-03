@@ -132,7 +132,7 @@ This document establishes the systematic framework for ensuring pedagogical vali
 | Cognitive Level | Appropriate Question Types | Examples |
 |----------------|---------------------------|----------|
 | Remember | MCQ (recall), TF, FILL | "What is the primary lesson from Sutton's Bitter Lesson?" |
-| Understand | MCQ (comprehension), SHORT (explain) | "Explain how the AI Triangle framework helps..." |
+| Understand | MCQ (comprehension), SHORT (explain) | "Explain how the AI Triad framework helps..." |
 | Apply | SHORT (scenario), ORDER (sequence) | "In a production system, how might you address..." |
 | Analyze | SHORT (compare/contrast), MCQ (complex) | "Analyze how data drift affects performance..." |
 | Evaluate | SHORT (critique/assess) | "Evaluate the trade-offs between..." |
