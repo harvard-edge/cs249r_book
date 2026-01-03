@@ -7,134 +7,881 @@ glossary: serving_glossary.json
 
 # Serving {#sec-serving}
 
-::: {.callout-tip title="Learning Objectives"}
+::: {layout-narrow}
+::: {.column-margin}
+*DALL·E 3 Prompt: An illustration of a machine learning serving system, depicted as a high-speed assembly line in a modern factory. On one end, raw data (images, text documents, sensor readings) enters on conveyor belts. In the center, a glowing neural network processes inputs through preprocessing stations, a central inference engine, and postprocessing units. Workers monitor latency gauges and throughput meters. Some requests wait in small batches while others stream through individually. The scene conveys speed, precision, and the transformation from raw input to useful predictions, with visible clocks emphasizing the time-critical nature of serving.*
+:::
 
-- Distinguish between training and inference optimization objectives, explaining why latency constraints fundamentally change system design
-- Analyze end-to-end serving latency by decomposing requests into preprocessing, inference, and postprocessing stages
-- Identify preprocessing bottlenecks and implement strategies to maintain parity between training and serving pipelines
-- Apply batching strategies that balance throughput and latency to meet service level objectives
-- Evaluate model loading strategies and memory management techniques for production serving
-- Implement appropriate postprocessing pipelines including decoding strategies and output formatting
-- Design request handling systems that manage concurrency, backpressure, and graceful degradation
-- Profile serving systems to identify bottlenecks and optimize hardware utilization
+\noindent
+![](images/png/serving.png){width=80%}
 
 :::
 
 ## Purpose {.unnumbered}
 
-This chapter addresses a fundamental question in machine learning systems: how do we transform a trained model into a responsive service that delivers predictions reliably and efficiently? While training optimizes for throughput over hours or days, serving demands consistent, low-latency responses for individual requests. This shift from batch processing to real-time response creates entirely different system requirements that many practitioners underestimate.
+_How do the system requirements for serving trained models differ from training them, and what principles govern the design of responsive prediction systems?_
 
-Understanding serving fundamentals is essential because even the most sophisticated model provides no value until it serves predictions to users. The techniques covered here, from preprocessing optimization to error handling, form the foundation for all deployment scenarios. A common misconception is that faster GPUs automatically mean faster serving. In practice, preprocessing, data movement, and postprocessing often dominate latency. Mastering single-machine serving prepares you for the distributed scaling challenges addressed in Volume II while providing immediately applicable skills for production deployment.
+Training and serving are fundamentally different computational paradigms requiring distinct system designs. Training optimizes throughput over days or weeks of computation while serving inverts this priority, optimizing latency per request under strict time constraints measured in milliseconds. A common misconception is that faster hardware automatically means faster serving, but in practice preprocessing and postprocessing often dominate latency: production systems report preprocessing consuming 60-70% of total request time when inference runs on optimized accelerators. Understanding where latency actually comes from requires mastering queuing theory fundamentals that explain why systems degrade nonlinearly under load, recognizing how traffic patterns (Poisson arrivals for servers, streaming for autonomous vehicles, single-user for mobile) determine batching strategy, and connecting serving decisions to prior chapters on quantization, hardware acceleration, and benchmarking. The principles established here for single-machine serving provide the foundation for understanding when and why scaling to multiple machines becomes necessary
 
-## The Serving Mindset {#sec-serving-mindset}
+::: {.callout-tip title="Learning Objectives"}
 
-TODO: Mental model shift from training to inference optimization
-- Latency vs throughput trade-offs
-- Anatomy of end-to-end latency
-- Why p99 latency matters more than mean latency
-- Latency budgets and allocation across pipeline stages
+- Explain why serving optimization differs fundamentally from training optimization, focusing on latency constraints and request-level thinking
 
-## Preprocessing: The Hidden Bottleneck {#sec-serving-preprocessing}
+- Identify training-serving skew in preprocessing pipelines and implement strategies to maintain parity between training and production environments
 
-TODO: Input transformation before model inference
-- Input validation and sanitization
-- Normalization and feature scaling (must match training exactly)
-- Tokenization for text models
-- Image preprocessing (resizing, color normalization, format conversion)
-- Feature extraction for tabular data
-- Critical importance of preprocessing parity between training and serving
-- CPU vs GPU preprocessing trade-offs
+- Apply appropriate batching strategies for different model types and latency requirements, understanding the fundamental tradeoff between throughput and individual request latency
 
-## Model Loading and Memory Management {#sec-serving-model-loading}
+- Implement postprocessing pipelines including decoding strategies for generative models and output formatting for production APIs
 
-TODO: How models occupy memory and loading strategies
-- Model serialization formats (SavedModel, ONNX, TorchScript)
-- Cold-start latency: disk to CPU to GPU
-- Memory mapping vs full loading
-- Multi-model serving on single machine
-- GPU memory allocation and fragmentation
-- Model warmup (why first inference is slower)
+- Evaluate model loading strategies and memory management techniques for production serving systems
 
-## Inference Optimization {#sec-serving-inference-optimization}
+- Select appropriate serving runtimes and frameworks based on deployment constraints and performance requirements
 
-TODO: Making model computation fast
-- Batching strategies: static, dynamic, continuous batching for LLMs
-- Batching trade-offs (throughput vs individual request latency)
-- Quantization for inference (INT8, FP16)
-- Graph optimization: operator fusion, constant folding
-- Runtime selection (TensorRT, ONNX Runtime, TorchScript)
-- KV-cache management for autoregressive models
+:::
 
-## Postprocessing: From Tensors to Responses {#sec-serving-postprocessing}
+## From Training to Production {#sec-serving-training-to-production}
 
-TODO: Converting raw outputs to useful responses
-- Output decoding: softmax, beam search, sampling strategies
-- Structured output generation (JSON mode, constrained decoding)
-- Confidence thresholds and fallback logic
-- Multi-head output handling
-- Response formatting and serialization
-- Streaming responses for generative models
+The journey from a trained model to a production system crosses a fundamental boundary. Previous chapters established how to train models efficiently (@sec-ai-training), optimize them for deployment (@sec-model-optimizations), and accelerate their execution on specialized hardware (@sec-ai-acceleration). Serving introduces a new dimension that transforms every prior decision: real-time responsiveness under unpredictable load. Where training optimizes for samples processed per hour over days of computation, serving must deliver predictions within milliseconds while handling request patterns that no training process could anticipate.
 
-## Request Handling and Concurrency {#sec-serving-concurrency}
+This inversion of priorities has profound consequences. The benchmarking techniques from @sec-benchmarking-perf-analysis now target percentile latencies rather than aggregate throughput. The quantization methods from @sec-model-optimizations must be validated not just for accuracy preservation but for calibration with production traffic. The hardware acceleration from @sec-ai-acceleration must be configured for single-request responsiveness rather than batch throughput. Understanding these connections enables practitioners to apply earlier optimizations correctly in the serving context.
 
-TODO: Managing multiple concurrent requests
-- Synchronous vs asynchronous request handling
-- Thread pools, async/await, process-based concurrency
-- The GIL problem in Python and workarounds
-- Request queuing and backpressure
-- Timeout handling and graceful degradation
-- Connection management
+The serving systems examined here focus on single-machine deployment, establishing the foundational principles that govern all inference systems. These foundations prepare practitioners for distributed serving patterns, including load balancing across nodes and model sharding for models exceeding single-machine memory, covered in @sec-inference-at-scale.
 
-## Hardware Utilization and Profiling {#sec-serving-profiling}
+::: {.callout-note title="Lighthouse Example: Serving a ResNet-50 Image Classifier"}
 
-TODO: Measuring and optimizing performance
-- GPU utilization metrics and what they mean
-- Profiling tools (NVIDIA Nsight, PyTorch Profiler)
-- Identifying bottlenecks: CPU-bound, GPU-bound, memory-bound, I/O-bound
-- Power and thermal considerations
-- Multi-GPU inference on single machine
+This chapter uses **serving a ResNet-50 image classification model** as a consistent reference point to ground abstract concepts in concrete reality. ResNet-50 represents an ideal teaching example because it:
 
-## Serving Frameworks and APIs {#sec-serving-frameworks}
+- **Spans common deployment scenarios**: Used in everything from mobile apps to cloud APIs
+- **Has well-documented performance characteristics**: 25.6M parameters, ~4 GFLOPS per inference, extensively benchmarked
+- **Exhibits all key serving challenges**: Preprocessing overhead (image decoding, resizing), batching tradeoffs, memory management
+- **Represents production ML systems**: Image classification remains one of the most widely deployed ML applications
 
-TODO: Evaluating and using serving infrastructure
-- Framework comparison (TorchServe, Triton, TensorFlow Serving, vLLM)
-- REST vs gRPC trade-offs
-- Protocol buffers and serialization
-- Health checks and readiness probes
-- Graceful shutdown and connection draining
+**Key ResNet-50 Serving Specifications:**
 
-## Error Handling and Reliability {#sec-serving-reliability}
+- **Parameters**: 25.6 million (98MB FP32, 49MB FP16, 25MB INT8)
+- **Input**: 224×224×3 RGB images (150KB typical JPEG, 588KB uncompressed tensor)
+- **Inference Time**: ~5ms on V100 GPU (batch=1), ~1ms per image at batch=32
+- **Preprocessing**: JPEG decode (~3ms), resize (~1ms), normalize (~0.5ms)
+- **Memory Footprint**: ~400MB GPU memory including activations
 
-TODO: Handling failures gracefully
-- Input validation and error responses
-- OOM handling and recovery
-- Timeout implementation
-- Retry logic with exponential backoff
-- Circuit breakers
-- Logging and debugging in production
+**🔄 ResNet-50 Example Markers** appear at strategic points where this specific model illuminates the concept under discussion. Each example provides quantitative specifications and concrete implementation decisions encountered when serving this model.
 
-## Security Considerations {#sec-serving-security}
+:::
 
-TODO: Security implications of ML serving
-- Input validation as security (prompt injection, adversarial inputs)
-- Model access control
-- Rate limiting
-- Output filtering (PII detection, content safety)
-- Audit logging
+## Serving System Fundamentals {#sec-serving-fundamentals}
 
-## Cost and Resource Planning {#sec-serving-cost}
+Serving systems occupy a unique position in the machine learning lifecycle, operating under constraints that differ fundamentally from both training and batch processing. Before examining specific optimization techniques, we must establish the conceptual framework that distinguishes these systems from other computational workloads.
 
-TODO: Operational economics
-- Estimating compute requirements from latency SLOs
-- Cost per inference calculation
-- GPU vs CPU inference trade-offs
-- Right-sizing and model selection
-- Capacity planning for traffic patterns
+::: {.callout-definition title="Model Serving"}
+
+***Model Serving*** is the process of exposing trained machine learning models for _real-time prediction_, requiring systems that transform raw inputs into useful outputs while meeting _latency constraints_, maintaining _consistency_ with training behavior, and achieving _cost-effective resource utilization_.
+
+:::
+
+The defining characteristic of serving systems is their request-driven nature. Unlike training, where the system controls when and how data flows through the model, serving systems must respond to external requests that arrive unpredictably. This fundamental difference shapes every design decision, from memory management to error handling.
+
+### Static vs Dynamic Inference {#sec-serving-static-dynamic}
+
+The first architectural decision in any serving system is whether predictions happen before or during user requests [@google2024staticdynamic]. This choice fundamentally shapes system design, cost structure, and capability boundaries.
+
+**Static inference** (also called offline or batch inference) pre-computes predictions for anticipated inputs and stores them for retrieval. Consider a recommendation system that generates predictions for all user-item pairs nightly. When a user requests recommendations, the system retrieves pre-computed results from a lookup table rather than running inference. This approach eliminates inference latency entirely since results already exist, enables quality verification before deployment, and dramatically reduces serving costs. However, static inference cannot handle novel inputs that were not anticipated during the batch computation and introduces hours or days of latency when models update.
+
+**Dynamic inference** (also called online or real-time inference) computes predictions on demand when requests arrive. This handles any input, including rare edge cases and novel combinations, and immediately reflects model updates. The cost is strict latency requirements that may force simpler models and more intensive monitoring infrastructure.
+
+::: {.callout-note title="🔄 ResNet-50: Static vs Dynamic Tradeoffs"}
+
+For our ResNet-50 image classifier, consider two deployment scenarios:
+
+**Static approach**: A photo organization app pre-classifies all images in a user's library overnight. With 10,000 photos and 5ms inference each, batch processing takes ~50 seconds total. Users see instant classification when browsing their library.
+
+**Dynamic approach**: A content moderation API must classify user-uploaded images in real-time. Each image requires the full preprocessing→inference→postprocessing pipeline, with a 100ms latency budget to meet user expectations.
+
+Most production image classification systems use a **hybrid approach**: frequently requested images (popular products, known memes) are pre-classified and cached, while novel uploads trigger dynamic inference. This reduces average latency while maintaining flexibility.
+
+:::
+
+Most production systems combine both approaches. Common queries hit a cache populated by batch inference while uncommon requests trigger dynamic computation. Understanding this spectrum is essential because it determines which subsequent optimization strategies apply. Static inference optimizes for throughput during batch computation and storage efficiency for serving. Dynamic inference optimizes for per-request latency under concurrent load, which requires understanding where time goes within each request.
+
+## The Latency Budget {#sec-serving-latency-budget}
+
+For dynamic inference systems, the fundamental difference from training lies in optimization objectives. Training optimizes throughput: maximizing samples processed per hour over days of computation. A training job that processes 1000 samples per second is successful regardless of how long any individual sample takes. Serving inverts this priority, optimizing latency per request under strict time constraints. A serving system with 1000ms per-request latency has failed, even if it achieves excellent throughput.
+
+This mindset shift has concrete implications for system design [@gujarati2020serving]. The metrics that matter change from aggregate throughput to latency distributions. Mean latency tells you little about user experience; p50, p95, and p99 latencies reveal how the system performs across the full range of requests. If your mean latency is 50ms but p99 is 2 seconds, one in a hundred users waits 40 times longer than average. For consumer-facing applications, these tail latencies often determine user satisfaction and retention.[^fn-tail-latency]
+
+[^fn-tail-latency]: **Tail Latency Impact**: Research at Google found that users are more sensitive to latency variance than mean latency. A 100ms increase in p99 latency can reduce revenue by 1% for e-commerce applications. This is why service level objectives (SLOs) typically specify percentile targets rather than averages.
+
+::: {.callout-definition title="Latency Budget"}
+
+***Latency Budget*** is the maximum time allowed for a serving request to complete, decomposed into allocations for _preprocessing_, _inference_, and _postprocessing_ phases. Effective latency budgeting requires understanding where time is consumed and allocating resources accordingly.
+
+:::
+
+Every serving request decomposes into three phases, each consuming part of the latency budget:
+
+1. **Preprocessing**: Transform raw input (image bytes, text strings) into model-ready tensors
+2. **Inference**: Execute the model computation
+3. **Postprocessing**: Transform model outputs into user-facing responses
+
+A common misconception is that faster hardware automatically means faster serving. In practice, preprocessing and postprocessing often dominate total latency. Studies of production systems show preprocessing consuming 60-70% of total request time when inference runs on optimized accelerators [@nvidia2024tritontutorial]. Optimizing only the inference phase yields diminishing returns when the surrounding pipeline remains bottlenecked on CPU operations.
+
+### Latency Distribution Analysis {#sec-serving-latency-analysis}
+
+Understanding where time goes requires instrumenting each phase independently. Consider what happens when our ResNet-50 classifier receives a JPEG image:
+
+::: {.callout-note title="🔄 ResNet-50: Latency Budget Breakdown"}
+
+A typical serving request for our ResNet-50 classifier shows the following latency distribution:
+
+| Phase | Operation | Time | Percentage |
+|-------|-----------|------|------------|
+| Preprocessing | JPEG decode | 3.0ms | 30% |
+| Preprocessing | Resize to 224×224 | 1.0ms | 10% |
+| Preprocessing | Normalize (mean/std) | 0.5ms | 5% |
+| Data Transfer | CPU→GPU copy | 0.5ms | 5% |
+| **Inference** | **ResNet-50 forward pass** | **5.0ms** | **50%** |
+| Postprocessing | Softmax + top-5 | 0.1ms | ~0% |
+| **Total** | | **10.1ms** | **100%** |
+
+Key insight: **Preprocessing consumes 45% of latency** despite model inference being the computationally intensive phase. With TensorRT optimization reducing inference to 2ms, preprocessing would dominate at 75%.
+
+:::
+
+This breakdown reveals why naive optimization efforts often fail. Engineers focus on model optimization (quantization, pruning) because that is where ML expertise applies, but the actual bottleneck is image decoding running on CPU. Moving preprocessing to GPU can reduce total latency by 6x in some pipelines by eliminating CPU-GPU data transfers between stages [@nvidia2024tritontutorial].
+
+**The Killer Microseconds Problem**
+
+Barroso, Patterson, and colleagues identified a critical gap in how systems handle latency at different time scales [@barroso2017attack]. Modern systems efficiently handle nanosecond-scale events (CPU cache access, DRAM reads) through hardware mechanisms like out-of-order execution, and millisecond-scale events (disk I/O, network calls) through software techniques like threading and asynchronous I/O. But microsecond-scale events fall into an uncomfortable middle ground where neither approach works well.
+
+ML serving lives squarely in this microsecond regime. Individual inference calls complete in 1-10ms, but the surrounding operations (serialization, memory allocation, network stack processing, encryption) each add microseconds that compound into significant overhead. Google's analysis found that 20-25% of datacenter CPU cycles are consumed by this "datacenter tax" rather than useful computation. For serving systems, this means:
+
+- A 2μs network fabric can become 100μs end-to-end through software overhead
+- Context switching costs (5-10μs) can exceed the inference time for small models
+- Memory allocation patterns in preprocessing can add unpredictable microsecond delays
+
+These overheads explain why serving latency often exceeds the sum of its measured parts, and why system-level optimization (memory pooling, zero-copy data paths, kernel bypass) matters as much as model optimization.
+
+The latency budget framework provides a systematic approach to optimization. First, measure each phase to identify the true bottleneck. Then allocate engineering effort proportionally to where time is actually spent. Finally, consider architectural changes (GPU preprocessing, batching strategies) that can shift work between phases.
+
+### Resolution and Input Size Tradeoffs {#sec-serving-resolution}
+
+Input resolution dramatically affects both preprocessing and inference latency, but the relationship differs depending on whether the system is compute-bound or memory-bound. Understanding this distinction (covered in depth in @sec-hw-acceleration) is essential for making informed resolution decisions.
+
+For compute-bound models, throughput scales inversely with resolution squared:
+
+$$\frac{T(r_2)}{T(r_1)} = \left(\frac{r_1}{r_2}\right)^2$$ {#eq-resolution-throughput}
+
+Doubling resolution from 224 to 448 theoretically yields 4× slowdown (measured: 3.6× due to fixed overhead amortization). However, at high resolutions, models transition from compute-bound to memory-bound as activation tensors exceed cache capacity:
+
+| Resolution | Activation Size | Arith. Intensity | Bottleneck |
+|:-----------|:----------------|:-----------------|:-----------|
+| 224×224 | 12.5MB | 290 FLOPS/byte | Compute |
+| 384×384 | 36.8MB | 168 FLOPS/byte | Transitional |
+| 512×512 | 65.5MB | 95 FLOPS/byte | Memory BW |
+| 640×640 | 102.4MB | 61 FLOPS/byte | Memory BW |
+
+: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity decreases with resolution as activation sizes grow. The V100 crossover point (~125 FLOPS/byte) occurs around 384×384, above which memory bandwidth limits throughput more than compute capacity. {#tbl-resolution-bottleneck}
+
+**Deployment-Specific Resolution Decisions**
+
+Different deployment contexts have fundamentally different resolution requirements:
+
+- **Mobile applications**: Lower resolution (224×224) acceptable for object detection in camera viewfinders; latency and battery life dominate
+- **Medical imaging**: High resolution (512×512+) required for diagnostic accuracy; latency requirements relaxed
+- **Autonomous vehicles**: Multiple resolutions for different tasks (low-res for detection, high-res crops for recognition)
+- **Cloud APIs**: Resolution often set by client upload; service must handle range gracefully
+
+**Adaptive Resolution**
+
+Production systems can select resolution dynamically based on content:
+
+1. Run lightweight classifier at 128×128 to categorize content type
+2. Select task-appropriate resolution: documents at 512×512, landscapes at 224×224, faces at 384×384
+3. Achieve 1.4× throughput improvement with 99.2% accuracy retention versus fixed high resolution
+
+This pattern trades preprocessing cost (running the lightweight classifier) for inference savings on the main model.
+
+## Queuing Fundamentals {#sec-serving-queuing}
+
+The latency budget framework explains where time goes within a single request, but production systems must handle many concurrent requests competing for finite resources. Understanding why latency degrades under load requires queuing theory, the mathematical framework that explains how requests wait for service in any system with finite capacity. These principles apply universally, from web servers to ML inference, and they explain the counterintuitive behavior that causes well-provisioned systems to suddenly violate latency SLOs when load increases modestly.
+
+### Little's Law {#sec-serving-littles-law}
+
+The most fundamental result in queuing theory is Little's Law, which relates three quantities in any stable system:
+
+$$L = \lambda \cdot W$$ {#eq-littles-law}
+
+where $L$ is the average number of requests in the system, $\lambda$ is the arrival rate (requests per second), and $W$ is the average time each request spends in the system. This relationship holds regardless of arrival distribution, service time distribution, or scheduling policy.
+
+Little's Law has immediate practical implications. If your inference service averages 10ms per request ($W = 0.01$s) and you observe 50 concurrent requests in the system on average ($L = 50$), then your arrival rate must be $\lambda = L/W = 5000$ requests per second. Conversely, if you need to limit concurrent requests to 10 (perhaps due to GPU memory constraints), and your service time is 10ms, you can sustain at most 1000 requests per second.
+
+### The Utilization-Latency Relationship {#sec-serving-utilization-latency}
+
+For a system with Poisson arrivals and exponential service times (the M/M/1 queue model), the average time in system follows:
+
+$$W = \frac{1}{\mu - \lambda} = \frac{\text{service time}}{1 - \rho}$$ {#eq-mm1-wait}
+
+where $\mu$ is the service rate (requests per second the server can handle), and $\rho = \lambda/\mu$ is the utilization (fraction of time the server is busy).
+
+This equation reveals why serving systems exhibit nonlinear behavior. At 50% utilization, average wait time is $2\times$ the service time. At 80% utilization, it is $5\times$. At 90% utilization, it is $10\times$. The relationship is hyperbolic: small increases in load near capacity cause disproportionate latency increases.
+
+| Utilization ($\rho$) | Wait Time Multiple | Example (5ms service) |
+|:---------------------|:-------------------|:----------------------|
+| 50% | 2.0× | 10ms |
+| 70% | 3.3× | 17ms |
+| 80% | 5.0× | 25ms |
+| 90% | 10.0× | 50ms |
+| 95% | 20.0× | 100ms |
+
+: **Utilization-Latency Relationship**: Average wait time as a multiple of service time for an M/M/1 queue. The nonlinear relationship explains why systems that perform well at moderate load can suddenly violate SLOs when traffic increases. {#tbl-utilization-latency}
+
+### Tail Latency {#sec-serving-tail-latency}
+
+Production SLOs typically specify percentile targets (p95, p99) rather than averages because tail latency determines user experience for the slowest requests [@dean2013tail]. For an M/M/1 queue, the p99 latency follows:
+
+$$W_{p99} \approx \text{service time} \cdot \left(1 + \frac{\ln(100 \cdot \rho)}{1 - \rho}\right)$$ {#eq-p99-latency}
+
+At 70% utilization, p99 latency is approximately $12\times$ the service time, while average latency is only $3.3\times$. This explains why systems that seem healthy (low average latency) can have unacceptable tail latency: the average hides the experience of the unluckiest requests.
+
+**The Tail at Scale Problem**
+
+Dean and Barroso's foundational analysis reveals why tail latency becomes critical in distributed systems [@dean2013tail]. Consider a service where individual servers have 99th percentile latency of 1 second (with typical responses at 10ms). For a single server, only 1% of requests are slow. But when a user request fans out to 100 servers in parallel and waits for all responses:
+
+$$P(\text{any server slow}) = 1 - (1 - 0.01)^{100} = 0.63$$
+
+Sixty-three percent of user requests experience the slow tail. At 2,000 servers (common for large-scale services), even a 1-in-10,000 slow response rate means 18% of user requests hit the tail. This fan-out amplification explains why even rare performance hiccups become user-visible problems at scale, and why tail-tolerant techniques become essential for distributed inference systems covered in @sec-inference-at-scale.
+
+::: {.callout-note title="🔄 ResNet-50: Capacity Planning Worked Example"}
+
+Consider designing a ResNet-50 serving system with these requirements:
+
+- **Target p99 latency**: 50ms
+- **Peak expected traffic**: 5,000 requests per second
+- **Service time** (TensorRT FP16): 5ms
+
+**Step 1: Find safe utilization**
+
+Using @eq-p99-latency, we need $W_{p99} \leq 50$ms with 5ms service time. Solving for $\rho$:
+
+$$5\text{ms} \cdot \left(1 + \frac{\ln(100 \cdot \rho)}{1 - \rho}\right) \leq 50\text{ms}$$
+
+This yields $\rho \leq 0.72$ (72% maximum utilization).
+
+**Step 2: Calculate required service rate**
+
+$$\mu_{\text{required}} = \frac{\lambda}{\rho_{\text{safe}}} = \frac{5000}{0.72} = 6944 \text{ requests/second}$$
+
+**Step 3: Determine GPU count**
+
+Single V100 throughput at batch=16: 1,143 images/second
+
+$$\text{GPUs needed} = \frac{6944}{1143} = 6.1 \rightarrow 7 \text{ GPUs}$$
+
+**Step 4: Add headroom for variance**
+
+Production systems add 30% headroom for traffic spikes and variance:
+
+$$\text{Final count} = 7 \times 1.3 = 9.1 \rightarrow 10 \text{ GPUs}$$
+
+**Result**: Provision 10 V100 GPUs to serve 5,000 QPS at 50ms p99 latency.
+
+:::
+
+The queuing analysis explains the capacity planning approach mentioned in @sec-serving-capacity-planning and connects to the MLPerf Server scenario from @sec-benchmarking, which measures throughput only for requests meeting the latency SLO. A system achieving 10,000 QPS but violating the SLO on 5% of requests reports only 9,500 valid QPS.
+
+### Tail-Tolerant Techniques {#sec-serving-tail-tolerant}
+
+Rather than eliminating all sources of latency variability (often impractical), production systems employ techniques that tolerate variability while still meeting SLOs [@dean2013tail; @dean2012rapid]. These techniques treat latency variance as a fact of life and design around it.
+
+**Hedged Requests**
+
+When a request has not completed within the expected time, send a duplicate request to another server. The client uses whichever response arrives first and cancels the other. For ML serving, this means maintaining multiple model replicas and routing slow requests to alternative replicas. The overhead is modest: if you hedge at the 95th percentile, only 5% of requests generate duplicates, increasing load by just 5% while dramatically reducing tail latency.
+
+**Tied Requests**
+
+Send the request to multiple servers simultaneously, but include a tag allowing servers to cancel execution once another server begins processing. This eliminates the delay of waiting to detect a slow response before hedging. For inference servers with significant startup overhead (model loading, memory allocation), tied requests ensure at least one server begins immediately.
+
+**Canary Requests**
+
+For requests that fan out to many backends, first send the request to a small subset (1-2 servers). If these return within expected time, send to the remainder. If the canary is slow, the system can take corrective action (retry elsewhere, use cached results) before committing to the full fan-out. This prevents a single slow backend from stalling an entire distributed inference request.
+
+**Graceful Degradation**
+
+When load exceeds capacity, return approximate results rather than timing out. For classification, return cached predictions for similar inputs. For generative models, return shorter outputs. For ensemble systems, return predictions from a subset of models. This maintains responsiveness at the cost of some accuracy, which users often prefer to outright failures.
+
+These techniques become essential at scale when fan-out amplification makes individual server tail latency visible to users. Single-machine serving systems can implement hedged and tied requests across GPU streams or model replicas; distributed systems covered in @sec-inference-at-scale extend these patterns across nodes.
+
+## Training-Serving Skew {#sec-serving-skew}
+
+The queuing theory and latency analysis from previous sections assume the model produces correct predictions. However, one of the most insidious problems in production ML systems threatens this assumption: training-serving skew, the phenomenon where a model behaves differently in production than during training, despite using identical weights [@sculley2015hidden]. The model has not changed, but something in the preprocessing pipeline produces different inputs in production than during training, causing silent accuracy degradation that may go undetected for weeks or months.
+
+::: {.callout-definition title="Training-Serving Skew"}
+
+***Training-Serving Skew*** occurs when the _preprocessing logic_ or _data characteristics_ differ between training and serving environments, causing models to receive inputs that do not match their training distribution and resulting in degraded prediction quality.
+
+:::
+
+This problem is particularly dangerous because traditional software testing often fails to catch it. The serving system returns predictions, the model runs without errors, and all health checks pass. Only careful monitoring of prediction quality reveals that something is wrong.
+
+### Sources of Skew {#sec-serving-skew-sources}
+
+Understanding the common causes of training-serving skew helps practitioners design systems that avoid these pitfalls.
+
+**Numerical precision differences** arise from different implementations of the same mathematical operations. Training uses float64 mean normalization while serving uses float32, producing different normalized values. A model achieving 0.87 AUC in validation may drop to 0.78 in production purely from these inconsistencies.
+
+**Library version mismatches** introduce subtle behavioral differences. Training uses NumPy 1.24 while serving uses TensorFlow ops with different rounding behavior. Image resizing with different interpolation defaults produces subtly different pixel values that accumulate through the network.
+
+**Missing value handling** diverges when training and serving encounter null values differently. Training fills nulls with column means computed over the training set while serving uses zeros or different defaults. Features present in training become missing in production due to upstream service failures.
+
+**Time and ordering effects** cause misalignment in temporal features. Training uses UTC timestamps while serving uses local time, causing off-by-one-day errors in date features. Tokenizers trained on specific vocabulary versions encounter unknown tokens differently than during training.
+
+**Environment differences** create systemic discrepancies [@polyzotis2017data]. Training runs in analytical environments (notebooks, data lakes) while serving runs in production microservices. Re-implementing feature engineering in different frameworks (Spark for training, pandas for serving) creates two codebases that must produce identical outputs.
+
+::: {.callout-note title="🔄 ResNet-50: Image Preprocessing Skew"}
+
+For ResNet-50 serving, common sources of skew include:
+
+**Resize interpolation**: Training uses PIL.BILINEAR while OpenCV defaults to cv2.INTER_LINEAR. These produce pixel-level differences that can shift accuracy by 0.5-1%.
+
+**Color space handling**: JPEG loading in different libraries may produce BGR vs RGB ordering. If the model trained on RGB but serves BGR inputs, predictions are essentially random.
+
+**Normalization constants**: ImageNet normalization uses specific mean/std values. Using `mean=[0.5, 0.5, 0.5]` instead of `mean=[0.485, 0.456, 0.406]` shifts inputs out of the training distribution.
+
+**Prevention**: The safest approach is to export the exact preprocessing code used during training and run it identically in serving, or use a framework like NVIDIA DALI that guarantees identical operations.
+
+:::
+
+### Prevention Strategies {#sec-serving-skew-prevention}
+
+The fundamental solution is using identical preprocessing code for training and serving. This sounds obvious but proves difficult in practice. Training pipelines optimize for batch processing while serving pipelines optimize for single-request latency. Feature stores address this by centralizing feature computation, ensuring both training and serving retrieve features from the same source [@orr2021managing].
+
+When identical code is impossible, rigorous testing catches skew before deployment. Statistical comparison between training feature distributions and serving feature distributions reveals discrepancies. Shadow deployment runs the candidate model on live traffic alongside the baseline, surfacing skew that synthetic tests miss.
+
+Monitoring in production detects skew that emerges over time. Feature drift detection compares serving distributions to training baselines using statistical distance measures [@breck2019data]. When drift exceeds thresholds, alerts trigger investigation before accuracy degrades noticeably.
+
+@tbl-skew-prevention summarizes strategies for preventing and detecting training-serving skew.
+
++---------------------------+----------------------------------+----------------------------------+
+| **Strategy**              | **Approach**                     | **Tradeoffs**                    |
++:==========================+:=================================+:=================================+
+| Shared preprocessing code | Use identical code for training  | May require runtime translation  |
+|                           | and serving                      | (e.g., Python to C++)            |
++---------------------------+----------------------------------+----------------------------------+
+| Feature stores            | Centralize feature computation   | Adds infrastructure complexity   |
+|                           | for both environments            |                                  |
++---------------------------+----------------------------------+----------------------------------+
+| Statistical validation    | Compare feature distributions    | Catches drift but not all skew   |
+|                           | between training and serving     | types                            |
++---------------------------+----------------------------------+----------------------------------+
+| Shadow deployment         | Run new model alongside baseline | Doubles serving cost during      |
+|                           | on live traffic                  | validation                       |
++---------------------------+----------------------------------+----------------------------------+
+| Continuous monitoring     | Track prediction distributions   | Reactive rather than preventive  |
+|                           | and accuracy metrics             |                                  |
++---------------------------+----------------------------------+----------------------------------+
+
+: **Training-Serving Skew Prevention**: Strategies range from prevention (shared code, feature stores) to detection (statistical validation, monitoring), each with distinct operational tradeoffs. {#tbl-skew-prevention}
+
+## Model Loading and Initialization {#sec-serving-model-loading}
+
+With preprocessing pipelines designed to avoid training-serving skew, the next challenge is getting the model ready to serve. Before processing any request, models must load from storage into memory and prepare for inference [@romero2021infaas]. This initialization phase creates the cold start problem: the first request after deployment or scaling experiences dramatically higher latency. Understanding cold start dynamics is essential for designing systems that meet latency requirements from the moment they begin serving traffic.
+
+### Cold Start Anatomy {#sec-serving-cold-start}
+
+Cold start latency compounds from multiple sources, each adding to the time between deployment and serving readiness:
+
+1. **Weight loading**: Reading model parameters from disk or network storage
+2. **Graph compilation**: Just-in-time compilation of operations for the specific hardware
+3. **Memory allocation**: Reserving GPU memory for activations and intermediate values
+4. **Warmup execution**: Initial inferences that populate caches and trigger lazy initialization
+
+::: {.callout-note title="🔄 ResNet-50: Cold Start Timeline"}
+
+Loading ResNet-50 for production serving involves the following cold start phases:
+
+| Phase | Duration | Notes |
+|-------|----------|-------|
+| Weight loading (SSD) | 0.5s | 98MB FP32 weights from local storage |
+| Weight loading (S3) | 3-5s | Network latency dominates for cloud storage |
+| CUDA context | 2-3s | First GPU operation initializes CUDA runtime |
+| TensorRT compilation | 15-30s | Converts PyTorch model to optimized engine |
+| Warmup (10 inferences) | 0.2s | Triggers remaining lazy initialization |
+| **Total (local, optimized)** | **~4s** | With pre-compiled TensorRT engine |
+| **Total (cloud, first deploy)** | **~40s** | Including compilation |
+
+**Key insight**: Pre-compiling models and storing the optimized engine eliminates the 30-second compilation phase on subsequent deployments.
+
+:::
+
+Without warmup, the first real request triggers compilation and memory allocation mid-inference, often causing timeout failures. A request that normally takes 5ms might require 500ms during cold start, violating SLOs and degrading user experience.
+
+### Loading Strategies {#sec-serving-loading-strategies}
+
+Different loading strategies trade off cold start duration against serving performance and memory efficiency.
+
+**Full loading** reads the entire model into memory before serving begins. This maximizes inference speed since all weights are immediately available, but extends cold start duration and limits model size to available memory. Full loading is appropriate when cold start latency is acceptable and models comfortably fit in memory.
+
+**Memory mapping** maps model files directly into the address space, loading pages on demand as accessed. This reduces cold start time since inference can begin before the full model loads, but causes unpredictable latency as pages fault in during initial requests. Memory mapping works well for infrequently accessed model components but can cause latency spikes if critical weights are not preloaded.
+
+**Lazy initialization** defers compilation and allocation until first use. This minimizes startup time but shifts latency to the first request. Production systems often combine lazy initialization with synthetic warmup requests to trigger initialization before real traffic arrives.
+
+### Multi-Model Serving {#sec-serving-multi-model}
+
+Production systems often serve multiple models from a single machine, whether different model versions for A/B testing, ensemble components, or entirely different models sharing infrastructure. GPU memory becomes the limiting resource, requiring careful management strategies.
+
+Strategies for multi-model serving include:
+
+- **Time-multiplexing**: Load one model at a time, swapping based on request routing
+- **Memory sharing**: Models share GPU memory, limiting concurrent execution but enabling more models
+- **Model virtualization**: Frameworks like Triton manage model lifecycle, loading and unloading based on traffic patterns [@nvidia2024triton]
+
+The choice depends on request patterns. If models receive traffic evenly, concurrent loading works. If traffic is bursty and model-specific, time-multiplexing with intelligent preloading reduces average latency while maximizing GPU utilization.
+
+**Multi-Stream Execution**
+
+When multiple models (or multiple instances of the same model) must run concurrently on a single GPU, the hardware must partition resources between them. NVIDIA's Multi-Instance GPU (MIG) technology enables hardware-level isolation, dividing an A100 into up to 7 independent GPU instances, each with dedicated memory and compute resources. Without MIG, models share memory and compete for compute resources through CUDA stream scheduling, which can cause unpredictable latency interference.
+
+MIG provides stronger isolation guarantees but reduces flexibility: once partitioned, GPU slices cannot be dynamically resized. CUDA streams offer flexibility but no performance isolation. The choice depends on whether consistent latency (MIG) or maximum utilization (shared streams) is the priority. Full implementation details for multi-model orchestration across GPUs are covered in @sec-inference-at-scale.
+
+## Batching for Serving {#sec-serving-batching}
+
+Once models are loaded and ready to serve, the next optimization opportunity lies in how requests are grouped for processing. Batching fundamentally differs between training and serving [@crankshaw2017clipper]. Training batches maximize throughput, processing hundreds or thousands of samples together with no concern for individual sample latency. Serving batches must balance throughput against individual request latency, typically processing single digits of requests together while ensuring no request waits too long.
+
+::: {.callout-definition title="Dynamic Batching"}
+
+***Dynamic Batching*** is a serving strategy that collects incoming requests within a _time window_ and processes them together, trading individual request latency for improved _throughput_ and _hardware utilization_. The window size and maximum batch size parameters control this tradeoff.
+
+:::
+
+### Why Batching Helps {#sec-serving-batching-why}
+
+Modern accelerators achieve peak efficiency only at sufficient batch sizes [@shen2019nexus]. A single inference request leaves most compute units idle because GPUs are designed for parallel execution across thousands of threads. Batching amortizes fixed costs (kernel launch overhead, weight loading from memory) across multiple requests and enables parallel execution across the batch dimension.
+
+::: {.callout-note title="🔄 ResNet-50: Batching Efficiency"}
+
+The throughput-latency tradeoff for ResNet-50 on a V100 GPU illustrates the power of batching:
+
+| Batch Size | Inference Time* | Per-Image Compute | Throughput | GPU Util. |
+|:-----------|:----------------|:------------------|:-----------|:----------|
+| 1 | 5.0ms | 5.0ms | 200 img/s | 15% |
+| 4 | 7.2ms | 1.8ms | 556 img/s | 42% |
+| 8 | 9.1ms | 1.1ms | 879 img/s | 65% |
+| 16 | 14.0ms | 0.9ms | 1,143 img/s | 85% |
+| 32 | 25.0ms | 0.8ms | 1,280 img/s | 95% |
+
+*Times shown are pure inference time, excluding queue wait. User-perceived latency includes batching window wait (see @sec-serving-traffic-patterns).
+
+**Key insight**: Batch size 32 achieves 6.4× higher throughput than batch size 1. However, user-perceived latency includes both queue wait and inference time. With a 10ms batching window and 25ms inference, total latency reaches 35ms versus 5ms at batch size 1.
+
+:::
+
+However, batching forces requests to wait. A request arriving just after a batch closes must wait for the current batch to complete plus full processing of its own batch. This waiting time directly adds to user-perceived latency, creating the fundamental tradeoff that serving system designers must navigate.
+
+### Static vs Dynamic Batching {#sec-serving-batching-types}
+
+**Static batching** waits for a fixed batch size before processing. Simple to implement but problematic in practice: during low traffic, requests wait indefinitely for a full batch. During high traffic, large batches increase per-request latency.
+
+**Dynamic batching** collects requests within a time window, processing whatever has arrived when the window closes [@olston2017tensorflow]. This bounds maximum wait time regardless of traffic level. The window size represents a direct tradeoff: shorter windows reduce latency but sacrifice throughput; longer windows improve throughput but increase latency.
+
+Typical configurations use windows of 5-50ms with maximum batch sizes of 8-32 for latency-sensitive applications. The optimal configuration depends on request arrival patterns, model characteristics, and latency requirements.
+
+### Continuous Batching {#sec-serving-continuous-batching}
+
+Autoregressive models like language models generate outputs token by token, creating a batching challenge that differs fundamentally from single-pass models like ResNet-50. Traditional batching processes all sequences in a batch for all generation steps, wasting compute when sequences complete at different times [@yu2022orca]. If one sequence in a batch of 8 finishes after 10 tokens while others need 100 tokens, 87.5% of the compute for that sequence slot is wasted. This inefficiency becomes critical as language models dominate production inference workloads.
+
+Continuous batching (also called iteration-level batching) addresses this waste by allowing new requests to join a batch between generation steps and completed sequences to exit [@kwon2023vllm]. Rather than forming static batches that persist for the entire generation process, the system dynamically manages batch composition at each decoding iteration.
+
+The mechanism works as follows: when a sequence generates its end-of-sequence token, its slot becomes immediately available. A waiting request can fill that slot for the next iteration rather than waiting for the entire batch to complete. Similarly, the system can add new requests to available slots without interrupting ongoing generation. This dynamic approach maintains high GPU utilization even when sequence lengths vary dramatically.
+
+Systems implementing continuous batching, such as vLLM and TensorRT-LLM, achieve 2-4× higher throughput than traditional static batching [@agrawal2024sarathi]. The improvement comes from two sources: eliminating wasted compute on completed sequences and reducing average wait time for new requests. For production language model serving where response lengths vary from single tokens to thousands, continuous batching has become essential for cost-effective deployment.
+
+Memory management adds complexity to continuous batching. As sequences enter and exit the batch, the key-value cache that stores attention context must be dynamically allocated and freed. PagedAttention, introduced in vLLM, applies operating system paging concepts to manage this memory efficiently, avoiding fragmentation that would otherwise limit batch capacity [@kwon2023vllm]. These techniques represent the intersection of classical systems engineering with modern ML serving challenges.
+
+### When Not to Batch {#sec-serving-no-batch}
+
+Some scenarios require single-request processing:
+
+- **Ultra-low latency requirements**: When p99 latency must stay under 10ms, any batching delay is unacceptable
+- **Highly variable request sizes**: When inputs vary dramatically in size, batching creates padding overhead that wastes compute
+- **Memory constraints**: When models already consume most GPU memory, batch activations may cause out-of-memory errors
+
+### Traffic Patterns and Batching Strategy {#sec-serving-traffic-patterns}
+
+The optimal batching strategy depends critically on how requests arrive. Different deployment contexts exhibit fundamentally different arrival patterns, each requiring distinct batching approaches. The MLPerf inference benchmark codifies these patterns into four scenarios that directly map to real-world deployments (see @sec-benchmarking for MLPerf details).
+
+**Server Traffic (Poisson Arrivals)**
+
+Cloud APIs and web services typically receive requests following a Poisson process, where arrivals are independent and uniformly distributed over time. For Poisson arrivals with rate $\lambda$ and batching window $T$:
+
+$$E[\text{batch size}] = \lambda \cdot T$$ {#eq-poisson-batch}
+
+The variance equals the mean (a property of Poisson distributions), so batch sizes fluctuate significantly at moderate traffic. With $\lambda = 200$ requests/second and $T = 10$ms, expected batch size is 2, but 16% of windows will have zero requests (wasted compute cycles) while others may have 4 or more.
+
+The optimal batching window balances waiting cost against throughput benefit:
+
+$$T_{\text{optimal}} = \min\left(L - S, \sqrt{\frac{S}{\lambda}}\right)$$ {#eq-optimal-window}
+
+where $L$ is the latency SLO and $S$ is the service time. A counterintuitive result: as traffic increases, the optimal window decreases while achieved batch sizes still grow.
+
+| Arrival Rate | Optimal Window | Avg Batch Size | p99 Latency |
+|:-------------|:---------------|:---------------|:------------|
+| 100 QPS | 20ms | 2.0 | 45ms |
+| 500 QPS | 8ms | 4.0 | 42ms |
+| 1,000 QPS | 5ms | 5.0 | 38ms |
+| 5,000 QPS | 2ms | 10.0 | 35ms |
+
+: **Traffic-Adaptive Batching**: Higher traffic enables shorter windows while still achieving larger batches. The optimal window decreases even as batch sizes grow because more requests arrive per unit time. {#tbl-traffic-adaptive}
+
+**Streaming Traffic (Correlated Arrivals)**
+
+Autonomous vehicles, video analytics, and robotics systems receive inputs from multiple synchronized sensors. Rather than independent arrivals, frames from all cameras for a given timestamp must be processed together as a batch.
+
+::: {.callout-note title="🔄 Multi-Camera Autonomous Vehicle Serving"}
+
+Consider a vehicle with 6 cameras capturing at 30 FPS, requiring spatial fusion:
+
+**Timeline for processing frame set N:**
+
+| Time | Event |
+|:-----|:------|
+| T = 0ms | Cameras begin capturing frame N |
+| T = 8ms | Camera 1 frame arrives |
+| T = 10ms | Cameras 2-5 frames arrive |
+| T = 15ms | Camera 6 arrives (jitter) |
+| T = 15ms | Batch inference begins (6 images) |
+| T = 25ms | Inference complete |
+| T = 32ms | Result ready for planning module |
+
+**Key constraints:**
+
+- Hard deadline: 33ms per frame set (real-time requirement)
+- Batch size: Fixed at 6 (one per camera)
+- Synchronization budget: 12ms of 33ms total (36% for jitter tolerance)
+- Timeout policy: If camera frame not received by T+20ms, use previous frame
+
+Unlike Poisson traffic where dynamic batching optimizes throughput, streaming traffic requires synchronization policies that handle sensor jitter while meeting hard deadlines.
+
+:::
+
+**Single-User Traffic (Sequential Arrivals)**
+
+Mobile and embedded applications serve one user at a time, with requests arriving only after the previous result is consumed. Batch size is always 1, eliminating batching optimization entirely but raising different challenges.
+
+::: {.callout-note title="🔄 ResNet-50: Mobile Single-User Serving (Pixel 6 NPU)"}
+
+| Phase | Duration | Notes |
+|:------|:---------|:------|
+| Camera buffer read | 8ms | System API overhead |
+| JPEG decode (CPU) | 15ms | Single-threaded |
+| Resize + Normalize | 5ms | CPU preprocessing |
+| NPU inference | 12ms | 82% NPU utilization |
+| Post-process + UI | 5ms | Result rendering |
+| **Total** | **45ms** | Perceived as "instant" |
+
+**Critical insight**: Even at batch size 1, the mobile NPU achieves 82% utilization because its compute capacity matches single-image workloads. This differs fundamentally from datacenter GPUs, which achieve only 15% utilization at batch size 1 because their massive parallelism requires larger batches to saturate.
+
+Mobile serving optimization focuses on preprocessing efficiency and power management rather than batching strategies.
+
+:::
+
+@tbl-traffic-patterns-summary maps MLPerf scenarios to deployment contexts and appropriate batching strategies.
+
++------------------+---------------------+------------------+----------------------------+
+| **MLPerf**       | **Deployment**      | **Batch**        | **Optimization**           |
+| **Scenario**     | **Context**         | **Strategy**     | **Focus**                  |
++:=================+:====================+:=================+:===========================+
+| Server           | Cloud APIs,         | Dynamic batching | Window tuning,             |
+|                  | web services        | with timeout     | utilization-latency curve  |
++------------------+---------------------+------------------+----------------------------+
+| MultiStream      | Autonomous driving, | Synchronized     | Jitter handling,           |
+|                  | video analytics     | sensor fusion    | deadline guarantees        |
++------------------+---------------------+------------------+----------------------------+
+| SingleStream     | Mobile apps,        | No batching      | Preprocessing,             |
+|                  | embedded devices    | (batch=1)        | power efficiency           |
++------------------+---------------------+------------------+----------------------------+
+| Offline          | Batch processing,   | Maximum batch    | Throughput,                |
+|                  | data pipelines      | size             | hardware utilization       |
++------------------+---------------------+------------------+----------------------------+
+
+: **Traffic Patterns and Batching Strategies**: The MLPerf inference scenarios map to distinct deployment contexts, each requiring different batching approaches and optimization priorities. {#tbl-traffic-patterns-summary}
+
+## Postprocessing {#sec-serving-postprocessing}
+
+Batching determines how inputs flow through inference, but the journey does not end when the model produces output tensors. Model outputs are arrays of floating-point numbers. Users need predictions: labels, probabilities, generated text, structured data. Postprocessing bridges this gap, transforming raw model outputs into responses that applications can consume. While often overlooked in system design, postprocessing significantly impacts both latency and the usefulness of predictions.
+
+### From Logits to Predictions {#sec-serving-logits}
+
+Classification models output logits or probabilities across classes. Converting these to predictions involves several potential steps:
+
+- **Argmax selection**: Choosing the highest-probability class
+- **Thresholding**: Applying confidence thresholds before returning predictions
+- **Top-k extraction**: Returning multiple high-probability classes with scores
+- **Calibration**: Adjusting raw probabilities to better reflect true likelihoods
+
+::: {.callout-note title="🔄 ResNet-50: Postprocessing Pipeline"}
+
+For ResNet-50 image classification, typical postprocessing includes:
+
+```python
+# Raw model output: logits tensor of shape (batch_size, 1000)
+probs = torch.softmax(logits, dim=-1)  # 0.05ms
+top5_probs, top5_indices = probs.topk(5)  # 0.02ms
+labels = [IMAGENET_CLASSES[i] for i in top5_indices]  # 0.01ms
+
+# Response formatting
+response = {
+    "predictions": [
+        {"label": label, "confidence": float(prob)}
+        for label, prob in zip(labels, top5_probs)
+    ],
+    "model_version": "resnet50-v2.1",
+    "inference_time_ms": 5.2,
+}
+```
+
+**Total postprocessing time**: ~0.1ms (negligible compared to preprocessing and inference)
+
+:::
+
+Each step adds latency but improves response utility. Calibration in particular can add significant computation but is essential when downstream systems make decisions based on confidence scores.
+
+### Generation and Decoding {#sec-serving-decoding}
+
+Generative models require decoding strategies that trade off quality, diversity, and latency. The choice of decoding strategy can dramatically affect both output quality and computational cost.
+
+**Greedy decoding** selects the highest-probability token at each step. Fast but often produces repetitive, low-quality outputs because it cannot recover from early mistakes.
+
+**Beam search** maintains multiple candidate sequences, selecting the highest-scoring complete sequence. Produces higher-quality outputs but multiplies computation by the beam width.
+
+**Sampling** with temperature, top-k, and top-p parameters introduces randomness for diversity [@holtzman2020curious]. Temperature scales logits before softmax; top-k limits sampling to the k highest-probability tokens; top-p (nucleus sampling) limits sampling to tokens comprising probability mass p.
+
+The choice involves latency tradeoffs [@meister2020beam]. Beam search with width 5 takes roughly 5× the compute of greedy decoding. Sampling adds minimal overhead but requires careful parameter tuning to balance quality and coherence.
+
+### Output Formatting and Streaming {#sec-serving-output-format}
+
+Production systems rarely return raw predictions. Outputs must conform to API contracts, often requiring:
+
+- JSON serialization with specific schema
+- Confidence score formatting and thresholding
+- Error handling for edge cases (no confident prediction, out-of-distribution input)
+- Metadata attachment (model version, inference time, feature attributions)
+
+Streaming responses for generative models add complexity. Rather than waiting for complete generation, systems return tokens as they are produced. This improves perceived latency (users see output beginning quickly) but requires infrastructure support for chunked responses and client-side incremental rendering.
+
+## Inference Runtime Selection {#sec-serving-runtimes}
+
+The preprocessing, inference, and postprocessing pipeline we have examined runs on an inference runtime that significantly impacts latency, throughput, and operational complexity. Choosing appropriately requires understanding the tradeoffs between framework-native serving, general-purpose optimization, and specialized inference engines. This decision often determines whether a model can meet its latency SLOs.
+
+### Framework-Native Serving {#sec-serving-framework-native}
+
+PyTorch and TensorFlow models can serve directly using their native runtimes. This approach maximizes compatibility (any model that trains will serve) and simplifies the deployment pipeline (no export or conversion step). However, framework runtimes include training functionality that adds overhead, and default execution paths may not exploit hardware-specific optimizations.
+
+TorchScript and TensorFlow SavedModel formats enable ahead-of-time compilation and graph optimization, improving over eager execution while maintaining framework compatibility. These formats represent the first step toward deployment optimization without abandoning the familiar framework ecosystem.
+
+### General-Purpose Optimization {#sec-serving-onnx}
+
+ONNX Runtime provides a hardware-agnostic optimization layer [@onnxruntime2024]. Models export to ONNX format, then ONNX Runtime applies graph optimizations and selects execution providers for the target hardware. This enables single-format deployment across CPUs, GPUs, and specialized accelerators.
+
+### Specialized Inference Engines {#sec-serving-specialized}
+
+TensorRT (NVIDIA GPUs), OpenVINO (Intel hardware), and similar engines optimize specifically for their target hardware [@nvidia2024tensorrt; @chen2018tvm]. They apply aggressive optimizations: layer fusion, precision calibration, kernel auto-tuning. These typically achieve 2-5× speedup over framework-native serving but require explicit export and may not support all operations.
+
+::: {.callout-note title="🔄 ResNet-50: Runtime Comparison"}
+
+Performance comparison for ResNet-50 inference on V100 GPU (batch size 1):
+
+| Runtime | Latency | Speedup | Notes |
+|---------|---------|---------|-------|
+| PyTorch (eager) | 8.5ms | 1.0× | Baseline, no optimization |
+| TorchScript | 6.2ms | 1.4× | JIT compilation |
+| ONNX Runtime | 5.1ms | 1.7× | Cross-platform |
+| TensorRT FP32 | 2.8ms | 3.0× | NVIDIA-specific |
+| TensorRT FP16 | 1.4ms | 6.1× | Tensor Core acceleration |
+| TensorRT INT8 | 0.9ms | 9.4× | Requires calibration |
+
+**Key insight**: The 9.4× speedup from TensorRT INT8 comes at the cost of: (1) quantization calibration data, (2) potential accuracy loss (<1% for ResNet-50), and (3) NVIDIA-specific deployment.
+
+:::
+
+The optimization-compatibility tradeoff is fundamental. More aggressive optimization yields better performance but increases deployment complexity and may introduce numerical differences from training. The choice depends on latency requirements, deployment constraints, and available engineering resources.
+
+### Runtime Configuration {#sec-serving-runtime-config}
+
+Beyond runtime selection, configuration choices impact serving performance:
+
+- **Thread pools**: Controlling parallelism for CPU inference
+- **Memory allocation**: Pre-allocating buffers vs dynamic allocation
+- **Execution providers**: Selecting and prioritizing hardware backends
+- **Graph optimization level**: Trading compilation time for runtime performance
+
+Production deployments typically require experimentation to find optimal configurations for specific models and hardware combinations. A systematic approach tests key parameters and measures their impact on latency distributions.
+
+### Precision Selection for Serving {#sec-serving-precision}
+
+Numerical precision directly trades accuracy for throughput, connecting to the quantization techniques covered in @sec-model-optimizations. While @sec-model-optimizations focuses on training-time quantization, serving introduces additional considerations: calibration requirements, layer sensitivity, and dynamic precision selection.
+
+**Precision-Throughput Relationship**
+
+For memory-bandwidth-bound operations, reducing precision proportionally increases throughput by reducing data movement:
+
+$$\frac{\text{Throughput}_{\text{INT8}}}{\text{Throughput}_{\text{FP32}}} = \frac{32}{8} = 4\times \text{ (theoretical maximum)}$$ {#eq-precision-throughput}
+
+In practice, GPU compute pipelines and Tensor Core alignment requirements limit achieved speedup to 2.5-3.5× for INT8 versus FP32. Tensor Cores require specific alignment: INT8 operations need tensor dimensions divisible by 16, while FP16 requires divisibility by 8 (see @sec-hw-acceleration for Tensor Core architecture details).
+
+::: {.callout-note title="🔄 ResNet-50: Precision Tradeoffs on V100"}
+
+| Precision | Latency | Memory | Accuracy | Tensor Core Util. | Calibration |
+|:----------|:--------|:-------|:---------|:------------------|:------------|
+| FP32 | 2.8ms | 98MB | 76.13% | 0% | None |
+| FP16 | 1.4ms | 49MB | 76.13% | 85% | None |
+| INT8 (PTQ) | 0.9ms | 25MB | 75.80% | 92% | 1,000 samples |
+| INT8 (QAT) | 0.9ms | 25MB | 76.05% | 92% | Full retraining |
+
+**Key observations:**
+
+- INT8 achieves 3.1× speedup but loses 0.33% accuracy with post-training quantization (PTQ)
+- Quantization-aware training (QAT) recovers most accuracy but requires retraining
+- FP16 provides 2× speedup with no accuracy loss for most models
+
+:::
+
+**Layer Sensitivity**
+
+Not all layers tolerate reduced precision equally. Quantization error for a layer scales with weight magnitude and gradient sensitivity:
+
+$$\epsilon_{\text{quant}} \propto \alpha \cdot \|W\|_2 \cdot 2^{-b}$$ {#eq-quant-error}
+
+where $\alpha$ is a layer-specific sensitivity coefficient, $\|W\|_2$ is the weight L2 norm, and $b$ is the bit width. This explains observed patterns:
+
+- **First convolutional layers** (high gradients, large $\alpha$): Precision-sensitive, often kept at FP16
+- **Middle layers** (stable gradients, low $\alpha$): Tolerate INT8 well
+- **Final classification layers** (small weights but high task sensitivity): Benefit from FP16+
+
+**Calibration Requirements**
+
+Post-training quantization requires a calibration dataset to determine optimal scale factors for INT8 conversion. Production experience shows that calibration data must be representative of actual serving traffic, not just training data. Using ImageNet validation images to calibrate a model serving wildlife camera images resulted in 3.2% accuracy degradation in one production system.
+
+**Dynamic Precision Selection**
+
+Advanced serving systems select precision per request based on runtime conditions:
+
+- If ahead of latency SLO, use higher precision for better accuracy
+- For low-confidence INT8 results, recompute at FP16
+- Different customer tiers may receive different precision levels
+
+This pattern enables adaptive quality-latency tradeoffs while maximizing throughput during normal operation.
+
+## Cost and Capacity Planning {#sec-serving-cost}
+
+The runtime and precision choices examined in previous sections determine per-inference performance, but production deployment requires translating these choices into infrastructure decisions. Serving costs scale with request volume, unlike training costs that scale with dataset size and model complexity [@zhang2019mark]. Understanding cost structure enables informed infrastructure decisions that balance performance requirements against budget constraints.
+
+### Cost Per Inference {#sec-serving-cost-per-inference}
+
+Total serving cost decomposes into several components:
+
+- **Compute**: GPU/CPU time per inference
+- **Memory**: Accelerator memory required to hold model and activations
+- **Data transfer**: Network bandwidth for request/response payloads
+- **Orchestration overhead**: Container runtime, load balancing, monitoring
+
+For GPU inference, compute time dominates when utilization is high. When utilization is low, memory cost dominates because the GPU is reserved but idle. This creates a utilization imperative: serving infrastructure should maximize GPU utilization through batching, multi-model serving, or right-sized instance selection.
+
+::: {.callout-note title="🔄 ResNet-50: Cost Analysis"}
+
+Consider serving ResNet-50 on AWS infrastructure:
+
+| Instance Type | Cost/Hour | Throughput | Cost per 1M Images |
+|---------------|-----------|------------|-------------------|
+| c5.xlarge (CPU) | $0.17 | 50 img/s | $0.94 |
+| g4dn.xlarge (T4 GPU) | $0.53 | 400 img/s | $0.37 |
+| p3.2xlarge (V100 GPU) | $3.06 | 1,200 img/s | $0.71 |
+
+**Key insight**: The T4 GPU instance achieves the lowest cost per inference despite higher hourly cost, because GPU throughput dramatically exceeds CPU throughput. The V100 is only cost-effective at very high sustained traffic where its higher throughput justifies the 6× price increase.
+
+:::
+
+### GPU vs CPU Economics {#sec-serving-gpu-cpu}
+
+GPUs provide orders-of-magnitude speedup for parallel operations but cost significantly more per hour [@wu2019machine]. The crossover point depends on model characteristics and latency requirements.
+
+CPU inference makes economic sense when:
+
+- Models are small (few parameters, simple operations)
+- Latency requirements are relaxed (hundreds of milliseconds acceptable)
+- Request volume is low or highly variable
+- Models use operations that do not parallelize well
+
+GPU inference makes economic sense when:
+
+- Models are large with parallel-friendly operations
+- Latency requirements are strict (tens of milliseconds)
+- Request volume is high and consistent
+- Batching can achieve high utilization
+
+### Capacity Planning {#sec-serving-capacity-planning}
+
+The GPU versus CPU decision establishes the cost per inference, but determining how much infrastructure to provision requires combining cost analysis with the queuing theory foundations from @sec-serving-queuing. Capacity planning translates latency requirements and traffic projections into infrastructure specifications. Key inputs include:
+
+- **Traffic patterns**: Peak request rate, daily/weekly cycles, growth projections
+- **Latency SLOs**: p50, p95, p99 targets
+- **Model characteristics**: Inference time distribution at various batch sizes
+
+From these inputs, queuing theory determines required capacity [@harchol2013performance]. The equations developed in @sec-serving-queuing provide the mathematical foundation: @eq-mm1-wait shows how latency scales with utilization, while @eq-p99-latency enables calculating p99 latency for capacity planning.
+
+The relationship between utilization and latency is nonlinear (@tbl-utilization-latency): at 70% utilization, p99 latency is approximately 12× service time; at 90% utilization, it reaches 33× service time. This nonlinearity explains why systems that seem healthy (low average latency) can suddenly violate SLOs when traffic increases modestly.
+
+The worked example in @sec-serving-queuing demonstrates the complete capacity planning process: starting from a 50ms p99 SLO and 5,000 QPS target, deriving the safe utilization threshold (72%), calculating required service rate (6,944 QPS), and determining GPU count with headroom (10 V100s). Production systems typically provision for peak load plus 30% headroom, using auto-scaling to reduce costs during low-traffic periods while maintaining latency guarantees during peaks.
+
+## Fallacies and Pitfalls {#sec-serving-fallacies-pitfalls}
+
+The principles established throughout this chapter provide a systematic framework for designing serving systems that meet latency requirements while maximizing efficiency. However, practitioners frequently encounter misconceptions that lead to suboptimal designs or production failures. These fallacies and pitfalls emerge from the fundamental differences between training and serving that make intuitions from one domain misleading in the other.
+
+**Fallacy:** _Faster model inference automatically means faster end-to-end serving._
+
+This misconception leads teams to focus optimization efforts exclusively on model inference while ignoring preprocessing and postprocessing overhead. As demonstrated in @sec-serving-latency-budget, preprocessing often consumes 45-70% of total latency when inference runs on optimized accelerators. A team that reduces inference time from 5ms to 2ms through quantization achieves only 15% improvement in total latency if preprocessing remains at 8ms. Effective optimization requires profiling the complete request path and allocating engineering effort proportionally to where time is actually spent.
+
+**Pitfall:** _Running serving infrastructure at high utilization to maximize cost efficiency._
+
+The nonlinear relationship between utilization and latency (@eq-mm1-wait) makes high utilization dangerous for latency-sensitive systems. At 90% utilization, average wait time reaches 10× service time, and p99 latency becomes unacceptable for most SLOs. Teams that provision for average load rather than peak load find their systems violate latency guarantees precisely when traffic increases, the moment when reliable performance matters most. Production systems typically target 60-70% utilization at peak load to maintain latency headroom.
+
+**Fallacy:** _Training accuracy guarantees serving accuracy._
+
+Training-serving skew (@sec-serving-skew) causes models to behave differently in production despite using identical weights. Differences in preprocessing libraries, numerical precision, feature computation timing, or input distribution silently degrade accuracy without triggering obvious errors. A model achieving 95% accuracy in training evaluation might drop to 90% in production due to subtle preprocessing differences that shift inputs outside the training distribution. Prevention requires either identical preprocessing code paths or rigorous statistical monitoring of input distributions.
+
+**Pitfall:** _Using average latency to evaluate serving system performance._
+
+Average latency hides the experience of the slowest requests, which often determine user satisfaction and SLO compliance. A system with 10ms average latency might have 200ms p99 latency, meaning 1% of users experience 20× worse performance. At scale with fan-out amplification (@sec-serving-tail-latency), even rare slow responses become visible to most users. Production SLOs specify percentile targets (p95, p99) precisely because averages mask unacceptable tail behavior.
+
+**Fallacy:** _Larger batch sizes always improve throughput._
+
+While batching amortizes fixed costs and improves GPU utilization, it also increases per-request latency and can cause memory exhaustion. Beyond a certain point, larger batches provide diminishing throughput returns while latency continues to grow linearly. Additionally, batch sizes that exceed GPU memory cause out-of-memory failures, and highly variable input sizes create padding overhead that wastes compute. The optimal batch size depends on latency SLOs, memory constraints, and traffic patterns, not just throughput maximization.
+
+**Pitfall:** _Calibrating quantized models with training data rather than production traffic._
+
+Post-training quantization requires calibration data to determine optimal scale factors, but using training data assumes production inputs match the training distribution. When production traffic differs (different image sources, lighting conditions, user behavior), calibration on training data produces suboptimal scale factors that degrade accuracy. One production system experienced 3.2% accuracy loss when calibrating with ImageNet validation images but serving wildlife camera images. Effective calibration requires representative samples of actual serving traffic.
+
+**Fallacy:** _Cold start latency only matters for the first request._
+
+Cold start affects any request that arrives after a period of inactivity, after model updates, or when auto-scaling adds new instances. In systems with bursty traffic or multiple model versions, cold starts can affect a significant fraction of requests. A model requiring 500ms to load impacts not just the first user but every user who triggers a scale-up event or model reload. Production systems mitigate cold start through model preloading, keep-alive mechanisms, and gradual traffic shifting during deployments.
 
 ## Summary {#sec-serving-summary}
 
-TODO: Chapter synthesis and bridge to MLOps
+Serving represents the critical transition from model development to production deployment, where the optimization priorities that governed training must be fundamentally inverted. Throughout this chapter, we have seen how the shift from throughput maximization to latency minimization transforms every system design decision. The queuing theory foundations established here reveal why this inversion is not merely a change in metrics but a change in the governing mathematics: the nonlinear relationship between utilization and latency means that systems behaving well at moderate load can suddenly violate SLOs when traffic increases modestly. Little's Law and the M/M/1 wait time equations provide the quantitative foundation for capacity planning that replaces intuition-based provisioning with engineering rigor.
 
-## Exercises {#sec-serving-exercises}
+Our exploration of the latency budget demonstrates that effective serving optimization requires understanding the complete request path rather than focusing exclusively on model inference. Preprocessing often consumes 45-70% of total latency when inference runs on optimized accelerators, yet engineering effort frequently targets the wrong bottleneck. The microsecond-scale overheads identified by Barroso, Patterson, and colleagues explain why serving latency often exceeds the sum of its measured parts, and why system-level optimization matters as much as model optimization. Training-serving skew represents another dimension of this complexity, silently degrading accuracy when preprocessing logic differs between training and production environments in ways that traditional testing cannot detect.
 
-TODO: Hands-on exercises for serving systems
+The traffic pattern analysis reveals how deployment context fundamentally shapes batching strategy and system design. Server workloads with Poisson arrivals optimize dynamic batching windows, autonomous vehicles with streaming sensor data require synchronized batch formation, and mobile applications with single-user patterns eliminate batching entirely. The MLPerf scenarios codify these patterns for standardized benchmarking, connecting the serving principles established here to the measurement frameworks explored in @sec-benchmarking. Precision selection and runtime optimization extend the quantization techniques from @sec-model-optimizations and Tensor Core capabilities from @sec-hw-acceleration into the serving domain, where calibration with representative production traffic becomes essential.
+
+::: {.callout-important title="Key Takeaways"}
+* Serving inverts training priorities: latency per request matters more than aggregate throughput, requiring fundamentally different system design
+* Queuing theory provides the mathematical foundation for capacity planning, with the utilization-latency relationship explaining why systems degrade nonlinearly under load
+* Preprocessing often dominates total latency (45-70%), making pipeline optimization as important as model optimization
+* Traffic patterns (Poisson, streaming, single-user) determine optimal batching strategy, directly mapping to MLPerf inference scenarios
+* Precision selection and resolution tradeoffs connect serving decisions to optimization techniques from earlier chapters
+* Training-serving skew silently degrades accuracy and requires identical preprocessing code or rigorous monitoring to prevent
+:::
+
+The serving foundations established in this chapter provide the infrastructure for the operational deployment strategies explored in @sec-ml-operations. While this chapter focused on the mechanics of transforming requests into predictions efficiently, production environments introduce additional complexities of monitoring, versioning, and continuous validation that characterize real-world ML system deployment. The single-machine serving principles developed here also prepare practitioners for understanding when and why scaling to multiple machines becomes necessary, with distributed serving patterns including load balancing across nodes and model sharding for models exceeding single-machine memory covered in @sec-inference-at-scale.
+
+<!-- This is here to make sure that quizzes are inserted properly before a part begins. -->
+::: { .quiz-end }
+:::
