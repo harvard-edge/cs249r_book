@@ -748,8 +748,6 @@ fit=(B4)(G4)](BB4){};
 
 This sequential processing introduces device idle time, as each device must wait for the previous device to complete its computation before beginning work. For example, while device 1 processes the initial blocks, devices 2, 3, and 4 remain inactive. Similarly, when device 2 begins its computation, device 1 sits idle. This pattern of waiting and idle time reduces hardware utilization efficiency compared to other parallelization strategies.
 
-Layer-wise partitioning assigns distinct model layers to separate computing devices. In transformer architectures, this translates to specific devices managing defined sets of attention and feed-forward blocks. A 24-layer transformer model distributed across four devices assigns six consecutive transformer blocks to each device. Device 1 processes blocks 1-6, device 2 handles blocks 7-12, and so forth.
-
 #### Pipeline Parallelism {#sec-distributed-training-pipeline-parallelism}
 
 Pipeline parallelism extends layer-wise partitioning by introducing microbatching to minimize device idle time, as illustrated in @fig-pipline-parallelism. Instead of waiting for an entire batch to sequentially pass through all devices, the computation is divided into smaller segments called microbatches [@harlap2018pipedream]. Each device, as represented by the rows in the drawing, processes its assigned model layers for different microbatches simultaneously. For example, the forward pass involves devices passing activations to the next stage (e.g., $F_{0,0}$ to $F_{1,0}$). The backward pass transfers gradients back through the pipeline (e.g., $B_{3,3}$ to $B_{2,3}$). This overlapping computation reduces idle time and increases throughput while maintaining the logical sequence of operations across devices.
@@ -822,7 +820,7 @@ Pipeline parallelism extends layer-wise partitioning by introducing microbatchin
 %\node[draw=none, minimum width=4cm, minimum height=1cm, align=center, right=1cm of F0_3] (Bubble) {Bubble};
 \end{tikzpicture}
 ```
-**Pipeline Parallelism**: Microbatching distributes model layers across devices, enabling concurrent computation and minimizing idle time during both forward and backward passes to accelerate training. Activations flow sequentially between devices during the forward pass, while gradients propagate in reverse during backpropagation, effectively creating a pipeline for efficient resource utilization.
+**Pipeline Parallelism**: With model layers distributed across devices, microbatching divides each training batch into smaller segments that flow through the pipeline concurrently. This approach minimizes device idle time during both forward and backward passes by allowing multiple microbatches to be processed simultaneously at different pipeline stages. Activations flow sequentially between devices during the forward pass, while gradients propagate in reverse during backpropagation.
 :::
 
 In a transformer model distributed across four devices, device 1 would process blocks 1-6 for microbatch $N+1$ while device 2 computes blocks 7-12 for microbatch $N$. Simultaneously, device 3 executes blocks 13-18 for microbatch $N-1$, and device 4 processes blocks 19-24 for microbatch $N-2$. Each device maintains its assigned transformer blocks but operates on a different microbatch, creating a continuous flow of computation.
@@ -859,7 +857,7 @@ Another challenge is data dependency between devices. During the forward pass, a
 
 Model parallelism also increases the complexity of implementation and debugging. Partitioning the model, ensuring proper data flow, and synchronizing gradients across devices require detailed coordination. Errors in any of these steps can lead to incorrect gradient updates or even model divergence. Debugging such errors is often more difficult in distributed systems, as issues may arise only under specific conditions or workloads.
 
-A further challenge is pipeline bubbles in pipeline parallelism. With m pipeline stages, the first $m-1$ steps operate at reduced efficiency as the pipeline fills. For example, in an 8-device pipeline, the first device begins processing immediately, but the eighth device remains idle for 7 steps. This warmup period reduces hardware utilization by approximately $(m-1)/b$ percent, where $b$ is the number of batches in the training step.
+A further challenge is pipeline bubbles in pipeline parallelism. With $m$ pipeline stages, the first $m-1$ steps operate at reduced efficiency as the pipeline fills. For example, in an 8-device pipeline, the first device begins processing immediately, but the eighth device remains idle for 7 steps. This warmup period reduces hardware utilization by a fraction of approximately $(m-1)/b$, where $b$ is the number of microbatches in the training step.
 
 Finally, model parallelism may be less effective for certain architectures, such as models with highly interdependent operations. In these cases, splitting the model may lead to excessive communication overhead, outweighing the benefits of parallel computation. For such models, alternative strategies like data parallelism or hybrid approaches might be more suitable.
 
