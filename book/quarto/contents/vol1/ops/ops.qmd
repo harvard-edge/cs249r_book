@@ -568,6 +568,65 @@ Beyond consistency across training and serving environments, feature stores supp
 
 Feature stores can be integrated with data pipelines and model registries, enabling lineage tracking and traceability. When a feature is updated or deprecated, dependent models are identified and retrained accordingly. This integration enhances the operational maturity of ML systems and supports auditing, debugging, and compliance workflows.
 
+##### Training-Serving Skew: Diagnosis and Prevention {#sec-ml-operations-training-serving-skew}
+
+Training-serving skew occurs when the model sees different features during inference than during training, causing silent accuracy degradation. This problem is insidious because the model continues to produce predictions without errors; they are simply less accurate.
+
+**Common Causes of Skew**:
+
+| Skew Type | Example | Detection Method |
+|:----------|:--------|:-----------------|
+| Feature preprocessing | Normalization uses different statistics | Statistical comparison of feature distributions |
+| Missing data handling | Training fills NaN with mean; serving uses 0 | Schema validation with explicit null handling |
+| Time-dependent features | Features computed with different time cutoffs | Timestamp validation in feature pipelines |
+| Library version drift | NumPy or Pandas version differences | Environment hash comparison |
+
+: **Training-Serving Skew Categories**: Each category requires different detection and prevention strategies. {#tbl-training-serving-skew}
+
+##### Training-Serving Skew Case Study {#sec-ml-operations-skew-case-study}
+
+A practical example illustrates how training-serving skew manifests in production systems. Consider a recommendation system that shows 8% accuracy degradation one month after deployment with no code changes. Feature distribution comparison reveals that `user_session_length` has a mean of 45 minutes in serving versus 12 minutes in training. The root cause is that training data excluded mobile sessions, which are typically shorter, while serving data includes all sessions. As a result, the model learned patterns specific to desktop users that fail for mobile users.
+
+Feature stores address this problem by computing features once and serving them consistently to both training and serving pipelines:
+
+```python
+# Instead of separate training/serving preprocessing:
+from feast import FeatureStore
+
+# Training: pull historical features
+training_df = fs.get_historical_features(
+    entity_df=training_entities,
+    features=["user:session_length", "user:purchase_history"],
+).to_df()
+
+# Serving: pull online features (same computation)
+online_features = fs.get_online_features(
+    entity_rows=[{"user_id": 12345}],
+    features=["user:session_length", "user:purchase_history"],
+)
+```
+
+By computing `session_length` once in the feature pipeline, training and serving are guaranteed to see identical values.
+
+**Skew Detection in CI/CD**:
+
+Automated pipelines should validate feature consistency before deployment:
+
+```python
+def validate_no_skew(
+    training_features, serving_features, threshold=0.1
+):
+    """Reject deployment if feature distributions diverge."""
+    for feature in training_features.columns:
+        ks_stat = ks_2samp(
+            training_features[feature], serving_features[feature]
+        )
+        if ks_stat.statistic > threshold:
+            raise SkewDetectedError(
+                f"{feature}: KS={ks_stat.statistic:.3f}"
+            )
+```
+
 #### Versioning and Lineage {#sec-ml-operations-versioning-lineage-deaa}
 
 Versioning is essential to reproducibility and traceability in machine learning systems. Unlike traditional software, ML models depend on multiple changing artifacts: training data, feature engineering logic, trained model parameters, and configuration settings. To manage this complexity, MLOps practices enforce tracking of versions across all pipeline components.
@@ -822,6 +881,18 @@ The foundation of operational training lies in modern machine learning framework
 
 Building on these framework foundations, reproducibility emerges as a key objective of MLOps. Training scripts and configurations are version-controlled using tools like [Git](https://git-scm.com/) and hosted on platforms such as [GitHub](https://github.com/). Interactive development environments, including [Jupyter](https://jupyter.org/) notebooks, encapsulate data ingestion, feature engineering, training routines, and evaluation logic in a unified format. These notebooks integrate into automated pipelines, allowing the same logic used for local experimentation to be reused for scheduled retraining in production systems.
 
+##### Notebooks in Production {#sec-ml-operations-notebooks-production}
+
+While notebooks excel for exploration and prototyping, using them directly in production pipelines introduces operational risks that require mitigation. These considerations are essential for teams transitioning from experimental workflows to production systems.
+
+Reproducibility presents the first challenge. Notebook cells can be executed out of order, creating hidden state dependencies that make results non-reproducible. A common failure mode occurs when a data scientist runs cells 1, 3, 2 during development, and the resulting model works, but the production pipeline runs cells 1, 2, 3 and fails.
+
+Testing difficulties compound this reproducibility challenge. Traditional unit testing frameworks do not integrate naturally with notebook structure. Cell-level testing is possible but rarely practiced, leaving notebooks less tested than equivalent Python modules.
+
+Several mitigation strategies address these operational concerns. Papermill enables parameterization and programmatic execution of notebooks, treating them as configurable pipeline stages. The nbconvert tool converts validated notebooks to Python scripts for production execution. Cell execution order enforcement tools execute all cells top-to-bottom, rejecting out-of-order dependencies.
+
+The recommended practice is to use notebooks for exploration and rapid iteration, then refactor validated logic into tested Python modules for production pipelines. The overhead of refactoring pays off in maintainability and reliability.
+
 Beyond ensuring reproducibility, automation further enhances model training by reducing manual effort and standardizing critical steps. MLOps workflows incorporate techniques such as [hyperparameter tuning](https://cloud.google.com/ai-platform/training/docs/hyperparameter-tuning-overview), [neural architecture search](https://arxiv.org/abs/1808.05377), and [automatic feature selection](https://scikit-learn.org/stable/modules/feature_selection.html) to explore the design space efficiently. These tasks are orchestrated using CI/CD pipelines, which automate data preprocessing, model training, evaluation, registration, and deployment. For instance, a Jenkins pipeline triggers a retraining job when new labeled data becomes available. The resulting model is evaluated against baseline metrics, and if performance thresholds are met, it is deployed automatically.
 
 Supporting these automated workflows, the increasing availability of cloud-based infrastructure has further expanded the reach of model training. This connects to the workflow orchestration patterns explored in @sec-ai-workflow, which provide the foundation for managing complex, multi-stage training processes across distributed systems. Cloud providers offer managed services that provision high-performance computing resources, which include GPU and TPU accelerators, on demand[^fn-cloud-ml-costs]. Depending on the platform, teams construct their own training workflows or rely on fully managed services such as [Vertex AI Fine Tuning](https://cloud.google.com/vertex-ai/docs/generative-ai/models/tune-models), which support automated adaptation of foundation models to new tasks. Nonetheless, hardware availability, regional access restrictions, and cost constraints remain important considerations when designing cloud-based training systems.
@@ -831,6 +902,54 @@ Supporting these automated workflows, the increasing availability of cloud-based
 To illustrate these integrated practices, consider a data scientist developing a neural network for image classification using a PyTorch notebook. The [fastai](https://www.fast.ai/) library is used to simplify model construction and training. The notebook trains the model on a labeled dataset, computes performance metrics, and tunes model configuration parameters. Once validated, the training script is version-controlled and incorporated into a retraining pipeline that is periodically triggered based on data updates or model performance monitoring.
 
 Through standardized workflows, versioned environments, and automated orchestration, MLOps enables the model training process to transition from ad hoc experimentation to a robust, repeatable, and scalable system. This not only accelerates development but also ensures that trained models meet production standards for reliability, traceability, and performance.
+
+##### Retraining Decision Framework {#sec-ml-operations-retraining-decisions}
+
+Deciding when to retrain a model requires balancing accuracy maintenance against computational costs. Three common strategies exist, each with distinct tradeoffs:
+
+**Scheduled Retraining**
+
+Retrain on a fixed schedule (daily, weekly, monthly) regardless of performance metrics. This approach is simple to implement and ensures models incorporate recent data. However, it may retrain unnecessarily when data is stable or fail to retrain quickly enough during rapid distribution shifts.
+
+| Domain | Typical Schedule | Rationale |
+|:-------|:-----------------|:----------|
+| Ad click prediction | Daily | User interests shift rapidly |
+| Fraud detection | Weekly | Attack patterns evolve continuously |
+| Demand forecasting | Monthly | Seasonal patterns change slowly |
+| Medical imaging | Quarterly | Disease presentations are stable |
+
+: **Typical Retraining Schedules by Domain**: These represent starting points; teams should calibrate based on observed drift rates and business impact. {#tbl-retraining-schedules}
+
+**Triggered Retraining**
+
+Retrain when monitoring detects performance degradation or drift beyond thresholds. This optimizes compute costs by retraining only when necessary but requires robust monitoring infrastructure and careful threshold calibration to avoid false positives or missed degradation.
+
+```yaml
+# Example triggered retraining configuration
+triggers:
+  - metric: accuracy
+    threshold: 0.05  # 5% accuracy drop
+    window: 7d
+  - metric: feature_drift_psi
+    threshold: 0.2
+    features: [user_age_bucket, purchase_amount_bin]
+  - metric: prediction_distribution_shift
+    threshold: 0.1
+    window: 24h
+```
+
+**Continuous Retraining**
+
+Incrementally update models as new labeled data arrives using online learning or periodic micro-updates. This keeps models current with minimal latency but requires careful validation to prevent model degradation from noisy labels or adversarial data.
+
+**Retraining Decision Factors**:
+
+- **Compute cost**: Large models may cost tens of thousands of dollars to retrain
+- **Validation infrastructure**: Sufficient testing to ensure new model outperforms baseline
+- **Rollback capability**: Ability to revert if new model degrades
+- **Label availability**: Triggered retraining requires ground truth labels to detect degradation
+
+The choice among these strategies depends on domain characteristics: scheduled retraining suits stable domains, triggered retraining addresses gradual drift, and continuous retraining handles rapidly evolving data distributions.
 
 #### Model Validation {#sec-ml-operations-model-validation-cb32}
 
@@ -1134,6 +1253,61 @@ Proactive alerting mechanisms are configured to notify teams when anomalies or t
 
 Ultimately, robust monitoring enables teams to detect problems before they escalate, maintain high service availability, and preserve the reliability and trustworthiness of machine learning systems. In the absence of such practices, models may silently degrade or systems may fail under load, undermining the effectiveness of the ML pipeline as a whole.
 
+#### Data Quality Monitoring {#sec-ml-operations-data-quality-monitoring}
+
+While model metrics detect degradation after it affects predictions, data quality monitoring catches issues before they propagate through the system. In production ML, monitoring inputs is often more important than monitoring outputs because data issues cause the majority of model degradation.
+
+**Input Data Validation**
+
+Schema validation catches structural problems before they reach the model:
+
+```python
+# Example using Great Expectations
+expect_column_to_exist(column="user_id")
+expect_column_values_to_be_of_type(
+    column="timestamp", type_="datetime"
+)
+expect_column_values_to_not_be_null(column="feature_a")
+
+# Statistical bounds catch value anomalies
+expect_column_values_to_be_between(
+    column="age", min_value=0, max_value=120
+)
+expect_column_mean_to_be_between(
+    column="purchase_amount", min_value=10, max_value=1000
+)
+```
+
+**Feature Distribution Monitoring**
+
+Track feature distributions against training baselines using statistical distance measures:
+
+| Metric | Alert Threshold | Use Case |
+|:-------|:----------------|:---------|
+| Population Stability Index (PSI) | PSI > 0.2 | Categorical and binned features |
+| Kolmogorov-Smirnov statistic | KS > 0.1 | Continuous feature distributions |
+| Jensen-Shannon divergence | JS > 0.1 | Probability distributions |
+
+: **Feature Distribution Thresholds**: These thresholds represent starting points; teams should calibrate based on feature sensitivity and business impact. {#tbl-feature-distribution-thresholds}
+
+**Data Freshness Monitoring**
+
+Feature stores and data pipelines can become stale without triggering obvious errors:
+
+```yaml
+# Example freshness alert configuration
+feature: user_purchase_history
+max_staleness: 6h
+alert_channels: [pagerduty, slack]
+on_stale:
+  action: fallback_to_default
+  default_value: []
+```
+
+**Upstream Dependency Health**
+
+Monitor the health of data sources that feed the ML system: database replication lag, API endpoint availability, and ETL job completion status. A recommendation system that detected a 15% shift in `user_lifetime_value` distribution within 48 hours traced the issue to a database migration that changed aggregation logic. Without data quality monitoring, this would have degraded recommendations for weeks before accuracy metrics detected the problem.
+
 The monitoring systems themselves require resilience planning to prevent operational blind spots. When primary monitoring infrastructure fails, such as Prometheus experiencing downtime or Grafana becoming unavailable, teams risk operating blind during critical periods. Production-grade MLOps implementations therefore maintain redundant monitoring pathways: secondary metric collectors that activate during primary system failures, local logging that persists when centralized systems fail, and heartbeat checks that detect monitoring system outages. Some organizations implement cross-monitoring where separate infrastructure monitors the monitoring systems themselves, ensuring that observation failures trigger immediate alerts through alternative channels such as PagerDuty or direct notifications. This defense-in-depth approach prevents the catastrophic scenario where both models and their monitoring systems fail simultaneously without detection.
 
 The complexity of monitoring resilience increases significantly in distributed deployments. Multi-region ML systems introduce additional coordination challenges that extend beyond simple redundancy. In such environments, monitoring becomes a distributed coordination problem requiring consensus mechanisms for consistent system state assessment. Traditional centralized monitoring assumes a single point of truth, but distributed ML systems must reconcile potentially conflicting observations across data centers.
@@ -1141,6 +1315,25 @@ The complexity of monitoring resilience increases significantly in distributed d
 This distributed monitoring challenge manifests in three critical areas: consensus-based alerting to prevent false positives from network partitions, coordinated circuit breaker states[^fn-circuit-breaker] to maintain system-wide consistency during failures, and distributed metric aggregation that preserves temporal ordering across regions with variable network latencies. The coordination overhead scales quadratically with the number of monitoring nodes, creating a tension between observability coverage and system complexity.
 
 To address these challenges, teams often implement hierarchical monitoring architectures where regional monitors report to global coordinators through eventual consistency models rather than requiring strong consistency for every metric. This approach balances monitoring granularity against the computational cost of maintaining distributed consensus, enabling scalable observability without overwhelming the system with coordination overhead.
+
+#### Incident Response for ML Systems {#sec-ml-operations-incident-response}
+
+When monitoring detects anomalies, structured incident response processes guide resolution. ML incidents differ from traditional software incidents because symptoms often manifest as accuracy degradation rather than explicit errors. This distinction requires specialized response frameworks that account for the probabilistic nature of machine learning systems.
+
+Severity classification provides the foundation for prioritizing incident response. @tbl-incident-severity presents a standard classification scheme adapted for ML systems.
+
+| Level | Criteria | Response Time | Example |
+|:------|:---------|:--------------|:--------|
+| P0 | Complete model failure, serving errors | 15 minutes | Model returns null predictions |
+| P1 | Significant accuracy degradation (>10%) | 1 hour | Recommendation CTR drops 15% |
+| P2 | Moderate drift, localized impact | 4 hours | One feature shows PSI > 0.3 |
+| P3 | Minor anomalies, no user impact | 24 hours | Training pipeline delay |
+
+: **Incident Severity Classification for ML Systems**: Response times reflect the urgency and potential business impact of each severity level. {#tbl-incident-severity}
+
+The incident response process follows a structured checklist. First, detection determines which monitoring signal triggered the alert. Second, impact assessment quantifies what percentage of traffic is affected. Third, responders review recent changes to identify whether any models, features, or data pipelines were deployed. Fourth, mitigation options are evaluated, including rollback, fallback enablement, or traffic reduction. Finally, root cause analysis determines whether the issue stems from the model, data, or infrastructure.
+
+For P0 and P1 incidents, postmortem documentation is required. These postmortems must include timeline, root cause, user impact, and preventive measures. ML-specific elements include identifying which monitoring gap allowed the issue to reach production and what validation would have caught it earlier.
 
 [^fn-circuit-breaker]: **Circuit Breaker Pattern**: Automatic failure detection mechanism that prevents cascade failures by "opening" when error rates exceed thresholds (typically 50% over 10 seconds), routing traffic away from failing services. Originally inspired by electrical circuit breakers, the pattern prevents one failing ML model from overwhelming downstream services. Netflix's Hystrix processes 20+ billion requests daily using circuit breakers, with typical recovery times of 30-60 seconds.
 

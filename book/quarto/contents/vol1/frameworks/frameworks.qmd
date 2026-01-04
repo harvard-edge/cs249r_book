@@ -160,7 +160,7 @@ A parallel development track emerged with [Torch7](http://torch.ch/) (the Lua-ba
 
 [^fn-eager-execution]: **Eager Execution**: An execution model where operations are evaluated immediately as they are called, similar to standard Python execution. Pioneered by Torch in 2002, this approach prioritizes developer productivity and debugging ease over performance optimization, becoming the default mode in modern frameworks like PyTorch and TensorFlow 2.x.
 
-Torch's design philosophy of prioritizing developer experience while maintaining high performance established design patterns that would later influence frameworks like PyTorch. Its architecture demonstrated how to balance high-level abstractions with efficient low-level matrix operations, introducing concepts that would prove crucial as deep learning complexity increased.
+Torch's design philosophy of prioritizing developer experience while maintaining high performance established design patterns that would later influence frameworks like PyTorch. Its architecture demonstrated how to balance high-level abstractions with efficient low-level matrix operations, introducing concepts that would prove important as deep learning complexity increased.
 
 ### Deep Learning Computational Platform Innovation {#sec-ai-frameworks-deep-learning-computational-platform-innovation-d3db}
 
@@ -503,7 +503,7 @@ This upfront definition enables powerful system-level optimizations. The framewo
 
 #### Runtime-Adaptive Computational Structure {#sec-ai-frameworks-runtimeadaptive-computational-structure-156d}
 
-Dynamic computation graphs, popularized by PyTorch, implement a "define-by-run" execution model. This approach constructs the graph during execution, offering greater flexibility in model definition and debugging. Unlike static graphs, which rely on predefined memory allocation, dynamic graphs allocate memory as operations execute, making them susceptible to memory fragmentation in long-running tasks. While dynamic graphs trade efficiency for flexibility in expressing control flow, they significantly limit compiler optimization opportunities. The inability to analyze the complete computation before execution prevents aggressive kernel fusion and graph rewriting optimizations that static graphs enable.
+Dynamic computation graphs, popularized by PyTorch, implement a "define-by-run" execution model. This approach constructs the graph during execution, offering greater flexibility in model definition and debugging. PyTorch employs a CUDA caching memory allocator that maintains memory pools and reuses allocations, mitigating fragmentation concerns that might otherwise affect long-running tasks. While historically dynamic graphs limited certain compiler optimizations, modern approaches like torch.compile (PyTorch 2.0+) and TorchDynamo capture computational graphs from eager execution, enabling optimization while preserving the dynamic programming model. This evolution allows dynamic frameworks to achieve performance competitive with static graph approaches while retaining their debugging and flexibility advantages.
 
 As shown in @fig-mlfm-dynamic-graph-flow, each operation is defined, executed, and completed before moving on to define the next operation. This contrasts sharply with static graphs, where all operations must be defined upfront. When an operation is defined, it is immediately executed, and its results become available for subsequent operations or for inspection during debugging. This cycle continues until all operations are complete.
 
@@ -1140,7 +1140,7 @@ While automatic differentiation principles remain consistent across frameworks, 
 
 #### PyTorch's Dynamic Autograd System {#sec-ai-frameworks-pytorchs-dynamic-autograd-system-b679}
 
-PyTorch implements automatic differentiation through a dynamic tape-based system that constructs the computational graph during execution. This approach directly supports the research workflows and debugging capabilities discussed earlier in the dynamic graphs section.
+PyTorch implements automatic differentiation through a dynamic computational graph built from Function objects. During forward execution, each operation creates a Function node that records the operation performed and references to input tensors. Tensors with requires_grad=True store a grad_fn attribute pointing to the Function that created them, forming a directed acyclic graph (DAG) that enables reverse-mode differentiation. This approach directly supports the research workflows and debugging capabilities discussed earlier in the dynamic graphs section.
 
 @lst-pytorch_autograd demonstrates PyTorch's approach to gradient tracking, which occurs transparently during forward execution.
 
@@ -1901,6 +1901,36 @@ This approach offers several advantages. It maintains the immediate feedback and
 However, JIT compilation also has some considerations. The first execution of a compiled function may be slower due to the overhead of the compilation process. Some complex Python constructs may not be easily JIT-compiled, requiring developers to be aware of what can be optimized effectively.
 
 JIT compilation is particularly useful in scenarios where you need both the flexibility of eager execution for development and prototyping, and the performance benefits of compilation for production or large-scale training. It's commonly used in research settings where rapid iteration is necessary but performance is still a concern.
+
+#### Modern Compilation: torch.compile (PyTorch 2.0+) {#sec-ai-frameworks-modern-compilation-torch-compile}
+
+PyTorch 2.0 introduced `torch.compile()`, representing a fundamental shift in how PyTorch handles optimization. Unlike TorchScript which required explicit annotation and had limited Python support, torch.compile works with arbitrary Python code:
+
+::: {#lst-torch_compile lst-cap="**Modern PyTorch Compilation**: torch.compile provides optimization with minimal code changes, working with arbitrary Python code."}
+```python
+import torch
+
+
+# Modern approach: just add @torch.compile decorator
+@torch.compile
+def compute(x, y):
+    return torch.matmul(x, y)
+
+
+# Or compile an existing model directly
+model = MyModel()
+compiled_model = torch.compile(model)
+
+# Use exactly as before with standard eager execution
+output = compiled_model(input)
+```
+:::
+
+**How torch.compile Works**: TorchDynamo captures Python bytecode and converts it to FX graphs. When encountering unsupported operations, Dynamo inserts "graph breaks" that fall back to eager execution, enabling compilation of most code without requiring any modifications. TorchInductor, the default backend, generates optimized Triton kernels for CUDA and C++/OpenMP for CPU.
+
+**Performance Characteristics**: Typical speedups range from 1.5x to 2x for transformer models. The first call incurs compilation overhead (seconds to minutes depending on model complexity), while subsequent calls execute the optimized version. Unlike TorchScript, torch.compile works with data-dependent control flow.
+
+**Relationship to TorchScript**: TorchScript remains useful for model serialization and deployment to non-Python environments where the model must run without a Python interpreter. torch.compile optimizes training and inference where Python is available, providing a more flexible compilation approach for research and development workflows.
 
 Many modern ML frameworks incorporate JIT compilation to provide developers with a balance of ease-of-use and performance optimization, as shown in @tbl-mlfm-execmodes. This balance manifests across multiple dimensions, from the learning curve that gradually introduces optimization concepts to the runtime behavior that combines immediate feedback with performance enhancements. The table highlights how JIT compilation bridges the gap between eager execution's programming simplicity and graph execution's performance benefits, particularly in areas like memory usage and optimization scope.
 
@@ -3006,12 +3036,12 @@ JAX's compilation strategy leverages XLA more centrally than TensorFlow, optimiz
 +-------------------------------+----------------------------------+------------------+----------------------------+
 | **Compilation Optimization**  | XLA: 3-10x speedup               | TorchScript: 2x  | XLA: 3-10x speedup         |
 +-------------------------------+----------------------------------+------------------+----------------------------+
-| **Memory Efficiency**         | 85% GPU utilization              | 82% GPU util.    | 91% GPU utilization        |
+| **Memory Efficiency**         | 70-90% (workload dependent)      | 70-90% (varies)  | 75-95% (with XLA fusion)   |
 +-------------------------------+----------------------------------+------------------+----------------------------+
 | **Distributed Scalability**   | 92% efficiency (1024 GPUs)       | 88% efficiency   | 95% efficiency (1024 GPUs) |
 +-------------------------------+----------------------------------+------------------+----------------------------+
 
-: **Framework Characteristics**: TensorFlow, PyTorch, and JAX differ in their graph construction (static, dynamic, or functional), which influences programming style and execution speed. Core distinctions include data mutability (arrays in JAX are immutable) and automatic differentiation capabilities, with JAX supporting both forward and reverse modes. Performance characteristics shown are representative benchmarks that can vary significantly based on workload, hardware configuration, and optimization settings. JAX typically achieves higher GPU utilization and distributed scaling efficiency, while PyTorch offers the most intuitive debugging experience through dynamic graphs. {#tbl-mlfm-comparison}
+: **Framework Characteristics**: TensorFlow, PyTorch, and JAX differ in their graph construction (static, dynamic, or functional), which influences programming style and execution speed. Core distinctions include data mutability (arrays in JAX are immutable) and automatic differentiation capabilities, with JAX supporting both forward and reverse modes. GPU utilization varies significantly based on model architecture, batch size, and operation mix. JAX/XLA can achieve higher utilization for TPU workloads and certain operation patterns through aggressive fusion, while PyTorch and TensorFlow show similar characteristics for most deep learning workloads. Students should profile their specific workloads rather than relying on framework-level generalizations. {#tbl-mlfm-comparison}
 
 These architectural differences manifest in distinct programming paradigms and API design choices. The following example illustrates how the same simple neural network (a single linear layer mapping 10 inputs to 1 output) varies dramatically across these major frameworks, revealing their fundamental design philosophies.
 

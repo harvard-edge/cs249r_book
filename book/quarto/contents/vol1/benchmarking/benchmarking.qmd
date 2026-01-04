@@ -812,7 +812,53 @@ The optimization process must balance four key objectives: model accuracy, compu
 
 ### Evaluation Metrics {#sec-benchmarking-ai-evaluation-metrics-ea0b}
 
-Building upon the optimization framework established through model selection, evaluation metrics provide the quantitative measures needed to assess machine learning model performance. These metrics establish objective standards for comparing different approaches, allowing researchers and practitioners to gauge solution effectiveness. The selection of appropriate metrics represents a critical aspect of benchmark design, as they must align with task objectives while providing meaningful insights into model behavior across both training and deployment scenarios. Importantly, metric computation can vary between frameworks—the training methodologies from @sec-ai-training demonstrate how different frameworks handle loss computation and gradient accumulation differently, affecting reported metrics.
+Building upon the optimization framework established through model selection, evaluation metrics provide the quantitative measures needed to assess machine learning model performance. These metrics establish objective standards for comparing different approaches, allowing researchers and practitioners to gauge solution effectiveness.
+
+#### Metric Taxonomy {#sec-benchmarking-metric-taxonomy}
+
+Understanding the landscape of ML benchmarking requires organizing metrics into a coherent taxonomy that reflects what each metric measures and when it should be applied:
+
++--------------------+-----------------------------+------------------------+-----------------------+
+| Category           | Metric                      | Unit                   | Primary Use Case      |
++:===================+:============================+:=======================+:======================+
+| **Accuracy**       | Top-1/Top-5 Accuracy        | Percentage             | Classification        |
++--------------------+-----------------------------+------------------------+-----------------------+
+|                    | mAP (mean Average Precision)| 0-1 score              | Object detection      |
++--------------------+-----------------------------+------------------------+-----------------------+
+|                    | BLEU/ROUGE                  | 0-100 score            | NLP generation        |
++--------------------+-----------------------------+------------------------+-----------------------+
+|                    | Perplexity                  | Score (lower = better) | Language modeling     |
++--------------------+-----------------------------+------------------------+-----------------------+
+| **Throughput**     | Samples/second              | Samples/s              | Batch inference       |
++--------------------+-----------------------------+------------------------+-----------------------+
+|                    | Tokens/second               | Tokens/s               | LLM inference         |
++--------------------+-----------------------------+------------------------+-----------------------+
+|                    | Time-to-train               | Hours/days             | Training benchmarks   |
++--------------------+-----------------------------+------------------------+-----------------------+
+| **Latency**        | p50 latency                 | Milliseconds           | Median response time  |
++--------------------+-----------------------------+------------------------+-----------------------+
+|                    | p99 latency                 | Milliseconds           | Tail latency (SLA)    |
++--------------------+-----------------------------+------------------------+-----------------------+
+|                    | First-token latency         | Milliseconds           | LLM responsiveness    |
++--------------------+-----------------------------+------------------------+-----------------------+
+| **Efficiency**     | Samples/second/watt         | Samples/s/W            | Energy efficiency     |
++--------------------+-----------------------------+------------------------+-----------------------+
+|                    | Accuracy/FLOP               | %/PFLOP                | Algorithmic efficiency|
++--------------------+-----------------------------+------------------------+-----------------------+
+|                    | TCO per inference           | $/inference            | Economic efficiency   |
++--------------------+-----------------------------+------------------------+-----------------------+
+
+: **ML Benchmarking Metric Taxonomy**: Metrics organized by category, showing the appropriate unit and primary use case for each. {#tbl-metric-taxonomy}
+
+**Key distinctions**:
+
+- **Throughput vs. Latency**: Throughput measures aggregate capacity (ideal for batch processing), while latency measures individual request timing (critical for interactive applications). These metrics can conflict; maximizing throughput often increases latency through batching.
+
+- **Mean vs. Percentile Latency**: Mean latency can hide problematic tail behavior. A system with 10ms mean latency might have 500ms p99 latency, failing SLA requirements. Always report percentiles (p50, p95, p99) for production systems.
+
+- **Single vs. Compound Metrics**: Compound metrics like samples/second/watt combine multiple dimensions but can obscure individual bottlenecks. Report both atomic metrics and relevant compound metrics.
+
+The selection of appropriate metrics represents a critical aspect of benchmark design, as they must align with task objectives while providing meaningful insights into model behavior across both training and deployment scenarios. Importantly, metric computation can vary between frameworks. The training methodologies from @sec-ai-training demonstrate how different frameworks handle loss computation and gradient accumulation differently, affecting reported metrics.
 
 Task-specific metrics quantify a model's performance on its intended function. For example, classification tasks employ metrics including accuracy (overall correct predictions), precision (positive prediction accuracy), recall (positive case detection rate), and F1 score (precision-recall harmonic mean) [@sokolova2009systematic]. Regression problems utilize error measurements like Mean Squared Error (MSE) and Mean Absolute Error (MAE) to assess prediction accuracy. Domain-specific applications often require specialized metrics - for example, machine translation uses the BLEU score[^fn-bleu] to evaluate the semantic and syntactic similarity between machine-generated and human reference translations [@papineni2002bleu].
 
@@ -877,11 +923,59 @@ Comprehensive documentation of hyperparameters forms a critical component of rep
 
 Code provenance and availability constitute another vital aspect of reproducibility guidelines. Contemporary benchmarks typically require researchers to publish implementation code in version-controlled repositories, encompassing not only the model implementation but also comprehensive scripts for data preprocessing, training, and evaluation. Advanced benchmarks often provide containerized environments that encapsulate all dependencies and configurations. Detailed experimental logging is mandatory, including systematic recording of training metrics, model checkpoints, and documentation of any experimental adjustments.
 
-These reproducibility guidelines serve multiple crucial functions: they enhance transparency, enable rigorous peer review, and accelerate scientific progress in AI research. By following these protocols, the research community can effectively verify results, iterate on successful approaches, and identify methodological limitations. In the rapidly evolving landscape of machine learning, these robust reproducibility practices form the foundation for reliable and progressive research.
+These reproducibility guidelines serve multiple essential functions: they enhance transparency, enable rigorous peer review, and accelerate scientific progress in AI research. By following these protocols, the research community can effectively verify results, iterate on successful approaches, and identify methodological limitations. In the rapidly evolving landscape of machine learning, these robust reproducibility practices form the foundation for reliable and progressive research.
 
 ### Result Interpretation {#sec-benchmarking-ai-result-interpretation-86d1}
 
-Building on the foundation established by run rules, result interpretation guidelines provide the essential framework for understanding and contextualizing benchmark outcomes. These guidelines help researchers and practitioners draw meaningful conclusions from benchmark results, ensuring fair and informative comparisons between different models or approaches. A critical aspect is understanding the statistical significance of performance differences. Benchmarks typically specify protocols for conducting statistical tests and reporting confidence intervals, enabling practitioners to distinguish between meaningful improvements and variations attributable to random factors.
+Building on the foundation established by run rules, result interpretation guidelines provide the essential framework for understanding and contextualizing benchmark outcomes. These guidelines help researchers and practitioners draw meaningful conclusions from benchmark results, ensuring fair and informative comparisons between different models or approaches.
+
+#### Benchmark Result Interpretation Framework {#sec-benchmarking-interpretation-framework}
+
+Before drawing conclusions from benchmark results, practitioners should systematically evaluate several dimensions that affect the validity and applicability of reported numbers:
+
+**Question 1: Is the comparison fair?**
+
+- Same model architecture, or different? (Comparing ResNet-50 vs. MobileNet conflates architecture and optimization)
+- Same precision (FP32 vs. INT8)? Precision differences can explain 2-4x performance gaps
+- Same batch size? Larger batches favor throughput; smaller batches favor latency
+- Same hardware generation? Never compare A100 results to H100 without normalization
+
+**Question 2: What is excluded?**
+
+- Data loading and preprocessing time (often significant)
+- Model loading and initialization (critical for cold-start scenarios)
+- Communication overhead in distributed settings
+- Memory transfer between CPU and accelerator
+- Queue wait time under load
+
+**Question 3: What conditions produced these results?**
+
+- Thermal state (cold vs. sustained operation)
+- Power limit settings (default vs. maximum)
+- Batch size (optimal for benchmark vs. realistic for deployment)
+- Input characteristics (benchmark data vs. production data distribution)
+
+**Question 4: Are the statistics meaningful?**
+
+- How many runs? (Minimum 5, preferably 10+)
+- What variance is reported? (Standard deviation, confidence intervals)
+- Are outliers included or excluded?
+- Is the system in steady-state, or are startup effects included?
+
+**Worked Example: Interpreting a Benchmark Claim**
+
+Consider a vendor claim: "Our system achieves 10,000 images/second on ResNet-50."
+
+Critical questions:
+
+1. What batch size? (Batch 256 achieves high throughput but 256ms latency; batch 1 achieves low latency but lower throughput)
+2. What precision? (INT8 is 2-4x faster than FP32 but may have accuracy implications)
+3. What is included? (Pure inference, or including preprocessing?)
+4. What accuracy? (Matching the original 76.1% Top-1, or degraded?)
+
+A complete specification: "10,000 images/second on ResNet-50 at batch size 32, INT8 precision, 76.0% Top-1 accuracy, including JPEG decoding, on NVIDIA H100 at 700W TDP."
+
+This framework builds on the statistical significance considerations established above: understanding whether a performance difference is meaningful requires both statistical rigor AND contextual validation.
 
 However, result interpretation requires careful consideration of real-world applications and context. While a 1% improvement in accuracy might be crucial for medical diagnostics or financial systems, other applications might prioritize inference speed or model efficiency over marginal accuracy gains. Understanding these context-specific requirements is essential for meaningful interpretation of benchmark results. Users must also recognize inherent benchmark limitations, as no single evaluation framework can encompass all possible use cases. Common limitations include dataset biases, task-specific characteristics, and constraints of evaluation metrics.
 
@@ -1490,6 +1584,42 @@ To account for this, benchmarks often measure tail latency[^fn-tail-latency], wh
 Tail latency's connection to user experience at scale becomes critical in production systems serving millions of users. Even small P99 latency degradations create compounding effects across large user bases: if 1% of requests experience 10x latency (e.g., 1000ms instead of 100ms), this affects 10,000 users per million requests, potentially leading to timeout errors, poor user experience, and customer churn. Search engines and recommendation systems demonstrate this sensitivity: Google found that 500ms additional latency reduces search traffic by 20%, while Amazon discovered that 100ms latency increase decreases sales by 1%.
 
 Service level objectives (SLOs) in production systems therefore focus on tail latency rather than mean latency to ensure consistent user experience. Typical production SLOs specify P95 < 100ms and P99 < 500ms for interactive services, recognizing that occasional slow responses have disproportionate impact on user satisfaction. Large-scale systems like Netflix and Uber optimize for P99.9 latency to handle traffic spikes and infrastructure variations that affect service reliability.
+
+#### End-to-End vs. Component Latency {#sec-benchmarking-latency-breakdown}
+
+A critical distinction in inference benchmarking is between component latency (time spent in model computation) and end-to-end latency (total time from request arrival to response delivery). Many benchmarks report only model inference time, obscuring significant overhead that determines actual user experience.
+
+**Latency breakdown for a typical inference request:**
+
++------------------------+----------------+------------------+
+| Component              | Typical Range  | Notes            |
++:=======================+:===============+:=================+
+| Network round-trip     | 10-100 ms      | Varies by region |
++------------------------+----------------+------------------+
+| Request parsing        | 0.1-1 ms       | JSON/protobuf    |
++------------------------+----------------+------------------+
+| Input preprocessing    | 1-50 ms        | Tokenization,    |
+|                        |                | image resize     |
++------------------------+----------------+------------------+
+| Queue wait time        | 0-1000+ ms     | Load-dependent   |
++------------------------+----------------+------------------+
+| Model inference        | 5-100 ms       | The "benchmark"  |
++------------------------+----------------+------------------+
+| Output postprocessing  | 0.5-10 ms      | Decoding, format |
++------------------------+----------------+------------------+
+| Response serialization | 0.1-1 ms       | JSON/protobuf    |
++------------------------+----------------+------------------+
+
+: **Inference Latency Breakdown**: Different components contribute to end-to-end latency, with model inference often representing only a fraction of total request time. {#tbl-latency-breakdown}
+
+**Implications for benchmarking:**
+
+1. **Preprocessing dominance**: For vision models, image decoding and resizing can exceed model inference time, especially for high-resolution inputs
+2. **Queue effects**: Under load, queuing delay often dominates, making isolated model benchmarks misleading
+3. **Network realities**: Edge deployment benchmarks should include network latency to cloud fallback scenarios
+4. **First-token vs. total latency**: For LLMs, first-token latency (time to generate the first output token) differs significantly from total generation time
+
+Comprehensive latency reporting therefore requires specifying which components are included, measuring under realistic load conditions, and distinguishing component from end-to-end metrics.
 
 #### Throughput & Batch Efficiency {#sec-benchmarking-ai-throughput-batch-efficiency-91d2}
 

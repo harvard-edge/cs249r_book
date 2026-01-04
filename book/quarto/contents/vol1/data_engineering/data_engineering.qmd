@@ -346,6 +346,27 @@ pics/target/.style = {
 **The Four Pillars of Data Engineering**: Quality, Reliability, Scalability, and Governance form the foundational framework for ML data systems. Each pillar contributes essential capabilities (solid arrows), while trade-offs between pillars (dashed lines) require careful balancing: validation overhead affects throughput, consistency constraints limit distributed scale, privacy requirements impact performance, and bias mitigation may reduce available training data. Effective data engineering requires managing these tensions systematically rather than optimizing any single pillar in isolation.
 :::
 
+The Four Pillars framework provides diagnostic utility when systems fail. @tbl-four-pillars-diagnostic maps common symptoms to likely root causes:
+
++------------------------------------------+----------------------------+---------------------------------------+
+| Symptom                                  | Likely Pillar              | Investigation                         |
++:=========================================+:===========================+:======================================+
+| Model accuracy drops gradually           | Quality                    | Check for data drift, label           |
+|                                          |                            | degradation                           |
++------------------------------------------+----------------------------+---------------------------------------+
+| Pipeline fails intermittently            | Reliability                | Review error handling, retry logic    |
++------------------------------------------+----------------------------+---------------------------------------+
+| Training takes too long                  | Scalability                | Profile bottlenecks, check            |
+|                                          |                            | parallelization                       |
++------------------------------------------+----------------------------+---------------------------------------+
+| Audit finds compliance gaps              | Governance                 | Review lineage tracking, access       |
+|                                          |                            | controls                              |
++------------------------------------------+----------------------------+---------------------------------------+
+| Features differ train vs. serve          | Quality and Reliability    | Check consistency contracts           |
++------------------------------------------+----------------------------+---------------------------------------+
+
+: **Four Pillars Diagnostic Guide**: When ML systems exhibit failures, this mapping helps teams identify which pillar to investigate first based on observed symptoms. {#tbl-four-pillars-diagnostic}
+
 ### Integrating the Pillars Through Systems Thinking {#sec-data-engineering-integrating-pillars-systems-thinking-eb3e}
 
 Although understanding each pillar individually provides important insights, recognizing their individual importance is only the first step toward effective data engineering. As illustrated in @fig-four-pillars, these four pillars are not independent components but interconnected aspects of a unified system where decisions in one area affect all others. Quality improvements must account for scalability constraints, reliability requirements influence governance implementations, and governance policies shape quality metrics. This systems perspective guides our exploration of data engineering, examining how each technical topic supports and balances these foundational principles while managing their inherent tensions.
@@ -706,6 +727,30 @@ Perhaps the most insidious validation challenge arises from training-serving ske
 
 [^fn-training-serving-skew]: **Training-Serving Skew**: A ML systems failure where identical features are computed differently during training versus serving, causing silent model degradation. Occurs when training uses batch processing with one implementation while serving uses real-time processing with different libraries, creating subtle differences that compound to degrade accuracy significantly without obvious errors.
 
+### Data Quality as Code {#sec-data-engineering-data-quality-as-code}
+
+Just as unit tests protect software systems, data expectation tests protect ML pipelines. Teams codify quality expectations as executable assertions that run on every pipeline execution.
+
+**Declarative Expectations** formalize quality requirements in code. Using libraries like Great Expectations or Pandera:
+
+```python
+# Data expectations that run on every pipeline execution
+expect_column_values_to_be_between(
+    column="age", min_value=0, max_value=120
+)
+expect_column_values_to_not_be_null(column="user_id")
+expect_column_value_lengths_to_equal(column="phone_number", value=10)
+expect_column_distinct_values_to_be_in_set(
+    column="country_code", value_set=["US", "CA", "UK", "DE", "FR"]
+)
+```
+
+**CI/CD Integration** runs expectations in the deployment pipeline. Expectation violations fail deployments before bad data reaches training. A pipeline structured as data ingestion followed by data validation followed by training blocks deployment when validation detects anomalies like age values of 150, triggering alerts for investigation.
+
+**Expectation Suites as Artifacts** version alongside training code. When training code changes, expectation updates ensure data contracts evolve together. This coupling prevents the silent divergence that occurs when code assumes data properties that data no longer guarantees.
+
+This pattern catches approximately 60% of production data issues before they reach training, based on industry experience with tools like Great Expectations, Pandera, and Pydantic. The remaining issues require the runtime monitoring discussed in the previous sections, as some quality problems only emerge in the full production data stream.
+
 ### Reliability Through Graceful Degradation {#sec-data-engineering-reliability-graceful-degradation-a21d}
 
 While quality monitoring detects issues, reliability ensures systems continue operating effectively when problems occur. Pipelines face constant challenges: data sources become temporarily unavailable, network partitions separate components, upstream schema changes break parsing logic, or unexpected load spikes exhaust resources. The reliability pillar demands systems that handle these failures gracefully rather than cascading into complete outage. This resilience comes from systematic failure analysis, intelligent error handling, and automated recovery strategies that maintain service continuity even under adverse conditions.
@@ -715,6 +760,8 @@ Systematic failure mode analysis for ML data pipelines reveals predictable patte
 [^fn-schema-evolution]: **Schema Evolution**: The challenge of managing changes to data structure over time as source systems add fields, rename columns, or modify data types. Critical for ML systems because model training expects consistent feature schemas, and schema changes can silently break feature computation or introduce training-serving skew.
 
 Building on this failure analysis, effective error handling strategies ensure problems are contained and recovered from systematically. Implementing intelligent retry logic for transient errors, such as network interruptions or temporary service outages, requires exponential backoff strategies to avoid overwhelming recovering services. A simple linear retry that attempts reconnection every second would flood a struggling service with connection attempts, potentially preventing its recovery. Exponential backoff—retrying after 1 second, then 2 seconds, then 4 seconds, doubling with each attempt—gives services breathing room to recover while still maintaining persistence. Many ML systems employ the concept of dead letter queues[^fn-dead-letter-queue], using separate storage for data that fails processing after multiple retry attempts. This allows for later analysis and potential reprocessing of problematic data without blocking the main pipeline [@kleppmann2017designing]. A pipeline processing financial transactions that encounters malformed data can route it to a dead letter queue rather than losing critical records or halting all processing.
+
+In ML systems, dead letter queues serve dual purposes beyond failure analysis. Production teams implement systematic review of DLQ contents to identify: (1) schema violations indicating upstream changes, (2) edge case patterns the model should handle, and (3) data quality issues requiring source system fixes. For example, a fraud detection system's DLQ revealed transactions from a new payment type the model had never seen, prompting targeted data collection and retraining rather than simply logging the failures. This transforms DLQs from passive error storage into active sources for identifying model blind spots and driving improvement.
 
 [^fn-dead-letter-queue]: **Dead Letter Queue**: A separate storage system for messages that fail processing after exhausting retry attempts, enabling later analysis and reprocessing without blocking the main pipeline. Essential for ML systems where data loss is unacceptable—malformed training examples can be fixed and reprocessed, while failed inference requests can be debugged to improve system robustness.
 
@@ -1534,6 +1581,18 @@ When implementing streaming components within ETL/ELT architectures, distributed
 
 [^fn-cap-theorem]: **CAP Theorem**: A fundamental distributed systems principle stating that any distributed data system can guarantee at most two of three properties: Consistency (all nodes see the same data simultaneously), Availability (system remains operational), and Partition tolerance (system continues despite network failures). Critical for ML systems where different workloads prioritize different properties.
 
+### Feature Computation Placement {#sec-data-engineering-feature-computation-placement}
+
+For ML pipelines, an additional decision extends beyond ETL versus ELT: where to compute features. This choice significantly impacts training speed, storage costs, and reproducibility.
+
+**Pipeline-computed features** are precomputed during ETL and stored. Benefits include fast training iteration (features ready on disk), reproducibility (same features used consistently), and reduced training compute. Drawbacks include storage cost (features stored separately from raw data), staleness risk (precomputed features may diverge from logic changes), and inflexibility (changes require recomputation).
+
+**Loader-computed features** are computed on the fly during training. Benefits include always-fresh computation (logic changes immediately reflected), flexible experimentation (easy to modify features), and reduced storage (only raw data stored). Drawbacks include slower training (computation repeated each epoch), higher compute costs (GPU often idle waiting for features), and potential non-determinism if not carefully implemented.
+
+**Hybrid patterns** predominate in production. Expensive, stable features (user embeddings requiring matrix factorization, historical aggregations spanning months of data) are precomputed. Cheap, time-sensitive features (recency signals, session context, time-based transformations) are computed in the data loader.
+
+For example, a recommendation system precomputes user embedding features (expensive, stable over days) while computing time-since-last-interaction features (cheap, time-sensitive) in the data loader. This balances storage costs, computation time, and feature freshness based on each feature's specific characteristics.
+
 ### Multi-Source Integration Strategies {#sec-data-engineering-multisource-integration-strategies-a79f}
 
 Regardless of whether ETL or ELT approaches are used, integrating diverse data sources represents a key challenge in data ingestion for ML systems. Data may originate from various sources including databases, APIs, file systems, and IoT devices. Each source may have its own data format, access protocol, and update frequency. The integration challenge lies not just in connecting to these sources but in normalizing their disparate characteristics into a unified pipeline that subsequent processing stages can consume reliably.
@@ -1619,6 +1678,29 @@ Handling partial processing failures requires careful state management. Processi
 Deterministic transformations are those that always produce the same output for the same input, without dependence on external factors like time, random numbers, or mutable global state. Transformations that depend on current time (e.g., computing "days since event" based on current date) break determinism—reprocessing historical data would produce different results. The solution is to capture temporal reference points explicitly: instead of "days since event," compute "days from event to reference date" where reference date is fixed and persisted. Random operations should use seeded random number generators where the seed is derived deterministically from input data, ensuring reproducibility.
 
 For our KWS system, reliability requires reproducible feature extraction. Audio preprocessing must be deterministic: given the same raw audio file, the same MFCC features are always computed regardless of when processing occurs or which server executes it. This enables debugging model behavior (can always recreate exact features for a problematic example), reprocessing data when bugs are fixed (produces consistent results), and distributed processing (different workers produce identical features from the same input). The processing code captures all parameters—FFT window size, hop length, number of MFCC coefficients—in configuration that's versioned alongside the code, ensuring reproducibility across time and execution environments.
+
+### Detecting Training-Serving Skew in Production {#sec-data-engineering-detecting-training-serving-skew-production}
+
+Prevention through careful engineering is necessary but insufficient. Production systems require automated detection of skew as it emerges.
+
+**Feature Distribution Monitoring** compares serving feature distributions against training baselines in real time. Key metrics include: Kolmogorov-Smirnov statistic for continuous features (alert if KS > 0.1), Population Stability Index (PSI) for categorical features (alert if PSI > 0.2), and per-feature mean/variance drift with Welch's t-test.
+
+**Shadow Scoring Pipelines** recompute training-time features on serving data using the training code path. Comparing against serving features catches implementation differences:
+
+```python
+# Shadow pipeline: compare training and serving feature computation
+serving_features = compute_serving_features(request)
+training_features = compute_training_features(
+    request
+)  # Same logic as training
+discrepancy = compare_features(serving_features, training_features)
+if discrepancy > threshold:
+    alert("Training-serving skew detected", details=discrepancy)
+```
+
+A recommendation system detected 15% feature drift in user lifetime value within 48 hours of a database migration that changed aggregation logic. Without automated monitoring, this would have caused weeks of degraded recommendations before detection through model accuracy drops.
+
+These monitoring signals integrate with the alerting infrastructure covered in @sec-ml-operations to enable rapid response to skew incidents. For KWS systems, monitoring would detect if edge devices compute spectrograms differently than the training pipeline, catching subtle differences in FFT implementations across hardware platforms.
 
 ### Scaling Through Distributed Processing {#sec-data-engineering-scaling-distributed-processing-c9f3}
 
@@ -2116,6 +2198,40 @@ The balance between preprocessing and on-the-fly computation becomes critical du
 Deployment and serving requirements prioritize low-latency random access over high-throughput sequential scanning. Real-time inference demands storage solutions capable of retrieving model parameters and relevant features within millisecond timescales. For a recommendation system serving 10,000 requests per second with 10 millisecond latency budgets, feature storage must support 100,000 random reads per second. In-memory databases like Redis or sophisticated caching strategies become essential for meeting these latency requirements. Edge deployment scenarios introduce additional constraints: limited storage capacity on embedded devices, intermittent connectivity to central data stores, and the need for model updates without disrupting inference. Many edge systems implement tiered storage where frequently-updated models cache locally while infrequently-changing reference data pulls from cloud storage periodically.
 
 Model versioning becomes operationally critical during deployment. Storage systems must facilitate smooth transitions between model versions, ensuring minimal service disruption while enabling rapid rollback if new versions underperform. Shadow deployment patterns, where new models run alongside existing ones for validation, require storage systems to efficiently serve multiple model versions simultaneously. A/B testing frameworks require per-request model version selection, necessitating fast model loading without maintaining dozens of model versions in memory simultaneously.
+
+### Data Versioning for ML Reproducibility {#sec-data-engineering-data-versioning-reproducibility}
+
+Data versioning connects model versions to exact training data, enabling debugging and reproducibility. Without data versioning, teams cannot answer fundamental questions like "what exact data trained model v47?"
+
+**DVC Workflow** provides Git-like semantics for data versioning:
+
+```bash
+# Add data to version control
+dvc add data/training.csv
+git add data/training.csv.dvc
+git commit -m "Add training data v1"
+dvc push  # Upload to remote storage
+
+# Later: retrieve exact data for any historical commit
+git checkout abc123
+dvc checkout  # Restores exact data from that commit
+```
+
+**Delta Lake Time Travel** enables querying historical data states directly in SQL:
+
+```sql
+-- Query data as it existed on a specific date
+SELECT * FROM training_data VERSION AS OF '2024-01-15'
+
+-- Or by version number for programmatic access
+SELECT * FROM training_data VERSION AS OF 47
+```
+
+**Feature Store Point-in-Time Retrieval** maintains historical feature values, enabling training with features "as they existed" at prediction time. This prevents label leakage where training inadvertently uses feature values computed after the prediction timestamp.
+
+**Model Registry Integration** links each model registry entry to its complete provenance: Git commit hash (code), data version (DVC commit or Delta version), feature store snapshot timestamp, and training configuration file. This complete lineage enables rapid debugging when production issues arise.
+
+A common failure mode illustrates the importance: Model v47 performed 3% worse than v46 with identical code. Without data versioning, the team spent two weeks investigating the accuracy drop. With proper versioning, they would have immediately seen that the data version was inadvertently updated mid-experiment and identified the root cause within hours.
 
 Monitoring and maintenance phases introduce long-term storage considerations centered on debugging, compliance, and system improvement. Capturing incoming data alongside prediction results enables ongoing analysis detecting data drift, identifying model failures, and maintaining regulatory compliance. For edge and mobile deployments, storage constraints complicate data collection—systems must balance gathering sufficient data for drift detection against limited device storage and network bandwidth for uploading to central analysis systems. Regulated industries often require immutable storage supporting auditing: healthcare ML systems must retain not just predictions but complete data provenance showing which training data and model version produced each diagnostic recommendation, potentially for years or decades.
 

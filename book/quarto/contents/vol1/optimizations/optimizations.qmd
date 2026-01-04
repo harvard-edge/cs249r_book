@@ -238,6 +238,32 @@ Parameter necessity for accuracy maintenance varies considerably. Many weights c
 
 Pruning enables models to become smaller, faster, and more efficient without requiring architectural redesign. By eliminating redundancy, pruning directly addresses the memory, computation, and scalability constraints of machine learning systems, making it essential for deploying models across diverse hardware platforms.
 
+#### Pruning Fundamentals {#sec-model-optimizations-pruning-fundamentals}
+
+Before examining specific pruning algorithms, understanding the fundamental concepts that determine pruning effectiveness is essential.
+
+**Importance Metrics**: Different criteria for measuring parameter importance lead to different pruning outcomes:
+
++------------------------+-------------------------------------------+---------------------+
+| Metric                 | Formula                                   | Properties          |
++:=======================+:==========================================+:====================+
+| Magnitude              | $|w_i|$                                   | Simple, widely used |
++------------------------+-------------------------------------------+---------------------+
+| Gradient               | $|w_i \cdot \nabla_{w_i} L|$              | Training-aware      |
++------------------------+-------------------------------------------+---------------------+
+| Hessian (Fisher)       | $w_i^2 \cdot \mathbb{E}[(\nabla_{w_i}L)^2]$ | Second-order        |
++------------------------+-------------------------------------------+---------------------+
+| Activation             | $\mathbb{E}[|a_i|]$                       | Data-dependent      |
++------------------------+-------------------------------------------+---------------------+
+
+: **Pruning Importance Metrics**: Different metrics capture different aspects of parameter importance, with trade-offs between computational cost and accuracy of importance estimates. {#tbl-importance-metrics}
+
+**Pruning Schedules**: How sparsity is introduced over time significantly affects final accuracy. Common approaches include one-shot pruning (prune all at once, then fine-tune), iterative pruning (gradually increase sparsity with fine-tuning between steps), and cubic sparsity scheduling that follows $s_t = s_f + (s_i - s_f)(1 - \frac{t - t_0}{n \Delta t})^3$.
+
+**Global vs. Layer-wise Pruning**: Global pruning applies a single threshold across all layers, which can leave some layers over-pruned and others under-pruned. Layer-wise pruning applies separate thresholds per layer, preserving a minimum capacity in each layer but potentially missing global optimization opportunities.
+
+**Sensitivity Analysis**: Different layers have different sensitivity to pruning. Early layers and attention layers in transformers are typically more sensitive than middle layers and feed-forward networks. Sensitivity analysis, which involves measuring accuracy drop when pruning each layer independently, guides non-uniform pruning ratios.
+
 Modern frameworks provide built-in APIs that make these optimization techniques readily accessible. PyTorch offers `torch.nn.utils.prune` for pruning operations, while TensorFlow provides the Model Optimization Toolkit[^fn-tf-model-optimization] with functions like `tfmot.sparsity.keras.prune_low_magnitude()`. These tools transform complex research algorithms into practical function calls, making optimization achievable for practitioners at all levels.
 
 [^fn-tf-model-optimization]: **TensorFlow Model Optimization**: TensorFlow Model Optimization Toolkit provides production-ready quantization (achieving 4x model size reduction), pruning (up to 90% sparsity), and clustering techniques. Used by YouTube, Gmail, and Google Photos to deploy models on 4+ billion devices worldwide.
@@ -2754,6 +2780,27 @@ By reducing numerical precision, models can not only execute computations more e
 
 However, reducing numerical precision introduces trade-offs. Lower-precision formats can lead to numerical instability and quantization noise, potentially affecting model accuracy. Some architectures, such as large transformer-based NLP models, tolerate quantization well, whereas others may experience significant degradation. Thus, selecting the appropriate numerical precision requires balancing accuracy constraints, hardware support, and efficiency gains.
 
+#### Quantization Error Analysis {#sec-model-optimizations-quantization-error-analysis}
+
+Understanding quantization error is essential for predicting accuracy degradation and selecting appropriate bit-widths. Quantization introduces error at each layer, and these errors propagate through the network.
+
+**Error Bound**: For uniform quantization with scale $s$ and $b$ bits, the maximum error per value is bounded by:
+$$|\epsilon_{max}| = \frac{s}{2} = \frac{r_{max} - r_{min}}{2^{b+1}}$$
+
+For a layer with $n$ values, the expected total squared error is:
+$$\mathbb{E}[\|\epsilon\|^2] \approx n \cdot \frac{s^2}{12}$$
+
+This $s^2/12$ factor comes from the variance of uniform quantization error.
+
+**Error Propagation**: For a linear layer $y = Wx$, the output error depends on both weight and activation quantization:
+$$\epsilon_y \approx W_{q}\epsilon_x + \epsilon_W x + \epsilon_W \epsilon_x$$
+
+The cross-term $\epsilon_W \epsilon_x$ is typically negligible, but the first two terms can compound through deep networks.
+
+**Sensitivity Variation**: Different layers and operations show different sensitivity to quantization. Normalization layers are sensitive because they divide by small variance values, so quantization error in variance can cause large output errors. Attention mechanisms are sensitive because softmax amplifies small differences, making quantized attention scores diverge from FP32. Residual connections are beneficial because they provide alternative gradient paths, making quantized networks more robust. First and last layers are critical because input quantization affects all downstream computation and output quantization directly affects predictions.
+
+**Practical Implications**: These theoretical insights guide quantization strategy. For 8-bit quantization, per-channel quantization with symmetric ranges works for most layers. For 4-bit quantization, sensitivity-aware mixed precision, using 8-bit for sensitive layers, becomes essential. For 2-bit quantization, only specialized architectures with explicit quantization training can maintain accuracy.
+
 ![Quantization error weighted by p(x).](images/png/modeloptimization_quant_hist.png){#fig-quantization width=80%}
 
 @fig-quantization illustrates the quantization error weighted by the probability distribution of values, comparing different numerical formats (FP8 variants and INT8). The error distribution highlights how different formats introduce varying levels of quantization noise across the range of values, which in turn influences model accuracy and stability.
@@ -4096,6 +4143,45 @@ Central to this proactive approach, a key aspect of hardware-aware design is usi
 The principles in @tbl-hardware-efficient-design work synergistically: scaling optimization sizes models appropriately for available resources, computation reduction eliminates redundant operations through techniques like depthwise separable convolutions[^fn-depthwise-separable], memory optimization aligns access patterns with hardware hierarchies, and hardware-aware design ensures architectural decisions match platform capabilities. Together, these principles enable models that balance accuracy with efficiency while maintaining consistent behavior across deployment environments.
 
 [^fn-depthwise-separable]: **Depthwise Separable Convolutions**: Factorizes standard convolution into depthwise (per-channel) and pointwise (1×1) operations, reducing computation by 8-9x. MobileNetV2 achieves 72% ImageNet accuracy with 300M FLOPs vs. ResNet-50's 76% with 4.1B FLOPs (13.7x fewer operations). Enables real-time inference on mobile devices.
+
+#### Depthwise Separable Convolution Derivation {#sec-model-optimizations-depthwise-separable-derivation}
+
+Understanding the computational savings from depthwise separable convolutions requires analyzing the FLOP counts of standard versus factorized convolutions.
+
+**Standard Convolution**: For input of size $H \times W \times C_{in}$ with $C_{out}$ filters of size $K \times K$, the standard convolution computes:
+$$\text{FLOPs}_{standard} = H \cdot W \cdot C_{in} \cdot C_{out} \cdot K^2$$
+
+**Depthwise Separable Convolution** factors this into two operations:
+
+*Depthwise convolution*: Apply one $K \times K$ filter per input channel:
+$$\text{FLOPs}_{depthwise} = H \cdot W \cdot C_{in} \cdot K^2$$
+
+*Pointwise convolution*: Apply $C_{out}$ filters of size $1 \times 1$:
+$$\text{FLOPs}_{pointwise} = H \cdot W \cdot C_{in} \cdot C_{out}$$
+
+Total for depthwise separable:
+$$\text{FLOPs}_{separable} = H \cdot W \cdot C_{in} \cdot (K^2 + C_{out})$$
+
+**Reduction Factor**: The ratio of separable to standard convolution is:
+$$\frac{\text{FLOPs}_{separable}}{\text{FLOPs}_{standard}} = \frac{K^2 + C_{out}}{K^2 \cdot C_{out}} = \frac{1}{C_{out}} + \frac{1}{K^2}$$
+
+For typical values of $K = 3$ and $C_{out} = 256$, this reduction factor is approximately $\frac{1}{256} + \frac{1}{9} \approx 0.115$, representing an 8.7x computation reduction.
+
+**Trade-offs**: Depthwise separable convolutions achieve this reduction by limiting cross-channel interaction during spatial filtering. The depthwise stage cannot learn correlations between channels, which the pointwise stage must compensate for. This architectural choice works well for mobile deployment but may reduce representational capacity for complex tasks.
+
++--------------------+------------------+-----------------+
+| Operation          | Parameters       | FLOPs           |
++:===================+:=================+:================+
+| Standard 3x3 Conv  | $9 C_{in} C_{out}$ | $9 H W C_{in} C_{out}$ |
++--------------------+------------------+-----------------+
+| Depthwise 3x3      | $9 C_{in}$       | $9 H W C_{in}$  |
++--------------------+------------------+-----------------+
+| Pointwise 1x1      | $C_{in} C_{out}$ | $H W C_{in} C_{out}$ |
++--------------------+------------------+-----------------+
+| Separable Total    | $9 C_{in} + C_{in} C_{out}$ | $H W C_{in}(9 + C_{out})$ |
++--------------------+------------------+-----------------+
+
+: **Depthwise Separable Convolution Computation**: Comparison of parameter counts and FLOPs between standard and depthwise separable convolutions, showing the source of computational savings. {#tbl-depthwise-separable}
 
 #### Scaling Optimization {#sec-model-optimizations-scaling-optimization-a193}
 

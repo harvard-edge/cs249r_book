@@ -133,7 +133,7 @@ The evolution of specialized computing hardware follows a consistent trajectory,
 %
 \node[Box={col2!50},below=2 of B2](2BB1){3D Graphics \& Multimedia};
 \node[Box={col2!50},below=of 2BB1](2BB2){Introduction of Early GPUs};
-\node[Box={col2!50},below=of 2BB2](2BB3){NVIDIA GeForce 256 -- First Programmable GPU (1999)};
+\node[Box={col2!50},below=of 2BB2](2BB3){NVIDIA GeForce 256 -- First GPU with Hardware T\&L (1999)};
 \node[Box={col2!50},below=of 2BB3](2BB4){Rise of SIMD Processing Units};
 %
 \node[Box={col3!50},below=2 of B3](3BB1){Real-time Media Coding \& Network Processing};
@@ -159,7 +159,7 @@ The evolution of specialized computing hardware follows a consistent trajectory,
 
 The principles established through floating-point acceleration provided a blueprint for addressing emerging computational challenges. As computing applications diversified, new computational patterns emerged that exceeded the capabilities of general-purpose processors. This expansion of specialized computing manifested across multiple domains, each contributing unique insights to hardware acceleration strategies.
 
-Graphics processing emerged as a primary driver of hardware specialization in the 1990s. Early graphics accelerators focused on specific operations like bitmap transfers and polygon filling. The introduction of programmable graphics pipelines with NVIDIA's GeForce 256 in 1999 represented a significant advancement in specialized computing. Graphics Processing Units (GPUs) demonstrated how parallel processing architectures could efficiently handle data-parallel workloads, achieving 50-100$\times$ speedups in 3D rendering tasks like texture mapping and vertex transformation. By 2004, high-end GPUs could process over 100 million polygons per second [@owens2008gpu].
+Graphics processing emerged as a primary driver of hardware specialization in the 1990s. Early graphics accelerators focused on specific operations like bitmap transfers and polygon filling. The introduction of fixed-function graphics accelerators with NVIDIA's GeForce 256 in 1999 represented a significant advancement in specialized computing. The GeForce 256 implemented hardware-accelerated transform and lighting (T&L), moving these computations from CPU to dedicated silicon. While not yet programmable, these Graphics Processing Units (GPUs) demonstrated how fixed-function parallel architectures could efficiently handle data-parallel workloads, achieving 50-100$\times$ speedups in 3D rendering tasks like texture mapping and vertex transformation. The transition to programmable shaders with the GeForce 3 (2001) and unified shader architectures with the GeForce 8 (2006) eventually enabled GPU computing for general-purpose workloads. By 2004, high-end GPUs could process over 100 million polygons per second [@owens2008gpu].
 
 Concurrently, Digital Signal Processing (DSP) processors established parallel data path architectures with specialized multiply-accumulate units and circular buffers optimized for filtering and transform operations. Texas Instruments' TMS32010 (1983) demonstrated how domain-specific instruction sets could dramatically improve performance for signal processing applications [@lyons2011understanding].
 
@@ -645,7 +645,7 @@ output = relu(Z)  # Vector: applies activation to
 ```
 :::
 
-This computation demonstrates the scale of matrix operations in neural networks. Each output neuron (512 total) must process all input features (256 total) for every sample in the batch (32 samples). The weight matrix alone contains $256 \times 512 = 131,072$ parameters that define these transformations, illustrating why efficient matrix multiplication becomes crucial for performance.
+This computation demonstrates the scale of matrix operations in neural networks. Each output neuron (512 total) must process all input features (256 total) for every sample in the batch (32 samples). The weight matrix alone contains $256 \times 512 = 131,072$ parameters that define these transformations, illustrating why efficient matrix multiplication dominates performance considerations.
 
 Neural networks employ matrix operations across diverse architectural patterns beyond simple linear layers.
 
@@ -933,7 +933,7 @@ While tensor cores package matrix operations into structured computational units
 
 The concept of systolic arrays was first introduced by Kung and Leiserson[^fn-systolic-origin], who formalized their use in parallel computing architectures for efficient matrix operations [@Kung1982]. Unlike general-purpose execution units, systolic arrays exploit spatial and temporal locality by reusing operands as they propagate through the grid. Google's TPU exemplifies this architectural approach. In the TPUv4, a $128\times128$ systolic array of multiply-accumulate units processes matrix operations by streaming data through the array in a pipelined manner, as shown in @fig-systolic-array.
 
-[^fn-systolic-origin]: **Systolic Array Renaissance**: H.T. Kung and Charles Leiserson introduced systolic arrays at CMU in 1979 for VLSI signal processing, but the concept languished for decades due to programming complexity. Google's 2016 TPU resurrection proved these "heartbeat" architectures could deliver massive efficiency gains for neural networks—the TPUv1's $256\times 256$ systolic array achieved 92 TOPS for 8-bit integer operations while consuming just 40 watts, making systolic arrays the dominant AI architecture today.
+[^fn-systolic-origin]: **Systolic Array Renaissance**: H.T. Kung and Charles Leiserson introduced systolic arrays at CMU in 1979 for VLSI signal processing, but the concept languished for decades due to programming complexity. Google's 2016 TPU resurrection proved these "heartbeat" architectures could deliver massive efficiency gains for neural networks. The TPUv1's $256\times 256$ systolic array contains 65,536 8-bit multiply-accumulate units operating at 700 MHz, yielding a peak throughput of 92 TOPS for INT8 operations (65,536 MACs $\times$ 2 ops/MAC $\times$ 700 MHz = 91.75 TOPS) while consuming just 40 watts. This theoretical peak assumes 100% utilization; actual performance depends on how well workloads map to the systolic dataflow, with typical utilization ranging from 30-70% depending on layer dimensions. This efficiency made systolic arrays the dominant AI architecture today.
 
 The systolic array architecture achieves computational efficiency through synchronized data movement across a structured grid of processing elements. Systolic arrays organize computation around four fundamental components:
 
@@ -1259,6 +1259,78 @@ $$
 with the number of floating-point operations (FLOPs) divided by the peak hardware throughput, $P_{\text{peak}}$. When $T_{\text{mem}} > T_{\text{compute}}$, the system becomes memory-bound, meaning that the processing elements spend more time waiting for data than performing computations. This imbalance demonstrates the need for memory-optimized architectures and efficient data movement strategies to sustain high performance.
 
 @fig-memory-wall demonstrates the emerging challenge between model growth and hardware memory capabilities, illustrating the "AI Memory Wall." The figure tracks AI model sizes (red dots) and hardware memory bandwidth (blue dots) over time on a log scale. Model parameters have grown exponentially, from AlexNet's ~62.3M parameters in 2012 to Gemini 1's trillion-scale parameters in 2023, as shown by the steeper red trend line. In contrast, hardware memory bandwidth, represented by successive generations of NVIDIA GPUs (~100-200 GB/s) and Google TPUs (~2-3 TB/s), has increased more gradually (blue trend line). The expanding shaded region between these trends corresponds to the "AI Memory Wall," which will be an architectural challenge where model scaling outpaces available memory bandwidth. This growing disparity necessitates increasingly sophisticated memory management and model optimization techniques to maintain computational efficiency.
+
+#### The Roofline Model {#sec-ai-acceleration-roofline-model}
+
+The roofline model provides the standard framework for understanding whether workloads are compute-bound or memory-bound, directly connecting the memory wall discussion to practical performance analysis. This model enables quantitative reasoning about accelerator utilization and guides optimization decisions.
+
+**Model Definition**: Performance is bounded by two ceilings:
+$$\text{Attainable Performance} = \min(\text{Peak Compute}, \text{Peak Bandwidth} \times \text{Arithmetic Intensity})$$
+
+**Arithmetic Intensity (AI)** measures operations per byte of memory traffic:
+$$\text{AI} = \frac{\text{FLOPs}}{\text{Bytes Transferred}}$$
+
+The roofline visualization shows performance (TFLOPS) on the vertical axis and arithmetic intensity (FLOPS/byte) on the horizontal axis. At low arithmetic intensity, performance increases linearly with intensity (memory-bound region). Above a threshold called the ridge point, performance saturates at peak compute (compute-bound region).
+
+**Hardware Ridge Points**: The ridge point determines the arithmetic intensity threshold where the transition from memory-bound to compute-bound occurs:
+
++-------------------+----------------+-------------+---------------------+
+| Accelerator       | Peak FP16      | Bandwidth   | Ridge Point         |
++:==================+:===============+:============+:====================+
+| NVIDIA V100       | 125 TFLOPS     | 900 GB/s    | 139 FLOP/byte       |
++-------------------+----------------+-------------+---------------------+
+| NVIDIA A100       | 312 TFLOPS     | 2.0 TB/s    | 156 FLOP/byte       |
++-------------------+----------------+-------------+---------------------+
+| NVIDIA H100       | 990 TFLOPS     | 3.4 TB/s    | 291 FLOP/byte       |
++-------------------+----------------+-------------+---------------------+
+| Google TPU v4     | 275 TFLOPS     | 1.2 TB/s    | 229 FLOP/byte       |
++-------------------+----------------+-------------+---------------------+
+
+: **Hardware Ridge Points**: Different accelerators have different ridge points determined by their compute-to-bandwidth ratios. Higher ridge points require more operations per byte to achieve peak utilization. {#tbl-ridge-points}
+
+**Neural Network Operations on the Roofline**: Different operations fall at different positions on the roofline:
+
++------------------------+-----------------------+------------------+
+| Operation              | Arithmetic Intensity  | Classification   |
++:=======================+:======================+:=================+
+| Dense MatMul (large)   | 64-256 FLOP/byte      | Compute-bound    |
++------------------------+-----------------------+------------------+
+| Conv2D (large batch)   | 50-200 FLOP/byte      | Compute-bound    |
++------------------------+-----------------------+------------------+
+| Attention softmax      | 2-5 FLOP/byte         | Memory-bound     |
++------------------------+-----------------------+------------------+
+| Activation functions   | 0.25-0.5 FLOP/byte    | Memory-bound     |
++------------------------+-----------------------+------------------+
+| LayerNorm              | 5-10 FLOP/byte        | Memory-bound     |
++------------------------+-----------------------+------------------+
+| Embedding lookup       | <1 FLOP/byte          | Memory-bound     |
++------------------------+-----------------------+------------------+
+
+: **Operations on the Roofline**: Neural network layers span a wide range of arithmetic intensities, with compute-intensive operations like matrix multiplication operating near the compute-bound ceiling while memory-intensive operations like activations and normalization are memory-bound. {#tbl-roofline-operations}
+
+**Worked Example: Transformer Layer Analysis**
+
+For a transformer with hidden_dim=768, batch=32, seq=512:
+
+*Attention QKV Projection*:
+
+- FLOPs: $3 \times 32 \times 512 \times 768 \times 768 = 29$ billion FLOPs
+- Bytes: (input + weights + output) $= (32 \times 512 \times 768 + 3 \times 768 \times 768 + 32 \times 512 \times 768 \times 3) \times 2 = 127$ MB
+- AI $= 29B / 127M = 228$ FLOP/byte, which is **compute-bound on A100** (above 156 threshold)
+
+*Softmax*:
+
+- FLOPs: $32 \times 12 \times 512 \times 512 \times 3 \approx 300M$ FLOPs (exp, sum, div)
+- Bytes: $32 \times 12 \times 512 \times 512 \times 2 \times 2 = 402$ MB
+- AI $= 300M / 402M = 0.75$ FLOP/byte, which is **memory-bound**
+
+This analysis explains why FlashAttention focuses on reducing memory traffic in attention rather than reducing FLOPs.
+
+**Optimization Implications**:
+
+For **memory-bound operations**: reduce data movement through operator fusion, use reduced precision (FP16, INT8), and increase arithmetic intensity through algorithmic changes like FlashAttention.
+
+For **compute-bound operations**: maximize hardware utilization through batching and parallelism, use Tensor Cores and specialized compute units, and optimize compute efficiency through tiling and scheduling.
 
 #### Irregular Memory Access {#sec-ai-acceleration-irregular-memory-access-c6ec}
 
@@ -2800,7 +2872,7 @@ When single-accelerator capacity proves insufficient, AI systems must scale acro
 
 ### Multi-Chip Scaling Approaches {#sec-ai-acceleration-multichip-scaling-approaches}
 
-Modern AI systems employ several strategies to scale beyond individual accelerators, each with distinct trade-offs that practitioners must understand when designing production systems.
+Modern AI systems employ several strategies to scale beyond individual accelerators, each with distinct trade-offs.
 
 One approach partitions large designs into smaller, modular dies interconnected within a single package. AMD's Instinct MI300 exemplifies this chiplet-based architecture, integrating multiple compute chiplets alongside memory chiplets via high-speed die-to-die interconnects. This approach bypasses manufacturing limits of monolithic chips while maintaining relatively low communication latency within the package.
 

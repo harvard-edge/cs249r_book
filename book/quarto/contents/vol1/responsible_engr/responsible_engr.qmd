@@ -30,6 +30,8 @@ Volume II provides deep technical coverage of fairness metrics, differential pri
 
 - Construct model documentation using standardized formats (model cards, datasheets) that capture intended use, evaluation results, and ethical considerations
 
+- Calculate fairness metrics including demographic parity, equalized odds, and calibration across demographic groups, interpreting results against established thresholds
+
 - Justify model selection decisions by analyzing tradeoffs between accuracy, computational efficiency, and deployment constraints
 :::
 
@@ -51,7 +53,7 @@ The timing of responsibility interventions determines their effectiveness. An et
 
 This engineering-centered approach does not diminish the importance of diverse perspectives in identifying potential harms. Product managers, user researchers, affected communities, and policy experts contribute essential knowledge about how systems fail socially despite technical success. Engineers translate these concerns into measurable requirements and testable properties that can be verified throughout the development lifecycle. Effective responsibility requires engineers who both listen to stakeholder concerns and possess the technical capability to implement appropriate safeguards.
 
-The chapters on efficient inference (@sec-efficient-ai), model optimization (@sec-model-optimizations), and ML operations (@sec-ml-operations) have established the technical foundations for building production systems. This chapter extends those foundations to encompass the full scope of engineering responsibility.
+The chapters on efficient inference (@sec-efficient-ai), model optimization (@sec-model-optimizations), and ML operations (@sec-ml-operations) have established the technical foundations for building production systems. This chapter extends those foundations to encompass the full scope of engineering responsibility. The quantization techniques from @sec-model-optimizations reduce inference energy by 2-4x, directly supporting sustainable deployment. The monitoring infrastructure from @sec-ml-operations enables disaggregated fairness evaluation across demographic groups. Responsible engineering synthesizes these capabilities into systematic practice.
 
 Concrete examples illustrate the gap between optimization success and responsible deployment. The next section examines specific cases where technically correct systems produced harmful outcomes.
 
@@ -191,6 +193,8 @@ Production deployment requires systematic evaluation of potential impacts across
 
 : **Pre-Deployment Assessment Framework**: Critical Path items block deployment until addressed. High Priority items should be completed before or shortly after launch. This framework ensures systematic coverage of responsibility concerns throughout the ML lifecycle. {#tbl-pre-deployment-assessment}
 
+Critical Path items are deployment blockers: the system must not go to production until these questions are satisfactorily answered. High Priority items should be addressed but may proceed with documented risk acceptance and a remediation timeline. This distinction enables teams to ship responsibly without requiring perfection on every dimension before initial deployment.
+
 This framework parallels aviation pre-flight checklists, where pilots follow every item without exception to ensure systematic coverage of critical concerns despite time pressure. Production ML deployments require equivalent discipline and systematic verification.[^fn-checklist-manifesto]
 
 [^fn-checklist-manifesto]: **Checklist Discipline**: The aviation industry's adoption of checklists dramatically reduced accidents by ensuring consistent coverage of critical items. The same principle applies to ML deployment: systematic processes catch issues that individual judgment might miss.
@@ -217,6 +221,34 @@ A complete model card includes:
 
 **Caveats and Recommendations**: Guidance for users on appropriate use, known failure modes, and recommended safeguards.
 
+The following example illustrates how model card categories translate to practical documentation for a MobileNetV2 model prepared for edge deployment.
+
++----------------------+------------------------------------------------------------------+
+| **Section**          | **Content**                                                      |
++:=====================+:=================================================================+
+| **Model Details**    | MobileNetV2 architecture with 3.5M parameters, trained on        |
+|                      | ImageNet using depthwise separable convolutions. INT8 quantized  |
+|                      | for edge deployment.                                             |
++----------------------+------------------------------------------------------------------+
+| **Intended Use**     | Real-time image classification on mobile devices with less than  |
+|                      | 50ms latency requirement. Suitable for consumer applications     |
+|                      | including photo organization and accessibility features.         |
++----------------------+------------------------------------------------------------------+
+| **Factors**          | Performance varies with image quality (blur, lighting), object   |
+|                      | size in frame, and categories outside ImageNet distribution.     |
++----------------------+------------------------------------------------------------------+
+| **Metrics**          | 72% top-1 accuracy on ImageNet validation (full precision:       |
+|                      | 74.7%). Accuracy varies by category: 85% on common objects,      |
+|                      | 45% on fine-grained distinctions.                                |
++----------------------+------------------------------------------------------------------+
+| **Ethical           | Training data reflects ImageNet biases in geographic and          |
+| Considerations**     | demographic representation. Not validated for high-stakes        |
+|                      | applications (medical diagnosis, security screening).            |
+|                      | Performance may degrade on images from underrepresented regions. |
++----------------------+------------------------------------------------------------------+
+
+: **Example Model Card: MobileNetV2 for Edge Deployment**: This excerpt demonstrates how abstract model card categories translate to practical documentation that guides responsible deployment decisions. {#tbl-model-card-example}
+
 Datasheets for datasets provide analogous documentation for training data [@gebru2021datasheets]. These documents capture data provenance, collection methodology, demographic composition, and known limitations that affect downstream model behavior.
 
 ### Testing Across Populations {#sec-responsible-engineering-testing-populations-9d1c}
@@ -236,6 +268,61 @@ Testing infrastructure should support:
 **Temporal Monitoring**: Ongoing evaluation that tracks subgroup performance over time, detecting drift that affects some populations before others.
 
 Several open source tools support responsible testing workflows. Fairlearn provides fairness metrics and mitigation algorithms that integrate with scikit-learn pipelines [@bird2020fairlearn]. AI Fairness 360 from IBM offers over 70 fairness metrics and 10 bias mitigation algorithms across the ML lifecycle [@bellamy2019aif360]. Google's What-If Tool enables interactive exploration of model behavior across different subgroups without writing code. These tools lower the barrier to systematic fairness evaluation, though they complement rather than replace careful thinking about what fairness means in specific application contexts.
+
+#### Worked Example: Fairness Analysis in Loan Approval {#sec-responsible-engineering-fairness-worked-example}
+
+A concrete example illustrates how fairness metrics reveal disparities invisible in aggregate performance measures. Consider a loan approval model evaluated on two demographic groups with the confusion matrices shown in @tbl-confusion-group-a and @tbl-confusion-group-b.
+
++---------------------+---------------------+---------------------+
+|                     | **Approved (pred)** | **Rejected (pred)** |
++:====================+====================:+====================:+
+| **Repaid (actual)** | 4,500 (TP)          | 500 (FN)            |
++---------------------+---------------------+---------------------+
+| **Defaulted         | 1,000 (FP)          | 4,000 (TN)          |
+| (actual)**          |                     |                     |
++---------------------+---------------------+---------------------+
+
+: **Confusion Matrix for Group A (Majority)**: Results for 10,000 applicants from the majority demographic group. {#tbl-confusion-group-a}
+
++---------------------+---------------------+---------------------+
+|                     | **Approved (pred)** | **Rejected (pred)** |
++:====================+====================:+====================:+
+| **Repaid (actual)** | 600 (TP)            | 400 (FN)            |
++---------------------+---------------------+---------------------+
+| **Defaulted         | 200 (FP)            | 800 (TN)            |
+| (actual)**          |                     |                     |
++---------------------+---------------------+---------------------+
+
+: **Confusion Matrix for Group B (Minority)**: Results for 2,000 applicants from the minority demographic group. {#tbl-confusion-group-b}
+
+Three standard fairness metrics computed from these confusion matrices reveal significant disparities.
+
+**Demographic Parity** requires equal approval rates across groups. Group A receives approval at a rate of (4500 + 1000) / 10000 = 55%, while Group B receives approval at (600 + 200) / 2000 = 40%. The 15 percentage point disparity indicates unequal treatment in approval decisions.
+
+**Equal Opportunity** requires equal true positive rates among qualified applicants. Group A achieves a TPR of 4500 / (4500 + 500) = 90%, meaning 90% of applicants who would repay receive approval. Group B achieves only 600 / (600 + 400) = 60% TPR. This 30 percentage point disparity means qualified applicants from Group B face substantially higher rejection rates than equally qualified applicants from Group A.
+
+**Equalized Odds** requires both equal true positive rates and equal false positive rates. Group A shows an FPR of 1000 / (1000 + 4000) = 20%, and Group B shows 200 / (200 + 800) = 20%. While false positive rates are equal, the true positive rate disparity means equalized odds is violated.
+
+The pattern revealed by these metrics has a clear interpretation. The model rejects qualified applicants from Group B at a much higher rate (40% false negative rate versus 10%) while maintaining similar false positive rates. This suggests the model has learned stricter approval criteria for Group B, potentially encoding historical discrimination in lending patterns where minority applicants faced higher scrutiny despite equivalent qualifications.
+
+@tbl-fairness-metrics-summary presents the computed metrics and disparities.
+
++----------------------+----------+----------+---------------------+
+| **Metric**           | **Group  | **Group  | **Disparity**       |
+|                      | A**      | B**      |                     |
++:=====================+=========:+=========:+:====================+
+| Approval Rate        | 55%      | 40%      | 15 percentage       |
+|                      |          |          | points              |
++----------------------+----------+----------+---------------------+
+| True Positive Rate   | 90%      | 60%      | 30 percentage       |
+|                      |          |          | points              |
++----------------------+----------+----------+---------------------+
+| False Positive Rate  | 20%      | 20%      | 0 percentage points |
++----------------------+----------+----------+---------------------+
+
+: **Fairness Metrics Summary**: Comparison of fairness metrics across demographic groups reveals substantial disparities in how the model treats qualified applicants from each group. {#tbl-fairness-metrics-summary}
+
+Several mitigation approaches exist, each with distinct tradeoffs. Threshold adjustment lowers the approval threshold for Group B to equalize TPR, though this may increase false positives for that group. Reweighting upweights Group B samples during training to give the model stronger signal about this population, though this may reduce overall accuracy. Adversarial debiasing trains with an adversary that prevents the model from learning group membership, though this adds training complexity. The choice among these approaches requires stakeholder input about which tradeoffs are acceptable in the specific application context.
 
 ### Incident Response Preparation {#sec-responsible-engineering-incident-response-4e8f}
 
@@ -293,7 +380,7 @@ Responsible engineering extends beyond fairness to encompass the resource costs 
 
 ### Computational Resource Costs {#sec-responsible-engineering-computational-costs-3a7f}
 
-The computational demands of modern ML systems have grown dramatically. Training large language models requires thousands of GPU hours, consuming energy measured in megawatt hours. Training runs for large models can produce carbon emissions equivalent to driving an automobile hundreds of thousands of miles [@strubell2019energy].
+The computational demands of modern ML systems have grown dramatically. Training large language models requires thousands of GPU hours, consuming energy measured in megawatt hours. Early studies reported extreme training emissions, but modern practices dramatically reduce costs. Efficient training techniques including mixed precision, gradient checkpointing, and optimized parallelization strategies reduce energy consumption by 10-100x compared to naive implementations [@strubell2019energy]. The key insight is that computational cost is largely a function of engineering practice, not inherent model requirements.
 
 These costs are not inherent to achieving useful capabilities. Much of the computational expense reflects inefficient practices such as training from scratch when fine tuning would suffice, using larger models than tasks require, and running hyperparameter searches that explore redundant configurations.[^fn-green-ai]
 
@@ -303,7 +390,7 @@ The efficiency techniques covered in @sec-efficient-ai and @sec-model-optimizati
 
 ### The Brain as Efficiency Inspiration {#sec-responsible-engineering-brain-efficiency-5c2a}
 
-The human brain provides a compelling reference point for evaluating ML system efficiency. Operating on approximately 20 watts, the brain performs visual recognition, language understanding, motor control, and reasoning tasks that challenge ML systems consuming thousands of times more energy. This comparison inspires a crucial question: if biological systems achieve sophisticated intelligence within such tight energy budgets, how much room remains for improving artificial systems?
+The human brain provides a compelling reference point for evaluating ML system efficiency. Operating on approximately 20 watts, the brain performs visual recognition, language understanding, motor control, and reasoning tasks that challenge ML systems consuming thousands of times more energy. This existence proof motivates three engineering principles: first, data movement dominates energy cost, so systems should minimize through local processing; second, specialized circuits outperform general-purpose compute for specific tasks; third, hierarchical processing reduces system-level computational load. These principles inform the edge deployment strategies and connect to the efficiency techniques covered in @sec-efficient-ai.
 
 Direct comparison requires careful interpretation. The brain uses analog computation, massive parallelism through 86 billion neurons, local communication that minimizes data movement, and spiking neural dynamics fundamentally different from digital matrix operations. These architectural differences prevent direct translation of brain efficiency metrics to artificial systems. The brain also evolved for embodied survival tasks rather than the narrow prediction problems that many ML applications address.
 
@@ -375,21 +462,87 @@ Engineers should evaluate whether the value an ML system delivers justifies its 
 
 [^fn-ml-roi]: **ML Return on Investment**: Many organizations deploy ML systems without rigorous analysis of whether the benefits justify the costs. Responsible engineering requires honest assessment of value delivered relative to resources consumed.
 
+#### TCO Calculation Methodology {#sec-responsible-engineering-tco-methodology}
+
+Engineers can estimate three-year total cost of ownership using a structured approach that accounts for training, inference, and operational costs. The following methodology applies to the recommendation system example discussed above.
+
+**Training Costs** include both initial development and ongoing retraining. @tbl-tco-training shows the calculation structure.
+
++---------------------------------+------------------------------------+--------------------------+
+| **Cost Component**              | **Calculation**                    | **Example**              |
++:================================+:===================================+:=========================+
+| Initial data preparation        | hours x rate                       | 100 GPU-hrs x $4 = $400  |
++---------------------------------+------------------------------------+--------------------------+
+| Hyperparameter search           | experiments x cost/experiment      | 50 x $40 = $2,000        |
++---------------------------------+------------------------------------+--------------------------+
+| Final training                  | hours x rate                       | 200 GPU-hrs x $4 = $800  |
++---------------------------------+------------------------------------+--------------------------+
+| **Subtotal per training cycle** |                                    | **$3,200**               |
++---------------------------------+------------------------------------+--------------------------+
+| Retraining frequency            | cycles/year x years                | 4/year x 3 years = 12    |
++---------------------------------+------------------------------------+--------------------------+
+| **Total training cost**         | subtotal x cycles                  | **$38,400**              |
++---------------------------------+------------------------------------+--------------------------+
+
+: **Training Cost Calculation**: Training costs include initial development and periodic retraining over the system lifecycle. {#tbl-tco-training}
+
+**Inference Costs** typically dominate total cost of ownership for production systems. @tbl-tco-inference details the calculation.
+
++---------------------------------+------------------------------------+---------------------------------+
+| **Cost Component**              | **Calculation**                    | **Example**                     |
++:================================+:===================================+:================================+
+| Daily queries                   | users x queries/user               | 10M x 20 = 200M                 |
++---------------------------------+------------------------------------+---------------------------------+
+| GPU-seconds/day                 | queries x latency                  | 200M x 0.01s = 2M sec           |
++---------------------------------+------------------------------------+---------------------------------+
+| GPU-hours/day                   | seconds / 3600                     | 556 GPU-hrs                     |
++---------------------------------+------------------------------------+---------------------------------+
+| Annual GPU cost                 | hours x 365 x rate                 | 556 x 365 x $2.50 = $507K       |
++---------------------------------+------------------------------------+---------------------------------+
+| **3-year inference cost**       | annual x 3                         | **$1.52M**                      |
++---------------------------------+------------------------------------+---------------------------------+
+
+: **Inference Cost Calculation**: Inference costs scale with query volume and dominate total cost for high-traffic systems. {#tbl-tco-inference}
+
+**Operational Costs** encompass infrastructure, personnel, and incident response. @tbl-tco-operations presents typical components.
+
++-----------------------------------+---------------------+------------------+
+| **Cost Component**                | **Annual Estimate** | **3-Year Total** |
++:==================================+====================:+=================:+
+| Monitoring infrastructure         | $50K                | $150K            |
++-----------------------------------+---------------------+------------------+
+| On-call engineering (0.5 FTE)     | $100K               | $300K            |
++-----------------------------------+---------------------+------------------+
+| Incident response (estimated)     | $20K                | $60K             |
++-----------------------------------+---------------------+------------------+
+| **Total operational**             |                     | **$510K**        |
++-----------------------------------+---------------------+------------------+
+
+: **Operational Cost Calculation**: Operational costs include infrastructure, personnel, and incident response over the system lifecycle. {#tbl-tco-operations}
+
+The total cost summary in @tbl-tco-summary reveals the relative contribution of each category.
+
++------------------+------------------+-----------------+
+| **Category**     | **3-Year Cost**  | **Percentage**  |
++:=================+=================:+================:+
+| Training         | $38K             | 2%              |
++------------------+------------------+-----------------+
+| Inference        | $1.52M           | 74%             |
++------------------+------------------+-----------------+
+| Operations       | $510K            | 24%             |
++------------------+------------------+-----------------+
+| **Total TCO**    | **$2.07M**       | 100%            |
++------------------+------------------+-----------------+
+
+: **Total Cost of Ownership Summary**: Inference dominates at 74% of total cost for this recommendation system example. {#tbl-tco-summary}
+
+The key insight from this analysis is that inference dominates total cost at 74%. A 20% reduction in inference latency through quantization would save $304K over three years, easily justifying the engineering investment in optimization techniques.
+
 ### Environmental Impact {#sec-responsible-engineering-environmental-impact-7c9d}
 
-Data centers consume approximately one to two percent of global electricity, with ML workloads representing a growing fraction of that consumption [@henderson2020towards]. Training large models produces carbon emissions that vary dramatically depending on the electricity grid powering the data center.
+Environmental impact follows directly from computational efficiency. The optimization techniques from @sec-efficient-ai and @sec-model-optimizations reduce energy consumption per inference, directly lowering carbon footprint. Data centers consume approximately one to two percent of global electricity, with ML workloads representing a growing fraction [@henderson2020towards]. However, engineers can reduce this impact by selecting cloud regions powered by renewable energy (5x carbon reduction), applying model efficiency techniques (2-4x reduction through quantization), and scheduling intensive workloads during periods of abundant renewable energy.
 
-Several mechanisms reduce environmental impact:
-
-**Model Efficiency**: Smaller models with equivalent task performance consume less energy for both training and inference. The efficiency techniques from earlier chapters directly support environmental goals.
-
-**Infrastructure Selection**: Choosing cloud regions powered by renewable energy reduces carbon emissions by factors of five or more compared to coal-dependent grids. Major cloud providers publish carbon intensity data for their regions.
-
-**Scheduling Optimization**: Running intensive workloads when renewable energy is abundant and grid demand is low reduces marginal carbon impact. Workloads that tolerate delays enable carbon-aware scheduling.
-
-**Lifecycle Thinking**: Considering environmental impact across the full system lifecycle, from data collection through model retirement, enables identification of the highest impact interventions.
-
-Environmental impact is not separate from good engineering. Efficient systems are both environmentally responsible and operationally cheaper. The alignment between efficiency and sustainability means responsible practice and self-interest point in the same direction.
+Volume II's Sustainable AI chapter provides comprehensive treatment of carbon accounting methodologies, lifecycle analysis, and grid selection strategies. For now, engineers should recognize that efficient systems are inherently more sustainable systems. The alignment between efficiency and sustainability means responsible practice and self-interest point in the same direction.
 
 ## Conclusion and Volume II Preview {#sec-responsible-engineering-conclusion-volume-ii-preview-3f29}
 
@@ -398,6 +551,8 @@ This chapter establishes a shift in how engineers approach machine learning depl
 The responsible engineering mindset transforms abstract concerns into concrete questions during system development. Before deployment, engineers must systematically evaluate whether systems have been tested across representative user populations, whether failure modes have been characterized and monitored, whether resource consumption aligns with delivered value, and whether affected stakeholders have meaningful recourse when systems malfunction. These questions demand the same rigorous thinking that engineers apply to performance optimization and reliability engineering.
 
 Efficiency and sustainability considerations demonstrate how responsible engineering aligns with practical constraints. Systems that waste computational resources impose environmental costs, operational expenses, scaling difficulties, and architectural inefficiencies. The most responsible systems are the most efficient because responsibility thinking requires engineers to justify resource consumption against delivered value.
+
+Responsible engineering demands the same quantitative rigor applied throughout this text. Fairness is measurable through disaggregated metrics across demographic groups. Efficiency is measurable through latency and power consumption. Environmental impact is measurable through carbon accounting. What gets measured gets managed, and responsible systems require systematic measurement.
 
 ### The Practitioner's Takeaway {#sec-responsible-engineering-practitioners-takeaway-8e7d}
 

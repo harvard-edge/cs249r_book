@@ -172,7 +172,11 @@ The practical manifestation of these patterns appears clearly in @fig-kaplan-sca
 
 ![**Scaling Laws & Compute Optimality**: Larger models consistently achieve better performance with increased training data and compute, but diminishing returns necessitate careful resource allocation during training. Optimal model size and training duration depend on the available compute budget, as evidenced by the convergence of loss curves at different parameter scales and training token counts. Source: [@kaplan2020scaling].](images/png/kaplan_scaling_data_compute.png){#fig-kaplan-scaling}
 
-This theoretical scaling relationship defines optimal compute allocation: for a fixed budget, the relationship $D \propto N^{0.74}$ [@hoffmann2022training] shows that dataset size $D$ and model size $N$ must grow in coordinated proportions. This means that as model size increases, the dataset should grow at roughly three-quarters the rate to maintain compute-optimal efficiency.
+This theoretical scaling relationship defines optimal compute allocation: for a fixed budget, the relationship $D \propto N^{0.74}$ [@hoffmann2022training] shows that dataset size $D$ and model size $N$ must grow in coordinated proportions. This represents a significant revision from earlier work by @kaplan2020scaling, which suggested $D \propto N^{0.57}$, implying that scaling model size was more important than scaling data.
+
+The Chinchilla study revealed that prior models were significantly undertrained. Chinchilla-70B, trained with 1.4 trillion tokens, outperformed the 280B parameter Gopher model across most benchmarks despite having 4x fewer parameters. This demonstrated that compute-optimal training requires substantially more data relative to model size than previously believed. The practical implication is that smaller models trained on more data often outperform larger models trained on less data, a finding with significant efficiency implications for practitioners operating under fixed compute budgets.
+
+These scaling laws are empirical and continue to evolve as researchers explore different model families, data compositions, and training procedures.
 
 These theoretical predictions assume perfect compute utilization, which becomes challenging in distributed training scenarios. Real-world implementations face communication overhead that scales unfavorably with system size, creating bandwidth bottlenecks that reduce effective utilization. Beyond 100 nodes, communication overhead can reduce expected performance gains by 20-40% depending on workload and interconnect, transforming predicted improvements into more modest real-world results.
 
@@ -414,6 +418,14 @@ While data-driven regimes characterize how performance varies with dataset size,
 
 **Test-time scaling** characterizes how performance improvements result from additional compute allocation during inference without modifying model parameters. This encompasses methods including ensemble prediction, chain-of-thought prompting, and iterative refinement, enabling models to allocate additional processing time per input.
 
+The relative compute allocation across these regimes reveals important efficiency insights:
+
+- **Pre-training**: Approximately $10^{24}$ FLOPs for frontier models (one-time investment)
+- **Post-training**: Approximately $10^{21}$ FLOPs (0.1% of pre-training compute)
+- **Inference per query**: Approximately $10^{12}$ FLOPs
+
+The critical insight for efficiency planning is that aggregate inference compute can dominate total system cost. With 1 billion queries per day, daily inference compute reaches $10^{21}$ FLOPs, equaling the entire post-training budget. After one year, aggregate inference exceeds pre-training compute by 300x. This explains why inference efficiency becomes the dominant optimization target for high-volume deployments, while pre-training efficiency matters more for organizations that frequently retrain models.
+
 @fig-scaling-regimes shows these temporal regimes exhibit distinct characteristics in computational resource allocation for performance improvement. Pre-training demands massive resources while providing broad capabilities, post-training offers targeted enhancements under moderate requirements, and test-time scaling enables flexible performance-compute trade-offs adjustable per inference.
 
 ::: {#fig-scaling-regimes fig-env="figure" fig-pos="htb"}
@@ -453,7 +465,7 @@ node[below right,text=black,align=center]{Test-time scaling\\ "long thinking};
 : **Temporal Scaling Regimes**: Different temporal scaling regimes offer distinct approaches to improving model performance with varying compute investments. Pre-training establishes broad capabilities through large-scale training from scratch, post-training refines existing models through additional training phases, and test-time scaling dynamically allocates compute during inference to enhance per-sample results. Understanding these regimes clarifies the trade-offs between upfront investment and flexible, on-demand resource allocation for optimal system performance.
 :::
 
-Data-driven and temporal scaling regimes are crucial for system design, revealing multiple paths to performance improvement beyond scaling training resources alone. For resource-constrained deployments, post-training and test-time scaling may provide more practical approaches than complete model retraining, while data-efficient techniques enable effective system operation within the power-law regime using smaller datasets.
+Data-driven and temporal scaling regimes inform system design, revealing multiple paths to performance improvement beyond scaling training resources alone. For resource-constrained deployments, post-training and test-time scaling may provide more practical approaches than complete model retraining, while data-efficient techniques enable effective system operation within the power-law regime using smaller datasets.
 
 ### Practical Applications in System Design {#sec-efficient-ai-practical-applications-system-design-5c97}
 
@@ -618,7 +630,63 @@ The specific priorities vary across deployment environments. Cloud systems with 
 
 Algorithmic efficiency achieves maximum performance per unit of computation through optimized model architectures and training procedures. Modern techniques achieve 10-100x improvements in computational requirements while maintaining or improving accuracy, providing the most direct path to practical AI deployment.
 
-The foundation for these improvements lies in a key observation: most neural networks are dramatically overparameterized. The lottery ticket hypothesis reveals that networks contain sparse subnetworks, typically 10-20% of original parameters (though this varies significantly by architecture and task), that achieve comparable accuracy when trained in isolation [@frankle2019lottery]. This discovery transforms compression into a principled approach: large models serve as initialization strategies for finding efficient architectures.
+#### Efficiency Metrics for Compression {#sec-efficient-ai-efficiency-metrics-compression}
+
+Evaluating compression techniques requires multiple complementary metrics that capture different aspects of efficiency gains.
+
+**Compression Ratio** measures the reduction in model size:
+$$CR = \frac{\text{Original Size}}{\text{Compressed Size}} = \frac{N_{params} \times b_{orig}}{N_{remaining} \times b_{compressed} + \text{Overhead}}$$
+where overhead includes index storage for sparse representations.
+
+**Theoretical vs. Actual Speedup** represents a critical distinction in system analysis. FLOPs reduction does not equal wall-clock speedup:
+$$\text{Actual Speedup} = \frac{T_{original}}{T_{compressed}} \neq \frac{\text{FLOPs}_{original}}{\text{FLOPs}_{compressed}}$$
+
+This gap exists because memory bandwidth may limit performance rather than compute, sparse operations require indexing overhead, reduced precision may not map to hardware acceleration, and kernel launch overhead becomes proportionally larger for smaller operations.
+
+**Structured Pruning Advantage**: Structured pruning (removing entire filters or channels) achieves speedups closer to theoretical because it preserves dense tensor operations. Unstructured pruning requires sparse matrix formats that may not accelerate on standard hardware.
+
+**Accuracy-Efficiency Pareto Frontier**: The optimal compression strategy lies on the Pareto frontier, the set of solutions where no technique achieves BOTH higher accuracy AND higher efficiency. Different techniques occupy different positions on this frontier, as shown in the comparison table below.
+
++---------------------------+------------+----------------+---------------+
+| Technique                 | Typical CR | Actual Speedup | Accuracy Loss |
++:==========================+:===========+:===============+:==============+
+| INT8 quantization         | 4x         | 2-4x           | <1%           |
++---------------------------+------------+----------------+---------------+
+| 50% structured pruning    | 2x         | 1.5-2x         | <2%           |
++---------------------------+------------+----------------+---------------+
+| 90% unstructured pruning  | 10x        | 1.2-1.5x       | 1-3%          |
++---------------------------+------------+----------------+---------------+
+| Knowledge distillation    | 4-10x      | 4-10x          | 1-5%          |
++---------------------------+------------+----------------+---------------+
+
+: **Compression Technique Trade-offs**: Different compression approaches offer varying trade-offs between compression ratio, actual speedup, and accuracy loss, enabling practitioners to select techniques appropriate for their deployment constraints. {#tbl-compression-tradeoffs}
+
+#### Why Neural Networks Are Compressible {#sec-efficient-ai-why-networks-compressible}
+
+The foundation for compression improvements lies in a key observation: most neural networks are dramatically overparameterized. Trained neural networks exhibit a characteristic property where weight magnitude distributions follow heavy-tailed patterns. Most weights cluster near zero while a small fraction carry the majority of information.
+
+Mathematically, if we sort weights by absolute magnitude $|w_i|$, typically 80-90% of weights contribute less than 10% to the output activation. This redundancy arises from overparameterization during training, where networks learn in a high-dimensional space but converge to solutions lying in lower-dimensional manifolds.
+
+**Sensitivity Analysis**: The sensitivity of each weight to network output can be approximated by the first-order Taylor expansion of the loss function:
+$$\Delta L \approx \sum_i g_i \cdot \Delta w_i$$
+where $g_i = \partial L / \partial w_i$ is the gradient. For converged networks, $g_i \approx 0$, leading to the simpler heuristic of removing weights with smallest $|w_i|$. This is the basis of magnitude-based pruning pioneered in Deep Compression [@han2015deep].
+
+The lottery ticket hypothesis reveals that networks contain sparse subnetworks that achieve comparable accuracy when trained in isolation [@frankle2019lottery]. The size of these "winning tickets" varies significantly by architecture: 3-5% of original parameters for deep vision models on ImageNet, 10-30% for smaller networks on CIFAR, and larger fractions for language models where attention patterns require more parameters. This discovery transforms compression into a principled approach: large models serve as initialization strategies for finding efficient architectures.
+
++----------------------+-----------------------+-------------------+--------------+
+| Pruning Type         | Speedup               | Hardware Support  | Accuracy     |
++:=====================+:======================+:==================+:=============+
+| Unstructured         | Theoretical only      | Requires sparse   | Best         |
+|                      |                       | formats           |              |
++----------------------+-----------------------+-------------------+--------------+
+| Structured (filter)  | Real 2-4x             | Standard dense    | Moderate     |
+|                      |                       | ops               |              |
++----------------------+-----------------------+-------------------+--------------+
+| N:M (e.g., 2:4)      | Real 2x               | Ampere Sparse     | Good         |
+|                      |                       | Tensor Cores      |              |
++----------------------+-----------------------+-------------------+--------------+
+
+: **Structured vs. Unstructured Pruning**: Different pruning approaches offer varying trade-offs between theoretical speedup, hardware support requirements, and accuracy preservation. {#tbl-pruning-types}
 
 #### Model Compression Fundamentals {#sec-efficient-ai-model-compression-fundamentals-bcc3}
 
@@ -626,27 +694,60 @@ Three major approaches dominate modern algorithmic efficiency, each targeting di
 
 **Model Compression** systematically removes redundant components from neural networks. Pruning techniques achieve 2-4x inference speedup with 1-3% accuracy loss by removing unnecessary weights and structures. Research demonstrates that ResNet-50 can be reduced to 20% of original parameters while maintaining 99% of ImageNet accuracy [@gholami2021survey]. The specific pruning algorithms—including magnitude-based selection, structured vs. unstructured approaches, and layer-wise sensitivity analysis—are covered in detail in @sec-model-optimizations.
 
-**Precision Optimization** reduces computational requirements through quantization, which maps high-precision floating-point values to lower-precision representations. Neural networks demonstrate inherent robustness to precision reduction, with INT8 quantization achieving 4x memory reduction and 2-4x inference speedup while typically maintaining 98-99% of FP32 accuracy [@Jacob_et_al_2018]. Modern techniques range from simple post-training quantization to sophisticated quantization-aware training. The specific quantization algorithms, calibration methods, and training procedures are detailed in @sec-model-optimizations.
+**Precision Optimization** reduces computational requirements through quantization, which maps high-precision floating-point values to lower-precision representations. For uniform affine quantization, the mapping is defined as:
+$$q = \text{round}\left(\frac{r}{s}\right) + z$$
+where $r$ is the real-valued input, $s$ is the scale factor, $z$ is the zero-point offset, and $q$ is the quantized integer. Dequantization recovers an approximation: $\hat{r} = s \cdot (q - z)$. The quantization error $\epsilon = r - \hat{r}$ is bounded by $|\epsilon| \leq s/2$ for rounding, and the scale factor for a range $[r_{min}, r_{max}]$ mapped to $b$ bits is:
+$$s = \frac{r_{max} - r_{min}}{2^b - 1}$$
 
-**Knowledge Transfer** distills capabilities from large teacher models into efficient student models. Knowledge distillation[^fn-knowledge-distillation] achieves 40-60% parameter reduction while retaining 95-97% of original performance, addressing both computational efficiency and data efficiency by requiring fewer training examples. The specific distillation algorithms, loss functions, and training procedures are covered in @sec-model-optimizations.
+Neural networks demonstrate inherent robustness to this bounded quantization error for several reasons: the error is bounded and approximately uniform, normalization layers (BatchNorm and LayerNorm) provide implicit regularization, many ReLU activations are zero and require no precision, and overparameterization provides redundant capacity to absorb noise. INT8 quantization achieves 4x memory reduction and 2-4x inference speedup while typically maintaining 98-99% of FP32 accuracy [@Jacob_et_al_2018]. Modern techniques range from simple post-training quantization to sophisticated quantization-aware training. The specific quantization algorithms, calibration methods, and training procedures are detailed in @sec-model-optimizations.
+
++----------------+------+----------------+-----------------+
+| Scheme         | Bits | Memory Savings | Accuracy Impact |
++:===============+:=====+:===============+:================+
+| FP32 to FP16   | 16   | 2x             | Negligible      |
++----------------+------+----------------+-----------------+
+| FP32 to INT8   | 8    | 4x             | 0.1-1% loss     |
++----------------+------+----------------+-----------------+
+| FP32 to INT4   | 4    | 8x             | 1-5% loss       |
++----------------+------+----------------+-----------------+
+
+: **Quantization Schemes and Trade-offs**: Lower precision representations provide greater memory savings but with increasing accuracy impact. {#tbl-quantization-schemes}
+
+**Knowledge Transfer** distills capabilities from large teacher models into efficient student models. The core mechanism uses a combined loss function:
+$$L = \alpha \cdot L_{CE}(y, p_s) + (1 - \alpha) \cdot T^2 \cdot L_{KL}(p_t^{(T)}, p_s^{(T)})$$
+where $L_{CE}$ is the cross-entropy loss with true labels, $L_{KL}$ is the Kullback-Leibler divergence between teacher and student outputs, and $T$ is the temperature parameter that softens the probability distributions. The $T^2$ factor compensates for the reduced gradient magnitudes when using high temperatures. Higher temperatures reveal the teacher's learned relationships between classes, including which incorrect classes are "close" to the correct answer, providing richer training signal than hard labels alone. Knowledge distillation[^fn-knowledge-distillation] achieves 40-60% parameter reduction while retaining 95-97% of original performance, addressing both computational efficiency and data efficiency by requiring fewer training examples. The specific distillation algorithms, loss functions, and training procedures are covered in @sec-model-optimizations.
 
 [^fn-knowledge-distillation]: **Knowledge Distillation**: Technique where a large "teacher" model transfers knowledge to a smaller "student" model by training the student to mimic the teacher's output probabilities. DistilBERT achieves ~97% of BERT's performance on GLUE benchmark with 40% fewer parameters and 60% faster inference through distillation.
 
 #### Hardware-Algorithm Co-Design {#sec-efficient-ai-hardwarealgorithm-codesign-67e8}
 
-Algorithmic optimizations alone are insufficient; their practical benefits depend on hardware-software co-design. Optimization techniques must be tailored to target hardware characteristics (memory bandwidth, compute capabilities, and precision support) to achieve real-world speedups. For example, INT8 quantization achieves 2.3x speedup on NVIDIA V100 GPUs with tensor core support but may provide minimal benefit on hardware lacking specialized integer instructions.
+Algorithmic optimizations alone are insufficient; their practical benefits depend on hardware-software co-design. Optimization techniques must be tailored to target hardware characteristics (memory bandwidth, compute capabilities, and precision support) to achieve real-world speedups.
 
-Successful co-design requires understanding whether workloads are memory-bound (limited by data movement) or compute-bound (limited by processing capacity), then applying optimizations that address the actual bottleneck. Techniques like operator fusion reduce memory traffic by combining operations, while precision reduction exploits specialized hardware units. While @sec-model-optimizations covers the algorithmic aspects of hardware-aware optimization, @sec-ai-acceleration details how systematic co-design approaches leverage specific hardware architectures for maximum efficiency.
+**Discrete Efficiency Steps**: Hardware provides acceleration in discrete steps aligned with specific bit-widths. INT8 quantization achieves 2.3x speedup on NVIDIA V100 GPUs with tensor core support, and INT4 provides additional gains on Ampere architecture, but arbitrary bit-widths like INT6 may provide no benefit because hardware lacks native support. This creates discrete efficiency steps rather than a continuous improvement curve.
+
+**Operational Intensity**: The ratio of compute operations to memory bytes transferred (FLOPs/byte) determines whether a workload is compute-bound or memory-bound. This metric is critical for optimization decisions:
+$$\text{Operational Intensity} = \frac{\text{FLOPs}}{\text{Bytes Transferred}}$$
+Modern accelerators require high operational intensity (often 50-200 FLOPs/byte) to achieve peak utilization. Most neural network layers fall below this threshold, making them memory-bound and explaining why memory bandwidth optimization often provides larger gains than raw compute speedup.
+
+**Compute-Bound vs. Memory-Bound**: For memory-bound operations (most activations, normalization, small batch inference), reducing memory traffic through operator fusion and caching provides larger gains than faster arithmetic. For compute-bound operations (large matrix multiplications in attention and FFN layers), exploiting tensor cores and reduced-precision arithmetic maximizes throughput.
+
+The roofline model in @sec-ai-acceleration provides the quantitative framework for these decisions, enabling systematic analysis of whether a given workload benefits more from compute or memory optimizations.
 
 #### Architectural Innovation for Efficiency {#sec-efficient-ai-architectural-innovation-efficiency-7dd9}
 
-Modern efficiency requires architectures designed for resource constraints. Models like MobileNet[^fn-mobilenet], EfficientNet[^fn-efficientnet], and SqueezeNet[^fn-squeezenet] demonstrate that compact designs can deliver high performance through architectural innovations rather than scaling up existing designs.
+Modern efficiency requires architectures designed for resource constraints. Models like MobileNet[^fn-mobilenet], EfficientNet[^fn-efficientnet], and SqueezeNet[^fn-squeezenet] demonstrate that compact designs can deliver high performance through architectural innovations rather than scaling up existing designs. Each architecture embodies a distinct efficiency principle:
 
-[^fn-mobilenet]: **MobileNet**: Efficient neural network architecture using depthwise separable convolutions, achieving ~50× fewer parameters than traditional models. MobileNet-v1 has only 4.2M parameters vs. VGG-16's ~138M, enabling deployment on smartphones with <100MB memory.
+**Depthwise Separable Convolutions** (MobileNet): Traditional convolutions apply $D_K \times D_K$ filters across all input channels simultaneously. Depthwise separable convolutions factor this into two operations: depthwise convolution (one $D_K \times D_K$ filter per channel) followed by pointwise convolution (1x1 filters across channels). This achieves approximately 8-9x FLOP reduction for 3x3 kernels on typical channel counts, enabling mobile deployment while maintaining accuracy. The specific derivation of this reduction factor is provided in @sec-model-optimizations.
+
+**Compound Scaling** (EfficientNet): Rather than scaling depth, width, or resolution independently, compound scaling increases all three dimensions together using learned coefficients. This balanced scaling achieves better accuracy-efficiency trade-offs than arbitrary scaling, with EfficientNet-B7 achieving 84.3% ImageNet accuracy while using 8.4x fewer FLOPs than the best prior models.
+
+**Fire Modules** (SqueezeNet): Fire modules first "squeeze" channels to a smaller count using 1x1 convolutions, then "expand" using a mix of 1x1 and 3x3 convolutions. This squeeze-expand pattern reduces parameters while maintaining receptive field size.
+
+[^fn-mobilenet]: **MobileNet**: Efficient neural network architecture using depthwise separable convolutions, achieving ~50x fewer parameters than traditional models. MobileNet-v1 has only 4.2M parameters vs. VGG-16's ~138M, enabling deployment on smartphones with <100MB memory.
 
 [^fn-efficientnet]: **EfficientNet**: Architecture achieving state-of-the-art accuracy with superior parameter efficiency. EfficientNet-B7 achieves 84.3% ImageNet top-1 accuracy (84.4% in some reports) with 66M parameters, compared to ResNet-152's 77.0% accuracy with approximately 60M parameters.
 
-[^fn-squeezenet]: **SqueezeNet**: Compact CNN architecture achieving AlexNet-level accuracy with 50× fewer parameters (1.25M vs. 60M). Demonstrated that clever architecture design can dramatically reduce model size without sacrificing performance.
+[^fn-squeezenet]: **SqueezeNet**: Compact CNN architecture achieving AlexNet-level accuracy with 50x fewer parameters (1.25M vs. 60M). Demonstrated that clever architecture design can dramatically reduce model size without sacrificing performance.
 
 Different deployment contexts require different efficiency trade-offs. Cloud inference prioritizes throughput and can tolerate higher memory usage, favoring parallel-friendly operations. Edge deployment prioritizes latency and memory efficiency, requiring architectures that minimize memory access. Mobile deployment constrains energy usage, demanding architectures optimized for energy-efficient operations.
 
@@ -655,6 +756,12 @@ Different deployment contexts require different efficiency trade-offs. Cloud inf
 Parameter-efficient fine-tuning[^fn-param-efficient] techniques demonstrate how the three efficiency dimensions work together. These methods update less than 1% of model parameters while achieving full fine-tuning performance, addressing all three efficiency pillars: algorithmic efficiency through reduced parameter updates, compute efficiency through lower memory requirements and faster training, and data efficiency by leveraging pre-trained representations that require fewer task-specific examples.
 
 [^fn-param-efficient]: **Parameter-Efficient Fine-tuning**: Methods like LoRA and Adapters that update <1% of model parameters while achieving full fine-tuning performance. Reduces memory requirements from gigabytes to megabytes for large model adaptation.
+
+**Low-Rank Adaptation (LoRA)** exemplifies the mathematical insight behind parameter-efficient methods. Instead of updating a weight matrix $W \in \mathbb{R}^{d \times k}$ directly, LoRA learns a low-rank decomposition of the update:
+$$W' = W + BA$$
+where $B \in \mathbb{R}^{d \times r}$ and $A \in \mathbb{R}^{r \times k}$ with rank $r \ll \min(d, k)$. This reduces trainable parameters from $d \times k$ to $r \times (d + k)$, a reduction factor of $\frac{dk}{r(d+k)}$. For a 175B parameter model with $r = 8$, this enables approximately 10,000x fewer trainable parameters.
+
+The key insight is that task-specific updates have low intrinsic dimensionality: while pre-training requires the full parameter space to capture general knowledge, adaptation to specific tasks operates in a much smaller subspace. This explains why LoRA works for fine-tuning but not for training from scratch.
 
 The practical impact is transformative: fine-tuning GPT-3 traditionally requires storing gradients for 175 billion parameters, consuming over 700GB of GPU memory. LoRA reduces this to under 10GB by learning low-rank decompositions of weight updates, enabling efficient adaptation on single consumer GPUs while requiring only hundreds of examples rather than thousands for effective adaptation.
 
@@ -1441,7 +1548,7 @@ Training costs for state-of-the-art models like GPT-4 and Gemini Ultra require t
 
 Data efficiency is essential where high-quality datasets are scarce, but achieving it is unequally distributed. NLP for low-resource languages suffers from lack of sufficient training data, leading to significant performance gaps. Efforts like the Masakhane project building open-source datasets for African languages show how collaborative initiatives can address this, though scaling globally requires greater investment. Democratizing data efficiency requires more open sharing of pre-trained models and datasets. Initiatives like Hugging Face's open access to transformers or Meta's No Language Left Behind aim to make state-of-the-art NLP models available worldwide, reducing barriers for data-scarce regions.
 
-Algorithmic efficiency plays a crucial role in democratizing ML by enabling advanced capabilities on low-cost, resource-constrained devices. AI-powered diagnostic tools on smartphones are transforming healthcare in remote areas, while low-power TinyML models enable environmental monitoring in regions without reliable electricity.
+Algorithmic efficiency contributes to democratizing ML by enabling advanced capabilities on low-cost, resource-constrained devices. AI-powered diagnostic tools on smartphones are transforming healthcare in remote areas, while low-power TinyML models enable environmental monitoring in regions without reliable electricity.
 
 Technologies like [TensorFlow Lite](https://ai.google.dev/edge/litert) and [PyTorch Mobile](https://pytorch.org/mobile/home/) allow developers to deploy lightweight models on everyday devices, expanding access in resource-constrained settings. Open-source efforts to share pre-optimized models like MobileNet or EfficientNet play a critical role by allowing under-resourced organizations to deploy state-of-the-art solutions.
 

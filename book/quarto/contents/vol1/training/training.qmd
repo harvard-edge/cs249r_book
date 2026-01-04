@@ -974,6 +974,40 @@ The mathematical operations we have examined—forward propagation, gradient com
 
 Efficiently executing training requires coordinating these mathematical operations with data loading pipelines, preprocessing workflows, hardware accelerators, and monitoring systems. The matrix multiplications that dominate forward and backward passes must be scheduled to overlap with data transfer operations to prevent GPU idle time. Activation storage requirements from forward propagation influence batch size selection and memory allocation strategies. The sequential dependencies imposed by backpropagation constrain parallelization opportunities and shape distributed training architectures. These system-level considerations transform mathematical operations into concrete computational pipelines.
 
+### Arithmetic Intensity and Training Bottlenecks {#sec-ai-training-arithmetic-intensity-bottlenecks}
+
+To understand why certain optimizations matter more than others, we must analyze whether operations are compute-bound or memory-bound. Arithmetic intensity (AI) measures this relationship:
+
+$$
+\text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{Bytes Moved}}
+$$
+
+Operations with high arithmetic intensity are compute-bound: their performance is limited by the processor's computational throughput. Operations with low arithmetic intensity are memory-bound: they spend more time moving data than computing.
+
+**Arithmetic Intensity of Training Operations**:
+
++-----------------------------+-----------------------------------+----------------------------+
+| Operation                   | Arithmetic Intensity              | Classification             |
++:============================+:==================================+:===========================+
+| Dense MatMul (large)        | O(n) FLOP/byte                    | Compute-bound              |
++-----------------------------+-----------------------------------+----------------------------+
+| Activation functions        | 0.25 FLOP/byte (FP16)             | Memory-bound               |
++-----------------------------+-----------------------------------+----------------------------+
+| LayerNorm/BatchNorm         | ~10 FLOP/byte                     | Memory-bound               |
++-----------------------------+-----------------------------------+----------------------------+
+| Attention softmax           | ~5 FLOP/byte                      | Memory-bound               |
++-----------------------------+-----------------------------------+----------------------------+
+
+: **Training Operation Classifications**: Different operations in the training pipeline have vastly different arithmetic intensities, determining whether they are limited by compute throughput or memory bandwidth. {#tbl-training-arithmetic-intensity}
+
+**Example: GPT-2 Attention Layer**: Consider the Q, K, V projections with dimensions (B x S x H) multiplied by (H x H). This produces BSH squared FLOPs. Data movement requires reading Q, K, V (3 x BSH x 2 bytes) plus writing the output (BSH x 2 bytes). The arithmetic intensity equals BSH squared divided by (8BSH), which simplifies to H/8. For GPT-2 with H=768, this yields 96 FLOP/byte.
+
+**Hardware Ridge Points**: Modern GPUs have characteristic ridge points where operations transition from memory-bound to compute-bound. The A100 with 312 TFLOPS FP16 and 2.0 TB/s bandwidth has a ridge point of 156 FLOP/byte. The H100 with 990 TFLOPS and 3.4 TB/s bandwidth has a ridge point of 291 FLOP/byte. Operations below the ridge point are memory-bound; above are compute-bound.
+
+**Batch Size Effects**: Batch size directly influences arithmetic intensity. With batch=1, many operations fall below the ridge point and become memory-bound. With batch=32 or higher, most matrix operations exceed the ridge point and become compute-bound. This explains why larger batches improve hardware utilization: they shift operations into the compute-bound regime where GPUs excel.
+
+**Optimization Implications**: This analysis guides optimization strategy selection. For memory-bound operations, reducing data movement through operator fusion, reduced precision, or algorithmic improvements like FlashAttention provides the largest gains. For compute-bound operations, increasing throughput through Tensor Cores, parallelism, or quantization matters more. FlashAttention succeeds precisely because it moves attention computation from memory-bound to compute-bound through algorithmic tiling that reduces memory traffic. See @sec-ai-acceleration for detailed roofline model analysis and hardware-specific optimization strategies.
+
 ## Pipeline Architecture {#sec-ai-training-pipeline-architecture-622a}
 
 The mathematical operations examined above define what training systems must compute. Pipeline architecture determines how to orchestrate these computations efficiently across real hardware with finite memory and bandwidth constraints. A training pipeline provides the organizational framework that coordinates mathematical operations with data movement, system resources, and operational monitoring. This architectural perspective enables optimization not just of individual operations, but their orchestration across the entire training process.
@@ -1982,6 +2016,24 @@ A neural network trained in FP32 requires 4 bytes per parameter, while both FP16
 
 The numerical precision differences between these formats shape their use cases. FP32 represents numbers from approximately $\pm1.18 \times 10^{-38}$ to $\pm3.4 \times 10^{38}$ with 7 decimal digits of precision. FP16 ranges from $\pm6.10 \times 10^{-5}$ to $\pm65,504$ with 3-4 decimal digits of precision. Bfloat16, developed by Google Brain, maintains the same dynamic range as FP32 ($\pm1.18 \times 10^{-38}$ to $\pm3.4 \times 10^{38}$) but with reduced precision (3-4 decimal digits). This range preservation makes bfloat16 particularly suited for deep learning training, as it handles large and small gradients more effectively than FP16.
 
+**Precision Format Selection Framework**:
+
++-------------------------+-----------------+-----------------+-----------------+
+| Property                | FP32            | FP16            | BF16            |
++:========================+:================+:================+:================+
+| Exponent bits           | 8               | 5               | 8               |
++-------------------------+-----------------+-----------------+-----------------+
+| Mantissa bits           | 23              | 10              | 7               |
++-------------------------+-----------------+-----------------+-----------------+
+| Min representable       | 10^-45          | 6 x 10^-8       | 10^-45          |
++-------------------------+-----------------+-----------------+-----------------+
+| Tensor Core speedup     | 1x              | 16x             | 16x             |
++-------------------------+-----------------+-----------------+-----------------+
+
+: **Precision Format Comparison**: The choice between FP16 and BF16 depends on whether dynamic range (BF16's strength) or precision (FP16's advantage) matters more for the specific workload. {#tbl-precision-comparison}
+
+The choice between formats depends on model characteristics. Models with gradient outliers, common in transformer architectures, generally benefit from BF16's wider dynamic range. Models with well-conditioned gradients may prefer FP16's greater mantissa precision. Regardless of the reduced-precision format chosen for forward and backward passes, certain operations require FP32 precision: loss accumulation, softmax denominators, normalization variance computation, and optimizer state. These requirements stem from the numerical sensitivity of these operations rather than arbitrary convention.
+
 The hybrid approach proceeds in three main phases, as illustrated in @fig-mixed-precision. During the forward pass, input data converts to reduced precision (FP16 or bfloat16), and matrix multiplications execute in this format, including activation function computations. In the gradient computation phase, the backward pass calculates gradients in reduced precision, but results are stored in FP32 master weights. Finally, during weight updates, the optimizer updates the main weights in FP32, and these updated weights convert back to reduced precision for the next forward pass.
 
 ::: {#fig-mixed-precision fig-env="figure" fig-pos="htb"}
@@ -2350,6 +2402,32 @@ scale=1, every node/.append style={transform shape}]
 Frameworks like PyTorch provide tools such as `torch.utils.checkpoint` to simplify this process. Checkpointing is particularly effective for very deep architectures, such as transformers or large convolutional networks, where the memory required for storing activations can exceed the GPU's capacity.
 
 The synergy between gradient accumulation and checkpointing enables training of larger, more complex models. Gradient accumulation manages memory constraints related to batch size, while checkpointing optimizes memory usage for intermediate activations. Together, these techniques expand the range of models that can be trained on available hardware.
+
+#### Optimal Checkpoint Placement Strategy {#sec-ai-training-optimal-checkpoint-placement}
+
+The number and placement of checkpoints determines the memory-compute tradeoff. For a network with L layers, each storing A bytes of activations:
+
++------------------------------+---------------------+-----------------------+
+| Strategy                     | Memory Cost         | Recompute Cost        |
++:=============================+:====================+:======================+
+| No checkpointing             | L x A               | 0 forward ops         |
++------------------------------+---------------------+-----------------------+
+| Checkpoint every layer       | A                   | (L-1) forward ops     |
++------------------------------+---------------------+-----------------------+
+| k checkpoints                | k x A + (L/k) x A   | (L-k) forward ops     |
++------------------------------+---------------------+-----------------------+
+
+: **Checkpointing Memory-Compute Tradeoffs**: Different checkpoint strategies trade memory savings against recomputation overhead. The optimal number of checkpoints balances these factors. {#tbl-checkpoint-tradeoffs}
+
+**Optimal Checkpoint Interval**: Setting the derivative of total memory cost (k x A + (L/k) x A) to zero yields k_optimal = sqrt(L). This minimizes total memory while bounding recomputation overhead to approximately 33% additional forward time.
+
+**Example: GPT-2 (48 transformer layers)**:
+
+Without checkpointing: Memory = 48 x A (full activation storage)
+
+Optimal checkpointing (sqrt(48) approximately equals 7 checkpoints): Memory = 7 x A + (48/7) x A approximately equals 14 x A. This achieves 71% memory savings with approximately 33% compute overhead.
+
+**Selective Checkpointing Strategy**: Not all operations are equally expensive to recompute. Attention layers with QKV projections have high memory cost (3 x B x S x H) but also high recompute cost (three matrix multiplications). Feed-forward layers have high memory cost (2 x B x S x 4H) but lower recompute cost (two matrix multiplications). LayerNorm has low memory cost and very low recompute cost. The practical strategy is to always checkpoint before attention layers (highest memory per compute ratio), skip FFN checkpoints (fast to recompute), and never checkpoint normalization layers. This selective approach achieves 60 to 80% memory savings with only 20 to 25% compute overhead, outperforming uniform checkpoint placement.
 
 #### Memory and Computational Benefits {#sec-ai-training-memory-computational-benefits-68be}
 

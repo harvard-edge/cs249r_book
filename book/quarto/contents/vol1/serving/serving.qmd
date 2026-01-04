@@ -104,6 +104,64 @@ Most production image classification systems use a **hybrid approach**: frequent
 
 Most production systems combine both approaches. Common queries hit a cache populated by batch inference while uncommon requests trigger dynamic computation. Understanding this spectrum is essential because it determines which subsequent optimization strategies apply. Static inference optimizes for throughput during batch computation and storage efficiency for serving. Dynamic inference optimizes for per-request latency under concurrent load, which requires understanding where time goes within each request.
 
+### The Load Balancer Layer {#sec-serving-load-balancer}
+
+Production serving systems never expose model servers directly to clients. A load balancer sits between clients and model replicas, providing essential functions that affect request distribution, health monitoring, and deployment strategies.
+
+**Request Distribution**
+
+Common algorithms for distributing requests across model replicas include:
+
+- **Round-robin**: Simple, even distribution that ignores server load
+- **Least-connections**: Routes to server with fewest active requests; effective for variable latency workloads
+- **Weighted**: Assigns proportional traffic based on server capacity
+- **Consistent hashing**: Routes similar requests to same servers for cache efficiency
+
+For latency-sensitive ML serving, least-connections often outperforms round-robin because it naturally routes away from slow replicas.
+
+**Health Checking**
+
+Load balancers continuously probe replica health:
+
+```yaml
+# Typical health check configuration
+health_check:
+  interval: 5s
+  timeout: 2s
+  unhealthy_threshold: 3  # Mark unhealthy after 3 failures
+  healthy_threshold: 2    # Mark healthy after 2 successes
+  path: /health           # HTTP endpoint to probe
+```
+
+For ML systems, health checks must verify not just process liveness but model readiness (weights loaded, warmup complete). A server that responds to health checks but has not loaded the model will produce errors or high latency.
+
+**Connection Management**
+
+Load balancers manage the connection lifecycle:
+
+- Maintain connection pools to replicas (avoiding TCP handshake per request)
+- Implement retry on failure (with exponential backoff)
+- Circuit breakers: Stop routing to replicas that fail repeatedly
+
+**Gradual Rollout**
+
+Load balancers enable safe deployment through traffic splitting:
+
+```
+Traffic split during canary deployment:
+  stable-v1: 95%
+  canary-v2: 5%
+
+After validation:
+  stable-v1: 50%
+  canary-v2: 50%
+
+Final promotion:
+  stable-v2: 100%
+```
+
+**Impact on Queuing Analysis**: The load balancer's behavior affects the queuing dynamics analyzed in @sec-serving-queuing. When capacity planning considers "the server," it really means the combined behavior of multiple replicas behind a load balancer.
+
 ## The Latency Budget {#sec-serving-latency-budget}
 
 For dynamic inference systems, the fundamental difference from training lies in optimization objectives. Training optimizes throughput: maximizing samples processed per hour over days of computation. A training job that processes 1000 samples per second is successful regardless of how long any individual sample takes. Serving inverts this priority, optimizing latency per request under strict time constraints. A serving system with 1000ms per-request latency has failed, even if it achieves excellent throughput.
@@ -154,7 +212,7 @@ This breakdown reveals why naive optimization efforts often fail. Engineers focu
 
 Barroso, Patterson, and colleagues identified a critical gap in how systems handle latency at different time scales [@barroso2017attack]. Modern systems efficiently handle nanosecond-scale events (CPU cache access, DRAM reads) through hardware mechanisms like out-of-order execution, and millisecond-scale events (disk I/O, network calls) through software techniques like threading and asynchronous I/O. But microsecond-scale events fall into an uncomfortable middle ground where neither approach works well.
 
-ML serving lives squarely in this microsecond regime. Individual inference calls complete in 1-10ms, but the surrounding operations (serialization, memory allocation, network stack processing, encryption) each add microseconds that compound into significant overhead. Google's analysis found that 20-25% of datacenter CPU cycles are consumed by this "datacenter tax" rather than useful computation. For serving systems, this means:
+ML serving lives squarely in this microsecond regime. Individual inference calls complete in 1-10ms, but the surrounding operations (serialization, memory allocation, network stack processing, encryption) each add microseconds that compound into significant overhead. Google's analysis found that a significant fraction (often 20% or more) of datacenter CPU cycles are consumed by this "datacenter tax" rather than useful computation. For serving systems, this means:
 
 - A 2μs network fabric can become 100μs end-to-end through software overhead
 - Context switching costs (5-10μs) can exceed the inference time for small models
@@ -240,6 +298,27 @@ The M/M/1 model assumes exponentially distributed service times, but ML inferenc
 
 [^fn-queuing-models]: **Queuing Model Selection**: For deeper treatment of M/M/c (multi-server) and M/G/1 (general service distribution) queues applicable to ML serving, see Harchol-Balter's *Performance Modeling and Design of Computer Systems* [@harchol2013performance], particularly chapters on server farms and scheduling policies.
 
+### Multi-Server Queuing Reality {#sec-serving-multi-server-queuing}
+
+Production serving systems deploy multiple replicas behind a load balancer, making M/M/c (c servers) the more applicable model than M/M/1.
+
+**Key insight**: For c servers with utilization $\rho$ per server, the probability of queuing drops exponentially with c, and average wait time is approximately:
+
+$$W_{M/M/c} \approx \frac{W_{M/M/1}}{c} \quad \text{(for low utilization)}$$
+
+**Practical Implication**: Four servers at 70% utilization each provide far better tail latency than one server at 70%, despite handling the same total load.
+
+| Configuration | Total Capacity | Avg Wait | p99 Wait |
+|:--------------|:---------------|:---------|:---------|
+| 1 server @ 70% | 1x | 2.3x service | 7x service |
+| 4 servers @ 70% each | 4x | 0.6x service | 2x service |
+
+: **Multi-Server Queuing Benefits**: Horizontal scaling improves tail latency even when adding capacity, because the queuing dynamics fundamentally improve with multiple servers. {#tbl-multi-server-queuing}
+
+This explains why horizontal scaling improves tail latency even when adding capacity: the queuing dynamics fundamentally improve with multiple servers.
+
+**When M/M/1 Analysis Applies**: Despite multi-server reality, M/M/1 analysis remains useful for understanding fundamental queuing dynamics, worst-case analysis (what if load concentrates on one server?), and capacity planning for individual server sizing.
+
 ### Tail Latency {#sec-serving-tail-latency}
 
 Production SLOs typically specify percentile targets (p95, p99) rather than averages because tail latency determines user experience for the slowest requests [@dean2013tail]. For an M/M/1 queue, the p99 latency follows:
@@ -250,11 +329,13 @@ At 70% utilization, p99 latency is approximately $12\times$ the service time, wh
 
 **The Tail at Scale Problem**
 
-Dean and Barroso's foundational analysis reveals why tail latency becomes critical in distributed systems [@dean2013tail]. Consider a service where individual servers have 99th percentile latency of 1 second (with typical responses at 10ms). For a single server, only 1% of requests are slow. But when a user request fans out to 100 servers in parallel and waits for all responses:
+Dean and Barroso's foundational analysis reveals why tail latency becomes critical in distributed systems [@dean2013tail]. Consider a service where individual servers have p50 latency of 10ms and p99 latency of 50ms (a 5x tail ratio, typical for well-tuned systems). For a single server, only 1% of requests experience the 50ms tail. But when a user request fans out to 100 servers in parallel and waits for all responses:
 
 $$P(\text{any server slow}) = 1 - (1 - 0.01)^{100} = 0.63$$
 
-Sixty-three percent of user requests experience the slow tail. At 2,000 servers (common for large-scale services), even a 1-in-10,000 slow response rate means 18% of user requests hit the tail. This fan-out amplification explains why even rare performance hiccups become user-visible problems at scale. As we will see in @sec-inference-at-scale, tail-tolerant techniques become essential when scaling to distributed inference systems where fan-out magnifies individual server variance.
+Sixty-three percent of user requests experience the slow tail. This fan-out amplification is why even well-behaved individual servers create unacceptable tail latency at scale. At 1000 servers, the probability rises to 99.996%, meaning virtually every request hits at least one slow server.
+
+**The Tail at Scale Solution**: Techniques like request hedging (sending redundant requests after a timeout), backup requests, and load balancing away from slow servers directly address this amplification effect. As we will see in @sec-inference-at-scale, these tail-tolerant techniques become essential when scaling to distributed inference systems where fan-out magnifies individual server variance.
 
 ::: {.callout-note title="🔄 ResNet-50: Capacity Planning Worked Example"}
 
@@ -288,7 +369,15 @@ Production systems add 30% headroom for traffic spikes and variance:
 
 $$\text{Final count} = 7 \times 1.3 = 9.1 \rightarrow 10 \text{ GPUs}$$
 
-**Result**: Provision 10 V100 GPUs to serve 5,000 QPS at 50ms p99 latency.
+**Step 5: Verify fault tolerance (N+1 redundancy)**
+
+The 30% headroom addresses traffic variance, but production systems also need fault tolerance. With 10 GPUs, losing one leaves 9 GPUs handling 5,000 QPS:
+
+$$\text{Utilization after failure} = \frac{5000 / 1143}{9} = 48.6\%$$
+
+This remains well below the 72% safe utilization threshold, confirming N+1 redundancy is satisfied. For stricter fault tolerance requirements, N+2 redundancy (tolerating two simultaneous failures) would require 11-12 GPUs.
+
+**Result**: Provision 10 V100 GPUs to serve 5,000 QPS at 50ms p99 latency with N+1 fault tolerance.
 
 :::
 
@@ -301,6 +390,8 @@ Rather than eliminating all sources of latency variability (often impractical), 
 **Hedged Requests**
 
 When a request has not completed within the expected time, send a duplicate request to another server. The client uses whichever response arrives first and cancels the other. For ML serving, this means maintaining multiple model replicas and routing slow requests to alternative replicas. The overhead is modest: if you hedge at the 95th percentile, only 5% of requests generate duplicates, increasing load by just 5% while dramatically reducing tail latency.
+
+**Cancellation Complexity**: A critical implementation detail is that CUDA kernels cannot be interrupted mid-execution. When a hedged request completes, the duplicate must be cancelled, but if inference has already begun on the GPU, cancellation approaches include: (1) checking a cancellation flag before launching inference, (2) accepting wasted compute for the in-flight kernel, or (3) using request prioritization to deprioritize the duplicate. Since hedging typically applies only to the slowest 5% of requests, the overhead from occasional wasted compute remains acceptable.
 
 **Tied Requests**
 
@@ -316,7 +407,11 @@ When load exceeds capacity, return approximate results rather than timing out. F
 
 **Admission Control**
 
-When traffic exceeds capacity, accepting all requests guarantees SLO violations for everyone. Admission control proactively rejects requests when queue depth exceeds a threshold, returning immediate 503 responses rather than accepting requests that will timeout. This sacrifices throughput to protect latency for admitted requests. The threshold typically equals 2-3× the service time multiplied by the number of workers. Adaptive admission control adjusts thresholds based on observed p99 latency, tightening when latency increases.
+When traffic exceeds capacity, accepting all requests guarantees SLO violations for everyone. Admission control proactively rejects requests when queue depth exceeds a threshold, returning immediate 503 responses rather than accepting requests that will timeout. This sacrifices throughput to protect latency for admitted requests.
+
+**Setting the Threshold**: A practical starting point is 2-3x service time multiplied by the number of workers. For a system with 4 workers and 10ms service time, this yields a queue depth threshold of 80-120 requests. Adaptive admission control adjusts thresholds based on observed p99 latency, tightening when latency increases above target and relaxing when latency remains healthy.
+
+**Retry Storm Prevention**: A subtle failure mode occurs when all replicas are overloaded simultaneously. If the load balancer retries rejected requests at other replicas (also overloaded), retry traffic amplifies the overload. Coordinated load shedding addresses this by sharing load information across replicas, enabling system-wide decisions about which requests to accept. When global load exceeds capacity, replicas collectively reject the same fraction of requests rather than each rejecting independently and triggering retries.
 
 These techniques become essential at scale when fan-out amplification makes individual server tail latency visible to users. Single-machine serving systems can implement hedged and tied requests across GPU streams or model replicas. The queuing analysis here assumes FIFO processing, but production systems often implement priority scheduling (deadline-aware, shortest-job-first) to further reduce tail latency for heterogeneous workloads [@harchol2013performance].
 
@@ -412,13 +507,13 @@ Loading ResNet-50 for production serving involves the following cold start phase
 |-------|----------|-------|
 | Weight loading (SSD) | 0.5s | 98MB FP32 weights from local storage |
 | Weight loading (S3) | 3-5s | Network latency dominates for cloud storage |
-| CUDA context | 2-3s | First GPU operation initializes CUDA runtime |
+| CUDA context | 0.3-0.5s | CUDA 11+ lazy loading significantly reduced this |
 | TensorRT compilation | 15-30s | Converts PyTorch model to optimized engine |
 | Warmup (10 inferences) | 0.2s | Triggers remaining lazy initialization |
-| **Total (local, optimized)** | **~4s** | With pre-compiled TensorRT engine |
-| **Total (cloud, first deploy)** | **~40s** | Including compilation |
+| **Total (local, optimized)** | **~1.5s** | With pre-compiled TensorRT engine, warm container |
+| **Total (cloud, first deploy)** | **~35s** | Including compilation from cold state |
 
-**Key insight**: Pre-compiling models and storing the optimized engine eliminates the 30-second compilation phase on subsequent deployments.
+**Key insight**: Pre-compiling models and storing the optimized engine eliminates the 30-second compilation phase on subsequent deployments. Production systems use CUDA MPS (Multi-Process Service) or pre-warmed container pools to amortize CUDA initialization costs across requests.
 
 :::
 
@@ -434,6 +529,18 @@ Different loading strategies trade off cold start duration against serving perfo
 
 **Lazy initialization** defers compilation and allocation until first use. This minimizes startup time but shifts latency to the first request. Production systems often combine lazy initialization with synthetic warmup requests to trigger initialization before real traffic arrives.
 
+### Model Caching Infrastructure {#sec-serving-model-caching}
+
+Production systems cache model weights at the infrastructure level to reduce cold start for common deployment scenarios:
+
+**Container Image Embedding**: Bundle model weights directly in the container image. This produces a single deployment artifact and eliminates network fetches at startup, but creates large images (often 10-50GB) that slow container pulls and consume registry storage. Best for models that rarely update.
+
+**Shared Filesystem**: Mount a network filesystem (EFS, GCS FUSE) containing model weights. Multiple replicas share cached weights, and updates propagate immediately without redeployment. However, network latency affects cold start, and filesystem availability becomes a critical dependency. Best for organizations with many models and frequent updates.
+
+**Node-Local SSD Cache**: Pre-populate local SSDs on inference nodes with frequently-used models. Provides fast loading (500MB/s+ for NVMe) without network dependency, but requires cache management to handle model updates and capacity limits. Best for high-traffic models where cold start latency is critical.
+
+The choice depends on model update frequency: infrequent updates favor container embedding, frequent updates favor shared filesystem, and performance-critical deployments benefit from local caching with background refresh.
+
 ### Multi-Model Serving {#sec-serving-multi-model}
 
 Production systems often serve multiple models from a single machine, whether different model versions for A/B testing, ensemble components, or entirely different models sharing infrastructure. GPU memory becomes the limiting resource, requiring careful management strategies.
@@ -448,7 +555,7 @@ The choice depends on request patterns. If models receive traffic evenly, concur
 
 **Multi-Stream Execution**
 
-When multiple models (or multiple instances of the same model) must run concurrently on a single GPU, the hardware must partition resources between them. NVIDIA's Multi-Instance GPU (MIG) technology enables hardware-level isolation, dividing an A100 into up to 7 independent GPU instances, each with dedicated memory and compute resources. Without MIG, models share memory and compete for compute resources through CUDA stream scheduling, which can cause unpredictable latency interference.
+When multiple models (or multiple instances of the same model) must run concurrently on a single GPU, the hardware must partition resources between them. NVIDIA's Multi-Instance GPU (MIG) technology enables hardware-level isolation, dividing an A100 into up to 7 independent GPU instances, each with dedicated memory and compute resources. MIG is available on A100, A30, H100, and newer data center GPUs. For older GPUs (V100, T4), CUDA stream scheduling provides time-multiplexed sharing without hardware isolation.
 
 MIG provides stronger isolation guarantees but reduces flexibility: once partitioned, GPU slices cannot be dynamically resized. CUDA streams offer flexibility but no performance isolation. The choice depends on whether consistent latency (MIG) or maximum utilization (shared streams) is the priority. We examine full implementation details for multi-model orchestration across GPUs in @sec-inference-at-scale, where distributed resource management becomes critical for production-scale deployments.
 
@@ -521,6 +628,18 @@ Some scenarios require single-request processing:
 - **Ultra-low latency requirements**: When p99 latency must stay under 10ms, any batching delay is unacceptable
 - **Highly variable request sizes**: When inputs vary dramatically in size, batching creates padding overhead that wastes compute
 - **Memory constraints**: When models already consume most GPU memory, batch activations may cause out-of-memory errors
+
+### Session Affinity Constraints {#sec-serving-session-affinity}
+
+When requests from the same user or session should route to the same replica, batching becomes constrained. Session affinity (also called sticky sessions) matters for three main reasons:
+
+**KV-Cache Reuse**: For conversational AI, the key-value cache from previous turns dramatically speeds up multi-turn conversations. Routing a follow-up request to a different replica forfeits this cached context, increasing latency by 2-5x for long conversations.
+
+**User-Specific Models**: Some systems serve personalized models or adapters per user. Routing requests to the replica that has already loaded that user's adapter avoids repeated loading overhead.
+
+**Stateful Preprocessing**: When preprocessing maintains state (tokenizer caches, session-specific normalization), routing to a different replica requires rebuilding this state.
+
+The tension with batching is clear: strict affinity constrains which requests can be batched together, potentially reducing batch sizes and GPU utilization. Production systems often implement "soft affinity" where requests prefer their assigned replica but can overflow to others when that replica is overloaded. This preserves most affinity benefits while maintaining load balance.
 
 ### Traffic Patterns and Batching Strategy {#sec-serving-traffic-patterns}
 
@@ -834,6 +953,10 @@ GPU inference makes economic sense when:
 - Latency requirements are strict (tens of milliseconds)
 - Request volume is high and consistent
 - Batching can achieve high utilization
+
+**Scaling Responsiveness**: Beyond steady-state costs, startup time affects scaling economics. CPU instances typically start in 30-60 seconds while GPU instances take 2-5 minutes (including driver initialization, model loading, and warmup). For variable traffic patterns, this startup latency can be more important than cost per inference. If traffic spikes arrive faster than GPU instances can scale, latency SLOs will be violated despite having sufficient eventual capacity.
+
+This asymmetry suggests different scaling strategies: CPU instances enable reactive scaling (responding to current demand) while GPU instances often require predictive scaling (provisioning based on anticipated demand). For bursty workloads, a hybrid approach uses always-on GPU capacity for baseline load plus CPU overflow capacity for spikes, trading higher per-inference cost during spikes for better responsiveness.
 
 ### Capacity Planning {#sec-serving-capacity-planning}
 
