@@ -2523,7 +2523,7 @@ Three concrete signals indicate that single-machine training has reached its pra
 
 ### Distributed Training Concepts {#sec-ai-training-distributed-training-concepts}
 
-When single-machine limits are reached, distributed training provides the next level of scaling capability by coordinating computation across multiple devices or machines. Several fundamental approaches exist, each addressing different bottlenecks:
+When single-machine limits are reached, distributed training provides the next level of scaling capability by coordinating computation across multiple devices or machines. Three fundamental approaches exist, each addressing different bottlenecks:
 
 ::: {.callout-definition title="Data Parallelism"}
 
@@ -2531,7 +2531,7 @@ When single-machine limits are reached, distributed training provides the next l
 
 :::
 
-Data parallelism works well when models fit in single-device memory but training data is large. Each device computes gradients on its local batch, then an AllReduce operation averages gradients across all devices. The mathematical equivalence to single-device training with a larger batch size makes this approach straightforward to implement and reason about.
+Data parallelism works well when models fit in single-device memory but training data is large. Each device computes gradients on its local batch, then a collective operation averages gradients across all devices. This mathematical equivalence to single-device training with a larger batch size makes data parallelism straightforward to reason about.
 
 ::: {.callout-definition title="Model Parallelism"}
 
@@ -2539,7 +2539,7 @@ Data parallelism works well when models fit in single-device memory but training
 
 :::
 
-Model parallelism addresses memory constraints by distributing model parameters across devices. In layer-wise partitioning, consecutive layers reside on different devices, with activations passing between devices during forward passes and gradients flowing back during backward passes. This introduces sequential dependencies that can reduce hardware utilization.
+Model parallelism addresses memory constraints by distributing model parameters across devices. Consecutive layers can reside on different devices, with activations passing between devices during forward passes and gradients flowing back during backward passes.
 
 ::: {.callout-definition title="Pipeline Parallelism"}
 
@@ -2547,48 +2547,9 @@ Model parallelism addresses memory constraints by distributing model parameters 
 
 :::
 
-Pipeline parallelism improves upon basic model parallelism by overlapping computation. While one device processes the forward pass for microbatch N, another device computes the backward pass for microbatch N-1. This pipelining increases hardware utilization but introduces complexity in managing microbatch scheduling and gradient accumulation.
+**Hybrid parallelism** combines multiple strategies. For example, a system might use model parallelism within a node while using data parallelism across nodes, addressing both memory constraints and dataset scale.
 
-**Hybrid parallelism** combines multiple strategies. For example, a system might use model parallelism to distribute a model across 8 GPUs within a node, while using data parallelism across 100 nodes. This combination addresses both memory constraints (via model parallelism) and dataset scale (via data parallelism).
-
-### Trade-offs in Distributed Training {#sec-ai-training-tradeoffs-distributed}
-
-Distributed training introduces complexity dimensions absent from single-machine scenarios:
-
-**Communication overhead** emerges from gradient synchronization. Each training step must aggregate gradients across all devices. For a model with N parameters distributed across D devices, AllReduce operations must transfer approximately 2N(D-1)/D bytes per step. On commodity network infrastructure (10-100 Gbps), this communication can dominate computation time for smaller models, reducing effective scaling efficiency.
-
-**Fault tolerance requirements** increase with cluster size. A 100-node cluster with 99.9% per-node reliability experiences failures every few hours on average, necessitating checkpoint and recovery mechanisms that add complexity and overhead.
-
-**Algorithmic considerations** change because distributed training alters optimization dynamics. Large batch sizes from data parallelism affect convergence behavior, often requiring learning rate scaling and warmup strategies that single-machine training does not need.
-
-The choice between parallelism strategies depends on specific constraints, as summarized in @tbl-parallelism-selection:
-
-| Constraint | Preferred Strategy |
-|------------|-------------------|
-| Model fits in memory, large dataset | Data parallelism |
-| Model exceeds memory, moderate dataset | Model parallelism |
-| Deep model, need high utilization | Pipeline parallelism |
-| Model exceeds memory AND large dataset | Hybrid parallelism |
-
-: **Parallelism Strategy Selection**: Different distributed training strategies address different constraints, with the choice depending on whether memory or dataset scale presents the primary bottleneck. {#tbl-parallelism-selection}
-
-### Framework Support for Distributed Training {#sec-ai-training-framework-support-distributed}
-
-Modern frameworks provide abstractions that simplify distributed training implementation. PyTorch offers `DistributedDataParallel` for data parallelism, which handles gradient synchronization automatically using optimized collective operations. The transition from single-GPU to multi-GPU training often requires only wrapping the model and initializing a distributed process group:
-
-```python
-# Conceptual transition from single-GPU to distributed training
-# Single GPU:
-model = MyModel().to("cuda")
-
-# Distributed (data parallel):
-model = MyModel().to("cuda")
-model = DistributedDataParallel(model)
-```
-
-For model parallelism, frameworks require more explicit device placement, as practitioners must specify which layers reside on which devices. Pipeline parallelism libraries like DeepSpeed and FairScale provide higher-level abstractions that handle microbatch scheduling and gradient accumulation.
-
-The key insight is that these frameworks abstract considerable complexity while preserving the performance characteristics essential for production training. Understanding the underlying concepts—gradient averaging, device placement, communication patterns—helps practitioners debug issues and make informed decisions about when distributed training is necessary.
+These strategies introduce significant complexity: communication overhead between devices, fault tolerance requirements that scale with cluster size, and algorithmic considerations around large batch optimization. Modern frameworks like PyTorch and TensorFlow provide abstractions that handle gradient synchronization and device placement automatically, though understanding the underlying concepts helps practitioners debug issues and make informed decisions about when distributed training is necessary.
 
 ### When to Consider Distributed Training {#sec-ai-training-when-distributed}
 
