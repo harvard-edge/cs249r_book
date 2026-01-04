@@ -1343,4 +1343,70 @@ The efficiency metrics governing distributed training—communication overhead, 
 * Framework APIs abstract distributed complexity while preserving the performance characteristics essential for production training
 :::
 
+## Fallacies and Pitfalls {#sec-distributed-training-fallacies-pitfalls}
+
+Distributed training involves counterintuitive behavior that leads to common misconceptions. These fallacies and pitfalls capture errors that waste compute resources and delay research progress.
+
+**Fallacy: Linear speedup is achievable with enough engineering effort.**
+
+This belief persists despite theoretical impossibility. Amdahl's Law establishes hard limits: any sequential component bounds maximum speedup regardless of parallelism. In distributed training, gradient synchronization is inherently sequential since all gradients must be collected before any update proceeds.
+
+Even with perfect overlap and optimal algorithms, communication overhead grows with cluster size. For data parallelism, AllReduce time increases logarithmically (tree) or linearly (ring latency term) with GPU count. A 1000-GPU cluster will never train 1000x faster than a single GPU; achieving 500x speedup would be exceptional, and 100-200x is more typical for communication-heavy workloads.
+
+Organizations that budget projects assuming linear scaling inevitably miss deadlines and overspend on compute.
+
+**Pitfall: Using the same hyperparameters at all scales.**
+
+Hyperparameters tuned on small clusters fail catastrophically at large scale. The most critical is learning rate: as batch size increases with data parallelism, learning rate typically must increase proportionally to maintain convergence rate. The "linear scaling rule" suggests $\eta_{large} = \eta_{base} \times (B_{large}/B_{base})$.
+
+However, this rule has limits. Beyond the "critical batch size" (model and dataset dependent, often 8K-32K for vision models), increasing batch size provides diminishing returns. Larger batches find sharper minima that generalize poorly. Training that converges beautifully at 256 GPUs may diverge or produce worse models at 1024 GPUs with naive scaling.
+
+Warmup schedules, weight decay, and dropout rates also require adjustment. The only reliable approach is systematic scaling studies that validate hyperparameters at target scale.
+
+**Fallacy: Data parallelism scales indefinitely by adding more GPUs.**
+
+Data parallelism increases effective batch size proportionally with GPU count. But statistical efficiency (loss reduction per sample) decreases with batch size beyond model-specific thresholds. A 100K-sample batch may provide only 2x the gradient quality of a 10K-sample batch, not 10x.
+
+The critical batch size defines where marginal returns collapse. Beyond this point, additional GPUs increase throughput (samples per second) but not training efficiency (loss reduction per compute dollar). For BERT, critical batch size is approximately 8K; for ResNet, approximately 32K. Scaling beyond critical batch size wastes compute.
+
+Large organizations have trained models to convergence using 1024 GPUs in the same wall-clock time as 512 GPUs at 2x the cost, because they exceeded critical batch size.
+
+**Pitfall: Ignoring the memory-compute trade-off in parallelism selection.**
+
+Pipeline parallelism and tensor parallelism both distribute model weights across devices, but their memory and compute characteristics differ dramatically.
+
+Tensor parallelism splits each layer across devices, requiring AllReduce communication within each layer. This reduces memory proportionally but introduces communication overhead on the critical path. Pipeline parallelism assigns complete layers to devices, requiring only point-to-point communication between stages but introducing bubble overhead.
+
+For memory-constrained scenarios where a model barely fits with splitting, tensor parallelism's even distribution helps. For throughput-maximizing scenarios with adequate memory, pipeline parallelism's lower communication overhead helps. Choosing based on one dimension (memory or compute) without considering the other leads to suboptimal configurations.
+
+**Fallacy: FSDP/ZeRO always improves training efficiency.**
+
+FSDP (Fully Sharded Data Parallel) and ZeRO reduce memory footprint by sharding optimizer state and gradients across GPUs. This enables larger batch sizes or larger models per GPU. However, sharding introduces communication overhead: AllGather before forward pass, ReduceScatter after backward pass.
+
+For models that fit comfortably in GPU memory without sharding, FSDP adds overhead without benefit. A 7B model training on A100-80GB with batch size 4 runs faster with DDP than FSDP because the model fits entirely with room for activations.
+
+FSDP provides value when:
+
+- Model + optimizer state exceeds single-GPU memory
+- Enabling larger batch sizes justifies communication overhead
+- ZeRO-Offload to CPU extends effective memory
+
+Applying FSDP universally, as some tutorials suggest, degrades performance for models that do not require it.
+
+**Pitfall: Benchmarking parallelism strategies on small models.**
+
+Parallelism overhead is roughly constant regardless of model size: AllReduce time depends on gradient size, not model computation time. For small models where forward/backward pass takes 10ms and AllReduce takes 5ms, communication overhead is 50%. For large models where forward/backward takes 1000ms and AllReduce takes 5ms, overhead is 0.5%.
+
+Decisions made based on small-model benchmarks ("pipeline parallelism is always slower") invert at scale. The 20% overhead acceptable for a 1B model becomes 0.2% for a 100B model. Parallelism strategy evaluation must occur at target scale, or at minimum with analytical models that extrapolate appropriately.
+
+**Fallacy: Gradient accumulation is free.**
+
+Gradient accumulation simulates larger batch sizes by accumulating gradients across multiple forward/backward passes before synchronizing. This reduces communication frequency proportionally. However, accumulation has costs:
+
+1. **Memory**: Accumulated gradients consume memory throughout the accumulation window
+2. **Latency**: Effective step time increases proportionally with accumulation steps
+3. **Precision**: Accumulated FP16 gradients may overflow or underflow
+
+For loss-sensitive early training, gradient accumulation can introduce instability from accumulated numerical errors. Organizations that use gradient accumulation to work around infrastructure limitations (slow network, small GPUs) sometimes discover training divergence that disappears with proper infrastructure.
+
 The principles established in this chapter provide the foundation for understanding fault tolerance mechanisms, which become increasingly critical as distributed training scales to thousands of devices where failures become statistically inevitable.
