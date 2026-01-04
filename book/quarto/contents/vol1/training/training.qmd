@@ -884,33 +884,13 @@ The optimizer interface exemplifies how frameworks balance mathematical rigor wi
 
 ### Backpropagation Mechanics {#sec-ai-training-backpropagation-mechanics-64c2}
 
-The backpropagation algorithm[^fn-backpropagation] computes gradients by systematically moving backward through a neural network's computational graph. While earlier discussions introduced backpropagation's mathematical principles, implementing this algorithm in training systems requires careful management of memory, computation, and data flow.
+The backpropagation algorithm[^fn-backpropagation] computes gradients by systematically moving backward through a neural network's computational graph. In @sec-dl-primer-gradient-computation-backpropagation-e26a, we established the mathematical foundation: the chain rule breaks gradient computation into layer-by-layer operations, with each layer receiving adjustment signals proportional to its contribution to the final error. If terms like "computational graph" or "gradient flow" feel unfamiliar, the factory assembly line analogy in that section is worth revisiting.
 
 [^fn-backpropagation]: **Backpropagation Algorithm**: Independently rediscovered multiple times, backpropagation was popularized by Rumelhart, Hinton, and Williams in 1986 (though similar ideas appeared in Werbos 1974). This breakthrough enabled training of deep networks by efficiently computing gradients in O(n) time vs. naive O(n²) approaches. Modern implementations require careful memory management since storing all activations for a ResNet-50 consumes 1.2GB per image.
 
-#### Backpropagation Algorithm Mechanics {#sec-ai-training-backpropagation-algorithm-mechanics-d1a4}
+Here, we shift focus from *what* backpropagation computes to *what it costs* to compute it at scale. The familiar equations from @sec-dl-primer reappear because understanding their structure reveals exactly *what* must be stored and *when*. During the forward pass, each layer computes activations $a^{(l)} = f(W^{(l)}a^{(l-1)} + b^{(l)})$ that must be retained for the backward pass. Computing $\frac{\partial L}{\partial W^{(l)}}$ requires access to these stored activations, creating memory requirements that scale with network depth and batch size.
 
-Neural networks learn by adjusting their parameters to reduce errors through the backpropagation algorithm, which computes how much each parameter contributed to the error by systematically moving backward through the network's computational graph.
-
-During the forward pass, each layer performs computations and produces activations that must be stored for the backward pass:
-\begin{gather*}
-z^{(l)} = W^{(l)}a^{(l-1)} + b^{(l)}
-\\
-a^{(l)} = f(z^{(l)})
-\end{gather*}
-where $z^{(l)}$ represents the pre-activation values and $a^{(l)}$ represents the activations at layer $l$. The storage of these intermediate values creates specific memory requirements that scale with network depth and batch size.
-
-The backward pass computes gradients by applying the chain rule, starting from the network's output and moving toward the input:
-\begin{gather*}
-\frac{\partial L}{\partial z^{(l)}}=\frac{\partial L}{\partial a^{(l)}} \odot f'(z^{(l)})
-\\
-\frac{\partial L}{\partial W^{(l)}}=\frac{\partial L}{\partial z^{(l)}}\big(a^{(l-1)}\big)^T
-\end{gather*}
-
-For a network with parameters $W_i$ at each layer, computing $\frac{\partial L}{\partial W_i}$ determines how much the loss L changes when adjusting each parameter. The chain rule provides a systematic way to organize these computations:
-$$ \frac{\partial L_{full}}{\partial L_{i}} = \frac{\partial A_{i}}{\partial L_{i}} \frac{\partial L_{i+1}}{\partial A_{i}} ... \frac{\partial A_{n}}{\partial L_{n}} \frac{\partial L_{full}}{\partial A_{n}} $$
-
-This equation reveals key requirements for training systems. Computing gradients for early layers requires information from all later layers, creating specific patterns in data storage and access. Each gradient computation requires access to stored activations from the forward pass, creating a specific pattern of memory access and computation that training systems must manage efficiently. These patterns directly influence the efficiency of optimization algorithms like SGD or Adam discussed earlier. Modern training systems use autodifferentiation[^fn-autodiff] to handle these computations automatically, but the underlying system requirements remain the same.
+A simple three-layer network processing MNIST requires kilobytes of activation storage. GPT-2 processing a single batch requires over 30 gigabytes, more than most GPUs can hold. That gap defines the engineering challenge this chapter addresses. Modern training systems use autodifferentiation[^fn-autodiff] to handle gradient computations automatically, but the underlying memory and computation patterns remain the systems engineer's responsibility to manage.
 
 [^fn-autodiff]: **Automatic Differentiation**: Not to be confused with symbolic or numerical differentiation, autodiff constructs a computational graph at runtime and applies the chain rule systematically. PyTorch uses "define-by-run" (dynamic graphs built during forward pass) while TensorFlow v1 used static graphs. This enables complex architectures like RNNs and transformers where graph structure changes dynamically, but requires careful memory management since the entire forward computation graph must be preserved for the backward pass.
 
@@ -1464,11 +1444,11 @@ This memory management challenge becomes particularly acute in state-of-the-art 
 
 ### Backward Pass {#sec-ai-training-backward-pass-36fa}
 
-Following the forward pass's computation of predictions and loss, the backward pass implements the backpropagation algorithm detailed in @sec-ai-training-backpropagation-algorithm-mechanics-d1a4. This computationally intensive phase propagates gradients through the network using the chain rule formulations established earlier. The system-level implementation involves complex interactions between computation and memory systems, requiring careful analysis of both computational demands and data movement patterns.
+Following the forward pass's computation of predictions and loss, the backward pass implements the backpropagation algorithm detailed in @sec-ai-training-backpropagation-mechanics-64c2. This computationally intensive phase propagates gradients through the network using the chain rule formulations established earlier. The system-level implementation involves complex interactions between computation and memory systems, requiring careful analysis of both computational demands and data movement patterns.
 
 #### Compute Operations {#sec-ai-training-compute-operations-3d69}
 
-The backward pass executes the gradient computations described in @sec-ai-training-backpropagation-algorithm-mechanics-d1a4, processing parameter gradients in reverse order through the network's layers. As established in the algorithm mechanics section, computing gradients requires matrix operations that combine stored activations with gradient signals, demanding twice the memory compared to forward computation.
+The backward pass executes the gradient computations described in @sec-ai-training-backpropagation-mechanics-64c2, processing parameter gradients in reverse order through the network's layers. As established in that section, computing gradients requires matrix operations that combine stored activations with gradient signals, demanding twice the memory compared to forward computation.
 
 The gradient computation $\frac{\partial L}{\partial W^{(l)}} = \delta^{(l)} \cdot \left(a^{(l-1)}\right)^T$ forms the primary computational load, where gradient signals multiply with transposed activations as detailed in the mathematical framework. For layers with 1000 input features and 100 output features, this results in millions of floating-point operations as calculated in the algorithm mechanics analysis.
 
