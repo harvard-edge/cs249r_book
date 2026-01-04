@@ -267,7 +267,7 @@ class Tensor:
     All arithmetic, matrix, and shape operations are built on this foundation.
     """
 
-    def __init__(self, data):
+    def __init__(self, data, requires_grad=False):
         """Create a new tensor from data.
 
         TODO: Initialize a Tensor by wrapping data in a NumPy array and setting attributes.
@@ -293,6 +293,7 @@ class Tensor:
         self.shape = self.data.shape
         self.size = self.data.size
         self.dtype = self.data.dtype
+        self.requires_grad = requires_grad
         ### END SOLUTION
 
     def __repr__(self):
