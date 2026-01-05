@@ -113,7 +113,13 @@ The transition from single-machine to distributed training represents a major sh
 
 ### Multi-Machine Training Requirements {#sec-distributed-training-multimachine-training-requirements}
 
-Three concrete signals indicate when distributed training becomes necessary rather than merely beneficial. First, memory exhaustion occurs when model parameters, optimizer states, and activation storage exceed single-device capacity even after applying gradient checkpointing and mixed precision. For transformer models, this threshold typically occurs around 10-20 billion parameters on current generation GPUs with 40-80GB memory [@rajbhandari2020zero]. Second, unacceptable training duration emerges when single-device training would require weeks or months to converge, making iteration impossible. Training GPT-3 on a single V100 GPU would require approximately 355 years [@brown2020language], making distributed approaches not optional but essential. Third, dataset scale exceeds single-machine storage when training data reaches multiple terabytes, as occurs in large-scale vision or language modeling tasks.
+Three concrete signals indicate when distributed training becomes necessary rather than merely beneficial. First, memory exhaustion occurs when model parameters, optimizer states, and activation storage exceed single-device capacity even after applying gradient checkpointing[^fn-gradient-checkpointing] and mixed precision.[^fn-mixed-precision]
+
+[^fn-gradient-checkpointing]: **Gradient Checkpointing**: A memory-compute trade-off technique that discards intermediate activations during the forward pass and recomputes them during backpropagation. This reduces memory usage from O(n) to O(sqrt(n)) for n layers, at the cost of roughly 30% additional compute. Essential for training deep networks or long sequences on memory-constrained devices.
+
+[^fn-mixed-precision]: **Mixed Precision Training**: Using lower-precision formats (FP16 or BF16) for forward/backward computation while maintaining FP32 master weights for updates. Halves memory usage and doubles compute throughput on modern GPUs with tensor cores. Introduced by NVIDIA in 2017, mixed precision is now standard practice for training large models.
+
+For transformer models, this threshold typically occurs around 10-20 billion parameters on current generation GPUs with 40-80GB memory [@rajbhandari2020zero]. Second, unacceptable training duration emerges when single-device training would require weeks or months to converge, making iteration impossible. Training GPT-3 on a single V100 GPU would require approximately 355 years [@brown2020language], making distributed approaches not optional but essential. Third, dataset scale exceeds single-machine storage when training data reaches multiple terabytes, as occurs in large-scale vision or language modeling tasks.
 
 ### Distributed Training Complexity Trade-offs {#sec-distributed-training-complexity-tradeoffs}
 
@@ -143,7 +149,9 @@ The path from single-device to distributed training involves distinct complexity
 
 [^nvlink]: **NVLink**: NVIDIA's proprietary high-speed interconnect providing up to 600 GB/s bidirectional bandwidth between GPUs, roughly 10x faster than PCIe Gen4. Essential for efficient multi-GPU training as it enables rapid gradient synchronization and tensor exchanges between devices.
 
-[^nccl]: **NCCL (NVIDIA Collective Communications Library)**: Optimized library implementing efficient collective operations (AllReduce, Broadcast, etc.) for multi-GPU and multi-node communication. Automatically selects optimal communication patterns based on hardware topology, critical for distributed training performance. The leap to multi-node distributed training brings substantially greater complexity: network communication overhead, fault tolerance requirements, and cluster orchestration challenges. Each scaling stage compounds the previous challenges—communication bottlenecks intensify, synchronization overhead grows, and failure probability increases. This progression underscores why practitioners should optimize single-GPU performance before scaling, ensuring efficient resource utilization at each level.
+[^nccl]: **NCCL (NVIDIA Collective Communications Library)**: Optimized library implementing efficient collective operations (AllReduce, Broadcast, etc.) for multi-GPU and multi-node communication. Automatically selects optimal communication patterns based on hardware topology, critical for distributed training performance.
+
+The leap to multi-node distributed training brings substantially greater complexity: network communication overhead, fault tolerance requirements, and cluster orchestration challenges. Each scaling stage compounds the previous challenges, with communication bottlenecks intensifying, synchronization overhead growing, and failure probability increasing. This progression underscores why practitioners should optimize single-GPU performance before scaling, ensuring efficient resource utilization at each level.
 
 ::: {.callout-note title="Practical Distributed Training Complexity"}
 
@@ -567,7 +575,11 @@ For example, with 8 GPUs sharing gradients for a 100 MB model, ring all-reduce r
 
 Distributed training systems operate under explicit synchronization models that govern when workers observe each other's updates. Understanding these models is essential for reasoning about correctness and performance.
 
-The default model, Bulk Synchronous Parallel (BSP) [@valiant1990bsp], requires all workers to complete their local computation (forward and backward pass), synchronize gradients through a barrier (AllReduce), and then simultaneously update parameters. BSP provides strong guarantees: every worker sees identical parameter values at each step, ensuring mathematical equivalence to single-device training. The cost is that the slowest worker determines iteration time, creating the "straggler problem."
+The default model, Bulk Synchronous Parallel (BSP)[^fn-bsp] [@valiant1990bsp], requires all workers to complete their local computation (forward and backward pass), synchronize gradients through a barrier (AllReduce), and then simultaneously update parameters.
+
+[^fn-bsp]: **Bulk Synchronous Parallel (BSP)**: A theoretical model for parallel computation introduced by Leslie Valiant in 1990. BSP divides computation into "supersteps" where all processors compute independently, then synchronize at a barrier before proceeding. While simple to reason about and implement, BSP's strict synchronization means the slowest worker determines iteration time, a problem that grows more severe as cluster size increases.
+
+BSP provides strong guarantees: every worker sees identical parameter values at each step, ensuring mathematical equivalence to single-device training. The cost is that the slowest worker determines iteration time, creating the "straggler problem."
 
 Stale Synchronous Parallel (SSP) relaxes this constraint, allowing workers to proceed up to $s$ iterations ahead of the slowest worker before blocking. This bounds staleness while reducing synchronization delays. SSP requires careful learning rate tuning since workers compute gradients on slightly different parameter versions. The bounded staleness guarantee ($s$ typically 2-5) provides a middle ground between BSP's strong consistency and fully asynchronous approaches.
 
@@ -695,7 +707,11 @@ OpenAI's GPT-2 paper reports training on 32 V100s across 4 nodes using optimized
 
 While data parallelism is an effective approach for distributed training, it introduces several challenges that must be addressed to achieve efficient and scalable training systems. These challenges stem from the inherent trade-offs between computation and communication, as well as the limitations imposed by hardware and network infrastructures.
 
-Communication overhead represents the most significant bottleneck in data parallelism. During gradient synchronization, each device must exchange gradient updates, often hundreds of megabytes per step for large models. With 8 GPUs training a 1-billion-parameter model, each synchronization step might require transferring several gigabytes of data across the network. While high-speed interconnects like NVLink (300 GB/s) or InfiniBand (200 Gb/s) help, the overhead remains substantial. NCCL's ring-allreduce algorithm[^fn-allreduce-algorithm] reduces this burden by organizing devices in a ring topology, but communication costs still grow with model size and device count.
+Communication overhead represents the most significant bottleneck in data parallelism. During gradient synchronization, each device must exchange gradient updates, often hundreds of megabytes per step for large models. With 8 GPUs training a 1-billion-parameter model, each synchronization step might require transferring several gigabytes of data across the network. While high-speed interconnects like NVLink (300 GB/s) or InfiniBand[^fn-infiniband] (200 Gb/s) help, the overhead remains substantial.
+
+[^fn-infiniband]: **InfiniBand**: A high-performance networking standard originally developed for supercomputers and now essential for multi-node GPU clusters. InfiniBand HDR provides 200 Gb/s per port with sub-microsecond latency, roughly 10x the bandwidth and 10x lower latency than standard Ethernet. RDMA (Remote Direct Memory Access) allows GPUs to read/write remote memory without CPU involvement, critical for efficient gradient synchronization across nodes.
+
+NCCL's ring-allreduce algorithm[^fn-allreduce-algorithm] reduces this burden by organizing devices in a ring topology, but communication costs still grow with model size and device count.
 
 [^fn-allreduce-algorithm]: **AllReduce Algorithm**: A collective communication primitive where each process contributes data and all processes receive the same combined result (typically a sum). Naive implementations require O(n²) messages for n devices. The ring-allreduce algorithm achieves bandwidth-optimal performance by organizing devices in a logical ring where each device communicates only with its neighbors [@patarasuk2009allreduce], making it scalable for modern ML with hundreds of GPUs.
 
@@ -713,7 +729,9 @@ Despite these challenges, data parallelism remains an important technique for di
 
 ### Memory-Efficient Data Parallelism: ZeRO and FSDP {#sec-distributed-training-zero-fsdp}
 
-The memory constraints of data parallelism motivate a family of techniques that shard memory state across workers while preserving the simplicity of data parallel training. ZeRO (Zero Redundancy Optimizer) [@rajbhandari2020zero] and its PyTorch implementation FSDP (Fully Sharded Data Parallel) [@zhao2023fsdp] enable training models that would otherwise require model parallelism.
+The memory constraints of data parallelism motivate a family of techniques that shard memory state across workers while preserving the simplicity of data parallel training. ZeRO (Zero Redundancy Optimizer)[^fn-zero] [@rajbhandari2020zero] and its PyTorch implementation FSDP (Fully Sharded Data Parallel) [@zhao2023fsdp] enable training models that would otherwise require model parallelism.
+
+[^fn-zero]: **ZeRO (Zero Redundancy Optimizer)**: Developed by Microsoft Research for DeepSpeed, ZeRO eliminates memory redundancy in data parallel training by partitioning optimizer states, gradients, and parameters across workers instead of replicating them. ZeRO enabled training of models with over 100 billion parameters on hardware previously limited to much smaller models, fundamentally changing the economics of large-scale training.
 
 In standard data parallelism, each GPU maintains a complete copy of:
 
@@ -928,7 +946,11 @@ This sequential processing introduces device idle time, as each device must wait
 
 #### Pipeline Parallelism {#sec-distributed-training-pipeline-parallelism}
 
-Pipeline parallelism extends layer-wise partitioning by introducing microbatching to minimize device idle time, as illustrated in @fig-pipline-parallelism. Instead of waiting for an entire batch to sequentially pass through all devices, the computation is divided into smaller segments called microbatches. GPipe [@gpipe2019] introduced synchronous pipeline parallelism with micro-batch accumulation, while PipeDream [@harlap2018pipedream] developed asynchronous approaches with weight stashing. Each device, as represented by the rows in the drawing, processes its assigned model layers for different microbatches simultaneously. For example, the forward pass involves devices passing activations to the next stage (e.g., $F_{0,0}$ to $F_{1,0}$). The backward pass transfers gradients back through the pipeline (e.g., $B_{3,3}$ to $B_{2,3}$). This overlapping computation reduces idle time and increases throughput while maintaining the logical sequence of operations across devices.
+Pipeline parallelism extends layer-wise partitioning by introducing microbatching to minimize device idle time, as illustrated in @fig-pipline-parallelism. Instead of waiting for an entire batch to sequentially pass through all devices, the computation is divided into smaller segments called microbatches. GPipe[^fn-gpipe] [@gpipe2019] introduced synchronous pipeline parallelism with micro-batch accumulation, while PipeDream [@harlap2018pipedream] developed asynchronous approaches with weight stashing.
+
+[^fn-gpipe]: **GPipe**: Developed by Google in 2018, GPipe pioneered synchronous pipeline parallelism for training neural networks too large for single devices. By splitting models across accelerators and using micro-batches to keep all stages busy, GPipe achieved near-linear scaling for training an AmoebaNet model with 557 million parameters across 8 TPUs. This approach influenced subsequent systems including Megatron-LM and DeepSpeed.
+
+Each device, as represented by the rows in the drawing, processes its assigned model layers for different microbatches simultaneously. For example, the forward pass involves devices passing activations to the next stage (e.g., $F_{0,0}$ to $F_{1,0}$). The backward pass transfers gradients back through the pipeline (e.g., $B_{3,3}$ to $B_{2,3}$). This overlapping computation reduces idle time and increases throughput while maintaining the logical sequence of operations across devices.
 
 ::: {#fig-pipline-parallelism}
 ```{.tikz}
@@ -1019,7 +1041,9 @@ Modern literature distinguishes two forms of model parallelism:
 The Megatron-LM framework popularized this distinction, using tensor parallelism within nodes (8 GPUs on NVLink) and pipeline parallelism across nodes (InfiniBand).
 :::
 
-Megatron-style tensor parallelism [@shoeybi2019megatron] partitions matrix multiplications in two ways.
+Megatron-style tensor parallelism[^fn-megatron] [@shoeybi2019megatron] partitions matrix multiplications in two ways.
+
+[^fn-megatron]: **Megatron-LM**: NVIDIA's framework for training large transformer models, first published in 2019. Megatron introduced efficient tensor parallelism strategies specifically designed for transformers, strategically placing AllReduce operations to minimize communication while splitting attention heads and feed-forward layers across GPUs. Megatron-LM enabled training of models with 8.3 billion parameters and established patterns now used across the industry for multi-GPU transformer training.
 
 Column-parallel linear layers split weights along columns. For input $X$ and weight matrix $W = [W_1 | W_2]$ split across 2 GPUs:
 $$Y = XW = X[W_1 | W_2] = [XW_1 | XW_2]$$
@@ -1281,7 +1305,9 @@ While the theoretical foundations of distributed training establish the mathemat
 
 The data parallelism mechanisms we explored earlier—gradient averaging, AllReduce communication, and parameter synchronization—are abstracted through framework APIs that handle the complex coordination automatically. PyTorch provides two primary approaches that demonstrate different trade-offs between simplicity and performance.
 
-`torch.nn.DataParallel` represents the simpler approach, automatically replicating the model across available GPUs within a single node. This API abstracts the gradient collection and averaging process, requiring minimal code changes to existing single-GPU training scripts. However, this simplicity comes with performance limitations, as the implementation uses a parameter server approach [@li2014parameter] that can create communication bottlenecks when scaling beyond 4-8 GPUs.
+`torch.nn.DataParallel` represents the simpler approach, automatically replicating the model across available GPUs within a single node. This API abstracts the gradient collection and averaging process, requiring minimal code changes to existing single-GPU training scripts. However, this simplicity comes with performance limitations, as the implementation uses a parameter server approach[^fn-parameter-server] [@li2014parameter] that can create communication bottlenecks when scaling beyond 4-8 GPUs.
+
+[^fn-parameter-server]: **Parameter Server**: A distributed architecture where dedicated server nodes store model parameters while worker nodes compute gradients on data. Workers pull parameters, compute gradients, and push updates to servers. While intuitive and flexible, this centralized design creates bandwidth bottlenecks at servers, leading modern systems to prefer decentralized AllReduce patterns where workers communicate directly without a central coordinator.
 
 ```python
 # Simple data parallelism - framework handles gradient synchronization
@@ -1359,7 +1385,11 @@ The scaling of AI systems follows a natural progression: integration within a si
 
 Chiplet architectures achieve scaling by partitioning large designs into smaller, modular dies that are interconnected within a single package. Small, specialized semiconductor dies connect together within a single package to create larger, more complex processors. AMD's EPYC processors use up to 8 chiplets connected via Infinity Fabric, achieving yields above 80% versus 20% for equivalent monolithic designs. This modular approach reduces manufacturing costs and enables mixing different technologies, with compute chiplets in 7 nm paired with I/O chiplets in 14 nm, optimizing each function independently.
 
-Modern AI accelerators partition large designs into smaller chiplets and connect them via high-bandwidth interconnects, enabling scalability beyond monolithic die limitations and improving manufacturing yields. HBM stacks provide fast access to data, crucial for the memory-intensive workloads common in machine learning. AMD's Instinct MI300 exemplifies this approach by integrating multiple compute chiplets alongside memory chiplets, linked by high-speed die-to-die interconnects. This modular design allows manufacturers to bypass the manufacturing limits of monolithic chips while still achieving high-density compute.
+Modern AI accelerators partition large designs into smaller chiplets and connect them via high-bandwidth interconnects, enabling scalability beyond monolithic die limitations and improving manufacturing yields. HBM (High Bandwidth Memory)[^fn-hbm] stacks provide fast access to data, crucial for the memory-intensive workloads common in machine learning.
+
+[^fn-hbm]: **High Bandwidth Memory (HBM)**: A 3D-stacked DRAM technology that places memory dies directly on top of or beside the processor die, connected via thousands of through-silicon vias. HBM3 provides up to 1.2 TB/s bandwidth per stack, roughly 10x that of GDDR6. The H100 GPU uses 80 GB of HBM3, enabling it to hold large model weights close to compute. HBM's proximity to the processor dramatically reduces memory access latency and energy compared to traditional off-chip memory.
+
+AMD's Instinct MI300 exemplifies this approach by integrating multiple compute chiplets alongside memory chiplets, linked by high-speed die-to-die interconnects. This modular design allows manufacturers to bypass the manufacturing limits of monolithic chips while still achieving high-density compute.
 
 However, even within a single package, scaling is not without challenges. Inter-chiplet communication latency, memory coherence, and thermal management become critical factors as more chiplets are integrated. Memory coherence presents particular complexity: ensuring all processors in a system see the same consistent view of shared memory when multiple cores or chips access the same data. Traditional cache coherence protocols like MESI add 10-50 ns latency for multi-core CPUs. For AI accelerators with thousands of cores, coherence becomes prohibitively expensive, so most ML hardware instead uses explicit memory management where programmers control data placement and synchronization manually.
 
@@ -1375,7 +1405,11 @@ The coordination complexity compounds exponentially. While two GPUs require a si
 
 #### Communication Overhead and Amdahl's Law {#sec-distributed-training-amdahl-analysis}
 
-The fundamental limitation of distributed AI training stems from Amdahl's Law, which quantifies how communication overhead constrains parallel speedup regardless of available compute power. For distributed neural network training, communication overhead during gradient synchronization creates a sequential bottleneck that limits scalability even with infinite parallelism.
+The fundamental limitation of distributed AI training stems from Amdahl's Law[^fn-amdahl], which quantifies how communication overhead constrains parallel speedup regardless of available compute power.
+
+[^fn-amdahl]: **Amdahl's Law**: Named after computer architect Gene Amdahl, who formulated it in 1967 to argue against massively parallel architectures. The law states that speedup from parallelization is limited by the sequential portion of a program. If 10% of a program must run sequentially, maximum speedup is 10x regardless of processor count. In distributed training, gradient synchronization represents this sequential bottleneck, explaining why 1000 GPUs never achieve 1000x speedup.
+
+For distributed neural network training, communication overhead during gradient synchronization creates a sequential bottleneck that limits scalability even with infinite parallelism.
 
 The maximum speedup achievable with distributed training is bound by Amdahl's Law:
 $$
@@ -1423,7 +1457,9 @@ Even with advanced interconnects like NVLink 4.0 (1.8 TB/s), gradient synchroniz
 
 #### TPU Pods {#sec-distributed-training-tpu-pods}
 
-As models and datasets continue to expand, training and inference workloads must extend beyond single-server configurations. Google's TPU Pods represent a pioneering approach to this challenge, interconnecting hundreds of TPUs to function as a unified system [@jouppi2017tpu].
+As models and datasets continue to expand, training and inference workloads must extend beyond single-server configurations. Google's TPU Pods[^fn-tpu-pod] represent a pioneering approach to this challenge, interconnecting hundreds of TPUs to function as a unified system [@jouppi2017tpu].
+
+[^fn-tpu-pod]: **TPU Pod**: A tightly integrated cluster of Google Tensor Processing Units connected via custom high-bandwidth interconnects. The TPU v4 Pod contains 4,096 TPU chips providing over 1 exaflop of peak compute. Unlike loosely coupled GPU clusters, TPU Pods are designed from the ground up for collective operations, using a 3D torus network topology that provides deterministic, low-latency communication for distributed training workloads.
 
 The architectural design of TPU Pods differs fundamentally from traditional multi-GPU systems. While multi-GPU configurations typically rely on NVLink or PCIe connections within a single machine, TPU Pods employ high-bandwidth optical links to interconnect accelerators at data center scale. This design implements a 2D torus interconnect topology, enabling efficient data exchange between accelerators while minimizing communication bottlenecks as workloads scale across nodes.
 
@@ -1437,7 +1473,11 @@ The energy cost of coordination also scales dramatically: moving data across the
 
 At the frontier of AI scaling, wafer-scale integration represents a paradigm shift that abandons traditional multi-chip architectures in favor of a single, massive AI processor. Rather than partitioning computation across discrete chips, this approach treats an entire silicon wafer as a unified compute fabric, eliminating the inefficiencies of inter-chip communication.
 
-Wafer-scale integration uses an entire 300 mm silicon wafer as a single processor instead of cutting it into individual chips. Cerebras WSE-3 contains 4 trillion transistors across 850,000 cores, 125x more than the largest GPUs. Manufacturing challenges include 100% yield requirements (solved with redundant cores) and cooling 23 kW of power. This approach eliminates inter-chip communication delays but costs $2-3 million per wafer versus $40,000 for equivalent GPU clusters.
+Wafer-scale integration[^fn-wafer-scale] uses an entire 300 mm silicon wafer as a single processor instead of cutting it into individual chips. Cerebras WSE-3 contains 4 trillion transistors across 850,000 cores, 125x more than the largest GPUs.
+
+[^fn-wafer-scale]: **Wafer-Scale Integration**: The radical approach of fabricating an entire processor on a single silicon wafer rather than dicing it into individual chips. Cerebras pioneered this for AI with their WSE (Wafer Scale Engine), which eliminates inter-chip communication bottlenecks by keeping all cores on a single die. The engineering challenges include managing defects (solved with redundant cores), distributing power across 56,000 mm² of silicon, and cooling 23 kW of heat.
+
+Manufacturing challenges include 100% yield requirements (solved with redundant cores) and cooling 23 kW of power. This approach eliminates inter-chip communication delays but costs $2-3 million per wafer versus $40,000 for equivalent GPU clusters.
 
 The primary advantage of wafer-scale AI is its ultra-fast on-die communication. Unlike chiplets, GPUs, or TPU Pods, where data must traverse physical boundaries between separate devices, wafer-scale AI enables near-instantaneous data transfer across its vast compute array. This architecture drastically reduces communication latency, achieving performance levels that remain out of reach for conventional multi-chip systems.
 
@@ -1503,7 +1543,9 @@ Even with perfect overlap and optimal algorithms, communication overhead grows w
 
 Organizations that budget projects assuming linear scaling inevitably miss deadlines and overspend on compute.
 
-Hyperparameters tuned on small clusters fail catastrophically at large scale. The most critical is learning rate: as batch size increases with data parallelism, learning rate typically must increase proportionally to maintain convergence rate. The "linear scaling rule" [@goyal2017accurate] suggests $\eta_{large} = \eta_{base} \times (B_{large}/B_{base})$.
+Hyperparameters tuned on small clusters fail catastrophically at large scale. The most critical is learning rate: as batch size increases with data parallelism, learning rate typically must increase proportionally to maintain convergence rate. The "linear scaling rule"[^fn-linear-scaling] [@goyal2017accurate] suggests $\eta_{large} = \eta_{base} \times (B_{large}/B_{base})$.
+
+[^fn-linear-scaling]: **Linear Scaling Rule**: Discovered empirically by Facebook AI Research when training ImageNet in 1 hour on 256 GPUs. When batch size increases by factor k, learning rate should also increase by factor k to maintain similar convergence behavior. This rule enables efficient distributed training but breaks down beyond the "critical batch size" where gradient noise becomes too low for effective exploration of the loss landscape.
 
 However, this rule has limits. Beyond the "critical batch size" (model and dataset dependent, often 8K-32K for vision models), increasing batch size provides diminishing returns. Larger batches find sharper minima that generalize poorly. Training that converges beautifully at 256 GPUs may diverge or produce worse models at 1024 GPUs with naive scaling.
 

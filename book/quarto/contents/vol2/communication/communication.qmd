@@ -116,7 +116,9 @@ The transition from single-machine to distributed training fundamentally changes
 
 This transition reveals a fundamental asymmetry in how computation and communication scale. Adding more GPUs increases aggregate compute capacity proportionally, but the coordination required between those GPUs creates communication demands that grow in ways that cannot be eliminated through better algorithms alone. The physics of data movement, constrained by the speed of light and the finite bandwidth of network links, imposes hard limits that no amount of software optimization can circumvent.
 
-Understanding these limits requires developing quantitative models that predict communication costs and reveal when distributed systems will achieve efficient scaling versus when they will waste resources waiting for data. The α-β model introduced in this section captures the essential physics of network communication: latency that does not depend on message size and bandwidth that determines transfer time for large messages. This simple model, combined with analysis of collective communication patterns, explains why certain distributed training configurations succeed while others fail to scale.
+Understanding these limits requires developing quantitative models that predict communication costs and reveal when distributed systems will achieve efficient scaling versus when they will waste resources waiting for data. The $\alpha$-$\beta$ model[^fn-alpha-beta-model] introduced in this section captures the essential physics of network communication: latency that does not depend on message size and bandwidth that determines transfer time for large messages. This simple model, combined with analysis of collective communication patterns, explains why certain distributed training configurations succeed while others fail to scale.
+
+[^fn-alpha-beta-model]: **The $\alpha$-$\beta$ Model**: A foundational performance model from parallel computing where $\alpha$ represents fixed latency overhead (time to initiate communication regardless of message size) and $\beta$ represents bandwidth (data transfer rate). The model $T = \alpha + M/\beta$ predicts communication time for a message of size $M$. This deceptively simple equation captures the essential trade-off that governs all distributed systems: small messages are latency-bound (dominated by $\alpha$), while large messages are bandwidth-bound (dominated by $M/\beta$).
 
 The communication patterns that emerge in distributed ML differ substantially from those in traditional high-performance computing. Scientific simulations often exhibit nearest-neighbor communication patterns where each process exchanges data only with adjacent processes in a logical grid. ML training, by contrast, requires global aggregation: every worker must contribute to and receive the averaged gradients from all other workers. This global communication pattern creates different scaling behaviors and demands different network architectures than the point-to-point patterns that dominated earlier distributed systems.
 
@@ -126,7 +128,9 @@ This section establishes the theoretical foundations for understanding communica
 
 Why does communication become *the* bottleneck rather than just *a* bottleneck? The answer lies in how computation and communication scale differently with system size. Computation scales nearly perfectly: doubling GPUs doubles aggregate compute capacity. Communication, however, scales poorly because coordination inherently requires data movement between independent memory spaces, and this movement is constrained by physical network capacity that does not scale with compute.
 
-Consider training a large language model with 175 billion parameters [@brown2020language] using data parallelism across $N$ GPUs. Each GPU computes gradients for its local batch, producing a gradient tensor of 350 GB (175B parameters times 2 bytes for FP16). These gradients must be averaged across all $N$ GPUs before any GPU can update its parameters. The total data movement required is approximately $2 \times 350\text{ GB} \times (N-1)/N$, approaching 700 GB per training step regardless of how many GPUs participate.
+Consider training a large language model with 175 billion parameters [@brown2020language] using data parallelism[^fn-data-parallelism] across $N$ GPUs. Each GPU computes gradients for its local batch, producing a gradient tensor of 350 GB (175B parameters times 2 bytes for FP16). These gradients must be averaged across all $N$ GPUs before any GPU can update its parameters. The total data movement required is approximately $2 \times 350\text{ GB} \times (N-1)/N$, approaching 700 GB per training step regardless of how many GPUs participate.
+
+[^fn-data-parallelism]: **Data Parallelism**: The most common distributed training strategy, where each GPU holds a complete copy of the model but processes different portions of the training data. After each forward-backward pass, gradients must be synchronized across all replicas to ensure model consistency. While conceptually simple, data parallelism becomes communication-bound at scale because gradient sizes grow with model size while per-GPU computation shrinks as you add more workers.
 
 The computation time per step decreases as we add GPUs because each GPU processes a smaller portion of the global batch. But the communication volume remains nearly constant. At some scale, communication time exceeds computation time, and adding more GPUs provides diminishing returns.
 
@@ -134,7 +138,9 @@ The computation time per step decreases as we add GPUs because each GPU processe
 For a fixed model size, there exists a cluster scale beyond which communication overhead dominates training time. This is not an implementation detail to be optimized away but a fundamental limit arising from the physics of data movement. The only solutions are: (1) reduce communication volume through compression or algorithm changes, (2) increase network bandwidth through better hardware, or (3) restructure the computation to require less synchronization.
 :::
 
-To quantify this effect, consider concrete numbers for training GPT-3 scale models. An NVIDIA H100 GPU delivers approximately 2 petaFLOPS of FP16 compute. A single forward-backward pass through a 175B parameter model requires roughly 1050 petaFLOPs (approximately 6 times the parameter count for forward and backward combined). On one H100, this takes:
+To quantify this effect, consider concrete numbers for training GPT-3 scale models. An NVIDIA H100 GPU delivers approximately 2 petaFLOPS[^fn-petaflops] of FP16 compute. A single forward-backward pass through a 175B parameter model requires roughly 1050 petaFLOPs (approximately 6 times the parameter count for forward and backward combined). On one H100, this takes:
+
+[^fn-petaflops]: **PetaFLOPS (PFLOPS)**: One quadrillion ($10^{15}$) floating-point operations per second. Modern AI accelerators achieve this scale through massive parallelism: the H100 contains 16,896 CUDA cores and 528 Tensor Cores operating simultaneously. For context, the entire world's computing capacity was estimated at roughly 1 exaFLOP (1000 petaFLOPS) in 2020, yet a single rack of 8 H100s now delivers 16 petaFLOPS.
 
 $$
 T_{compute} = \frac{1050 \times 10^{15} \text{ FLOPs}}{2 \times 10^{15} \text{ FLOP/s}} = 525 \text{ seconds}
@@ -146,7 +152,9 @@ $$
 T_{compute} = \frac{525}{1024} \approx 0.51 \text{ seconds}
 $$
 
-Now consider communication. With 400 Gbps InfiniBand (50 GB/s effective bandwidth) and optimal ring AllReduce transferring 700 GB of gradient data:
+Now consider communication. With 400 Gbps InfiniBand[^fn-infiniband] (50 GB/s effective bandwidth) and optimal ring AllReduce transferring 700 GB of gradient data:
+
+[^fn-infiniband]: **InfiniBand**: A high-performance networking standard originally developed for supercomputers, now essential for ML training clusters. InfiniBand provides 400 Gbps bandwidth (NDR generation) with latency under 1 microsecond, compared to 100 Gbps and 10-50 microseconds for typical Ethernet. The technology uses Remote Direct Memory Access (RDMA) to bypass CPU involvement in data transfers, enabling GPUs to communicate directly. A single InfiniBand switch costs $50,000-$200,000, making network infrastructure a significant portion of training cluster costs.
 
 $$
 T_{comm} = \frac{700 \text{ GB}}{50 \text{ GB/s}} = 14 \text{ seconds}
@@ -156,7 +164,9 @@ Communication takes 27 times longer than computation. This is the communication 
 
 ### The LogP and LogGP Models {#sec-logp-model}
 
-Reasoning about communication performance requires formal models that capture the essential characteristics of network behavior. The LogP model [@culler1993logp], developed for parallel computing, provides a principled framework for analyzing communication costs.
+Reasoning about communication performance requires formal models that capture the essential characteristics of network behavior. The LogP model[^fn-logp] [@culler1993logp], developed for parallel computing, provides a principled framework for analyzing communication costs.
+
+[^fn-logp]: **LogP Model**: Named for its four parameters (Latency, overhead, gap, Processors), this model was developed in 1993 at UC Berkeley to predict parallel algorithm performance more accurately than earlier models that assumed infinitely fast networks. The key insight was recognizing that both latency (network delay) and overhead (processor time to send/receive) independently constrain performance. LogP remains foundational because it captures the essential physics that makes distributed computing fundamentally different from shared-memory parallelism.
 
 The LogP model characterizes a network using four parameters:
 
@@ -219,13 +229,17 @@ Understanding which regime applies to your workload determines which optimizatio
 
 Distributed systems fundamentally differ in how processes exchange data. The two primary paradigms, message passing and shared memory, have distinct characteristics that shape how ML frameworks implement distributed training.
 
-**Message Passing**: Processes explicitly send and receive data through network communication. Each process has private memory inaccessible to others. To share information, a process must serialize data into a message, transmit it over the network, and the recipient must deserialize it into local memory. MPI (Message Passing Interface) [@mpi2021standard] established the standard API for this paradigm, defining operations like `Send`, `Recv`, and collective operations like `AllReduce`.
+**Message Passing**: Processes explicitly send and receive data through network communication. Each process has private memory inaccessible to others. To share information, a process must serialize data into a message, transmit it over the network, and the recipient must deserialize it into local memory. MPI (Message Passing Interface)[^fn-mpi] [@mpi2021standard] established the standard API for this paradigm, defining operations like `Send`, `Recv`, and collective operations like `AllReduce`.
+
+[^fn-mpi]: **Message Passing Interface (MPI)**: The dominant standard for distributed computing communication since its introduction in 1994. MPI defines a language-independent API with implementations from multiple vendors (OpenMPI, MPICH, Intel MPI). While NCCL has superseded MPI for GPU collective operations, MPI remains essential for process management, job launching, and CPU-based distributed computing. Most large-scale training systems use MPI for initialization even when using NCCL for GPU communication.
 
 Advantages of message passing include explicit control over communication (making costs visible and analyzable), natural mapping to distributed hardware, and no implicit synchronization overhead. Disadvantages include programming complexity and the requirement to carefully manage data distribution.
 
 **Shared Memory**: Processes access a common address space where updates by one process become visible to others. This model simplifies programming because data sharing requires no explicit communication: one process writes to a memory location, and others can read the updated value. Hardware cache coherence protocols ensure consistency.
 
-Within a single node, modern GPUs use shared memory semantics for multi-GPU communication. NVIDIA's NVLink creates a unified memory space where GPUs can directly access each other's memory without explicit message construction. This is why intra-node communication is dramatically faster than inter-node communication: shared memory avoids serialization overhead and leverages high-bandwidth interconnects.
+Within a single node, modern GPUs use shared memory semantics for multi-GPU communication. NVIDIA's NVLink[^fn-nvlink-comm] creates a unified memory space where GPUs can directly access each other's memory without explicit message construction. This is why intra-node communication is dramatically faster than inter-node communication: shared memory avoids serialization overhead and leverages high-bandwidth interconnects.
+
+[^fn-nvlink-comm]: **NVLink in Communication Context**: While NVLink provides 900 GB/s bidirectional bandwidth (18x faster than PCIe Gen5), its more significant advantage for communication is unified memory addressing. GPUs can load and store to remote GPU memory using the same instructions as local memory, eliminating the serialization and protocol overhead inherent in message passing. This is why tensor parallelism, which requires fine-grained communication every layer, is only practical within NVLink-connected nodes.
 
 Across nodes, true shared memory is impractical due to physical limitations. Distributed shared memory systems exist but incur significant overhead to maintain consistency. Production ML systems therefore use message passing between nodes while leveraging shared memory within nodes.
 
@@ -235,15 +249,21 @@ This hybrid reality shapes how frameworks like PyTorch implement distributed tra
 
 Different distributed training strategies generate distinct communication patterns, each with unique characteristics and optimization opportunities.
 
-**Synchronous Data Parallelism** produces the most regular communication pattern: all workers compute gradients, then all workers participate in a collective reduction to compute the average gradient, then all workers apply the update. This pattern repeats every iteration. The defining characteristic is a global synchronization barrier where all workers must complete gradient computation before any can proceed.
+**Synchronous Data Parallelism** produces the most regular communication pattern: all workers compute gradients, then all workers participate in a collective reduction to compute the average gradient, then all workers apply the update. This pattern repeats every iteration. The defining characteristic is a global synchronization barrier[^fn-sync-barrier] where all workers must complete gradient computation before any can proceed.
+
+[^fn-sync-barrier]: **Synchronization Barrier**: A coordination point where all participants must arrive before any can proceed. In synchronous training, the slowest worker (the "straggler") determines iteration time. This creates a fundamental tension: synchronous training guarantees gradient correctness but wastes fast workers' compute waiting for slow ones. The alternative, asynchronous training, allows stragglers to fall behind but risks using stale gradients that can slow or prevent convergence.
 
 The communication volume per iteration is deterministic: for a model with $M$ parameters in FP16, each worker sends and receives approximately $2M$ bytes during AllReduce (the exact factor depends on the algorithm). This predictability enables precise capacity planning.
 
-**Asynchronous Data Parallelism** eliminates the synchronization barrier. Workers send gradients to a parameter server (or peer workers) and immediately proceed to the next iteration without waiting for responses. This improves hardware utilization by hiding communication latency but introduces staleness: workers may use slightly outdated parameters.
+**Asynchronous Data Parallelism** eliminates the synchronization barrier. Workers send gradients to a parameter server[^fn-param-server] (or peer workers) and immediately proceed to the next iteration without waiting for responses. This improves hardware utilization by hiding communication latency but introduces staleness: workers may use slightly outdated parameters.
+
+[^fn-param-server]: **Parameter Server**: A centralized architecture for distributed training where dedicated server nodes store model parameters while worker nodes compute gradients. Workers pull current parameters, compute gradients on their data shard, and push gradient updates back. Pioneered by systems like DistBelief (2012), parameter servers dominated early distributed training but have been largely replaced by AllReduce-based approaches for dense models because the server becomes a bandwidth bottleneck. Parameter servers remain common for sparse models like recommendation systems where only a subset of parameters update each iteration.
 
 Communication volume is similar to synchronous training, but the timing is distributed rather than concentrated at synchronization points. This can improve network utilization by avoiding bursts but complicates reasoning about convergence.
 
-**Model Parallelism** (tensor and pipeline) generates communication patterns tied to the model architecture rather than the batch size. Tensor parallelism requires communication within each layer to combine partial results, producing frequent small messages. Pipeline parallelism requires communication only at stage boundaries, producing less frequent but larger messages (activation tensors).
+**Model Parallelism**[^fn-model-parallelism] (tensor and pipeline) generates communication patterns tied to the model architecture rather than the batch size. Tensor parallelism requires communication within each layer to combine partial results, producing frequent small messages. Pipeline parallelism requires communication only at stage boundaries, producing less frequent but larger messages (activation tensors).
+
+[^fn-model-parallelism]: **Model Parallelism**: Distributing different parts of a single model across multiple devices, required when models are too large for one GPU's memory. Tensor parallelism splits individual layers (e.g., dividing a large matrix multiplication across 8 GPUs), while pipeline parallelism assigns different layers to different GPUs in a sequential pipeline. Tensor parallelism is latency-sensitive (communication on every layer), while pipeline parallelism is throughput-sensitive (activation transfers between stages). Modern LLM training combines both: tensor parallelism within nodes (fast NVLink), pipeline parallelism across nodes (tolerates InfiniBand latency).
 
 | Strategy | Communication Frequency | Message Size | Pattern Regularity |
 |----------|------------------------|--------------|-------------------|
@@ -256,7 +276,9 @@ Communication volume is similar to synchronous training, but the timing is distr
 
 **Embedding Parallelism** in recommendation systems produces a fundamentally different pattern. Rather than reducing gradients across all parameters, workers exchange embedding vectors for the specific items in each training batch. This creates an AlltoAll communication pattern where each worker sends different data to each other worker, contrasting with AllReduce where all workers contribute to computing the same result.
 
-**Mixture of Experts (MoE)** models exhibit data-dependent communication. A routing network decides which tokens go to which expert, creating dynamic communication patterns that vary with input data. This unpredictability challenges static optimization and requires adaptive algorithms.
+**Mixture of Experts (MoE)**[^fn-moe-intro] models exhibit data-dependent communication. A routing network decides which tokens go to which expert, creating dynamic communication patterns that vary with input data. This unpredictability challenges static optimization and requires adaptive algorithms.
+
+[^fn-moe-intro]: **Mixture of Experts (MoE)**: An architecture that activates only a subset of model parameters for each input, enabling massive models without proportional compute cost. A gating network routes each token to 1-2 "expert" subnetworks from a pool of many (e.g., 8-64 experts). Switch Transformer (2021) demonstrated trillion-parameter models with MoE; GPT-4 reportedly uses MoE with 8 experts. The communication challenge: tokens must be shuffled to reach their assigned experts, requiring AlltoAll operations that scale poorly with expert count.
 
 ### The Communication-Computation Ratio {#sec-comm-comp-ratio}
 
@@ -303,7 +325,9 @@ GPT-3's high $\rho$ value explains why training requires extremely high-bandwidt
 
 Communication performance faces fundamental physical constraints that no algorithm can overcome. Understanding these limits prevents wasted effort optimizing the wrong bottleneck.
 
-**Speed of Light Constraint**: Information cannot travel faster than light. A signal traversing a 1000 km fiber link requires at least 5 milliseconds (accounting for the refractive index of fiber). For geographically distributed training, this latency is irreducible regardless of bandwidth improvements.
+**Speed of Light Constraint**: Information cannot travel faster than light. A signal traversing a 1000 km fiber link requires at least 5 milliseconds (accounting for the refractive index of fiber[^fn-fiber-physics]). For geographically distributed training, this latency is irreducible regardless of bandwidth improvements.
+
+[^fn-fiber-physics]: **Fiber Optic Physics**: Light travels at approximately 200,000 km/s through fiber optic cables, about two-thirds the speed of light in vacuum, due to the refractive index of glass. This creates a hard floor of 5 microseconds per kilometer, meaning a round-trip between New York and London (11,000 km) takes at minimum 55 ms. No software optimization can reduce this latency, which is why synchronous global training is impractical and why edge computing exists.
 
 **Energy Cost of Data Movement**: Moving data requires energy proportional to distance and inversely proportional to feature size. Moving a byte across a chip costs approximately 10-100 picojoules; across a datacenter, 10-100 nanojoules; across continents, millijoules or more. The energy cost of communication increasingly dominates system power budgets as compute becomes more efficient.
 
@@ -460,7 +484,9 @@ For small messages, tree AllReduce is 100x faster than ring AllReduce due to the
 
 ### Ring AllReduce {#sec-ring-allreduce}
 
-Ring AllReduce arranges processes in a logical ring and pipelines communication to achieve optimal bandwidth utilization. Originally developed for MPI implementations, it became the standard for distributed deep learning after adoption by Baidu [@gibiansky2017baidu] in 2017.
+Ring AllReduce[^fn-ring-history] arranges processes in a logical ring and pipelines communication to achieve optimal bandwidth utilization. Originally developed for MPI implementations, it became the standard for distributed deep learning after adoption by Baidu [@gibiansky2017baidu] in 2017.
+
+[^fn-ring-history]: **Ring AllReduce History**: Andrew Gibiansky's 2017 blog post "Bringing HPC Techniques to Deep Learning" at Baidu popularized ring AllReduce for ML, demonstrating near-linear scaling to hundreds of GPUs. The algorithm itself dates to the 1990s HPC community, but its application to gradient synchronization catalyzed modern distributed training. Uber's Horovod (2017) and NVIDIA's NCCL subsequently optimized ring AllReduce for GPU clusters, making it the default algorithm in PyTorch's DistributedDataParallel.
 
 The algorithm divides the message into $N$ chunks and proceeds in two phases, each with $N-1$ steps.
 
@@ -643,7 +669,9 @@ With p = 0.001 (0.1% per GPU-hour) and 1000 GPUs training for 100 hours: $P(\tex
 
 Real implementations improve on textbook algorithms through careful chunking and pipelining. Rather than transferring the entire gradient as one message, implementations divide it into smaller chunks that can be processed in a pipelined fashion.
 
-**Gradient Chunking**: NCCL [@jeaugey2017nccl] and other libraries divide large messages into chunks (typically 256 KB to 4 MB) and pipeline chunk transmission. This enables overlap between network transmission and reduction computation.
+**Gradient Chunking**: NCCL[^fn-nccl-intro] [@jeaugey2017nccl] and other libraries divide large messages into chunks (typically 256 KB to 4 MB) and pipeline chunk transmission. This enables overlap between network transmission and reduction computation.
+
+[^fn-nccl-intro]: **NVIDIA Collective Communications Library (NCCL)**: The de facto standard for GPU collective operations, pronounced "nickel." NCCL provides highly optimized implementations of AllReduce, AllGather, ReduceScatter, and other collectives that leverage NVIDIA hardware features including NVLink, NVSwitch, and GPUDirect RDMA. NCCL automatically detects GPU topology and selects optimal algorithms, achieving near-theoretical-peak bandwidth on supported hardware. All major ML frameworks (PyTorch, TensorFlow, JAX) use NCCL as their GPU communication backend.
 
 For a message of size $M$ divided into $C$ chunks, the ring AllReduce time with pipelining becomes:
 
@@ -681,7 +709,9 @@ AllReduce for vision: Ring AllReduce works well because gradients are bandwidth-
 
 AllReduce for LLMs: Hierarchical ring AllReduce is essential at scale due to gradient size. Tensor parallelism within nodes reduces per-GPU gradient size, making communication more manageable. The regularity of transformer architectures enables predictable communication scheduling.
 
-**Recommendation Models (DLRM)**: Deep learning recommendation models [@naumov2019dlrm] have massive embedding tables (trillions of parameters) with sparse gradients. Only embeddings accessed in the current batch require updates.
+**Recommendation Models (DLRM)**: Deep learning recommendation models[^fn-dlrm] [@naumov2019dlrm] have massive embedding tables (trillions of parameters) with sparse gradients. Only embeddings accessed in the current batch require updates.
+
+[^fn-dlrm]: **Deep Learning Recommendation Model (DLRM)**: Meta's architecture for personalized content recommendation, powering systems that serve billions of users. DLRM combines massive embedding tables (mapping users and items to dense vectors) with a relatively small multi-layer perceptron. The key systems challenge: embedding tables can reach terabytes (Meta's models reportedly use 10+ TB), far exceeding GPU memory, requiring specialized sharding and AlltoAll communication patterns fundamentally different from LLM training.
 
 AllReduce for RecSys: Standard AllReduce is inappropriate because it would waste bandwidth on zero gradients. Sparse AllReduce variants or AlltoAll operations are preferred. The embedding-dense network split means different model components may use different collective operations.
 
@@ -833,7 +863,11 @@ AlltoAll stands out with its $(N-1) \cdot \alpha$ latency term, which scales lin
 
 ### AllGather: Collecting Distributed Parameters {#sec-allgather}
 
-AllGather collects data fragments from all processes and distributes the complete collection to everyone. It is the communication backbone of Fully Sharded Data Parallelism (FSDP) [@zhao2023fsdp] and ZeRO-3 [@rajbhandari2020zero], where model parameters are sharded across workers and must be gathered before computation.
+AllGather collects data fragments from all processes and distributes the complete collection to everyone. It is the communication backbone of Fully Sharded Data Parallelism (FSDP)[^fn-fsdp] [@zhao2023fsdp] and ZeRO-3[^fn-zero] [@rajbhandari2020zero], where model parameters are sharded across workers and must be gathered before computation.
+
+[^fn-fsdp]: **Fully Sharded Data Parallelism (FSDP)**: PyTorch's implementation of memory-efficient distributed training that shards model parameters, gradients, and optimizer states across data-parallel workers. Before computing each layer, FSDP uses AllGather to reconstruct full parameters; after computing gradients, ReduceScatter distributes gradient shards. This trade-off (communication for memory) enables training models that exceed single-GPU memory while maintaining data-parallel semantics. FSDP can reduce memory usage by 8x or more compared to standard data parallelism.
+
+[^fn-zero]: **ZeRO (Zero Redundancy Optimizer)**: Microsoft's memory optimization framework that inspired FSDP. ZeRO has three stages: ZeRO-1 shards optimizer states (2x memory reduction), ZeRO-2 adds gradient sharding (4x), and ZeRO-3 adds parameter sharding (8x+). The communication cost increases with each stage, but memory savings enable training models that would otherwise be impossible. DeepSpeed, Microsoft's training library, implements ZeRO and is widely used for LLM training.
 
 **Algorithm**: Ring AllGather proceeds similarly to the AllGather phase of ring AllReduce. Each process starts with $M/N$ elements and ends with $M$ elements total. In $N-1$ steps, each process sends its local data around the ring while receiving data from neighbors.
 
@@ -1115,7 +1149,9 @@ This inequality is more likely to hold when:
 
 ### Quantization: Reducing Precision {#sec-quantization}
 
-Quantization [@alistarh2017qsgd] reduces gradient size by representing values with fewer bits. The simplest approach maps FP32 gradients to lower precision formats.
+Quantization[^fn-gradient-quantization] [@alistarh2017qsgd] reduces gradient size by representing values with fewer bits. The simplest approach maps FP32 gradients to lower precision formats.
+
+[^fn-gradient-quantization]: **Gradient Quantization**: Distinct from model quantization (which reduces inference model size), gradient quantization compresses gradients during distributed training to reduce communication volume. The key insight: gradients are only used for parameter updates, not inference, so some precision loss is tolerable if convergence is maintained. QSGD (Quantized SGD) proved that with proper stochastic rounding, heavily quantized gradients can train models to full accuracy with 4-32x communication reduction.
 
 **Fixed-Point Quantization**: Map floating-point values to fixed-point representation with $b$ bits:
 
@@ -1144,7 +1180,9 @@ $$
 
 where $s_j$ is the scaling factor for block $j$. This improves accuracy at the cost of transmitting per-block metadata.
 
-**INT8 and FP8 Quantization**: Modern accelerators support native INT8 and FP8 operations, enabling efficient quantized communication. NVIDIA's Transformer Engine uses FP8 for activations; the same precision can apply to gradients:
+**INT8 and FP8 Quantization**: Modern accelerators support native INT8 and FP8[^fn-fp8] operations, enabling efficient quantized communication. NVIDIA's Transformer Engine uses FP8 for activations; the same precision can apply to gradients:
+
+[^fn-fp8]: **FP8 (8-bit Floating Point)**: A new numeric format introduced with NVIDIA Hopper (H100) GPUs, designed specifically for deep learning. Unlike INT8 (fixed point), FP8 maintains dynamic range through its exponent bits, better preserving gradient magnitudes across different layers. Two variants exist: E4M3 (4 exponent, 3 mantissa bits) for forward pass and E5M2 (5 exponent, 2 mantissa) for gradients. FP8 halves communication volume compared to FP16 while maintaining training accuracy for most models.
 
 - FP16 → FP8: 2x compression
 - FP32 → INT8: 4x compression
@@ -1218,7 +1256,9 @@ Sparsification is beneficial when $K \times 6 < N \times 2$ (for FP16), i.e., wh
 
 ### Error Feedback: Preserving Discarded Information {#sec-error-feedback}
 
-Naive sparsification or aggressive quantization loses gradient information, potentially harming convergence. Error feedback mechanisms [@lin2018deep] accumulate discarded gradient components and incorporate them in future iterations.
+Naive sparsification or aggressive quantization loses gradient information, potentially harming convergence. Error feedback mechanisms[^fn-error-feedback] [@lin2018deep] accumulate discarded gradient components and incorporate them in future iterations.
+
+[^fn-error-feedback]: **Error Feedback**: A technique that rescues gradient compression from destroying convergence. Without error feedback, discarding 99% of gradients (via sparsification) means 99% of gradient information is permanently lost, potentially preventing the model from converging. Error feedback stores discarded gradient components in a buffer and adds them to the next iteration's gradients, ensuring all gradient information is eventually transmitted, just delayed. This transforms lossy compression into lossless compression at the cost of increased memory for the error buffer.
 
 **Error Feedback Algorithm**: Maintain an error accumulator $e_t$ at each worker:
 
@@ -1346,7 +1386,9 @@ During network congestion, higher compression maintains throughput. When network
 
 ### PowerSGD and Low-Rank Compression {#sec-powersgd}
 
-PowerSGD uses low-rank approximation to compress gradients, achieving high compression ratios with theoretical convergence guarantees.
+PowerSGD[^fn-powersgd] uses low-rank approximation to compress gradients, achieving high compression ratios with theoretical convergence guarantees.
+
+[^fn-powersgd]: **PowerSGD**: A gradient compression algorithm that exploits the observation that gradient matrices are often approximately low-rank. Instead of transmitting the full $m \times n$ gradient matrix, workers exchange two smaller matrices that can be multiplied to reconstruct an approximation. For a rank-4 approximation of a 4096×4096 layer, this achieves 512x compression. PowerSGD uses power iteration to find the best low-rank approximation efficiently, and combined with error feedback, matches full-precision training accuracy for many models.
 
 **Algorithm Overview**: Gradients are approximated as low-rank matrices:
 
@@ -1426,7 +1468,9 @@ Network topology determines how GPUs connect to each other and fundamentally sha
 
 Network topology describes the arrangement of nodes and links in a distributed system. Key metrics characterize topology quality for different workloads:
 
-**Bisection Bandwidth**: The minimum bandwidth across any cut that divides the network into two equal halves. This metric determines maximum achievable throughput for all-to-all communication patterns:
+**Bisection Bandwidth**[^fn-bisection-bandwidth]: The minimum bandwidth across any cut that divides the network into two equal halves. This metric determines maximum achievable throughput for all-to-all communication patterns:
+
+[^fn-bisection-bandwidth]: **Bisection Bandwidth**: A network topology's most important metric for ML training. It answers: "If half the cluster needs to send data to the other half simultaneously, what's the maximum aggregate throughput?" Fat-tree topologies achieve full bisection bandwidth (every node can communicate at line rate simultaneously), while cheaper topologies like torus have reduced bisection bandwidth, limiting AlltoAll performance. A cluster's bisection bandwidth often determines whether AlltoAll-heavy workloads (recommendation, MoE) will perform well.
 
 $$
 B_{bisection} = \min_{\text{cuts}} \sum_{\text{links crossing cut}} B_{link}
@@ -1448,7 +1492,9 @@ Low diameter reduces latency for latency-sensitive communication patterns like t
 
 ### Fat-Tree Topology {#sec-fat-tree}
 
-Fat-tree is the dominant topology for datacenter networks and ML training clusters. It provides full bisection bandwidth, enabling any-to-any communication at line rate.
+Fat-tree[^fn-fat-tree] is the dominant topology for datacenter networks and ML training clusters. It provides full bisection bandwidth, enabling any-to-any communication at line rate.
+
+[^fn-fat-tree]: **Fat-Tree Topology**: Invented by Charles Leiserson at MIT in 1985, fat-tree networks use progressively "fatter" (higher bandwidth) links as you move up the tree toward the root, ensuring no bottleneck at any level. The key innovation: unlike a regular tree where root links would bottleneck, fat-trees provide full bisection bandwidth by using enough parallel uplinks at each level. Google, Microsoft, and Meta all use fat-tree variants in their ML training clusters.
 
 **Structure**: A $k$-ary fat-tree consists of three tiers:
 
@@ -1525,7 +1571,9 @@ For 8-GPU nodes:
 
 ### Torus Topology {#sec-torus}
 
-Google's TPU pods use torus topology, connecting processors in a multi-dimensional mesh with wrap-around links.
+Google's TPU pods use torus topology[^fn-torus], connecting processors in a multi-dimensional mesh with wrap-around links.
+
+[^fn-torus]: **Torus Topology**: A mesh network where opposite edges connect ("wrap around"), forming a doughnut shape in 2D or a hypertorus in higher dimensions. The key advantage: every node has the same connectivity pattern (no edge effects), and diameter is halved compared to a mesh. Google's TPU v4 uses a 3D torus of 4096 chips, enabling dimension-ordered AllReduce that exploits the regular structure. Torus trades off lower bisection bandwidth for simpler cabling and more predictable performance.
 
 **Structure**: A $d$-dimensional torus with $k$ nodes per dimension contains $k^d$ nodes. Each node connects to 2 neighbors in each dimension (forward and backward), for degree $2d$.
 
@@ -1561,7 +1609,9 @@ $$
 - 2D tensor parallelism: Map to torus dimensions
 - Structured communication patterns match torus structure
 
-**TPU ICI**: TPU's Inter-Chip Interconnect implements high-bandwidth torus links (up to 4.8 Tbps per chip in v5e). The torus topology with ICI enables efficient collective operations across thousands of chips.
+**TPU ICI**: TPU's Inter-Chip Interconnect[^fn-tpu-ici] implements high-bandwidth torus links (up to 4.8 Tbps per chip in v5e). The torus topology with ICI enables efficient collective operations across thousands of chips.
+
+[^fn-tpu-ici]: **Inter-Chip Interconnect (ICI)**: Google's proprietary interconnect for TPU pods, analogous to NVIDIA's NVLink but designed for the torus topology. ICI provides 4.8 Tbps bidirectional bandwidth per TPU v5e chip, roughly 10x the bandwidth of InfiniBand. The custom interconnect is a key TPU advantage: because Google controls both chip and interconnect, they can co-design for optimal collective operation performance rather than adapting algorithms to commodity networks.
 
 ### Dragonfly Topology {#sec-dragonfly}
 
@@ -1873,7 +1923,9 @@ export NCCL_DEBUG_FILE=/tmp/nccl_%h_%p.log
 
 1. **Incorrect topology detection**: Force correct topology with `NCCL_GRAPH_FILE`
 2. **PCIe bottleneck**: Ensure GPUs on same PCIe root for NVLink systems
-3. **RDMA not enabled**: Verify `NCCL_NET_GDR_LEVEL` and IB configuration
+3. **RDMA not enabled**: Verify `NCCL_NET_GDR_LEVEL`[^fn-rdma] and IB configuration
+
+[^fn-rdma]: **Remote Direct Memory Access (RDMA)**: A technology that allows direct memory-to-memory data transfer between computers without involving the CPU on either side. GPUDirect RDMA extends this to GPU memory, enabling network cards to read/write GPU memory directly. This eliminates two memory copies (GPU→CPU and CPU→network buffer) that would otherwise add latency and consume CPU resources. RDMA is why InfiniBand achieves sub-microsecond latency while Ethernet typically sees 10-50 microseconds.
 4. **Too few channels**: Increase `NCCL_MIN_NCHANNELS` for large clusters
 
 **Benchmarking NCCL**:
@@ -1943,7 +1995,9 @@ MPI provides:
 - Point-to-point communication (`MPI_Send`, `MPI_Recv`)
 - Collective operations (`MPI_Allreduce`, `MPI_Alltoall`)
 
-Frameworks like Horovod use MPI for process coordination while using NCCL for actual GPU communication:
+Frameworks like Horovod[^fn-horovod] use MPI for process coordination while using NCCL for actual GPU communication:
+
+[^fn-horovod]: **Horovod**: Uber's distributed training framework (2017) that popularized easy-to-use data parallelism. Named after a traditional Russian circle dance, Horovod added ring AllReduce to TensorFlow with minimal code changes (just wrap the optimizer). Its simple API, `hvd.DistributedOptimizer(optimizer)`, became the template for distributed training interfaces. While PyTorch's native DDP has largely replaced Horovod's functionality, Horovod remains popular for TensorFlow users and cross-framework deployments.
 
 ```python
 # Horovod with MPI coordination, NCCL communication
@@ -1969,7 +2023,9 @@ Modern network switches can perform computation during data transit, enabling co
 
 **Switch-Based AllReduce**:
 
-NVIDIA's SHARP (Scalable Hierarchical Aggregation and Reduction Protocol) performs reduction operations in InfiniBand switches:
+NVIDIA's SHARP[^fn-sharp] (Scalable Hierarchical Aggregation and Reduction Protocol) performs reduction operations in InfiniBand switches:
+
+[^fn-sharp]: **SHARP (Scalable Hierarchical Aggregation and Reduction Protocol)**: In-network computing technology that offloads AllReduce operations to InfiniBand switches. Instead of gradients traveling to all GPUs before reduction, switches perform partial reductions as data passes through, reducing network traffic and latency. SHARP requires Mellanox Quantum-series switches and can reduce AllReduce latency by 50-80% for small to medium messages. The technology represents a broader trend of pushing computation into the network rather than just endpoints.
 
 1. Switches receive gradient chunks from workers
 2. Switches perform aggregation in hardware
@@ -2032,7 +2088,9 @@ torch.cuda.synchronize()
 
 **Gradient Bucketing**:
 
-PyTorch's DistributedDataParallel buckets gradients for communication:
+PyTorch's DistributedDataParallel[^fn-ddp] buckets gradients for communication:
+
+[^fn-ddp]: **DistributedDataParallel (DDP)**: PyTorch's primary API for data-parallel training, wrapping a model to synchronize gradients automatically during backward pass. DDP is more efficient than its predecessor DataParallel because it overlaps gradient computation with communication and uses NCCL instead of CPU-based synchronization. DDP launches one process per GPU (as opposed to DataParallel's single-process multi-GPU approach), enabling true parallelism and better scaling.
 
 1. Small gradients accumulated into buckets
 2. Bucket communicated when full (reduces latency overhead)
@@ -2225,7 +2283,9 @@ This section examines communication patterns in production ML systems, illustrat
 
 ### Case Study: Megatron-LM 3D Parallelism {#sec-megatron-case-study}
 
-Megatron-LM, developed by NVIDIA, demonstrates how to orchestrate multiple parallelism strategies for training models exceeding a trillion parameters. Its communication architecture illustrates careful collective selection and topology-aware design.
+Megatron-LM[^fn-megatron], developed by NVIDIA, demonstrates how to orchestrate multiple parallelism strategies for training models exceeding a trillion parameters. Its communication architecture illustrates careful collective selection and topology-aware design.
+
+[^fn-megatron]: **Megatron-LM**: NVIDIA's framework for training large language models, first released in 2019 and continuously updated. Megatron pioneered practical tensor parallelism for transformers, showing how to split attention and MLP layers across GPUs with minimal communication overhead. The Megatron-Turing NLG model (530B parameters) and subsequent Megatron-based models demonstrated that careful 3D parallelism (tensor + pipeline + data) can achieve 50%+ hardware utilization on thousand-GPU clusters.
 
 **System Configuration**:
 
@@ -2288,7 +2348,9 @@ $$T_{DP} = 2 \times \frac{7}{8} \times \frac{3.79}{25} = 0.27 \text{ seconds}$$
 
 ### Case Study: HugeCTR for Recommendation Systems {#sec-hugectr-case-study}
 
-NVIDIA's HugeCTR demonstrates communication patterns for recommendation models, where AlltoAll dominates rather than AllReduce.
+NVIDIA's HugeCTR[^fn-hugectr] demonstrates communication patterns for recommendation models, where AlltoAll dominates rather than AllReduce.
+
+[^fn-hugectr]: **HugeCTR**: NVIDIA's GPU-accelerated framework for training recommendation models, optimized for the sparse embedding + dense MLP architecture common in industrial systems. HugeCTR handles embedding tables across multiple GPUs using AlltoAll communication, caching strategies, and hybrid CPU-GPU memory management. It powers recommendation systems at companies processing billions of user interactions daily, where embedding table sizes can reach 10+ terabytes.
 
 **System Configuration**:
 
@@ -2403,7 +2465,9 @@ This mapping minimizes cross-dimension communication, which has higher latency.
 
 ### Case Study: Mixture-of-Experts Communication {#sec-moe-case-study}
 
-Mixture-of-Experts models present unique communication challenges due to dynamic routing. This case study examines communication patterns in GShard/Switch Transformer architectures.
+Mixture-of-Experts models present unique communication challenges due to dynamic routing. This case study examines communication patterns in GShard[^fn-gshard]/Switch Transformer architectures.
+
+[^fn-gshard]: **GShard**: Google's 2020 framework for training Mixture-of-Experts models at scale, demonstrating a 600-billion-parameter model with 2048 experts across 2048 TPU chips. GShard introduced key techniques for MoE training: capacity factors (limiting tokens per expert), auxiliary load balancing losses, and efficient AlltoAll implementations for expert routing. The subsequent Switch Transformer simplified GShard's top-2 routing to top-1, enabling trillion-parameter models with practical training efficiency.
 
 **System Configuration**:
 
@@ -2467,7 +2531,9 @@ With 2x imbalance on popular experts:
 
 ### Case Study: Distributed GNN Training {#sec-gnn-case-study}
 
-Graph Neural Networks present unique communication patterns determined by graph structure rather than model architecture.
+Graph Neural Networks[^fn-gnn-comm] present unique communication patterns determined by graph structure rather than model architecture.
+
+[^fn-gnn-comm]: **Graph Neural Networks (GNNs) Communication**: Unlike dense models where communication depends only on model size, GNN communication is determined by graph structure. The "neighborhood explosion" problem means that computing one node's embedding may require features from thousands of neighbors (which require their neighbors, recursively). This can create cross-partition communication volumes exceeding 1000x the model size per iteration. Techniques like neighbor sampling and historical embeddings trade accuracy for tractable communication.
 
 **System Configuration**:
 

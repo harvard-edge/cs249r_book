@@ -116,9 +116,13 @@ ML datacenters differ from traditional cloud facilities in three critical dimens
 
 #### Power Delivery and Distribution
 
-A single NVIDIA DGX H100 system consumes 10.2 kW at peak load. A rack containing four such systems requires over 40 kW, compared to 5-10 kW for traditional server racks. This density fundamentally changes power infrastructure design.
+A single NVIDIA DGX H100 system consumes 10.2 kW at peak load. A rack containing four such systems requires over 40 kW, compared to 5-10 kW for traditional server racks. This power density[^fn-power-density] fundamentally changes power infrastructure design.
 
-**Utility and Backup Power.** Production ML facilities require redundant power feeds, typically N+1 or 2N configurations where N represents the load requirement. Uninterruptible power supplies (UPS) bridge the gap during utility failures, but the massive power draw of GPU clusters limits battery backup duration to minutes rather than hours. Diesel generators provide extended backup, with automatic transfer switches completing failover within 10-15 seconds.
+[^fn-power-density]: **Power density**: The power consumption per unit of datacenter floor space, typically measured in kW per rack or kW per square meter. Traditional enterprise datacenters design for 5-10 kW per rack. Modern GPU clusters require 40-100+ kW per rack, demanding specialized power distribution and cooling infrastructure. Power density directly limits how many GPUs can be deployed in existing facilities.
+
+**Utility and Backup Power.** Production ML facilities require redundant power feeds, typically N+1 or 2N configurations[^fn-redundancy] where N represents the load requirement. Uninterruptible power supplies (UPS) bridge the gap during utility failures, but the massive power draw of GPU clusters limits battery backup duration to minutes rather than hours. Diesel generators provide extended backup, with automatic transfer switches completing failover within 10-15 seconds.
+
+[^fn-redundancy]: **N+1 and 2N redundancy**: Power redundancy configurations where N is the capacity required to serve the load. N+1 provides one backup component (e.g., 3 UPS units where 2 are required), allowing single-failure tolerance. 2N provides complete duplication (e.g., 4 UPS units), allowing maintenance on one path while maintaining failure protection on the other. ML training runs spanning weeks justify 2N redundancy to prevent catastrophic job loss.
 
 **Power Distribution Architecture.** Modern ML datacenters use a tiered distribution model:
 
@@ -135,7 +139,9 @@ A single NVIDIA DGX H100 system consumes 10.2 kW at peak load. A rack containing
 | Server PSU             | 12V DC           | Component-level power          |
 +------------------------+------------------+--------------------------------+
 
-**Power Usage Effectiveness.** The PUE metric, developed by The Green Grid consortium in 2007 [@thegreengrid2007pue], quantifies datacenter energy efficiency:
+**Power Usage Effectiveness.** The PUE metric[^fn-pue], developed by The Green Grid consortium in 2007 [@thegreengrid2007pue], quantifies datacenter energy efficiency:
+
+[^fn-pue]: **Power Usage Effectiveness (PUE)**: An industry-standard metric where values closer to 1.0 indicate greater efficiency. A PUE of 2.0 means half the power goes to overhead (cooling, lighting, power distribution), while 1.1 means only 10% goes to overhead. Google's most efficient datacenters achieve PUE of 1.06, while typical enterprise facilities operate at 1.5-2.0.
 
 $$
 \text{PUE} = \frac{\text{Total Facility Power}}{\text{IT Equipment Power}}
@@ -188,9 +194,13 @@ ML clusters combine multiple node types, each optimized for different phases of 
 
 Modern GPU clusters are built from dense multi-GPU nodes connected via high-bandwidth fabrics. Two reference architectures dominate production deployments.
 
-**DGX-Style Dense Nodes.** NVIDIA's DGX systems package 8 GPUs with NVLink interconnects, high-bandwidth networking, and substantial local storage in a single chassis. The DGX H100 provides:
+**DGX-Style Dense Nodes.** NVIDIA's DGX systems package 8 GPUs with NVLink[^fn-nvlink] interconnects, high-bandwidth networking, and substantial local storage in a single chassis. The DGX H100 provides:
 
-- 8x H100 GPUs with 640GB total HBM3 memory
+[^fn-nvlink]: **NVLink**: NVIDIA's proprietary high-bandwidth interconnect for GPU-to-GPU communication, providing 900 GB/s bidirectional bandwidth in NVLink 4.0 (H100), compared to 64 GB/s for PCIe Gen5. NVLink enables efficient tensor parallelism by allowing GPUs to share memory across the interconnect with near-local-memory latency.
+
+- 8x H100 GPUs with 640GB total HBM3[^fn-hbm] memory
+
+[^fn-hbm]: **High Bandwidth Memory (HBM)**: A 3D-stacked DRAM technology that places memory dies vertically atop the GPU die, connected via thousands of through-silicon vias (TSVs). HBM3 provides 3.4 TB/s bandwidth per GPU compared to 400 GB/s for DDR5. This bandwidth is essential for memory-bound ML workloads where data movement, not computation, limits performance.
 - NVSwitch fabric enabling 900 GB/s GPU-to-GPU bandwidth
 - 8x 400 Gbps InfiniBand or Ethernet ports
 - 2x Intel Xeon CPUs for preprocessing
@@ -258,7 +268,9 @@ NVIDIA maintains market dominance through integrated hardware-software offerings
 
 The H100 delivers approximately 3x the tensor TFLOPS of A100 at 1.75x the power. To derive the efficiency improvement: A100 achieves 312 TF / 400W = 0.78 TF/W, while H100 achieves 990 TF / 700W = 1.41 TF/W, yielding approximately 80% improvement in FLOPS/watt. Memory bandwidth increases proportionally, maintaining the compute-to-memory ratio critical for transformer models.
 
-**Tensor Core Utilization.** Tensor Cores accelerate matrix operations but require specific data layouts and sizes for full utilization. Dimensions should be multiples of 8 (FP16) or 16 (INT8) for optimal performance. Underutilized Tensor Cores represent the most common source of poor GPU efficiency in production, with many workloads achieving only 30-50% of theoretical peak FLOPS.
+**Tensor Core Utilization.** Tensor Cores[^fn-tensor-cores] accelerate matrix operations but require specific data layouts and sizes for full utilization. Dimensions should be multiples of 8 (FP16) or 16 (INT8) for optimal performance. Underutilized Tensor Cores represent the most common source of poor GPU efficiency in production, with many workloads achieving only 30-50% of theoretical peak FLOPS.
+
+[^fn-tensor-cores]: **Tensor Cores**: Specialized matrix-multiply-accumulate units introduced in NVIDIA Volta (2017) that perform 4x4 matrix operations in a single clock cycle. Unlike general-purpose CUDA cores, Tensor Cores are optimized for the fused multiply-add pattern $D = A \times B + C$ that dominates neural network computation. H100 Tensor Cores support FP8, FP16, BF16, TF32, and INT8 formats.
 
 **NVLink Topology.** Within a node, NVSwitch provides full-bandwidth connectivity between all GPUs. Across nodes, NVLink Network (available in H100 and later) extends high-bandwidth connectivity, though at reduced bandwidth compared to intra-node links. Topology-aware job placement, discussed in @sec-communication, is essential for multi-node training performance.
 
@@ -266,7 +278,11 @@ The H100 delivers approximately 3x the tensor TFLOPS of A100 at 1.75x the power.
 
 Google's Tensor Processing Units offer an alternative architecture optimized for matrix operations with a distinct programming model.
 
-**TPU Pod Architecture.** TPUs connect via proprietary Inter-Chip Interconnect (ICI) forming 2D or 3D torus topologies. A TPU v4 pod contains 4,096 chips with 1.1 exaFLOPS of aggregate compute. Unlike GPU clusters where networking is separate from compute nodes, TPU pods integrate interconnect into the chip design.
+**TPU Pod Architecture.** TPUs connect via proprietary Inter-Chip Interconnect (ICI)[^fn-ici] forming 2D or 3D torus[^fn-torus] topologies. A TPU v4 pod contains 4,096 chips with 1.1 exaFLOPS of aggregate compute. Unlike GPU clusters where networking is separate from compute nodes, TPU pods integrate interconnect into the chip design.
+
+[^fn-ici]: **Inter-Chip Interconnect (ICI)**: Google's proprietary chip-to-chip communication fabric integrated directly into TPU silicon. ICI provides 6 links per chip at 100 GB/s each, enabling the torus topology without external switches. This integration reduces latency and power compared to discrete networking but limits flexibility in topology configuration.
+
+[^fn-torus]: **Torus topology**: A network topology where nodes connect in a ring structure along each dimension, with the last node wrapping around to connect to the first. A 3D torus creates a cube-like structure where each node connects to 6 neighbors. This topology provides consistent latency for nearest-neighbor communication patterns common in model parallelism, though AllReduce operations require O(sqrt(N)) hops compared to O(log(N)) for fat-tree.
 
 **TPU Slices and Multislice.** Users allocate TPU slices, contiguous subsets of a pod. Multislice training connects multiple slices via datacenter network for jobs exceeding single-slice capacity. The programming model (JAX with pjit) abstracts the physical topology, enabling code portability across slice sizes.
 
@@ -295,8 +311,12 @@ The ML accelerator landscape continues to diversify as organizations optimize fo
 
 **Emerging Architectures.** Several companies offer alternative approaches:
 
-- **Cerebras WSE**: Wafer-scale integration places an entire ML accelerator on a single silicon wafer, eliminating chip-to-chip communication for models that fit on-chip
-- **Graphcore IPU**: Bulk Synchronous Parallel (BSP) execution model with distributed on-chip memory targeting sparse and dynamic workloads
+- **Cerebras WSE**: Wafer-scale integration[^fn-wafer-scale] places an entire ML accelerator on a single silicon wafer, eliminating chip-to-chip communication for models that fit on-chip
+- **Graphcore IPU**: Bulk Synchronous Parallel (BSP)[^fn-bsp] execution model with distributed on-chip memory targeting sparse and dynamic workloads
+
+[^fn-wafer-scale]: **Wafer-scale integration**: Building an entire processor on a full silicon wafer (850 cm^2^) rather than dicing it into individual chips. Cerebras's WSE-2 contains 850,000 cores and 40 GB of on-chip SRAM, eliminating off-chip memory bandwidth bottlenecks. The approach requires novel solutions for defect tolerance and power delivery, as traditional packaging assumes perfect dies.
+
+[^fn-bsp]: **Bulk Synchronous Parallel (BSP)**: An execution model where computation proceeds in supersteps: parallel computation, global communication, then barrier synchronization. Graphcore's IPU implements BSP at the hardware level, with all 1,472 cores executing the same phase simultaneously. This deterministic execution simplifies debugging but requires all operations to complete within time bounds.
 - **SambaNova**: Reconfigurable dataflow architecture for enterprise AI applications
 
 These alternatives find niches where their architectural trade-offs align with workload requirements, though NVIDIA and Google maintain dominant market positions for general ML training.
@@ -331,7 +351,9 @@ The PCIe variant's higher efficiency reflects reduced interconnect power, accept
 
 Understanding these patterns guides accelerator selection: memory-bound workloads benefit from HBM3's bandwidth improvements, while compute-bound workloads prioritize FLOPS per dollar.
 
-**The Roofline Model.** The roofline model [@williams2009roofline] provides a systematic framework for understanding whether workloads are compute-bound or memory-bound. Achievable performance is limited by the minimum of peak compute and memory bandwidth:
+**The Roofline Model.** The roofline model[^fn-roofline] [@williams2009roofline] provides a systematic framework for understanding whether workloads are compute-bound or memory-bound. Achievable performance is limited by the minimum of peak compute and memory bandwidth:
+
+[^fn-roofline]: **Roofline model**: A visual performance model developed at Berkeley that plots achievable FLOPS against arithmetic intensity (FLOPS per byte of memory traffic). The "roofline" consists of a sloped region (memory-bound, limited by bandwidth) and a flat region (compute-bound, limited by peak FLOPS). The intersection point, called the ridge point, indicates where workloads transition between these regimes. This model helps identify whether to optimize for compute or memory access.
 
 $$
 \text{Achievable FLOPS} = \min\left(\text{Peak Compute}, \text{Memory Bandwidth} \times \text{Arithmetic Intensity}\right)
@@ -380,7 +402,11 @@ Large-scale training workloads impose unique demands on network infrastructure. 
 
 #### High-Bandwidth Interconnects
 
-InfiniBand has emerged as the dominant interconnect for ML training clusters due to its RDMA (Remote Direct Memory Access) capabilities and consistent low latency [@infiniband2000spec]. The technology enables direct memory-to-memory transfers without CPU involvement, reducing both latency and processor overhead.
+InfiniBand[^fn-infiniband] has emerged as the dominant interconnect for ML training clusters due to its RDMA (Remote Direct Memory Access)[^fn-rdma] capabilities and consistent low latency [@infiniband2000spec]. The technology enables direct memory-to-memory transfers without CPU involvement, reducing both latency and processor overhead.
+
+[^fn-infiniband]: **InfiniBand**: A high-speed interconnect standard originally developed for HPC, now dominant in ML clusters. Unlike Ethernet, InfiniBand provides guaranteed delivery with hardware-based reliability, eliminating software retransmission overhead. Current NDR (Next Data Rate) generation provides 400 Gb/s per port, with XDR (800 Gb/s) emerging.
+
+[^fn-rdma]: **Remote Direct Memory Access (RDMA)**: A network capability that allows one machine to read from or write to another machine's memory without involving either CPU. RDMA bypasses the kernel network stack, reducing latency from tens of microseconds to sub-microsecond. For ML, RDMA enables GPUs to exchange gradient data with minimal CPU intervention, critical for overlapping communication with computation.
 
 +---------------------+-------------+----------------+------------------+
 | Generation          | Bandwidth   | Latency        | Common Deployment|
@@ -396,7 +422,9 @@ InfiniBand has emerged as the dominant interconnect for ML training clusters due
 | XDR (800 Gb/s)      | 100 GB/s    | < 0.5 μs       | Emerging         |
 +---------------------+-------------+----------------+------------------+
 
-RoCE (RDMA over Converged Ethernet) provides an alternative that leverages existing Ethernet infrastructure. RoCEv2 operates over UDP/IP, enabling RDMA semantics across routed networks. While RoCE offers lower capital costs and operational familiarity, it requires careful configuration of Priority Flow Control (PFC) and Explicit Congestion Notification (ECN) to prevent packet loss. In ML workloads, even small packet loss rates cause significant performance degradation because collective operations must wait for retransmissions.
+RoCE (RDMA over Converged Ethernet)[^fn-roce] provides an alternative that leverages existing Ethernet infrastructure. RoCEv2 operates over UDP/IP, enabling RDMA semantics across routed networks. While RoCE offers lower capital costs and operational familiarity, it requires careful configuration of Priority Flow Control (PFC) and Explicit Congestion Notification (ECN) to prevent packet loss. In ML workloads, even small packet loss rates cause significant performance degradation because collective operations must wait for retransmissions.
+
+[^fn-roce]: **RoCE (RDMA over Converged Ethernet)**: A protocol that implements RDMA semantics over Ethernet networks. RoCEv2 uses UDP encapsulation for routability across L3 networks. RoCE reduces infrastructure costs by using commodity Ethernet switches but requires lossless Ethernet configuration (PFC/ECN) to achieve RDMA performance. Cloud providers typically offer RoCE-based networking (AWS EFA, Azure NDR) as a lower-cost alternative to InfiniBand.
 
 The choice between InfiniBand and RoCE involves trade-offs beyond raw performance:
 
@@ -410,7 +438,11 @@ Network interface cards for ML workloads increasingly integrate compute capabili
 
 #### Network Topology Design
 
-The physical arrangement of switches and links fundamentally constrains distributed training performance. Fat-tree topologies [@leiserson1985fattrees], derived from Clos network theory, provide full bisection bandwidth: any partition of the network can communicate at full link rate with the other half. For AllReduce operations that require all-to-all communication patterns, this property ensures no bottlenecks regardless of job placement.
+The physical arrangement of switches and links fundamentally constrains distributed training performance. Fat-tree topologies[^fn-fat-tree] [@leiserson1985fattrees], derived from Clos network theory, provide full bisection bandwidth[^fn-bisection-bw]: any partition of the network can communicate at full link rate with the other half. For AllReduce operations that require all-to-all communication patterns, this property ensures no bottlenecks regardless of job placement.
+
+[^fn-fat-tree]: **Fat-tree topology**: A hierarchical network structure where bandwidth increases toward the root, resembling a tree with thicker branches near the top. Unlike traditional trees where aggregation creates bottlenecks, fat-trees use multiple uplinks per switch to maintain bandwidth at each tier. The name comes from Charles Leiserson's 1985 paper that applied this concept to parallel computing.
+
+[^fn-bisection-bw]: **Bisection bandwidth**: The minimum bandwidth available when a network is divided into two equal halves. If bisection bandwidth equals the sum of all edge bandwidths, the network is non-blocking, meaning any communication pattern can proceed at full speed. This metric predicts worst-case performance for collective operations like AllReduce that involve all-to-all communication.
 
 A three-tier fat-tree with radix-64 switches supports 65,536 endpoints while maintaining non-blocking connectivity. The bandwidth at each tier equals:
 
@@ -484,7 +516,9 @@ Quantitative understanding of network performance enables informed decisions abo
 
 #### Bandwidth Utilization Patterns
 
-AllReduce bandwidth requirements scale with model size and parallelism configuration. For data parallelism with $N$ workers and model parameters $P$, each worker must send and receive approximately $2P$ bytes per iteration (assuming ring AllReduce [@patarasuk2009bandwidth]). The required bandwidth to hide communication behind computation is:
+AllReduce[^fn-allreduce] bandwidth requirements scale with model size and parallelism configuration. For data parallelism with $N$ workers and model parameters $P$, each worker must send and receive approximately $2P$ bytes per iteration (assuming ring AllReduce [@patarasuk2009bandwidth]). The required bandwidth to hide communication behind computation is:
+
+[^fn-allreduce]: **AllReduce**: A collective communication operation that combines data from all participating processes and distributes the result back to all. In ML training, AllReduce averages gradients across all workers. The ring AllReduce algorithm achieves optimal bandwidth utilization of 2(N-1)/N by passing partial sums around a logical ring. See @sec-communication for detailed implementation analysis.
 
 $$
 B_{\text{required}} = \frac{2P}{T_{\text{compute}}}
@@ -499,7 +533,9 @@ Theoretical bandwidth calculations assume ideal conditions. Production AllReduce
 
 - **Startup latency**: Each ring stage incurs 5-20 μs fixed overhead per chunk
 - **Memory copy overhead**: CPU-GPU and GPU-NIC transfers add latency
-- **Protocol overhead**: NCCL/Gloo software stack processing
+- **Protocol overhead**: NCCL[^fn-nccl]/Gloo software stack processing
+
+[^fn-nccl]: **NCCL (NVIDIA Collective Communications Library)**: NVIDIA's optimized library for multi-GPU and multi-node collective operations. NCCL automatically selects algorithms based on topology (ring, tree, or hybrid) and handles GPU-to-GPU communication via NVLink, PCIe, or network. It achieves 85-95% of theoretical bandwidth on well-configured systems, making it the default communication backend for PyTorch and TensorFlow distributed training.
 - **Network contention**: Shared fabric with concurrent jobs reduces effective bandwidth
 
 Well-tuned systems on dedicated InfiniBand fabric achieve 75-85% efficiency. Many deployments, particularly those using RoCE or shared networks, achieve only 40-60%. Always benchmark actual collective performance rather than relying on theoretical link rates.
@@ -539,7 +575,9 @@ $$
 
 For a system with 5 μs latency and 50 GB/s bandwidth, messages smaller than 250 KB are latency-bound. This motivates message aggregation in collective implementations, batching small gradient tensors to amortize latency overhead.
 
-Congestion control algorithms significantly impact performance under contention. Traditional TCP congestion control, designed for fairness across independent flows, performs poorly for synchronized ML traffic where all flows compete simultaneously. DCQCN (Data Center Quantized Congestion Notification) [@zhu2015dcqcn] for RoCE and hardware-based credit flow control for InfiniBand provide faster response to congestion, reducing tail latency. NCCL implements topology-aware algorithms that schedule transfers to minimize contention, exploiting knowledge of collective patterns that general-purpose congestion control lacks. We examine these collective operation implementations in detail in @sec-communication.
+Congestion control algorithms significantly impact performance under contention. Traditional TCP congestion control, designed for fairness across independent flows, performs poorly for synchronized ML traffic where all flows compete simultaneously. DCQCN (Data Center Quantized Congestion Notification)[^fn-dcqcn] [@zhu2015dcqcn] for RoCE and hardware-based credit flow control for InfiniBand provide faster response to congestion, reducing tail latency. NCCL implements topology-aware algorithms that schedule transfers to minimize contention, exploiting knowledge of collective patterns that general-purpose congestion control lacks. We examine these collective operation implementations in detail in @sec-communication.
+
+[^fn-dcqcn]: **DCQCN (Data Center Quantized Congestion Notification)**: A congestion control algorithm designed for RoCE networks. DCQCN uses ECN (Explicit Congestion Notification) marks from switches to throttle senders before packet loss occurs. Unlike TCP's reactive approach, DCQCN responds in microseconds, critical for the synchronized traffic patterns in distributed training where a single slow flow can delay all workers.
 
 ### Case Study: NVIDIA DGX SuperPOD Networking
 
@@ -577,7 +615,9 @@ Before examining specific schedulers, understanding why cluster scheduling diffe
 
 4. **Ordering without global time**: Without a global clock, determining whether allocation A happened before allocation B across different nodes requires careful protocol design. Two jobs may both believe they "own" the same GPU if the system is not carefully designed.
 
-**CAP Theorem Implications.** The CAP theorem applies directly to cluster scheduling: a scheduler cannot simultaneously provide perfect consistency (every allocation reflects true cluster state), availability (every request gets a response), and partition tolerance (system operates despite network failures).
+**CAP Theorem Implications.** The CAP theorem[^fn-cap] applies directly to cluster scheduling: a scheduler cannot simultaneously provide perfect consistency (every allocation reflects true cluster state), availability (every request gets a response), and partition tolerance (system operates despite network failures).
+
+[^fn-cap]: **CAP theorem**: A fundamental distributed systems result proving that no system can simultaneously guarantee Consistency (all nodes see the same data), Availability (every request receives a response), and Partition tolerance (the system operates despite network failures). First proven by Eric Brewer in 2000, CAP forces designers to choose which property to sacrifice when partitions occur. Most modern systems choose availability over strict consistency, using eventual consistency models.
 
 Production schedulers make different trade-offs:
 
@@ -599,7 +639,9 @@ Training large models requires allocating substantial GPU resources for extended
 
 #### Slurm for HPC-Style ML
 
-Slurm (Simple Linux Utility for Resource Management) [@yoo2003slurm] dominates HPC environments and extends naturally to GPU-intensive ML training. Its partition-based architecture maps well to heterogeneous accelerator pools.
+Slurm[^fn-slurm] (Simple Linux Utility for Resource Management) [@yoo2003slurm] dominates HPC environments and extends naturally to GPU-intensive ML training. Its partition-based architecture maps well to heterogeneous accelerator pools.
+
+[^fn-slurm]: **Slurm**: An open-source job scheduler originating from Lawrence Livermore National Laboratory (2002) that manages compute resources across thousands of nodes. Slurm's design prioritizes predictability and fairness for long-running scientific workloads. Unlike Kubernetes' declarative model, Slurm uses imperative job submission with explicit resource requests, making it easier to reason about allocation guarantees but less flexible for dynamic workloads.
 
 A typical ML cluster configuration defines partitions by accelerator type and interconnect:
 
@@ -615,7 +657,9 @@ A typical ML cluster configuration defines partitions by accelerator type and in
 | debug                | 1 x V100   | Ethernet        | Development      |
 +----------------------+------------+-----------------+------------------+
 
-GPU allocation strategies significantly impact utilization. The `--gres=gpu:N` flag requests N GPUs, but naive allocation can fragment nodes. Consider a 64-node cluster with 8 GPUs each (512 total). If jobs request 6 GPUs, each job wastes 2 GPUs per node, reducing effective capacity to 75%. Slurm's `SelectTypeParameters=CR_GPU` enables GPU-level scheduling, while `--gpus-per-node` ensures jobs receive full nodes when beneficial for NVLink communication.
+GPU allocation strategies significantly impact utilization. The `--gres=gpu:N`[^fn-gres] flag requests N GPUs, but naive allocation can fragment nodes. Consider a 64-node cluster with 8 GPUs each (512 total). If jobs request 6 GPUs, each job wastes 2 GPUs per node, reducing effective capacity to 75%. Slurm's `SelectTypeParameters=CR_GPU` enables GPU-level scheduling, while `--gpus-per-node` ensures jobs receive full nodes when beneficial for NVLink communication.
+
+[^fn-gres]: **GRES (Generic Resource Scheduling)**: Slurm's mechanism for scheduling non-CPU resources like GPUs, FPGAs, or specialized accelerators. GRES tracks resource availability per node and enforces exclusive allocation. The gres.conf file defines available resources, while jobs request them via `--gres=resource_type:count`. This abstraction allows Slurm to manage diverse accelerator types without code changes.
 
 Fair-share scheduling prevents any single user or project from monopolizing resources. The classic fair-share formula computes effective priority as:
 
@@ -637,7 +681,9 @@ resources:
     nvidia.com/gpu: 4
 ```
 
-However, this binary allocation model wastes resources when workloads need less than a full GPU. Multi-Instance GPU (MIG) technology addresses this by partitioning A100 and H100 GPUs into isolated instances. An A100-80GB can be divided into configurations ranging from 7 small instances (10GB each) to 2 large instances (40GB each). The device plugin exposes MIG instances as separate resources:
+However, this binary allocation model wastes resources when workloads need less than a full GPU. Multi-Instance GPU (MIG)[^fn-mig] technology addresses this by partitioning A100 and H100 GPUs into isolated instances. An A100-80GB can be divided into configurations ranging from 7 small instances (10GB each) to 2 large instances (40GB each). The device plugin exposes MIG instances as separate resources:
+
+[^fn-mig]: **Multi-Instance GPU (MIG)**: NVIDIA hardware feature (A100 and later) that partitions a single GPU into up to 7 isolated instances, each with dedicated memory, cache, and compute resources. Unlike software-based GPU sharing, MIG provides hardware isolation that prevents memory access between instances. This enables secure multi-tenant GPU sharing but requires workloads to fit within instance memory limits.
 
 +----------------------+------------+-----------------+------------------+
 | MIG Profile          | GPU Memory | SM Count        | Typical Workload |
@@ -651,7 +697,9 @@ However, this binary allocation model wastes resources when workloads need less 
 | 7g.80gb              | 80 GB      | 98 SMs          | Training         |
 +----------------------+------------+-----------------+------------------+
 
-Gang scheduling ensures distributed training jobs receive all requested resources simultaneously. Without gang scheduling, a job requesting 32 GPUs might receive 24 immediately while waiting indefinitely for the remaining 8, wasting the already-allocated resources. The Volcano batch scheduler and scheduler plugins like Coscheduling implement gang semantics through PodGroup abstractions. Jobs specify minimum member counts, and the scheduler delays placement until all pods can be scheduled together.
+Gang scheduling[^fn-gang] ensures distributed training jobs receive all requested resources simultaneously. Without gang scheduling, a job requesting 32 GPUs might receive 24 immediately while waiting indefinitely for the remaining 8, wasting the already-allocated resources. The Volcano batch scheduler and scheduler plugins like Coscheduling implement gang semantics through PodGroup abstractions. Jobs specify minimum member counts, and the scheduler delays placement until all pods can be scheduled together.
+
+[^fn-gang]: **Gang scheduling**: A scheduling policy that allocates resources for multi-component jobs atomically, ensuring all components start simultaneously or none do. First developed for parallel computing in the 1980s, gang scheduling prevents deadlock scenarios where jobs partially acquire resources and block each other. For ML training, gang scheduling ensures all workers are ready before training begins, avoiding wasted GPU cycles.
 
 Priority classes control preemption behavior. A typical hierarchy assigns training workloads medium priority, inference high priority, and development jobs low priority. The `preemptionPolicy: PreemptLowerPriority` setting enables inference pods to reclaim resources from training when latency SLOs are threatened, though organizations must balance this against training job completion times.
 
@@ -659,7 +707,9 @@ Priority classes control preemption behavior. A typical hierarchy assigns traini
 
 Research schedulers have demonstrated significant improvements over general-purpose systems by exploiting ML-specific characteristics.
 
-**Tiresias** [@gu2019tiresias] observes that ML training jobs have predictable resource requirements after initial epochs. Rather than requiring users to estimate job duration (often inaccurate by 2-5x), Tiresias uses a two-dimensional attained service scheduler. Jobs accumulate "service" based on GPU-time consumed, with priority decreasing as service increases. A discretized version groups jobs into service bins, promoting short jobs without requiring duration estimates. Experiments show 40-60% reduction in average job completion time compared to FIFO scheduling.
+**Tiresias** [@gu2019tiresias] observes that ML training jobs have predictable resource requirements after initial epochs. Rather than requiring users to estimate job duration (often inaccurate by 2-5x), Tiresias uses a two-dimensional attained service[^fn-attained-service] scheduler. Jobs accumulate "service" based on GPU-time consumed, with priority decreasing as service increases. A discretized version groups jobs into service bins, promoting short jobs without requiring duration estimates. Experiments show 40-60% reduction in average job completion time compared to FIFO scheduling.
+
+[^fn-attained-service]: **Attained service scheduling**: A scheduling discipline where job priority decreases with cumulative resource usage. Originally developed for processor sharing, attained service naturally prioritizes short jobs without requiring duration estimates. For ML workloads where job length correlates with model complexity, this approach provides near-optimal average completion times while remaining robust to inaccurate user estimates.
 
 **Gandiva** exploits the iterative nature of deep learning. Training alternates between GPU-intensive forward/backward passes and CPU-intensive data loading. Gandiva time-slices GPU access at iteration boundaries, enabling higher utilization through oversubscription. A cluster with 100 GPUs might support 120 concurrent jobs if each spends 20% of time waiting for data. Gandiva also implements grow-shrink elasticity, automatically adjusting data parallelism degree based on resource availability.
 
@@ -689,15 +739,21 @@ Horizontal Pod Autoscaling (HPA) adjusts replica counts based on metrics. Defaul
 
 Vertical Pod Autoscaling (VPA) adjusts resource requests and limits for individual pods. For inference, VPA can right-size memory allocations based on observed usage. However, GPU resources cannot be vertically scaled without pod restart, limiting VPA's utility for accelerated workloads.
 
-LLM inference requires specialized scaling due to the key-value cache. A 70B parameter model serving long-context requests may require 80GB+ of GPU memory for KV cache alone, even with PagedAttention optimizations. Scaling decisions must account for both request rate and context length distribution.
+LLM inference requires specialized scaling due to the key-value cache[^fn-kv-cache]. A 70B parameter model serving long-context requests may require 80GB+ of GPU memory for KV cache alone, even with PagedAttention optimizations. Scaling decisions must account for both request rate and context length distribution.
+
+[^fn-kv-cache]: **Key-Value (KV) cache**: Memory that stores computed attention key and value tensors from previous tokens during autoregressive generation. Without caching, each new token would require recomputing attention over the entire sequence. KV cache grows linearly with sequence length and batch size; for a 70B model with 128K context, the cache can exceed model weights in memory usage. PagedAttention (vLLM) manages this memory more efficiently through virtual memory techniques.
 
 #### Resource Isolation
 
 Noisy neighbor problems occur when colocated workloads interfere with each other. On GPUs, interference manifests through shared memory bandwidth, L2 cache contention, and PCIe bottlenecks. MIG provides hardware isolation but at the cost of flexibility. Software approaches include careful placement policies and time-based resource contracts.
 
-GPU memory isolation prevents one model from consuming memory needed by another. Without explicit limits, a memory leak or unexpectedly large batch can crash colocated workloads. Container runtimes can enforce memory limits through CUDA MPS (Multi-Process Service), though this adds latency overhead of approximately 5-10 microseconds per kernel launch.
+GPU memory isolation prevents one model from consuming memory needed by another. Without explicit limits, a memory leak or unexpectedly large batch can crash colocated workloads. Container runtimes can enforce memory limits through CUDA MPS (Multi-Process Service)[^fn-mps], though this adds latency overhead of approximately 5-10 microseconds per kernel launch.
 
-CPU pinning assigns specific cores to inference pods, preventing scheduler migration that causes cache invalidation. For latency-sensitive workloads, isolating cores using `isolcpus` kernel parameters and `taskset` affinity removes OS scheduling jitter. Combined with NUMA-aware placement, this reduces P99 latency by 10-30% for sub-millisecond inference tasks.
+[^fn-mps]: **CUDA MPS (Multi-Process Service)**: A CUDA feature that enables multiple processes to share a GPU with reduced context switching overhead. Unlike time-slicing where only one process accesses the GPU at a time, MPS allows concurrent kernel execution from different processes. MPS improves utilization for small workloads but provides limited isolation compared to MIG; a memory-intensive process can still impact colocated workloads through shared cache pressure.
+
+CPU pinning assigns specific cores to inference pods, preventing scheduler migration that causes cache invalidation. For latency-sensitive workloads, isolating cores using `isolcpus` kernel parameters and `taskset` affinity removes OS scheduling jitter. Combined with NUMA-aware[^fn-numa] placement, this reduces P99 latency by 10-30% for sub-millisecond inference tasks.
+
+[^fn-numa]: **NUMA (Non-Uniform Memory Access)**: A memory architecture where access time depends on memory location relative to the processor. Modern multi-socket servers have distinct memory controllers per CPU socket; accessing local memory takes approximately 100ns, while accessing remote memory via the interconnect takes 150-200ns. For ML inference, placing GPU workloads on CPU cores closest to the GPU's PCIe connection minimizes data transfer latency.
 
 ### Multi-Tenancy Considerations
 
@@ -729,7 +785,9 @@ Understanding the complete financial picture of ML infrastructure requires movin
 
 ### Capital Expenditure Components
 
-Capital expenditure (CapEx) encompasses all upfront investments required to establish ML infrastructure. These costs are typically amortized over 3-5 years, though the rapid pace of GPU advancement often compresses effective useful life.
+Capital expenditure (CapEx)[^fn-capex-opex] encompasses all upfront investments required to establish ML infrastructure. These costs are typically amortized over 3-5 years, though the rapid pace of GPU advancement often compresses effective useful life.
+
+[^fn-capex-opex]: **CapEx vs OpEx**: Capital expenditure (CapEx) covers upfront asset purchases (hardware, construction) that are depreciated over time, while operational expenditure (OpEx) covers ongoing costs (power, staff, cloud fees) that are expensed immediately. Cloud computing shifts costs from CapEx to OpEx, which affects financial planning, tax treatment, and budget approval processes differently across organizations.
 
 #### Hardware Costs
 
@@ -926,7 +984,9 @@ The topology choice optimizes for AllReduce patterns where each chip communicate
 
 #### Software Stack Integration
 
-TPU software centers on JAX and XLA, with pjit (partitioned JIT compilation) managing distributed execution. XLA compiles high-level model descriptions to TPU-specific operations, automatically inserting communication collectives based on partition specifications. This approach differs from the explicit communication programming required for GPU clusters.
+TPU software centers on JAX and XLA[^fn-xla], with pjit (partitioned JIT compilation) managing distributed execution. XLA compiles high-level model descriptions to TPU-specific operations, automatically inserting communication collectives based on partition specifications. This approach differs from the explicit communication programming required for GPU clusters.
+
+[^fn-xla]: **XLA (Accelerated Linear Algebra)**: A domain-specific compiler for linear algebra operations that optimizes entire computation graphs rather than individual operations. XLA performs operator fusion (combining multiple ops into single kernels), buffer reuse optimization, and automatic layout transformation. Originally developed for TPUs, XLA now supports GPUs and CPUs, enabling framework-agnostic optimization of ML computations.
 
 Multislice training extends beyond single pods by connecting multiple TPU slices via datacenter network. A PaLM-scale training run might utilize four TPU v4 pods (16,384 chips) with cross-slice communication at lower bandwidth than intra-slice ICI. The software stack handles this hierarchy transparently, using different collective algorithms for intra-slice versus inter-slice operations.
 
@@ -936,7 +996,9 @@ Meta's recommendation systems illustrate infrastructure optimized for a fundamen
 
 #### CPU-GPU Hybrid Architecture
 
-Recommendation models like DLRM (Deep Learning Recommendation Model) partition naturally between embedding operations and dense neural network computation. Embedding tables for production systems can exceed 10 TB, far exceeding GPU memory capacity. The hybrid architecture addresses this by placing embeddings in CPU DRAM while dense layers execute on GPUs.
+Recommendation models like DLRM[^fn-dlrm] (Deep Learning Recommendation Model) partition naturally between embedding operations and dense neural network computation. Embedding tables for production systems can exceed 10 TB, far exceeding GPU memory capacity. The hybrid architecture addresses this by placing embeddings in CPU DRAM while dense layers execute on GPUs.
+
+[^fn-dlrm]: **DLRM (Deep Learning Recommendation Model)**: Meta's open-source recommendation model architecture that became the reference design for industry recommendation systems. DLRM processes both dense features (through MLPs) and sparse features (through embedding tables), combining them via a factorization machine-inspired interaction layer. The architecture explicitly acknowledges the embedding-memory bottleneck, making it a natural fit for hybrid CPU-GPU deployment.
 
 A production recommendation training node combines multiple CPUs totaling 2-4 TB of DRAM with 8 GPUs for dense computation. The CPUs handle embedding lookups, concatenation, and feature preprocessing. Resulting feature vectors transfer to GPUs via PCIe for the dense forward and backward passes. Gradient updates for embeddings return to CPU memory via the same path.
 
@@ -962,7 +1024,9 @@ Tesla's Dojo system represents the custom silicon approach to ML infrastructure:
 
 #### Custom Silicon Architecture
 
-The Dojo D1 chip provides 1024 custom-designed cores in a 645 mm2 die. Each core combines an 8-wide vector unit, 64-bit scalar unit, and 1.25 MB of SRAM, yielding approximately 22.6 TFLOPS of BF16 compute per chip. The design optimizes for convolutional and attention operations typical of vision models, with dataflow execution patterns that minimize memory traffic.
+The Dojo D1 chip provides 1024 custom-designed cores in a 645 mm^2^ die. Each core combines an 8-wide vector unit, 64-bit scalar unit, and 1.25 MB of SRAM, yielding approximately 22.6 TFLOPS of BF16[^fn-bf16] compute per chip. The design optimizes for convolutional and attention operations typical of vision models, with dataflow execution patterns that minimize memory traffic.
+
+[^fn-bf16]: **BF16 (Brain Floating Point)**: A 16-bit floating point format with the same 8-bit exponent as FP32 but only 7 mantissa bits (versus 23 in FP32). Developed by Google for TPUs, BF16 matches FP32's dynamic range, avoiding the overflow/underflow issues of FP16 that require loss scaling. BF16 has become the default training precision for transformers, offering 2x memory savings with minimal accuracy impact.
 
 Twenty-five D1 chips mount on a single training tile, connected via a 2D mesh interconnect providing 4 TB/s aggregate bandwidth. Six tiles combine into a system tray, and multiple trays assemble into a complete ExaPOD delivering over 1 exaFLOP of aggregate compute. The modular architecture enables deployments from single tiles (0.5 PFLOPS) to multi-ExaPOD installations.
 

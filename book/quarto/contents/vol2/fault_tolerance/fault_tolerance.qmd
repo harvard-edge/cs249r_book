@@ -123,7 +123,9 @@ The techniques developed in this chapter draw from decades of distributed system
 
 ### The Mathematics of Inevitable Failure {#sec-mathematics-inevitable-failure}
 
-System reliability engineering provides the foundational framework for understanding failure at scale [@birolini2017reliability]. Individual components exhibit failure rates characterized by the failure rate parameter $\lambda$, measured in failures per unit time. For a single component with constant failure rate $\lambda$, the probability of surviving without failure until time $t$ follows an exponential distribution:
+System reliability engineering provides the foundational framework for understanding failure at scale [@birolini2017reliability]. Individual components exhibit failure rates characterized by the failure rate parameter $\lambda$,[^fn-failure-rate] measured in failures per unit time. For a single component with constant failure rate $\lambda$, the probability of surviving without failure until time $t$ follows an exponential distribution:
+
+[^fn-failure-rate]: **Failure Rate ($\lambda$)**: The instantaneous probability of failure per unit time, assuming the component has survived until that point. For electronic components, $\lambda$ is typically expressed in FITs (Failures In Time), where 1 FIT equals one failure per billion device-hours. A GPU with 50,000-hour MTBF has $\lambda = 20$ FITs, meaning 20 failures per billion device-hours of operation.
 
 $$
 R_{single}(t) = e^{-\lambda t}
@@ -228,7 +230,9 @@ Not all failures are equivalent. Understanding failure characteristics guides th
 Transient failures occur temporarily and resolve without intervention. Examples include:
 
 - **Network packet loss**: Momentary congestion causes dropped packets, but retransmission succeeds
-- **Memory bit flips**: Cosmic ray induced single-event upsets corrupt individual bits
+- **Memory bit flips**: Cosmic ray induced single-event upsets[^fn-seu] corrupt individual bits
+
+[^fn-seu]: **Single-Event Upsets (SEUs)**: Bit flips caused by high-energy particles (cosmic rays at sea level, alpha particles from packaging materials) striking memory cells. At datacenter scale, SEU rates become significant: approximately one bit flip per gigabyte of RAM per month. ECC memory detects and corrects single-bit errors but cannot correct multi-bit errors in the same word, making silent corruption possible even with error correction.
 - **Thermal throttling**: Temporary performance reduction due to temperature spikes
 - **Software timeouts**: Temporary resource contention causes operation delays
 
@@ -261,7 +265,9 @@ where $k$ typically ranges from 3 to 5 to achieve low false positive rates while
 
 #### Byzantine Failures {#sec-byzantine-failures}
 
-Byzantine failures represent the most challenging class: components continue operating but produce incorrect results. Named after the Byzantine Generals Problem [@lamport1982byzantine] in distributed systems theory, these failures include:
+Byzantine failures represent the most challenging class: components continue operating but produce incorrect results. Named after the Byzantine Generals Problem[^fn-byzantine-generals] [@lamport1982byzantine] in distributed systems theory, these failures include:
+
+[^fn-byzantine-generals]: **Byzantine Generals Problem**: A foundational problem in distributed systems posed by Lamport, Shostak, and Pease in 1982. The problem asks how generals (distributed nodes) can reach consensus on a battle plan when some generals may be traitors (faulty or malicious). The key result: agreement is impossible with fewer than 3f+1 total nodes when f nodes are Byzantine. This explains why Byzantine-resilient ML training requires significant redundancy overhead.
 
 - **Silent data corruption**: Memory or computation errors produce wrong values without triggering errors
 - **Numerical instability**: Floating-point edge cases cause gradients to become NaN or infinity
@@ -305,11 +311,15 @@ Defending against correlated failures requires understanding failure domains and
 
 Hardware failure rates are not constant over component lifetime. The bathtub curve, a well-established model in reliability engineering, describes how failure rates vary across three distinct phases:
 
-**Infant Mortality Phase**: New components exhibit elevated failure rates due to manufacturing defects, improper installation, and early-life wear-out of marginal components. This phase typically lasts days to weeks for electronic components. Burn-in testing, where components are operated under stress conditions before deployment, aims to precipitate infant mortality failures before production use.
+**Infant Mortality Phase**: New components exhibit elevated failure rates due to manufacturing defects, improper installation, and early-life wear-out of marginal components. This phase typically lasts days to weeks for electronic components. Burn-in testing,[^fn-burn-in] where components are operated under stress conditions before deployment, aims to precipitate infant mortality failures before production use.
+
+[^fn-burn-in]: **Burn-in Testing**: A reliability screening process where components are operated at elevated temperature (typically 85-125C) and voltage for 24-168 hours before deployment. The goal is to accelerate infant mortality failures, catching defective components before they reach production. Major cloud providers burn-in GPUs before deployment, which is why newly-received cloud instances typically exhibit lower failure rates than bare-metal deployments of new hardware.
 
 **Useful Life Phase**: After surviving infant mortality, components exhibit relatively constant failure rates [@klutke2003critical]. This phase represents the longest portion of component lifetime and is the period where the exponential reliability model (@eq-single-component-reliability) applies most accurately. For datacenter GPUs, the useful life phase typically spans 3-5 years.
 
-**Wear-Out Phase**: As components age, failure rates increase due to accumulated wear. For GPUs, wear mechanisms include electromigration in circuits, thermal cycling stress on solder joints, and degradation of thermal interface materials. The onset of wear-out depends heavily on operating conditions; components operated at high temperatures or with frequent thermal cycling enter wear-out earlier.
+**Wear-Out Phase**: As components age, failure rates increase due to accumulated wear. For GPUs, wear mechanisms include electromigration[^fn-electromigration] in circuits, thermal cycling stress on solder joints, and degradation of thermal interface materials. The onset of wear-out depends heavily on operating conditions; components operated at high temperatures or with frequent thermal cycling enter wear-out earlier.
+
+[^fn-electromigration]: **Electromigration**: The gradual movement of metal atoms in conductors due to momentum transfer from electrons. At high current densities (common in modern chips with nanometer-scale wires), electromigration can create voids that increase resistance or opens that break circuits entirely. Operating at higher temperatures accelerates electromigration exponentially, which is why GPU thermal management directly impacts component lifespan.
 
 The practical implication for ML systems is that fleet-wide failure rates depend on age distribution. A cluster populated entirely with new GPUs will experience elevated failure rates during the first few weeks (infant mortality), followed by a stable period, then increasing failures as the fleet ages. Mixed-age fleets exhibit more consistent aggregate failure rates because different cohorts are in different lifecycle phases.
 
@@ -399,7 +409,9 @@ Checkpointing captures sufficient state to resume training from a recorded point
 - **Random state**: RNG seeds for reproducible data shuffling and augmentation
 - **Learning rate schedule state**: Current position in learning rate schedule
 
-For large models, optimizer state often exceeds model size. Adam maintains two state tensors ($m$ and $v$) per parameter, so optimizer state equals twice the model parameter count. For a 175B parameter model at FP32 precision:
+For large models, optimizer state often exceeds model size. Adam[^fn-adam-state] maintains two state tensors ($m$ and $v$) per parameter, so optimizer state equals twice the model parameter count. For a 175B parameter model at FP32 precision:
+
+[^fn-adam-state]: **Adam Optimizer State**: Adam [@kingma2014adam] tracks first-moment ($m$, exponentially weighted gradient average) and second-moment ($v$, exponentially weighted squared gradient average) estimates for each parameter. This enables adaptive learning rates per parameter but triples memory requirements compared to vanilla SGD. For a 175B parameter model, this means 1.4 TB of optimizer state alone, which dominates checkpoint size and recovery time.
 
 $$
 \text{Model size} = 175 \times 10^9 \times 4 \text{ bytes} = 700 \text{ GB}
@@ -585,7 +597,9 @@ The idealized protocol above assumes step 2 completes quickly. At scale, this ba
 
 **Two-Phase Checkpoint Commit**: The basic protocol has a subtle correctness bug: if the coordinator crashes after some workers confirm but before writing metadata, those workers believe the checkpoint succeeded while the system has no valid checkpoint.
 
-Production systems use two-phase commit [@gray1978notes], a classic distributed systems protocol:
+Production systems use two-phase commit[^fn-two-phase-commit] [@gray1978notes], a classic distributed systems protocol:
+
+[^fn-two-phase-commit]: **Two-Phase Commit (2PC)**: A distributed algorithm ensuring all participants either commit or abort a transaction together. Phase 1 (prepare): coordinator asks all participants to prepare and vote. Phase 2 (commit/abort): if all vote yes, coordinator broadcasts commit; otherwise abort. 2PC guarantees atomicity but can block indefinitely if the coordinator fails after prepare. For checkpointing, this blocking is acceptable since a stuck checkpoint can be timed out and retried.
 
 1. **Prepare phase**: Workers write to staging location, report success to coordinator
 2. **Commit phase**: Coordinator atomically renames/commits all shards together (e.g., moving from `staging/` to `checkpoints/`)
@@ -599,7 +613,9 @@ This ensures atomic checkpoint commits: either all shards are committed together
 
 Modern distributed training frameworks partition model state across workers using techniques like ZeRO (Zero Redundancy Optimizer) and FSDP (Fully Sharded Data Parallel). In these configurations, no single worker holds complete model state. Each worker holds only its assigned parameter shard plus corresponding optimizer state.
 
-**Sharded checkpointing** [@rajbhandari2020zero] leverages this distribution: each worker writes only its shard, dramatically reducing per-worker write volume. Recovery loads shards and redistributes state to workers based on the recovery configuration.
+**Sharded checkpointing**[^fn-sharded-ckpt] [@rajbhandari2020zero] leverages this distribution: each worker writes only its shard, dramatically reducing per-worker write volume. Recovery loads shards and redistributes state to workers based on the recovery configuration.
+
+[^fn-sharded-ckpt]: **Sharded Checkpointing**: A checkpoint strategy where each worker saves only its local partition of the model and optimizer state, rather than gathering everything to a single writer. For ZeRO-3 or FSDP with 1000 workers training a 175B model, each worker writes approximately 2.1 GB instead of one worker writing 2.1 TB. This parallelizes I/O across all workers, achieving aggregate write bandwidth of 100+ GB/s on modern distributed filesystems.
 
 This approach enables efficient checkpointing even for massive models. A 175B parameter model with 2.1 TB checkpoint distributed across 1,000 workers requires each worker to write only 2.1 GB, achievable in seconds with local NVMe storage.
 
@@ -626,7 +642,9 @@ where:
 
 **Heartbeat monitoring**: Each worker periodically sends heartbeat messages to a coordinator or monitoring service. Missing heartbeats trigger failure detection. Heartbeat interval and timeout parameters control the trade-off between detection speed and false positive rate.
 
-**Collective operation timeouts**: During distributed training, collective operations (AllReduce, broadcast) hang if any participant fails. Framework-level timeouts on collective operations detect failures that would otherwise cause indefinite hangs. NCCL provides configurable timeout parameters (`NCCL_TIMEOUT`) for this purpose.
+**Collective operation timeouts**: During distributed training, collective operations (AllReduce, broadcast) hang if any participant fails. Framework-level timeouts on collective operations detect failures that would otherwise cause indefinite hangs. NCCL[^fn-nccl-timeout] provides configurable timeout parameters (`NCCL_TIMEOUT`) for this purpose.
+
+[^fn-nccl-timeout]: **NCCL Timeout Configuration**: NVIDIA's NCCL library provides `NCCL_TIMEOUT` (default 30 minutes in recent versions) and `NCCL_BLOCKING_WAIT` environment variables for failure detection. Setting aggressive timeouts (e.g., 5 minutes) enables faster failure detection but may cause false positives during legitimate long operations. Production systems typically set 10-30 minute timeouts and use separate heartbeat mechanisms for faster detection.
 
 **Health check probes**: Container orchestration systems (Kubernetes) and cluster managers (SLURM) provide health check mechanisms that detect unresponsive workers. Liveness probes verify that processes are running; readiness probes verify that processes are ready to handle requests.
 
@@ -717,7 +735,9 @@ where $N$ represents the number of workers (and thus the global batch size). The
 
 Modern frameworks provide varying levels of elastic training support:
 
-**PyTorch Elastic (TorchElastic)** [@li2020pytorch]: Provides elastic launch capabilities through `torchrun`. Supports membership changes through a rendezvous mechanism. Workers can join or leave, and the training process adapts. Integrates with Kubernetes for automatic scaling.
+**PyTorch Elastic (TorchElastic)** [@li2020pytorch]: Provides elastic launch capabilities through `torchrun`. Supports membership changes through a rendezvous mechanism.[^fn-rendezvous] Workers can join or leave, and the training process adapts. Integrates with Kubernetes for automatic scaling.
+
+[^fn-rendezvous]: **Rendezvous Mechanism**: A distributed coordination protocol where workers discover each other and agree on training configuration before starting. TorchElastic implements rendezvous using etcd or a built-in C10d store, handling dynamic membership by re-running rendezvous when workers join or leave. The rendezvous assigns ranks, establishes the process group, and ensures all workers agree on world size before training proceeds.
 
 **DeepSpeed** [@rasley2020deepspeed]: Supports elastic training through integration with Azure ML and automatic checkpoint/restart mechanisms. The ZeRO optimizer can reshard checkpoints for different worker counts.
 
@@ -970,7 +990,9 @@ Different model types have distinct serving fault tolerance requirements based o
 
 LLM serving with conversational context presents significant fault tolerance challenges:
 
-**KV cache state**: The KV cache can be substantial (gigabytes for long contexts across attention layers). Losing the KV cache requires regenerating all previous turns, which can take seconds to minutes.
+**KV cache state**: The KV cache[^fn-kv-cache-ft] can be substantial (gigabytes for long contexts across attention layers). Losing the KV cache requires regenerating all previous turns, which can take seconds to minutes.
+
+[^fn-kv-cache-ft]: **KV Cache Size**: For transformer models, the KV cache stores key and value projections for all previous tokens across all attention layers. Size scales as $2 \times L \times H \times S \times D$ where L is layers, H is heads, S is sequence length, and D is head dimension. For a 70B model with 80 layers, 64 heads, 128K context, and 128-dimension heads, this reaches approximately 160 GB per conversation, making KV cache state a dominant factor in LLM serving fault tolerance.
 
 **Fault tolerance approaches for LLM serving**:
 
@@ -1097,7 +1119,9 @@ When system capacity is insufficient for incoming load, deliberately drop reques
 
 **Admission control**: Rate limit at system entry points. Reject requests that would exceed capacity rather than accepting and degrading all requests.
 
-**Circuit breakers**: When downstream services fail, stop sending requests rather than accumulating failures. Circuit breakers prevent cascade failures where one failing service causes callers to fail due to timeouts and resource exhaustion.
+**Circuit breakers**:[^fn-circuit-breaker] When downstream services fail, stop sending requests rather than accumulating failures. Circuit breakers prevent cascade failures where one failing service causes callers to fail due to timeouts and resource exhaustion.
+
+[^fn-circuit-breaker]: **Circuit Breaker Pattern**: Borrowed from electrical engineering, where circuit breakers prevent electrical fires by cutting power during overload. In software, the pattern (popularized by Michael Nygard's "Release It!") wraps calls to external services and "trips open" after a threshold of failures, failing fast without attempting the call. This prevents resource exhaustion from waiting on failing services and gives downstream services time to recover.
 
 Circuit breaker states:
 
@@ -1166,7 +1190,9 @@ Diagnosing failures in distributed ML systems presents unique challenges. The no
 
 Several factors combine to make distributed ML debugging exceptionally challenging:
 
-**Non-determinism**: Distributed systems exhibit non-deterministic behavior due to:
+**Non-determinism**: Distributed systems exhibit non-deterministic behavior[^fn-heisenbug] due to:
+
+[^fn-heisenbug]: **Heisenbugs in Distributed Systems**: Named after the Heisenberg uncertainty principle, Heisenbugs are bugs that seem to disappear or change behavior when you try to observe them. In distributed ML systems, adding logging or debugging instrumentation changes timing, which can mask race conditions. Deterministic replay systems like rr (for single-node) or Dapper-style distributed tracing help by recording execution without altering timing.
 
 - Network timing variations
 - Thread scheduling differences
@@ -1281,7 +1307,9 @@ Trace: user-request-12345
 Total: 68ms
 ```
 
-**Tracing tools**: OpenTelemetry [@opentelemetry2024] provides a standard API for distributed tracing. Backend systems like Jaeger, Zipkin, or cloud tracing services store and visualize traces.
+**Tracing tools**: OpenTelemetry[^fn-opentelemetry] provides a standard API for distributed tracing. Backend systems like Jaeger, Zipkin, or cloud tracing services store and visualize traces.
+
+[^fn-opentelemetry]: **OpenTelemetry**: A CNCF project that merged OpenTracing and OpenCensus to provide a vendor-neutral standard for telemetry (traces, metrics, logs). OpenTelemetry defines APIs, SDKs, and a wire protocol (OTLP) for collecting and exporting observability data. Adopting OpenTelemetry avoids vendor lock-in and enables switching between backends (Jaeger, Datadog, Honeycomb, etc.) without code changes.
 
 ### ML-Specific Debugging {#sec-ml-specific-debugging}
 
@@ -1291,7 +1319,9 @@ Beyond general distributed debugging, ML systems require specialized debugging c
 
 ML computations are prone to numerical issues:
 
-**NaN detection**: Check for NaN values in model outputs:
+**NaN detection**:[^fn-nan-propagation] Check for NaN values in model outputs:
+
+[^fn-nan-propagation]: **NaN Propagation**: In floating-point arithmetic, NaN (Not a Number) values propagate through computations: any operation involving NaN produces NaN. This makes a single NaN in gradient computation corrupt all downstream parameters. Common causes include division by zero (e.g., in normalization layers with zero variance), log of zero or negative numbers, and overflow to infinity followed by subtraction. Early NaN detection prevents wasted training iterations.
 
 ```python
 if torch.isnan(output).any():
@@ -1305,7 +1335,9 @@ if torch.isnan(output).any():
 - Gradient distribution (detect anomalies)
 - Layer-wise gradients (identify problematic layers)
 
-**Precision issues**: Mixed-precision training can introduce numerical issues. Monitor for:
+**Precision issues**: Mixed-precision training[^fn-mixed-precision-issues] can introduce numerical issues. Monitor for:
+
+[^fn-mixed-precision-issues]: **Mixed-Precision Numerical Issues**: FP16 has limited dynamic range (approximately 6x10^-8 to 65504), causing underflow for small gradients and overflow for large values. Loss scaling multiplies loss by a large factor (e.g., 1024) before backpropagation to prevent gradient underflow, then divides gradients by the same factor. When overflow occurs, the loss scaler automatically reduces the scaling factor and skips the corrupted step.
 
 - Loss scale adjustments (indicates underflow)
 - Gradient overflow (values exceed FP16 range)
