@@ -109,7 +109,7 @@ Distributed training becomes an architectural necessity when training demands ex
 
 Part I established the infrastructure foundations that make distributed training possible. The datacenter architectures and accelerator topologies examined in @sec-infrastructure provide the compute fabric, while the distributed storage systems and data pipelines developed in @sec-storage ensure training data flows efficiently to thousands of workers. These foundations answer the question of what physical resources exist. Part II addresses the central question those resources enable: how do we coordinate training across distributed infrastructure to achieve performance that no single machine could deliver?
 
-The transition from single-machine to distributed training represents a fundamental shift in optimization strategy and system complexity. Single-machine optimization focuses on efficiently utilizing available resources through techniques such as prefetching, mixed precision, and gradient accumulation. Distributed training introduces fundamentally different challenges: communication overhead, fault tolerance, and synchronization that require new conceptual frameworks and engineering approaches.
+The transition from single-machine to distributed training represents a major shift in optimization strategy and system complexity. Single-machine optimization focuses on efficiently utilizing available resources through techniques such as prefetching, mixed precision, and gradient accumulation. Distributed training introduces different challenges: communication overhead, fault tolerance, and synchronization that require new conceptual frameworks and engineering approaches.
 
 ### Multi-Machine Training Requirements {#sec-distributed-training-multimachine-training-requirements}
 
@@ -382,7 +382,7 @@ node[fill=white,pos=0.75]{Chunk}(SC1.south);
 \draw[myline,-latex,shorten <=2mm](D3CL2)-|(CGG.230);
  \end{tikzpicture}
 ```
-**Data-Parallel Training**: Distributed machine learning scales model training by partitioning datasets across multiple gpus, enabling concurrent computation of gradients, and then aggregating these gradients to update shared model parameters. This approach accelerates training by leveraging parallel processing while maintaining a consistent model across all devices.
+Distributed machine learning scales model training by partitioning datasets across multiple GPUs, enabling concurrent computation of gradients, and then aggregating these gradients to update shared model parameters. This approach accelerates training through parallel processing while maintaining model consistency across all devices.
 :::
 
 This coordination introduces several key challenges that distributed training systems must address. A distributed training system must orchestrate multi-machine computation by splitting up the work, managing communication between machines, and maintaining synchronization throughout the training process. Understanding these basic requirements provides the foundation for examining the main approaches to distributed training: data parallelism, which divides the training data across machines; model parallelism, which splits the model itself; pipeline parallelism, which combines aspects of both; and hybrid approaches that integrate multiple strategies.
@@ -542,7 +542,7 @@ The process of data parallelism can be broken into a series of distinct steps, e
 \draw[Line,-latex](GGB1.east)--++(0:6.8)|-node[Text,pos=0.8,text=black]{Next Mini-Batch}(DB3.east);
 \end{tikzpicture}
 ```
-**Data Parallelism**: Distributed training replicates the model across multiple devices, each processing a subset of the data before aggregating gradients to update model parameters, thereby accelerating the training process. This approach contrasts with model parallelism, where the model itself is partitioned across devices.
+Distributed training replicates the model across multiple devices, each processing a subset of the data before aggregating gradients to update model parameters. This accelerates the training process compared to single-device training, and contrasts with model parallelism where the model itself is partitioned across devices.
 :::
 
 #### Dataset Splitting {#sec-distributed-training-dataset-splitting}
@@ -567,11 +567,11 @@ For example, with 8 GPUs sharing gradients for a 100 MB model, ring all-reduce r
 
 Distributed training systems operate under explicit synchronization models that govern when workers observe each other's updates. Understanding these models is essential for reasoning about correctness and performance.
 
-**Bulk Synchronous Parallel (BSP)**: The default model for synchronous data parallelism. All workers complete their local computation (forward and backward pass), synchronize gradients through a barrier (AllReduce), and then simultaneously update parameters. BSP provides strong guarantees: every worker sees identical parameter values at each step, ensuring mathematical equivalence to single-device training. The cost is that the slowest worker determines iteration time (the "straggler problem").
+The default model, Bulk Synchronous Parallel (BSP), requires all workers to complete their local computation (forward and backward pass), synchronize gradients through a barrier (AllReduce), and then simultaneously update parameters. BSP provides strong guarantees: every worker sees identical parameter values at each step, ensuring mathematical equivalence to single-device training. The cost is that the slowest worker determines iteration time, creating the "straggler problem."
 
-**Stale Synchronous Parallel (SSP)**: Workers may proceed up to $s$ iterations ahead of the slowest worker before blocking. This bounds staleness while reducing synchronization delays. SSP requires careful learning rate tuning since workers compute gradients on slightly different parameter versions. The bounded staleness guarantee ($s$ typically 2-5) provides a middle ground between BSP's strong consistency and fully asynchronous approaches.
+Stale Synchronous Parallel (SSP) relaxes this constraint, allowing workers to proceed up to $s$ iterations ahead of the slowest worker before blocking. This bounds staleness while reducing synchronization delays. SSP requires careful learning rate tuning since workers compute gradients on slightly different parameter versions. The bounded staleness guarantee ($s$ typically 2-5) provides a middle ground between BSP's strong consistency and fully asynchronous approaches.
 
-**Asynchronous SGD**: Workers update parameters independently without synchronization barriers. This maximizes hardware utilization but introduces gradient staleness that can degrade convergence. When a worker computes gradients on parameters that are already $\tau$ steps stale, the effective learning rate decreases. Compensation techniques include learning rate scaling ($\eta' = \eta / \sqrt{\tau}$) or momentum correction.
+Asynchronous SGD eliminates synchronization barriers entirely, with workers updating parameters independently. This maximizes hardware utilization but introduces gradient staleness that can degrade convergence. When a worker computes gradients on parameters that are already $\tau$ steps stale, the effective learning rate decreases. Compensation techniques include learning rate scaling ($\eta' = \eta / \sqrt{\tau}$) or momentum correction.
 
 ::: {.callout-note title="Synchronization Model Trade-offs"}
 | Model | Consistency | Throughput | Convergence | Use Case |
@@ -581,21 +581,17 @@ Distributed training systems operate under explicit synchronization models that 
 | Async | Weak | Maximum | Degraded, requires compensation | Large heterogeneous clusters |
 :::
 
-The choice of synchronization model fundamentally affects both system throughput and model convergence. Production systems typically use BSP for final training runs (to ensure reproducibility) while exploring SSP or async approaches during hyperparameter search where exact reproducibility is less critical.
+The choice of synchronization model directly affects both system throughput and model convergence. Production systems typically use BSP for final training runs to ensure reproducibility, while exploring SSP or async approaches during hyperparameter search where exact reproducibility is less critical.
 
 #### Barrier Semantics and Failure Modes {#sec-distributed-training-barrier-failures}
 
-AllReduce operations implement implicit barriers: no worker can proceed until all workers have contributed their gradients. This coupling creates failure modes absent from single-device training:
+AllReduce operations implement implicit barriers: no worker can proceed until all workers have contributed their gradients. This coupling creates failure modes absent from single-device training.
 
-**Deadlock from Worker Failure**: If any worker crashes during AllReduce, all other workers block indefinitely waiting for the missing contribution. Without timeout mechanisms, the entire training job hangs rather than failing cleanly. Production systems implement watchdog timers (typically 5-10 minutes) to detect and terminate stuck jobs.
+Worker failures during AllReduce cause all other workers to block indefinitely, waiting for the missing contribution. Without timeout mechanisms, the entire training job hangs rather than failing cleanly. Production systems implement watchdog timers, typically set to 5-10 minutes, to detect and terminate stuck jobs.
 
-**Deadlock from Gradient Mismatch**: If workers disagree on which tensors to synchronize (due to conditional computation paths or dynamic batching), AllReduce operations may block waiting for tensors that some workers never send. This commonly occurs with:
+Gradient mismatches occur when workers disagree on which tensors to synchronize due to conditional computation paths or dynamic batching. AllReduce operations may block waiting for tensors that some workers never send. This commonly occurs with variable-length sequences in NLP models, dynamic computation graphs, and mixture-of-experts with different routing decisions.
 
-- Variable-length sequences in NLP models
-- Dynamic computation graphs
-- Mixture-of-experts with different routing decisions
-
-**Straggler-Induced Delays**: The iteration time equals the slowest worker's time plus synchronization overhead. A single slow worker (due to thermal throttling, network congestion, or OS jitter) delays all workers, reducing cluster utilization. At 1000 GPUs with 1% probability of straggler per GPU per step, approximately 10 GPUs straggle every iteration.
+Straggler-induced delays arise because iteration time equals the slowest worker's time plus synchronization overhead. A single slow worker, whether due to thermal throttling, network congestion, or OS jitter, delays all workers and reduces cluster utilization. At 1000 GPUs with 1% probability of straggler per GPU per step, approximately 10 GPUs straggle every iteration.
 
 Production systems address these issues through:
 
@@ -735,11 +731,11 @@ ZeRO addresses this redundancy through progressive sharding:
 | ZeRO-2 | + Gradients | ~8x | ReduceScatter replaces AllReduce |
 | ZeRO-3 / FSDP | + Parameters | ~$N$ (linear in workers) | AllGather before each layer |
 
-**ZeRO-1** shards optimizer states across GPUs. Each GPU stores only $1/N$ of the Adam momentum and variance tensors. After gradient AllReduce, each GPU updates only its shard of parameters, then broadcasts updates to other GPUs. Memory savings: optimizer states reduced from $8N$ bytes/param to $8$ bytes/param total across cluster.
+ZeRO-1 shards optimizer states across GPUs. Each GPU stores only $1/N$ of the Adam momentum and variance tensors. After gradient AllReduce, each GPU updates only its shard of parameters, then broadcasts updates to other GPUs. Memory savings: optimizer states reduced from $8N$ bytes/param to $8$ bytes/param total across cluster.
 
-**ZeRO-2** additionally shards gradients. Instead of AllReduce (which leaves full gradients on each GPU), ZeRO-2 uses ReduceScatter (each GPU receives $1/N$ of the reduced gradients). Memory savings: gradients reduced from $4N$ bytes/param to $4$ bytes/param total.
+ZeRO-2 additionally shards gradients. Instead of AllReduce, which leaves full gradients on each GPU, ZeRO-2 uses ReduceScatter so each GPU receives $1/N$ of the reduced gradients. Memory savings: gradients reduced from $4N$ bytes/param to $4$ bytes/param total.
 
-**ZeRO-3 / FSDP** shards parameters themselves. Each GPU stores only $1/N$ of the model. Before each layer's forward pass, parameters are gathered via AllGather; after backward pass, gradients are reduced via ReduceScatter, then parameters are discarded. This achieves maximum memory efficiency at the cost of additional communication.
+ZeRO-3 and FSDP shard parameters themselves. Each GPU stores only $1/N$ of the model. Before each layer's forward pass, parameters are gathered via AllGather; after backward pass, gradients are reduced via ReduceScatter, then parameters are discarded. This achieves maximum memory efficiency at the cost of additional communication.
 
 ::: {.callout-note title="FSDP Communication Analysis"}
 FSDP introduces communication on the critical path that DDP avoids:
@@ -752,12 +748,7 @@ For a model with $L$ layers, FSDP performs $2L$ collective operations per traini
 Total FSDP communication volume: approximately $3M$ bytes (vs. $2M$ for DDP AllReduce), but spread across more operations with overlap opportunities.
 :::
 
-**When to use FSDP vs. DDP:**
-
-- **Model fits in GPU memory with room for activations**: Use DDP (lower overhead)
-- **Model barely fits or requires activation checkpointing**: Use FSDP ZeRO-2
-- **Model parameters exceed single-GPU memory**: Use FSDP ZeRO-3
-- **Training 70B+ models on 80GB GPUs**: Combine FSDP with tensor parallelism
+The choice between FSDP and DDP depends on model size and memory constraints. Use DDP when the model fits in GPU memory with room for activations, as it has lower overhead. Use FSDP ZeRO-2 when the model barely fits or requires activation checkpointing. Use FSDP ZeRO-3 when model parameters exceed single-GPU memory. For training 70B+ models on 80GB GPUs, combine FSDP with tensor parallelism.
 
 FSDP configuration requires careful tuning of sharding strategy (by layer, by transformer block, or flat) and mixed precision settings. The `auto_wrap_policy` determines sharding granularity, with finer sharding reducing memory but increasing communication frequency.
 
@@ -827,7 +818,7 @@ Model parallelism divides neural networks across multiple computing devices, wit
 -|node[Text,pos=0.25]{Backward Pass}(B5.240);
 \end{tikzpicture}
 ```
-**Model Partitioning**: Distributing a neural network across multiple devices enables training models larger than the memory capacity of a single device. This approach requires careful coordination of data flow and gradient computation between devices to maintain training efficiency.
+Distributing a neural network across multiple devices enables training models larger than the memory capacity of a single device. This approach requires careful coordination of data flow and gradient computation between devices to maintain training efficiency.
 :::
 
 #### Model Partitioning {#sec-distributed-training-model-partitioning}
@@ -1007,7 +998,7 @@ Pipeline parallelism extends layer-wise partitioning by introducing microbatchin
 %\node[draw=none, minimum width=4cm, minimum height=1cm, align=center, right=1cm of F0_3] (Bubble) {Bubble};
 \end{tikzpicture}
 ```
-**Pipeline Parallelism**: With model layers distributed across devices, microbatching divides each training batch into smaller segments that flow through the pipeline concurrently. This approach minimizes device idle time during both forward and backward passes by allowing multiple microbatches to be processed simultaneously at different pipeline stages. Activations flow sequentially between devices during the forward pass, while gradients propagate in reverse during backpropagation.
+With model layers distributed across devices, microbatching divides each training batch into smaller segments that flow through the pipeline concurrently. This approach minimizes device idle time during both forward and backward passes by allowing multiple microbatches to be processed simultaneously at different pipeline stages. Activations flow sequentially between devices during the forward pass, while gradients propagate in reverse during backpropagation.
 :::
 
 In a transformer model distributed across four devices, device 1 would process blocks 1-6 for microbatch $N+1$ while device 2 computes blocks 7-12 for microbatch $N$. Simultaneously, device 3 executes blocks 13-18 for microbatch $N-1$, and device 4 processes blocks 19-24 for microbatch $N-2$. Each device maintains its assigned transformer blocks but operates on a different microbatch, creating a continuous flow of computation.
@@ -1028,13 +1019,13 @@ Modern literature distinguishes two forms of model parallelism:
 The Megatron-LM framework popularized this distinction, using tensor parallelism within nodes (8 GPUs on NVLink) and pipeline parallelism across nodes (InfiniBand).
 :::
 
-**Megatron-Style Tensor Parallelism**: The key insight is that matrix multiplications can be partitioned in two ways:
+Megatron-style tensor parallelism partitions matrix multiplications in two ways.
 
-**Column-parallel linear layers**: Weights are split along columns. For input $X$ and weight matrix $W = [W_1 | W_2]$ split across 2 GPUs:
+Column-parallel linear layers split weights along columns. For input $X$ and weight matrix $W = [W_1 | W_2]$ split across 2 GPUs:
 $$Y = XW = X[W_1 | W_2] = [XW_1 | XW_2]$$
 Each GPU computes its partition independently. Outputs are concatenated (no communication needed if followed by row-parallel layer).
 
-**Row-parallel linear layers**: Weights are split along rows. For $W = \begin{bmatrix} W_1 \\ W_2 \end{bmatrix}$:
+Row-parallel linear layers split weights along rows. For $W = \begin{bmatrix} W_1 \\ W_2 \end{bmatrix}$:
 $$Y = XW = X_1 W_1 + X_2 W_2$$
 Each GPU computes a partial sum. Outputs require AllReduce to combine.
 
@@ -1047,12 +1038,12 @@ In transformer architectures, Megatron applies this pattern:
 
 This design places AllReduce operations strategically: one after attention, one after FFN, totaling 2 AllReduce operations per transformer layer.
 
-**Communication volume per transformer layer**: For sequence length $S$, hidden dimension $H$, and batch size $B$:
+Communication volume per transformer layer depends on sequence length $S$, hidden dimension $H$, and batch size $B$:
 $$\text{Communication} = 2 \times B \times S \times H \times \text{sizeof(dtype)}$$
 
 With $S=2048$, $H=4096$, $B=4$, and FP16: $2 \times 4 \times 2048 \times 4096 \times 2 = 134$ MB per layer. For a 96-layer model, this totals 12.6 GB per training step, requiring NVLink bandwidth to avoid becoming the bottleneck.
 
-**Tensor parallelism scaling limits**: Beyond 8-way tensor parallelism, efficiency degrades rapidly because:
+Tensor parallelism scaling degrades rapidly beyond 8-way parallelism because:
 
 - Communication volume grows linearly with tensor parallel degree
 - Computation per GPU decreases (less work to hide communication latency)
@@ -1279,7 +1270,7 @@ above=of $(B2.north)!0.5!(B3.north)$](G1B3){Is scaling the model\\ or data more 
 \node[above=2pt of  BB.204,inner sep=0pt,anchor=south,fill=BackColor]{Parallelism Opportunities};
 \end{tikzpicture}
 ```
-**Parallelism Strategy Selection**: Distributed training systems use data, model, or hybrid parallelism based on model size, dataset size, and scaling constraints to accelerate training and efficiently utilize resources. This flowchart guides practitioners through a decision process, recognizing that real-world deployments often require adaptation due to factors like hardware heterogeneity and workload imbalance.
+Distributed training systems use data, model, or hybrid parallelism based on model size, dataset size, and scaling constraints to accelerate training and efficiently utilize resources. This flowchart guides practitioners through a decision process, recognizing that real-world deployments often require adaptation due to factors like hardware heterogeneity and workload imbalance.
 :::
 
 ## Framework Integration {#sec-distributed-training-framework-integration}
@@ -1448,7 +1439,7 @@ At the frontier of AI scaling, wafer-scale integration represents a paradigm shi
 
 Wafer-scale integration uses an entire 300 mm silicon wafer as a single processor instead of cutting it into individual chips. Cerebras WSE-3 contains 4 trillion transistors across 850,000 cores, 125x more than the largest GPUs. Manufacturing challenges include 100% yield requirements (solved with redundant cores) and cooling 23 kW of power. This approach eliminates inter-chip communication delays but costs $2-3 million per wafer versus $40,000 for equivalent GPU clusters.
 
-The fundamental advantage of wafer-scale AI is its ultra-fast on-die communication. Unlike chiplets, GPUs, or TPU Pods, where data must traverse physical boundaries between separate devices, wafer-scale AI enables near-instantaneous data transfer across its vast compute array. This architecture drastically reduces communication latency, achieving performance levels that remain out of reach for conventional multi-chip systems.
+The primary advantage of wafer-scale AI is its ultra-fast on-die communication. Unlike chiplets, GPUs, or TPU Pods, where data must traverse physical boundaries between separate devices, wafer-scale AI enables near-instantaneous data transfer across its vast compute array. This architecture drastically reduces communication latency, achieving performance levels that remain out of reach for conventional multi-chip systems.
 
 Achieving this level of integration introduces substantial engineering challenges. Thermal dissipation, fault tolerance, and manufacturing yield become major constraints when fabricating a processor of this scale. Unlike distributed TPU systems, which mitigate failures by dynamically re-routing workloads, wafer-scale AI must incorporate built-in redundancy mechanisms to tolerate localized defects in the silicon.
 
@@ -1476,13 +1467,13 @@ While chiplets enable modular scaling within a package, they introduce latency a
 
 As AI systems scale from single-chip accelerators to multi-chip architectures, the fundamental challenges in computation and memory evolve. Computation must now be distributed across multiple accelerators, and memory access patterns become constrained by interconnect bandwidth and communication overhead.
 
-**Execution Mapping**: In multi-chip execution, computation placement must consider workload partitioning across multiple accelerators, requiring explicit coordination of execution order and dependencies. Computation scheduling must be interconnect-aware to manage communication delays effectively. Load balancing across accelerators is vital; an uneven distribution of tasks can result in some accelerators remaining underutilized while others operate at full capacity.
+Execution mapping in multi-chip systems requires computation placement that considers workload partitioning across multiple accelerators, with explicit coordination of execution order and dependencies. Computation scheduling must be interconnect-aware to manage communication delays effectively. Load balancing across accelerators is vital, as uneven task distribution results in some accelerators remaining underutilized while others operate at full capacity.
 
-**Distributed Memory Allocation**: In multi-chip AI systems, each accelerator manages its own local memory, necessitating explicit allocation of model parameters, activations, and intermediate data across devices. Unlike single-chip execution where data is fetched once and reused, multi-chip setups require deliberate strategies to minimize redundant data transfers.
+Distributed memory allocation requires each accelerator to manage its own local memory, necessitating explicit allocation of model parameters, activations, and intermediate data across devices. Unlike single-chip execution where data is fetched once and reused, multi-chip setups require deliberate strategies to minimize redundant data transfers.
 
-**Data Movement Optimization**: In multi-chip AI systems, inter-chip data transfer becomes the primary bottleneck rather than memory hierarchy latency. Techniques include overlapping computation and communication so accelerators process data while simultaneously sending and receiving, and locality-aware scheduling that places computations on accelerators already holding required data.
+Data movement optimization addresses inter-chip data transfer, which becomes the primary bottleneck rather than memory hierarchy latency. Techniques include overlapping computation and communication so accelerators process data while simultaneously sending and receiving, and locality-aware scheduling that places computations on accelerators already holding required data.
 
-**Compiler and Runtime Adaptations**: Multi-chip runtimes extend single-chip execution models to handle dynamic workload distribution across accelerators. Interconnect-aware workload partitioning enables compilers to distribute computations strategically based on communication cost. In TPU Pods, the runtime schedules computations across multiple TPU cores to minimize communication bottlenecks. In multi-GPU frameworks like PyTorch and TensorFlow, runtime execution synchronizes operations across GPUs while maintaining execution order.
+Compiler and runtime adaptations extend single-chip execution models to handle dynamic workload distribution across accelerators. Interconnect-aware workload partitioning enables compilers to distribute computations strategically based on communication cost. In TPU Pods, the runtime schedules computations across multiple TPU cores to minimize communication bottlenecks. In multi-GPU frameworks like PyTorch and TensorFlow, runtime execution synchronizes operations across GPUs while maintaining execution order.
 
 ## Summary {#sec-distributed-training-summary}
 
@@ -1506,15 +1497,11 @@ The efficiency metrics governing distributed training—communication overhead, 
 
 Distributed training involves counterintuitive behavior that leads to common misconceptions. These fallacies and pitfalls capture errors that waste compute resources and delay research progress.
 
-**Fallacy: Linear speedup is achievable with enough engineering effort.**
+Linear speedup remains theoretically impossible regardless of engineering effort. Amdahl's Law establishes hard limits: any sequential component bounds maximum speedup regardless of parallelism. In distributed training, gradient synchronization is inherently sequential since all gradients must be collected before any update proceeds.
 
-This belief persists despite theoretical impossibility. Amdahl's Law establishes hard limits: any sequential component bounds maximum speedup regardless of parallelism. In distributed training, gradient synchronization is inherently sequential since all gradients must be collected before any update proceeds.
-
-Even with perfect overlap and optimal algorithms, communication overhead grows with cluster size. For data parallelism, AllReduce time increases logarithmically (tree) or linearly (ring latency term) with GPU count. A 1000-GPU cluster will never train 1000x faster than a single GPU; achieving 500x speedup would be exceptional, and 100-200x is more typical for communication-heavy workloads.
+Even with perfect overlap and optimal algorithms, communication overhead grows with cluster size. For data parallelism, AllReduce time increases logarithmically with tree algorithms or linearly in the latency term with ring algorithms as GPU count grows. A 1000-GPU cluster will never train 1000x faster than a single GPU; achieving 500x speedup would be exceptional, and 100-200x is more typical for communication-heavy workloads.
 
 Organizations that budget projects assuming linear scaling inevitably miss deadlines and overspend on compute.
-
-**Pitfall: Using the same hyperparameters at all scales.**
 
 Hyperparameters tuned on small clusters fail catastrophically at large scale. The most critical is learning rate: as batch size increases with data parallelism, learning rate typically must increase proportionally to maintain convergence rate. The "linear scaling rule" suggests $\eta_{large} = \eta_{base} \times (B_{large}/B_{base})$.
 
@@ -1522,15 +1509,11 @@ However, this rule has limits. Beyond the "critical batch size" (model and datas
 
 Warmup schedules, weight decay, and dropout rates also require adjustment. The only reliable approach is systematic scaling studies that validate hyperparameters at target scale.
 
-**Fallacy: Data parallelism scales indefinitely by adding more GPUs.**
-
-Data parallelism increases effective batch size proportionally with GPU count. But statistical efficiency (loss reduction per sample) decreases with batch size beyond model-specific thresholds. A 100K-sample batch may provide only 2x the gradient quality of a 10K-sample batch, not 10x.
+Data parallelism does not scale indefinitely by adding more GPUs. Data parallelism increases effective batch size proportionally with GPU count, but statistical efficiency (loss reduction per sample) decreases with batch size beyond model-specific thresholds. A 100K-sample batch may provide only 2x the gradient quality of a 10K-sample batch, not 10x.
 
 The critical batch size defines where marginal returns collapse. Beyond this point, additional GPUs increase throughput (samples per second) but not training efficiency (loss reduction per compute dollar). For BERT, critical batch size is approximately 8K; for ResNet, approximately 32K. Scaling beyond critical batch size wastes compute.
 
 Large organizations have trained models to convergence using 1024 GPUs in the same wall-clock time as 512 GPUs at 2x the cost, because they exceeded critical batch size.
-
-**Pitfall: Ignoring the memory-compute trade-off in parallelism selection.**
 
 Pipeline parallelism and tensor parallelism both distribute model weights across devices, but their memory and compute characteristics differ dramatically.
 
@@ -1538,9 +1521,7 @@ Tensor parallelism splits each layer across devices, requiring AllReduce communi
 
 For memory-constrained scenarios where a model barely fits with splitting, tensor parallelism's even distribution helps. For throughput-maximizing scenarios with adequate memory, pipeline parallelism's lower communication overhead helps. Choosing based on one dimension (memory or compute) without considering the other leads to suboptimal configurations.
 
-**Fallacy: FSDP/ZeRO always improves training efficiency.**
-
-FSDP (Fully Sharded Data Parallel) and ZeRO reduce memory footprint by sharding optimizer state and gradients across GPUs. This enables larger batch sizes or larger models per GPU. However, sharding introduces communication overhead: AllGather before forward pass, ReduceScatter after backward pass.
+FSDP and ZeRO do not always improve training efficiency. FSDP (Fully Sharded Data Parallel) and ZeRO reduce memory footprint by sharding optimizer state and gradients across GPUs. This enables larger batch sizes or larger models per GPU. However, sharding introduces communication overhead: AllGather before forward pass, ReduceScatter after backward pass.
 
 For models that fit comfortably in GPU memory without sharding, FSDP adds overhead without benefit. A 7B model training on A100-80GB with batch size 4 runs faster with DDP than FSDP because the model fits entirely with room for activations.
 
@@ -1552,15 +1533,11 @@ FSDP provides value when:
 
 Applying FSDP universally, as some tutorials suggest, degrades performance for models that do not require it.
 
-**Pitfall: Benchmarking parallelism strategies on small models.**
-
 Parallelism overhead is roughly constant regardless of model size: AllReduce time depends on gradient size, not model computation time. For small models where forward/backward pass takes 10ms and AllReduce takes 5ms, communication overhead is 50%. For large models where forward/backward takes 1000ms and AllReduce takes 5ms, overhead is 0.5%.
 
 Decisions made based on small-model benchmarks ("pipeline parallelism is always slower") invert at scale. The 20% overhead acceptable for a 1B model becomes 0.2% for a 100B model. Parallelism strategy evaluation must occur at target scale, or at minimum with analytical models that extrapolate appropriately.
 
-**Fallacy: Gradient accumulation is free.**
-
-Gradient accumulation simulates larger batch sizes by accumulating gradients across multiple forward/backward passes before synchronizing. This reduces communication frequency proportionally. However, accumulation has costs:
+Gradient accumulation is not free. Gradient accumulation simulates larger batch sizes by accumulating gradients across multiple forward/backward passes before synchronizing. This reduces communication frequency proportionally. However, accumulation has costs:
 
 1. **Memory**: Accumulated gradients consume memory throughout the accumulation window
 2. **Latency**: Effective step time increases proportionally with accumulation steps

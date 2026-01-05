@@ -111,6 +111,74 @@ While DevOps achieved considerable success in traditional software deployment, m
 
 The operational complexity and business risk of deploying machine learning without systematic engineering practices becomes clear when examining real-world failures. Consider a retail company that deployed a recommendation model that initially boosted sales by 15%. However, due to a silent data drift issue, the model's accuracy degraded over six months, eventually reducing sales by 5% compared to the original system. The problem went undetected because monitoring focused on system uptime rather than model performance metrics. The company lost an estimated $10 million in revenue before the issue was discovered during routine quarterly analysis. This scenario, common in early ML deployments, illustrates why MLOps, with its emphasis on continuous model monitoring and automated retraining, is not merely an engineering best practice, but a business necessity for organizations depending on machine learning systems for critical operations.
 
+### Foundational Principles {#sec-ml-operations-foundational-principles}
+
+Before examining specific tools and practices, we establish the enduring principles that underpin all MLOps implementations. These principles remain constant even as specific tools evolve, providing a framework for evaluating any MLOps solution.
+
+**Principle 1: Reproducibility Through Versioning**
+
+Every artifact that influences model behavior must be versioned and traceable. This principle extends beyond code versioning to encompass data, configurations, and environments:
+
+$$\text{Model Output} = f(\text{Code}_v, \text{Data}_v, \text{Config}_v, \text{Environment}_v)$$
+
+where each subscript $v$ denotes a specific version. A model cannot be reproduced unless all four components are captured. Tools that implement this principle (version control systems, data versioning platforms, configuration managers) vary in implementation but share the common goal of enabling complete reproducibility.
+
+**Principle 2: Separation of Concerns**
+
+MLOps systems decompose into distinct functional layers that can evolve independently:
+
+| Layer | Responsibility | Stability |
+|:------|:---------------|:----------|
+| **Data Layer** | Feature computation, storage, serving | Changes with data schema evolution |
+| **Training Layer** | Model development, hyperparameter optimization | Changes with algorithm research |
+| **Serving Layer** | Inference, scaling, latency management | Changes with traffic patterns |
+| **Monitoring Layer** | Drift detection, performance tracking | Changes with business requirements |
+
+: **MLOps Separation of Concerns**: Each layer addresses a distinct responsibility and evolves at different rates. {#tbl-mlops-layers}
+
+This separation enables teams to update serving infrastructure without retraining models, modify monitoring thresholds without redeploying, and evolve data pipelines while maintaining model compatibility.
+
+**Principle 3: The Consistency Imperative**
+
+Training and serving environments must process data identically. The cost of inconsistency grows with system scale:
+
+$$\text{Skew Cost} = \text{Base Error Rate} \times \text{Query Volume} \times \text{Error Impact}$$
+
+For a system serving one million queries daily with 1% skew-induced errors costing \$0.10 each, annual skew cost reaches \$365,000. This quantifies why consistency mechanisms (feature stores, shared preprocessing code, validation checks) represent investments with measurable returns.
+
+**Principle 4: Observable Degradation**
+
+ML systems must make silent failures visible through continuous measurement. The key insight is that model performance degrades along a continuum rather than failing discretely:
+
+| Degradation Type | Detection Mechanism | Response Strategy |
+|:-----------------|:--------------------|:------------------|
+| Sudden accuracy drop | Threshold alerts | Immediate rollback |
+| Gradual drift | Trend analysis | Scheduled retraining |
+| Subgroup degradation | Cohort monitoring | Targeted data collection |
+| Latency increase | Percentile tracking | Infrastructure scaling |
+
+: **Degradation Detection Strategies**: Different failure modes require different monitoring approaches and response strategies. {#tbl-degradation-types}
+
+**Principle 5: Cost-Aware Automation**
+
+Automation decisions should balance computational costs against accuracy improvements. The decision to retrain can be modeled as:
+
+$$\text{Retrain if: } \Delta\text{Accuracy} \times \text{Value per Point} > \text{Training Cost} + \text{Deployment Risk}$$
+
+This principle guides the design of retraining triggers, validation thresholds, and deployment strategies examined throughout this chapter. The specific values vary by domain, but the framework for making principled tradeoff decisions remains constant. See @sec-ml-operations-retraining-economics for the complete economic model with worked examples.
+
+These five principles form the evaluation framework for all MLOps tooling and practices. When assessing any tool or approach, ask: Does it enable reproducibility? Does it respect separation of concerns? Does it ensure consistency? Does it make degradation observable? Does it support cost-aware decisions?
+
+| Principle | Core Insight | Key Metric |
+|:----------|:-------------|:-----------|
+| 1. Reproducibility | Version all artifacts | Complete artifact hash |
+| 2. Separation of Concerns | Independent layer evolution | Layer coupling score |
+| 3. Consistency | Training equals Serving | Feature skew rate |
+| 4. Observable Degradation | Make failures visible | Time to detection |
+| 5. Cost-Aware Automation | Optimize total cost | Net retraining value |
+
+: **MLOps Principles Summary**: Quick reference for the five foundational principles that guide all MLOps tooling and practice decisions. {#tbl-mlops-principles-summary}
+
 This adaptation was driven by several recurring challenges in operationalizing machine learning that distinguished it from traditional software deployment. Data drift[^fn-data-drift-discovery], where shifts in input data distributions over time degrade model accuracy, requires continuous monitoring and automated retraining procedures.
 
 [^fn-data-drift-discovery]: **Data Drift Discovery**: The concept was first formalized by researchers studying spam detection systems in the early 2000s, who noticed that spam patterns evolved so rapidly that models became obsolete within weeks. This led to the realization that ML systems face a different challenge than traditional software: their environment actively adapts to defeat them.
@@ -562,7 +630,7 @@ Feature stores[^fn-feature-store-scale] provide an abstraction layer between dat
 
 [^fn-training-serving-skew]: **Training-Serving Skew Impact**: Studies show training-serving skew causes 5-15% accuracy degradation in production models. Google reported that fixing skew issues improved ad click prediction accuracy by 8%, translating to millions in additional revenue annually.
 
-To address these challenges, feature stores manage both offline (batch) and online (real-time) feature access in a centralized repository. This becomes critical when deploying the optimized models discussed in @sec-model-optimizations, where feature consistency across environments is essential for maintaining model accuracy. During training, features are computed and stored in a batch environment, typically in conjunction with historical labels. At inference time, the same transformation logic is applied to fresh data in an online serving system. This architecture ensures that models consume identical features in both contexts, promoting consistency and improving reliability.
+To address these challenges, feature stores manage both offline (batch) and online (real-time) feature access in a centralized repository. Feature stores implement **Principle 3: The Consistency Imperative** (@sec-ml-operations-foundational-principles) by ensuring identical feature computation across training and serving environments. This becomes critical when deploying the optimized models discussed in @sec-model-optimizations, where feature consistency is essential for maintaining model accuracy. During training, features are computed and stored in a batch environment, typically in conjunction with historical labels. At inference time, the same transformation logic is applied to fresh data in an online serving system. This architecture ensures that models consume identical features in both contexts, promoting consistency and improving reliability.
 
 Beyond consistency across training and serving environments, feature stores support versioning, metadata management, and feature reuse across teams. For example, a fraud detection model and a credit scoring model rely on overlapping transaction features, which can be centrally maintained, validated, and shared. This reduces engineering overhead and supports alignment across use cases.
 
@@ -629,7 +697,7 @@ def validate_no_skew(
 
 #### Versioning and Lineage {#sec-ml-operations-versioning-lineage-deaa}
 
-Versioning is essential to reproducibility and traceability in machine learning systems. Unlike traditional software, ML models depend on multiple changing artifacts: training data, feature engineering logic, trained model parameters, and configuration settings. To manage this complexity, MLOps practices enforce tracking of versions across all pipeline components.
+Versioning is essential to reproducibility and traceability in machine learning systems. This practice implements **Principle 1: Reproducibility Through Versioning** (@sec-ml-operations-foundational-principles), which requires all artifacts influencing model behavior to be versioned. Unlike traditional software, ML models depend on multiple changing artifacts: training data, feature engineering logic, trained model parameters, and configuration settings. To manage this complexity, MLOps practices enforce tracking of versions across all pipeline components.
 
 At the foundation of this tracking system, data versioning allows teams to snapshot datasets at specific points in time and associate them with particular model runs. This includes both raw data (e.g., input tables or log streams) and processed artifacts (e.g., cleaned datasets or feature sets). By maintaining a direct mapping between model checkpoints and the data used for training, teams can audit decisions, reproduce results, and investigate regressions.
 
@@ -951,6 +1019,83 @@ Incrementally update models as new labeled data arrives using online learning or
 
 The choice among these strategies depends on domain characteristics: scheduled retraining suits stable domains, triggered retraining addresses gradual drift, and continuous retraining handles rapidly evolving data distributions.
 
+##### Quantitative Retraining Economics {#sec-ml-operations-retraining-economics}
+
+The retraining decision can be formalized as an optimization problem that balances the cost of model staleness against retraining expenses. This framework enables principled decisions rather than arbitrary scheduling.
+
+**The Staleness Cost Function**
+
+Model accuracy typically degrades over time due to distribution drift. Let $A(t)$ represent accuracy at time $t$ since last training, and $A_0$ represent initial accuracy. The degradation rate $\lambda$ depends on domain volatility:
+
+$$A(t) = A_0 \cdot e^{-\lambda t}$$
+
+The cost of staleness accumulates based on query volume $Q$ per time period and the value impact $V$ of each accuracy point:
+
+$$\text{Staleness Cost}(T) = \int_0^T Q \cdot V \cdot (A_0 - A(t)) \, dt = Q \cdot V \cdot A_0 \cdot \left(T - \frac{1-e^{-\lambda T}}{\lambda}\right)$$
+
+**The Retraining Cost Function**
+
+Each retraining incurs fixed costs including compute, validation, and deployment overhead:
+
+$$\text{Retraining Cost} = C_{\text{compute}} + C_{\text{validation}} + C_{\text{deployment}} + C_{\text{risk}}$$
+
+where $C_{\text{risk}}$ represents the expected cost of potential regression from the new model.
+
+**Optimal Retraining Interval**
+
+The optimal retraining interval $T^*$ minimizes total cost per unit time:
+
+$$T^* = \arg\min_T \frac{\text{Staleness Cost}(T) + \text{Retraining Cost}}{T}$$
+
+For exponential decay, this yields:
+
+$$T^* \approx \sqrt{\frac{2 \cdot \text{Retraining Cost}}{Q \cdot V \cdot A_0 \cdot \lambda}}$$
+
+**Worked Example**
+
+Consider a fraud detection model with the following parameters:
+
+| Parameter | Value | Description |
+|:----------|:------|:------------|
+| $Q$ | 1,000,000 | Transactions per day |
+| $V$ | \$0.50 | Value per accuracy point |
+| $A_0$ | 0.95 | Initial accuracy |
+| $\lambda$ | 0.02 | Daily decay rate (2% per day) |
+| Retraining Cost | \$5,000 | Total retraining expense |
+
+: **Retraining Decision Parameters**: Example values for a fraud detection system. {#tbl-retraining-parameters}
+
+Applying the formula:
+
+$$T^* \approx \sqrt{\frac{2 \times 5000}{1000000 \times 0.50 \times 0.95 \times 0.02}} \approx \sqrt{\frac{10000}{9500}} \approx 1.03 \text{ days}$$
+
+This analysis suggests daily retraining is economically optimal for this high-volume, high-stakes fraud detection scenario.
+
+**Sensitivity Analysis**
+
+The optimal interval scales with the square root of costs and inversely with the square root of value and decay rate:
+
+| Change | Effect on $T^*$ |
+|:-------|:----------------|
+| 4x retraining cost | 2x longer interval |
+| 4x query volume | 2x shorter interval |
+| 4x decay rate | 2x shorter interval |
+
+: **Retraining Interval Sensitivity**: How parameter changes affect optimal retraining frequency. {#tbl-retraining-sensitivity}
+
+**Model Limitations**
+
+This framework provides a first-order approximation that enables principled decision-making, but practitioners should be aware of its assumptions:
+
+- **Predictable drift**: The exponential decay model assumes drift occurs gradually at a known rate. Sudden distribution shifts (concept drift) require different detection and response mechanisms.
+- **Known value function**: The model assumes each accuracy point has a quantifiable business value. In practice, this value may be nonlinear or context-dependent.
+- **Independent retraining cycles**: The model treats each retraining decision independently, ignoring potential benefits from continuous learning or transfer across retraining cycles.
+- **Linear cost scaling**: Retraining costs are assumed fixed. In practice, infrastructure costs may vary with compute availability and pricing dynamics.
+
+Despite these limitations, the framework provides a principled starting point for retraining decisions. Teams should calibrate parameters using historical data and refine the model as they accumulate operational experience.
+
+This quantitative framework transforms retraining from an ad hoc decision into an engineering optimization, enabling teams to justify infrastructure investments and calibrate monitoring thresholds based on measurable business impact. The framework implements **Principle 5: Cost-Aware Automation** (@sec-ml-operations-foundational-principles) by making the cost-benefit tradeoffs explicit and quantifiable.
+
 #### Model Validation {#sec-ml-operations-model-validation-cb32}
 
 Before a machine learning model is deployed into production, it must undergo rigorous evaluation to ensure that it meets predefined performance, robustness, and reliability criteria. While earlier chapters discussed evaluation in the context of model development, MLOps reframes evaluation as a structured and repeatable process for validating operational readiness. It incorporates practices that support pre-deployment assessment, post-deployment monitoring, and automated regression testing.
@@ -1223,7 +1368,7 @@ Operational resource allocation extends beyond simple utilization metrics to enc
 
 #### Model and Infrastructure Monitoring {#sec-ml-operations-model-infrastructure-monitoring-3c34}
 
-Monitoring is a critical function in MLOps, enabling teams to maintain operational visibility over machine learning systems deployed in production. Once a model is live, it becomes exposed to real-world inputs, evolving data distributions, and shifting user behavior. Without continuous monitoring, it becomes difficult to detect performance degradation, data quality issues, or system failures in a timely manner.
+Monitoring is a critical function in MLOps, enabling teams to maintain operational visibility over machine learning systems deployed in production. Monitoring implements **Principle 4: Observable Degradation** (@sec-ml-operations-foundational-principles), transforming the silent failure problem into actionable signals. Once a model is live, it becomes exposed to real-world inputs, evolving data distributions, and shifting user behavior. Without continuous monitoring, it becomes difficult to detect performance degradation, data quality issues, or system failures in a timely manner.
 
 Effective monitoring spans both model behavior and infrastructure performance. On the model side, teams track metrics such as accuracy, precision, recall, and the [confusion matrix](https://scikit-learn.org/stable/auto_examples/model_selection/plot_confusion_matrix.html) using live or sampled predictions. By evaluating these metrics over time, they can detect whether the model's performance remains stable or begins to drift.
 
@@ -2218,7 +2363,7 @@ In low-maturity environments, ML systems are often constructed around monolithic
 
 As maturity increases, modular abstractions begin to emerge. Feature engineering is decoupled from model logic, pipelines are defined declaratively, and system boundaries are enforced through APIs and orchestration frameworks. These changes support reproducibility and enable teams to scale development across multiple contributors or applications. Infrastructure becomes programmable through configuration files, and model artifacts are promoted through standardized deployment stages. This architectural discipline allows systems to evolve predictably, even as requirements shift or data distributions change.
 
-At high levels of maturity, ML systems exhibit properties commonly found in production-grade software systems: stateless services, contract-driven interfaces, environment isolation, and observable execution. Design patterns such as feature stores, model registries, and infrastructure-as-code become foundational. Crucially, system behavior is not inferred from static assumptions, but monitored in real time and adapted as needed. This enables feedback-driven development and supports closed-loop systems where data, models, and infrastructure co-evolve.
+At high levels of maturity, ML systems exhibit properties commonly found in production-grade software systems: stateless services, contract-driven interfaces, environment isolation, and observable execution. Design patterns such as feature stores, model registries, and infrastructure-as-code become foundational. System behavior is not inferred from static assumptions but monitored in real time and adapted as needed. This enables feedback-driven development and supports closed-loop systems where data, models, and infrastructure co-evolve.
 
 In each case, operational maturity is not an external constraint but an architectural force: it governs how complexity is managed, how change is absorbed, and how the system can scale in the face of threats to service uptime (see @fig-uptime-iceberg). Design decisions that disregard these constraints may function under ideal conditions, but fail under real-world pressures such as latency requirements, drift, outages, or regulatory audits. Understanding this relationship between maturity and design is essential for building resilient machine learning systems that sustain performance over time.
 
@@ -2388,7 +2533,7 @@ The Oura Ring represents a compelling example of MLOps practices applied to cons
 
 The Oura Ring is a consumer-grade wearable device designed to monitor sleep, activity, and physiological recovery through embedded sensing and computation. By measuring signals such as motion, heart rate, and body temperature, the device estimates sleep stages and delivers personalized feedback to users. Unlike traditional cloud-based systems, much of the Oura Ring's data processing and inference occurs directly on the device, making it a practical example of embedded machine learning in production.
 
-The central objective for the development team was to improve the device's accuracy in classifying sleep stages, aligning its predictions more closely with those obtained through polysomnography (PSG)[^fn-psg-gold-standard], the clinical gold standard for sleep monitoring. Initial evaluations revealed a 62% correlation between the Oura Ring's predictions and PSG-derived labels, in contrast to the 82–83% correlation observed between expert human scorers. This discrepancy highlighted both the promise and limitations of the initial model, prompting an effort to re-evaluate data collection, preprocessing, and model development workflows. The case illustrates the importance of robust MLOps practices, particularly when operating under the constraints of embedded systems.
+The central objective for the development team was to improve the device's accuracy in classifying sleep stages, aligning its predictions more closely with those obtained through polysomnography (PSG)[^fn-psg-gold-standard], the clinical gold standard for sleep monitoring. Initial evaluations revealed a 62% correlation between the Oura Ring's predictions and PSG-derived labels, in contrast to the 82 to 83% correlation observed between expert human scorers. This discrepancy highlighted both the promise and limitations of the initial model, prompting an effort to re-evaluate data collection, preprocessing, and model development workflows. The case illustrates the importance of robust MLOps practices, particularly when operating under the constraints of embedded systems.
 
 [^fn-psg-gold-standard]: **Polysomnography (PSG)**: Multi-parameter sleep study that records brain waves, eye movements, muscle activity, heart rhythm, breathing, and blood oxygen levels simultaneously. First developed by Alrick Hertzman in 1936 and formalized by researchers at Harvard and University of Chicago in the 1930s-1950s, PSG requires patients to sleep overnight in specialized labs with 20+ electrodes attached. Modern sleep centers conduct over 2.8 million PSG studies annually in the US, with each study costing $1,000-$3,000 and requiring 6-8 hours of monitoring.
 
@@ -2442,7 +2587,7 @@ CTM leverages wearable sensors and devices to collect rich streams of physiologi
 
 However, the mere deployment of ML models is insufficient to realize these benefits. AI systems must be integrated into clinical workflows, aligned with regulatory requirements, and designed to augment rather than replace human decision-making. The traditional MLOps paradigm, which focuses on automating pipelines for model development and serving, does not adequately account for the complex sociotechnical landscape of healthcare, where patient safety, clinician judgment, and ethical constraints must be prioritized. The privacy and security considerations inherent in healthcare AI, including data protection, regulatory compliance, and secure computation, represent critical operational requirements.
 
-This case study explores ClinAIOps, a framework proposed for operationalizing AI in clinical environments [@chen2023framework]. Where the Oura Ring case demonstrated how MLOps principles adapt to resource constraints, ClinAIOps shows how they must evolve to address regulatory and human-centered requirements. Unlike conventional MLOps, ClinAIOps directly addresses the **feedback loop** challenges identified earlier by designing them into the system architecture rather than treating them as technical debt. The framework's structured coordination between patients, clinicians, and AI systems represents a practical implementation of the **governance and collaboration** components discussed in the production operations section. ClinAIOps also exemplifies how **operational maturity** evolves in specialized domains—requiring not just technical sophistication but domain-specific adaptations that maintain the core MLOps principles while addressing regulatory and ethical constraints.
+This case study explores ClinAIOps, a framework proposed for operationalizing AI in clinical environments [@chen2023framework]. Where the Oura Ring case demonstrated how MLOps principles adapt to resource constraints, ClinAIOps shows how they must evolve to address regulatory and human-centered requirements. Unlike conventional MLOps, ClinAIOps directly addresses the **feedback loop** challenges identified earlier by designing them into the system architecture rather than treating them as technical debt. The framework's structured coordination between patients, clinicians, and AI systems represents a practical implementation of the **governance and collaboration** components discussed in the production operations section. ClinAIOps also exemplifies how **operational maturity** evolves in specialized domains, requiring not just technical sophistication but domain-specific adaptations that maintain the core MLOps principles while addressing regulatory and ethical constraints.
 
 To understand why ClinAIOps represents a necessary evolution from traditional MLOps, we must first examine where standard operational practices fall short in clinical environments:
 
@@ -2613,7 +2758,7 @@ Together, these loops enable adaptive personalization of care. They help calibra
 
 ##### Patient-AI Loop {#sec-ml-operations-patientai-loop-ef3d}
 
-The patient–AI loop enables personalized and timely therapy optimization by leveraging continuous physiological data collected through wearable devices. Patients are equipped with sensors such as smartwatches, skin patches, or specialized biosensors that passively capture health-related signals in real-world conditions. For instance, a patient managing diabetes may wear a continuous glucose monitor, while individuals with cardiovascular conditions may use ECG-enabled wearables to track cardiac rhythms.
+The patient-AI loop enables personalized and timely therapy optimization by leveraging continuous physiological data collected through wearable devices. Patients are equipped with sensors such as smartwatches, skin patches, or specialized biosensors that passively capture health-related signals in real-world conditions. For instance, a patient managing diabetes may wear a continuous glucose monitor, while individuals with cardiovascular conditions may use ECG-enabled wearables to track cardiac rhythms.
 
 The AI system continuously analyzes these data streams in conjunction with relevant clinical context drawn from the patient's electronic medical records, including diagnoses, lab values, prescribed medications, and demographic information. Using this holistic view, the AI model generates individualized recommendations for treatment adjustments, such as modifying dosage levels, altering administration timing, or flagging anomalous trends for review.
 
@@ -2623,17 +2768,17 @@ By enabling real-time, tailored interventions, including automatic insulin dosin
 
 ##### Clinician-AI Loop {#sec-ml-operations-clinicianai-loop-1808}
 
-The clinician–AI loop introduces a critical layer of human oversight into the process of AI-assisted therapeutic decision-making. In this loop, the AI system generates treatment recommendations and presents them to the clinician along with concise, interpretable summaries of the underlying patient data. These summaries may include longitudinal trends, sensor-derived metrics, and contextual factors extracted from the electronic health record.
+The clinician-AI loop introduces a critical layer of human oversight into the process of AI-assisted therapeutic decision-making. In this loop, the AI system generates treatment recommendations and presents them to the clinician along with concise, interpretable summaries of the underlying patient data. These summaries may include longitudinal trends, sensor-derived metrics, and contextual factors extracted from the electronic health record.
 
 For example, an AI model might recommend a reduction in antihypertensive medication dosage for a patient whose blood pressure has remained consistently below target thresholds. The clinician reviews the recommendation in the context of the patient's broader clinical profile and may choose to accept, reject, or modify the proposed change. This feedback, in turn, contributes to the continuous refinement of the model, improving its alignment with clinical practice.
 
-Crucially, clinicians also define the operational boundaries within which the AI system can autonomously issue recommendations. These constraints ensure that only low-risk adjustments are automated, while more significant decisions require human approval. This preserves clinical accountability, supports patient safety, and enhances trust in AI-supported workflows.
+Clinicians also define the operational boundaries within which the AI system can autonomously issue recommendations. These constraints ensure that only low-risk adjustments are automated, while more significant decisions require human approval. This preserves clinical accountability, supports patient safety, and enhances trust in AI-supported workflows.
 
-The clinician–AI loop exemplifies a hybrid model of care in which AI augments rather than replaces human expertise. By enabling efficient review and oversight of algorithmic outputs, it facilitates the integration of machine intelligence into clinical practice while preserving the role of the clinician as the final decision-maker.
+The clinician-AI loop exemplifies a hybrid model of care in which AI augments rather than replaces human expertise. By enabling efficient review and oversight of algorithmic outputs, it facilitates the integration of machine intelligence into clinical practice while preserving the role of the clinician as the final decision-maker.
 
 ##### Patient-Clinician Loop {#sec-ml-operations-patientclinician-loop-dbae}
 
-The patient–clinician loop enhances the quality of clinical interactions by shifting the focus from routine data collection to higher-level interpretation and shared decision-making. With AI systems handling data aggregation and basic trend analysis, clinicians are freed to engage more meaningfully with patients: reviewing patterns, contextualizing insights, and setting personalized health goals.
+The patient-clinician loop enhances the quality of clinical interactions by shifting the focus from routine data collection to higher-level interpretation and shared decision-making. With AI systems handling data aggregation and basic trend analysis, clinicians are freed to engage more meaningfully with patients: reviewing patterns, contextualizing insights, and setting personalized health goals.
 
 For example, in managing diabetes, a clinician may use AI-summarized data to guide a discussion on dietary habits and physical activity, tailoring recommendations to the patient's specific glycemic trends. Rather than adhering to fixed follow-up intervals, visit frequency can be adjusted dynamically based on patient progress and stability, ensuring that care delivery remains responsive and efficient.
 
@@ -2645,7 +2790,7 @@ To concretize the principles of ClinAIOps, consider the management of hyper&shy;
 
 ClinAIOps offers a structured framework for managing hypertension by integrating wearable sensing technologies, AI-driven recommendations, and clinician oversight into a cohesive feedback system. In this context, wearable devices equipped with photoplethysmography (PPG) and electrocardiography (ECG) sensors passively capture cardiovascular data, which can be analyzed in near-real-time to inform treatment adjustments. These inputs are augmented by behavioral data (e.g., physical activity) and medication adherence logs, forming the basis for an adaptive and responsive treatment regimen.
 
-The following subsections detail how the patient–AI, clinician–AI, and patient–clinician loops apply in this setting, illustrating the practical implementation of ClinAIOps for a widespread and clinically significant condition.
+The following subsections detail how the patient-AI, clinician-AI, and patient-clinician loops apply in this setting, illustrating the practical implementation of ClinAIOps for a widespread and clinically significant condition.
 
 ##### Data Collection {#sec-ml-operations-data-collection-da4d}
 
