@@ -162,7 +162,7 @@ The LogP model characterizes a network using four parameters:
 
 - **L (Latency)**: The time for a small message to traverse the network from sender to receiver, including all fixed overheads. Typical values range from 1-10 microseconds for modern InfiniBand networks.
 
-- **o (Overhead)**: The CPU time required at sender and receiver to inject or receive a message. This includes protocol processing, buffer management, and system call overhead. Typical values are 1-5 microseconds.
+- **o (Overhead)**: The CPU/GPU time required at sender and receiver to inject or receive a message. This includes protocol processing, buffer management, CUDA stream synchronization, and kernel launch overhead. Typical values range from 1-5 microseconds for well-optimized paths, but can spike to 50-100 microseconds when GPU memory pressure triggers allocation or when CUDA streams require synchronization. Production systems must account for this variability when predicting communication time distributions, not just means.
 
 - **g (Gap)**: The minimum time between consecutive message transmissions, representing the inverse of per-node bandwidth. For a 400 Gbps link, $g = 1/(50 \text{ GB/s}) = 20$ nanoseconds per byte.
 
@@ -392,13 +392,13 @@ $$
 T_{latency} \geq \log_2 N \cdot \alpha
 $$
 
-**Combined Lower Bound**: The total time for any AllReduce algorithm is bounded by:
+**Combined Lower Bound**: The total time for any AllReduce algorithm is bounded by the sum of these terms, since both bandwidth and latency contributions are unavoidable:
 
 $$
-T_{AllReduce} \geq \max\left(2 \cdot \frac{N-1}{N} \cdot \frac{M}{\beta}, \log_2 N \cdot \alpha\right)
+T_{AllReduce} \geq 2 \cdot \frac{N-1}{N} \cdot \frac{M}{\beta} + 2\log_2 N \cdot \alpha
 $$
 
-No algorithm can simultaneously achieve both bounds. Algorithms optimized for bandwidth have higher latency terms; algorithms optimized for latency sacrifice bandwidth efficiency. The optimal choice depends on message size and network characteristics.
+The factor of 2 in the latency term accounts for both the reduce and broadcast phases, each requiring $\log_2 N$ sequential steps. No practical algorithm achieves both optimal terms simultaneously. Algorithms optimized for bandwidth (like ring AllReduce) have $O(N)$ latency terms; algorithms optimized for latency (like tree AllReduce) have $O(\log N)$ bandwidth multipliers. Understanding this fundamental trade-off guides algorithm selection: use tree-based algorithms for small messages where latency dominates, and ring-based algorithms for large messages where bandwidth dominates.
 
 ### Naive AllReduce: Reduce then Broadcast {#sec-naive-allreduce}
 
@@ -508,6 +508,31 @@ Recursive halving-doubling achieves balanced latency and bandwidth performance b
 
 **AllGather Phase (Recursive Doubling)**: The process reverses. In step $k$, each process pairs with a partner at distance $2^k$. Partners exchange their fully reduced chunks. Each step doubles the amount of reduced data each process holds. After $\log_2 N$ steps, every process has the complete result.
 
+::: {.callout-note title="Derivation: Why Recursive Halving-Doubling is Optimal"}
+**Latency Optimality**: Each phase requires exactly $\log_2 N$ steps because the data ownership changes by a factor of 2 each step. In ReduceScatter, each process starts with M bytes and ends with M/N bytes, halving each step. In AllGather, each process starts with M/N bytes and ends with M bytes, doubling each step.
+
+**Bandwidth Optimality**: Track the total data transferred per process:
+
+- Step 1: Exchange $M/2$ bytes with partner
+- Step 2: Exchange $M/4$ bytes
+- ...
+- Step $\log_2 N$: Exchange $M/N$ bytes
+
+Total per phase: $M/2 + M/4 + ... + M/N = M(1/2 + 1/4 + ... + 1/N) = M \cdot \frac{N-1}{N}$
+
+Both phases combined: $2 \cdot M \cdot (N-1)/N$, matching the bandwidth lower bound.
+
+**Worked Example (N=8)**:
+
+| Step | Partner Distance | Data Exchanged | Cumulative Transfer |
+|------|------------------|----------------|---------------------|
+| 1 | 4 | M/2 | M/2 |
+| 2 | 2 | M/4 | 3M/4 |
+| 3 | 1 | M/8 | 7M/8 |
+
+After 3 steps, each process has transferred $(7/8) \cdot M = (N-1)/N \cdot M$, achieving the bandwidth lower bound in $\log_2 N$ steps.
+:::
+
 The time complexity is:
 
 $$
@@ -587,6 +612,32 @@ The table below shows optimal algorithm selection for various scenarios:
 | 1 MB - 100 MB | > 64 GPUs | Hierarchical | Balance both terms |
 | 100 MB - 10 GB | Any | Ring | Bandwidth-bound |
 | > 10 GB | Multi-node | Hierarchical Ring | Exploit topology |
+
+### AllReduce Fault Tolerance {#sec-allreduce-fault-tolerance}
+
+Production AllReduce implementations must handle node failures gracefully. At 1000+ GPU scale, hardware failures occur multiple times per day, making fault tolerance a critical design consideration rather than an edge case.
+
+**Failure Modes in Collective Operations**:
+
+1. **Node crash**: Process terminates, breaking ring or tree topology. All other participants block indefinitely waiting for the failed node's contribution.
+2. **Network partition**: Subset of nodes unreachable. Collective cannot complete because not all participants can communicate.
+3. **Straggler**: One node slower than others (thermal throttling, OS jitter, network congestion). All participants wait, bounded only by timeout.
+4. **Silent data corruption**: Rare but catastrophic. Incorrect gradients propagate through the reduction, corrupting model training.
+
+Ring AllReduce is particularly vulnerable because a single node failure breaks the ring, stalling all participants. Tree AllReduce degrades more gracefully since subtrees can complete independently.
+
+**Recovery Strategies**:
+
+- **Timeout and rebuild**: Detect failure via timeout (typically 5-10 minutes), rebuild topology excluding failed node, restart AllReduce. This adds 10-60 seconds overhead.
+- **Elastic training**: Dynamically adjust worker count when failures occur. Continue training with fewer workers, accepting slightly degraded throughput.
+- **Checkpointing**: Save model state before AllReduce operations. On failure, restore from checkpoint and retry with reconfigured topology.
+- **Redundant computation**: Run duplicate workers on critical nodes. If primary fails, seamlessly switch to backup without restarting collective.
+
+**Quantifying Failure Probability**: For N GPUs with independent failure probability p per hour, the probability of at least one failure during a T-hour training run is:
+
+$$P(\text{failure}) = 1 - (1-p)^{N \cdot T}$$
+
+With p = 0.001 (0.1% per GPU-hour) and 1000 GPUs training for 100 hours: $P(\text{failure}) = 1 - (0.999)^{100,000} \approx 1.0$. Failures are guaranteed at scale. Systems must be designed for graceful degradation, not failure prevention.
 
 ### Pipelining and Chunking Strategies {#sec-pipelining-chunking}
 
@@ -711,7 +762,7 @@ Students who learn only AllReduce are unprepared for half of production ML workl
 
 ### The Collective Operation Vocabulary {#sec-collective-vocabulary}
 
-MPI standardized seven core collective operations that form the basis for all distributed communication patterns. Each operation has distinct semantics, complexity characteristics, and use cases.
+MPI standardized eight core collective operations that form the basis for all distributed communication patterns. Each operation has distinct semantics, complexity characteristics, and use cases.
 
 **Broadcast**: One root process distributes identical data to all other processes. Starting state: root has data $x$, others have nothing. Ending state: all processes have $x$.
 
@@ -2517,7 +2568,7 @@ Communication is the binding constraint that determines whether distributed trai
 
 **The LogP Model**: Communication time follows $T = \alpha + M/\beta$, where $\alpha$ represents fixed latency and $M/\beta$ represents bandwidth-limited transfer time. The crossover point $M_{cross} = \alpha \cdot \beta$ determines whether optimizations should target latency reduction or bandwidth improvement.
 
-**Collective Operations as Primitives**: The seven MPI collectives (Broadcast, Reduce, AllReduce, Scatter, Gather, AllGather, ReduceScatter, AlltoAll) form a complete vocabulary for distributed communication. Mastering when to use each primitive is essential for efficient system design.
+**Collective Operations as Primitives**: The eight core MPI collectives (Broadcast, Reduce, AllReduce, Scatter, Gather, AllGather, ReduceScatter, AlltoAll) form a complete vocabulary for distributed communication. Mastering when to use each primitive is essential for efficient system design.
 
 ### Key Takeaways
 

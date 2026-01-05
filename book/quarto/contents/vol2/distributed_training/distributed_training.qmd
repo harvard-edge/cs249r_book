@@ -391,7 +391,27 @@ This coordination introduces several key challenges that distributed training sy
 
 Before examining specific parallelism strategies, understanding the quantitative metrics that govern distributed training efficiency is essential. These metrics provide the foundation for making informed decisions about scaling strategies, hardware selection, and optimization approaches.
 
-Communication overhead represents the primary bottleneck in distributed training systems. AllReduce operations consume 10-40% of total training time in data parallel systems, with this overhead increasing significantly at scale. For BERT-Large on 128 GPUs, communication overhead reaches 35% of total runtime, while GPT-3 scale models experience 55% overhead on 1,024 GPUs. The communication time scales as O(n) for ring-AllReduce and O(log n) for tree-based reduction, making interconnect selection critical for large-scale deployments.
+Communication overhead represents the primary bottleneck in distributed training systems. AllReduce operations consume 10-40% of total training time in data parallel systems, with this overhead increasing significantly at scale. For BERT-Large on 128 GPUs, communication overhead reaches 35% of total runtime, while GPT-3 scale models experience 55% overhead on 1,024 GPUs.
+
+::: {.callout-note title="AllReduce Communication Complexity"}
+AllReduce complexity depends on two components: latency ($\alpha$) and bandwidth ($\beta$). For a message of size $M$ across $N$ workers:
+
+**Ring AllReduce**:
+
+- Time: $2(N-1) \cdot \alpha + 2 \cdot \frac{N-1}{N} \cdot M \cdot \beta$
+- Bandwidth utilization: $(N-1)/N$, approaching optimal as $N$ grows
+- Each device sends/receives approximately $2M$ bytes total (not $2M \cdot N$)
+
+**Tree AllReduce**:
+
+- Time: $2 \log_2(N) \cdot \alpha + 2 \log_2(N) \cdot M \cdot \beta$
+- Bandwidth utilization: $1/\log_2(N)$, decreasing with scale
+- Latency: $O(\log N)$ steps
+
+The crossover point depends on message size: tree AllReduce wins for small messages (latency-dominated), while ring AllReduce wins for large gradients (bandwidth-dominated). Modern implementations like NCCL use hierarchical algorithms that achieve tree latency within nodes (using NVLink) and ring bandwidth between nodes (using InfiniBand).
+:::
+
+Interconnect selection is critical for large-scale deployments, as these complexity characteristics determine when communication dominates computation.
 
 The bandwidth requirements for efficient distributed training are substantial, particularly for transformer models. Efficient systems require 100-400 GB/s aggregate bandwidth per node for transformer architectures. BERT-Base needs 8 GB parameter synchronization per iteration across 64 GPUs, demanding 200 GB/s sustained bandwidth for <50ms synchronization latency. Language models with 175B parameters require 700 GB/s aggregate bandwidth to maintain 80% parallel efficiency, necessitating InfiniBand HDR or equivalent interconnects.
 
@@ -543,6 +563,47 @@ To maintain consistency across the distributed system, the gradients computed by
 
 For example, with 8 GPUs sharing gradients for a 100 MB model, ring all-reduce requires only 7 communication steps instead of the 56 steps needed for naive all-to-all synchronization. The ring topology creates bottlenecks: the slowest link in the ring determines the overall synchronization time, and network partitions can halt the entire training process. Alternative algorithms like tree-reduce achieve O(log n) latency at the cost of increased bandwidth requirements on root nodes. Modern systems often implement hierarchical topologies, using high-speed links within nodes and lower-bandwidth connections between nodes to optimize these trade-offs.
 
+#### Synchronization Models {#sec-distributed-training-sync-models}
+
+Distributed training systems operate under explicit synchronization models that govern when workers observe each other's updates. Understanding these models is essential for reasoning about correctness and performance.
+
+**Bulk Synchronous Parallel (BSP)**: The default model for synchronous data parallelism. All workers complete their local computation (forward and backward pass), synchronize gradients through a barrier (AllReduce), and then simultaneously update parameters. BSP provides strong guarantees: every worker sees identical parameter values at each step, ensuring mathematical equivalence to single-device training. The cost is that the slowest worker determines iteration time (the "straggler problem").
+
+**Stale Synchronous Parallel (SSP)**: Workers may proceed up to $s$ iterations ahead of the slowest worker before blocking. This bounds staleness while reducing synchronization delays. SSP requires careful learning rate tuning since workers compute gradients on slightly different parameter versions. The bounded staleness guarantee ($s$ typically 2-5) provides a middle ground between BSP's strong consistency and fully asynchronous approaches.
+
+**Asynchronous SGD**: Workers update parameters independently without synchronization barriers. This maximizes hardware utilization but introduces gradient staleness that can degrade convergence. When a worker computes gradients on parameters that are already $\tau$ steps stale, the effective learning rate decreases. Compensation techniques include learning rate scaling ($\eta' = \eta / \sqrt{\tau}$) or momentum correction.
+
+::: {.callout-note title="Synchronization Model Trade-offs"}
+| Model | Consistency | Throughput | Convergence | Use Case |
+|-------|-------------|------------|-------------|----------|
+| BSP | Strong | Bounded by slowest worker | Equivalent to single-GPU | Final training runs, reproducibility |
+| SSP | Bounded staleness | Higher than BSP | Near-equivalent with tuning | Hyperparameter search |
+| Async | Weak | Maximum | Degraded, requires compensation | Large heterogeneous clusters |
+:::
+
+The choice of synchronization model fundamentally affects both system throughput and model convergence. Production systems typically use BSP for final training runs (to ensure reproducibility) while exploring SSP or async approaches during hyperparameter search where exact reproducibility is less critical.
+
+#### Barrier Semantics and Failure Modes {#sec-distributed-training-barrier-failures}
+
+AllReduce operations implement implicit barriers: no worker can proceed until all workers have contributed their gradients. This coupling creates failure modes absent from single-device training:
+
+**Deadlock from Worker Failure**: If any worker crashes during AllReduce, all other workers block indefinitely waiting for the missing contribution. Without timeout mechanisms, the entire training job hangs rather than failing cleanly. Production systems implement watchdog timers (typically 5-10 minutes) to detect and terminate stuck jobs.
+
+**Deadlock from Gradient Mismatch**: If workers disagree on which tensors to synchronize (due to conditional computation paths or dynamic batching), AllReduce operations may block waiting for tensors that some workers never send. This commonly occurs with:
+
+- Variable-length sequences in NLP models
+- Dynamic computation graphs
+- Mixture-of-experts with different routing decisions
+
+**Straggler-Induced Delays**: The iteration time equals the slowest worker's time plus synchronization overhead. A single slow worker (due to thermal throttling, network congestion, or OS jitter) delays all workers, reducing cluster utilization. At 1000 GPUs with 1% probability of straggler per GPU per step, approximately 10 GPUs straggle every iteration.
+
+Production systems address these issues through:
+
+- **Timeouts**: AllReduce operations with configurable timeouts that trigger failure handling rather than indefinite blocking
+- **Heartbeat monitoring**: Detecting unresponsive workers before AllReduce blocks
+- **Elastic training**: Removing failed workers and continuing with reduced parallelism (see @sec-fault-tolerance)
+- **Backup workers**: Redundant computation to mask stragglers
+
 #### Parameter Updating {#sec-distributed-training-parameter-updating}
 
 After gradient aggregation, each device independently updates model parameters using the chosen optimization algorithm, such as SGD with momentum or Adam. This decentralized update strategy, implemented in frameworks like PyTorch's DistributedDataParallel (DDP), enables efficient parameter updates without requiring a central coordination server. Since all devices have identical gradient values after synchronization, they perform mathematically equivalent updates to maintain model consistency across the distributed system.
@@ -652,7 +713,53 @@ Finally, there are critical challenges related to fault tolerance and reliabilit
 
 Implementation complexity compounds these reliability challenges. While modern frameworks abstract much of the complexity, implementing robust distributed training systems requires significant engineering expertise. Graceful degradation when subsets of nodes fail, consistent gradient synchronization despite network partitions, and automatic recovery from transient failures demand deep understanding of both machine learning and distributed systems principles.
 
-Despite these challenges, data parallelism remains an important technique for distributed training, with many strategies available to address its limitations. Monitoring these distributed systems requires specialized tooling for tracking gradient norms, communication patterns, and hardware utilization across nodes. Model parallelism provides another strategy for scaling training that is particularly well-suited for handling extremely large models that cannot fit on a single device.
+Despite these challenges, data parallelism remains an important technique for distributed training, with many strategies available to address its limitations. Monitoring these distributed systems requires specialized tooling for tracking gradient norms, communication patterns, and hardware utilization across nodes. Before examining model parallelism, we first explore memory optimization techniques that extend data parallelism to larger models.
+
+### Memory-Efficient Data Parallelism: ZeRO and FSDP {#sec-distributed-training-zero-fsdp}
+
+The memory constraints of data parallelism motivate a family of techniques that shard memory state across workers while preserving the simplicity of data parallel training. ZeRO (Zero Redundancy Optimizer) and its PyTorch implementation FSDP (Fully Sharded Data Parallel) enable training models that would otherwise require model parallelism.
+
+In standard data parallelism, each GPU maintains a complete copy of:
+
+- **Model parameters**: 4 bytes/param (FP32) or 2 bytes/param (FP16/BF16)
+- **Gradients**: Same size as parameters
+- **Optimizer states**: For Adam, 8 bytes/param (momentum + variance in FP32)
+
+For a 7B parameter model with Adam optimizer, each GPU requires: $7B \times (4 + 4 + 8) = 112$ GB, exceeding A100-80GB capacity even before accounting for activations.
+
+ZeRO addresses this redundancy through progressive sharding:
+
+| Stage | What is Sharded | Memory Reduction | Communication Overhead |
+|-------|-----------------|------------------|------------------------|
+| ZeRO-1 | Optimizer states only | ~4x | None (same as DDP) |
+| ZeRO-2 | + Gradients | ~8x | ReduceScatter replaces AllReduce |
+| ZeRO-3 / FSDP | + Parameters | ~$N$ (linear in workers) | AllGather before each layer |
+
+**ZeRO-1** shards optimizer states across GPUs. Each GPU stores only $1/N$ of the Adam momentum and variance tensors. After gradient AllReduce, each GPU updates only its shard of parameters, then broadcasts updates to other GPUs. Memory savings: optimizer states reduced from $8N$ bytes/param to $8$ bytes/param total across cluster.
+
+**ZeRO-2** additionally shards gradients. Instead of AllReduce (which leaves full gradients on each GPU), ZeRO-2 uses ReduceScatter (each GPU receives $1/N$ of the reduced gradients). Memory savings: gradients reduced from $4N$ bytes/param to $4$ bytes/param total.
+
+**ZeRO-3 / FSDP** shards parameters themselves. Each GPU stores only $1/N$ of the model. Before each layer's forward pass, parameters are gathered via AllGather; after backward pass, gradients are reduced via ReduceScatter, then parameters are discarded. This achieves maximum memory efficiency at the cost of additional communication.
+
+::: {.callout-note title="FSDP Communication Analysis"}
+FSDP introduces communication on the critical path that DDP avoids:
+
+- **Forward pass**: AllGather to reconstruct parameters ($M$ bytes × 2 for each layer)
+- **Backward pass**: ReduceScatter for gradients ($M$ bytes × 2 for each layer)
+
+For a model with $L$ layers, FSDP performs $2L$ collective operations per training step versus 1 AllReduce for DDP. However, FSDP enables overlapping: while layer $i$ computes, layer $i+1$ can prefetch parameters.
+
+Total FSDP communication volume: approximately $3M$ bytes (vs. $2M$ for DDP AllReduce), but spread across more operations with overlap opportunities.
+:::
+
+**When to use FSDP vs. DDP:**
+
+- **Model fits in GPU memory with room for activations**: Use DDP (lower overhead)
+- **Model barely fits or requires activation checkpointing**: Use FSDP ZeRO-2
+- **Model parameters exceed single-GPU memory**: Use FSDP ZeRO-3
+- **Training 70B+ models on 80GB GPUs**: Combine FSDP with tensor parallelism
+
+FSDP configuration requires careful tuning of sharding strategy (by layer, by transformer block, or flat) and mixed precision settings. The `auto_wrap_policy` determines sharding granularity, with finer sharding reducing memory but increasing communication frequency.
 
 ## Model Parallelism {#sec-distributed-training-model-parallelism}
 
@@ -907,11 +1014,51 @@ In a transformer model distributed across four devices, device 1 would process b
 
 The transfer of hidden states between devices occurs continuously rather than in distinct phases. When device 1 completes processing a microbatch, it immediately transfers the output tensor of shape [microbatch_size, sequence_length, hidden_dimension] to device 2 and begins processing the next microbatch. This overlapping computation pattern maintains full hardware utilization while preserving the model's mathematical properties.
 
-#### Operator-level Parallelism {#sec-distributed-training-operatorlevel-parallelism}
+#### Tensor Parallelism {#sec-distributed-training-tensor-parallelism}
 
-Operator-level parallelism divides individual neural network operations across devices. In transformer models, this often means splitting attention computations. Consider a transformer with 64 attention heads and a hidden dimension of 4096. Two devices might split this computation as follows: Device 1 processes attention heads 1-32, computing queries, keys, and values for its assigned heads. Device 2 simultaneously processes heads 33-64. Each device handles attention computations for [batch_size, sequence_length, 2048] dimensional tensors.
+Tensor parallelism (also called operator-level or intra-layer parallelism) divides individual neural network operations across devices. Unlike pipeline parallelism which assigns complete layers to devices, tensor parallelism splits the weight matrices within each layer. This distinction is critical: tensor parallelism requires high-bandwidth interconnects (NVLink) due to fine-grained communication within each layer, while pipeline parallelism tolerates lower bandwidth between stages.
 
-Matrix multiplication operations in feed-forward networks also benefit from operator-level splitting. A feed-forward layer with input dimension 4096 and intermediate dimension 16384 can split across devices along the intermediate dimension. Device 1 computes the first 8192 intermediate features, while device 2 computes the remaining 8192 features. This division reduces peak memory usage while maintaining mathematical equivalence to the original computation.
+::: {.callout-note title="Terminology: Tensor Parallelism vs. Pipeline Parallelism"}
+Modern literature distinguishes two forms of model parallelism:
+
+**Tensor Parallelism** (intra-layer): Splits individual operations (matrix multiplies, attention heads) across devices. Requires high-bandwidth interconnects (NVLink) due to fine-grained communication within each layer.
+
+**Pipeline Parallelism** (inter-layer): Assigns complete layers to different devices. Requires only point-to-point communication between pipeline stages, tolerating lower bandwidth interconnects.
+
+The Megatron-LM framework popularized this distinction, using tensor parallelism within nodes (8 GPUs on NVLink) and pipeline parallelism across nodes (InfiniBand).
+:::
+
+**Megatron-Style Tensor Parallelism**: The key insight is that matrix multiplications can be partitioned in two ways:
+
+**Column-parallel linear layers**: Weights are split along columns. For input $X$ and weight matrix $W = [W_1 | W_2]$ split across 2 GPUs:
+$$Y = XW = X[W_1 | W_2] = [XW_1 | XW_2]$$
+Each GPU computes its partition independently. Outputs are concatenated (no communication needed if followed by row-parallel layer).
+
+**Row-parallel linear layers**: Weights are split along rows. For $W = \begin{bmatrix} W_1 \\ W_2 \end{bmatrix}$:
+$$Y = XW = X_1 W_1 + X_2 W_2$$
+Each GPU computes a partial sum. Outputs require AllReduce to combine.
+
+In transformer architectures, Megatron applies this pattern:
+
+1. **QKV projection**: Column-parallel (weights split, outputs concatenated across heads)
+2. **Attention output projection**: Row-parallel (requires AllReduce after)
+3. **First FFN layer**: Column-parallel (split intermediate dimension)
+4. **Second FFN layer**: Row-parallel (requires AllReduce after)
+
+This design places AllReduce operations strategically: one after attention, one after FFN, totaling 2 AllReduce operations per transformer layer.
+
+**Communication volume per transformer layer**: For sequence length $S$, hidden dimension $H$, and batch size $B$:
+$$\text{Communication} = 2 \times B \times S \times H \times \text{sizeof(dtype)}$$
+
+With $S=2048$, $H=4096$, $B=4$, and FP16: $2 \times 4 \times 2048 \times 4096 \times 2 = 134$ MB per layer. For a 96-layer model, this totals 12.6 GB per training step, requiring NVLink bandwidth to avoid becoming the bottleneck.
+
+**Tensor parallelism scaling limits**: Beyond 8-way tensor parallelism, efficiency degrades rapidly because:
+
+- Communication volume grows linearly with tensor parallel degree
+- Computation per GPU decreases (less work to hide communication latency)
+- NVLink bandwidth becomes saturated
+
+Production systems (GPT-4, LLaMA, Gemini) use 8-way tensor parallelism within nodes, combined with pipeline parallelism across nodes, achieving the best balance of memory distribution and communication efficiency.
 
 ### Model Parallelism Advantages {#sec-distributed-training-model-parallelism-advantages}
 
@@ -1243,25 +1390,37 @@ The maximum speedup achievable with distributed training is bound by Amdahl's La
 $$
 \text{Speedup} = \frac{1}{(1-P) + \frac{P}{N}}
 $$
-where $P$ is the fraction of work that can be parallelized and $N$ is the number of processors. However, for AI training, communication overhead introduces additional sequential time:
+where $P$ is the fraction of work that can be parallelized and $N$ is the number of processors. For AI training, the correct formulation accounts for communication time that does not decrease with more workers:
 $$
-\text{Speedup}_{\text{AI}} = \frac{1}{(1-P) + \frac{P}{N} + \frac{C}{N}}
+\text{Speedup} = \frac{T_{compute}}{T_{compute}/N + T_{comm}}
 $$
-where $C$ represents the communication overhead fraction.
+where $T_{comm}$ is largely independent of $N$ for ring AllReduce (or grows as $\log N$ for tree-based approaches). This can be rewritten as:
+$$
+\text{Speedup} = \frac{N}{1 + N \cdot (T_{comm}/T_{compute})}
+$$
 
 Consider training a 175 B parameter model with 1000 H100 GPUs as a concrete example:
 
-- **Computation time per iteration**: 100 ms of forward/backward passes
-- **Communication time**: AllReduce of 175 B parameters (700 GB in FP32) across 1000 GPUs
-- **Available bandwidth**: 600 GB/s per NVSwitch link
-- **Communication overhead**: $\frac{700\text{GB}}{600\text{GB/s}} \times \log_2(1000) \approx 11.6\text{ms}$
+- **Computation time per iteration**: 100 ms of forward/backward passes per GPU
+- **Gradient size**: 175 B parameters × 4 bytes = 700 GB in FP32
+- **Ring AllReduce time**: For ring AllReduce, each GPU sends/receives $2 \times (N-1)/N \times 700\text{GB} \approx 1.4\text{TB}$
 
-Even if only 5% of training requires communication (P = 0.95), the maximum speedup is:
+With ring AllReduce across 1000 GPUs connected via 600 GB/s links:
+
+- **Intra-node (8 GPUs via NVLink)**: $1.4\text{TB} / 600\text{GB/s} \approx 2.3$ seconds
+- **Inter-node adds latency**: $1000 \times \alpha$ where $\alpha \approx 1\mu s$ per hop
+
+The resulting scaling efficiency is:
 $$
-\text{Speedup} = \frac{1}{0.05 + \frac{0.95}{1000} + \frac{0.116}{100}} \approx 8.3\text{x}
+\text{Efficiency} = \frac{T_{compute}}{T_{compute} + T_{comm}} = \frac{100\text{ms}}{100\text{ms} + 2300\text{ms}} \approx 4\%
 $$
 
-This demonstrates why adding more GPUs beyond approximately 100 provides diminishing returns for large model training.
+This is why real systems use mixed precision (FP16 = 350 GB, halving communication), gradient compression, and pipeline parallelism. With FP16 and 4-way pipeline parallelism reducing synchronization to 1/4 of parameters per stage, efficiency improves dramatically:
+$$
+\text{Efficiency} = \frac{100\text{ms}}{100\text{ms} + 290\text{ms}} \approx 26\%
+$$
+
+This demonstrates why pure data parallelism fails at scale and why hybrid strategies are essential.
 
 Communication requirements scale superlinearly with model size and linearly with the number of parameters. Modern transformer models require gradient synchronization across all parameters during each training step:
 

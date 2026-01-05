@@ -429,6 +429,22 @@ $$ {#eq-young-daly}
 
 where $T_{save}$ is the time to write a checkpoint and $MTBF$ is the mean time between failures.
 
+::: {.callout-warning title="Young-Daly Formula Assumptions"}
+The Young-Daly formula provides valuable intuition but rests on assumptions that may not hold in practice:
+
+1. **Exponentially distributed failures**: Assumes constant failure rate. Real systems exhibit "bathtub curve" behavior with higher rates during burn-in and wear-out phases.
+
+2. **Deterministic checkpoint time**: Assumes $T_{save}$ is constant. In practice, checkpoint time varies 2-3x due to storage contention, network congestion, and memory pressure.
+
+3. **Recovery time equals checkpoint time**: Assumes recovery reads same data written during checkpoint. Often recovery takes 3-5x longer due to job scheduling delays, topology reconstruction, and warmup.
+
+4. **Single failure mode**: Assumes one failure at a time. Correlated failures (power, cooling, shared switch) violate this assumption.
+
+5. **Infinite timeline**: Optimal for long training runs. Short runs (where total time is comparable to MTBF) require different analysis.
+
+When assumptions are violated, the optimal interval may shift significantly. As a rule of thumb, if restart overhead significantly exceeds checkpoint time, use $\sqrt{2 \times (T_{save} + T_{restart}) \times MTBF}$ instead.
+:::
+
 **Derivation sketch**: Let $T_c$ be the checkpoint interval. Expected wasted work per failure is $T_c/2$ (on average, failure occurs halfway through the interval) plus recovery time. Checkpoint overhead per interval is $T_{save}/T_c$. Minimizing total expected time yields the square root relationship.
 
 ::: {.callout-tip title="Worked Example: Optimal Checkpoint Interval for GPT-175B"}
@@ -506,6 +522,28 @@ Modern frameworks like PyTorch's FSDP provide asynchronous checkpointing support
 
 [^fn-async-checkpoint]: **Asynchronous Checkpoint Implementation**: DeepSpeed implements asynchronous checkpointing by maintaining a checkpoint staging buffer in CPU memory. When a checkpoint triggers, GPU state is copied to CPU asynchronously using CUDA streams, allowing GPU computation to continue. A separate thread writes staged data to storage while training proceeds. This achieves near-zero checkpoint overhead for models where staging memory is available.
 
+#### Checkpoint Storage Architecture {#sec-checkpoint-storage-architecture}
+
+Where checkpoints are stored is as critical as how often they are written. Production systems use hierarchical storage with different tiers for different purposes:
+
+| Tier | Technology | Write Bandwidth | Durability | Use Case |
+|------|------------|-----------------|------------|----------|
+| Tier 1 | Local NVMe | 5-10 GB/s per node | Not durable | Async staging buffer |
+| Tier 2 | Distributed FS (Lustre, GPFS) | 50-200 GB/s aggregate | Durable within datacenter | Primary checkpoint storage |
+| Tier 3 | Object storage (S3, GCS) | 10-50 GB/s aggregate | Cross-region durable | Disaster recovery, long-term retention |
+
+**Hierarchical checkpoint flow**:
+
+1. GPU state snapshots to local NVMe (fastest, enables async checkpoint)
+2. Background promotion to distributed filesystem (durable, fast random access for recovery)
+3. Periodic archival to object storage (cheapest per GB, disaster recovery)
+
+**Storage cost analysis**: Checkpoints can consume significant storage budget at scale. A 175B model training with 14-minute checkpoint intervals for 30 days generates:
+
+$$\frac{30 \times 24 \times 60}{14} \times 2.1\text{ TB} = 6,480\text{ TB}$$
+
+At $0.02/GB/month for object storage, this costs $130,000/month just for checkpoint storage. Production systems implement checkpoint versioning and garbage collection, retaining only recent checkpoints plus periodic snapshots for long-term recovery.
+
 ### Distributed Checkpointing {#sec-distributed-checkpointing}
 
 When training spans multiple workers, checkpoint coordination becomes essential. Two primary approaches exist: centralized checkpointing where a coordinator gathers all state and writes a single checkpoint, and distributed checkpointing where each worker writes its own portion of the checkpoint.
@@ -534,6 +572,26 @@ In distributed checkpointing, each worker writes its portion of the checkpoint t
 6. Coordinator broadcasts checkpoint complete, training resumes
 
 This protocol ensures that either all workers complete their writes (valid checkpoint) or the checkpoint is incomplete (detectable through missing metadata). Partial checkpoints can be garbage collected.
+
+::: {.callout-note title="Checkpoint Consistency Models"}
+The idealized protocol above assumes step 2 completes quickly. At scale, this barrier synchronization becomes the dominant checkpoint cost because there is almost always at least one slow worker in a 10,000+ GPU cluster.
+
+**Strict Synchronous**: All workers checkpoint at exactly the same training step. Provides strongest consistency but highest overhead from barrier synchronization.
+
+**Bounded Asynchronous**: Workers may be within $k$ steps of each other (typically $k=1-3$). The checkpoint manager tracks the "checkpoint wavefront" across workers. Recovery uses the earliest consistent cut across all shards. This trades perfect consistency for dramatically reduced synchronization overhead and is what production systems actually use.
+
+**Eventual Consistency**: Workers checkpoint when convenient, reconcile during recovery. Lowest overhead but requires complex recovery logic to reconstruct consistent state.
+:::
+
+**Two-Phase Checkpoint Commit**: The basic protocol has a subtle correctness bug: if the coordinator crashes after some workers confirm but before writing metadata, those workers believe the checkpoint succeeded while the system has no valid checkpoint.
+
+Production systems use two-phase commit:
+
+1. **Prepare phase**: Workers write to staging location, report success to coordinator
+2. **Commit phase**: Coordinator atomically renames/commits all shards together (e.g., moving from `staging/` to `checkpoints/`)
+3. **Recovery**: If coordinator fails between phases, workers detect during next heartbeat and rollback staged writes
+
+This ensures atomic checkpoint commits: either all shards are committed together, or none are.
 
 **Consistency considerations**: In distributed training with synchronous gradient updates, workers naturally reach consistent states at step boundaries. Checkpointing at step boundaries ensures all workers have applied the same updates. With asynchronous training or pipeline parallelism, defining and reaching consistent states requires more careful coordination.
 
@@ -573,6 +631,19 @@ where:
 **Health check probes**: Container orchestration systems (Kubernetes) and cluster managers (SLURM) provide health check mechanisms that detect unresponsive workers. Liveness probes verify that processes are running; readiness probes verify that processes are ready to handle requests.
 
 **Training dynamics monitoring**: Monitoring loss values, gradient norms, and other training statistics can detect Byzantine failures that do not cause explicit errors. Sudden loss spikes or gradient explosions may indicate silent corruption.
+
+::: {.callout-warning title="Realistic Failure Detection Latencies"}
+Production experience shows that failure detection takes significantly longer than theoretical heartbeat timeouts suggest. The fundamental challenge is distinguishing failures from stragglers:
+
+| Failure Type | Typical Detection Time | Why |
+|-------------|----------------------|-----|
+| Process crash | 5-30 seconds | Heartbeat timeout + verification retries |
+| GPU hang | 30-120 seconds | Must distinguish from legitimately slow kernel |
+| Network partition | 60-180 seconds | Must distinguish from temporary congestion |
+| Silent data corruption | Minutes to hours | Requires statistical anomaly detection |
+
+These latencies exist because aggressive timeouts cause false positives (killing healthy-but-slow workers), while conservative timeouts delay real failure detection. Production systems typically use multi-stage detection: fast initial timeout triggers investigation, slower confirmation timeout triggers recovery.
+:::
 
 #### Recovery Procedures {#sec-recovery-procedures}
 
