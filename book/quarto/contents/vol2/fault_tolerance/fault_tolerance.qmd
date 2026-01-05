@@ -113,7 +113,7 @@ Machine learning systems deployed in production environments operate in a world 
 
 The distributed training systems examined in @sec-distributed-training and the communication infrastructure developed in @sec-communication enable training across thousands of devices. These chapters established what distributed systems can accomplish when everything works correctly. This chapter addresses the uncomfortable reality: at scale, everything does not work correctly. Failures are not exceptional events to be handled by error messages and restarts. They are continuous, expected operating conditions that systems must accommodate as naturally as they accommodate normal computation.
 
-The transition from small-scale experimentation to large-scale production fundamentally changes the relationship between systems and failures. A researcher training a model on a single GPU might experience hardware failure once per year. That same researcher scaling to a 1,000 GPU cluster will experience failures multiple times per day. This shift from rare exception to routine occurrence demands entirely different engineering approaches. The mathematical analysis that follows makes this transition precise and quantitative.
+The transition from small-scale experimentation to large-scale production changes the relationship between systems and failures. A researcher training a model on a single GPU might experience hardware failure once per year. That same researcher scaling to a 1,000 GPU cluster will experience failures multiple times per day. This shift from rare exception to routine occurrence demands different engineering approaches. The mathematical analysis that follows makes this transition precise and quantitative.
 
 Understanding failure at scale requires abandoning the mindset that treats failures as bugs to be fixed. Individual component failures cannot be eliminated; they can only be managed. Memory errors, network partitions, storage corruption, and software crashes will occur with statistical regularity that increases predictably with system size. The engineering challenge is not to prevent these failures but to build systems that continue making progress despite them.
 
@@ -123,7 +123,7 @@ The techniques developed in this chapter draw from decades of distributed system
 
 ### The Mathematics of Inevitable Failure {#sec-mathematics-inevitable-failure}
 
-System reliability engineering provides the foundational framework for understanding failure at scale. Individual components exhibit failure rates characterized by the failure rate parameter $\lambda$, measured in failures per unit time. For a single component with constant failure rate $\lambda$, the probability of surviving without failure until time $t$ follows an exponential distribution:
+System reliability engineering provides the foundational framework for understanding failure at scale [@birolini2017reliability]. Individual components exhibit failure rates characterized by the failure rate parameter $\lambda$, measured in failures per unit time. For a single component with constant failure rate $\lambda$, the probability of surviving without failure until time $t$ follows an exponential distribution:
 
 $$
 R_{single}(t) = e^{-\lambda t}
@@ -307,7 +307,7 @@ Hardware failure rates are not constant over component lifetime. The bathtub cur
 
 **Infant Mortality Phase**: New components exhibit elevated failure rates due to manufacturing defects, improper installation, and early-life wear-out of marginal components. This phase typically lasts days to weeks for electronic components. Burn-in testing, where components are operated under stress conditions before deployment, aims to precipitate infant mortality failures before production use.
 
-**Useful Life Phase**: After surviving infant mortality, components exhibit relatively constant failure rates. This phase represents the longest portion of component lifetime and is the period where the exponential reliability model (@eq-single-component-reliability) applies most accurately. For datacenter GPUs, the useful life phase typically spans 3-5 years.
+**Useful Life Phase**: After surviving infant mortality, components exhibit relatively constant failure rates [@klutke2003critical]. This phase represents the longest portion of component lifetime and is the period where the exponential reliability model (@eq-single-component-reliability) applies most accurately. For datacenter GPUs, the useful life phase typically spans 3-5 years.
 
 **Wear-Out Phase**: As components age, failure rates increase due to accumulated wear. For GPUs, wear mechanisms include electromigration in circuits, thermal cycling stress on solder joints, and degradation of thermal interface materials. The onset of wear-out depends heavily on operating conditions; components operated at high temperatures or with frequent thermal cycling enter wear-out earlier.
 
@@ -333,7 +333,7 @@ The cost of failure differs dramatically across model types due to differences i
 
 **Recommendation Systems** present unique challenges because their training is often continuous rather than episodic. The value of a RecSys model derives partly from its freshness: embeddings that capture recent user behavior outperform stale embeddings. A failure that loses hours of embedding updates may degrade recommendation quality in ways that directly impact revenue. Meta has documented that recommendation model freshness directly correlates with engagement metrics, making recovery time a business-critical metric.[^fn-recsys-freshness]
 
-[^fn-recsys-freshness]: **RecSys Freshness Impact**: Meta's published research on deep learning recommendation models indicates that embedding staleness measured in hours can produce measurable degradation in recommendation relevance. Their continuous training infrastructure prioritizes minimal interruption over checkpoint optimization, using incremental checkpointing and elastic training to maintain freshness.
+[^fn-recsys-freshness]: **RecSys Freshness Impact**: Meta's published research on deep learning recommendation models [@naumov2019deep] indicates that embedding staleness measured in hours can produce measurable degradation in recommendation relevance. Their continuous training infrastructure prioritizes minimal interruption over checkpoint optimization, using incremental checkpointing and elastic training to maintain freshness.
 
 **Vision Models** occupy a middle ground with moderate training durations and manageable checkpoint sizes. The relatively small checkpoints (1-2 GB for ViT-Large) enable frequent checkpointing with minimal overhead. Data augmentation state (current augmentation parameters, data shuffling seed) represents the primary state beyond model weights that must be preserved for reproducible recovery.
 
@@ -419,13 +419,13 @@ With mixed-precision training storing model parameters and optimizer state at di
 
 Checkpointing involves a fundamental trade-off. Frequent checkpoints minimize lost work when failures occur but consume time and resources for checkpoint operations. Infrequent checkpoints minimize checkpoint overhead but risk losing substantial work to failures.
 
-The Young-Daly formula provides the optimal checkpoint interval that minimizes expected total time including both checkpointing overhead and failure recovery:[^fn-young-daly]
+The Young-Daly formula [@young1974first; @daly2006higher] provides the optimal checkpoint interval that minimizes expected total time including both checkpointing overhead and failure recovery:
 
 $$
 T_{opt} = \sqrt{2 \times T_{save} \times MTBF}
 $$ {#eq-young-daly}
 
-[^fn-young-daly]: **Young-Daly Formula Derivation**: Originally derived by John Young (1974) for general checkpointing systems and refined by William Daly (2004) for high-performance computing. The formula assumes exponentially distributed failure times and derives the interval that minimizes expected time to completion including checkpoint overhead and failure recovery.
+[^fn-young-daly]: **Young-Daly Formula Derivation**: Originally derived by Young [-@young1974first] for general checkpointing systems and refined by Daly [-@daly2006higher] for high-performance computing. The formula assumes exponentially distributed failure times and derives the interval that minimizes expected time to completion including checkpoint overhead and failure recovery.
 
 where $T_{save}$ is the time to write a checkpoint and $MTBF$ is the mean time between failures.
 
@@ -518,9 +518,9 @@ where $T_{pause}$ represents any training pause beyond the checkpoint write time
 - **Consistency challenges**: Care must be taken to ensure the snapshot represents a consistent point in training
 - **I/O contention**: Background writes compete for storage bandwidth with data loading
 
-Modern frameworks like PyTorch's FSDP provide asynchronous checkpointing support through memory-efficient state snapshotting and background writes. DeepSpeed's checkpointing similarly supports overlap between checkpoint writes and continued training.[^fn-async-checkpoint]
+Modern frameworks like PyTorch's FSDP [@zhao2023pytorch] provide asynchronous checkpointing support through memory-efficient state snapshotting and background writes. DeepSpeed's checkpointing [@rasley2020deepspeed] similarly supports overlap between checkpoint writes and continued training.[^fn-async-checkpoint]
 
-[^fn-async-checkpoint]: **Asynchronous Checkpoint Implementation**: DeepSpeed implements asynchronous checkpointing by maintaining a checkpoint staging buffer in CPU memory. When a checkpoint triggers, GPU state is copied to CPU asynchronously using CUDA streams, allowing GPU computation to continue. A separate thread writes staged data to storage while training proceeds. This achieves near-zero checkpoint overhead for models where staging memory is available.
+[^fn-async-checkpoint]: **Asynchronous Checkpoint Implementation**: DeepSpeed [@rasley2020deepspeed] implements asynchronous checkpointing by maintaining a checkpoint staging buffer in CPU memory. When a checkpoint triggers, GPU state is copied to CPU asynchronously using CUDA streams, allowing GPU computation to continue. A separate thread writes staged data to storage while training proceeds. This achieves near-zero checkpoint overhead for models where staging memory is available.
 
 #### Checkpoint Storage Architecture {#sec-checkpoint-storage-architecture}
 
@@ -599,7 +599,7 @@ This ensures atomic checkpoint commits: either all shards are committed together
 
 Modern distributed training frameworks partition model state across workers using techniques like ZeRO (Zero Redundancy Optimizer) and FSDP (Fully Sharded Data Parallel). In these configurations, no single worker holds complete model state. Each worker holds only its assigned parameter shard plus corresponding optimizer state.
 
-**Sharded checkpointing** leverages this distribution: each worker writes only its shard, dramatically reducing per-worker write volume. Recovery loads shards and redistributes state to workers based on the recovery configuration.
+**Sharded checkpointing** [@rajbhandari2020zero] leverages this distribution: each worker writes only its shard, dramatically reducing per-worker write volume. Recovery loads shards and redistributes state to workers based on the recovery configuration.
 
 This approach enables efficient checkpointing even for massive models. A 175B parameter model with 2.1 TB checkpoint distributed across 1,000 workers requires each worker to write only 2.1 GB, achievable in seconds with local NVMe storage.
 
@@ -717,13 +717,13 @@ where $N$ represents the number of workers (and thus the global batch size). Thi
 
 Modern frameworks provide varying levels of elastic training support:
 
-**PyTorch Elastic (TorchElastic)**: Provides elastic launch capabilities through `torchrun`. Supports membership changes through a rendezvous mechanism. Workers can join or leave, and the training process adapts. Integrates with Kubernetes for automatic scaling.
+**PyTorch Elastic (TorchElastic)** [@li2020pytorch]: Provides elastic launch capabilities through `torchrun`. Supports membership changes through a rendezvous mechanism. Workers can join or leave, and the training process adapts. Integrates with Kubernetes for automatic scaling.
 
-**DeepSpeed**: Supports elastic training through integration with Azure ML and automatic checkpoint/restart mechanisms. The ZeRO optimizer can reshard checkpoints for different worker counts.
+**DeepSpeed** [@rasley2020deepspeed]: Supports elastic training through integration with Azure ML and automatic checkpoint/restart mechanisms. The ZeRO optimizer can reshard checkpoints for different worker counts.
 
 **Ray Train**: Built on Ray's actor model, provides native elasticity. Workers are Ray actors that can be dynamically added or removed. Ray's distributed object store facilitates efficient state redistribution.
 
-**Horovod Elastic**: Extends Horovod's data parallel training with elastic capabilities. Workers can join or leave during training, with automatic rank reassignment and gradient accumulation adjustment.
+**Horovod Elastic** [@sergeev2018horovod]: Extends Horovod's data parallel training with elastic capabilities. Workers can join or leave during training, with automatic rank reassignment and gradient accumulation adjustment.
 
 @tbl-elastic-training-comparison compares elastic training capabilities across frameworks.
 
