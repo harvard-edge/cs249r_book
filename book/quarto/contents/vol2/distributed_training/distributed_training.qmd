@@ -135,7 +135,7 @@ Building upon single-machine optimization foundations, distributed training exte
 
 The progression from single-machine to distributed training follows a natural scaling path: optimize locally first, then scale horizontally. This progression ensures that distributed systems operate efficiently at each node while adding the coordination mechanisms necessary for multi-machine training. Training machine learning models often requires scaling beyond a single machine due to increasing model complexity and dataset sizes. The demand for computational power, memory, and storage can exceed the capacity of individual devices, especially in domains like natural language processing, computer vision, and scientific computing. Distributed training[^fn-distributed-training] addresses this challenge by spreading the workload across multiple machines, which coordinate to train a single model efficiently.
 
-[^fn-distributed-training]: **Distributed Training**: Google's DistBelief (2012) pioneered large-scale distributed neural network training, enabling models with billions of parameters across thousands of machines. This breakthrough led to modern frameworks like Horovod (2017) and PyTorch's DistributedDataParallel, democratizing distributed training for researchers worldwide.
+[^fn-distributed-training]: **Distributed Training**: Google's DistBelief [@dean2012distbelief] pioneered large-scale distributed neural network training, enabling models with billions of parameters across thousands of machines. This breakthrough led to modern frameworks like Horovod [@sergeev2018horovod] and PyTorch's DistributedDataParallel, democratizing distributed training for researchers worldwide.
 
 This coordination relies on consensus protocols and synchronization primitives to ensure parameter updates remain consistent across nodes. While basic barrier synchronization suffices for research, production deployments require careful fault tolerance, checkpointing, and recovery mechanisms covered in @sec-fault-tolerance.
 
@@ -408,7 +408,7 @@ AllReduce complexity depends on two components: latency ($\alpha$) and bandwidth
 - Bandwidth utilization: $1/\log_2(N)$, decreasing with scale
 - Latency: $O(\log N)$ steps
 
-The crossover point depends on message size: tree AllReduce wins for small messages (latency-dominated), while ring AllReduce wins for large gradients (bandwidth-dominated). Modern implementations like NCCL use hierarchical algorithms that achieve tree latency within nodes (using NVLink) and ring bandwidth between nodes (using InfiniBand).
+The crossover point depends on message size: tree AllReduce wins for small messages (latency-dominated), while ring AllReduce wins for large gradients (bandwidth-dominated) [@patarasuk2009allreduce]. Modern implementations like NCCL use hierarchical algorithms that achieve tree latency within nodes (using NVLink) and ring bandwidth between nodes (using InfiniBand).
 :::
 
 Interconnect selection is critical for large-scale deployments, as these complexity characteristics determine when communication dominates computation.
@@ -427,7 +427,7 @@ These efficiency metrics directly influence the choice of parallelism strategy. 
 
 Building on the efficiency characteristics outlined above, data parallelism represents the most straightforward distributed approach, particularly effective in the linear scaling regime where communication overhead remains manageable. This method distributes the training process across multiple devices by splitting the dataset into smaller subsets. Each device trains a complete copy of the model using its assigned subset of the data. For example, when training an image classification model on 1 million images using 4 GPUs, each GPU would process 250,000 images while maintaining an identical copy of the model architecture.
 
-It is particularly effective when the dataset size is large but the model size is manageable, as each device must store a full copy of the model in memory. This method is widely used in scenarios such as image classification and natural language processing, where the dataset can be processed in parallel without dependencies between data samples. For instance, when training a ResNet model on ImageNet, each GPU can independently process its portion of images since the classification of one image doesn't depend on the results of another.
+It is particularly effective when the dataset size is large but the model size is manageable, as each device must store a full copy of the model in memory. This method is widely used in scenarios such as image classification and natural language processing, where the dataset can be processed in parallel without dependencies between data samples. For instance, when training a ResNet model [@he2016resnet] on ImageNet, each GPU can independently process its portion of images since the classification of one image doesn't depend on the results of another.
 
 The effectiveness of data parallelism stems from a property of stochastic gradient descent established in optimization foundations. Gradients computed on different minibatches can be averaged while preserving mathematical equivalence to single-device training. This property enables parallel computation across devices, with the mathematical foundation following directly from the linearity of expectation.
 
@@ -567,7 +567,7 @@ For example, with 8 GPUs sharing gradients for a 100 MB model, ring all-reduce r
 
 Distributed training systems operate under explicit synchronization models that govern when workers observe each other's updates. Understanding these models is essential for reasoning about correctness and performance.
 
-The default model, Bulk Synchronous Parallel (BSP), requires all workers to complete their local computation (forward and backward pass), synchronize gradients through a barrier (AllReduce), and then simultaneously update parameters. BSP provides strong guarantees: every worker sees identical parameter values at each step, ensuring mathematical equivalence to single-device training. The cost is that the slowest worker determines iteration time, creating the "straggler problem."
+The default model, Bulk Synchronous Parallel (BSP) [@valiant1990bsp], requires all workers to complete their local computation (forward and backward pass), synchronize gradients through a barrier (AllReduce), and then simultaneously update parameters. BSP provides strong guarantees: every worker sees identical parameter values at each step, ensuring mathematical equivalence to single-device training. The cost is that the slowest worker determines iteration time, creating the "straggler problem."
 
 Stale Synchronous Parallel (SSP) relaxes this constraint, allowing workers to proceed up to $s$ iterations ahead of the slowest worker before blocking. This bounds staleness while reducing synchronization delays. SSP requires careful learning rate tuning since workers compute gradients on slightly different parameter versions. The bounded staleness guarantee ($s$ typically 2-5) provides a middle ground between BSP's strong consistency and fully asynchronous approaches.
 
@@ -697,7 +697,7 @@ While data parallelism is an effective approach for distributed training, it int
 
 Communication overhead represents the most significant bottleneck in data parallelism. During gradient synchronization, each device must exchange gradient updates, often hundreds of megabytes per step for large models. With 8 GPUs training a 1-billion-parameter model, each synchronization step might require transferring several gigabytes of data across the network. While high-speed interconnects like NVLink (300 GB/s) or InfiniBand (200 Gb/s) help, the overhead remains substantial. NCCL's ring-allreduce algorithm[^fn-allreduce-algorithm] reduces this burden by organizing devices in a ring topology, but communication costs still grow with model size and device count.
 
-[^fn-allreduce-algorithm]: **AllReduce Algorithm**: A collective communication primitive where each process contributes data and all processes receive the same combined result (typically a sum). Naive implementations require O(n²) messages for n devices. The ring-allreduce algorithm, developed for high-performance computing in the 1980s, reduces this to O(n) by organizing devices in a logical ring where each device communicates only with its neighbors, making it scalable for modern ML with hundreds of GPUs.
+[^fn-allreduce-algorithm]: **AllReduce Algorithm**: A collective communication primitive where each process contributes data and all processes receive the same combined result (typically a sum). Naive implementations require O(n²) messages for n devices. The ring-allreduce algorithm achieves bandwidth-optimal performance by organizing devices in a logical ring where each device communicates only with its neighbors [@patarasuk2009allreduce], making it scalable for modern ML with hundreds of GPUs.
 
 Scalability limitations become apparent as device count increases. While 8 GPUs might achieve $7\times$ speedup (87.5% scaling efficiency), scaling to 64 GPUs typically yields only 45-50$\times$ speedup (70-78% efficiency) due to growing synchronization costs. Scaling efficiency, calculated as speedup divided by the number of devices—quantifies how effectively additional hardware translates to reduced training time. Perfect linear scaling would yield 100% efficiency, but communication overhead and synchronization barriers typically degrade efficiency as device count grows. This non-linear scaling means that doubling the number of devices rarely halves the training time, particularly in configurations exceeding 16-32 devices.
 
@@ -713,7 +713,7 @@ Despite these challenges, data parallelism remains an important technique for di
 
 ### Memory-Efficient Data Parallelism: ZeRO and FSDP {#sec-distributed-training-zero-fsdp}
 
-The memory constraints of data parallelism motivate a family of techniques that shard memory state across workers while preserving the simplicity of data parallel training. ZeRO (Zero Redundancy Optimizer) and its PyTorch implementation FSDP (Fully Sharded Data Parallel) enable training models that would otherwise require model parallelism.
+The memory constraints of data parallelism motivate a family of techniques that shard memory state across workers while preserving the simplicity of data parallel training. ZeRO (Zero Redundancy Optimizer) [@rajbhandari2020zero] and its PyTorch implementation FSDP (Fully Sharded Data Parallel) [@zhao2023fsdp] enable training models that would otherwise require model parallelism.
 
 In standard data parallelism, each GPU maintains a complete copy of:
 
@@ -839,7 +839,7 @@ For example, in a two-device setup with attention mechanisms split between devic
 
 Parameter updates occur independently on each device using the computed gradients and an optimization algorithm. A device holding attention layer parameters applies updates using only the gradients computed for those specific parameters. This localized update approach differs from data parallelism, which requires gradient averaging across devices.
 
-The optimization step proceeds as follows: Each device applies its chosen optimizer (such as Adam or AdaFactor) to update its portion of the model parameters. A device holding the first six transformer layers updates only those layers' weights and biases. This local parameter update eliminates the need for cross-device synchronization during the optimization step, reducing communication overhead.
+The optimization step proceeds as follows: Each device applies its chosen optimizer (such as Adam [@kingma2015adam] or AdaFactor) to update its portion of the model parameters. A device holding the first six transformer layers updates only those layers' weights and biases. This local parameter update eliminates the need for cross-device synchronization during the optimization step, reducing communication overhead.
 
 #### Iterative Process {#sec-distributed-training-iterative-process}
 
@@ -928,7 +928,7 @@ This sequential processing introduces device idle time, as each device must wait
 
 #### Pipeline Parallelism {#sec-distributed-training-pipeline-parallelism}
 
-Pipeline parallelism extends layer-wise partitioning by introducing microbatching to minimize device idle time, as illustrated in @fig-pipline-parallelism. Instead of waiting for an entire batch to sequentially pass through all devices, the computation is divided into smaller segments called microbatches [@harlap2018pipedream]. Each device, as represented by the rows in the drawing, processes its assigned model layers for different microbatches simultaneously. For example, the forward pass involves devices passing activations to the next stage (e.g., $F_{0,0}$ to $F_{1,0}$). The backward pass transfers gradients back through the pipeline (e.g., $B_{3,3}$ to $B_{2,3}$). This overlapping computation reduces idle time and increases throughput while maintaining the logical sequence of operations across devices.
+Pipeline parallelism extends layer-wise partitioning by introducing microbatching to minimize device idle time, as illustrated in @fig-pipline-parallelism. Instead of waiting for an entire batch to sequentially pass through all devices, the computation is divided into smaller segments called microbatches. GPipe [@gpipe2019] introduced synchronous pipeline parallelism with micro-batch accumulation, while PipeDream [@harlap2018pipedream] developed asynchronous approaches with weight stashing. Each device, as represented by the rows in the drawing, processes its assigned model layers for different microbatches simultaneously. For example, the forward pass involves devices passing activations to the next stage (e.g., $F_{0,0}$ to $F_{1,0}$). The backward pass transfers gradients back through the pipeline (e.g., $B_{3,3}$ to $B_{2,3}$). This overlapping computation reduces idle time and increases throughput while maintaining the logical sequence of operations across devices.
 
 ::: {#fig-pipline-parallelism}
 ```{.tikz}
@@ -1019,7 +1019,7 @@ Modern literature distinguishes two forms of model parallelism:
 The Megatron-LM framework popularized this distinction, using tensor parallelism within nodes (8 GPUs on NVLink) and pipeline parallelism across nodes (InfiniBand).
 :::
 
-Megatron-style tensor parallelism partitions matrix multiplications in two ways.
+Megatron-style tensor parallelism [@shoeybi2019megatron] partitions matrix multiplications in two ways.
 
 Column-parallel linear layers split weights along columns. For input $X$ and weight matrix $W = [W_1 | W_2]$ split across 2 GPUs:
 $$Y = XW = X[W_1 | W_2] = [XW_1 | XW_2]$$
@@ -1281,7 +1281,7 @@ While the theoretical foundations of distributed training establish the mathemat
 
 The data parallelism mechanisms we explored earlier—gradient averaging, AllReduce communication, and parameter synchronization—are abstracted through framework APIs that handle the complex coordination automatically. PyTorch provides two primary approaches that demonstrate different trade-offs between simplicity and performance.
 
-`torch.nn.DataParallel` represents the simpler approach, automatically replicating the model across available GPUs within a single node. This API abstracts the gradient collection and averaging process, requiring minimal code changes to existing single-GPU training scripts. However, this simplicity comes with performance limitations, as the implementation uses a parameter server approach that can create communication bottlenecks when scaling beyond 4-8 GPUs.
+`torch.nn.DataParallel` represents the simpler approach, automatically replicating the model across available GPUs within a single node. This API abstracts the gradient collection and averaging process, requiring minimal code changes to existing single-GPU training scripts. However, this simplicity comes with performance limitations, as the implementation uses a parameter server approach [@li2014parameter] that can create communication bottlenecks when scaling beyond 4-8 GPUs.
 
 ```python
 # Simple data parallelism - framework handles gradient synchronization
@@ -1423,7 +1423,7 @@ Even with advanced interconnects like NVLink 4.0 (1.8 TB/s), gradient synchroniz
 
 #### TPU Pods {#sec-distributed-training-tpu-pods}
 
-As models and datasets continue to expand, training and inference workloads must extend beyond single-server configurations. Google's TPU Pods represent a pioneering approach to this challenge, interconnecting hundreds of TPUs to function as a unified system.
+As models and datasets continue to expand, training and inference workloads must extend beyond single-server configurations. Google's TPU Pods represent a pioneering approach to this challenge, interconnecting hundreds of TPUs to function as a unified system [@jouppi2017tpu].
 
 The architectural design of TPU Pods differs fundamentally from traditional multi-GPU systems. While multi-GPU configurations typically rely on NVLink or PCIe connections within a single machine, TPU Pods employ high-bandwidth optical links to interconnect accelerators at data center scale. This design implements a 2D torus interconnect topology, enabling efficient data exchange between accelerators while minimizing communication bottlenecks as workloads scale across nodes.
 
@@ -1503,7 +1503,7 @@ Even with perfect overlap and optimal algorithms, communication overhead grows w
 
 Organizations that budget projects assuming linear scaling inevitably miss deadlines and overspend on compute.
 
-Hyperparameters tuned on small clusters fail catastrophically at large scale. The most critical is learning rate: as batch size increases with data parallelism, learning rate typically must increase proportionally to maintain convergence rate. The "linear scaling rule" suggests $\eta_{large} = \eta_{base} \times (B_{large}/B_{base})$.
+Hyperparameters tuned on small clusters fail catastrophically at large scale. The most critical is learning rate: as batch size increases with data parallelism, learning rate typically must increase proportionally to maintain convergence rate. The "linear scaling rule" [@goyal2017accurate] suggests $\eta_{large} = \eta_{base} \times (B_{large}/B_{base})$.
 
 However, this rule has limits. Beyond the "critical batch size" (model and dataset dependent, often 8K-32K for vision models), increasing batch size provides diminishing returns. Larger batches find sharper minima that generalize poorly. Training that converges beautifully at 256 GPUs may diverge or produce worse models at 1024 GPUs with naive scaling.
 

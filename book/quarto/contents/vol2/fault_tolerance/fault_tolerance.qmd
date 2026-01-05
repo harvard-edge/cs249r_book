@@ -232,9 +232,9 @@ Transient failures occur temporarily and resolve without intervention. Examples 
 - **Thermal throttling**: Temporary performance reduction due to temperature spikes
 - **Software timeouts**: Temporary resource contention causes operation delays
 
-Transient failures are particularly insidious in ML training because they may not trigger explicit errors. A transient memory bit flip during gradient computation produces incorrect gradients that propagate through subsequent training steps. The model continues training but produces subtly degraded results. Studies of large-scale training runs have documented cases where transient hardware errors caused training to diverge after hundreds of hours, wasting substantial compute resources.[^fn-silent-corruption]
+Transient failures are particularly insidious in ML training because they may not trigger explicit errors. A transient memory bit flip during gradient computation produces incorrect gradients that propagate through subsequent training steps. The model continues training but produces subtly degraded results. Studies of large-scale training runs have documented cases where transient hardware errors caused training to diverge after hundreds of hours, wasting substantial compute resources [@dixit2021silent].[^fn-silent-corruption]
 
-[^fn-silent-corruption]: **Silent Data Corruption in Training**: Meta's published analysis of large-scale training identified silent data corruption as a significant concern, with approximately 0.1% of training runs exhibiting anomalous loss trajectories traceable to hardware errors that did not trigger explicit failures. Detection required monitoring training loss statistics and comparing against expected convergence curves.
+[^fn-silent-corruption]: **Silent Data Corruption in Training**: Meta's published analysis of large-scale training [@dixit2021silent] identified silent data corruption as a significant concern, with approximately 0.1% of training runs exhibiting anomalous loss trajectories traceable to hardware errors that did not trigger explicit failures. Detection required monitoring training loss statistics and comparing against expected convergence curves.
 
 The appropriate response to transient failures depends on detection capability. Errors that trigger explicit exceptions can be handled through retry logic. Silent corruption requires validation mechanisms such as gradient checksums, periodic model evaluation, and statistical monitoring of training dynamics.
 
@@ -261,7 +261,7 @@ where $k$ typically ranges from 3 to 5 to achieve low false positive rates while
 
 #### Byzantine Failures {#sec-byzantine-failures}
 
-Byzantine failures represent the most challenging class: components continue operating but produce incorrect results. Named after the Byzantine Generals Problem in distributed systems theory, these failures include:
+Byzantine failures represent the most challenging class: components continue operating but produce incorrect results. Named after the Byzantine Generals Problem [@lamport1982byzantine] in distributed systems theory, these failures include:
 
 - **Silent data corruption**: Memory or computation errors produce wrong values without triggering errors
 - **Numerical instability**: Floating-point edge cases cause gradients to become NaN or infinity
@@ -272,9 +272,9 @@ Byzantine failures are particularly dangerous in distributed training because th
 
 Detection of Byzantine failures requires redundant computation. If multiple workers compute gradients for the same data, their results can be compared. Statistical outlier detection can identify workers consistently producing anomalous gradients. However, these detection mechanisms add computational overhead and may not catch subtle corruption.
 
-Byzantine-resilient distributed training algorithms exist but impose significant overhead. Algorithms such as Krum and coordinate-wise trimmed mean compute aggregates that are robust to a bounded number of Byzantine workers, but they require more communication and computation than simple averaging.[^fn-byzantine-ml]
+Byzantine-resilient distributed training algorithms exist but impose significant overhead. Algorithms such as Krum [@blanchard2017machine] and coordinate-wise trimmed mean [@yin2018byzantine] compute aggregates that are robust to a bounded number of Byzantine workers, but they require more communication and computation than simple averaging.[^fn-byzantine-ml]
 
-[^fn-byzantine-ml]: **Byzantine-Resilient ML**: Research on Byzantine-resilient distributed learning has produced algorithms like Krum (selecting the gradient most similar to others), trimmed mean (discarding extreme values before averaging), and SIGNSGD (using only gradient signs). However, these methods typically assume a bounded fraction of Byzantine workers (often < 50%) and may not fully protect against sophisticated attacks.
+[^fn-byzantine-ml]: **Byzantine-Resilient ML**: Research on Byzantine-resilient distributed learning has produced algorithms like Krum [@blanchard2017machine] (selecting the gradient most similar to others), trimmed mean [@yin2018byzantine] (discarding extreme values before averaging), and signSGD [@bernstein2018signsgd] (using only gradient signs). However, these methods typically assume a bounded fraction of Byzantine workers (often < 50%) and may not fully protect against sophisticated attacks.
 
 #### Correlated Failures {#sec-correlated-failures}
 
@@ -585,7 +585,7 @@ The idealized protocol above assumes step 2 completes quickly. At scale, this ba
 
 **Two-Phase Checkpoint Commit**: The basic protocol has a subtle correctness bug: if the coordinator crashes after some workers confirm but before writing metadata, those workers believe the checkpoint succeeded while the system has no valid checkpoint.
 
-Production systems use two-phase commit:
+Production systems use two-phase commit [@gray1978notes], a classic distributed systems protocol:
 
 1. **Prepare phase**: Workers write to staging location, report success to coordinator
 2. **Commit phase**: Coordinator atomically renames/commits all shards together (e.g., moving from `staging/` to `checkpoints/`)
@@ -699,13 +699,13 @@ Implementing elastic training requires adapting several training components:
 
 **Batch size adjustment**: With fewer workers, each worker must process more samples to maintain the global batch size, or the global batch size must be reduced. Reducing global batch size may require learning rate adjustment.
 
-**Learning rate scaling**: The relationship between batch size and optimal learning rate follows (approximately) a square root scaling law:
+**Learning rate scaling**: The relationship between batch size and optimal learning rate has been studied extensively. Goyal et al. [@goyal2017accurate] demonstrated that a linear scaling rule works well in practice: when scaling the batch size by factor $k$, scale the learning rate also by factor $k$. An alternative square root scaling law provides more conservative adjustment:
 
 $$
 \eta_{new} = \eta_{base} \times \sqrt{\frac{N_{new}}{N_{base}}}
 $$ {#eq-lr-scaling}
 
-where $N$ represents the number of workers (and thus the global batch size). This scaling maintains similar training dynamics when worker count changes.
+where $N$ represents the number of workers (and thus the global batch size). The linear rule [@goyal2017accurate] is often preferred for large batch training with warmup, while square root scaling provides a more conservative alternative when stability is a concern.
 
 **Gradient accumulation**: To maintain effective batch size with fewer workers, each worker can accumulate gradients over multiple micro-batches before synchronization. If worker count drops by half, doubling the accumulation steps maintains the same effective batch size.
 
@@ -1281,7 +1281,7 @@ Trace: user-request-12345
 Total: 68ms
 ```
 
-**Tracing tools**: OpenTelemetry provides a standard API for distributed tracing. Backend systems like Jaeger, Zipkin, or cloud tracing services store and visualize traces.
+**Tracing tools**: OpenTelemetry [@opentelemetry2024] provides a standard API for distributed tracing. Backend systems like Jaeger, Zipkin, or cloud tracing services store and visualize traces.
 
 ### ML-Specific Debugging {#sec-ml-specific-debugging}
 
@@ -1388,17 +1388,17 @@ Experience with large-scale ML systems reveals recurring failure patterns:
 
 This section examines how leading organizations implement fault tolerance in production ML systems, illustrating the principles developed throughout this chapter.
 
-### OpenAI: Training Fault Tolerance at GPT Scale {#sec-openai-case-study}
+### Large-Scale LLM Training Fault Tolerance {#sec-openai-case-study}
 
-Training GPT-4 scale models requires fault tolerance capable of handling hundreds of failures during multi-week training runs.[^fn-openai-scale]
+Training models at GPT-4 scale or larger requires fault tolerance capable of handling hundreds of failures during multi-week training runs. Recent publications from organizations training frontier models provide detailed insights into these challenges [@jiang2024megascale; @dubey2024llama].[^fn-openai-scale]
 
-[^fn-openai-scale]: **GPT-4 Training Scale**: While OpenAI has not published complete details, industry estimates based on available information suggest GPT-4 training consumed approximately 25,000 A100 GPUs over 90-100 days. At this scale, the infrastructure would experience multiple failures per hour, requiring sophisticated fault tolerance to complete training.
+[^fn-openai-scale]: **Large-Scale Training**: MegaScale [@jiang2024megascale] documented training at 12,288 GPU scale with over 100 automated recoveries. Meta's Llama 3 training [@dubey2024llama] experienced 466 job interruptions over 54 days on 16,384 GPUs, with 78% attributed to hardware issues. At this scale, the infrastructure experiences multiple failures per hour, requiring sophisticated fault tolerance to complete training.
 
-**Infrastructure configuration**:
+**Infrastructure configuration** (based on published data from MegaScale and Llama 3):
 
-- Cluster scale: Estimated 25,000+ GPUs
-- Expected failure rate: Multiple failures per hour
-- Training duration: 3+ months
+- Cluster scale: 10,000-25,000+ GPUs
+- Expected failure rate: Multiple failures per hour (one every 3 hours for 16,384 GPUs)
+- Training duration: Weeks to months
 - Checkpoint size: Multiple terabytes
 
 **Fault tolerance mechanisms**:
@@ -1419,9 +1419,9 @@ Training GPT-4 scale models requires fault tolerance capable of handling hundred
 
 ### Google: TPU Pod Failure Handling {#sec-google-tpu-case-study}
 
-Google's TPU pods present unique fault tolerance challenges due to their tightly-coupled architecture.[^fn-tpu-pods]
+Google's TPU pods present unique fault tolerance challenges due to their tightly-coupled architecture [@jouppi2023tpu].[^fn-tpu-pods]
 
-[^fn-tpu-pods]: **TPU Pod Architecture**: TPU v4 pods contain up to 4,096 TPU chips connected via high-bandwidth custom interconnects. The tightly-coupled design enables efficient collective operations but means that chip failures affect the entire pod rather than individual nodes.
+[^fn-tpu-pods]: **TPU Pod Architecture**: TPU v4 pods [@jouppi2023tpu] contain up to 4,096 TPU chips connected via high-bandwidth custom interconnects. The tightly-coupled design enables efficient collective operations but means that chip failures affect the entire pod rather than individual nodes. Google reports that in an average supercomputer, each day 0.08% of TPU machines, 0.005% of ICI cables, and 0.04% of optical circuit switches experience failures.
 
 **TPU-specific challenges**:
 
@@ -1468,9 +1468,9 @@ Meta's recommendation systems serve billions of users with strict availability r
 
 ### Netflix: Chaos Engineering for ML {#sec-netflix-case-study}
 
-Netflix pioneered chaos engineering and applies these principles to ML systems.[^fn-netflix-chaos]
+Netflix pioneered chaos engineering [@basiri2016chaos] and applies these principles to ML systems.[^fn-netflix-chaos]
 
-[^fn-netflix-chaos]: **Netflix Chaos Engineering**: Netflix's Chaos Monkey and related tools (Chaos Kong, Latency Monkey) intentionally inject failures into production systems to verify fault tolerance. This approach has become an industry standard for building reliable distributed systems.
+[^fn-netflix-chaos]: **Netflix Chaos Engineering**: Netflix's Chaos Monkey and related tools [@basiri2016chaos] (Chaos Kong, Latency Monkey) intentionally inject failures into production systems to verify fault tolerance. This approach has become an industry standard for building reliable distributed systems.
 
 **Chaos engineering principles for ML**:
 
@@ -1623,10 +1623,10 @@ Elastic training is complementary to checkpointing, not a replacement. The reduc
 
 Modern GPUs, interconnects, and memory systems include extensive error correction: ECC memory, CRC verification, and parity checks. This creates an intuition that silent data corruption (undetected bit flips affecting computation) is negligible. Studies from large-scale deployments reveal otherwise.
 
-At planetary scale, silent data corruption rates are measurable:
+At planetary scale, silent data corruption rates are measurable [@dixit2021silent; @sridharan2015memory]:
 
 - **GPU SRAM corruption**: 0.01-0.1% of GPUs per year exhibit silent corruption not caught by ECC
-- **Memory corruption**: Cosmic ray-induced bit flips occur at approximately 1 bit flip per GB per month
+- **Memory corruption**: Cosmic ray-induced bit flips occur at approximately 1 bit flip per GB per month [@sridharan2015memory]
 - **Interconnect corruption**: Rare CRC collisions produce undetected errors at approximately 1 per 10^18 bits
 
 For a 10,000-GPU cluster running continuously:
