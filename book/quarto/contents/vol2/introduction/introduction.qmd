@@ -160,29 +160,27 @@ These scale-induced challenges explain why the largest AI organizations invest h
 
 ## Why Scale Changes Everything {#sec-vol2-introduction-why-scale-changes}
 
-Scale is not merely a larger version of small. Systems that work perfectly at modest scale exhibit fundamentally different behaviors at production scale. Understanding these qualitative transitions prepares you for the engineering challenges examined throughout this volume.
+Scale is not merely a larger version of small. Systems that work perfectly at modest scale exhibit qualitatively different behaviors at production scale. Understanding these transitions prepares you for the engineering challenges examined throughout this volume.
 
 ### Communication Becomes Dominant
 
 At small scale, computation dominates. Training a model on a single GPU spends most time performing matrix multiplications. Communication overhead, moving data between CPU and GPU memory, represents a small fraction of total time.
 
-At large scale, communication often dominates. Distributed training requires synchronizing gradients across workers after each batch. For a model with 175 billion parameters using 32 bit gradients, each synchronization must transfer 700GB of data (175 billion parameters × 4 bytes per parameter). Using the ring all-reduce algorithm[^fn-all-reduce] across 1,000 workers connected by 200 Gb/s InfiniBand (25 GB/s), theoretical completion time for the full synchronization approaches 56 seconds (2 × 700 GB ÷ 25 GB/s). Practical implementations achieve 60 to 80% of theoretical bandwidth, making communication consume a significant fraction of total training time even with optimized networks.
+At large scale, communication often dominates. Distributed training requires synchronizing gradients across workers after each batch. For a model with 175 billion parameters using 32-bit gradients, each synchronization must transfer 700GB of data (175 billion parameters × 4 bytes per parameter). Using the ring all-reduce algorithm[^fn-all-reduce] across 1,000 workers connected by 200 Gb/s InfiniBand (25 GB/s), theoretical completion time for the full synchronization approaches 56 seconds (2 × 700 GB ÷ 25 GB/s). Practical implementations achieve 60-80% of theoretical bandwidth, making communication consume a significant fraction of total training time even with optimized networks.
 
-[^fn-all-reduce]: **Ring All-Reduce**: The dominant collective communication algorithm for distributed training gradient synchronization. In ring all-reduce, N workers arrange logically in a ring. Each worker sends 1/N of its gradient to its neighbor, which adds the received gradient to its own before forwarding. After N minus 1 steps, each worker has the sum of all gradients for 1/N of parameters. A second ring pass distributes the complete sum to all workers. The algorithm achieves optimal bandwidth utilization. Total data transferred equals 2(N minus 1)/N times the gradient size, approaching 2× regardless of worker count. For 1,000 workers with 700GB of gradients and 200 Gb/s links, theoretical completion time is approximately 2 × 700GB / 200 Gb/s = 56 seconds for the full reduce scatter plus all gather. Practical implementations achieve 60 to 80% of theoretical bandwidth, making communication a significant fraction of large scale training time.
+[^fn-all-reduce]: **Ring All-Reduce**: The dominant collective communication algorithm for distributed training gradient synchronization [@patarasuk2009bandwidth]. In ring all-reduce, N workers arrange logically in a ring. Each worker sends 1/N of its gradient to its neighbor, which adds the received gradient to its own before forwarding. After N minus 1 steps, each worker has the sum of all gradients for 1/N of parameters. A second ring pass distributes the complete sum to all workers. The algorithm achieves optimal bandwidth utilization. Total data transferred equals 2(N minus 1)/N times the gradient size, approaching 2× regardless of worker count. For 1,000 workers with 700GB of gradients and 200 Gb/s links, theoretical completion time is approximately 2 × 700GB / 200 Gb/s = 56 seconds for the full reduce scatter plus all gather. Practical implementations achieve 60 to 80% of theoretical bandwidth, making communication a significant fraction of large scale training time.
 
-This ratio explains why distributed training systems optimize communication aggressively. Gradient compression reduces transfer volume by 10 to 100× at the cost of some accuracy. Overlapping communication with computation hides transfer latency during the next batch's forward pass. Hierarchical aggregation reduces cross rack traffic by combining gradients locally first. These optimizations, unnecessary at small scale, become essential at production scale.
+This ratio explains why distributed training systems optimize communication aggressively. Gradient compression reduces transfer volume by 10-100× at the cost of some accuracy. Overlapping communication with computation hides transfer latency during the next batch's forward pass. Hierarchical aggregation reduces cross-rack traffic by combining gradients locally first. These optimizations, unnecessary at small scale, become essential at production scale.
 
 ::: {.callout-definition title="Communication-Computation Ratio"}
-***Communication-Computation Ratio*** describes the relative time spent transferring data versus performing computation in distributed systems. A ratio of 1 to 1 means equal time on each; higher ratios indicate communication bound workloads. Modern distributed training systems typically achieve ratios between 1 to 3 and 1 to 1, making communication optimization critical for efficiency. The ratio depends on model size (larger models have more gradients to synchronize), batch size (larger batches amortize communication over more computation), and network bandwidth (faster networks reduce communication time).
+***Communication-Computation Ratio*** describes the relative time spent transferring data versus performing computation in distributed systems. A ratio of 1:1 means equal time on each; higher ratios indicate communication-bound workloads. Modern distributed training systems typically achieve ratios between 1:3 and 1:1, making communication optimization critical for efficiency. The ratio depends on model size (larger models have more gradients to synchronize), batch size (larger batches amortize communication over more computation), and network bandwidth (faster networks reduce communication time).
 :::
 
 ### Failure Becomes Routine
 
 At small scale, failure is exceptional. A well maintained server might run for years without hardware issues. Software bugs, once fixed, stay fixed. Administrators can manually investigate and remediate problems.
 
-At large scale, failure becomes statistical certainty. With 10,000 GPUs, multiple failures occur weekly. With 100,000 concurrent user sessions, software edge cases that occur one in a million times happen hundreds of times daily. Manual intervention becomes impossible; systems must self heal.
-
-This transition requires fundamental architectural changes. Small scale systems optimize for the common case and handle failures through manual recovery. Large scale systems must design for failure from the beginning:
+At large scale, failure becomes statistical certainty. With 10,000 GPUs, multiple failures occur weekly. With 100,000 concurrent user sessions, software edge cases that occur one in a million times happen hundreds of times daily. Manual intervention becomes impossible; systems must self heal. This transition requires architectural changes from the beginning. Small scale systems optimize for the common case and handle failures through manual recovery, while large scale systems embed failure handling into their core design:
 
 - **Checkpointing**: Saving model state frequently enough that losing hours of progress is acceptable when failures occur
 - **Redundancy**: Running extra workers that can absorb failed workers' tasks without restart
@@ -208,7 +206,7 @@ The CAP theorem[^fn-cap-theorem] establishes that distributed systems can provid
 
 [^fn-cap-theorem]: **CAP Theorem**: Proven by Eric Brewer and formalized by Gilbert and Lynch [@gilbert2002brewer], the CAP theorem states that a distributed data store cannot simultaneously provide more than two of Consistency (every read receives the most recent write), Availability (every request receives a non-error response), and Partition tolerance (the system continues operating despite network partitions). Since partitions are unavoidable in distributed systems, the practical choice is between CP (consistent but potentially unavailable during partitions) and AP (available but potentially inconsistent). Distributed ML systems make different choices. Synchronous training is CP (training halts during partitions to maintain model consistency), while asynchronous training is AP (training continues with potentially stale gradients). Understanding this trade-off informs architecture decisions throughout distributed ML systems.
 
-ML systems make different choices depending on context. Synchronous distributed training chooses consistency: all workers see the same model state, but training halts if any worker becomes unreachable. Asynchronous training chooses availability: training continues even with stragglers or failures, but workers may operate on slightly stale model versions. Federated learning often chooses availability with eventual consistency: edge devices train locally and periodically synchronize, accepting temporary inconsistency for continuous operation.
+Distributed ML systems make different CAP trade-offs depending on their requirements. Synchronous distributed training chooses consistency: all workers see the same model state, but training halts if any worker becomes unreachable. Asynchronous training chooses availability: training continues even with stragglers or failures, but workers may operate on slightly stale model versions. Federated learning often chooses availability with eventual consistency: edge devices train locally and periodically synchronize, accepting temporary inconsistency for continuous operation.
 
 ### Coordination Overhead
 
@@ -228,19 +226,17 @@ Steps 1-3 and 5 parallelize efficiently. Step 4, gradient aggregation, requires 
 
 Datacenter distribution is challenging but controlled. All machines run in managed facilities with reliable power, cooling, and networking. Administrators can access any machine for diagnosis and repair.
 
-Edge distribution amplifies every challenge. Billions of smartphones, IoT devices, and embedded systems operate in uncontrolled environments with unreliable connectivity, limited power, and heterogeneous capabilities. Google's Gboard keyboard runs on over 1 billion Android devices, each potentially participating in federated learning[^fn-federated-learning] to improve predictions [@hard2018federated].
+Edge distribution amplifies every challenge. Billions of smartphones, IoT devices, and embedded systems operate in uncontrolled environments with unreliable connectivity, limited power, and heterogeneous capabilities. Google's Gboard keyboard runs on over 1 billion Android devices, each potentially participating in federated learning[^fn-federated-learning] to improve predictions [@hard2018federated]. This deployment context introduces unique constraints:
 
-[^fn-federated-learning]: **Federated Learning**: A distributed machine learning approach where models train across many decentralized devices holding local data samples, without exchanging the raw data. Instead of collecting user data to a central server, federated learning sends the model to devices, trains locally, and aggregates only the model updates (gradients or weight differences). This preserves data privacy while enabling learning from distributed sources. Challenges include handling heterogeneous device capabilities, intermittent connectivity, and ensuring convergence despite non-uniform data distributions. Federated learning is covered in detail in the On-Device Learning chapter.
-
-Edge distribution introduces unique constraints:
+[^fn-federated-learning]: **Federated Learning**: A distributed machine learning approach where models train across many decentralized devices holding local data samples, without exchanging the raw data. Instead of collecting user data to a central server, federated learning sends the model to devices, trains locally, and aggregates only the model updates (gradients or weight differences). This preserves data privacy while enabling learning from distributed sources. Challenges include handling heterogeneous device capabilities, intermittent connectivity, and ensuring convergence despite non-uniform data distributions. Federated learning is covered in detail in @sec-edge-intelligence.
 
 - **Intermittent connectivity**: Devices may be reachable only when on WiFi and charging
-- **Heterogeneous hardware**: Model must run efficiently across devices spanning 100× performance range
-- **Privacy requirements**: Raw data cannot leave devices, requiring on device processing
+- **Heterogeneous hardware**: Model must run efficiently across devices spanning a 100× performance range
+- **Privacy requirements**: Raw data cannot leave devices, requiring on-device processing
 - **Update complexity**: Pushing model updates to billions of devices takes weeks
 - **Monitoring limitations**: Cannot install arbitrary diagnostics on user devices
 
-These constraints require architectural approaches fundamentally different from datacenter ML. Federated learning aggregates model updates without collecting data. On-device inference optimizes for varied hardware capabilities. Differential privacy, which adds calibrated noise to protect individual data points while preserving aggregate statistical properties, provides mathematical guarantees about information leakage. These techniques, largely unnecessary for centralized ML, become essential for edge deployment.
+These constraints require architectural approaches that differ from datacenter ML in essential ways. Federated learning aggregates model updates without collecting data. On-device inference optimizes for varied hardware capabilities. Differential privacy, which adds calibrated noise to protect individual data points while preserving aggregate statistical properties, provides mathematical guarantees about information leakage. These techniques, largely unnecessary for centralized ML, become essential for edge deployment.
 
 ## Why Governance Matters at Scale {#sec-vol2-introduction-why-governance-matters}
 
@@ -254,13 +250,13 @@ ML systems face unique security threats beyond traditional software vulnerabilit
 
 At production scale, these threats become economically attractive to attackers. A model serving millions of users represents substantial intellectual property worth stealing. A model making consequential decisions (loans, hiring, content moderation) offers high-value manipulation targets. A model processing sensitive data (health records, financial information) provides valuable inference targets.
 
-Defense requires systematic approaches including access controls that limit query rates and patterns, output perturbation that provides differential privacy guarantees, adversarial training that improves robustness to perturbations, and monitoring that detects anomalous query patterns indicative of attacks. These defenses impose overhead unnecessary for small-scale systems but essential for production deployment.
+Defending against these threats requires systematic approaches including access controls that limit query rates and patterns, output perturbation that provides differential privacy guarantees, adversarial training that improves robustness to perturbations, and monitoring that detects anomalous query patterns indicative of attacks. These defenses impose overhead unnecessary for small-scale systems but essential for production deployment.
 
 ### Regulatory Requirements Emerge
 
 Systems operating at scale attract regulatory attention. The European Union's General Data Protection Regulation (GDPR) imposes obligations for systems processing EU residents' data, including the right to explanation for automated decisions. The EU AI Act establishes risk-based requirements for AI systems, with high-risk applications (healthcare, employment, law enforcement) requiring conformity assessments, human oversight, and accuracy documentation. Similar regulations exist or are developing in jurisdictions worldwide.
 
-Compliance requires technical capabilities:
+Meeting these regulatory requirements demands technical capabilities:
 
 - **Audit trails**: Recording inputs, outputs, and model versions for every decision
 - **Explanation generation**: Producing human-interpretable justifications for model outputs
@@ -272,9 +268,7 @@ These capabilities impose engineering costs absent for unregulated systems but m
 
 ### Societal Impact Demands Responsibility
 
-Beyond legal compliance, systems affecting billions of users carry ethical obligations. Recommendation algorithms shape public discourse. Researchers have documented how engagement-optimizing systems can amplify misinformation and polarization [@ribeiro2020auditing]. Hiring algorithms affect employment opportunities. Amazon discontinued an AI recruiting tool that exhibited bias against women [@dastin2018amazon]. Content moderation systems determine what speech is visible. Errors can suppress legitimate expression or fail to remove harmful content.
-
-Responsible engineering practices address these impacts:
+Beyond legal compliance, systems affecting billions of users carry ethical obligations. Recommendation algorithms shape public discourse. Researchers have documented how engagement-optimizing systems can amplify misinformation and polarization [@ribeiro2020auditing]. Hiring algorithms affect employment opportunities. Amazon discontinued an AI recruiting tool that exhibited bias against women [@dastin2018amazon]. Content moderation systems determine what speech is visible. Errors can suppress legitimate expression or fail to remove harmful content. Responsible engineering practices must address these impacts:
 
 - **Fairness evaluation**: Testing for disparate impact across demographic groups before deployment
 - **Impact assessment**: Analyzing potential harms before launching new capabilities
@@ -290,11 +284,11 @@ Responsible engineering practices address these impacts:
 
 Volume I established the foundations that this textbook extends. If you are beginning here, this section provides essential context. If you completed Volume I, consider this a brief reminder before we proceed to advanced topics.
 
-**The AI Triad** provides the organizing framework for understanding ML systems. Every machine learning system comprises three interdependent components: data that guides behavior, algorithms that learn patterns, and computational infrastructure that enables both training and inference. These components exist in dynamic tension. Larger models require more data and compute. Larger datasets enable more sophisticated models but demand storage and processing infrastructure. At the scales examined in this volume, these interdependencies intensify. Distributed training requires coordinating the AI Triad's components across thousands of machines rather than optimizing them on a single system.
+Volume I introduced the AI Triad as the organizing framework for understanding ML systems. Every machine learning system comprises three interdependent components: data that guides behavior, algorithms that learn patterns, and computational infrastructure that enables both training and inference. These components exist in dynamic tension. Larger models require more data and compute. Larger datasets enable more sophisticated models but demand storage and processing infrastructure. At the scales examined in this volume, these interdependencies intensify. Distributed training requires coordinating the AI Triad's components across thousands of machines rather than optimizing them on a single system.
 
-**The Five-Pillar Framework** structures the ML systems engineering discipline into interconnected domains: data engineering establishes pipelines for collecting, processing, and serving training and inference data; model development encompasses architecture design, training procedures, and validation methodologies; optimization techniques compress and accelerate models for deployment constraints; deployment infrastructure spans cloud platforms, edge devices, and embedded systems; and operations practices ensure systems remain reliable, secure, and effective throughout their lifecycle. This textbook extends each pillar to production scale, where the engineering challenges multiply.
+The Five-Pillar Framework structures the ML systems engineering discipline into interconnected domains: data engineering establishes pipelines for collecting, processing, and serving training and inference data; model development encompasses architecture design, training procedures, and validation methodologies; optimization techniques compress and accelerate models for deployment constraints; deployment infrastructure spans cloud platforms, edge devices, and embedded systems; and operations practices ensure systems remain reliable, secure, and effective throughout their lifecycle. This textbook extends each pillar to production scale, where the engineering challenges multiply.
 
-**The Six Systems Engineering Principles** provide guidance for design decisions across all five pillars:
+The Six Systems Engineering Principles provide guidance for design decisions across all five pillars:
 
 1. *Measure Everything*: At scale, measurement itself becomes a systems challenge requiring distributed monitoring infrastructure
 2. *Design for 10x Scale*: Production deployment reveals whether 10× design was adequate or optimistic
@@ -307,7 +301,7 @@ Volume I taught you to build, optimize, and operate ML systems. This textbook te
 
 ## The Structure of This Textbook {#sec-vol2-introduction-structure}
 
-This textbook organizes around the three imperatives, progressing from infrastructure foundations through distribution techniques to governance practices. @tbl-vol2-structure summarizes the five-part structure.
+This textbook organizes around the three imperatives, progressing from infrastructure foundations through distribution techniques to governance practices. @tbl-vol2-structure summarizes this five-part structure.
 
 +--------------------------------+---------------------------------+----------------------------------------+
 | **Part**                       | **Theme**                       | **Key Chapters**                       |
@@ -395,10 +389,10 @@ The path forward begins with infrastructure: the datacenters, accelerators, stor
 Let us begin.
 
 ::: {.callout-important title="Key Takeaways"}
-* Volume II addresses the fundamental shift from single-machine ML to distributed systems where communication costs, routine failures, and governance requirements become dominant engineering concerns
+* Volume II addresses the shift from single-machine ML to distributed systems where communication costs, routine failures, and governance requirements become dominant engineering concerns
 * Scale creates qualitative, not merely quantitative, changes: techniques that work for 8 GPUs may fail at 8,000 GPUs due to emergent phenomena like network congestion, straggler effects, and coordination overhead
 * The three pillars of Volume II, scaling infrastructure, distributing computation, and governing responsibly, are interdependent: infrastructure determines what distribution strategies are feasible, and governance constraints shape both
-* Production ML systems differ fundamentally from research prototypes in their requirements for fault tolerance, security, privacy, and accountability to stakeholders beyond the development team
+* Production ML systems diverge from research prototypes in their requirements for fault tolerance, security, privacy, and accountability to stakeholders beyond the development team
 :::
 
 ::: { .quiz-end }
