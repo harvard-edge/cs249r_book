@@ -1,0 +1,149 @@
+name: '🚀 Publish All (Live)'
+
+# Orchestrator workflow that deploys all subsites sequentially
+# Prevents gh-pages conflicts by running one deployment at a time
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_book:
+        description: 'Deploy Book?'
+        type: boolean
+        default: true
+      deploy_kits:
+        description: 'Deploy Kits?'
+        type: boolean
+        default: true
+      deploy_tinytorch:
+        description: 'Deploy TinyTorch?'
+        type: boolean
+        default: true
+      deploy_labs:
+        description: 'Deploy Labs?'
+        type: boolean
+        default: true
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+concurrency:
+  group: gh-pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  # ==========================================================================
+  # Step 1: Deploy Kits
+  # ==========================================================================
+  deploy-kits:
+    name: '📦 Deploy Kits'
+    if: ${{ inputs.deploy_kits }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Build Kits
+        run: |
+          cd kits
+          quarto render
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./kits/_build
+          destination_dir: kits
+          publish_branch: gh-pages
+          keep_files: true
+          commit_message: '📦 Deploy Kits - ${{ github.sha }}'
+
+  # ==========================================================================
+  # Step 2: Deploy TinyTorch (after kits)
+  # ==========================================================================
+  deploy-tinytorch:
+    name: '🔥 Deploy TinyTorch'
+    needs: [deploy-kits]
+    if: ${{ always() && inputs.deploy_tinytorch && (needs.deploy-kits.result == 'success' || needs.deploy-kits.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Build TinyTorch
+        run: |
+          cd tinytorch/site
+          quarto render
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./tinytorch/site/_build/html
+          destination_dir: tinytorch
+          publish_branch: gh-pages
+          keep_files: true
+          commit_message: '🔥 Deploy TinyTorch - ${{ github.sha }}'
+
+  # ==========================================================================
+  # Step 3: Deploy Labs (after tinytorch)
+  # ==========================================================================
+  deploy-labs:
+    name: '🔬 Deploy Labs'
+    needs: [deploy-tinytorch]
+    if: ${{ always() && inputs.deploy_labs && (needs.deploy-tinytorch.result == 'success' || needs.deploy-tinytorch.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Build Labs
+        run: |
+          cd labs
+          quarto render
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./labs/_build
+          destination_dir: labs
+          publish_branch: gh-pages
+          keep_files: true
+          commit_message: '🔬 Deploy Labs - ${{ github.sha }}'
+
+  # ==========================================================================
+  # Summary
+  # ==========================================================================
+  summary:
+    name: '📋 Deployment Summary'
+    needs: [deploy-kits, deploy-tinytorch, deploy-labs]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "## 🚀 Publish All Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Site | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 📦 Kits | ${{ needs.deploy-kits.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔥 TinyTorch | ${{ needs.deploy-tinytorch.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔬 Labs | ${{ needs.deploy-labs.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🌐 Live URLs" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 [Kits](https://mlsysbook.ai/kits/)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔥 [TinyTorch](https://mlsysbook.ai/tinytorch/)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔬 [Labs](https://mlsysbook.ai/labs/)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📚 Book Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "Book uses a separate workflow with version management." >> $GITHUB_STEP_SUMMARY
+          echo "Run **📚 Book Publish (Live)** separately for book updates." >> $GITHUB_STEP_SUMMARY
