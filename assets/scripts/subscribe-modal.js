@@ -16,8 +16,6 @@
             <div class="modal-header">
               <div class="modal-brand-row">
                 <span class="modal-brand-item">📚 MLSysBook</span>
-                <span class="modal-brand-plus">+</span>
-                <span class="modal-brand-item">🔥 TinyTorch</span>
               </div>
               <h2 class="modal-title">Stay in the Loop</h2>
               <p class="modal-subtitle">Get updates on new chapters, hands-on labs, and ML systems resources.</p>
@@ -62,7 +60,7 @@
                 <label for="modal-motivation">What brings you here? <span class="optional-label">(optional)</span></label>
                 <textarea id="modal-motivation" name="metadata__motivation" rows="2" placeholder="e.g., teaching a course, learning ML systems, building edge devices..."></textarea>
               </div>
-              <input type="hidden" name="tag" value="mlsysbook-textbook">
+              <input type="hidden" name="tag" value="mlsysbook-site">
               <button type="submit" class="btn btn-primary subscribe-btn">Subscribe</button>
               <p class="form-note">No spam, ever. Unsubscribe anytime.</p>
             </form>
