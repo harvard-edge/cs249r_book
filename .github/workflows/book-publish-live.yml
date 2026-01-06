@@ -980,15 +980,6 @@ jobs:
             echo "❌ EPUB file not found - skipping EPUB deployment"
           fi
 
-          # Copy Netlify config for custom redirects
-          echo "🌐 Copying Netlify configuration..."
-          if [ -f "${{ github.workspace }}/netlify.toml" ]; then
-            cp "${{ github.workspace }}/netlify.toml" combined-site/netlify.toml
-            echo "✅ netlify.toml copied to deployment directory"
-          else
-            echo "⚠️ netlify.toml not found in repository root - skipping"
-          fi
-
           echo "📊 Combined site structure:"
           ls -la combined-site/ | head -10
           echo "📊 Assets directory:"
@@ -1021,34 +1012,57 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Preserve TinyTorch subdirectory (deployed separately by tinytorch-publish-live.yml)
-          # This prevents the main book deployment from wiping out the TinyTorch subsite
-          if [ -d "tinytorch" ]; then
-            echo "📦 Preserving existing tinytorch/ directory..."
-            mv tinytorch ../tinytorch-preserved
+          # =================================================================
+          # SUBDIRECTORY DEPLOYMENT: Book deploys to /book/
+          # =================================================================
+          # Each subsite has its own directory (no conflicts, no preservation needed):
+          #   /book/      - Main textbook (this workflow)
+          #   /tinytorch/ - TinyTorch framework (tinytorch-publish-live.yml)
+          #   /kits/      - Hardware Kits (kits-publish-live.yml)
+          #   /collabs/   - Collaborations (collabs-publish-live.yml)
+          # =================================================================
+
+          # Clear only the book/ subdirectory (preserves other subsites)
+          echo "🗑️ Clearing existing book/ directory..."
+          rm -rf book/
+
+          # Create book directory and copy new content
+          echo "📦 Deploying textbook to /book/..."
+          mkdir -p book
+          cp -r ../combined-site/* book/
+
+          # Ensure CNAME file exists at root for custom domain
+          if [ ! -f "CNAME" ]; then
+            echo "mlsysbook.ai" > CNAME
+            echo "✅ CNAME file created for mlsysbook.ai"
+          else
+            echo "✅ CNAME file already exists"
           fi
 
-          # Clear existing book content (tinytorch already preserved above)
-          rm -rf *
+          # Ensure .nojekyll exists at root
+          touch .nojekyll
 
-          # Copy new combined content
-          cp -r ../combined-site/* .
-
-          # Restore TinyTorch if it existed
-          if [ -d "../tinytorch-preserved" ]; then
-            echo "📦 Restoring tinytorch/ directory..."
-            mv ../tinytorch-preserved tinytorch
-            echo "✅ TinyTorch preserved at /tinytorch/"
-          fi
-
-          # Add CNAME file for custom domain
-          echo "mlsysbook.ai" > CNAME
-          echo "✅ CNAME file created for mlsysbook.ai"
+          # Create root index.html that redirects to /book/
+          cat > index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta http-equiv="refresh" content="0;url=/book/">
+            <link rel="canonical" href="https://mlsysbook.ai/book/">
+            <title>Redirecting to ML Systems Textbook...</title>
+          </head>
+          <body>
+            <p>Redirecting to <a href="/book/">ML Systems Textbook</a>...</p>
+          </body>
+          </html>
+          EOF
+          echo "✅ Root redirect to /book/ created"
 
           echo "📊 Deployed content structure:"
-          ls -la | head -10
-          echo "📊 Assets available:"
-          ls -la assets/ 2>/dev/null || echo "No assets directory"
+          ls -la | head -15
+          echo "📊 Book directory contents:"
+          ls -la book/ | head -10
 
           # Add all files to git
           git add .
@@ -1069,13 +1083,13 @@ jobs:
 
           # Commit with comprehensive validation
           echo "📝 Creating deployment commit..."
-          COMMIT_MSG="🚀 Deploy release ${{ needs.validate-inputs.outputs.new_version }} from commit ${{ github.sha }}
+          COMMIT_MSG="🚀 Deploy release ${{ needs.validate-inputs.outputs.new_version }} to /book/ from commit ${{ github.sha }}
 
           Combined HTML site with PDF and EPUB assets for download.
 
-          - HTML: Interactive web textbook
-          - PDF: assets/downloads/Machine-Learning-Systems.pdf
-          - EPUB: assets/downloads/Machine-Learning-Systems.epub (if available)
+          - HTML: Interactive web textbook at /book/
+          - PDF: /book/assets/downloads/Machine-Learning-Systems.pdf
+          - EPUB: /book/assets/downloads/Machine-Learning-Systems.epub (if available)
           - Release: ${{ needs.validate-inputs.outputs.new_version }}
           - Files updated: $CHANGED_FILES"
 
@@ -1118,14 +1132,17 @@ jobs:
           echo "  - Files updated: $CHANGED_FILES"
           echo "  - Commit hash: $COMMIT_HASH"
           echo "  - Branch: gh-pages"
+          echo "  - Deploy path: /book/"
           echo ""
           echo "🌐 Site URLs:"
-          echo "  - GitHub Pages: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
-          echo "  - Custom Domain: https://mlsysbook.ai"
+          echo "  - Textbook: https://mlsysbook.ai/book/"
+          echo "  - TinyTorch: https://mlsysbook.ai/tinytorch/"
+          echo "  - Hardware Kits: https://mlsysbook.ai/kits/"
+          echo "  - Root (redirects to /book/): https://mlsysbook.ai/"
           echo ""
           echo "📄 Direct Asset Links:"
-          echo "  - PDF: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/downloads/Machine-Learning-Systems.pdf"
-          echo "  - EPUB: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/downloads/Machine-Learning-Systems.epub"
+          echo "  - PDF: https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf"
+          echo "  - EPUB: https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.epub"
           echo ""
           echo "⏰ Note: Changes may take 1-5 minutes to appear due to CDN caching."
         env:
@@ -1660,13 +1677,15 @@ jobs:
           echo "- 🌐 **Deployment**: Combined HTML + PDF + EPUB deployed to GitHub Pages (gh-pages branch)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🌐 Access Your Published Textbook:" >> $GITHUB_STEP_SUMMARY
-          echo "- 📖 [Interactive Web Textbook](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }})" >> $GITHUB_STEP_SUMMARY
+          echo "- 📖 [Interactive Web Textbook](https://mlsysbook.ai/book/)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔥 [TinyTorch Framework](https://mlsysbook.ai/tinytorch/)" >> $GITHUB_STEP_SUMMARY
+          echo "- ⚙️ [Hardware Kits](https://mlsysbook.ai/kits/)" >> $GITHUB_STEP_SUMMARY
           echo "- 📦 [Version Release Notes](https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate-inputs.outputs.new_version }})" >> $GITHUB_STEP_SUMMARY
           echo "- 📄 [Download Complete PDF](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
           echo "- 📚 [Download EPUB eBook](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems.epub)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📄 [Direct PDF Access](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/downloads/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📚 [Direct EPUB Access](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/downloads/Machine-Learning-Systems.epub)" >> $GITHUB_STEP_SUMMARY
-          echo "- 🎓 [Share with Students](https://mlsysbook.ai)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 [Direct PDF Access](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📚 [Direct EPUB Access](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.epub)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🎓 [Share with Students](https://mlsysbook.ai/book/)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📊 Build Status:" >> $GITHUB_STEP_SUMMARY
           echo "- 📋 **Quarto Build Container Workflow**: Should be running/completed" >> $GITHUB_STEP_SUMMARY
