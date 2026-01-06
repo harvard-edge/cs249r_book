@@ -1,3 +1,44 @@
+## 2026 Updates
+
+### 📅 January 6 — v0.6.0: New Year Refresh
+
+**This release brings a refreshed site experience with improved navigation, the new Labs platform, and content updates based on MIT Press reviewer feedback.**
+
+<details>
+<summary>**🎨 Site Experience**</summary>
+
+- `█████` **Navbar Dropdowns**: New organized dropdown menus across all sites for improved navigation.
+- `█████` **Happy New Year Banners**: Consistent announcement banners celebrating 2026 across book, kits, and labs sites.
+- `████░` **Hardware Kits Site**: Standalone site at mlsysbook.ai/kits with dark mode, PDF builds, subscribe modal, and hardware carousel.
+- `███░░` **Labs Platform**: Renamed from "Collabs" to "Labs" at mlsysbook.ai/labs (interactive simulations coming 2026).
+- `██░░░` **Ecosystem Consistency**: Unified styling, favicons, and configuration across all four sites.
+
+</details>
+
+<details>
+<summary>**📖 Content Updates**</summary>
+
+- `█████` **MIT Press Reviewer Feedback**: Addressed feedback across multiple chapters for improved clarity and accuracy.
+- `████░` **Review Findings**: Fixed medium-priority issues across 11+ chapters based on comprehensive review.
+- `███░░` **Figure Captions**: Added descriptive captions to data and model parallelism diagrams.
+- `██░░░` **Hardware Kit Prices**: Updated to December 2025 values with accurate pricing.
+- `█░░░░` **Typo Corrections**: Various fixes including footnote accuracy improvements.
+
+</details>
+
+<details>
+<summary>**🔧 Infrastructure**</summary>
+
+- `████░` **Manual Live Deploys**: All publish-live workflows now require manual trigger for controlled releases.
+- `███░░` **PDF Builds**: Titlepage support for Kits PDF with simplified profile approach.
+- `██░░░` **Codespell Updates**: Added contributor names to ignore list, improved spell checking accuracy.
+- `██░░░` **URL Structure**: Migrated /collabs to /labs with proper redirects and cleanup.
+- `█░░░░` **Repository Cleanup**: Removed internal planning docs from public repo.
+
+</details>
+
+---
+
 ## 2025 Updates
 
 ### 📅 December 14 — v0.5.0: The TinyTorch Release
