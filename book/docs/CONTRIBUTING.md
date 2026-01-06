@@ -55,8 +55,6 @@ Make your changes to the code or documentation. Please make sure that your chang
 
 - Each chapter folder also include an images folder. The images folder has 4 subfolders: `png`, `pdf`, `svg`, and `jpg`. Please add your images to the appropriate folder. This is important to keep the images organized and to make sure that the images are rendered correctly in the book.
 
-- Update `updates.md` file with a brief description of your contribution. Please include the issue number in the description. For example, `Fix typo in the documentation (issue #14)`. See [keep a changelog](https://keepachangelog.com/en/1.1.0/) for more information on how to write a good changelog.
-
 ### Commit your changes
 
 ```bash

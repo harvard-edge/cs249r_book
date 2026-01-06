@@ -1,4 +1,4 @@
-# Collabs
+# Labs
 
 **Understanding the Interplay Between Algorithms and Systems**
 
@@ -6,14 +6,14 @@
 
 ---
 
-## What Are Collabs?
+## What Are Labs?
 
-Collabs are hands-on Google Colab simulations that bridge the gap between **reading about ML systems** (the textbook) and **building them from scratch** (TinyTorch).
+Labs are hands-on interactive notebooks that bridge the gap between **reading about ML systems** (the textbook) and **building them from scratch** (TinyTorch).
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │                 │     │                 │     │                 │
-│    Textbook     │────▶│     Collabs     │────▶│    TinyTorch    │
+│    Textbook     │────▶│      Labs       │────▶│    TinyTorch    │
 │                 │     │                 │     │                 │
 │  Concepts &     │     │  Experiment &   │     │  Build from     │
 │  Theory         │     │  Explore        │     │  Scratch        │
@@ -27,12 +27,12 @@ Collabs are hands-on Google Colab simulations that bridge the gap between **read
 | Phase | Resource | What You Do |
 |-------|----------|-------------|
 | **Understand** | [Textbook](https://mlsysbook.ai) | Learn concepts, theory, and system design principles |
-| **Experiment** | Collabs | Explore tradeoffs, tweak parameters, see how decisions ripple through systems |
+| **Experiment** | Labs | Explore tradeoffs, tweak parameters, see how decisions ripple through systems |
 | **Build** | [TinyTorch](https://mlsysbook.ai/tinytorch) | Implement everything from scratch, own every line of code |
 
-## Why Collabs?
+## Why Labs?
 
-ML systems are where algorithms meet hardware. A model that works perfectly in theory can fail in practice due to memory limits, latency constraints, or numerical precision. Collabs help you develop intuition for these algorithm-system interactions.
+ML systems are where algorithms meet hardware. A model that works perfectly in theory can fail in practice due to memory limits, latency constraints, or numerical precision. Labs help you develop intuition for these algorithm-system interactions.
 
 - **See the tradeoffs** — How does batch size affect memory? How does quantization affect accuracy?
 - **Explore interactively** — Adjust parameters and watch how changes ripple through the system
@@ -49,7 +49,7 @@ ML systems are where algorithms meet hardware. A model that works perfectly in t
 
 ## Stay Updated
 
-Collabs are under active development. To be notified when they launch:
+Labs are under active development. To be notified when they launch:
 
 - [Subscribe to updates](https://buttondown.email/mlsysbook)
 - [Star the repo](https://github.com/harvard-edge/cs249r_book)
@@ -69,6 +69,6 @@ Collabs are under active development. To be notified when they launch:
 
 <div align="center">
 
-**Read. Explore. Build.** *(Collabs coming soon)*
+**Read. Explore. Build.** *(Labs coming soon)*
 
 </div>

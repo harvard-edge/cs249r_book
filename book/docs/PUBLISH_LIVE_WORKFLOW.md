@@ -124,52 +124,18 @@ This will check:
 
 ## 📝 Release Notes Management
 
-### Automatic vs Manual Release Notes
+The workflow creates **draft releases** on GitHub that you can edit manually. This gives you full control over release notes.
 
-The workflow now creates **draft releases** that you can edit manually on GitHub. This gives you full control over release notes.
+### Writing Release Notes
 
-### Generate Release Notes Script
+1. **Run publish-live workflow** → Creates draft release
+2. **Edit on GitHub** → Go to the draft release and write your notes
+3. **Publish when ready** → Click "Publish release" when satisfied
 
-The workflow automatically generates AI-powered release notes using your existing changelog system:
-
-```bash
-# Manual usage (for testing)
-python tools/scripts/maintenance/generate_release_content.py \
-  --release-notes \
-  --version v1.2.0 \
-  --previous-version v1.1.0 \
-  --description "Add new chapter on TinyML" \
-  --model gemma2:9b
-```
-
-This analyzes:
-- 📊 Git commits since last release
-- 📁 Changed files and directories
+Release notes should summarize:
 - 📖 Content updates and improvements
 - 🔧 Technical changes and infrastructure updates
-- 🎯 Impact assessment with visual bars
-
-### AI Model Configuration
-
-The workflow uses Ollama (local AI) with configurable models:
-
-- **Default**: `gemma2:9b` (fast, good quality)
-- **Alternative**: `gemma2:27b` (better quality, slower)
-- **Other options**: `llama3.1:8b`, `llama3.1:70b`
-
-You can specify the model in the workflow inputs:
-- Go to GitHub Actions → "🚀 Publish Live"
-- Set "AI model" field to your preferred model
-- Leave empty for default (`gemma2:9b`)
-
-**No API keys required** - all AI processing happens locally via Ollama.
-
-### Manual Release Notes Workflow
-
-1. **Run publish-live workflow** → Creates draft release with AI notes
-2. **AI analyzes changes** → Uses your existing changelog system
-3. **Edit on GitHub** → Go to the draft release and edit if needed
-4. **Publish when ready** → Click "Publish release" when satisfied
+- 🐛 Bug fixes and corrections
 
 ## 📋 Usage Instructions
 
