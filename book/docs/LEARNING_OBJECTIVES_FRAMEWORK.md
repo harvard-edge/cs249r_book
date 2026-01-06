@@ -334,7 +334,6 @@ SEVERITY: Warning
 - [ ] Review affected quiz questions
 - [ ] Run validation suite
 - [ ] Update quiz JSON `learning_objective` fields
-- [ ] Document rationale in CHANGELOG
 
 ### B. When Quiz Questions Change
 
