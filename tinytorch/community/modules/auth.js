@@ -30,29 +30,22 @@ export async function refreshToken() {
     }
 
     try {
-        const refreshRes = await fetch(`${NETLIFY_URL}/api/auth/refresh`, { 
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ refreshToken })
-        });
+        const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
 
-        if (!refreshRes.ok) { 
-            return false; 
+        if (error || !data.session) {
+            console.error("Supabase refresh failed:", error);
+            return false;
         }
 
-        const refreshData = await refreshRes.json();
-        const session = refreshData.session || refreshData; 
-
-        if (session && session.access_token) {
-            localStorage.setItem("tinytorch_token", session.access_token);
-            if (session.refresh_token) {
-                localStorage.setItem("tinytorch_refresh_token", session.refresh_token);
-            }
-            if (session.user) {
-                localStorage.setItem("tinytorch_user", JSON.stringify(session.user));
-            }
-            return session.access_token;
+        const session = data.session;
+        localStorage.setItem("tinytorch_token", session.access_token);
+        if (session.refresh_token) {
+            localStorage.setItem("tinytorch_refresh_token", session.refresh_token);
         }
+        if (session.user) {
+            localStorage.setItem("tinytorch_user", JSON.stringify(session.user));
+        }
+        return session.access_token;
     } catch (e) {
         console.error("Token refresh failed", e);
     }
@@ -164,6 +157,28 @@ export function handleToggle() {
     }
 }
 
+export function showMessageModal(title, body, onCloseCallback = null) {
+    const overlay = document.getElementById('messageOverlay');
+    const titleEl = document.getElementById('messageTitle');
+    const bodyEl = document.getElementById('messageBody');
+    const btnEl = document.getElementById('messageBtn');
+    
+    if (overlay && titleEl && bodyEl) {
+        titleEl.textContent = title;
+        bodyEl.textContent = body;
+        overlay.classList.add('active');
+        
+        // Remove previous listeners to avoid duplicates if reused
+        const newBtn = btnEl.cloneNode(true);
+        btnEl.parentNode.replaceChild(newBtn, btnEl);
+        
+        newBtn.addEventListener('click', () => {
+            overlay.classList.remove('active');
+            if (onCloseCallback) onCloseCallback();
+        });
+    }
+}
+
 export async function handleAuth(e) {
     e.preventDefault();
     const emailInput = document.getElementById('authEmail');
@@ -175,8 +190,12 @@ export async function handleAuth(e) {
     const email = emailInput.value;
     const password = passwordInput.value;
     authError.style.display = 'none';
+    
+    // Save original text
+    const originalBtnText = authSubmit.textContent;
+    // Show spinner
     authSubmit.disabled = true;
-    authSubmit.textContent = 'Processing...';
+    authSubmit.innerHTML = '<div class="spinner"></div>';
 
     try {
         let endpoint, body;
@@ -208,7 +227,7 @@ export async function handleAuth(e) {
 
         if (currentMode === 'forgot') {
                 if (response.ok) {
-                    alert(data.message || 'If an account exists, a reset link has been sent.');
+                    showMessageModal('Reset Link Sent', data.message || 'If an account exists, a reset link has been sent.');
                     setMode('login');
                 } else {
                     throw new Error(data.error || 'Failed to send reset link');
@@ -234,8 +253,16 @@ export async function handleAuth(e) {
                     }
                 }
             } else {
-                alert('If an account exists for this email, we have sent you a login link. Otherwise, please check your email to confirm your signup.');
-                window.location.href = basePath + '/dashboard.html';
+                // Signup Success - Show Message Modal
+                // We close the auth modal first so it doesn't overlap
+                closeModal();
+                showMessageModal(
+                    'Check your Email', 
+                    'If you don\'t already have an account, we have sent you an email. Please check your inbox to confirm your signup.',
+                    () => {
+                        window.location.href = basePath + '/dashboard.html';
+                    }
+                );
             }
         }
 
@@ -245,6 +272,7 @@ export async function handleAuth(e) {
         authError.style.display = 'block';
     } finally {
         authSubmit.disabled = false;
+        // Restore button text based on current mode, as logic might have changed mode or just finished
         if (currentMode === 'login') authSubmit.textContent = 'Login';
         else if (currentMode === 'signup') authSubmit.textContent = 'Create Account';
         else authSubmit.textContent = 'Send Reset Link';
@@ -258,6 +286,7 @@ export async function handleLogout() {
         localStorage.removeItem("tinytorch_token");
         localStorage.removeItem("tinytorch_refresh_token");
         localStorage.removeItem("tinytorch_user");
+        sessionStorage.removeItem("tinytorch_location_checked");
         updateNavState();
         closeProfileModal();
         window.location.href = basePath + '/index.html';

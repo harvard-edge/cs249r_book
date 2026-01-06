@@ -2,7 +2,7 @@ import { injectStyles } from './modules/styles.js';
 import { renderLayout, updateNavState } from './modules/ui.js?v=3';
 import { getSession } from './modules/state.js?v=2';
 import { openModal, closeModal, handleToggle, handleAuth, handleLogout, setMode, verifySession, signInWithSocial, supabase } from './modules/auth.js?v=3';
-import { openProfileModal, closeProfileModal, handleProfileUpdate, geocodeAndSetCoordinates } from './modules/profile.js';
+import { openProfileModal, closeProfileModal, handleProfileUpdate, geocodeAndSetCoordinates, checkAndAutoUpdateLocation } from './modules/profile.js';
 import { setupCameraEvents } from './modules/camera.js';
 import { getBasePath } from './modules/config.js';
 
@@ -21,12 +21,14 @@ import { getBasePath } from './modules/config.js';
         btnGoogle.addEventListener('click', (e) => { 
             e.preventDefault(); 
             signInWithSocial('google'); 
+            closeModal();
         });
     }
     if (btnGithub) {
         btnGithub.addEventListener('click', (e) => { 
             e.preventDefault(); 
             signInWithSocial('github'); 
+            closeModal();
         });
     }
 
@@ -46,6 +48,9 @@ import { getBasePath } from './modules/config.js';
         }
         // 3. Verify Session (Async)
         verifySession();
+        
+        // 3.5 Check and Auto-update Location (Async, non-blocking)
+        checkAndAutoUpdateLocation();
     });
 
     // 4. Add Event Listeners

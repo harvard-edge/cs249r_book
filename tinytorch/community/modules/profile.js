@@ -44,15 +44,9 @@ export function closeProfileModal() {
     profileOverlay.classList.remove('active');
 }
 
-export async function fetchUserProfile() {
-    let token = localStorage.getItem("tinytorch_token");
-    if (!token) {
-        console.error("No token found for fetching profile.");
-        forceLogin();
-        return;
-    }
+export async function getProfileData(token) {
+    if (!token) return null;
 
-    let profileData = null;
     let retryCount = 0;
     const MAX_RETRIES = 1;
 
@@ -81,7 +75,7 @@ export async function fetchUserProfile() {
             if (needsRefresh && retryCount === 0) {
                 console.log("Token expired or invalid (400/401). Attempting refresh...");
                 const refreshToken = localStorage.getItem("tinytorch_refresh_token");
-                if (!refreshToken) { forceLogin(); return; }
+                if (!refreshToken) return null;
 
                 const refreshRes = await fetch(`${NETLIFY_URL}/api/auth/refresh`, {
                     method: "POST",
@@ -89,7 +83,7 @@ export async function fetchUserProfile() {
                     body: JSON.stringify({ refreshToken })
                 });
 
-                if (!refreshRes.ok) { forceLogin(); return; }
+                if (!refreshRes.ok) return null;
 
                 const refreshData = await refreshRes.json();
                 const session = refreshData.session || refreshData;
@@ -103,53 +97,139 @@ export async function fetchUserProfile() {
                     retryCount++;
                     continue;
                 } else {
-                    console.warn("Refresh failed: No access token in response", refreshData);
-                    forceLogin();
-                    return;
+                    return null;
                 }
             }
 
             if (!response.ok) {
-                if (!errorData) {
-                     try { errorData = await response.json(); } catch(e) {}
-                }
-                throw new Error(errorData?.error || `Failed to fetch profile data: ${response.status}`);
+                 throw new Error(`Failed to fetch profile data: ${response.status}`);
             }
 
-            profileData = await response.json();
-            populateProfileForm(profileData.profile);
-            return;
+            return await response.json();
         } catch (error) {
             console.error("Error fetching user profile:", error);
-            if (retryCount >= MAX_RETRIES || !error.message.includes("Invalid Token")) {
-                alert("Failed to load profile data. Please try again.");
-                closeProfileModal();
-            }
-            return;
+            if (retryCount >= MAX_RETRIES) return null;
         }
     } while (retryCount < MAX_RETRIES);
+    return null;
+}
 
-    if (!profileData) {
-        alert("Failed to load profile data after multiple attempts. Please try again.");
+export async function fetchUserProfile() {
+    let token = localStorage.getItem("tinytorch_token");
+    if (!token) {
+        console.error("No token found for fetching profile.");
+        forceLogin();
+        return;
+    }
+
+    const profileData = await getProfileData(token);
+    
+    if (profileData) {
+        populateProfileForm(profileData.profile);
+    } else {
+        alert("Failed to load profile data. Please try again.");
         closeProfileModal();
+    }
+}
+
+async function updateProfileLocation(token, updates) {
+    try {
+        const response = await fetch(`${SUPABASE_URL}/update-profile`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(updates)
+        });
+        if (response.ok) {
+            console.log("Location auto-updated successfully");
+        } else {
+            console.warn("Failed to auto-update location");
+        }
+    } catch (e) {
+        console.error("Error auto-updating location:", e);
+    }
+}
+
+export async function checkAndAutoUpdateLocation() {
+    const token = localStorage.getItem("tinytorch_token");
+    if (!token) return;
+
+    // Check if we already checked in this session to avoid spamming
+    if (sessionStorage.getItem("tinytorch_location_checked")) return;
+
+    try {
+        const data = await getProfileData(token);
+        if (!data || !data.profile) return;
+
+        const p = data.profile;
+        
+        const isPlaceholder = p.location && (p.location.includes("Lost at Sea") || p.location.includes("🌊"));
+
+        // If location is missing or placeholder, try to find it
+        if (isPlaceholder || (!p.location && (!p.latitude || !p.longitude))) {
+            console.log("Location missing or placeholder, attempting auto-detection...");
+            
+            // Try HTTPS first (ipapi.co)
+            let found = false;
+            try {
+                const res = await fetch('https://ipapi.co/json/');
+                if (res.ok) {
+                    const geo = await res.json();
+                    if (geo.city && geo.latitude && geo.longitude) {
+                        const locationStr = `${geo.city}, ${geo.country_name}`;
+                        await updateProfileLocation(token, {
+                            location: locationStr,
+                            latitude: geo.latitude,
+                            longitude: geo.longitude
+                        });
+                        found = true;
+                    }
+                }
+            } catch (e) {
+                console.warn("Primary geo lookup failed:", e);
+            }
+
+            if (!found) {
+                // Fallback (might fail on HTTPS sites due to mixed content if using http)
+                 try {
+                    const res = await fetch('http://ip-api.com/json/');
+                    if (res.ok) {
+                        const geo = await res.json();
+                        if (geo.city && geo.lat && geo.lon) {
+                            const locationStr = `${geo.city}, ${geo.country}`;
+                            await updateProfileLocation(token, {
+                                location: locationStr,
+                                latitude: geo.lat,
+                                longitude: geo.lon
+                            });
+                        }
+                    }
+                } catch (e) {
+                     console.warn("Secondary geo lookup failed:", e);
+                }
+            }
+        }
+        // Mark as checked for this session
+        sessionStorage.setItem("tinytorch_location_checked", "true");
+    } catch (e) {
+        console.error("Auto-location check failed:", e);
     }
 }
 
 function populateProfileForm(data) {
     const profileDisplayNameInput = document.getElementById('profileDisplayName');
-    const profileAvatarUrlInput = document.getElementById('profileAvatarUrl');
     const profileIsPublicCheckbox = document.getElementById('profileIsPublic');
     const profileFullNameInput = document.getElementById('profileFullName');
     const profileSummaryTextarea = document.getElementById('profileSummary');
     const profileLocationInput = document.getElementById('profileLocation');
     const profileInstitutionInput = document.getElementById('profileInstitution');
     const profileWebsitesInput = document.getElementById('profileWebsites');
-    const avatarPreview = document.getElementById('avatarPreview');
     const profileLatitude = document.getElementById('profileLatitude');
     const profileLongitude = document.getElementById('profileLongitude');
 
     profileDisplayNameInput.value = data.display_name || '';
-    profileAvatarUrlInput.value = data.avatar || data.avatar_url || '';
 
     profileFullNameInput.value = data.full_name || '';
     profileSummaryTextarea.value = data.bio || data.summary || '';
@@ -161,10 +241,6 @@ function populateProfileForm(data) {
 
     const sites = data.website || data.websites;
     profileWebsitesInput.value = Array.isArray(sites) ? sites.join(', ') : (sites || '');
-
-    if(avatarPreview) {
-         avatarPreview.src = data.avatar || '';
-    }
 }
 
 export async function handleProfileUpdate(e) {
@@ -177,7 +253,6 @@ export async function handleProfileUpdate(e) {
     }
 
     const profileDisplayNameInput = document.getElementById('profileDisplayName');
-    const profileAvatarUrlInput = document.getElementById('profileAvatarUrl');
     const profileFullNameInput = document.getElementById('profileFullName');
     const profileSummaryTextarea = document.getElementById('profileSummary');
     const profileLocationInput = document.getElementById('profileLocation');
@@ -188,7 +263,6 @@ export async function handleProfileUpdate(e) {
 
     const updatedProfile = {
         display_name: profileDisplayNameInput.value,
-        avatar: profileAvatarUrlInput.value,
         full_name: profileFullNameInput.value,
         summary: profileSummaryTextarea.value,
         location: profileLocationInput.value,
