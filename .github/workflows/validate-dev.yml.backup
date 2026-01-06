@@ -1,0 +1,470 @@
+name: '💯 Validate Dev'
+
+# Cancel any running validation and start fresh when new one is triggered
+# Concurrency disabled - allow unlimited parallel builds
+
+# Triggers: dev branch pushes and manual testing
+on:
+  push:
+    branches: [dev]  # Auto-trigger for dev branch
+  workflow_dispatch:  # Manual trigger for testing
+    inputs:
+      test_branch:
+        description: 'Branch to test (for feature branch testing)'
+        required: false
+        default: ''
+        type: string
+      target:
+        description: 'Target branch for build artifacts (dev/main)'
+        required: false
+        type: choice
+        default: 'dev'
+        options:
+          - dev
+          - main
+      # Format & OS selection
+      build_formats:
+        description: '📦 Build formats (all, html, pdf, epub)'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - html
+          - pdf
+          - epub
+      build_os:
+        description: '⚙️ Build OS (both, linux, windows)'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - linux
+          - windows
+      # Container validation
+      run_health_check:
+        description: '💊 Run container health check'
+        required: false
+        default: false
+        type: boolean
+      # Build method selection
+      build_method:
+        description: 'Build method to use'
+        required: false
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - container
+          - baremetal
+      # Container configuration (consistent with other workflows)
+      container_registry:
+        description: 'Container registry URL'
+        required: false
+        default: 'ghcr.io'
+        type: string
+      container_tag:
+        description: 'Container tag to use'
+        required: false
+        default: 'latest'
+        type: string
+
+permissions:
+  contents: write
+  pages: write
+  packages: read
+
+jobs:
+  # Step 1: Pre-commit validation
+  pre-commit:
+    name: '🔍 Pre-commit Checks'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.test_branch || github.ref }}
+          fetch-depth: 0
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: 🔍 Run pre-commit checks
+        run: |
+          echo "🔍 Installing and running pre-commit..."
+          python -m pip install --upgrade pip
+          pip install pre-commit
+          pre-commit install --install-hooks
+          
+          echo "🔄 Running pre-commit on all files..."
+          if pre-commit run --all-files; then
+            echo "✅ Pre-commit checks: PASSED"
+          else
+            echo "❌ Pre-commit checks: FAILED"
+            exit 1
+          fi
+
+  # Step 2: Container Health Check (validate containers before builds)
+  container-health-check:
+    name: '💊 Container Health Check'
+    needs: [build-config]
+    if: inputs.run_health_check == true
+    uses: ./.github/workflows/container-health-check.yml
+    with:
+      test_linux: true
+      test_windows: true
+      container_registry: 'ghcr.io'
+      container_tag: 'latest'
+
+  # Step 3: Update contributors (after validation passes, before build matrix)
+  update-contributors:
+    name: '👥 Update Contributors'
+    needs: [pre-commit]
+    if: needs.pre-commit.result == 'success' && github.event_name == 'push'
+    uses: ./.github/workflows/update-contributors.yml
+
+  # Step 4: Determine build configuration (shared logic)
+  build-config:
+    name: '🎯 Build Configuration'
+    needs: [pre-commit, update-contributors]
+    if: always() && needs.pre-commit.result == 'success' && (needs.update-contributors.result == 'success' || needs.update-contributors.result == 'skipped')
+    runs-on: ubuntu-latest
+    outputs:
+      build_html: ${{ steps.config.outputs.build_html }}
+      build_pdf: ${{ steps.config.outputs.build_pdf }}
+      build_epub: ${{ steps.config.outputs.build_epub }}
+      build_linux: ${{ steps.config.outputs.build_linux }}
+      build_windows: ${{ steps.config.outputs.build_windows }}
+      build_method: ${{ steps.config.outputs.build_method }}
+      container_registry: ${{ steps.config.outputs.container_registry }}
+      container_tag: ${{ steps.config.outputs.container_tag }}
+      target: ${{ steps.config.outputs.target }}
+    
+    steps:
+      - name: 🎯 Determine build configuration
+        id: config
+        run: |
+          echo "🎯 === BUILD CONFIGURATION ==="
+          
+          # Determine what to build based on inputs (individual format flags)
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Auto-trigger: build everything
+            BUILD_HTML="true"
+            BUILD_PDF="true"
+            BUILD_EPUB="true"
+            BUILD_LINUX="true"
+            BUILD_WINDOWS="true"
+            BUILD_METHOD="both"
+            TARGET="dev" # For push events, always target dev
+            echo "📊 Trigger: Automatic (dev branch push)"
+            echo "📊 HTML: $BUILD_HTML (mandatory)"
+            echo "📊 PDF: $BUILD_PDF (mandatory)"
+            echo "📊 EPUB: $BUILD_EPUB (mandatory)"
+            echo "📊 Linux: $BUILD_LINUX (mandatory)"
+            echo "📊 Windows: $BUILD_WINDOWS (enabled by default)"
+            echo "📊 Method: $BUILD_METHOD (default)"
+            echo "📊 Target: $TARGET"
+          else
+            # Manual trigger: respect choices
+            echo "📊 Trigger: Manual workflow dispatch"
+            BUILD_HTML="false"
+            if [[ "${{ inputs.build_formats }}" == "all" || "${{ inputs.build_formats }}" == "html" ]]; then
+              BUILD_HTML="true"
+            fi
+            BUILD_PDF="false"
+            if [[ "${{ inputs.build_formats }}" == "all" || "${{ inputs.build_formats }}" == "pdf" ]]; then
+              BUILD_PDF="true"
+            fi
+            BUILD_EPUB="false"
+            if [[ "${{ inputs.build_formats }}" == "all" || "${{ inputs.build_formats }}" == "epub" ]]; then
+              BUILD_EPUB="true"
+            fi
+            
+            BUILD_LINUX="false"
+            if [[ "${{ inputs.build_os }}" == "both" || "${{ inputs.build_os }}" == "linux" ]]; then
+              BUILD_LINUX="true"
+            fi
+            BUILD_WINDOWS="false"
+            if [[ "${{ inputs.build_os }}" == "both" || "${{ inputs.build_os }}" == "windows" ]]; then
+              BUILD_WINDOWS="true"
+            fi
+            
+            BUILD_METHOD="${{ inputs.build_method }}"
+            TARGET="${{ inputs.target }}"
+            
+            echo "📊 Formats: ${{ inputs.build_formats }} (HTML: $BUILD_HTML, PDF: $BUILD_PDF)"
+            echo "📊 OS: ${{ inputs.build_os }} (Linux: $BUILD_LINUX, Windows: $BUILD_WINDOWS)"
+            echo "📊 Method: $BUILD_METHOD"
+            echo "📊 Target: $TARGET"
+          fi
+          
+          # Container configuration
+          CONTAINER_REGISTRY="${{ inputs.container_registry || 'ghcr.io' }}"
+          CONTAINER_TAG="${{ inputs.container_tag || 'latest' }}"
+          
+          echo "📊 Final Configuration:"
+          echo "  HTML: $BUILD_HTML"
+          echo "  PDF: $BUILD_PDF"
+          echo "  Linux: $BUILD_LINUX"
+          echo "  Windows: $BUILD_WINDOWS"  
+          echo "  Method: $BUILD_METHOD"
+          echo "  Registry: $CONTAINER_REGISTRY"
+          echo "  Tag: $CONTAINER_TAG"
+          echo "  Target: $TARGET"
+          
+          # Set outputs (individual format flags for matrix-driven approach)
+          echo "build_html=$BUILD_HTML" >> $GITHUB_OUTPUT
+          echo "build_pdf=$BUILD_PDF" >> $GITHUB_OUTPUT
+          echo "build_epub=$BUILD_EPUB" >> $GITHUB_OUTPUT
+          echo "build_linux=$BUILD_LINUX" >> $GITHUB_OUTPUT
+          echo "build_windows=$BUILD_WINDOWS" >> $GITHUB_OUTPUT
+          echo "build_method=$BUILD_METHOD" >> $GITHUB_OUTPUT
+          echo "container_registry=$CONTAINER_REGISTRY" >> $GITHUB_OUTPUT
+          echo "container_tag=$CONTAINER_TAG" >> $GITHUB_OUTPUT
+          echo "target=$TARGET" >> $GITHUB_OUTPUT
+
+
+  # Step 4: Matrix-driven build calls (clean and simple!)
+  build-container:
+    name: '🐳 Container Build Matrix'
+    needs: [build-config]
+    if: |
+      always() && 
+      (needs.build-config.result == 'success') &&
+      (needs.build-config.outputs.build_method == 'container' || needs.build-config.outputs.build_method == 'both')
+    uses: ./.github/workflows/quarto-build-container.yml
+    with:
+      build_linux: ${{ needs.build-config.outputs.build_linux == 'true' }}
+      build_windows: ${{ needs.build-config.outputs.build_windows == 'true' }}
+      build_html: ${{ needs.build-config.outputs.build_html == 'true' }}
+      build_pdf: ${{ needs.build-config.outputs.build_pdf == 'true' }}
+      build_epub: ${{ needs.build-config.outputs.build_epub == 'true' }}
+      target: ${{ needs.build-config.outputs.target }}
+      container_registry: ${{ needs.build-config.outputs.container_registry }}
+      container_tag: ${{ needs.build-config.outputs.container_tag }}
+
+  build-baremetal:
+    name: '⚠️ Baremetal Build Matrix (Legacy)'
+    needs: [build-config]
+    if: |
+      always() && 
+      (needs.build-config.result == 'success') &&
+      (needs.build-config.outputs.build_method == 'baremetal' || needs.build-config.outputs.build_method == 'both')
+    uses: ./.github/workflows/quarto-build-baremetal.yml
+    with:
+      build_linux: ${{ needs.build-config.outputs.build_linux == 'true' }}
+      build_windows: ${{ needs.build-config.outputs.build_windows == 'true' }}
+      build_html: ${{ needs.build-config.outputs.build_html == 'true' }}
+      build_pdf: ${{ needs.build-config.outputs.build_pdf == 'true' }}
+      build_epub: ${{ needs.build-config.outputs.build_epub == 'true' }}
+      target: ${{ needs.build-config.outputs.target }}
+
+  report-baremetal-pass:
+    name: 'Baremetal Build Status'
+    runs-on: ubuntu-latest
+    needs: [build-baremetal]
+    if: ${{ needs.build-baremetal.result == 'success' }}
+    steps:
+      - name: Report Baremetal Success
+        run: echo "✅ Baremetal build passed."
+
+  # Step 4: Collect build results (needed for outputs)
+  collect-results:
+    name: '📊 Collect Results'
+    needs: [build-config, build-container, build-baremetal]
+    runs-on: ubuntu-latest
+    if: always()
+    outputs:
+      linux_success: ${{ steps.collect.outputs.linux_success }}
+      windows_success: ${{ steps.collect.outputs.windows_success }}
+      linux_html_artifact: ${{ steps.collect.outputs.linux_html_artifact }}
+      windows_html_artifact: ${{ steps.collect.outputs.windows_html_artifact }}
+      linux_pdf_artifact: ${{ steps.collect.outputs.linux_pdf_artifact }}
+      windows_pdf_artifact: ${{ steps.collect.outputs.windows_pdf_artifact }}
+    
+    steps:
+      - name: 📊 Collect build results
+        id: collect
+        run: |
+          echo "📊 === COLLECTING BUILD RESULTS ==="
+          
+          # These will hold the final results, preferring container builds
+          OVERALL_SUCCESS="false"
+          LINUX_HTML=""
+          WINDOWS_HTML=""
+          LINUX_PDF=""
+          WINDOWS_PDF=""
+          
+          # Check container build results first
+          if [[ "${{ needs.build-config.outputs.build_method }}" == "container" || "${{ needs.build-config.outputs.build_method }}" == "both" ]]; then
+            if [[ "${{ needs.build-container.result }}" == "success" ]]; then
+              echo "✅ Container builds completed successfully."
+              OVERALL_SUCCESS="${{ needs.build-container.outputs.build_success }}"
+              LINUX_HTML="${{ needs.build-container.outputs.linux_html_artifact }}"
+              LINUX_PDF="${{ needs.build-container.outputs.linux_pdf_artifact }}"
+              WINDOWS_HTML="${{ needs.build-container.outputs.windows_html_artifact }}"
+              WINDOWS_PDF="${{ needs.build-container.outputs.windows_pdf_artifact }}"
+            else
+              echo "❌ Container builds failed or were skipped."
+              OVERALL_SUCCESS="false"
+            fi
+          fi
+          
+          # Fallback to baremetal if container failed and method was 'both', or if method was 'baremetal'
+          if [[ "$OVERALL_SUCCESS" == "false" && ("${{ needs.build-config.outputs.build_method }}" == "baremetal" || "${{ needs.build-config.outputs.build_method }}" == "both") ]]; then
+            if [[ "${{ needs.build-baremetal.result }}" == "success" ]]; then
+              echo "✅ Baremetal builds completed successfully."
+              OVERALL_SUCCESS="${{ needs.build-baremetal.outputs.build_success }}"
+              LINUX_HTML="${{ needs.build-baremetal.outputs.linux_html_artifact }}"
+              LINUX_PDF="${{ needs.build-baremetal.outputs.linux_pdf_artifact }}"
+              WINDOWS_HTML="${{ needs.build-baremetal.outputs.windows_html_artifact }}"
+              WINDOWS_PDF="${{ needs.build-baremetal.outputs.windows_pdf_artifact }}"
+            else
+              echo "❌ Baremetal builds also failed or were skipped."
+              OVERALL_SUCCESS="false"
+            fi
+          fi
+
+          # Determine per-platform success based on overall success and which platforms were built
+          LINUX_SUCCESS="false"
+          if [[ "${{ needs.build-config.outputs.build_linux }}" == "true" && "$OVERALL_SUCCESS" == "true" ]]; then
+            LINUX_SUCCESS="true"
+          fi
+
+          WINDOWS_SUCCESS="false"
+          if [[ "${{ needs.build-config.outputs.build_windows }}" == "true" && "$OVERALL_SUCCESS" == "true" ]]; then
+            WINDOWS_SUCCESS="true"
+          fi
+          
+          echo "Final Success Status: Linux -> $LINUX_SUCCESS, Windows -> $WINDOWS_SUCCESS"
+
+          # Set outputs
+          echo "linux_success=$LINUX_SUCCESS" >> $GITHUB_OUTPUT
+          echo "windows_success=$WINDOWS_SUCCESS" >> $GITHUB_OUTPUT
+          echo "linux_html_artifact=$LINUX_HTML" >> $GITHUB_OUTPUT
+          echo "windows_html_artifact=$WINDOWS_HTML" >> $GITHUB_OUTPUT
+          echo "linux_pdf_artifact=$LINUX_PDF" >> $GITHUB_OUTPUT
+          echo "windows_pdf_artifact=$WINDOWS_PDF" >> $GITHUB_OUTPUT
+
+  # Step 5: Final results and summary
+  validation-summary:
+    name: '🎯 Validation Summary'
+    if: always()
+    needs: [pre-commit, build-config, collect-results]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 🎯 Generate validation summary
+        run: |
+          echo "🎯 === VALIDATION SUMMARY ==="
+          echo "=============================="
+          echo ""
+          
+          # Visual status indicators
+          echo "🔍 RESULTS:"
+          echo "----------"
+          
+          if [ "${{ needs.pre-commit.result }}" = "success" ]; then
+            echo "✅ Pre-commit checks: PASSED"
+          else
+            echo "❌ Pre-commit checks: FAILED"
+          fi
+          
+          if [ "${{ needs.build-config.outputs.build_linux }}" = "true" ]; then
+            if [ "${{ needs.collect-results.outputs.linux_success }}" = "true" ]; then
+              echo "✅ Linux build: PASSED"
+            else
+              echo "❌ Linux build: FAILED"
+            fi
+          else
+            echo "⏭️ Linux build: SKIPPED"
+          fi
+          
+          if [ "${{ needs.build-config.outputs.build_windows }}" = "true" ]; then
+            if [ "${{ needs.collect-results.outputs.windows_success }}" = "true" ]; then
+              echo "✅ Windows build: PASSED"
+            else
+              echo "❌ Windows build: FAILED"
+            fi
+          else
+            echo "⏭️ Windows build: SKIPPED"
+          fi
+          
+          echo ""
+          echo "🎯 OVERALL STATUS:"
+          echo "-----------------"
+          
+          # Determine overall success
+          PRECOMMIT_OK="${{ needs.pre-commit.result == 'success' }}"
+          LINUX_OK="${{ needs.collect-results.outputs.linux_success == 'true' || needs.build-config.outputs.build_linux == 'false' }}"
+          WINDOWS_OK="${{ needs.collect-results.outputs.windows_success == 'true' || needs.build-config.outputs.build_windows == 'false' }}"
+          
+          if [ "$PRECOMMIT_OK" = "true" ] && [ "$LINUX_OK" = "true" ] && [ "$WINDOWS_OK" = "true" ]; then
+            echo "🟢 VALIDATION: FULLY OPERATIONAL ✅"
+            echo "   All enabled checks passed successfully!"
+            echo "🚀 PREVIEW: DEPLOYMENT TRIGGERED ✅"
+            echo "   A separate workflow will deploy the preview to the staging site."
+          else
+            echo "🔴 VALIDATION: ISSUES DETECTED ❌"
+            echo "   Check the logs above for details"
+          fi
+          echo "=============================="
+
+      - name: 📋 Generate GitHub summary
+        run: |
+          echo "# 🎯 Enhanced Dev Validation Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Pre-commit**: ${{ needs.pre-commit.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Linux Build**: ${{ needs.collect-results.outputs.linux_success == 'true' && '✅ success' || '❌ failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Windows Build**: ${{ needs.collect-results.outputs.windows_success == 'true' && '✅ success' || '❌ failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## 🔧 Build Configuration" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "- **Trigger**: Automatic (dev branch push)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Format**: HTML + PDF (mandatory)" >> $GITHUB_STEP_SUMMARY
+            echo "- **OS**: Linux + Windows (mandatory)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Method**: 🔄 Both container and baremetal builds (default for auto-push)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Trigger**: Manual workflow dispatch" >> $GITHUB_STEP_SUMMARY
+            echo "- **Formats**: ${{ inputs.build_formats }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **OS**: ${{ inputs.build_os }}" >> $GITHUB_STEP_SUMMARY
+            
+            if [ "${{ inputs.build_method }}" = "baremetal" ]; then
+              echo "- **Method**: ⚠️ Baremetal builds (LEGACY - deprecated)" >> $GITHUB_STEP_SUMMARY
+            elif [ "${{ inputs.build_method }}" = "both" ]; then
+              echo "- **Method**: 🔄 Both container and baremetal builds" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- **Method**: ✅ Container builds (recommended)" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            echo "- **Registry**: ${{ needs.build-config.outputs.container_registry }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Tag**: ${{ needs.build-config.outputs.container_tag }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Target**: ${{ needs.build-config.outputs.target }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## 🚀 Preview Deployment" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.collect-results.outputs.linux_success }}" = "true" ]; then
+            echo "Deployment will be handled by a separate workflow." >> $GITHUB_STEP_SUMMARY
+            echo "Check the 'Actions' tab for the '🚀 Deploy Preview' workflow run." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Deployment skipped due to build failure." >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎯 Summary" >> $GITHUB_STEP_SUMMARY
+          LINUX_OK="${{ needs.collect-results.outputs.linux_success == 'true' || needs.build-config.outputs.build_linux == 'false' }}"
+          WINDOWS_OK="${{ needs.collect-results.outputs.windows_success == 'true' || needs.build-config.outputs.build_windows == 'false' }}"
+          
+          if [ "${{ needs.pre-commit.result }}" = "success" ] && [ "$LINUX_OK" = "true" ] && [ "$WINDOWS_OK" = "true" ]; then
+            echo "✅ **Validation Passed** - All enabled builds successful" >> $GITHUB_STEP_SUMMARY
+            echo "🚀 **Preview Deployment Triggered** - A separate workflow is handling the deployment." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Validation Failed** - Check the logs above" >> $GITHUB_STEP_SUMMARY
+          fi
