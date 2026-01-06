@@ -645,7 +645,7 @@ def generate_release_notes_for_version(version, previous_version, description, v
 
 ### 📊 Technical Details
 - **Build System**: Quarto with custom extensions
-- **Deployment**: GitHub Pages + Netlify
+- **Deployment**: GitHub Pages + Cloudflare
 - **PDF Generation**: LaTeX with compression
 - **Content**: Markdown with interactive elements
 
