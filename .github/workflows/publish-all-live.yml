@@ -1,11 +1,27 @@
 name: '🚀 Publish All (Live)'
 
-# Orchestrator workflow that deploys all subsites sequentially
-# Prevents gh-pages conflicts by running one deployment at a time
+# Orchestrator workflow that deploys ALL subsites sequentially
+# Book → Kits → TinyTorch → Labs
 
 on:
   workflow_dispatch:
     inputs:
+      book_version:
+        description: 'Book version (e.g., v0.6.0)'
+        required: true
+        default: 'v0.6.0'
+      book_description:
+        description: 'Book release description'
+        required: true
+        default: 'Content updates and improvements'
+      release_type:
+        description: 'Release type'
+        type: choice
+        options:
+          - minor
+          - patch
+          - major
+        default: 'minor'
       deploy_book:
         description: 'Deploy Book?'
         type: boolean
@@ -32,11 +48,45 @@ concurrency:
 
 jobs:
   # ==========================================================================
-  # Step 1: Deploy Kits
+  # Step 1: Deploy Book (triggers the full book-publish-live workflow)
+  # ==========================================================================
+  deploy-book:
+    name: '📚 Deploy Book'
+    if: ${{ inputs.deploy_book }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Book Publish Workflow
+        run: |
+          echo "🚀 Triggering book-publish-live workflow..."
+          gh workflow run "book-publish-live.yml" \
+            --repo ${{ github.repository }} \
+            --ref main \
+            -f release_type=${{ inputs.release_type }} \
+            -f description="${{ inputs.book_description }}" \
+            -f confirm=PUBLISH \
+            -f ai_generated_notes=yes \
+            -f testing_mode=no
+          
+          echo "⏳ Waiting for workflow to start..."
+          sleep 10
+          
+          # Get the run ID of the triggered workflow
+          RUN_ID=$(gh run list --workflow=book-publish-live.yml --repo ${{ github.repository }} --limit 1 --json databaseId --jq '.[0].databaseId')
+          echo "📋 Workflow run ID: $RUN_ID"
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+          
+          echo "⏳ Waiting for book workflow to complete (this may take 20-30 minutes)..."
+          gh run watch $RUN_ID --repo ${{ github.repository }} --exit-status
+          
+          echo "✅ Book deployment complete!"
+
+  # ==========================================================================
+  # Step 2: Deploy Kits (after book)
   # ==========================================================================
   deploy-kits:
     name: '📦 Deploy Kits'
-    if: ${{ inputs.deploy_kits }}
+    needs: [deploy-book]
+    if: ${{ always() && inputs.deploy_kits && (needs.deploy-book.result == 'success' || needs.deploy-book.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -61,7 +111,7 @@ jobs:
           commit_message: '📦 Deploy Kits - ${{ github.sha }}'
 
   # ==========================================================================
-  # Step 2: Deploy TinyTorch (after kits)
+  # Step 3: Deploy TinyTorch (after kits)
   # ==========================================================================
   deploy-tinytorch:
     name: '🔥 Deploy TinyTorch'
@@ -91,7 +141,7 @@ jobs:
           commit_message: '🔥 Deploy TinyTorch - ${{ github.sha }}'
 
   # ==========================================================================
-  # Step 3: Deploy Labs (after tinytorch)
+  # Step 4: Deploy Labs (after tinytorch)
   # ==========================================================================
   deploy-labs:
     name: '🔬 Deploy Labs'
@@ -125,7 +175,7 @@ jobs:
   # ==========================================================================
   summary:
     name: '📋 Deployment Summary'
-    needs: [deploy-kits, deploy-tinytorch, deploy-labs]
+    needs: [deploy-book, deploy-kits, deploy-tinytorch, deploy-labs]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -133,17 +183,18 @@ jobs:
         run: |
           echo "## 🚀 Publish All Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version**: ${{ inputs.book_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Description**: ${{ inputs.book_description }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Site | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 📚 Book | ${{ needs.deploy-book.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 📦 Kits | ${{ needs.deploy-kits.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔥 TinyTorch | ${{ needs.deploy-tinytorch.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔬 Labs | ${{ needs.deploy-labs.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🌐 Live URLs" >> $GITHUB_STEP_SUMMARY
+          echo "- 📚 [Book](https://mlsysbook.ai/book/)" >> $GITHUB_STEP_SUMMARY
           echo "- 📦 [Kits](https://mlsysbook.ai/kits/)" >> $GITHUB_STEP_SUMMARY
           echo "- 🔥 [TinyTorch](https://mlsysbook.ai/tinytorch/)" >> $GITHUB_STEP_SUMMARY
           echo "- 🔬 [Labs](https://mlsysbook.ai/labs/)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📚 Book Deployment" >> $GITHUB_STEP_SUMMARY
-          echo "Book uses a separate workflow with version management." >> $GITHUB_STEP_SUMMARY
-          echo "Run **📚 Book Publish (Live)** separately for book updates." >> $GITHUB_STEP_SUMMARY
