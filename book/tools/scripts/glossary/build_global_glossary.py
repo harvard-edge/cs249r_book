@@ -22,8 +22,13 @@ def load_chapter_glossaries():
     """Load all individual chapter glossary files."""
     # Get project root (4 levels up from this script)
     project_root = Path(__file__).parent.parent.parent.parent
-    base_dir = project_root / "quarto/contents/vol1"
-    json_files = list(base_dir.glob("**/*_glossary.json"))
+    
+    # Scan both vol1 and vol2
+    json_files = []
+    for vol in ["vol1", "vol2"]:
+        base_dir = project_root / f"quarto/contents/{vol}"
+        if base_dir.exists():
+            json_files.extend(list(base_dir.glob("**/*_glossary.json")))
 
     print(f"📚 Found {len(json_files)} chapter glossary files")
 
