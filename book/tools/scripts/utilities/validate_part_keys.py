@@ -20,16 +20,27 @@ from typing import Dict, List, Set, Tuple
 
 def load_part_summaries() -> Dict:
     """Load part summaries from YAML file."""
-    yaml_path = Path("book/quarto/contents/parts/summaries.yml")
-    if not yaml_path.exists():
-        print("❌ Error: book/quarto/contents/parts/summaries.yml not found")
+    # Try multiple possible paths to handle being run from root or book/
+    possible_paths = [
+        Path("quarto/contents/parts/summaries.yml"),
+        Path("book/quarto/contents/parts/summaries.yml")
+    ]
+    
+    yaml_path = None
+    for p in possible_paths:
+        if p.exists():
+            yaml_path = p
+            break
+            
+    if not yaml_path:
+        print("❌ Error: summaries.yml not found in expected locations")
         return {}
 
     try:
         with open(yaml_path, 'r') as f:
             data = yaml.safe_load(f)
             if 'parts' not in data:
-                print("❌ Error: No 'parts' section in part_summaries.yml")
+                print("❌ Error: No 'parts' section in summaries.yml")
                 return {}
 
             # Create a mapping of normalized keys to entries
@@ -41,16 +52,27 @@ def load_part_summaries() -> Dict:
 
             return summaries
     except Exception as e:
-        print(f"❌ Error loading part_summaries.yml: {e}")
+        print(f"❌ Error loading summaries.yml: {e}")
         return {}
 
 def find_qmd_files() -> List[Path]:
     """Find all .qmd files in the quarto directory."""
     qmd_files = []
-    book_dir = Path("book/quarto")
+    
+    # Try multiple possible paths to handle being run from root or book/
+    possible_dirs = [
+        Path("quarto"),
+        Path("book/quarto")
+    ]
+    
+    book_dir = None
+    for d in possible_dirs:
+        if d.exists():
+            book_dir = d
+            break
 
-    if not book_dir.exists():
-        print("❌ Error: book/quarto directory not found")
+    if not book_dir:
+        print("❌ Error: quarto directory not found")
         return []
 
     # Find all .qmd files recursively
