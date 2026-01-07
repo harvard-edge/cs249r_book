@@ -71,7 +71,7 @@ ANTI-PATTERNS TO AVOID:
 ================================================================================
 -->
 
-# Distributed Training Strategies {#sec-distributed-training}
+# Distributed Training Strategies {#sec-distributed-strategies}
 
 ::: {layout-narrow}
 ::: {.column-margin}
@@ -101,13 +101,13 @@ Distributed training becomes an architectural necessity when training demands ex
 
 :::
 
-## Multi-Machine Scaling Fundamentals {#sec-distributed-training-multimachine-scaling-fundamentals}
+## Multi-Machine Scaling Fundamentals {#sec-distributed-training-multimachine-scaling-fundamentals-strat}
 
 Part I established the infrastructure foundations that make distributed training possible. The datacenter architectures and accelerator topologies examined in @sec-infrastructure provide the compute fabric, while the distributed storage systems and data pipelines developed in @sec-storage ensure training data flows efficiently to thousands of workers. These foundations answer the question of what physical resources exist. Part II addresses the central question those resources enable: how do we coordinate training across distributed infrastructure to achieve performance that no single machine could deliver?
 
 The transition from single-machine to distributed training represents a major shift in optimization strategy and system complexity. Single-machine optimization focuses on efficiently utilizing available resources through techniques such as prefetching, mixed precision, and gradient accumulation. Distributed training introduces different challenges: communication overhead, fault tolerance, and synchronization that require new conceptual frameworks and engineering approaches.
 
-### Multi-Machine Training Requirements {#sec-distributed-training-multimachine-training-requirements}
+### Multi-Machine Training Requirements {#sec-distributed-training-multimachine-training-requirements-strat}
 
 Three concrete signals indicate when distributed training becomes necessary rather than merely beneficial. First, memory exhaustion occurs when model parameters, optimizer states, and activation storage exceed single-device capacity even after applying gradient checkpointing[^fn-gradient-checkpointing] and mixed precision.[^fn-mixed-precision]
 
@@ -117,15 +117,15 @@ Three concrete signals indicate when distributed training becomes necessary rath
 
 For transformer models, this threshold typically occurs around 10-20 billion parameters on current generation GPUs with 40-80GB memory [@rajbhandari2020zero]. Second, unacceptable training duration emerges when single-device training would require weeks or months to converge, making iteration impossible. Training GPT-3 on a single V100 GPU would require approximately 355 years [@brown2020language], making distributed approaches not optional but essential. Third, dataset scale exceeds single-machine storage when training data reaches multiple terabytes, as occurs in large-scale vision or language modeling tasks.
 
-### Distributed Training Complexity Trade-offs {#sec-distributed-training-complexity-tradeoffs}
+### Distributed Training Complexity Trade-offs {#sec-distributed-training-complexity-tradeoffs-strat}
 
 Distributed training introduces three primary complexity dimensions absent from single-machine scenarios. Communication overhead emerges from gradient synchronization, where each training step must aggregate gradients across all devices. For a model with $N$ parameters distributed across $D$ devices, all-reduce operations must transfer approximately $2N(D-1)/D$ bytes per step. On commodity network infrastructure (10-100 Gbps), this communication can dominate computation time for models under 1 billion parameters [@sergeev2018horovod]. Fault tolerance requirements increase exponentially with cluster size: a 100-node cluster with 99.9% per-node reliability experiences failures every few hours on average, necessitating checkpoint and recovery mechanisms. Algorithmic considerations change because distributed training alters optimization dynamics—large batch sizes from data parallelism affect convergence behavior, requiring learning rate scaling and warmup strategies that single-machine training does not require [@goyal2017accurate].
 
-### Single-Machine to Distributed Transition {#sec-distributed-training-singlemachine-distributed-transition}
+### Single-Machine to Distributed Transition {#sec-distributed-training-singlemachine-distributed-transition-strat}
 
 The systematic optimization methodology established for single-machine training extends to distributed environments with important adaptations. Profiling must now capture inter-device communication patterns and synchronization overhead in addition to computation and memory metrics. Tools like NVIDIA Nsight Systems and PyTorch's distributed profiler reveal whether training is communication-bound or computation-bound, guiding the choice between parallelization strategies. The solution space expands from single-machine techniques to include data parallelism (distributing training examples), model parallelism (distributing model parameters), pipeline parallelism (distributing model layers), and hybrid approaches that combine multiple strategies. The principles remain consistent—identify bottlenecks, select appropriate techniques, compose solutions—but the implementation complexity increases substantially.
 
-## Distributed Training Fundamentals {#sec-distributed-training-fundamentals}
+## Distributed Training Fundamentals {#sec-distributed-training-fundamentals-strat}
 
 Building upon single-machine optimization foundations, distributed training extends systematic optimization to multiple machines. When single-machine techniques have been exhausted—prefetching eliminates data loading bottlenecks, mixed-precision maximizes memory efficiency, and gradient accumulation reaches practical limits—distributed approaches provide the next level of scaling capability.
 
@@ -390,7 +390,7 @@ Distributed machine learning scales model training by partitioning datasets acro
 
 This coordination introduces several key challenges that distributed training systems must address. A distributed training system must orchestrate multi-machine computation by splitting up the work, managing communication between machines, and maintaining synchronization throughout the training process. Understanding these basic requirements provides the foundation for examining the main approaches to distributed training: data parallelism, which divides the training data across machines; model parallelism, which splits the model itself; pipeline parallelism, which combines aspects of both; and hybrid approaches that integrate multiple strategies.
 
-## Distributed Training Efficiency Metrics {#sec-distributed-training-efficiency-metrics}
+## Distributed Training Efficiency Metrics {#sec-distributed-training-efficiency-metrics-strat}
 
 Before examining specific parallelism strategies, understanding the quantitative metrics that govern distributed training efficiency is essential. These metrics provide the foundation for making informed decisions about scaling strategies, hardware selection, and optimization approaches.
 
@@ -426,7 +426,7 @@ Hardware selection critically impacts these scaling characteristics. NVIDIA DGX 
 
 These efficiency metrics directly influence the choice of parallelism strategy. Data parallelism works well in the linear scaling regime but becomes communication-bound at scale. Model parallelism addresses memory constraints but introduces sequential dependencies that limit efficiency. Pipeline parallelism reduces device idle time but introduces complexity in managing microbatches. Understanding these trade-offs enables architects to select appropriate strategies for their specific workloads.
 
-## Data Parallelism {#sec-distributed-training-data-parallelism}
+## Data Parallelism {#sec-distributed-training-data-parallelism-strat}
 
 Building on the efficiency characteristics outlined above, data parallelism represents the most straightforward distributed approach, particularly effective in the linear scaling regime where communication overhead remains manageable. This method distributes the training process across multiple devices by splitting the dataset into smaller subsets. Each device trains a complete copy of the model using its assigned subset of the data. For example, when training an image classification model on 1 million images using 4 GPUs, each GPU would process 250,000 images while maintaining an identical copy of the model architecture.
 
@@ -472,7 +472,7 @@ Production teams typically benchmark communication patterns and scaling efficien
 
 :::
 
-### Data Parallelism Implementation {#sec-distributed-training-data-parallelism-implementation}
+### Data Parallelism Implementation {#sec-distributed-training-data-parallelism-implementation-strat}
 
 The process of data parallelism can be broken into a series of distinct steps, each with its role in ensuring the system operates efficiently. These steps are illustrated in @fig-strategies-data-parallelism.
 
@@ -548,25 +548,25 @@ The process of data parallelism can be broken into a series of distinct steps, e
 Distributed training replicates the model across multiple devices, each processing a subset of the data before aggregating gradients to update model parameters. This approach accelerates training through parallel processing while maintaining model consistency across all devices.
 :::
 
-#### Dataset Splitting {#sec-distributed-training-dataset-splitting}
+#### Dataset Splitting {#sec-distributed-training-dataset-splitting-strat}
 
 The first step in data parallelism involves dividing the dataset into smaller, non-overlapping subsets. This ensures that each device processes a unique portion of the data, avoiding redundancy and enabling efficient utilization of available hardware. For instance, with a dataset of 100,000 training examples and 4 GPUs, each GPU would be assigned 25,000 examples. Modern frameworks like PyTorch's DistributedSampler handle this distribution automatically, implementing prefetching and caching mechanisms to ensure data is readily available for processing.
 
-#### Device Forward Pass {#sec-distributed-training-device-forward-pass}
+#### Device Forward Pass {#sec-distributed-training-device-forward-pass-strat}
 
 Once the data subsets are distributed, each device performs the forward pass independently. During this stage, the model processes its assigned batch of data, generating predictions and calculating the loss. For example, in a ResNet-50 model, each GPU would independently compute the convolutions, activations, and final loss for its batch. The forward pass is computationally intensive and benefits from hardware accelerators like NVIDIA V100 GPUs or Google TPUs, which are optimized for matrix operations.
 
-#### Backward Pass and Calculation {#sec-distributed-training-backward-pass-calculation}
+#### Backward Pass and Calculation {#sec-distributed-training-backward-pass-calculation-strat}
 
 Following the forward pass, each device computes the gradients of the loss with respect to the model's parameters during the backward pass. Modern frameworks like PyTorch and TensorFlow handle this automatically through their autograd systems. For instance, if a model has 50 million parameters, each device calculates gradients for all parameters but based only on its local data subset.
 
-#### Gradient Synchronization {#sec-distributed-training-gradient-synchronization}
+#### Gradient Synchronization {#sec-distributed-training-gradient-synchronization-strat}
 
 To maintain consistency across the distributed system, the gradients computed by each device must be synchronized. This coordination represents a distributed systems challenge: achieving global consensus while minimizing communication complexity. The ring all-reduce algorithm exemplifies this trade-off, organizing devices in a logical ring where each GPU communicates only with its neighbors. The algorithm complexity is O(n) in communication rounds but requires sequential dependencies that can limit parallelism.
 
 For example, with 8 GPUs sharing gradients for a 100 MB model, ring all-reduce requires only 7 communication steps instead of the 56 steps needed for naive all-to-all synchronization. The ring topology creates bottlenecks: the slowest link in the ring determines the overall synchronization time, and network partitions can halt the entire training process. Alternative algorithms like tree-reduce achieve O(log n) latency at the cost of increased bandwidth requirements on root nodes. Modern systems often implement hierarchical topologies, using high-speed links within nodes and lower-bandwidth connections between nodes to optimize these trade-offs.
 
-#### Synchronization Models {#sec-distributed-training-sync-models}
+#### Synchronization Models {#sec-distributed-training-sync-models-strat}
 
 Distributed training systems operate under explicit synchronization models that govern when workers observe each other's updates. Understanding these models is essential for reasoning about correctness and performance.
 
@@ -590,7 +590,7 @@ Asynchronous SGD eliminates synchronization barriers entirely, with workers upda
 
 The choice of synchronization model directly affects both system throughput and model convergence. Production systems typically use BSP for final training runs to ensure reproducibility, while exploring SSP or async approaches during hyperparameter search where exact reproducibility is less critical.
 
-#### Barrier Semantics and Failure Modes {#sec-distributed-training-barrier-failures}
+#### Barrier Semantics and Failure Modes {#sec-distributed-training-barrier-failures-strat}
 
 AllReduce operations implement implicit barriers: no worker can proceed until all workers have contributed their gradients. This coupling creates failure modes absent from single-device training.
 
@@ -607,7 +607,7 @@ Production systems address these issues through:
 - **Elastic training**: Removing failed workers and continuing with reduced parallelism (see @sec-fault-tolerance)
 - **Backup workers**: Redundant computation to mask stragglers
 
-#### Parameter Updating {#sec-distributed-training-parameter-updating}
+#### Parameter Updating {#sec-distributed-training-parameter-updating-strat}
 
 After gradient aggregation, each device independently updates model parameters using the chosen optimization algorithm, such as SGD with momentum or Adam. This decentralized update strategy, implemented in frameworks like PyTorch's DistributedDataParallel (DDP), enables efficient parameter updates without requiring a central coordination server. Since all devices have identical gradient values after synchronization, they perform mathematically equivalent updates to maintain model consistency across the distributed system.
 
@@ -615,7 +615,7 @@ For example, in a system with 8 GPUs training a ResNet model, each GPU computes 
 
 This process, which involves splitting data, performing computations, synchronizing results, and updating parameters, repeats for each batch of data. Modern frameworks automate this cycle, allowing developers to focus on model architecture and hyperparameter tuning rather than distributed computing logistics.
 
-### Data Parallelism Advantages {#sec-distributed-training-data-parallelism-advantages}
+### Data Parallelism Advantages {#sec-distributed-training-data-parallelism-advantages-strat}
 
 Data parallelism offers several key benefits that make it the predominant approach for distributed training. By splitting the dataset across multiple devices and allowing each device to train an identical copy of the model, this approach effectively addresses the core challenges in modern AI training systems.
 
@@ -698,7 +698,7 @@ OpenAI's GPT-2 paper reports training on 32 V100s across 4 nodes using optimized
 
 :::
 
-### Data Parallelism Limitations {#sec-distributed-training-data-parallelism-limitations}
+### Data Parallelism Limitations {#sec-distributed-training-data-parallelism-limitations-strat}
 
 While data parallelism is an effective approach for distributed training, it introduces several challenges that must be addressed to achieve efficient and scalable training systems. These challenges stem from the inherent trade-offs between computation and communication, as well as the limitations imposed by hardware and network infrastructures.
 
@@ -722,11 +722,11 @@ Implementation complexity compounds these reliability challenges. While modern f
 
 Despite these challenges, data parallelism remains an important technique for distributed training, with many strategies available to address its limitations. Monitoring these distributed systems requires specialized tooling for tracking gradient norms, communication patterns, and hardware utilization across nodes. Before examining model parallelism, we first explore memory optimization techniques that extend data parallelism to larger models.
 
-## Framework Integration {#sec-distributed-training-framework-integration}
+## Framework Integration {#sec-distributed-training-framework-integration-strat}
 
 While the theoretical foundations of distributed training establish the mathematical principles for scaling across multiple devices, modern frameworks provide abstractions that make these concepts accessible to practitioners. Understanding how frameworks like PyTorch translate distributed training theory into practical APIs bridges the gap between mathematical concepts and implementation.
 
-### Data Parallel Framework APIs {#sec-distributed-training-data-parallel-framework-apis}
+### Data Parallel Framework APIs {#sec-distributed-training-data-parallel-framework-apis-strat}
 
 The data parallelism mechanisms we explored earlier—gradient averaging, AllReduce communication, and parameter synchronization—are abstracted through framework APIs that handle the complex coordination automatically. PyTorch provides two primary approaches that demonstrate different trade-offs between simplicity and performance.
 
@@ -757,7 +757,7 @@ model = torch.nn.parallel.DistributedDataParallel(model)
 
 The key insight is that `DistributedDataParallel` implements the efficient ring AllReduce algorithm automatically, transforming the O(n) communication complexity we discussed into practical code that achieves 90%+ parallel efficiency at scale. The framework handles device placement, gradient bucketing for efficient communication, and overlapping computation with communication.
 
-### Model Parallel Framework Support {#sec-distributed-training-model-parallel-framework-support}
+### Model Parallel Framework Support {#sec-distributed-training-model-parallel-framework-support-strat}
 
 Model parallelism requires more explicit coordination since frameworks must manage cross-device tensor placement and data flow. PyTorch addresses this through manual device placement and the emerging `torch.distributed.pipeline` API for pipeline parallelism.
 
@@ -779,7 +779,7 @@ class ModelParallelNet(nn.Module):
 
 This manual approach exposes the sequential dependencies and communication overhead inherent in model parallelism, requiring careful management of tensor movement between devices. The framework automatically handles the backward pass gradient flow across device boundaries, but practitioners must consider the performance implications of frequent device transfers.
 
-### Communication Primitives {#sec-distributed-training-communication-primitives}
+### Communication Primitives {#sec-distributed-training-communication-primitives-strat}
 
 Modern frameworks expose the communication operations that enable distributed training through high-level APIs. These primitives abstract the low-level NCCL operations while maintaining performance:
 
@@ -814,7 +814,7 @@ The efficiency metrics governing distributed training—communication overhead, 
 * Framework APIs abstract distributed complexity while preserving the performance characteristics essential for production training
 :::
 
-## Fallacies and Pitfalls {#sec-distributed-training-fallacies-pitfalls}
+## Fallacies and Pitfalls {#sec-distributed-training-fallacies-pitfalls-strat}
 
 Distributed training involves counterintuitive behavior that leads to common misconceptions. These fallacies and pitfalls capture errors that waste compute resources and delay research progress.
 
@@ -868,4 +868,4 @@ Gradient accumulation is not free. Gradient accumulation simulates larger batch 
 
 For loss-sensitive early training, gradient accumulation can introduce instability from accumulated numerical errors. Organizations that use gradient accumulation to work around infrastructure limitations (slow network, small GPUs) sometimes discover training divergence that disappears with proper infrastructure.
 
-While data parallelism serves as the workhorse for many workloads, it hits a hard limit when model parameters exceed the memory of a single device. The next chapter, @sec-advanced-parallelism, explores the sophisticated model parallelism techniques—tensor slicing, pipeline staging, and memory sharding—required to train the frontier models that define the state of the art.
+While data parallelism serves as the workhorse for many workloads, it hits a hard limit when model parameters exceed the memory of a single device. The next chapter, @sec-distributed-training, explores the sophisticated model parallelism techniques—tensor slicing, pipeline staging, and memory sharding—required to train the frontier models that define the state of the art.

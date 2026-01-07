@@ -135,7 +135,7 @@ The mean time between failures (MTBF) for this component equals $1/\lambda$. Mod
 
 [^fn-gpu-mtbf]: **GPU MTBF Variation**: Published MTBF figures for datacenter GPUs vary significantly based on measurement methodology and operating conditions. NVIDIA reports A100 MTBF of approximately 50,000 hours under specified conditions, but actual field experience shows substantial variation. Higher ambient temperatures, power supply fluctuations, and memory-intensive workloads all reduce effective MTBF. Google's published TPU failure data and Meta's GPU fleet telemetry suggest actual failure rates 20-50% higher than manufacturer specifications.
 
-When multiple independent components operate in a system where any single failure causes system failure, the system reliability becomes the product of individual component reliabilities:
+When multiple independent components operate in a system where any single failure causes system failure, the system reliability becomes the product of individual component reliabilities as shown in @eq-system-reliability-product:
 
 $$
 R_{system}(t) = \prod_{i=1}^{N} R_i(t) = \prod_{i=1}^{N} e^{-\lambda_i t}
@@ -147,7 +147,7 @@ $$
 R_{system}(t) = e^{-N\lambda t}
 $$ {#eq-system-reliability-n-components}
 
-The system failure rate becomes $N\lambda$, and the system MTBF becomes:
+The system failure rate becomes $N\lambda$, and the system MTBF becomes (@eq-system-mtbf):
 
 $$
 MTBF_{system} = \frac{1}{N\lambda} = \frac{MTBF_{component}}{N}
@@ -255,7 +255,7 @@ Fail-stop failures are the easiest class to handle because detection is straight
 
 Detection time $T_{detect}$ typically involves heartbeat mechanisms where each worker periodically signals liveness to a coordinator. If no heartbeat arrives within timeout period $T_{timeout}$, the coordinator declares failure. Setting $T_{timeout}$ requires balancing false positive rate (declaring healthy workers failed due to transient delays) against detection latency (slow detection wastes compute during the detection window).
 
-For a heartbeat interval of $H$ seconds and expected network delay variance $\sigma_d$, a common heuristic sets:
+For a heartbeat interval of $H$ seconds and expected network delay variance $\sigma_d$, a common heuristic sets the timeout using @eq-timeout-calculation:
 
 $$
 T_{timeout} = H + k\sigma_d
@@ -369,15 +369,15 @@ Fault tolerance mechanisms consume resources: storage for checkpoints, bandwidth
 
 The optimal investment in fault tolerance balances these costs. For small-scale training on a few GPUs where failures are rare, minimal fault tolerance (infrequent checkpoints, manual recovery) may be cost-optimal. For large-scale training on thousands of GPUs where failures occur multiple times daily, extensive fault tolerance (frequent checkpoints, automatic recovery, elastic training) provides positive return on investment.
 
-A simplified economic model considers expected cost per training run:
+A simplified economic model considers expected cost per training run as shown in @eq-ft-total-cost:
 
 $$
 C_{total} = C_{compute} + E[N_{failures}] \times C_{per\_failure} + C_{ft}
-$$ {#eq-total-cost}
+$$ {#eq-ft-total-cost}
 
 where $C_{compute}$ is the base compute cost, $E[N_{failures}]$ is the expected number of failures during training, $C_{per\_failure}$ is the cost per failure (wasted compute plus overhead), and $C_{ft}$ is the cost of fault tolerance mechanisms.
 
-Fault tolerance investment is justified when:
+Fault tolerance investment is justified when the criterion in @eq-ft-investment-criterion is met:
 
 $$
 \frac{\partial C_{ft}}{\partial x} < \frac{\partial (E[N_{failures}] \times C_{per\_failure})}{\partial x}
@@ -497,7 +497,7 @@ Beyond the time consumed by checkpoint writes, checkpointing imposes additional 
 
 **Training disruption**: Synchronous checkpointing pauses training while the checkpoint writes. Even with fast storage, the pause disrupts the training pipeline, potentially causing GPU idle time as data loading and forward passes cannot proceed during checkpoint operations.
 
-**Checkpoint overhead** can be expressed as:
+**Checkpoint overhead** can be expressed as shown in @eq-checkpoint-overhead:
 
 $$
 O_{ckpt} = \frac{T_{save}}{T_{interval}} + \frac{T_{pause}}{T_{interval}}
@@ -518,7 +518,7 @@ where $T_{pause}$ represents any training pause beyond the checkpoint write time
 
 : **Checkpoint Overhead by Model Type**: Larger models with correspondingly larger checkpoints require longer save times but also benefit from longer optimal checkpoint intervals. The percentage overhead remains manageable (under 5%) for most configurations. {#tbl-checkpoint-overhead-by-model}
 
-#### Synchronous vs Asynchronous Checkpointing {#sec-sync-async-checkpoint}
+#### Synchronous vs Asynchronous Checkpointing {#sec-sync-async-checkpoint-ft}
 
 **Synchronous checkpointing** pauses training while the checkpoint writes. All workers coordinate to reach a consistent state, write their portions of the checkpoint, and resume training only after all writes complete. This approach guarantees checkpoint consistency but introduces training pauses.
 
@@ -532,7 +532,7 @@ Modern frameworks like PyTorch's FSDP [@zhao2023pytorch] provide asynchronous ch
 
 [^fn-async-checkpoint]: **Asynchronous Checkpoint Implementation**: DeepSpeed [@rasley2020deepspeed] implements asynchronous checkpointing by maintaining a checkpoint staging buffer in CPU memory. When a checkpoint triggers, GPU state is copied to CPU asynchronously using CUDA streams, allowing GPU computation to continue. A separate thread writes staged data to storage while training proceeds. This achieves near-zero checkpoint overhead for models where staging memory is available.
 
-#### Checkpoint Storage Architecture {#sec-checkpoint-storage-architecture}
+#### Checkpoint Storage Architecture {#sec-checkpoint-storage-architecture-ft}
 
 Where checkpoints are stored is as critical as how often they are written. Production systems use hierarchical storage with different tiers for different purposes:
 
@@ -554,7 +554,7 @@ $$\frac{30 \times 24 \times 60}{14} \times 2.1\text{ TB} = 6,480\text{ TB}$$
 
 At $0.02/GB/month for object storage, this costs $130,000/month just for checkpoint storage. Production systems implement checkpoint versioning and garbage collection, retaining only recent checkpoints plus periodic snapshots for long-term recovery.
 
-### Distributed Checkpointing {#sec-distributed-checkpointing}
+### Distributed Checkpointing {#sec-distributed-checkpointing-ft}
 
 When training spans multiple workers, checkpoint coordination becomes essential. Two primary approaches exist: centralized checkpointing where a coordinator gathers all state and writes a single checkpoint, and distributed checkpointing where each worker writes its own portion of the checkpoint.
 
@@ -623,7 +623,7 @@ This approach enables efficient checkpointing even for massive models. A 175B pa
 
 Checkpoints enable recovery, but the recovery process itself requires careful engineering. Recovery time directly impacts training efficiency: faster recovery means less wasted compute waiting for the system to resume.
 
-Recovery time decomposes into:
+Recovery time decomposes as shown in @eq-recovery-time:
 
 $$
 T_{recovery} = T_{detect} + T_{restart} + T_{load} + T_{warmup}
@@ -715,7 +715,7 @@ Implementing elastic training requires adapting several training components:
 
 **Batch size adjustment**: With fewer workers, each worker must process more samples to maintain the global batch size, or the global batch size must be reduced. Reducing global batch size may require learning rate adjustment.
 
-**Learning rate scaling**: The relationship between batch size and optimal learning rate has been studied extensively. Goyal et al. [@goyal2017accurate] demonstrated that a linear scaling rule works well in practice: when scaling the batch size by factor $k$, scale the learning rate also by factor $k$. An alternative square root scaling law provides more conservative adjustment:
+**Learning rate scaling**: The relationship between batch size and optimal learning rate has been studied extensively. Goyal et al. [@goyal2017accurate] demonstrated that a linear scaling rule works well in practice: when scaling the batch size by factor $k$, scale the learning rate also by factor $k$. An alternative square root scaling law (@eq-lr-scaling) provides more conservative adjustment:
 
 $$
 \eta_{new} = \eta_{base} \times \sqrt{\frac{N_{new}}{N_{base}}}
@@ -879,7 +879,7 @@ Redundancy is the foundation of serving fault tolerance. By maintaining multiple
 
 #### Availability Calculations {#sec-availability-calculations}
 
-For a single replica with availability $A_{single}$ (probability of being operational at any given time), multiple independent replicas achieve higher system availability:
+For a single replica with availability $A_{single}$ (probability of being operational at any given time), multiple independent replicas achieve higher system availability (@eq-availability-redundancy):
 
 $$
 A_{system} = 1 - (1 - A_{single})^R
@@ -1117,7 +1117,7 @@ When system capacity is insufficient for incoming load, deliberately drop reques
 
 **Admission control**: Rate limit at system entry points. Reject requests that would exceed capacity rather than accepting and degrading all requests.
 
-**Circuit breakers**:[^fn-circuit-breaker] When downstream services fail, stop sending requests rather than accumulating failures. Circuit breakers prevent cascade failures where one failing service causes callers to fail due to timeouts and resource exhaustion.
+Circuit breakers[^fn-circuit-breaker] prevent resource exhaustion by failing fast when dependent services are unhealthy.
 
 [^fn-circuit-breaker]: **Circuit Breaker Pattern**: Borrowed from electrical engineering, where circuit breakers prevent electrical fires by cutting power during overload. In software, the pattern (popularized by Michael Nygard's "Release It!") wraps calls to external services and "trips open" after a threshold of failures, failing fast without attempting the call. This prevents resource exhaustion from waiting on failing services and gives downstream services time to recover.
 
@@ -1414,7 +1414,7 @@ Experience with large-scale ML systems reveals recurring failure patterns:
 
 **Cascade failure**: One failing component causes others to fail through timeout exhaustion, resource depletion, or error propagation. Requires circuit breakers and isolation.
 
-## Case Studies {#sec-case-studies}
+## Case Studies {#sec-fault-tolerance-case-studies}
 
 This section examines how leading organizations implement fault tolerance in production ML systems, illustrating the principles developed throughout this chapter.
 

@@ -173,7 +173,7 @@ This chapter develops the principles and techniques for building inference syste
 
 ### When Single-Machine Serving Is Insufficient {#sec-inference-when-insufficient}
 
-Three distinct signals indicate when distributed inference becomes necessary rather than merely optional. Understanding these thresholds guides infrastructure decisions and prevents both premature complexity and delayed scaling.
+Three distinct signals indicate when distributed inference becomes necessary rather than merely optional, as summarized in @tbl-distribution-triggers.
 
 **Memory exhaustion** occurs when model parameters, key-value caches, or embedding tables exceed single-device capacity. A single NVIDIA H100 GPU provides 80GB of HBM3[^fn-hbm3] memory. GPT-4 class models with hundreds of billions of parameters require 200-400GB just for weights in FP16 precision, forcing distribution across multiple GPUs regardless of throughput requirements. Recommendation systems with trillion-parameter embedding tables face similar constraints: Meta's DLRM[^fn-dlrm] model stores embedding tables that require multiple terabytes of memory.
 
@@ -195,7 +195,7 @@ Three distinct signals indicate when distributed inference becomes necessary rat
 
 ### The Fundamental Inversion: Training vs Inference {#sec-inference-inversion}
 
-The contrast between training and inference optimization extends beyond the throughput-latency distinction introduced in @sec-serving. At scale, this inversion manifests in system architecture, resource allocation, and operational priorities.
+The contrast between training and inference optimization extends beyond the throughput-latency distinction introduced in Volume I. At scale, this inversion manifests in system architecture, resource allocation, and operational priorities as compared in @tbl-training-inference-inversion.
 
 | Aspect | Distributed Training | Distributed Inference |
 |--------|---------------------|----------------------|
@@ -228,7 +228,7 @@ Distributing inference across multiple machines introduces overhead absent from 
 
 **Coordination overhead** emerges when requests require fan-out to multiple services. A recommendation system that queries a user model, item model, and ranking model in parallel must coordinate these queries and aggregate results. The coordination logic itself consumes CPU cycles and introduces latency variation.
 
-The total serving tax often consumes 10-30% of the latency budget in distributed systems:
+The total serving tax often consumes 10-30% of the latency budget in distributed systems as shown in @eq-serving-tax:
 
 $$L_{total} = L_{compute} + L_{network} + L_{serialization} + L_{coordination} + L_{queuing}$$ {#eq-serving-tax}
 
@@ -238,7 +238,7 @@ Minimizing this tax requires co-locating communicating components, using high-ba
 
 A critical insight for infrastructure planning is that serving cost typically dominates training cost over a model's operational lifetime. This reversal from the training-centric view of model development has profound implications for where optimization effort should focus.
 
-The total cost of operating a model comprises training cost (a one-time expense) and serving cost (an ongoing expense):
+The total cost of operating a model comprises training cost (a one-time expense) and serving cost (an ongoing expense) as defined in @eq-total-cost:
 
 $$C_{total} = C_{training} + C_{serving} \times T_{deployment} \times Q_{rate}$$ {#eq-total-cost}
 
@@ -272,7 +272,7 @@ Even reducing serving cost by 10% saves $631,000, far exceeding the entire train
 
 :::
 
-The cost dominance ratio varies by application:
+The cost dominance ratio varies by application as shown in @tbl-cost-ratios:
 
 | Application | Training Cost | Annual Serving Cost | Ratio |
 |-------------|--------------|-------------------|-------|
@@ -287,7 +287,7 @@ This cost structure motivates the optimization techniques throughout this chapte
 
 ### The Inference Landscape: Beyond LLMs {#sec-inference-landscape}
 
-A critical misconception in current discourse frames inference at scale as synonymous with LLM serving. While large language models present distinctive challenges and attract significant attention, they represent a small fraction of production inference volume. Understanding the full inference landscape is essential for appropriate technique selection.
+A critical misconception in current discourse frames inference at scale as synonymous with LLM serving. While large language models present distinctive challenges and attract significant attention, they represent a small fraction of production inference volume. The full inference landscape summarized in @tbl-inference-landscape is essential for appropriate technique selection.
 
 ::: {.callout-important title="Production Inference by Request Volume"}
 
@@ -341,7 +341,7 @@ Replica Level     [GPU Utilization, Memory Management]
 Request Level     [Batching, Caching, Preprocessing]
 ```
 
-Each level has distinct optimization levers:
+Each level has distinct optimization levers as summarized in @tbl-serving-hierarchy:
 
 | Level | Optimization Target | Key Techniques |
 |-------|-------------------|----------------|
@@ -912,7 +912,7 @@ This section develops a taxonomy of batching strategies matched to model charact
 
 ### Why Batching Differs Across Model Types {#sec-inference-batching-differences}
 
-The core insight is that batching efficiency depends on how computation scales with batch size relative to how memory and communication scale. Different model architectures exhibit different scaling relationships, requiring different batching strategies.
+The core insight is that batching efficiency depends on how computation scales with batch size relative to how memory and communication scale. Different model architectures exhibit different scaling relationships, requiring different batching strategies as summarized in @tbl-batching-by-model.
 
 For **vision models** (CNNs, ViTs processing fixed-size images), computation scales linearly with batch size while memory scales sub-linearly due to weight sharing. Larger batches improve GPU utilization with minimal overhead, making static or dynamic batching with large batch sizes optimal.
 
@@ -932,11 +932,11 @@ For **recommendation systems**, the bottleneck is often embedding lookup rather 
 
 ### Static and Dynamic Batching for Vision Models {#sec-inference-static-dynamic-batching}
 
-Vision models represent the simplest batching case because inputs have uniform size (after preprocessing) and computation follows a predictable pattern. The foundations from @sec-serving apply directly, with scale introducing considerations of batch formation across multiple replicas.
+Vision models represent the simplest batching case because inputs have uniform size (after preprocessing) and computation follows a predictable pattern. The foundations from Volume I apply directly, with scale introducing considerations of batch formation across multiple replicas.
 
 **Static batching** collects exactly $B$ requests before processing. This maximizes GPU utilization when request arrival is predictable but causes unbounded latency during low-traffic periods.
 
-**Dynamic batching** collects requests for a maximum time window $T_{window}$ or until reaching maximum batch size $B_{max}$, whichever occurs first. The expected latency under Poisson arrivals with rate $\lambda$ follows:
+**Dynamic batching** collects requests for a maximum time window $T_{window}$ or until reaching maximum batch size $B_{max}$, whichever occurs first. The expected latency under Poisson arrivals with rate $\lambda$ follows @eq-dynamic-batch-latency:
 
 $$E[L_{total}] = E[L_{queue}] + L_{batch} + L_{inference}(B)$$ {#eq-dynamic-batch-latency}
 
@@ -1019,7 +1019,7 @@ For realistic output length distributions with high variance, wasted compute can
 
 This dynamic batch management maintains high GPU utilization regardless of sequence length variance.
 
-The throughput improvement from continuous batching depends on sequence length distribution. For a distribution with coefficient of variation $CV = \sigma / \mu$:
+The throughput improvement from continuous batching depends on sequence length distribution. For a distribution with coefficient of variation $CV = \sigma / \mu$, the gain is approximately @eq-continuous-batching-gain:
 
 $$\text{Throughput gain} \approx 1 + \frac{CV^2}{2}$$ {#eq-continuous-batching-gain}
 
@@ -1053,7 +1053,7 @@ The 3x throughput improvement from continuous batching comes from eliminating id
 
 ### Prefill vs Decode: The Two-Phase Challenge {#sec-inference-prefill-decode}
 
-LLM inference consists of two distinct phases with different computational characteristics, requiring different batching strategies within the same request:
+LLM inference consists of two distinct phases with different computational characteristics, requiring different batching strategies within the same request as summarized in @tbl-prefill-decode:
 
 **Prefill phase**: Process the entire input prompt in parallel. Computation scales with prompt length. Memory access pattern is compute-bound (high arithmetic intensity[^fn-arithmetic-intensity]).
 
@@ -1286,7 +1286,7 @@ Is the model autoregressive (LLM, speech)?
         └─ No → Dynamic batching with adaptive parameters
 ```
 
-For each strategy, the key parameters to tune are:
+For each strategy, the key parameters to tune are summarized in @tbl-batching-parameters:
 
 | Strategy | Key Parameters | Tuning Goal |
 |----------|---------------|-------------|
@@ -1306,9 +1306,9 @@ This section examines four sharding strategies, each suited to different model a
 
 ### When Sharding Becomes Necessary {#sec-inference-sharding-when}
 
-Model sharding for inference is driven by two distinct requirements:
+Model sharding for inference is driven by two distinct requirements as summarized in @tbl-sharding-triggers:
 
-**Memory requirements**: A model that cannot fit in single-GPU memory must be sharded regardless of performance considerations. For a model with $P$ parameters at precision $b$ bits:
+**Memory requirements**: A model that cannot fit in single-GPU memory must be sharded regardless of performance considerations. For a model with $P$ parameters at precision $b$ bits, the weight memory is calculated by @eq-weight-memory:
 
 $$\text{Memory}_{weights} = P \times \frac{b}{8} \text{ bytes}$$ {#eq-weight-memory}
 
@@ -1318,7 +1318,7 @@ $$\text{Memory} = 70 \times 10^9 \times \frac{16}{8} = 140 \text{ GB}$$
 
 This exceeds the 80GB capacity of an H100 GPU, requiring at minimum 2-way sharding.
 
-**Latency requirements**: Even when a model fits in memory, sharding can reduce latency by parallelizing computation. The potential speedup depends on the parallelization efficiency:
+**Latency requirements**: Even when a model fits in memory, sharding can reduce latency by parallelizing computation. The potential speedup depends on the parallelization efficiency as shown in @eq-parallel-time:
 
 $$T_{parallel} = \frac{T_{sequential}}{P} + T_{communication}$$ {#eq-parallel-time}
 
@@ -1373,7 +1373,7 @@ AllReduce (combine FF outputs)
 Output activations (replicated on all devices)
 ```
 
-The inference time with tensor parallelism follows:
+The inference time with tensor parallelism follows @eq-tensor-parallel-time:
 
 $$T_{inference} = \frac{T_{compute}}{P} + 2 \times T_{allreduce}\left(\frac{A}{P}\right)$$ {#eq-tensor-parallel-time}
 
@@ -1468,6 +1468,16 @@ Once the pipeline is full, throughput equals $P$ times single-stage throughput, 
 | Memory efficiency | Activations replicated | Activations passed along |
 | Complexity | Higher (requires custom kernels) | Lower (layer-level partitioning) |
 
+: **Pipeline vs Tensor Parallelism**: Each strategy has distinct tradeoffs in latency, throughput, and implementation complexity as compared in @tbl-pipeline-tensor-comparison.
+
+| Aspect | Tensor Parallelism | Pipeline Parallelism |
+|--------|-------------------|---------------------|
+| Single-request latency | Reduced by ~$P$x | No improvement |
+| Throughput | $P$x | $P$x (when pipelined) |
+| Communication pattern | AllReduce (bandwidth-intensive) | Point-to-point (latency-sensitive) |
+| Memory efficiency | Activations replicated | Activations passed along |
+| Complexity | Higher (requires custom kernels) | Lower (layer-level partitioning) |
+
 : **Pipeline vs Tensor Parallelism**: Each strategy has distinct tradeoffs in latency, throughput, and implementation complexity. {#tbl-pipeline-tensor-comparison}
 
 ### Expert Parallelism for MoE Models {#sec-inference-expert-parallelism}
@@ -1551,6 +1561,8 @@ $$e_j = [e_j^{(0)}, e_j^{(1)}, ..., e_j^{(P-1)}]$$
 Each device stores a slice of every embedding.
 
 **Hybrid sharding** combines both approaches: frequently accessed embeddings are column-sharded for faster access, while the long tail uses row sharding.
+
+The choice of embedding sharding strategy depends on lookup patterns and communication overhead as compared in @tbl-embedding-sharding.
 
 | Sharding Strategy | Lookup Pattern | Communication | Best For |
 |------------------|----------------|---------------|----------|
@@ -1636,19 +1648,19 @@ DLRM-scale model:
 
 The practical speedup from sharding depends critically on communication efficiency. Each sharding strategy has characteristic communication patterns with different bandwidth and latency requirements.
 
-**AllReduce** (tensor parallelism): Combines data from all devices, with result available on all devices.
+**AllReduce** (tensor parallelism): Combines data from all devices, with result available on all devices as shown in @eq-allreduce-time.
 
 $$T_{allreduce} = 2 \times \frac{(P-1)}{P} \times \frac{M}{B}$$ {#eq-allreduce-time}
 
 where $P$ is the number of devices, $M$ is the message size, and $B$ is the interconnect bandwidth. The factor of 2 accounts for the reduce-scatter and all-gather phases.
 
-**Point-to-point** (pipeline parallelism): Sends data from one device to the next.
+**Point-to-point** (pipeline parallelism): Sends data from one device to the next as calculated by @eq-p2p-time.
 
 $$T_{p2p} = L + \frac{M}{B}$$ {#eq-p2p-time}
 
 where $L$ is the network latency and $M/B$ is the transfer time.
 
-**AllToAll** (expert parallelism): Exchanges data where each device sends different data to each other device.
+**AllToAll** (expert parallelism): Exchanges data where each device sends different data to each other device as defined in @eq-alltoall-time.
 
 $$T_{alltoall} = (P-1) \times \left(L + \frac{M/P}{B}\right)$$ {#eq-alltoall-time}
 
@@ -1685,21 +1697,7 @@ NVLink bandwidth has evolved significantly over GPU generations.[^fn-nvlink]
 
 ### Sharding Strategy Selection {#sec-inference-sharding-selection}
 
-Selecting the appropriate sharding strategy depends on model architecture, deployment constraints, and optimization priorities:
-
-```
-Does the model fit in single-GPU memory?
-├─ Yes → Is latency reduction needed?
-│        ├─ Yes → Tensor parallelism (within node)
-│        └─ No → No sharding needed
-└─ No → What is the memory bottleneck?
-         ├─ Weights → Tensor or pipeline parallelism
-         ├─ KV cache → Tensor parallelism (distributes cache)
-         ├─ Embeddings → Embedding sharding
-         └─ Experts → Expert parallelism
-```
-
-**Decision factors**:
+The choice of sharding strategy depends on model architecture and deployment priorities as summarized in @tbl-sharding-selection.
 
 | Factor | Tensor Parallel | Pipeline Parallel | Expert Parallel | Embedding Shard |
 |--------|----------------|-------------------|-----------------|-----------------|
@@ -1747,7 +1745,7 @@ For homogeneous servers with identical service times, both achieve near-optimal 
 - **Variable request sizes**: Some requests take 10x longer than others
 - **Server state variations**: Some replicas warming up, others near memory limits
 
-Under these realistic conditions, uninformed strategies perform poorly. The maximum queue length under random assignment follows[^fn-theta-notation]:
+Under these realistic conditions, uninformed strategies perform poorly. The maximum queue length under random assignment follows @eq-random-max-queue[^fn-theta-notation]:
 
 $$E[\text{max queue}] = \Theta\left(\frac{\log n}{\log \log n}\right)$$ {#eq-random-max-queue}
 
@@ -1767,7 +1765,7 @@ A remarkable result in load balancing theory [@mitzenmacher2001power] shows that
 2. Query both for their current queue length
 3. Route the request to the server with the shorter queue
 
-This simple modification reduces maximum queue length from $O(\log n / \log \log n)$ to $O(\log \log n)$:
+This simple modification reduces maximum queue length from $O(\log n / \log \log n)$ to $O(\log \log n)$ as shown in @eq-two-choices-max-queue:
 
 $$E[\text{max queue}]_{\text{two choices}} = \Theta(\log \log n)$$ {#eq-two-choices-max-queue}
 
@@ -2091,7 +2089,7 @@ Deep health checks run less frequently because they consume GPU resources.
 
 ### Quantitative Analysis: Load Balancing Impact {#sec-inference-lb-analysis}
 
-The choice of load balancing algorithm has quantitative impact on system performance. Consider a system with 100 servers, 10,000 QPS, and variable request sizes (CV = 0.5).
+The choice of load balancing algorithm has quantitative impact on system performance as compared in @tbl-lb-comparison. Consider a system with 100 servers, 10,000 QPS, and variable request sizes (CV = 0.5).
 
 | Algorithm | Max Queue | P99 Latency | CPU Overhead |
 |-----------|-----------|-------------|--------------|
@@ -2188,7 +2186,7 @@ This section examines the memory management techniques that enable efficient LLM
 
 During autoregressive generation, each transformer layer computes attention over all previous tokens. Without caching, generating token $t$ would require recomputing attention keys and values for tokens $1$ through $t-1$, an $O(t^2)$ cost per generated token.
 
-The KV cache stores these computed key and value vectors, reducing generation to $O(t)$ per token. However, this memory savings comes at the cost of storing past context:
+The KV cache stores these computed key and value vectors, reducing generation to $O(t)$ per token. However, this memory savings comes at the cost of storing past context as calculated by @eq-kv-cache-size:
 
 $$\text{KV cache size} = 2 \times L \times H \times S \times B \times P$$ {#eq-kv-cache-size}
 
@@ -2627,7 +2625,7 @@ async def swap_to_gpu(sequence_id):
 ## Weight Quantization for Serving {#sec-inference-weight-quantization}
 
 ::: {.callout-note title="Building on Volume I"}
-This section assumes familiarity with quantization fundamentals covered in @sec-model-optimizations-quantization-precision-optimization-e90a. Here we focus on production inference-specific quantization challenges: post-training methods designed for LLM deployment, hardware-deployment co-design, and the interaction between quantization and serving system design.
+This section assumes familiarity with quantization fundamentals covered in Volume I. Here we focus on production inference-specific quantization challenges: post-training methods designed for LLM deployment, hardware-deployment co-design, and the interaction between quantization and serving system design.
 :::
 
 Quantization reduces numerical precision of model weights and activations, decreasing memory footprint and increasing throughput. While Volume I covers quantization fundamentals including post-training quantization (PTQ), quantization-aware training (QAT), and precision format tradeoffs, serving at scale introduces distinct challenges. Models must be quantized after training without access to training data. Quantization must preserve quality across diverse inputs. Hardware deployment targets vary from datacenter GPUs to edge accelerators. This section examines quantization techniques specifically designed for production inference.
@@ -2968,7 +2966,7 @@ Multi-tenancy provides significant benefits:
 - **Operational simplicity**: Fewer clusters to manage, monitor, and upgrade
 - **Statistical multiplexing**: Aggregate traffic is more predictable than per-tenant traffic
 
-However, sharing introduces risks:
+However, sharing introduces risks as compared in @tbl-tenancy-comparison:
 
 - **Noisy neighbors**: One tenant's burst traffic impacts others
 - **Resource contention**: GPU memory, network bandwidth, CPU cycles
@@ -3336,7 +3334,7 @@ This section examines autoscaling strategies for inference, with particular atte
 
 ### Scaling Dimensions {#sec-inference-scaling-dimensions}
 
-Inference systems can scale along multiple dimensions:
+Inference systems can scale along multiple dimensions as compared in @tbl-scaling-dimensions:
 
 **Horizontal scaling (replicas)**: Add or remove model replicas to adjust throughput.
 
@@ -3360,7 +3358,7 @@ $$\text{Latency} \uparrow \text{ as } \text{Batch size} \uparrow \text{, Through
 
 ### The Cold Start Problem {#sec-inference-cold-start}
 
-Unlike stateless web services that start in seconds, inference services have significant startup latency:
+Unlike stateless web services that start in seconds, inference services have significant startup latency as defined in @eq-cold-start-time:
 
 $$T_{cold start} = T_{provision} + T_{load} + T_{warmup}$$ {#eq-cold-start-time}
 
@@ -3576,7 +3574,7 @@ Scaling sequence:
 
 ### Scaling Response Time Analysis {#sec-inference-scaling-response}
 
-The total time to respond to a scaling event:
+The total time to respond to a scaling event is given by @eq-scaling-response:
 
 $$T_{response} = T_{detect} + T_{decide} + T_{provision} + T_{warmup}$$ {#eq-scaling-response}
 
@@ -4111,7 +4109,7 @@ This allows independent updates to each modality's model without retraining the 
 
 ### Cross-Cutting Observations {#sec-inference-case-observations}
 
-Several patterns emerge across these case studies:
+Several patterns emerge across these case studies as summarized in @tbl-case-studies-summary:
 
 **Separation of concerns**: All systems separate embedding/retrieval from ranking/generation. This enables specialized optimization for each component.
 
