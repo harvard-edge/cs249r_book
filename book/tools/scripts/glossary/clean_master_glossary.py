@@ -79,7 +79,7 @@ def clean_global_glossary():
     print("=" * 50)
 
     # Load master glossary
-    glossary_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/data/global_glossary.json")
+    glossary_path = Path(__file__).parent.parent.parent.parent / "quarto/contents/backmatter/glossary/global_glossary.json"
     with open(glossary_path) as f:
         data = json.load(f)
 

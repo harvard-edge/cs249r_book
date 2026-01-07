@@ -190,7 +190,7 @@ def create_improved_master_glossary(all_terms):
     }
 
     # Save master glossary
-    master_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/data/master_glossary.json")
+    master_path = Path(__file__).parent.parent.parent.parent / "quarto/contents/backmatter/glossary/global_glossary.json"
     master_path.parent.mkdir(exist_ok=True)
     save_json_glossary(master_json, master_path)
 

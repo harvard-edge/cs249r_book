@@ -205,7 +205,7 @@ def main():
 
     # Load current master glossary
     project_root = Path(__file__).parent.parent.parent.parent
-    master_path = project_root / "quarto/contents/data/global_glossary.json"
+    master_path = project_root / "quarto/contents/backmatter/glossary/global_glossary.json"
 
     print("📚 Loading current master glossary...")
     with open(master_path, 'r') as f:

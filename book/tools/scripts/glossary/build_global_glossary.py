@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Build clean master glossary from individual chapter glossaries.
+Build volume-specific glossaries from individual chapter glossaries.
 
 This script:
 1. Reads all individual chapter glossary JSON files (source of truth)
 2. Standardizes and deduplicates terms during aggregation
 3. Identifies cross-chapter terms and consolidates definitions
-4. Outputs clean master glossary for use by glossary page generation
+4. Outputs separate glossaries for vol1 and vol2
 
-This is the proper data flow:
-chapter glossaries (clean) → aggregation (smart) → master glossary (clean)
+Data flow:
+chapter glossaries (clean) → aggregation (smart) → volume glossaries (clean)
 """
 
 import json
@@ -18,19 +18,21 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
-def load_chapter_glossaries():
-    """Load all individual chapter glossary files."""
+def load_chapter_glossaries(volume=None):
+    """Load chapter glossary files, optionally filtered by volume."""
     # Get project root (4 levels up from this script)
     project_root = Path(__file__).parent.parent.parent.parent
     
-    # Scan both vol1 and vol2
+    # Determine which volumes to scan
+    volumes = [volume] if volume else ["vol1", "vol2"]
+    
     json_files = []
-    for vol in ["vol1", "vol2"]:
+    for vol in volumes:
         base_dir = project_root / f"quarto/contents/{vol}"
         if base_dir.exists():
             json_files.extend(list(base_dir.glob("**/*_glossary.json")))
 
-    print(f"📚 Found {len(json_files)} chapter glossary files")
+    print(f"📚 Found {len(json_files)} chapter glossary files" + (f" for {volume}" if volume else ""))
 
     chapter_data = {}
     total_raw_terms = 0
@@ -50,7 +52,7 @@ def load_chapter_glossaries():
         except Exception as e:
             print(f"  ❌ Error loading {json_path}: {e}")
 
-    print(f"📊 Total raw terms across all chapters: {total_raw_terms}")
+    print(f"📊 Total raw terms: {total_raw_terms}")
     return chapter_data
 
 def standardize_term_name(term):
@@ -162,71 +164,79 @@ def aggregate_terms(chapter_data):
 
     return clean_terms
 
-def build_global_glossary():
-    """Build the master glossary from individual chapter files."""
-    print("🔧 Building Master Glossary from Chapter Sources")
-    print("=" * 60)
+def build_volume_glossary(volume):
+    """Build a glossary for a specific volume."""
+    print(f"\n{'='*60}")
+    print(f"🔧 Building Glossary for {volume.upper()}")
+    print(f"{'='*60}")
 
-    # Load all chapter glossaries
-    chapter_data = load_chapter_glossaries()
+    # Load chapter glossaries for this volume only
+    chapter_data = load_chapter_glossaries(volume)
+
+    if not chapter_data:
+        print(f"⚠️  No chapter glossaries found for {volume}")
+        return None
 
     # Aggregate and deduplicate
     clean_terms = aggregate_terms(chapter_data)
 
-    # Build master glossary structure
-    global_glossary = {
+    # Build glossary structure
+    glossary = {
         "metadata": {
-            "type": "global_glossary",
-            "version": "3.0.0",
+            "type": "volume_glossary",
+            "volume": volume,
+            "version": "1.0.0",
             "generated": datetime.now().isoformat(),
             "total_terms": len(clean_terms),
-            "source": "aggregated_from_chapter_glossaries",
+            "source": f"aggregated_from_{volume}_chapter_glossaries",
             "standardized": True,
-            "description": "Master glossary built by aggregating and deduplicating individual chapter glossaries"
+            "description": f"Glossary for {volume.upper()} built from chapter glossaries"
         },
         "terms": clean_terms
     }
 
-    # Save master glossary
+    # Save volume glossary
     project_root = Path(__file__).parent.parent.parent.parent
-    output_path = project_root / "quarto/contents/data/global_glossary.json"
+    output_path = project_root / f"quarto/contents/{volume}/backmatter/glossary/{volume}_glossary.json"
+    
+    # Ensure directory exists
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Create backup if exists
-    if output_path.exists():
-        backup_path = output_path.with_suffix('.backup.json')
-        if not backup_path.exists():
-            print(f"💾 Creating backup: {backup_path}")
-            output_path.rename(backup_path)
-
-    print(f"💾 Saving master glossary: {output_path}")
+    print(f"💾 Saving glossary: {output_path}")
     with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(global_glossary, f, indent=2, ensure_ascii=False)
+        json.dump(glossary, f, indent=2, ensure_ascii=False)
 
     # Report statistics
     multi_chapter_terms = [t for t in clean_terms if "appears_in" in t]
 
-    print(f"\n📈 Final Master Glossary Statistics:")
+    print(f"\n📈 {volume.upper()} Glossary Statistics:")
     print(f"  → Total terms: {len(clean_terms)}")
     print(f"  → Multi-chapter terms: {len(multi_chapter_terms)}")
     print(f"  → Single-chapter terms: {len(clean_terms) - len(multi_chapter_terms)}")
 
-    # Show examples
-    print(f"\n🔍 Example multi-chapter terms:")
-    for term in multi_chapter_terms[:5]:
-        chapters = ', '.join(term['appears_in'])
-        print(f"  → {term['term']}: {chapters}")
-
-    return global_glossary
+    return glossary
 
 def main():
-    """Main function."""
-    global_glossary = build_global_glossary()
+    """Main function to build all glossaries."""
+    print("🔧 Building Volume-Specific Glossaries")
+    print("=" * 60)
 
-    print(f"\n✅ Master glossary successfully built!")
-    print(f"Next steps:")
-    print(f"  1. Review individual chapter glossaries for any needed cleanup")
-    print(f"  2. Run generate_glossary.py to create the glossary page")
-    print(f"  3. Individual chapter glossaries remain the source of truth")
+    # Build volume-specific glossaries
+    vol1_glossary = build_volume_glossary("vol1")
+    vol2_glossary = build_volume_glossary("vol2")
+
+    print("\n" + "="*60)
+    print("✅ All glossaries successfully built!")
+    print("="*60)
+    
+    if vol1_glossary:
+        print(f"  → Vol1: {vol1_glossary['metadata']['total_terms']} terms")
+    if vol2_glossary:
+        print(f"  → Vol2: {vol2_glossary['metadata']['total_terms']} terms")
+    
+    print("\nNext steps:")
+    print("  1. Run generate_glossary.py to create the glossary QMD pages")
+    print("  2. Individual chapter glossaries remain the source of truth")
 
 if __name__ == "__main__":
     main()

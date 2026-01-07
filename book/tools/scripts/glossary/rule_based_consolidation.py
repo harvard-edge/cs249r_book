@@ -305,7 +305,7 @@ def main():
     print("=" * 60)
 
     project_root = Path(__file__).parent.parent.parent.parent
-    master_path = project_root / "quarto/contents/data/global_glossary.json"
+    master_path = project_root / "quarto/contents/backmatter/glossary/global_glossary.json"
 
     # Apply consolidation
     reduction, log = apply_rule_based_consolidation(master_path)
