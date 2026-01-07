@@ -1,0 +1,187 @@
+---
+title: "Cluster Orchestration and Scheduling"
+bibliography: ../infrastructure/infrastructure.bib
+---
+
+# Cluster Orchestration and Scheduling {#sec-orchestration}
+
+::: {layout-narrow}
+::: {.column-margin}
+_DALL·E 3 Prompt: A visualization of a sophisticated cluster scheduler managing thousands of ML jobs. The scene shows a control plane dispatching tasks to a massive grid of GPUs. Visual elements include job queues with different priorities, resource allocation maps showing fragmentation and bin-packing, and dynamic scaling of worker pools. The style is clean, modern, and flat, emphasizing the logic and flow of distributed systems._
+:::
+
+\noindent
+![](images/png/cover_orchestration.png)
+
+:::
+
+## Purpose {.unnumbered}
+
+_How do we transform raw compute infrastructure into a shared, efficient, and reliable platform for hundreds of researchers and production models?_
+
+Hardware provides the potential for computation, but software orchestration turns that potential into utilized capacity. Without effective scheduling, a thousand-GPU cluster becomes a fragmented, underutilized resource where researchers fight for access and production jobs stall. Orchestration systems bridge the gap between physical infrastructure and user workloads, solving the complex distributed systems problem of allocating thousands of tasks to thousands of processors while respecting constraints on topology, fairness, and priority. Mastering orchestration enables organizations to scale from manual job submission to automated platforms that sustain high utilization and developer velocity.
+
+::: {.callout-tip title="Learning Objectives"}
+
+- Design resource management policies that achieve target GPU utilization (70%+) in multi-tenant clusters
+- Compare batch scheduling (Slurm) versus service orchestration (Kubernetes) for different ML workload types
+- Implement gang scheduling and topology-aware placement to optimize distributed training performance
+- Architect multi-tenant isolation strategies using namespaces, quotas, and priority classes
+- Evaluate autoscaling strategies for inference workloads based on latency and throughput metrics
+
+:::
+
+## Resource Management and Scheduling
+
+The datacenter infrastructure and high-speed networks discussed in @sec-infrastructure provide the physical foundation for large-scale ML. However, translating these resources into productive workloads requires sophisticated scheduling systems that balance utilization, fairness, and job completion time. This section examines the scheduling challenges unique to ML workloads and the systems designed to address them.
+
+ML workloads present scheduling challenges distinct from traditional computing. Training jobs require coordinated access to multiple GPUs, often spanning nodes connected via the InfiniBand fabric discussed in the previous section. Inference workloads demand consistent latency while handling unpredictable traffic patterns. Both compete for the same accelerator resources, creating tension between throughput-oriented batch processing and latency-sensitive serving.
+
+### Why Distributed Scheduling is Hard
+
+Before examining specific schedulers, understanding why cluster scheduling differs fundamentally from single-machine scheduling clarifies the design constraints these systems face.
+
+**Distributed Systems Challenges.** Cluster scheduling is not merely "putting jobs on machines" at larger scale. Several fundamental distributed systems problems make it intrinsically harder:
+
+1. **Partial failures**: A node can fail between allocation and job start. The scheduler may successfully allocate 32 GPUs across 4 nodes, only to have one node fail before the job launches. The remaining 24 GPUs sit idle while the scheduler detects the failure and re-allocates.
+
+2. **Network partitions**: The scheduler may lose connectivity to a subset of nodes while those nodes continue operating. From the scheduler's perspective, the nodes appear failed. From the nodes' perspective, jobs may still be running.
+
+3. **State inconsistency**: Resource state may differ between the scheduler's view and reality on individual nodes. A GPU the scheduler believes is free may still be cleaning up from a previous job.
+
+4. **Ordering without global time**: Without a global clock, determining whether allocation A happened before allocation B across different nodes requires careful protocol design. Two jobs may both believe they "own" the same GPU if the system is not carefully designed.
+
+**CAP Theorem Implications.** The CAP theorem applies directly to cluster scheduling: a scheduler cannot simultaneously provide perfect consistency (every allocation reflects true cluster state), availability (every request gets a response), and partition tolerance (system operates despite network failures).
+
+Production schedulers make different trade-offs:
+
+- **Slurm** prioritizes consistency, blocking allocations during uncertainty
+- **Kubernetes** prioritizes availability, using eventual consistency with reconciliation loops
+- **Custom ML schedulers** often accept bounded inconsistency for performance
+
+**Failure Rates at Scale.** At scale, failure is normal operation, not exceptional. With 99.9% annual GPU reliability (typical for datacenter hardware), a 4096-GPU cluster experiences:
+
+$$
+\text{Expected failures per day} = 4096 \times \frac{0.001}{365} \approx 0.01 \text{ GPU failures/day}
+$$
+
+More realistically, including software failures, driver issues, and thermal events, production clusters see 1-4 failures per day per 1000 GPUs. A multi-week training run on 4096 GPUs will experience multiple failures. Infrastructure and scheduling systems must anticipate this reality.
+
+### Batch Scheduling for Training
+
+Training large models requires allocating substantial GPU resources for extended periods. A 175B parameter model may require 1024 GPUs for weeks, while smaller experiments need only a few GPUs for hours. Scheduling systems must efficiently pack these diverse workloads while respecting resource constraints and fairness policies.
+
+#### Slurm for HPC-Style ML
+
+Slurm[^fn-slurm] (Simple Linux Utility for Resource Management) [@yoo2003slurm] dominates HPC environments and extends naturally to GPU-intensive ML training. Its partition-based architecture maps well to heterogeneous accelerator pools.
+
+[^fn-slurm]: **Slurm**: An open-source job scheduler originating from Lawrence Livermore National Laboratory (2002) that manages compute resources across thousands of nodes. Slurm's design prioritizes predictability and fairness for long-running scientific workloads. Unlike Kubernetes' declarative model, Slurm uses imperative job submission with explicit resource requests, making it easier to reason about allocation guarantees but less flexible for dynamic workloads.
+
+A typical ML cluster configuration defines partitions by accelerator type and interconnect. GPU allocation strategies significantly impact utilization. The `--gres=gpu:N`[^fn-gres] flag requests N GPUs, but naive allocation can fragment nodes. Consider a 64-node cluster with 8 GPUs each (512 total). If jobs request 6 GPUs, each job wastes 2 GPUs per node, reducing effective capacity to 75%. Slurm's `SelectTypeParameters=CR_GPU` enables GPU-level scheduling, while `--gpus-per-node` ensures jobs receive full nodes when beneficial for NVLink communication.
+
+[^fn-gres]: **GRES (Generic Resource Scheduling)**: Slurm's mechanism for scheduling non-CPU resources like GPUs, FPGAs, or specialized accelerators. GRES tracks resource availability per node and enforces exclusive allocation. The gres.conf file defines available resources, while jobs request them via `--gres=resource_type:count`. This abstraction allows Slurm to manage diverse accelerator types without code changes.
+
+Fair-share scheduling prevents any single user or project from monopolizing resources. The classic fair-share formula computes effective priority as:
+
+$$P_{effective} = P_{base} \times \frac{F_{target}}{F_{actual} + \epsilon}$$
+
+where $F_{target}$ represents the user's allocated share and $F_{actual}$ their recent usage. This naturally deprioritizes heavy users while allowing burst access when resources are idle.
+
+Preemption policies enable high-priority jobs to reclaim resources from running workloads. For ML training, this requires checkpoint-aware preemption. Jobs receive SIGTERM with configurable grace periods (typically 60-300 seconds) to save checkpoints before SIGKILL. The `PreemptMode=REQUEUE` setting automatically restarts preempted jobs, while `GraceTime` controls the checkpoint window.
+
+#### Kubernetes for ML Workloads
+
+Kubernetes has become the standard platform for ML infrastructure, particularly for organizations requiring unified management of training and serving workloads. Native Kubernetes lacks ML-aware scheduling, but extensions address this gap.
+
+GPU scheduling relies on device plugins that expose accelerators as extended resources. The NVIDIA device plugin registers GPUs with the kubelet, enabling pod specifications like `nvidia.com/gpu: 4`.
+
+However, this binary allocation model wastes resources when workloads need less than a full GPU. Multi-Instance GPU (MIG)[^fn-mig] technology addresses this by partitioning A100 and H100 GPUs into isolated instances.
+
+[^fn-mig]: **Multi-Instance GPU (MIG)**: NVIDIA hardware feature (A100 and later) that partitions a single GPU into up to 7 isolated instances, each with dedicated memory, cache, and compute resources. Unlike software-based GPU sharing, MIG provides hardware isolation that prevents memory access between instances. This enables secure multi-tenant GPU sharing but requires workloads to fit within instance memory limits.
+
+Gang scheduling[^fn-gang] ensures distributed training jobs receive all requested resources simultaneously. Without gang scheduling, a job requesting 32 GPUs might receive 24 immediately while waiting indefinitely for the remaining 8, wasting the already-allocated resources. The Volcano batch scheduler and scheduler plugins like Coscheduling implement gang semantics through PodGroup abstractions. Jobs specify minimum member counts, and the scheduler delays placement until all pods can be scheduled together.
+
+[^fn-gang]: **Gang scheduling**: A scheduling policy that allocates resources for multi-component jobs atomically, ensuring all components start simultaneously or none do. First developed for parallel computing in the 1980s, gang scheduling prevents deadlock scenarios where jobs partially acquire resources and block each other. For ML training, gang scheduling ensures all workers are ready before training begins, avoiding wasted GPU cycles.
+
+Priority classes control preemption behavior. A typical hierarchy assigns training workloads medium priority, inference high priority, and development jobs low priority. The `preemptionPolicy: PreemptLowerPriority` setting enables inference pods to reclaim resources from training when latency SLOs are threatened, though organizations must balance this against training job completion times.
+
+#### Custom ML Schedulers
+
+Research schedulers have demonstrated significant improvements over general-purpose systems by exploiting ML-specific characteristics.
+
+**Tiresias** [@gu2019tiresias] observes that ML training jobs have predictable resource requirements after initial epochs. Rather than requiring users to estimate job duration (often inaccurate by 2-5x), Tiresias uses a two-dimensional attained service scheduler. Jobs accumulate "service" based on GPU-time consumed, with priority decreasing as service increases.
+
+**Gandiva** exploits the iterative nature of deep learning. Training alternates between GPU-intensive forward/backward passes and CPU-intensive data loading. Gandiva time-slices GPU access at iteration boundaries, enabling higher utilization through oversubscription.
+
+**Themis** addresses fairness in long-running ML workloads. Traditional fair-share treats all GPU-seconds equally, but ML jobs have diminishing returns as training progresses. Themis defines a finish-time fairness metric, allocating resources to minimize the maximum slowdown any job experiences relative to exclusive access.
+
+Locality-aware scheduling recognizes that communication topology matters for distributed training. A 64-GPU job performs better on 8 nodes of 8 GPUs each than 16 nodes of 4 GPUs, due to higher NVLink bandwidth within nodes. Advanced schedulers consider the fat-tree topology discussed in @sec-infrastructure, preferring allocations that share fewer switch hops. Experiments show 15-30% training throughput improvement from topology-aware placement.
+
+### Online Serving Resource Management
+
+Inference workloads require different scheduling strategies than training. Latency matters more than throughput, traffic fluctuates unpredictably, and resource requirements vary by model size and request characteristics.
+
+#### Autoscaling for Inference
+
+Horizontal Pod Autoscaling (HPA) adjusts replica counts based on metrics. Default CPU utilization targets (often 50-70%) poorly reflect GPU inference workloads. Effective ML autoscaling uses custom metrics:
+
+- **GPU utilization**: 60-80% target, varies by model batch efficiency
+- **Request queue depth**: 10-50 requests, prevents latency spikes
+- **P99 latency**: < SLO target, reactive and lags demand changes
+- **Pending tokens**: Model-specific for LLMs, accounts for KV cache
+
+Vertical Pod Autoscaling (VPA) adjusts resource requests and limits for individual pods. For inference, VPA can right-size memory allocations based on observed usage. However, GPU resources cannot be vertically scaled without pod restart, limiting VPA's utility for accelerated workloads.
+
+LLM inference requires specialized scaling due to the key-value cache[^fn-kv-cache]. A 70B parameter model serving long-context requests may require 80GB+ of GPU memory for KV cache alone, even with PagedAttention optimizations. Scaling decisions must account for both request rate and context length distribution.
+
+[^fn-kv-cache]: **Key-Value (KV) cache**: Memory that stores computed attention key and value tensors from previous tokens during autoregressive generation. Without caching, each new token would require recomputing attention over the entire sequence. KV cache grows linearly with sequence length and batch size; for a 70B model with 128K context, the cache can exceed model weights in memory usage. PagedAttention (vLLM) manages this memory more efficiently through virtual memory techniques.
+
+#### Resource Isolation
+
+Noisy neighbor problems occur when colocated workloads interfere with each other. On GPUs, interference manifests through shared memory bandwidth, L2 cache contention, and PCIe bottlenecks. MIG provides hardware isolation but at the cost of flexibility. Software approaches include careful placement policies and time-based resource contracts.
+
+GPU memory isolation prevents one model from consuming memory needed by another. Without explicit limits, a memory leak or unexpectedly large batch can crash colocated workloads. Container runtimes can enforce memory limits through CUDA MPS (Multi-Process Service)[^fn-mps], though this adds latency overhead of approximately 5-10 microseconds per kernel launch.
+
+[^fn-mps]: **CUDA MPS (Multi-Process Service)**: A CUDA feature that enables multiple processes to share a GPU with reduced context switching overhead. Unlike time-slicing where only one process accesses the GPU at a time, MPS allows concurrent kernel execution from different processes. MPS improves utilization for small workloads but provides limited isolation compared to MIG; a memory-intensive process can still impact colocated workloads through shared cache pressure.
+
+CPU pinning assigns specific cores to inference pods, preventing scheduler migration that causes cache invalidation. For latency-sensitive workloads, isolating cores using `isolcpus` kernel parameters and `taskset` affinity removes OS scheduling jitter. Combined with NUMA-aware placement, this reduces P99 latency by 10-30% for sub-millisecond inference tasks.
+
+### Multi-Tenancy Considerations
+
+Production ML platforms serve multiple teams with competing priorities. Quota systems balance guaranteed access against overall utilization, while security isolation protects sensitive models and data.
+
+#### Quota Management
+
+GPU quota allocation typically operates at the namespace or project level. A simple approach allocates fixed GPU counts, but this leads to underutilization when teams have variable workloads. Hierarchical quotas enable departmental limits with sub-team flexibility. Fair-share across teams extends the single-user formula to organizational hierarchies. When aggregate demand exceeds capacity, each team receives resources proportional to their share allocation. Unused capacity borrows down the hierarchy, maximizing utilization while respecting priorities.
+
+Burst capacity handling enables teams to temporarily exceed quotas when resources are available. Overcommitment ratios of 1.2-1.5x are common, with admission controllers tracking actual versus requested resources. When contention occurs, jobs using burst capacity face preemption first.
+
+#### Security Isolation
+
+Namespace separation provides the fundamental isolation boundary in Kubernetes. Each team operates within dedicated namespaces with role-based access control (RBAC) limiting visibility to their own resources. Network policies extend isolation to the network layer, preventing cross-namespace communication except through explicitly permitted services.
+
+Network policies for ML workloads must balance isolation with distributed training requirements. A policy might allow all-to-all communication within a namespace (for ring-AllReduce) while blocking ingress from other namespaces. Egress policies prevent training jobs from accessing external networks, reducing data exfiltration risk.
+
+GPU virtualization options range from time-slicing (low isolation, high flexibility) to MIG (hardware isolation, fixed partitions) to full device passthrough (complete isolation, lowest utilization). The choice depends on workload sensitivity and trust boundaries. Multi-tenant inference platforms typically use MIG for isolation between tenants, while single-tenant training clusters favor device passthrough for maximum performance.
+
+## Summary
+
+Cluster orchestration is the brain of the ML infrastructure, transforming raw hardware into a managed service. While hardware defines the potential capacity, scheduling determines the realized efficiency. Effective orchestration requires balancing competing objectives: high utilization to minimize cost, fairness to support multiple teams, and low latency for serving workloads.
+
+Batch scheduling systems like Slurm excel at static, long-running training jobs, while Kubernetes provides the flexibility needed for dynamic serving and complex workflows. The most advanced organizations often employ hybrid approaches, using specialized schedulers for training while leveraging Kubernetes for serving and platform services.
+
+The challenges of distributed scheduling—partial failures, network partitions, and state inconsistency—are fundamental distributed systems problems that reappear in ML contexts. However, ML workloads add unique constraints: gang scheduling for all-or-nothing training allocation, topology awareness for communication efficiency, and specific preemption patterns for checkpointed jobs.
+
+As models grow and clusters scale, the role of the scheduler becomes increasingly critical. A 10% improvement in utilization on a 1000-GPU cluster is equivalent to adding 100 GPUs—a multi-million dollar value. Investing in sophisticated orchestration is often the highest-leverage optimization available to platform teams.
+
+The scheduling foundations established here enable efficient use of the storage systems discussed in @sec-storage, which must deliver data to these orchestrated jobs at scale. Together, hardware (@sec-infrastructure), orchestration (@sec-orchestration), and storage (@sec-storage) form the complete infrastructure substrate for distributed machine learning.
+
+::: {.callout-important title="Key Takeaways"}
+
+* Distributed scheduling must handle partial failures and network partitions as routine events, not exceptions
+* Gang scheduling is essential for distributed training to prevent resource deadlock and wastage
+* Kubernetes and Slurm represent different trade-offs between flexibility (Kubernetes) and HPC-style efficiency (Slurm)
+* Multi-tenancy requires strict isolation mechanisms (MIG, namespaces, quotas) to prevent noisy neighbor effects
+* Utilization is the primary metric for scheduler efficiency, directly translating to infrastructure ROI
+
+:::

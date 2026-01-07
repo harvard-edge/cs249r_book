@@ -1,0 +1,339 @@
+---
+title: "Large-Scale ML Infrastructure: Hardware"
+bibliography: infrastructure.bib
+---
+
+# Large-Scale ML Infrastructure: Hardware {#sec-infrastructure}
+
+::: {layout-narrow}
+:::.column-margin
+_DALL·E 3 Prompt: A sweeping architectural visualization of a modern AI datacenter infrastructure. The scene reveals a massive facility with rows of GPU clusters arranged in pods, connected by high-bandwidth networking fabric depicted as glowing fiber optic pathways. Cooling systems appear as flowing blue currents between server racks. The visualization includes multiple layers: physical infrastructure at the bottom with power and cooling, compute infrastructure in the middle with thousands of interconnected accelerators. The color scheme uses industrial grays and silvers with accent colors of electric blue for networking and amber for active computation. Photorealistic technical illustration style suitable for infrastructure engineering documentation._
+:::
+
+\\noindent
+![](images/png/cover_infrastructure.png)
+
+:::
+
+## Purpose {.unnumbered}
+
+_Why does the ability to build and manage computational infrastructure determine which organizations can realize their most ambitious machine learning goals?_
+
+::: {.callout-tip title="Learning Objectives"}
+
+After completing this chapter, you will be able to:
+
+- Calculate power and cooling requirements for GPU cluster deployments using PUE and thermal dissipation constraints
+- Compare network topology trade-offs (fat-tree, rail-optimized, torus) using bisection bandwidth and hop count metrics
+- Analyze total cost of ownership for infrastructure decisions by computing amortized CapEx plus OpEx
+- Evaluate accelerator options (GPU, TPU, custom ASIC) by matching workload characteristics to hardware capabilities
+- Apply the roofline model to determine whether workloads are compute-bound or memory-bound
+
+:::
+
+Machine learning systems that transform industries operate on infrastructure far exceeding the scale of single machines or small clusters. Training a frontier model may require thousands of GPUs coordinated across multiple datacenters, each machine contributing to a unified computation that can span weeks or months. Managing such infrastructure demands expertise in datacenter design, high-bandwidth networking, and specialized accelerator architectures. The infrastructure must satisfy competing requirements: computational efficiency alongside fault tolerance, coordination across thousands of machines without prohibitive communication overhead, and cost-effective scaling. These challenges have become central to machine learning advancement, as organizations cannot access frontier capabilities without mastering the physical systems that make large-scale computation possible. Understanding infrastructure architecture is essential for building systems beyond prototype experiments, shaping whether organizations deploy efficiently, scale reliably, and compete effectively in an increasingly infrastructure-dependent landscape.
+
+## Datacenter Architecture for ML Workloads
+
+The transition from single-machine ML systems to distributed training fundamentally changes the infrastructure requirements. Where Volume I focused on optimizing computations within a single node, production ML at scale demands purpose-built datacenters designed around the unique characteristics of ML workloads: massive power consumption, extreme heat density, and communication patterns that differ markedly from traditional cloud computing.
+
+This section examines the physical and compute infrastructure that enables large-scale ML, providing the foundation for understanding how distributed training systems leverage these resources.
+
+### Physical Infrastructure Fundamentals
+
+ML datacenters differ from traditional cloud facilities in three critical dimensions: power density per rack is 5-10x higher, cooling requirements demand liquid rather than air-based solutions, and physical layout must optimize for high-bandwidth interconnects rather than flexible networking.
+
+#### Power Delivery and Distribution
+
+A single NVIDIA DGX H100 system consumes 10.2 kW at peak load. A rack containing four such systems requires over 40 kW, compared to 5-10 kW for traditional server racks. This power density[^fn-power-density] fundamentally changes power infrastructure design.
+
+[^fn-power-density]: **Power density**: The power consumption per unit of datacenter floor space, typically measured in kW per rack or kW per square meter. Traditional enterprise datacenters design for 5-10 kW per rack. Modern GPU clusters require 40-100+ kW per rack, demanding specialized power distribution and cooling infrastructure. Power density directly limits how many GPUs can be deployed in existing facilities.
+
+**Utility and Backup Power.** Production ML facilities require redundant power feeds, typically N+1 or 2N configurations[^fn-redundancy] where N represents the load requirement. Uninterruptible power supplies (UPS) bridge the gap during utility failures, but the massive power draw of GPU clusters limits battery backup duration to minutes rather than hours. Diesel generators provide extended backup, with automatic transfer switches completing failover within 10-15 seconds.
+
+[^fn-redundancy]: **N+1 and 2N redundancy**: Power redundancy configurations where N is the capacity required to serve the load. N+1 provides one backup component (e.g., 3 UPS units where 2 are required), allowing single-failure tolerance. 2N provides complete duplication (e.g., 4 UPS units), allowing maintenance on one path while maintaining failure protection on the other. ML training runs spanning weeks justify 2N redundancy to prevent catastrophic job loss.
+
+**Power Distribution Architecture.** Modern ML datacenters use a tiered distribution model:
+
++-----------------------------+---------------------+-------------------------+
+| **Distribution Level**      | **Typical Voltage** | **Purpose**             |
++:============================+====================:+:========================+
+| **Utility feed**            | 13.8-69 kV          | Grid connection         |
++-----------------------------+---------------------+-------------------------+
+| **Substation transformer**  | 480V (US)           | Building distribution   |
++-----------------------------+---------------------+-------------------------+
+| **PDU (Power Distribution** | 208V                | Rack-level distribution |
+| **Unit)**                   |                     |                         |
++-----------------------------+---------------------+-------------------------+
+| **Server PSU**              | 12V DC              | Component-level power   |
++-----------------------------+---------------------+-------------------------+
+
+**Power Usage Effectiveness.** The PUE metric[^fn-pue], developed by The Green Grid consortium in 2007 [@thegreengrid2007pue], quantifies datacenter energy efficiency:
+
+[^fn-pue]: **Power Usage Effectiveness (PUE)**: An industry-standard metric where values closer to 1.0 indicate greater efficiency. A PUE of 2.0 means half the power goes to overhead (cooling, lighting, power distribution), while 1.1 means only 10% goes to overhead. Google's most efficient datacenters achieve PUE of 1.06, while typical enterprise facilities operate at 1.5-2.0.
+
+$$
+\text{PUE} = \frac{\text{Total Facility Power}}{\text{IT Equipment Power}}
+$$
+
+A PUE of 1.0 represents perfect efficiency where all power goes to computing. Traditional datacenters achieve PUE values of 1.5-2.0, while hyperscale facilities target 1.1-1.2. ML datacenters face a challenge: the extreme heat density of GPU clusters increases cooling overhead, pushing PUE higher unless advanced cooling technologies are deployed.
+
+#### Cooling Systems at Scale
+
+Heat dissipation represents the primary constraint on ML cluster density. An H100 GPU generates 700W of thermal output from a surface area smaller than a dinner plate, producing heat flux comparable to a nuclear reactor's fuel rod surface.
+
+**Air Cooling Limitations.** Traditional air cooling becomes impractical above 30-40 kW per rack. The physics are straightforward: air's low heat capacity (approximately 1 kJ/kg-K) requires massive airflow to remove heat. A 40 kW rack requires roughly 10,000 CFM (cubic feet per minute) of airflow, creating acoustic levels exceeding 80 dB and significant fan power overhead.
+
+**Hot Aisle/Cold Aisle Containment.** This architectural pattern separates cold supply air from hot exhaust air using physical barriers. Cold air enters through raised floor vents or overhead ducts, passes through servers front-to-back, and exhausts into a contained hot aisle. Containment improves cooling efficiency by preventing mixing, but cannot solve the fundamental heat density challenge of modern GPU clusters.
+
+**Direct-to-Chip Liquid Cooling.** Liquid cooling addresses heat density through water's superior heat capacity (4.2 kJ/kg-K, roughly four times air). Cold plates mounted directly on GPUs and CPUs transfer heat to circulating coolant, which flows to facility-level heat exchangers. This approach enables rack densities of 100+ kW while reducing cooling power consumption by 30-40% compared to air cooling.
+
+::: {.callout-note}
+## Liquid Cooling Adoption
+
+As of 2024, liquid cooling has transitioned from specialty option to requirement for large-scale ML clusters. NVIDIA's GB200 NVL72 systems require liquid cooling, with no air-cooled option available. Facilities planning for next-generation hardware must include liquid cooling infrastructure from initial design.
+:::
+
+**Immersion Cooling.** The most aggressive thermal solution submerges entire servers in dielectric fluid. Single-phase immersion uses non-conductive oils that remain liquid, while two-phase systems use fluids that boil at low temperatures, leveraging latent heat of vaporization for efficient heat transfer. Immersion enables rack densities exceeding 200 kW but requires specialized maintenance procedures and component compatibility.
+
+#### Physical Layout Optimization
+
+ML cluster performance depends critically on physical topology. Unlike web serving workloads where any server can handle any request, distributed training requires specific communication patterns between specific nodes.
+
+**Rack Density Considerations.** Higher density reduces cable lengths and switch hops but concentrates power and cooling requirements. Production deployments balance these factors based on workload characteristics:
+
++---------------------+---------------------+---------------------+
+| **Workload Type**   | **Typical Density** | **Limiting Factor** |
++:====================+====================:+:====================+
+| **LLM training**    | 80-120 kW/rack      | Cooling capacity    |
++---------------------+---------------------+---------------------+
+| **Recommendation**  | 30-50 kW/rack       | CPU/memory balance  |
+| **inference**       |                     |                     |
++---------------------+---------------------+---------------------+
+| **Vision training** | 60-80 kW/rack       | Network bandwidth   |
++---------------------+---------------------+---------------------+
+
+**Cable Management.** High-bandwidth interconnects like InfiniBand use copper cables for distances under 3 meters and fiber optics beyond. Cable routing must maintain bend radius requirements (typically 10x cable diameter) while enabling airflow for any air-cooled components. Active optical cables (AOCs) simplify routing but add latency and power consumption compared to passive copper.
+
+### Compute Infrastructure Design
+
+ML clusters combine multiple node types, each optimized for different phases of the training and inference pipeline. Understanding these roles clarifies infrastructure design decisions.
+
+#### GPU Cluster Architectures
+
+Modern GPU clusters are built from dense multi-GPU nodes connected via high-bandwidth fabrics. Two reference architectures dominate production deployments.
+
+**DGX-Style Dense Nodes.** NVIDIA's DGX systems package 8 GPUs with NVLink[^fn-nvlink] interconnects, high-bandwidth networking, and substantial local storage in a single chassis. The DGX H100 provides:
+
+[^fn-nvlink]: **NVLink**: NVIDIA's proprietary high-bandwidth interconnect for GPU-to-GPU communication, providing 900 GB/s bidirectional bandwidth in NVLink 4.0 (H100), compared to 64 GB/s for PCIe Gen5. NVLink enables efficient tensor parallelism by allowing GPUs to share memory across the interconnect with near-local-memory latency.
+
+- 8x H100 GPUs with 640GB total HBM3[^fn-hbm] memory
+
+[^fn-hbm]: **High Bandwidth Memory (HBM)**: A 3D-stacked DRAM technology that places memory dies vertically atop the GPU die, connected via thousands of through-silicon vias (TSVs). HBM3 provides 3.4 TB/s bandwidth per GPU compared to 400 GB/s for DDR5. This bandwidth is essential for memory-bound ML workloads where data movement, not computation, limits performance.
+- NVSwitch fabric enabling 900 GB/s GPU-to-GPU bandwidth
+- 8x 400 Gbps InfiniBand or Ethernet ports
+- 2x Intel Xeon CPUs for preprocessing
+- 30TB NVMe storage for dataset staging
+
+This integrated design simplifies deployment but limits flexibility. Each DGX H100 costs approximately $300,000 (pricing reflects 2024 market conditions and fluctuates significantly based on supply, demand, and generation transitions), making component-level upgrades economically impractical.
+
+**HGX Baseboard Designs.** For organizations building custom infrastructure, NVIDIA's HGX baseboards provide the GPU and interconnect components for integration into custom server designs. Cloud providers and large enterprises use HGX to optimize for their specific power, cooling, and networking requirements while maintaining compatibility with NVIDIA's software stack.
+
+**PCIe vs. NVLink Configurations.** The choice between PCIe and NVLink connectivity involves fundamental trade-offs:
+
++---------------------+---------------+------------------+----------------------+
+| **Interconnect**    | **Bandwidth** | **Latency**      | **Use Case**         |
++:====================+==============:+=================:+:=====================+
+| **PCIe Gen5 x16**   | 64 GB/s       | ~1 microsecond   | Inference, small     |
+|                     |               |                  | models               |
++---------------------+---------------+------------------+----------------------+
+| **NVLink 4.0**      | 900 GB/s      | ~0.5 microsecond | Large model training |
+| **(bidirectional)** |               |                  |                      |
++---------------------+---------------+------------------+----------------------+
+
+For models requiring tensor parallelism across GPUs (as detailed in @sec-distributed-training), NVLink's 14x bandwidth advantage directly translates to training throughput. PCIe-based systems suffice for data-parallel workloads where gradient synchronization occurs less frequently.
+
+#### CPU Infrastructure Roles
+
+While GPUs dominate ML computation, CPUs perform essential supporting functions that bottleneck overall system performance if under-provisioned.
+
+**Preprocessing and Data Preparation.** Training data pipelines involve decompression, augmentation, tokenization, and batching. These operations execute on CPUs, which must supply data fast enough to keep GPUs utilized. A common rule of thumb allocates 4-8 CPU cores per GPU for training workloads, though data-intensive pipelines (video, large images) may require more.
+
+**Feature Serving for Recommendation Systems.** Recommendation models present a distinct infrastructure pattern. These systems combine deep learning components with massive embedding tables that may exceed 1TB. The embedding lookups are memory-bound CPU operations, while neural network components benefit from GPU acceleration. Production recommendation systems often use CPU-heavy nodes for embedding serving alongside GPU nodes for model computation, connected via low-latency networks.
+
+**Control Plane and Orchestration.** Cluster management, job scheduling, and monitoring run on dedicated CPU nodes separate from the training cluster. This isolation prevents resource contention and enables management operations even when the training cluster is fully utilized.
+
+#### Hybrid Architectures
+
+Real production systems rarely use homogeneous hardware throughout. Workload-aware placement matches job characteristics to appropriate resources.
+
+**Embedding Table Placement.** For recommendation systems with embedding tables exceeding GPU memory, hybrid architectures place embeddings in CPU DRAM while compute-intensive layers execute on GPUs. Facebook's DLRM architecture pioneered this pattern, with embeddings distributed across CPU nodes communicating with GPU nodes via high-bandwidth networks.
+
+### Accelerator Selection by Workload Type
+
+The accelerator landscape has expanded beyond NVIDIA GPUs to include Google TPUs, custom ASICs, and emerging architectures. Selection requires matching accelerator characteristics to workload requirements.
+
+#### NVIDIA GPU Ecosystem
+
+NVIDIA maintains market dominance through integrated hardware-software offerings. Understanding the architecture evolution clarifies capability differences.
+
+**Architecture Progression.** Each generation brings substantial improvements in compute density and memory bandwidth:
+
++-----------+------------+--------------+---------------+---------+
+| **GPU**   | **FP16**   | **HBM**      | **Memory**    | **TDP** |
+|           | **Tensor** | **Capacity** | **Bandwidth** |         |
+|           | **TFLOPS** |              |               |         |
++==========:+===========:+=============:+==============:+========:+
+| **A100**  | 312        | 80 GB HBM2e  | 2.0 TB/s      | 400W    |
++-----------+------------+--------------+---------------+---------+
+| **H100**  | 990        | 80 GB HBM3   | 3.4 TB/s      | 700W    |
++-----------+------------+--------------+---------------+---------+
+| **B100*** | ~1,800     | 192 GB HBM3e | 8.0 TB/s      | ~700W   |
++-----------+------------+--------------+---------------+---------+
+
+*B100 specifications are preliminary estimates based on NVIDIA announcements. Verify against official specifications for production planning.
+
+The H100 delivers approximately 3x the tensor TFLOPS of A100 at 1.75x the power. To derive the efficiency improvement: A100 achieves 312 TF / 400W = 0.78 TF/W, while H100 achieves 990 TF / 700W = 1.41 TF/W, yielding approximately 80% improvement in FLOPS/watt. Memory bandwidth increases proportionally, maintaining the compute-to-memory ratio critical for transformer models.
+
+**Tensor Core Utilization.** Tensor Cores[^fn-tensor-cores] accelerate matrix operations but require specific data layouts and sizes for full utilization. Dimensions should be multiples of 8 (FP16) or 16 (INT8) for optimal performance. Underutilized Tensor Cores represent the most common source of poor GPU efficiency in production, with many workloads achieving only 30-50% of theoretical peak FLOPS.
+
+[^fn-tensor-cores]: **Tensor Cores**: Specialized matrix-multiply-accumulate units introduced in NVIDIA Volta (2017) that perform 4x4 matrix operations in a single clock cycle. Unlike general-purpose CUDA cores, Tensor Cores are optimized for the fused multiply-add pattern $D = A \times B + C$ that dominates neural network computation. H100 Tensor Cores support FP8, FP16, BF16, TF32, and INT8 formats.
+
+#### Google TPU Infrastructure
+
+Google's Tensor Processing Units offer an alternative architecture optimized for matrix operations with a distinct programming model.
+
+**TPU Pod Architecture.** TPUs connect via proprietary Inter-Chip Interconnect (ICI)[^fn-ici] forming 2D or 3D torus[^fn-torus] topologies. A TPU v4 pod contains 4,096 chips with 1.1 exaFLOPS of aggregate compute. Unlike GPU clusters where networking is separate from compute nodes, TPU pods integrate interconnect into the chip design.
+
+[^fn-ici]: **Inter-Chip Interconnect (ICI)**: Google's proprietary chip-to-chip communication fabric integrated directly into TPU silicon. ICI provides 6 links per chip at 100 GB/s each, enabling the torus topology without external switches. This integration reduces latency and power compared to discrete networking but limits flexibility in topology configuration.
+
+[^fn-torus]: **Torus topology**: A network topology where nodes connect in a ring structure along each dimension, with the last node wrapping around to connect to the first. A 3D torus creates a cube-like structure where each node connects to 6 neighbors. This topology provides consistent latency for nearest-neighbor communication patterns common in model parallelism, though AllReduce operations require O(sqrt(N)) hops compared to O(log(N)) for fat-tree.
+
+**TPU vs. GPU Trade-offs.** TPUs excel for large-scale training with regular computation patterns:
+
++------------------------+-------------------------+--------------------------+
+| **Factor**             | **TPU Advantage**       | **GPU Advantage**        |
++:=======================+:========================+:=========================+
+| **Large transformer**  | Optimized matrix units, | Broader operator support |
+| **training**           | integrated interconnect |                          |
++------------------------+-------------------------+--------------------------+
+| **Custom operations**  | Limited flexibility     | CUDA extensibility       |
++------------------------+-------------------------+--------------------------+
+| **Software ecosystem** | JAX-centric             | PyTorch, TensorFlow,     |
+|                        |                         | many frameworks          |
++------------------------+-------------------------+--------------------------+
+| **Availability**       | Google Cloud only       | Multiple cloud and       |
+|                        |                         | on-premise options       |
++------------------------+-------------------------+--------------------------+
+
+#### Custom ASICs and Specialized Accelerators
+
+The ML accelerator landscape continues to diversify as organizations optimize for specific workloads.
+
+**Inference-Optimized Accelerators.** Training and inference present different requirements. Training needs high-precision arithmetic, large memory for activations and optimizer state, and high interconnect bandwidth. Inference prioritizes low latency, high throughput, and power efficiency. Accelerators like Google's TPU Inference chips and AWS Inferentia optimize for inference characteristics, achieving 2-4x better performance per watt than training-focused hardware for appropriate workloads.
+
+### Quantitative Infrastructure Analysis
+
+Effective infrastructure decisions require quantitative comparison across accelerator options and workload types.
+
+**The Roofline Model.** The roofline model[^fn-roofline] [@williams2009roofline] provides a systematic framework for understanding whether workloads are compute-bound or memory-bound. Achievable performance is limited by the minimum of peak compute and memory bandwidth:
+
+[^fn-roofline]: **Roofline model**: A visual performance model developed at Berkeley that plots achievable FLOPS against arithmetic intensity (FLOPS per byte of memory traffic). The "roofline" consists of a sloped region (memory-bound, limited by bandwidth) and a flat region (compute-bound, limited by peak FLOPS). The intersection point, called the ridge point, indicates where workloads transition between these regimes. This model helps identify whether to optimize for compute or memory access.
+
+$$
+\text{Achievable FLOPS} = \min\left(\text{Peak Compute}, \text{Memory Bandwidth} \times \text{Arithmetic Intensity}\right)
+$$
+
+Arithmetic intensity measures FLOPS per byte of memory traffic. The "ridge point" where compute and memory limits intersect determines which workloads benefit from each resource:
+
++-----------------+------------------+---------------+-----------------+
+| **Accelerator** | **Peak Compute** | **Memory BW** | **Ridge Point** |
+|                 | **(TF FP16)**    | **(TB/s)**    | **(FLOP/byte)** |
++================:+=================:+==============:+================:+
+| **H100 SXM**    | 990              | 3.4           | 291             |
++-----------------+------------------+---------------+-----------------+
+| **A100 80GB**   | 312              | 2.0           | 156             |
++-----------------+------------------+---------------+-----------------+
+| **TPU v4**      | 275              | 1.2           | 229             |
++-----------------+------------------+---------------+-----------------+
+
+Most LLM training operates at 50-100 FLOP/byte arithmetic intensity, well below the ridge point, making these workloads memory-bound.
+
+## Networking for Large-Scale ML
+
+The networking fabric connecting accelerators determines whether a distributed training job achieves near-linear scaling or collapses into communication-bound inefficiency. While the previous section examined intra-node connectivity through NVLink and NVSwitch, this section extends to the datacenter-scale networks that enable training across hundreds or thousands of accelerators.
+
+### Training Network Requirements
+
+Large-scale training workloads impose unique demands on network infrastructure. Unlike traditional datacenter traffic patterns dominated by short flows and request-response interactions, distributed training generates sustained, synchronized bulk transfers.
+
+#### High-Bandwidth Interconnects
+
+InfiniBand[^fn-infiniband] has emerged as the dominant interconnect for ML training clusters due to its RDMA (Remote Direct Memory Access)[^fn-rdma] capabilities and consistent low latency [@infiniband2000spec].
+
+[^fn-infiniband]: **InfiniBand**: A high-speed interconnect standard originally developed for HPC, now dominant in ML clusters. Unlike Ethernet, InfiniBand provides guaranteed delivery with hardware-based reliability, eliminating software retransmission overhead. Current NDR (Next Data Rate) generation provides 400 Gb/s per port, with XDR (800 Gb/s) emerging.
+
+[^fn-rdma]: **Remote Direct Memory Access (RDMA)**: A network capability that allows one machine to read from or write to another machine's memory without involving either CPU. RDMA bypasses the kernel network stack, reducing latency from tens of microseconds to sub-microsecond. For ML, RDMA enables GPUs to exchange gradient data with minimal CPU intervention, critical for overlapping communication with computation.
+
+The choice between InfiniBand and RoCE (RDMA over Converged Ethernet) involves trade-offs beyond raw performance. InfiniBand achieves protocol efficiencies above 95%, while RoCE typically operates at 85-92% depending on network congestion and flow control configuration.
+
+#### Network Topology Design
+
+The physical arrangement of switches and links fundamentally constrains distributed training performance. Fat-tree topologies[^fn-fat-tree] [@leiserson1985fattrees], derived from Clos network theory, provide full bisection bandwidth[^fn-bisection-bw]: any partition of the network can communicate at full link rate with the other half.
+
+[^fn-fat-tree]: **Fat-tree topology**: A hierarchical network structure where bandwidth increases toward the root, resembling a tree with thicker branches near the top. Unlike traditional trees where aggregation creates bottlenecks, fat-trees use multiple uplinks per switch to maintain bandwidth at each tier.
+
+[^fn-bisection-bw]: **Bisection bandwidth**: The minimum bandwidth available when a network is divided into two equal halves. If bisection bandwidth equals the sum of all edge bandwidths, the network is non-blocking, meaning any communication pattern can proceed at full speed.
+
+Rail-optimized topologies offer an alternative for workloads dominated by tensor parallelism. In these designs, GPUs at the same position across multiple nodes connect through dedicated "rails" with minimal switch hops.
+
+## Total Cost of Ownership Analysis
+
+Understanding the complete financial picture of ML infrastructure requires moving beyond simple hardware acquisition costs to comprehensive Total Cost of Ownership (TCO) analysis.
+
+### Capital Expenditure Components
+
+Capital expenditure (CapEx)[^fn-capex-opex] encompasses all upfront investments required to establish ML infrastructure. These costs are typically amortized over 3-5 years.
+
+[^fn-capex-opex]: **CapEx vs OpEx**: Capital expenditure (CapEx) covers upfront asset purchases (hardware, construction) that are depreciated over time, while operational expenditure (OpEx) covers ongoing costs (power, staff, cloud fees) that are expensed immediately.
+
+#### Hardware Costs
+
+GPU and accelerator acquisition represents the dominant CapEx component for ML infrastructure. Server and storage costs add substantial overhead beyond accelerators. Networking equipment costs scale superlinearly with cluster size due to the hierarchical nature of high-bandwidth fabrics.
+
+#### Facility Costs
+
+Datacenter construction costs range from $7-12 million per megawatt of IT capacity for purpose-built facilities. ML workloads, with their high power density requirements, demand specialized cooling infrastructure that increases construction costs by 20-40%.
+
+### Operational Expenditure Components
+
+Operational expenditure (OpEx) captures ongoing costs that accumulate throughout infrastructure lifetime. For ML systems, power costs and specialized staffing dominate this category.
+
+#### Power Costs
+
+Electricity represents the largest operational cost for ML infrastructure. The annual power cost for a single DGX H100 system can be calculated as:
+
+$$C_{\text{power}} = P_{\text{system}} \times \text{PUE} \times H_{\text{annual}} \times R_{\text{electricity}} \times U$$
+
+where $P_{\text{system}}$ is system power, $H_{\text{annual}}$ is hours per year, $R_{\text{electricity}}$ is the electricity rate, and $U$ is utilization factor.
+
+## Summary
+
+Large-scale ML infrastructure represents the physical foundation upon which all distributed training and serving systems operate. The constraints examined in this chapter, from power delivery and cooling capacity to network topology and accelerator selection, ultimately determine what scale of ML systems an organization can build and operate effectively.
+
+Infrastructure design must match workload characteristics. LLM training demands GPU-dense configurations with high-bandwidth NVLink and InfiniBand connectivity, while recommendation systems require hybrid CPU-GPU architectures optimized for embedding table access.
+
+Total cost of ownership extends far beyond hardware acquisition. Power consumption for a 1000-GPU cluster can exceed $2 million annually at typical datacenter rates. Cooling infrastructure may cost more than the GPUs it supports.
+
+Network topology choices determine training efficiency. The decision between fat-tree and rail-optimized topologies, InfiniBand and RoCE, 2-tier and 3-tier switching architectures shapes what parallelism strategies perform well on the resulting infrastructure.
+
+The infrastructure foundations established here enable the scheduling systems discussed in @sec-orchestration, which transform raw compute capacity into managed services. Following that, @sec-storage examines the data infrastructure required to keep these powerful accelerators fed.
+
+::: {.callout-important title="Key Takeaways"}
+
+* Power density and cooling capacity represent hard physical limits that constrain cluster design independent of budget
+* Network topology determines training efficiency, with fat-tree providing flexibility while rail-optimized reduces latency for structured communication patterns
+* Hybrid CPU-GPU architectures outperform GPU-only configurations for recommendation systems and other embedding-heavy workloads
+* Total cost of ownership must include power, cooling, operations, and realistic utilization rates rather than theoretical peak performance
+
+:::
