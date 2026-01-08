@@ -109,11 +109,11 @@ Distributed training becomes an architectural necessity when training demands ex
 
 Part I established the infrastructure foundations that make distributed training possible. The datacenter architectures and accelerator topologies examined in @sec-infrastructure provide the compute fabric, while the distributed storage systems and data pipelines developed in @sec-storage ensure training data flows efficiently to thousands of workers. These foundations answer the question of what physical resources exist. Part II addresses the central question those resources enable: how do we coordinate training across distributed infrastructure to achieve performance that no single machine could deliver?
 
-The transition from single-machine to distributed training represents a major shift in optimization strategy and system complexity. Single-machine optimization focuses on efficiently utilizing available resources through techniques such as prefetching, mixed precision, and gradient accumulation. Distributed training introduces different challenges: communication overhead, fault tolerance, and synchronization that require new conceptual frameworks and engineering approaches.
+The transition from single-machine to distributed training represents a major shift in optimization strategy and system complexity. Single-machine optimization focuses on efficiently utilizing available resources through techniques such as prefetching, mixed precision[^fn-mixed-precision], and gradient accumulation. Distributed training introduces different challenges: communication overhead, fault tolerance, and synchronization that require new conceptual frameworks and engineering approaches.
 
 ### Multi-Machine Training Requirements {#sec-distributed-training-multimachine-training-requirements}
 
-Three concrete signals indicate when distributed training becomes necessary rather than merely beneficial. First, memory exhaustion occurs when model parameters, optimizer states, and activation storage exceed single-device capacity even after applying gradient checkpointing[^fn-gradient-checkpointing] and mixed precision.[^fn-mixed-precision]
+Three concrete signals indicate when distributed training becomes necessary rather than merely beneficial. First, **memory exhaustion** occurs when model parameters, optimizer states, and activation storage exceed single-device capacity. It is critical to distinguish between static memory (parameters + optimizer states, constant per batch) and dynamic memory (activations, scaling with batch size and sequence length). For long-context LLMs, activation memory often dominates. Techniques like **gradient checkpointing**[^fn-gradient-checkpointing] address this by discarding intermediate activations during the forward pass and recomputing them during the backward pass, trading 30% more compute for O(sqrt(n)) memory reduction. Even with these optimizations, models beyond 10-20 billion parameters typically exceed the 40-80GB HBM capacity of modern GPUs.
 
 [^fn-gradient-checkpointing]: **Gradient Checkpointing**: A memory-compute trade-off technique that discards intermediate activations during the forward pass and recomputes them during backpropagation. This reduces memory usage from O(n) to O(sqrt(n)) for n layers, at the cost of roughly 30% additional compute. Essential for training deep networks or long sequences on memory-constrained devices.
 
@@ -128,6 +128,14 @@ Distributed training introduces three primary complexity dimensions absent from 
 ### Single-Machine to Distributed Transition {#sec-distributed-training-singlemachine-distributed-transition}
 
 The systematic optimization methodology established for single-machine training extends to distributed environments with important adaptations. Profiling must now capture inter-device communication patterns and synchronization overhead in addition to computation and memory metrics. Tools like NVIDIA Nsight Systems and PyTorch's distributed profiler reveal whether training is communication-bound or computation-bound, guiding the choice between parallelization strategies. The solution space expands from single-machine techniques to include data parallelism (distributing training examples), model parallelism (distributing model parameters), pipeline parallelism (distributing model layers), and hybrid approaches that combine multiple strategies. The principles remain consistent—identify bottlenecks, select appropriate techniques, compose solutions—but the implementation complexity increases substantially.
+
+::: {.callout-note title="Figure Placeholder: 3D Parallelism Cube" collapse="true"}
+```{.tikz}
+% TODO: 3D Cube showing Data, Tensor, and Pipeline axes
+\node[draw, align=center] {3D Parallelism\nData x Tensor x Pipeline};
+```
+**The 3D Parallelism Cube**. A conceptual visualization of the three orthogonal scaling axes: Data Parallelism (replicating the model), Tensor Parallelism (splitting layers), and Pipeline Parallelism (splitting depth). Production training for models like GPT-4 occupies a specific point $(d, t, p)$ within this cube to balance memory usage, compute efficiency, and communication overhead.
+:::
 
 ## Distributed Training Fundamentals {#sec-distributed-training-fundamentals}
 
@@ -743,6 +751,14 @@ For a 7B parameter model with Adam optimizer, each GPU requires: $7B \times (4 +
 
 ZeRO addresses this redundancy through progressive sharding:
 
+::: {.callout-note title="Figure Placeholder: ZeRO Memory Usage" collapse="true"}
+```{.tikz}
+% TODO: Bar chart showing memory usage of DDP vs ZeRO-1/2/3
+\node[draw, align=center] {ZeRO Memory Partitioning\nOptimizer | Gradients | Parameters};
+```
+**ZeRO Memory Partitioning**. Visual comparison of memory usage between standard Data Parallelism (DDP) and ZeRO Stages 1, 2, and 3. In DDP, every GPU stores a full copy of parameters, gradients, and optimizer states. ZeRO progressively partitions these states across GPUs, eliminating redundancy. ZeRO-3 achieves linear memory scaling with GPU count, enabling training of trillion-parameter models on limited hardware.
+:::
+
 | Stage | What is Sharded | Memory Reduction | Communication Overhead |
 |-------|-----------------|------------------|------------------------|
 | ZeRO-1 | Optimizer states only | ~4x | None (same as DDP) |
@@ -1099,7 +1115,21 @@ Another challenge is data dependency between devices. During the forward pass, a
 
 Model parallelism also increases the complexity of implementation and debugging. Partitioning the model, ensuring proper data flow, and synchronizing gradients across devices require detailed coordination. Errors in any of these steps can lead to incorrect gradient updates or even model divergence. Debugging such errors is often more difficult in distributed systems, as issues may arise only under specific conditions or workloads.
 
-A further challenge is pipeline bubbles in pipeline parallelism. With $m$ pipeline stages, the first $m-1$ steps operate at reduced efficiency as the pipeline fills. For example, in an 8-device pipeline, the first device begins processing immediately, but the eighth device remains idle for 7 steps. This warmup period reduces hardware utilization by a fraction of approximately $(m-1)/b$, where $b$ is the number of microbatches in the training step.
+A further challenge is pipeline bubbles in pipeline parallelism. With $P$ pipeline stages and $M$ microbatches per training step, the pipeline experiences idle time at the start (fill) and end (drain) of the schedule. The fraction of time spent in the bubble is given by:
+
+$$
+\text{Bubble Fraction} = \frac{P - 1}{M}
+$$
+
+For example, in an 8-stage pipeline ($P=8$) with 32 microbatches ($M=32$), the bubble overhead is $(8-1)/32 \approx 22\%$. Increasing $M$ reduces this overhead but increases the memory required to store activations for the pending backward passes. This trade-off between throughput (high $M$) and memory (low $M$) is the central optimization constraint in pipeline parallelism.
+
+::: {.callout-note title="Figure Placeholder: Pipeline Bubble" collapse="true"}
+```{.tikz}
+% TODO: Space-time diagram of pipeline schedule showing idle bubbles
+\node[draw, align=center] {Pipeline Schedule\nIdle Bubbles vs Active Compute};
+```
+**Pipeline Bubble Analysis**. A space-time diagram comparing naive pipeline execution versus 1F1B (One-Forward-One-Backward) scheduling. The "bubble" represents idle time (gray) where accelerators wait for data dependencies. Minimizing this bubble through micro-batching and efficient scheduling is the primary optimization goal in pipeline parallelism.
+:::
 
 Finally, model parallelism may be less effective for certain architectures, such as models with highly interdependent operations. In these cases, splitting the model may lead to excessive communication overhead, outweighing the benefits of parallel computation. For such models, alternative strategies like data parallelism or hybrid approaches might be more suitable.
 

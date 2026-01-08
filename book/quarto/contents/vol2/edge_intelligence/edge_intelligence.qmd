@@ -527,6 +527,18 @@ The transition from inference-only deployment to on-device training creates mult
 
 Standard efficiency constraints (quantization, pruning, knowledge distillation) apply to both inference and training, but training amplifies each constraint dimension by 3-10×. @tbl-training-amplification quantifies how training workloads intensify the challenges of model efficiency, optimization techniques, and hardware acceleration.
 
+::: {.callout-note title="Figure Placeholder: Memory Amplification" collapse="true"}
+```{.tikz}
+% TODO: Bar chart comparing memory usage: Inference (Weights+Activations) vs Training (Weights+Activations+Gradients+Optimizer)
+\node[draw, align=center] {Memory Amplification\nInference vs Training};
+```
+**Training Memory Amplification**. Visualizing the explosion of memory requirements when moving from inference to training. Inference requires only weights and a single activation map. Training requires weights, *all* activation maps (for backprop), gradients, and optimizer state. This 3-5x increase creates the primary bottleneck for on-device learning.
+:::
+
+**Peak Memory Usage**
+
+Memory consumption during training is not static; it fluctuates dynamically, reaching a maximum during the backward pass when activations, gradients, and optimizer states must coexist. This **peak memory usage** determines whether a model can be trained on a device. A model that averages 50MB usage might spike to 200MB during backpropagation, causing an Out-Of-Memory (OOM) crash on a device with 128MB RAM. Techniques like **gradient checkpointing** mitigate this by discarding intermediate activations during the forward pass and recomputing them on-demand during the backward pass, effectively trading increased computation (20-30%) for a dramatic reduction in peak memory (often 3-4x).
+
 These amplifications explain why simply applying standard optimization techniques to training workloads proves insufficient. Each constraint category shapes on-device learning system design, requiring approaches that build on but extend beyond inference-focused methods.
 
 +--------------------------+------------------------+----------------------------+------------------------------+
@@ -1844,6 +1856,12 @@ $$
 \theta^{t+1} = \sum_{k=1}^{K} \frac{n_k}{n} \theta_k^{t+1}
 $$
 where $n_k = |\mathcal{D}_k|$ is the number of samples on device $k$, $n = \sum_k n_k$ is the total number of samples across participating clients, and $K$ is the number of active devices in the current round.
+
+#### Straggler Mitigation
+
+In a fleet of millions of heterogeneous devices, waiting for every selected client to report its update is impractical. Network latency, battery depletion, or background process contention can cause some devices ("stragglers") to take 10x longer than average.
+
+To prevent the global model update from stalling, production FL systems employ **Over-Selection**. The server selects a candidate pool size $K_{candidates}$ larger than the target number of updates $K_{target}$ (typically $K_{candidates} \approx 1.3 \times K_{target}$). The server aggregates updates from the first $K_{target}$ responders and discards the rest. This approach bounds the round duration by the speed of the $K_{target}$-th fastest device rather than the absolute slowest, dramatically accelerating convergence wall-clock time.
 
 This cyclical coordination protocol forms the foundation of federated learning, as illustrated in @fig-federated-averaging-cycle that clarifies the core FedAvg process:
 

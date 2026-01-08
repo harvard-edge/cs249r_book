@@ -170,6 +170,14 @@ Reasoning about communication performance requires formal models that capture th
 
 The LogP model characterizes a network using four parameters:
 
+::: {.callout-note title="Figure Placeholder: LogP Model" collapse="true"}
+```{.tikz}
+% TODO: Timeline diagram showing Sender (o) -> Network (L) -> Gap (g) -> Receiver (o)
+\node[draw, align=center] {LogP Model\nLatency vs Overhead vs Gap};
+```
+**The LogP Communication Model**. Visual representation of the four parameters governing distributed communication performance: **L**atency (network delay), **o**verhead (CPU processing time), **g**ap (minimum interval between transmissions), and **P** (number of processors). This model reveals why small messages are latency-bound (dominated by L + o) while large messages are bandwidth-bound (dominated by message_size × g).
+:::
+
 - **L (Latency)**: The time for a small message to traverse the network from sender to receiver, including all fixed overheads. Typical values range from 1-10 microseconds for modern InfiniBand networks.
 
 - **o (Overhead)**: The CPU/GPU time required at sender and receiver to inject or receive a message. This includes protocol processing, buffer management, CUDA stream synchronization, and kernel launch overhead. Typical values range from 1-5 microseconds for well-optimized paths, but can spike to 50-100 microseconds when GPU memory pressure triggers allocation or when CUDA streams require synchronization. Production systems must account for this variability when predicting communication time distributions, not just means.
@@ -195,6 +203,25 @@ $$
 where $\alpha = L + 2o$ represents the fixed latency component and $\beta = 1/g$ is the effective bandwidth. This model, sometimes called the $\alpha$-$\beta$ model, provides intuition about when latency versus bandwidth dominates communication cost.
 
 The LogGP model [@alexandrov1995loggp] extends LogP to handle large messages more accurately by adding a parameter $G$ representing the gap per byte for long messages (which may differ from $g$ due to pipelining effects in network hardware). For most practical purposes in ML systems, the simpler $\alpha$-$\beta$ model suffices.
+
+### Communication-Computation Overlap {#sec-communication-overlap}
+
+Raw network speed is necessary but insufficient. The most effective way to reduce communication overhead is to hide it completely behind computation.
+
+In a naive implementation, the training loop is sequential:
+1.  Compute Forward Pass
+2.  Compute Backward Pass (calculate all gradients)
+3.  Synchronize Gradients (AllReduce)
+4.  Update Parameters
+
+This leaves the network idle during computation and the compute units idle during synchronization. **Communication-computation overlap** changes this by pipelining the backward pass.
+
+*   **Layer-wise Triggering**: As the backward pass proceeds from the last layer to the first, gradients for the final layers become available immediately.
+*   **Bucketing**: Frameworks like PyTorch DistributedDataParallel group these gradients into "buckets" (typically 25MB).
+*   **Async AllReduce**: As soon as a bucket is full, an asynchronous AllReduce operation is launched for that bucket.
+*   **Hiding Latency**: While the AllReduce for bucket $N$ travels over the network, the GPU continues computing gradients for bucket $N-1$.
+
+If the computation time for a bucket exceeds its communication time, the network cost is effectively zero (fully hidden). If communication is slower, the training time becomes determined solely by the network speed. Tuning bucket sizes is a key optimization: too small, and latency overhead dominates; too large, and the pipeline stalls waiting for data.
 
 ### Bandwidth-Bound versus Latency-Bound Communication {#sec-bandwidth-latency-regimes}
 
@@ -489,6 +516,14 @@ Ring AllReduce[^fn-ring-history] arranges processes in a logical ring and pipeli
 [^fn-ring-history]: **Ring AllReduce History**: Andrew Gibiansky's 2017 blog post "Bringing HPC Techniques to Deep Learning" at Baidu popularized ring AllReduce for ML, demonstrating near-linear scaling to hundreds of GPUs. The algorithm itself dates to the 1990s HPC community, but its application to gradient synchronization catalyzed modern distributed training. Uber's Horovod (2017) and NVIDIA's NCCL subsequently optimized ring AllReduce for GPU clusters, making it the default algorithm in PyTorch's DistributedDataParallel.
 
 The algorithm divides the message into $N$ chunks and proceeds in two phases, each with $N-1$ steps.
+
+::: {.callout-note title="Figure Placeholder: Ring AllReduce" collapse="true"}
+```{.tikz}
+% TODO: Step-by-step Ring AllReduce showing chunks moving between N nodes
+\node[draw, align=center] {Ring AllReduce\nPhase 1: Reduce-Scatter | Phase 2: AllGather};
+```
+**Ring AllReduce Operation**. Step-by-step visualization of the bandwidth-optimal reduction algorithm. Phase 1 (Reduce-Scatter) circulates partial gradients until every node holds one fully reduced chunk. Phase 2 (AllGather) circulates these reduced chunks until every node holds the complete result. By pipelining chunks, Ring AllReduce achieves 100% bandwidth utilization as cluster size increases.
+:::
 
 **ReduceScatter Phase**: Each process sends one chunk to its right neighbor and receives one chunk from its left neighbor. After receiving, the process combines the received chunk with its local chunk using the reduction operator. After $N-1$ steps, each process holds the complete reduction for one chunk.
 
@@ -993,6 +1028,17 @@ $$
 
 AlltoAll for embeddings takes longer than AllReduce for gradients in this example, demonstrating why embedding communication often dominates DLRM training.
 
+**Hierarchical AlltoAll for Scale**
+
+At cluster scale (thousands of GPUs), a flat AlltoAll creates a packet storm that can overwhelm network switch buffers. Each of $N$ GPUs sends small messages to $N-1$ others, causing "incast" congestion.
+
+**Hierarchical AlltoAll** mitigates this by decomposing the operation:
+1.  **Intra-node Gather**: Each GPU collects data destined for other nodes into a local buffer.
+2.  **Inter-node AlltoAll**: One GPU per node performs a coarse-grained exchange with other nodes.
+3.  **Intra-node Scatter**: Data is distributed to the final destination GPUs within the node.
+
+This approach replaces $N^2$ small global messages with $N_{nodes}^2$ large global messages, leveraging the high bandwidth of NVLink for the local aggregation steps and utilizing InfiniBand more efficiently with larger packet sizes.
+
 ### Mixture-of-Experts Communication Patterns {#sec-moe-communication}
 
 Mixture-of-Experts (MoE) models route each token to a subset of expert networks, creating dynamic communication patterns that depend on input data. This section analyzes MoE communication requirements and their scaling challenges.
@@ -1468,6 +1514,14 @@ Network topology determines how GPUs connect to each other and fundamentally sha
 
 Network topology describes the arrangement of nodes and links in a distributed system. Key metrics characterize topology quality for different workloads:
 
+::: {.callout-note title="Figure Placeholder: Topology Comparison" collapse="true"}
+```{.tikz}
+% TODO: Diagrams of Fat-Tree, Torus (3D Grid), and Rail-Optimized topologies
+\node[draw, align=center] {Network Topologies\nFat-Tree vs Torus vs Rail};
+```
+**Network Topologies for ML**. Comparative visualization of Fat-Tree, Torus, and Rail-Optimized topologies. Fat-Tree provides full bisection bandwidth for any communication pattern (ideal for AlltoAll). Torus optimizes for neighbor-to-neighbor communication with lower cabling cost (ideal for TPUs). Rail-Optimized provides dedicated high-bandwidth rails for tensor parallelism, reducing latency for specific multi-node groups (ideal for GPU supercomputers).
+:::
+
 **Bisection Bandwidth**[^fn-bisection-bandwidth]: The minimum bandwidth across any cut that divides the network into two equal halves. This metric determines maximum achievable throughput for all-to-all communication patterns:
 
 [^fn-bisection-bandwidth]: **Bisection Bandwidth**: A network topology's most important metric for ML training. It answers: "If half the cluster needs to send data to the other half simultaneously, what's the maximum aggregate throughput?" Fat-tree topologies achieve full bisection bandwidth (every node can communicate at line rate simultaneously), while cheaper topologies like torus have reduced bisection bandwidth, limiting AlltoAll performance. A cluster's bisection bandwidth often determines whether AlltoAll-heavy workloads (recommendation, MoE) will perform well.
@@ -1907,6 +1961,14 @@ export NCCL_MIN_NCHANNELS=1
 ```
 
 **Debugging and Profiling**:
+
+::: {.callout-tip title="Pro Tip: The First Step of Debugging"}
+Before suspecting network hardware or code bugs, **always** run with `NCCL_DEBUG=INFO`.
+This environment variable forces NCCL to print its initialization log.
+*   **Check Topology**: Look for "NVLink" connections between GPUs. If you see "PCI" where you expect "NVL", your topology detection failed, and performance will suffer by 10x or more.
+*   **Check Algorithm**: Look for "Ring" vs "Tree". Using "Tree" for large gradients suggests a configuration error.
+*   **Check Transport**: Look for "NET/IB" (InfiniBand). If you see "NET/Socket", RDMA failed, and you are using slow TCP/IP.
+:::
 
 ```bash
 # Enable debug output

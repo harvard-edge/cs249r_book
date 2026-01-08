@@ -914,6 +914,14 @@ This section develops a taxonomy of batching strategies matched to model charact
 
 The core insight is that batching efficiency depends on how computation scales with batch size relative to how memory and communication scale. Different model architectures exhibit different scaling relationships, requiring different batching strategies as summarized in @tbl-batching-by-model.
 
+::: {.callout-note title="Figure Placeholder: Batching Strategies" collapse="true"}
+```{.tikz}
+% TODO: Visual comparison of Static, Continuous, and Feature-Parallel batching
+\node[draw, align=center] {Batching Strategies\nStatic vs Continuous vs Feature-Parallel};
+```
+**Batching Strategies Compared**. Visual comparison of Static Batching (Vision), Continuous Batching (LLM), and Feature-Parallel Batching (RecSys). Static batching waits for a full batch, creating latency bubbles. Continuous batching dynamically inserts requests into running batches, maximizing GPU utilization. Feature-parallel batching shards requests by feature type rather than sample count, optimizing for embedding lookup latency.
+:::
+
 For **vision models** (CNNs, ViTs processing fixed-size images), computation scales linearly with batch size while memory scales sub-linearly due to weight sharing. Larger batches improve GPU utilization with minimal overhead, making static or dynamic batching with large batch sizes optimal.
 
 For **LLMs in the decode phase**, computation per token is small relative to memory bandwidth requirements for loading model weights. The bottleneck is memory bandwidth, not compute. Larger batches amortize weight loading across more tokens, dramatically improving throughput but with diminishing returns as batch size grows.
@@ -1038,6 +1046,12 @@ vLLM implements continuous batching with the following key mechanisms:
 **Memory management**: The KV cache is managed using PagedAttention (see @sec-inference-kv-cache), which enables dynamic allocation without fragmentation. When a sequence completes, its KV cache pages are immediately available for new sequences.
 
 **Batched decode kernel**: Despite dynamic batch composition, the decode kernel processes all active sequences in a single batched operation. Sequences at different generation lengths are padded to a common shape within the kernel.
+
+#### Preemption and Swapping
+
+A critical challenge in continuous batching is memory contention. As sequences grow during generation, they consume more KV cache pages. If the GPU memory fills up, the system cannot simply crash; it must preempt running requests.
+
+vLLM implements a virtual memory mechanism similar to an operating system's swap. When memory is exhausted, the scheduler identifies low-priority requests (e.g., those most recently started) and **swaps** their KV cache blocks from GPU HBM to CPU DRAM. These requests are paused until memory becomes available, at which point they are swapped back in and resumed. This mechanism ensures system stability under heavy load at the cost of increased latency for preempted requests.
 
 **Typical performance (Llama-2 70B on 8xA100)**:
 
@@ -1277,6 +1291,14 @@ The system automatically increases batch size to maintain throughput as traffic 
 ### Quantitative Summary: Batching Strategy Selection {#sec-inference-batching-summary}
 
 The choice of batching strategy depends on model characteristics, traffic patterns, and latency requirements. The following decision framework guides selection:
+
+::: {.callout-note title="Figure Placeholder: Inference Request Lifecycle" collapse="true"}
+```{.tikz}
+% TODO: Flowchart: Request -> LB -> Queue -> Batcher -> GPU -> Response
+\node[draw, align=center] {Inference Pipeline\nRequest Lifecycle};
+```
+**End-to-End Inference Pipeline**. A high-level view of the request lifecycle: Client -> Load Balancer -> Request Queue -> Batch Scheduler -> Model Execution -> Response. This visualization highlights the critical "Serving Tax" components (serialization, routing, coordination) that consume latency budget outside of the actual GPU compute time.
+:::
 
 ```
 Is the model autoregressive (LLM, speech)?

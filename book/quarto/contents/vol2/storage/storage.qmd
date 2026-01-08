@@ -148,6 +148,14 @@ ML systems extend this hierarchy with two critical additions: GPU High Bandwidth
 
 The bandwidth column in @tbl-storage-hierarchy deserves particular attention. GPU HBM delivers 3.35 TB/s, roughly 17x faster than host DRAM and 130x faster than the fastest local NVMe drives. This disparity creates the central challenge of ML storage systems: keeping accelerators fed with data at rates that prevent them from idling.
 
+::: {.callout-note title="Figure Placeholder: Storage Hierarchy" collapse="true"}
+```{.tikz}
+% TODO: Pyramid diagram showing HBM -> DRAM -> NVMe -> DFS -> Object Store
+\node[draw, align=center] {Storage Hierarchy\nBandwidth vs Capacity};
+```
+**ML Storage Hierarchy**. A pyramid visualization extending the classic memory hierarchy. The peak shows GPU HBM (3+ TB/s, small capacity), descending through Host DRAM, Local NVMe, and Distributed File Systems, to the base of Object Storage (100+ GB/s aggregate, unlimited capacity). The bandwidth gap between HBM and storage tiers drives the need for sophisticated caching and prefetching.
+:::
+
 Consider what happens when an H100 GPU processes a training batch. At 1,979 TFLOPS[^fn-tflops] of FP16 compute capability, the GPU can perform approximately 2 quadrillion floating-point operations per second. A typical transformer forward pass requires roughly 6 FLOPs per parameter per token. For a 7 billion parameter model processing 2048-token sequences with a batch size of 32, each forward pass involves:
 
 [^fn-tflops]: **TFLOPS (Tera Floating-Point Operations Per Second)**: A measure of computational throughput representing one trillion ($10^{12}$) floating-point operations per second. The H100's 1,979 TFLOPS uses FP16 (16-bit floating-point) precision with sparsity optimization; dense FP16 achieves 990 TFLOPS, and FP32 (32-bit) achieves 67 TFLOPS. This 15x difference between FP16 and FP32 explains why ML training increasingly uses mixed-precision techniques, performing bulk computation in FP16 while maintaining FP32 precision for numerically sensitive operations like loss accumulation.
@@ -183,6 +191,14 @@ Traditional storage system design optimizes for workloads with specific characte
 ### Access Pattern Analysis {#sec-storage-access-patterns}
 
 Understanding access patterns (@tbl-access-patterns) quantitatively enables storage system selection and capacity planning. ML workloads exhibit distinct patterns across different phases and model types.
+
+::: {.callout-note title="Figure Placeholder: Access Patterns" collapse="true"}
+```{.tikz}
+% TODO: Plots of I/O over time for Training (streaming), Checkpoint (burst), Serving (random)
+\node[draw, align=center] {Access Patterns\nStreaming vs Bursty vs Random};
+```
+**Workload Access Patterns**. Visual comparison of I/O behavior across ML phases. Training data access appears as massive sequential streams with global shuffling. Checkpoint access shows infrequent, intense write bursts. Feature store access demonstrates continuous, high-frequency random reads. Understanding these distinct signatures is essential for selecting appropriate storage backends.
+:::
 
 **Training data access** follows a streaming sequential pattern with random shuffling. Each epoch reads the entire dataset once, but the order is randomized to prevent the model from learning ordering artifacts. This creates a pattern that is globally sequential (every sample accessed once) but locally random (no predictable next sample). Storage systems must support high sequential bandwidth while handling the pseudo-random access order that shuffling creates.
 
@@ -485,6 +501,16 @@ HDFS optimizes for the same access patterns as GFS: large sequential reads and w
 2. **JVM overhead**: Java implementation adds latency and memory overhead compared to native implementations
 3. **Small file problem**: Each file consumes NameNode memory regardless of size; millions of small files exhaust metadata capacity
 
+#### The Small File Problem: IOPS vs Bandwidth
+
+A critical limitation of HDFS (and similar distributed file systems) is the separation of metadata and data. While aggregate **bandwidth** scales linearly with the number of DataNodes, metadata throughput (**IOPS**) is often bottlenecked by the single NameNode.
+
+Consider a 1 TB dataset:
+*   **Scenario A**: Stored as 1,000 files of 1 GB each. Reading the dataset requires 1,000 metadata RPCs to the NameNode.
+*   **Scenario B**: Stored as 100 million files of 10 KB each (e.g., individual small images). Reading the dataset requires 100 million metadata RPCs.
+
+In Scenario B, the NameNode will be overwhelmed by metadata requests long before the DataNodes saturate their network links. The training job will spend most of its time waiting for `open()` calls to complete rather than reading data. This structural bottleneck drives the necessity for aggregation formats like **TFRecord** or **Parquet**, which bundle thousands of small samples into a single large file, amortizing one metadata operation over many data reads.
+
 These limitations become acute for ML workloads with many small files (e.g., individual images) or high-frequency metadata operations (e.g., checkpoint writes). HDFS works well for datasets stored as large sequential files (TFRecord, Parquet) but struggles with directory structures containing millions of individual samples.
 
 #### Lustre and Parallel File Systems {#sec-lustre}
@@ -598,6 +624,16 @@ Using object storage for training data requires adapting to its characteristics:
 **Prefetching and buffering.** Object storage latency (50-100 ms) would be catastrophic if each batch waited for storage. Data pipelines must prefetch many batches ahead, overlapping storage access with GPU computation.
 
 **Local caching.** For datasets accessed repeatedly across training runs, caching on local NVMe reduces object storage costs and improves performance. The first training run populates the cache; subsequent runs read locally.
+
+#### Data Egress and Cost
+
+In cloud environments, physical distance equals money. Cloud providers typically charge for data crossing availability zone (AZ) or regional boundaries.
+
+*   **Intra-Zone**: Free and high bandwidth.
+*   **Inter-Zone**: Charged (e.g., $0.01/GB) and higher latency.
+*   **Inter-Region**: Expensive (e.g., $0.02-$0.05/GB) and high latency.
+
+A common anti-pattern is storing a petabyte dataset in a regional bucket and training on a cluster pinned to a specific zone. Every training epoch reads the full petabyte across the zonal boundary, incurring massive "cross-zone networking" fees that can exceed the cost of the GPUs themselves. **Strict data locality**—ensuring the training bucket and compute cluster reside in the exact same zone—is an essential cost control mechanism.
 
 ### Data Format Selection {#sec-data-formats}
 
@@ -1024,6 +1060,16 @@ $$\text{Wasted compute} = 1000 \text{ steps} \times 1.5 \text{ s/step} \times 10
 
 This quantifies why checkpoint reliability matters: a $1,536 loss from one failed checkpoint motivates engineering investment in checkpoint robustness.
 
+**Mitigating Checkpoint Storms**
+
+When 4,000 GPUs attempt to write checkpoint data simultaneously at the end of an epoch, the aggregate instantaneous bandwidth demand can exceed the storage system's ingress capacity by orders of magnitude. This phenomenon, known as a **checkpoint storm**, creates a "thundering herd" effect that can trigger timeout errors or packet drops in the storage network.
+
+The solution is **staggered checkpointing**. Rather than having all ranks write at $T=0$, the system introduces a deterministic delay based on rank:
+$$
+T_{write}(rank) = T_{start} + (rank \times \delta)
+$$
+where $\delta$ is a small delay (e.g., 10-100ms). This smoothes the write burst from a sharp spike into a plateau that matches the storage system's sustained throughput capability. While this slightly extends the total checkpoint time, it drastically reduces failure rates and tail latency.
+
 **Straggler Mitigation:**
 
 With 1000+ workers, one slow worker can delay checkpoint completion by minutes, blocking all training.
@@ -1193,6 +1239,14 @@ Feature stores solve these problems by providing:
 ### Feature Store Architecture {#sec-feature-store-architecture}
 
 A feature store has two primary components: the offline store for training and the online store for serving.
+
+::: {.callout-note title="Figure Placeholder: Feature Store Architecture" collapse="true"}
+```{.tikz}
+% TODO: Diagram showing Offline Store (Training) and Online Store (Serving) paths
+\node[draw, align=center] {Feature Store\nOffline vs Online Paths};
+```
+**Feature Store System Design**. The dual-path architecture solving the training-serving skew problem. The offline path (top) processes batch data into a data warehouse for training. The online path (bottom) ingests streaming events into a low-latency key-value store for serving. A unified API ensures that features retrieved for training (historical) match those retrieved for inference (current), guaranteeing point-in-time correctness.
+:::
 
 #### Offline Store {#sec-offline-store}
 

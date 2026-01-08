@@ -433,6 +433,14 @@ Checkpointing involves a fundamental trade-off. Frequent checkpoints minimize lo
 
 The Young-Daly formula [@young1974first; @daly2006higher] provides the optimal checkpoint interval that minimizes expected total time including both checkpointing overhead and failure recovery:
 
+::: {.callout-note title="Figure Placeholder: Checkpoint Timeline" collapse="true"}
+```{.tikz}
+% TODO: Timeline showing Compute | Checkpoint | Compute | Failure | Recovery
+\node[draw, align=center] {Checkpoint Trade-off\nOverhead vs Recovery Cost};
+```
+**Optimal Checkpoint Interval**. Visualizing the trade-off between checkpoint overhead and recovery cost. Too frequent checkpoints (left) waste time on I/O. Too infrequent checkpoints (right) waste time recomputing lost work after failures. The Young-Daly optimal point (center) minimizes total wasted time, providing a quantitative basis for configuration.
+:::
+
 $$
 T_{opt} = \sqrt{2 \times T_{save} \times MTBF}
 $$ {#eq-young-daly}
@@ -504,6 +512,16 @@ O_{ckpt} = \frac{T_{save}}{T_{interval}} + \frac{T_{pause}}{T_{interval}}
 $$ {#eq-checkpoint-overhead}
 
 where $T_{pause}$ represents any training pause beyond the checkpoint write time (memory allocation, coordination, serialization).
+
+**The "Stop-the-World" Cost**
+
+The financial impact of synchronous checkpointing at scale is severe. Consider a 10,000 GPU cluster training a frontier model.
+*   **Idle Resource**: 10,000 H100 GPUs.
+*   **Pause Duration**: 2 minutes (typical for multi-TB checkpoints on shared storage).
+*   **Wasted Compute**: $10,000 \times \frac{2}{60} \approx 333$ GPU-hours.
+*   **Financial Loss**: At ~$3/GPU-hour, a single checkpoint costs **$1,000** in wasted idle time.
+
+If checkpoints occur hourly, the system wastes **$24,000 per day** simply waiting for storage I/O. This economic reality drives the aggressive adoption of asynchronous checkpointing strategies that move data movement off the critical path.
 
 @tbl-checkpoint-overhead-by-model shows checkpoint characteristics for different model types, illustrating how checkpoint overhead varies with model architecture.
 
@@ -646,6 +664,13 @@ where:
 
 **Health check probes**: Container orchestration systems (Kubernetes) and cluster managers (SLURM) provide health check mechanisms that detect unresponsive workers. Liveness probes verify that processes are running; readiness probes verify that processes are ready to handle requests.
 
+**Loss Spike Detection**
+
+Silent hardware errors (e.g., bit flips in ALU logic) often fail to crash the process but corrupt the mathematical result. In training, this manifests as a sudden, catastrophic spike in the loss function.
+*   **Symptom**: Loss jumps 10x-100x or becomes NaN/Inf instantly.
+*   **Diagnosis**: This is rarely an algorithmic issue if hyperparameters were stable. It is a signature of hardware failure.
+*   **Response**: Systems should automatically pause training, identify which rank contributed the corrupted gradient (using checksums or replay), and drain that node before restarting from the last good checkpoint.
+
 **Training dynamics monitoring**: Monitoring loss values, gradient norms, and other training statistics can detect Byzantine failures that do not cause explicit errors. Sudden loss spikes or gradient explosions may indicate silent corruption.
 
 ::: {.callout-warning title="Realistic Failure Detection Latencies"}
@@ -728,6 +753,17 @@ where $N$ represents the number of workers (and thus the global batch size). The
 **Data loader redistribution**: When workers change, the data loader must redistribute data assignments. This requires coordination to ensure all data is processed and no data is duplicated or dropped.
 
 **State resharding**: If using sharded model parallelism (ZeRO/FSDP), changing worker count requires redistributing model shards. This can be done online (migrating shards between workers) or through checkpoint reload (resharding during recovery).
+
+#### Spot Instance Arbitrage
+
+Elastic training is not just a reliability mechanism; it is a powerful economic lever. Cloud providers offer preemptible ("spot") instances at 60-90% discounts compared to on-demand pricing, with the caveat that they can be reclaimed with little warning.
+
+Traditional static jobs cannot use spot instances effectively because a single preemption kills the entire run. Elastic training transforms preemption from a fatal error into a recoverable resizing event. When a spot node is reclaimed:
+1.  The job detects the node loss.
+2.  It pauses briefly to redistribute the workload among surviving nodes (or waits for a replacement).
+3.  Training resumes.
+
+This capability allows organizations to train on massive clusters of cheap, unreliable hardware. The cost savings (e.g., $0.60/hour vs $3.00/hour) far outweigh the efficiency loss from occasional resizing pauses, often reducing total training bills by >50%.
 
 #### Framework Support for Elastic Training {#sec-elastic-framework-support}
 
@@ -876,6 +912,14 @@ Fault tolerance for stateful serving requires:
 ### Redundancy and Replication {#sec-redundancy-replication}
 
 Redundancy is the foundation of serving fault tolerance. By maintaining multiple copies of serving capability, the system can continue operating when individual copies fail.
+
+::: {.callout-note title="Figure Placeholder: Serving Redundancy" collapse="true"}
+```{.tikz}
+% TODO: Diagram comparing Active-Active vs Active-Passive replication
+\node[draw, align=center] {Serving Redundancy\nActive-Active vs Active-Passive};
+```
+**Serving Redundancy Strategies**. Comparison of Active-Active vs. Active-Passive replication. Active-Active (left) distributes load across all replicas, maximizing utilization but requiring capacity headroom. Active-Passive (right) keeps a standby replica idle, simplifying failover logic but wasting resources. Geographic replication (bottom) extends redundancy across regions to survive datacenter-level outages.
+:::
 
 #### Availability Calculations {#sec-availability-calculations}
 

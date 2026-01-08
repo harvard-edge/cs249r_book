@@ -283,6 +283,14 @@ To understand these failure patterns systematically, we must bridge the gap betw
 
 Consider how hardware reliability directly impacts ML performance: a single bit flip in a critical neural network weight can degrade ResNet-50 classification accuracy from 76.0% (top-1) to 11% on ImageNet, while memory subsystem failures during training corrupt gradient updates and prevent model convergence. Modern transformer models (such as GPT-3 with 175&nbsp;B parameters) execute 10^15 floating-point operations per inference, creating over one million opportunities for hardware faults during a single forward pass. GPU memory systems operating at up to 900 GB/s bandwidth (e.g., V100 HBM2) process 10^11 bits per second, where base error rates of 10^-17 errors per bit translate to multiple potential faults per hour of operation.
 
+::: {.callout-note title="Figure Placeholder: Bit Flip Impact" collapse="true"}
+```{.tikz}
+% TODO: Diagram showing IEEE 754 bit-flip in exponent leading to value explosion
+\node[draw, align=center] {Bit Flip Impact\nValue Explosion in Exponent};
+```
+**Weight Corruption via Bit Flip**. Visualization of a floating-point numbers bit representation (sign, exponent, mantissa). A single bit flip in the exponent can change a weight from 0.001 to 10^38, causing a neurons activation to saturate and propagate massive errors through the network, leading to catastrophic misclassification.
+:::
+
 This connection between hardware reliability and ML performance requires us to adopt concepts from reliability engineering[^fn-reliability-engineering], including fault models that describe how failures occur, error detection mechanisms that identify problems before they impact results, and recovery strategies that restore system operation. These reliability concepts complement performance optimization techniques including quantization, pruning, and knowledge distillation by ensuring that optimized systems continue to operate correctly under real-world conditions.
 
 [^fn-reliability-engineering]: **Reliability Engineering**: Discipline ensuring systems perform intended functions without failure over specified periods. Originated in 1950s aerospace (MTBF analysis, failure mode analysis). Quantifies reliability as R(t)=e^(-λt) for exponential failure distributions. AI systems inherit these methods while adding ML-specific concerns: model drift, adversarial robustness, and uncertainty quantification.
@@ -1561,6 +1569,12 @@ Input sanitization applies preprocessing techniques to remove or reduce adversar
 
 Adversarial training [@madry2017towards] incorporates adversarial examples into the training process, teaching models to maintain correct predictions in the presence of adversarial perturbations. PGD adversarial training on CIFAR-10 achieves 87% robust accuracy against ε = 8/255 attacks compared to 0% for undefended models, though clean accuracy drops from 95% to 84%. Training time increases 6-10$\times$ due to adversarial example generation during each epoch, requiring specialized hardware acceleration for practical implementation.
 
+**The Robustness-Accuracy Tradeoff**
+
+Robustness is not free. A fundamental trade-off exists between accuracy on clean data and robustness to adversarial attacks. Empirically, training a ResNet-50 to be robust against $\ell_\infty$ perturbations ($\epsilon=8/255$) typically degrades clean ImageNet accuracy by 10-15%.
+
+This occurs because standard training exploits high-frequency features (e.g., texture patterns invisible to humans) that are predictive but brittle. Adversarial training forces the model to ignore these features and rely only on robust, semantic features (e.g., shape), which are harder to learn and less discriminative. Engineers must explicitly decide how much clean accuracy they are willing to sacrifice for security.
+
 Certified defenses provide mathematical guarantees about model robustness within specified perturbation bounds [@cohen2019certified]. Randomized smoothing achieves 67% certified accuracy on ImageNet for ℓ2 perturbations with σ = 0.5, compared to 76% clean accuracy. The certification radius increases to ε = 1.0 for 54% of test inputs, providing provable robustness guarantees. However, inference time increases 100-1000$\times$ due to Monte Carlo sampling requirements (typically 1,000 samples per prediction).
 
 Ensemble methods leverage multiple models or detection mechanisms to identify and filter adversarial inputs [@tramèr2017ensemble]. Ensembles of 5 independently trained models achieve 94% detection rates for adversarial examples using prediction entropy thresholds (τ = 1.5), with false positive rates below 2% on clean data. Computational overhead scales linearly with ensemble size, requiring $5\times$ inference time and memory for the 5-model ensemble, making real-time deployment challenging.
@@ -1577,15 +1591,37 @@ The third pillar of robust AI addresses the natural evolution of real-world cond
 
 Consider a medical diagnosis model trained on X-ray images from a modern hospital. When deployed in a rural clinic with older equipment, the model's accuracy plummets not because the underlying medical conditions have changed, but because the image characteristics differ. This exemplifies distribution shift: the world the model encounters differs from the world it learned from.
 
+::: {.callout-note title="Figure Placeholder: Distribution Shift Types" collapse="true"}
+```{.tikz}
+% TODO: 3-panel diagram: Covariate Shift, Label Shift, Concept Drift
+\node[draw, align=center] {Distribution Shift\nCovariate vs Label vs Concept};
+```
+**Types of Distribution Shift**. Comparison of Covariate Shift, Label Shift, and Concept Drift. Covariate shift (left) shows input features P(x) changing while P(y|x) remains constant. Label shift (center) shows target prevalence P(y) changing. Concept drift (right) shows the underlying decision boundary P(y|x) itself shifting over time, rendering the original model obsolete.
+:::
+
 Distribution shifts occur naturally as environments evolve. User preferences change seasonally, language evolves with new slang, and economic patterns shift with market conditions. Unlike adversarial attacks that require malicious intent, these shifts emerge organically from the dynamic nature of real-world systems.
 
 #### Technical Categories {#sec-robust-ai-technical-categories-cc06}
 
 Covariate shift occurs when the input distribution changes while the relationship between inputs and outputs remains constant [@quinonero2009dataset]. Autonomous vehicle perception models trained on daytime images (luminance 1,000-100,000 lux) experience 15-30% accuracy degradation when deployed in nighttime conditions (0.1-10 lux), despite unchanged object recognition tasks. Weather conditions introduce additional covariate shift: rain reduces object detection mAP by 12%, snow by 18%, and fog by 25% compared to clear conditions.
 
+::: {.callout-note title="Figure Placeholder: Distribution Shift Math" collapse="true"}
+```{.tikz}
+% TODO: 3-panel diagram showing P(x) change, P(y) change, and P(y|x) change
+\node[draw, align=center] {Distribution Shift Types\nCovariate vs Label vs Concept};
+```
+**Types of Distribution Shift**. Visual comparison of Covariate Shift ($P(x)$ changes), Label Shift ($P(y)$ changes), and Concept Drift ($P(y|x)$ changes). Understanding the specific type of shift is crucial for selecting the correct adaptation strategy (e.g., re-weighting vs re-training).
+:::
+
 Concept drift represents changes in the underlying relationship between inputs and outputs over time [@widmer1996learning]. Credit card fraud detection systems experience concept drift with 6-month correlation decay rates of 0.2-0.4, requiring model retraining every 90-120 days to maintain performance above 85% precision. E-commerce recommendation systems show 15-20% accuracy degradation over 3-6 months due to seasonal preference changes and evolving user behavior patterns.
 
 Label shift affects the distribution of output classes without changing the input-output relationship [@lipton2018detecting]. COVID-19 caused dramatic label shift in medical imaging: pneumonia prevalence increased from 12% to 35% in some hospital systems, requiring recalibration of diagnostic thresholds. Seasonal label shift in agriculture monitoring shows crop disease prevalence varying by 40-60% between growing seasons, necessitating adaptive decision boundaries for accurate yield prediction.
+
+#### Spurious Correlations
+
+Models often fail not because the world changes, but because they learned the wrong lessons from the training data. A classic example is a model that learns to identify "cow" by detecting "grass" background. When presented with a cow on a sandy beach, the model fails. This is a **spurious correlation**: a feature that is predictive in the training set but not causally related to the label.
+
+Standard training (ERM) encourages these shortcuts because they are often statistically easier to learn than the robust features (shape, texture). Techniques like **Group Distributionally Robust Optimization (Group DRO)** explicitly mitigate this by minimizing the loss of the *worst-case* group (e.g., cows on sand) rather than the average, forcing the model to learn features that work across all contexts.
 
 ### Monitoring and Adaptation Strategies {#sec-robust-ai-monitoring-adaptation-strategies-f305}
 

@@ -157,6 +157,14 @@ Heat dissipation represents the primary constraint on ML cluster density. An H10
 
 **Hot Aisle/Cold Aisle Containment.** This architectural pattern separates cold supply air from hot exhaust air using physical barriers. Cold air enters through raised floor vents or overhead ducts, passes through servers front-to-back, and exhausts into a contained hot aisle. Containment improves cooling efficiency by preventing mixing, but cannot solve the fundamental heat density challenge of modern GPU clusters.
 
+::: {.callout-note title="Figure Placeholder: Cooling Topology" collapse="true"}
+```{.tikz}
+% TODO: Diagram showing hot/cold aisle airflow vs liquid cooling loops
+\node[draw, align=center] {Datacenter Cooling\nAir vs Liquid};
+```
+**Datacenter Cooling Architectures**: Comparison of traditional hot-aisle/cold-aisle air cooling versus modern direct-to-chip liquid cooling. The air cooling diagram shows airflow management separating intake and exhaust streams, while the liquid cooling diagram illustrates coolant loops directly contacting high-power components to manage extreme heat density.
+:::
+
 **Direct-to-Chip Liquid Cooling.** Liquid cooling addresses heat density through water's superior heat capacity (4.2 kJ/kg-K, roughly four times air). Cold plates mounted directly on GPUs and CPUs transfer heat to circulating coolant, which flows to facility-level heat exchangers. This approach enables rack densities of 100+ kW while reducing cooling power consumption by 30-40% compared to air cooling.
 
 ::: {.callout-note}
@@ -212,6 +220,14 @@ This integrated design simplifies deployment but limits flexibility. Each DGX H1
 
 **PCIe vs. NVLink Configurations.** The choice between PCIe and NVLink connectivity involves fundamental trade-offs:
 
+::: {.callout-note title="Figure Placeholder: Interconnect Topology" collapse="true"}
+```{.tikz}
+% TODO: Diagram contrasting PCIe tree vs NVLink mesh topology
+\node[draw, align=center] {Interconnect Topology\nPCIe Tree vs NVLink Mesh};
+```
+**Node Interconnect Topologies**: Contrast between PCIe-based commodity servers and NVLink-based dense nodes. The PCIe topology shows CPU-centric communication with higher latency and shared bandwidth bottlenecks, while the NVLink topology demonstrates a high-bandwidth mesh allowing direct peer-to-peer GPU communication essential for tensor parallelism.
+:::
+
 +---------------------+---------------+------------------+----------------------+
 | **Interconnect**    | **Bandwidth** | **Latency**      | **Use Case**         |
 +:====================+==============:+=================:+:=====================+
@@ -266,6 +282,16 @@ NVIDIA maintains market dominance through integrated hardware-software offerings
 
 *B100 specifications are preliminary estimates based on NVIDIA announcements. Verify against official specifications for production planning.
 
+::: {.callout-note title="Numerics: The Case for Bfloat16"}
+Deep learning training is resilient to low precision but sensitive to dynamic range.
+Standard FP16 (IEEE 754) uses 5 bits for the exponent and 10 bits for the mantissa. This limited exponent range often causes gradients to underflow to zero or overflow to infinity during training, requiring complex loss scaling techniques to maintain stability.
+
+**Bfloat16 (Brain Floating Point)**, developed by Google, reallocates bits: 8 bits for the exponent (matching FP32) and 7 bits for the mantissa.
+- **Advantage**: Matches the dynamic range of FP32, meaning numbers that fit in FP32 also fit in BF16. This eliminates the need for loss scaling and stabilizes training for large transformers.
+- **Trade-off**: Lower precision (fewer mantissa bits), but neural networks typically don't need high precision for individual weights, only for the aggregate accumulation (which is usually done in FP32).
+Virtually all modern large language models (GPT-4, PaLM, Llama) are trained using BF16.
+:::
+
 The H100 delivers approximately 3x the tensor TFLOPS of A100 at 1.75x the power. To derive the efficiency improvement: A100 achieves 312 TF / 400W = 0.78 TF/W, while H100 achieves 990 TF / 700W = 1.41 TF/W, yielding approximately 80% improvement in FLOPS/watt. Memory bandwidth increases proportionally, maintaining the compute-to-memory ratio critical for transformer models.
 
 **Tensor Core Utilization.** Tensor Cores[^fn-tensor-cores] accelerate matrix operations but require specific data layouts and sizes for full utilization. Dimensions should be multiples of 8 (FP16) or 16 (INT8) for optimal performance. Underutilized Tensor Cores represent the most common source of poor GPU efficiency in production, with many workloads achieving only 30-50% of theoretical peak FLOPS.
@@ -279,6 +305,16 @@ The H100 delivers approximately 3x the tensor TFLOPS of A100 at 1.75x the power.
 Google's Tensor Processing Units offer an alternative architecture optimized for matrix operations with a distinct programming model.
 
 **TPU Pod Architecture.** TPUs connect via proprietary Inter-Chip Interconnect (ICI)[^fn-ici] forming 2D or 3D torus[^fn-torus] topologies. A TPU v4 pod contains 4,096 chips with 1.1 exaFLOPS of aggregate compute. Unlike GPU clusters where networking is separate from compute nodes, TPU pods integrate interconnect into the chip design.
+
+#### The Systolic Array Advantage
+
+The defining feature of the TPU architecture is the **systolic array**. Unlike CPUs or GPUs that function as general-purpose instruction processors, a systolic array is a specialized grid of arithmetic units designed for massive matrix multiplication.
+
+*   **Data Flow**: The name "systolic" refers to the way data flows through the chip in rhythmic waves, analogous to blood pumped by a heart.
+*   **Weight Stationary**: In a matrix multiply $C = A \times B$, weights from matrix $B$ are loaded into the array and held stationary in local registers. Data from matrix $A$ flows in from the left, and partial sums flow down.
+*   **Energy Efficiency**: This design drastically reduces energy consumption. In a standard architecture, every operation requires reading operands from registers or memory (high energy cost). In a systolic array, operands are passed directly to the next neighbor unit (very low energy cost). A single memory access effectively amortizes over hundreds of operations.
+
+This architecture explains why TPUs achieve extremely high FLOPS/watt for dense matrix operations but struggle with sparse or irregular computations that break the rhythmic data flow.
 
 [^fn-ici]: **Inter-Chip Interconnect (ICI)**: Google's proprietary chip-to-chip communication fabric integrated directly into TPU silicon. ICI provides 6 links per chip at 100 GB/s each, enabling the torus topology without external switches. This integration reduces latency and power compared to discrete networking but limits flexibility in topology configuration.
 
@@ -352,6 +388,14 @@ The PCIe variant's higher efficiency reflects reduced interconnect power, accept
 Understanding these patterns guides accelerator selection: memory-bound workloads benefit from HBM3's bandwidth improvements, while compute-bound workloads prioritize FLOPS per dollar.
 
 **The Roofline Model.** The roofline model[^fn-roofline] [@williams2009roofline] provides a systematic framework for understanding whether workloads are compute-bound or memory-bound. Achievable performance is limited by the minimum of peak compute and memory bandwidth:
+
+::: {.callout-note title="Figure Placeholder: Roofline Model" collapse="true"}
+```{.tikz}
+% TODO: Log-log plot of FLOPS vs Arithmetic Intensity
+\node[draw, align=center] {Roofline Model\nMemory vs Compute Bound};
+```
+**Roofline Performance Model**: A visual representation of performance limits plotting achievable FLOPS against arithmetic intensity (FLOPS/Byte). The slanted "roof" represents the memory-bound region where bandwidth constrains performance, while the flat "roof" represents the compute-bound region limited by peak processor throughput. Operational points for LLMs typically fall under the slanted roof, indicating memory bandwidth dependence.
+:::
 
 [^fn-roofline]: **Roofline model**: A visual performance model developed at Berkeley that plots achievable FLOPS against arithmetic intensity (FLOPS per byte of memory traffic). The "roofline" consists of a sloped region (memory-bound, limited by bandwidth) and a flat region (compute-bound, limited by peak FLOPS). The intersection point, called the ridge point, indicates where workloads transition between these regimes. This model helps identify whether to optimize for compute or memory access.
 

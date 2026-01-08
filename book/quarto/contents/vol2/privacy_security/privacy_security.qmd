@@ -50,6 +50,14 @@ Machine learning systems exhibit different security characteristics compared to 
 
 The architectural complexity of machine learning systems compounds these security challenges through multi-layered attack surfaces. Contemporary ML deployments include data ingestion pipelines, distributed training infrastructure, model serving systems, and continuous monitoring frameworks. Each architectural component introduces distinct vulnerabilities while privacy concerns affect the entire computational stack. The distributed nature of modern deployments, with continuous adaptation at edge nodes and federated coordination protocols, expands the attack surface while complicating comprehensive security implementation.
 
+::: {.callout-note title="Figure Placeholder: Attack Surface" collapse="true"}
+```{.tikz}
+% TODO: Diagram showing Attack Vectors: Data (Poisoning) -> Model (Backdoor/Theft) -> API (Adversarial/Inversion) -> Hardware (Side-channel)
+\node[draw, align=center] {ML Attack Surface\nData | Model | API | Hardware};
+```
+**ML System Attack Surface**. Visualizing entry points for adversarial actions across the ML lifecycle. Training data can be poisoned (input layer); model parameters can be extracted or backdoored (model layer); inference APIs can be exploited with adversarial examples or evasion attacks (interface layer); and physical hardware can be targeted via side-channels (infrastructure layer).
+:::
+
 Addressing these challenges requires systematic approaches that integrate security and privacy considerations throughout the machine learning system lifecycle. This chapter establishes the foundations and methodologies necessary for engineering ML systems that achieve both computational effectiveness and trustworthy operation. We examine the application of established security principles to machine learning contexts, identify threat models specific to learning systems, and present comprehensive defense strategies that include data protection mechanisms, secure model architectures, and hardware-based security implementations.
 
 Our investigation proceeds through four interconnected frameworks. We begin by establishing distinctions between security and privacy within machine learning contexts, then examine evidence from historical security incidents to inform contemporary threat assessment. We analyze vulnerabilities that emerge from the learning process itself, before presenting layered defense architectures that span cryptographic data protection, adversarial-robust model design, and hardware security mechanisms. Throughout this analysis, we emphasize implementation guidance that enables practitioners to develop systems meeting both technical performance requirements and the trust standards necessary for societal deployment.
@@ -1585,6 +1593,14 @@ To build intuition for this concept, imagine you want to find the average salary
 
 Differential privacy formalizes this intuition through a comparison of algorithm behavior on similar datasets. Consider two adjacent datasets that differ only in the presence or absence of a single individual's record. Differential privacy ensures that the probability distributions of algorithm outputs remain statistically similar regardless of whether that individual's data is included. This protection is achieved through carefully calibrated noise that masks individual contributions while preserving the aggregate statistical patterns necessary for machine learning.
 
+::: {.callout-note title="Figure Placeholder: Differential Privacy" collapse="true"}
+```{.tikz}
+% TODO: Visualization of D and D-prime distributions overlapping with epsilon bound
+\node[draw, align=center] {Differential Privacy\nIndistinguishability};
+```
+**Differential Privacy Mechanism**. Conceptual diagram of the randomized response mechanism. An individuals true data point (x) is perturbed by noise (Laplace or Gaussian) before aggregation. The output distribution for dataset D is indistinguishable from dataset D (without x), preventing inference of x while preserving the aggregate statistical signal.
+:::
+
 To make this intuition mathematically precise, differential privacy introduces a quantitative measure of privacy loss. The mathematical framework uses probability ratios to bound how much an algorithm's behavior can change when a single individual's data is added or removed. This approach allows us to prove privacy guarantees rather than simply assume them.
 
 A randomized algorithm $\mathcal{A}$ is said to be $\epsilon$-differentially private if, for all adjacent datasets $D$ and $D'$ differing in one record, and for all outputs $S \subseteq \text{Range}(\mathcal{A})$, the following holds:
@@ -1606,14 +1622,41 @@ Practical DP deployment requires careful consideration of computational trade-of
 
 Increasing the noise to reduce $\epsilon$ may degrade model accuracy, especially in low-data regimes or fine-grained classification tasks. Consequently, DP is often applied selectively—either during training on sensitive datasets or at inference when returning aggregate statistics—to balance privacy with performance goals [@dwork2014algorithmic].
 
+#### Privacy Budget Composition
+
+A critical aspect of differential privacy is that privacy loss accumulates. Every time a mechanism accesses the sensitive data, it consumes a portion of the privacy budget $\epsilon$. If an organization trains 10 models on the same dataset, each with $\epsilon=1$, the total privacy loss is not $\epsilon=1$ but closer to $\epsilon=10$ (under simple composition).
+
+**Composition Theorems** quantify this accumulation:
+*   **Simple Composition**: Running $k$ mechanisms with $\epsilon_i$ guarantees $\sum \epsilon_i$ privacy. This is a loose bound.
+*   **Advanced Composition**: Provides tighter bounds, showing that privacy loss grows roughly with $\sqrt{k}$.
+*   **Rényi Differential Privacy (RDP)**: A modern framework used in deep learning (e.g., DP-SGD) that offers even tighter composition tracking, essential for training neural networks over thousands of iterations.
+
+The practical implication is that organizations must manage a **global privacy budget** for each dataset, halting access once the budget is exhausted.
+
 #### Federated Learning {#sec-security-privacy-federated-learning-3834}
 
 While differential privacy adds mathematical guarantees to data processing, federated learning (FL) offers a complementary approach that reduces privacy risks by restructuring the learning process itself. This technique directly addresses the privacy challenges of on-device learning explored in @sec-edge-intelligence, where models must adapt to local data patterns without exposing sensitive user information. Rather than aggregating raw data at a central location, FL distributes the training across a set of client devices, each holding local data [@mcmahan2017communicationefficient]. This distributed training paradigm, which builds on the adaptive deployment concepts from on-device learning, requires careful coordination of security measures across multiple participants and infrastructure providers. Clients compute model updates locally and share only parameter deltas with a central server for aggregation:
+
+::: {.callout-note title="Figure Placeholder: Federated Privacy" collapse="true"}
+```{.tikz}
+% TODO: Diagram of Secure Aggregation (Masking + Summation)
+\node[draw, align=center] {Secure Aggregation\nMasked Updates -> Zero-Sum Noise};
+```
+**Secure Aggregation in Federated Learning**. Visualization of the secure update protocol. Devices compute local updates $\Delta\theta$. Before uploading, devices add pairwise masking noise such that the sum of noise across all devices is zero. The server receives only the masked updates, aggregates them (canceling the noise), and recovers the true global update without ever seeing an individual devices raw contribution.
+:::
 $$
 \theta_{t+1} \leftarrow \sum_{k=1}^{K} \frac{n_k}{n} \cdot \theta_{t}^{(k)}
 $$
 
-Here, $\theta_{t}^{(k)}$ represents the model update from client $k$, $n_k$ the number of samples held by that client, and $n$ the total number of samples across all clients. This weighted aggregation allows the global model to learn from distributed data without direct access to it. FL reduces the exposure of raw data, but still leaks information through gradients [@zhu2019deep; @nasr2019comprehensive], motivating the use of DP, secure aggregation [@bonawitz2017practical], and hardware-based protections in federated settings.
+Here, $\theta_{t}^{(k)}$ represents the model update from client $k$, $n_k$ the number of samples held by that client, and $n$ the total number of samples across all clients. This weighted aggregation allows the global model to learn from distributed data without direct access to it.
+
+**Gradient Inversion Risks**
+
+However, federated learning does not guarantee privacy by default. **Gradient inversion attacks** (such as Deep Leakage from Gradients) demonstrate that an adversary with access to a client's raw update can reconstruct the original training data (e.g., images or text) with high fidelity. The gradient vector contains information about the data that produced it.
+
+This vulnerability drives the need for **Secure Aggregation** protocols [@bonawitz2017practical] and local differential privacy. Secure aggregation ensures the server only sees the *sum* of updates, never an individual update, mathematically preventing inversion of any single user's data.
+
+FL reduces the exposure of raw data, but still leaks information through gradients [@zhu2019deep; @nasr2019comprehensive], motivating the use of DP, secure aggregation [@bonawitz2017practical], and hardware-based protections in federated settings.
 
 ::: {.callout-note title="Real-World Example: Google Gboard Federated Learning" icon=false}
 Google's Gboard keyboard uses federated learning to improve next-word prediction across 1+ billion Android devices without collecting typing data. The system works as follows:
