@@ -2624,80 +2624,6 @@ Communication-computation overlap enables high efficiency:
 - Medium scale: Bandwidth-bound (addressed by compression)
 - Large scale: Latency-bound (AlltoAll O(N) becomes problematic)
 
-## Summary {#sec-communication-summary}
-
-Communication is the binding constraint that determines whether distributed training achieves meaningful speedup or degrades into expensive inefficiency. This chapter developed the theoretical foundations, algorithmic techniques, and practical knowledge needed to design and optimize communication systems for production ML training.
-
-### Core Concepts
-
-**The Communication Bottleneck**: At scale, network communication dominates training time. For a 175B parameter model on 1024 GPUs, communication can take 14+ seconds per step while computation takes under 1 second. This fundamental asymmetry between computation and communication scaling shapes every design decision in distributed ML systems.
-
-**The LogP Model**: Communication time follows $T = \alpha + M/\beta$, where $\alpha$ represents fixed latency and $M/\beta$ represents bandwidth-limited transfer time. The crossover point $M_{cross} = \alpha \cdot \beta$ determines whether optimizations should target latency reduction or bandwidth improvement.
-
-**Collective Operations as Primitives**: The eight core MPI collectives (Broadcast, Reduce, AllReduce, Scatter, Gather, AllGather, ReduceScatter, AlltoAll) form a complete vocabulary for distributed communication. Mastering when to use each primitive is essential for efficient system design.
-
-### Key Takeaways
-
-::: {.callout-note title="The 3 Things Students Must Remember"}
-
-**1. Ring AllReduce achieves optimal bandwidth utilization.** The bandwidth term $2(N-1)/N \cdot M/\beta$ approaches $2M/\beta$ as $N$ increases, achieving near-100% bandwidth efficiency for large clusters. This makes ring AllReduce the algorithm of choice for large gradients.
-
-**2. Different parallelism strategies require different collectives.** Data parallelism uses AllReduce. Embedding parallelism (recommendation) uses AlltoAll. Pipeline parallelism uses point-to-point. FSDP uses ReduceScatter and AllGather. Treating all communication as AllReduce leads to poor system designs.
-
-**3. The latency-bandwidth trade-off determines algorithm selection.** Below the crossover point $M_{cross}$, use tree algorithms for their $O(\log N)$ latency. Above it, use ring algorithms for their optimal bandwidth. Hierarchical algorithms combine both for real hardware topologies.
-
-:::
-
-### Algorithm Selection Guide
-
-| Scenario | Message Size | Best Algorithm | Key Optimization |
-|----------|-------------|----------------|------------------|
-| Small model, few GPUs | < 100 MB | Tree AllReduce | Minimize latency |
-| Large model, few GPUs | > 1 GB | Ring AllReduce | Maximize bandwidth |
-| Large model, many GPUs | > 10 GB | Hierarchical Ring | Exploit topology |
-| Embeddings (RecSys) | Variable | AlltoAll | Handle sparsity |
-| FSDP/ZeRO | Per-layer | ReduceScatter + AllGather | Overlap with compute |
-| MoE routing | Variable | Hierarchical AlltoAll | Manage $O(N)$ latency |
-
-### Model-Type Communication Summary
-
-| Model Type | Primary Challenge | Primary Collective | Optimization Focus |
-|-----------|------------------|-------------------|-------------------|
-| LLM | Gradient size | AllReduce | Bandwidth, hierarchy |
-| RecSys | Embedding exchange | AlltoAll | Sparsity, caching |
-| Vision | Moderate gradients | AllReduce | Overlap, compression |
-| MoE | Dynamic routing | AlltoAll | Load balance, latency |
-| GNN | Graph structure | Custom | Partitioning, sampling |
-
-### Equations to Remember
-
-**AllReduce Lower Bound**:
-$$T_{AllReduce} \geq 2 \cdot \frac{N-1}{N} \cdot \frac{M}{\beta}$$
-
-**Ring AllReduce Time**:
-$$T_{ring} = 2(N-1) \cdot \alpha + 2 \cdot \frac{N-1}{N} \cdot \frac{M}{\beta}$$
-
-**Tree AllReduce Time**:
-$$T_{tree} = 2 \log_2 N \cdot \alpha + 2 \log_2 N \cdot \frac{M}{\beta}$$
-
-**Crossover Point**:
-$$M_{cross} \approx \frac{\alpha \cdot \beta \cdot N}{\log_2 N}$$
-
-**Communication-Computation Ratio**:
-$$\rho = \frac{T_{comm}}{T_{compute}}; \quad \eta = \frac{1}{1+\rho}$$
-
-### Practical Guidance
-
-**When starting a new distributed training project:**
-
-1. Profile single-GPU training to establish compute baseline
-2. Measure network bandwidth and latency between nodes
-3. Calculate expected communication time using the equations in this chapter
-4. Choose parallelism strategy based on model architecture and available topology
-5. Implement with appropriate collectives, not default AllReduce for everything
-6. Profile actual communication to validate predictions
-7. Tune NCCL parameters for your specific configuration
-
 ## Fallacies and Pitfalls {#sec-communication-fallacies-pitfalls}
 
 Communication optimization presents numerous opportunities for misconception. These fallacies and pitfalls capture common errors that waste engineering time and degrade system performance.
@@ -2765,7 +2691,74 @@ Frameworks advertise communication-computation overlap as automatic, but achievi
 
 Effective overlap requires profiling with tools like Nsight Systems to verify that communication and computation actually proceed in parallel rather than sequentially.
 
-### Looking Ahead
+## Summary {#sec-communication-summary}
+
+Communication is the binding constraint that determines whether distributed training achieves meaningful speedup or degrades into expensive inefficiency. This chapter developed the theoretical foundations, algorithmic techniques, and practical knowledge needed to design and optimize communication systems for production ML training.
+
+### Core Concepts
+
+**The Communication Bottleneck**: At scale, network communication dominates training time. For a 175B parameter model on 1024 GPUs, communication can take 14+ seconds per step while computation takes under 1 second. This fundamental asymmetry between computation and communication scaling shapes every design decision in distributed ML systems.
+
+**The LogP Model**: Communication time follows $T = \alpha + M/\beta$, where $\alpha$ represents fixed latency and $M/\beta$ represents bandwidth-limited transfer time. The crossover point $M_{cross} = \alpha \cdot \beta$ determines whether optimizations should target latency reduction or bandwidth improvement.
+
+**Collective Operations as Primitives**: The eight core MPI collectives (Broadcast, Reduce, AllReduce, Scatter, Gather, AllGather, ReduceScatter, AlltoAll) form a complete vocabulary for distributed communication. Mastering when to use each primitive is essential for efficient system design.
+
+### Algorithm Selection Guide
+
+| Scenario | Message Size | Best Algorithm | Key Optimization |
+|----------|-------------|----------------|------------------|
+| Small model, few GPUs | < 100 MB | Tree AllReduce | Minimize latency |
+| Large model, few GPUs | > 1 GB | Ring AllReduce | Maximize bandwidth |
+| Large model, many GPUs | > 10 GB | Hierarchical Ring | Exploit topology |
+| Embeddings (RecSys) | Variable | AlltoAll | Handle sparsity |
+| FSDP/ZeRO | Per-layer | ReduceScatter + AllGather | Overlap with compute |
+| MoE routing | Variable | Hierarchical AlltoAll | Manage $O(N)$ latency |
+
+### Model-Type Communication Summary
+
+| Model Type | Primary Challenge | Primary Collective | Optimization Focus |
+|-----------|------------------|-------------------|-------------------|
+| LLM | Gradient size | AllReduce | Bandwidth, hierarchy |
+| RecSys | Embedding exchange | AlltoAll | Sparsity, caching |
+| Vision | Moderate gradients | AllReduce | Overlap, compression |
+| MoE | Dynamic routing | AlltoAll | Load balance, latency |
+| GNN | Graph structure | Custom | Partitioning, sampling |
+
+### Equations to Remember
+
+**AllReduce Lower Bound**:
+$$T_{AllReduce} \geq 2 \cdot \frac{N-1}{N} \cdot \frac{M}{\beta}$$
+
+**Ring AllReduce Time**:
+$$T_{ring} = 2(N-1) \cdot \alpha + 2 \cdot \frac{N-1}{N} \cdot \frac{M}{\beta}$$
+
+**Tree AllReduce Time**:
+$$T_{tree} = 2 \log_2 N \cdot \alpha + 2 \log_2 N \cdot \frac{M}{\beta}$$
+
+**Crossover Point**:
+$$M_{cross} \approx \frac{\alpha \cdot \beta \cdot N}{\log_2 N}$$
+
+**Communication-Computation Ratio**:
+$$\rho = \frac{T_{comm}}{T_{compute}}; \quad \eta = \frac{1}{1+\rho}$$
+
+### Practical Guidance
+
+**When starting a new distributed training project:**
+
+1. Profile single-GPU training to establish compute baseline
+2. Measure network bandwidth and latency between nodes
+3. Calculate expected communication time using the equations in this chapter
+4. Choose parallelism strategy based on model architecture and available topology
+5. Implement with appropriate collectives, not default AllReduce for everything
+6. Profile actual communication to validate predictions
+7. Tune NCCL parameters for your specific configuration
+
+::: {.callout-important title="Key Takeaways"}
+* Ring AllReduce achieves optimal bandwidth utilization, with the bandwidth term approaching $2M/\beta$ as cluster size increases
+* Different parallelism strategies require different collectives: Data parallelism uses AllReduce, embedding parallelism uses AlltoAll, pipeline parallelism uses point-to-point
+* The latency-bandwidth trade-off determines algorithm selection: use tree algorithms below the crossover point for $O(\log N)$ latency, ring algorithms above for optimal bandwidth
+* Communication patterns connect directly to fault tolerance: understanding what data moves where reveals what can be lost when failures occur
+:::
 
 Communication patterns connect directly to fault tolerance (@sec-fault-tolerance): understanding what data moves where reveals what can be lost when failures occur. The collective operation framework developed here extends to distributed inference (@sec-inference-at-scale), where similar primitives coordinate model-parallel serving.
 
