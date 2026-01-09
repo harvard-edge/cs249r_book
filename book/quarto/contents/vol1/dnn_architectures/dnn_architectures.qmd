@@ -677,6 +677,216 @@ This algorithmic structure directly implements the requirements for spatial patt
 Group theory provides the mathematical language for symmetries and transformations in data. Convolution implements **translation equivariance**: shifting the input shifts the output feature map. Formally, for translation operator \(T_v\), a convolutional layer \(f\) satisfies \(f(T_v x) = T_v f(x)\). This is distinct from **translation invariance** (\(f(T_v x) = f(x)\)), which is often introduced via pooling or other aggregation.
 :::
 
+#### Translation Equivariance: Preserving Spatial Structure {#sec-dnn-architectures-translation-equivariance-8f3a}
+
+The mathematical property of translation equivariance is central to understanding why CNNs work effectively for spatial data. While the brief note above introduced the concept, its implications for learning efficiency and systems design warrant deeper examination.
+
+**Equivariance vs Invariance**: These related but distinct concepts determine how architectures handle transformations:
+
+**Equivariance** means transforming the input produces the same transformation in the output:
+
+$$
+f(T(\mathbf{x})) = T(f(\mathbf{x}))
+$$
+
+For CNNs with translation $T_v$ (shift by vector $v$), if the input shifts by 5 pixels right, the feature maps also shift by 5 pixels right. Position information is preserved through the transformation.
+
+**Invariance** means transforming the input does not change the output:
+
+$$
+f(T(\mathbf{x})) = f(\mathbf{x})
+$$
+
+Global average pooling over an entire feature map exhibits translation invariance: shifting the input does not change the averaged output. Position information is discarded.
+
+**Why Equivariance Matters for Learning**: Equivariance preserves information needed for structured learning:
+
+**Spatial Relationships**: A feature detector responding to an eye at position $(x, y)$ will respond to the same eye at position $(x+5, y)$, but the response moves to reflect the new position. The network can learn spatial relationships: "eye above nose" matters for face detection. Full invariance would lose this: "eye and nose both present somewhere" is insufficient.
+
+**Object Detection**: Localization tasks require position. Object detection outputs bounding boxes like "car at $(100, 200)$ with size $50 \times 80$". Equivariant layers track position through the network, while invariant final layers determine class. This architectural choice matches task structure: equivariance for localization, invariance for classification.
+
+**Hierarchical Composition**: Equivariance enables compositional learning. Early layers detect edges equivariantly at all positions. Middle layers combine edges into shapes, also equivariantly. Final layers may use partial invariance (via pooling) for classification. This hierarchy works because intermediate features maintain spatial structure for composition.
+
+**Mathematical Formulation**: For a convolutional layer with filter $\mathbf{w}$ and input $\mathbf{x}$:
+
+$$
+(f * \mathbf{w})[i, j] = \sum_{m,n} \mathbf{w}[m, n] \cdot \mathbf{x}[i + m, j + n]
+$$
+
+Applying translation $T_v$ (shift by $v = (v_1, v_2)$) to the input:
+
+$$
+(T_v \mathbf{x})[i, j] = \mathbf{x}[i - v_1, j - v_2]
+$$
+
+The convolution of the translated input becomes:
+
+$$
+(f * \mathbf{w})[T_v \mathbf{x}][i, j] = \sum_{m,n} \mathbf{w}[m, n] \cdot \mathbf{x}[(i - v_1) + m, (j - v_2) + n]
+$$
+
+$$
+= \sum_{m,n} \mathbf{w}[m, n] \cdot \mathbf{x}[(i + m) - v_1, (j + n) - v_2]
+$$
+
+$$
+= (f * \mathbf{w})[\mathbf{x}][i - v_1, j - v_2] = T_v((f * \mathbf{w})[\mathbf{x}])[i, j]
+$$
+
+This proves translation equivariance: $f(T_v \mathbf{x}) = T_v(f(\mathbf{x}))$.
+
+**Concrete Example**: Consider detecting whisker patterns in a cat image:
+
+**Input Image**: Cat face at position $(50, 50)$
+
+**Equivariant Convolutional Layer**:
+
+- Operation: $3 \times 3$ filter detecting whisker textures
+- Output: Whisker features detected at position $(50, 50)$ in feature map
+- Shifted Input: Cat face at position $(55, 55)$
+- Shifted Output: Whisker features at position $(55, 55)$ in feature map
+- Property: Feature position tracks input position
+
+**Invariant Global Pooling Layer**:
+
+- Operation: Average pooling over entire spatial dimensions
+- Output: Average whisker strength $= 0.8$ (scalar, no position)
+- Shifted Input: Cat face at position $(55, 55)$
+- Shifted Output: Average whisker strength $= 0.8$ (same value)
+- Property: Output ignores spatial position
+
+The equivariant layers preserve where features occur, enabling the network to learn that "whiskers near mouth" and "ears above eyes" matter for cat classification. Invariant final layers discard absolute position for classification.
+
+::: {.callout-example title="Equivariance in Action: Feature Detection"}
+
+Consider a $7 \times 7$ image with a vertical edge at column 3:
+
+$$
+\mathbf{x} = \begin{bmatrix}
+0 & 0 & 1 & 0 & 0 & 0 & 0 \\
+0 & 0 & 1 & 0 & 0 & 0 & 0 \\
+0 & 0 & 1 & 0 & 0 & 0 & 0 \\
+0 & 0 & 1 & 0 & 0 & 0 & 0 \\
+0 & 0 & 1 & 0 & 0 & 0 & 0 \\
+0 & 0 & 1 & 0 & 0 & 0 & 0 \\
+0 & 0 & 1 & 0 & 0 & 0 & 0
+\end{bmatrix}
+$$
+
+Vertical edge detector filter:
+
+$$
+\mathbf{w} = \begin{bmatrix}
+-1 & 0 & 1 \\
+-1 & 0 & 1 \\
+-1 & 0 & 1
+\end{bmatrix}
+$$
+
+**Convolving original image**:
+
+Output feature map has strong activation at column 3 (where edge is):
+
+$$
+f(\mathbf{x}) = \begin{bmatrix}
+0 & 3 & 0 & 0 & 0 \\
+0 & 3 & 0 & 0 & 0 \\
+0 & 3 & 0 & 0 & 0 \\
+0 & 3 & 0 & 0 & 0 \\
+0 & 3 & 0 & 0 & 0
+\end{bmatrix}
+$$
+
+**Shifted input** (edge moved to column 5):
+
+$$
+T_2 \mathbf{x} = \begin{bmatrix}
+0 & 0 & 0 & 0 & 1 & 0 & 0 \\
+0 & 0 & 0 & 0 & 1 & 0 & 0 \\
+0 & 0 & 0 & 0 & 1 & 0 & 0 \\
+0 & 0 & 0 & 0 & 1 & 0 & 0 \\
+0 & 0 & 0 & 0 & 1 & 0 & 0 \\
+0 & 0 & 0 & 0 & 1 & 0 & 0 \\
+0 & 0 & 0 & 0 & 1 & 0 & 0
+\end{bmatrix}
+$$
+
+**Convolving shifted image**:
+
+$$
+f(T_2 \mathbf{x}) = \begin{bmatrix}
+0 & 0 & 0 & 3 & 0 \\
+0 & 0 & 0 & 3 & 0 \\
+0 & 0 & 0 & 3 & 0 \\
+0 & 0 & 0 & 3 & 0 \\
+0 & 0 & 0 & 3 & 0
+\end{bmatrix} = T_2(f(\mathbf{x}))
+$$
+
+The feature activation shifts by the same amount as the input, demonstrating equivariance. The network knows the edge is at column 5 in the shifted image, not just that an edge exists somewhere.
+
+:::
+
+**Systems Implications of Equivariance**:
+
+**Parameter Efficiency**: Equivariance through parameter sharing enables dramatic parameter reduction:
+
+- MLP for $224 \times 224$ RGB image: Each hidden neuron connects to all $224 \times 224 \times 3 = 150,528$ inputs
+- CNN with $3 \times 3$ filter: Only $3 \times 3 \times 3 = 27$ parameters per filter, reused across all $224 \times 224$ positions
+- Parameter reduction: $150,528 / 27 \approx 5,575 \times$ fewer parameters per feature detector
+- Memory savings enable larger models and bigger batches on fixed hardware
+
+**Computational Structure**: Equivariance creates regular, parallelizable computation:
+
+- **Sliding Window**: Same operation at every spatial position
+- **Data Reuse**: Input pixels used by multiple filter positions (im2col optimizations exploit this)
+- **SIMD Friendly**: Modern GPUs execute same instruction across spatial positions simultaneously
+- **Hardware Acceleration**: TPUs and AI accelerators have specialized units for convolution specifically because this structure maps efficiently to silicon
+
+**Generalization**: Equivariance improves sample efficiency:
+
+- Network learning edge detector at one position automatically has it at all positions
+- No need for training examples with edges at every possible location
+- This "built-in" data augmentation means fewer training samples needed
+- Systems benefit: less data storage, faster training, lower bandwidth requirements
+
+**Group Theory Perspective**: Convolution's equivariance to translations is one instance of a general principle. The translation group $(\mathbb{R}^2, +)$ consists of all 2D translations, closed under composition (translating by $v$ then $u$ equals translating by $v + u$). Convolution is equivariant to this group.
+
+Recent research extends this framework to other symmetry groups. Cohen & Welling [@cohen2016group] developed Group-Equivariant CNNs that handle rotations and reflections by constructing filters equivariant to rotation groups. This enables learning rotation-invariant features for tasks like satellite imagery or medical imaging where orientation does not determine meaning.
+
+The mathematical framework: for group $G$ acting on input space $X$ and output space $Y$, a function $f: X \to Y$ is $G$-equivariant if:
+
+$$
+f(g \cdot \mathbf{x}) = g \cdot f(\mathbf{x}) \quad \forall g \in G, \mathbf{x} \in X
+$$
+
+Standard CNNs are translation-equivariant. Rotation-equivariant networks extend this to rotation groups. The architectural principle generalizes: embed symmetries of your data as equivariances in your architecture.
+
+For systems engineering, this means:
+
+- Identifying data symmetries informs architecture choice
+- More constrained architectures (stronger symmetries) often mean smaller models
+- Specialized equivariances may require custom operations (rotation convolutions) that need hardware support or efficient software implementations
+
+**Practical Considerations**:
+
+**Breaking Equivariance**: Some operations break translation equivariance:
+
+- Padding: Asymmetric padding at image boundaries breaks perfect equivariance
+- Stride $> 1$: Downsampling introduces quantization (shift by 1 pixel produces non-integer shift in output)
+- Batch normalization: Statistics computed per position in some implementations break equivariance
+
+Modern networks accept these deviations as necessary trade-offs for computational efficiency or training stability.
+
+**Equivariance vs Task Requirements**:
+
+- Image classification: Only final class label needs invariance; intermediate layers stay equivariant
+- Object detection: Bounding box coordinates require equivariance throughout
+- Semantic segmentation: Per-pixel labels need full equivariance to output layer
+- Image generation: Output image must maintain spatial structure (equivariance essential)
+
+The choice of where to introduce invariance (via pooling, global averaging) vs. maintaining equivariance reflects task requirements and directly impacts architectural decisions.
+
 The choice of convolution reflects deeper principles about inductive bias[^fn-inductive-bias] in neural architecture design. By restricting connectivity to local neighborhoods and sharing parameters across spatial positions, CNNs encode prior knowledge about the structure of visual data: that important features are local and translation-invariant. This architectural constraint reduces the hypothesis space[^fn-hypothesis-space] that the network must search, enabling more efficient learning from limited data compared to fully connected networks.
 
 [^fn-inductive-bias]: **Inductive Bias**: Prior assumptions built into model architecture about the structure of data. CNNs assume spatial locality and translation equivariance, which can yield translation-invariant predictions when combined with pooling or other aggregation. This constraint reduces the space of functions they can learn compared to MLPs and often enables better generalization with fewer parameters.
