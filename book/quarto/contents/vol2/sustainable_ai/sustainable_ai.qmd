@@ -338,6 +338,291 @@ print(f"Training emissions: {emissions:.4f} kg CO2")
 
 This integration allows engineers to make informed decisions about model complexity versus environmental impact during development.
 
+### Power Modeling Fundamentals {#sec-sustainable-ai-power-modeling-fundamentals}
+
+Understanding where energy goes in AI systems requires grounding in the physics of digital computation. The CMOS power equation provides the foundation for reasoning about energy consumption in modern processors, explaining why different optimization techniques achieve their efficiency gains and enabling quantitative comparison of architectural choices.
+
+#### The CMOS Power Equation {#sec-sustainable-ai-cmos-power-equation}
+
+Every digital circuit consumes power through two fundamental mechanisms. Dynamic power arises from switching transistors between states, while static power results from leakage current that flows even when transistors are nominally off. The total power consumption follows:
+
+$$P_{total} = P_{dynamic} + P_{static} = \alpha C V^2 f + V I_{leak}$$ {#eq-cmos-power}
+
+The dynamic power component $P_{dynamic} = \alpha C V^2 f$ depends on four parameters. The switching activity factor $\alpha$ represents the fraction of transistors changing state per clock cycle, ranging from 0 to 1. General-purpose CPUs typically exhibit $\alpha \approx 0.1$ to $0.3$ due to diverse instruction mixes, while specialized AI accelerators can achieve $\alpha \approx 0.6$ to $0.8$ through optimized dataflow that keeps more circuits active during computation. The load capacitance $C$ scales with transistor count and interconnect length. Supply voltage $V$ enters quadratically, making voltage reduction the most powerful lever for energy efficiency. Clock frequency $f$ determines operations per second.
+
+The static power component $P_{static} = V \cdot I_{leak}$ represents leakage current that increases exponentially with temperature, approximately doubling for every 10 degrees Celsius rise. This thermal dependence creates a feedback loop: higher power generates heat, which increases leakage, which generates more heat. Managing this thermal runaway constrains the power density achievable in modern processors and explains why cooling infrastructure represents such a significant fraction of data center energy consumption.
+
+The practical implications for AI systems are substantial. The quadratic voltage dependence means that reducing voltage from 1.0V to 0.8V decreases dynamic power by 36%, even before considering that lower voltages often enable frequency reduction with additional linear savings. This relationship explains why specialized AI accelerators operating at lower voltages but higher utilization can achieve order-of-magnitude efficiency improvements over general-purpose processors.
+
+#### Why Optimization Techniques Save Energy {#sec-sustainable-ai-why-optimization-saves-energy}
+
+The power equation illuminates why specific optimization techniques achieve their efficiency gains. Quantization reduces numerical precision from 32-bit floating point to 8-bit integers, which directly reduces datapath capacitance $C$ by approximately 4 times since narrower datapaths require fewer transistors and shorter interconnects. Additionally, lower precision arithmetic enables reduced supply voltage $V$ because the circuits have larger noise margins. The combined effect yields 6 to 10 times energy reduction per operation, closely matching published measurements of INT8 versus FP32 inference efficiency.
+
+Pruning removes weights from neural networks, reducing the effective capacitance $C$ by eliminating computation paths that would otherwise consume switching energy. Structured pruning, which removes entire channels or attention heads, achieves larger efficiency gains than unstructured pruning because it eliminates complete circuit paths rather than individual operations that the hardware must still orchestrate.
+
+Specialized accelerators improve the activity factor $\alpha$ by designing circuits specifically for matrix multiplication and convolution operations. Where a CPU might activate 10% of its transistors during typical ML workloads, a systolic array architecture can keep 70% or more of its compute units active, effectively performing more useful work per watt of power consumed.
+
+#### Facility-Level Power Metrics {#sec-sustainable-ai-facility-level-metrics}
+
+Beyond chip-level power, data center infrastructure imposes additional energy overhead that the Power Usage Effectiveness (PUE) metric captures:
+
+$$PUE = \frac{P_{total\_facility}}{P_{IT\_equipment}}$$ {#eq-pue}
+
+A PUE of 1.0 would indicate perfect efficiency where all energy powers computation, though this is physically impossible since cooling, power distribution, and lighting require nonzero energy. Industry-average data centers operate at PUE of 1.5 to 2.0, meaning that 50% to 100% additional energy beyond computation goes to infrastructure. Leading hyperscale facilities achieve PUE between 1.1 and 1.2 through advanced cooling techniques including free-air cooling in cold climates, liquid cooling for high-density GPU clusters, and optimized power distribution.
+
+Water Usage Effectiveness (WUE) captures the water consumption that evaporative cooling and other processes require:
+
+$$WUE = \frac{W_{annual\_water\_usage}}{P_{IT\_equipment\_energy}}$$ {#eq-wue}
+
+The units are liters per kilowatt-hour, with typical values ranging from 0.5 to 2.0 L/kWh depending on climate and cooling technology. A data center with WUE of 1.8 L/kWh training a model requiring 10,000 MWh would consume 18 million liters of water, equivalent to the annual water usage of approximately 500 households.
+
+#### Carbon Intensity and Regional Variation {#sec-sustainable-ai-carbon-intensity}
+
+The carbon impact of electricity consumption depends critically on the energy generation mix, quantified by carbon intensity measured in grams of CO2 equivalent per kilowatt-hour (gCO2eq/kWh):
+
++----------------------+---------------------------+----------------------------------+
+| Energy Source        | Carbon Intensity          | Regional Examples                |
+|                      | (gCO2eq/kWh)              |                                  |
++:=====================+:==========================+:=================================+
+| Coal                 | 820 to 1,200              | Poland, West Virginia            |
++----------------------+---------------------------+----------------------------------+
+| Natural Gas          | 350 to 500                | Texas combined cycle plants      |
++----------------------+---------------------------+----------------------------------+
+| Solar PV             | 20 to 50                  | California, Arizona              |
++----------------------+---------------------------+----------------------------------+
+| Wind                 | 7 to 15                   | Denmark, Scotland                |
++----------------------+---------------------------+----------------------------------+
+| Hydroelectric        | 10 to 30                  | Quebec, Norway                   |
++----------------------+---------------------------+----------------------------------+
+| Nuclear              | 5 to 20                   | France, Ontario                  |
++----------------------+---------------------------+----------------------------------+
+
+: **Carbon Intensity by Energy Source**: Electricity generation carbon intensity varies by more than two orders of magnitude across energy sources. Geographic location of computation can dramatically affect emissions even for identical workloads. {#tbl-carbon-intensity}
+
+These variations create opportunities for carbon-aware computing. Training the same model in Quebec (hydro-powered grid at approximately 20 gCO2eq/kWh) versus Poland (coal-dominated grid at approximately 700 gCO2eq/kWh) produces a 35-fold difference in carbon emissions. Even within a single grid, carbon intensity varies temporally with renewable generation: midday solar peaks can reduce intensity by 30% to 50% compared to evening hours when natural gas peaker plants operate.
+
+### Energy Measurement Techniques {#sec-sustainable-ai-energy-measurement}
+
+Quantifying AI system energy consumption requires measurement at multiple levels of the hardware stack, from chip-level instrumentation to facility-wide monitoring. Each measurement approach offers different granularity, accuracy, and overhead trade-offs that practitioners must understand to select appropriate methods for their use case.
+
+#### Hardware Power Counters {#sec-sustainable-ai-hardware-counters}
+
+Modern processors include dedicated circuitry for power measurement that software can query through manufacturer-provided interfaces. These hardware counters measure actual power draw rather than estimating from activity, providing ground-truth energy consumption data at microsecond resolution.
+
+Intel's Running Average Power Limit (RAPL) interface exposes power measurements for CPU packages, DRAM, and integrated graphics through model-specific registers (MSRs). RAPL reports energy consumption in microjoules with updates every millisecond, enabling fine-grained attribution of energy to specific code regions. The following code demonstrates RAPL-based measurement for a training loop:
+
+::: {#lst-rapl-measurement lst-cap="**RAPL Energy Measurement**: Reading Intel RAPL counters to measure CPU and DRAM energy consumption during model training."}
+```python
+import subprocess
+import time
+
+def read_rapl_energy():
+    """Read current RAPL energy counters (requires root or perf permissions)."""
+    result = subprocess.run(
+        ['cat', '/sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj'],
+        capture_output=True, text=True
+    )
+    return int(result.stdout.strip())  # Returns microjoules
+
+# Measure training energy
+start_energy = read_rapl_energy()
+start_time = time.time()
+
+# Training loop
+for epoch in range(num_epochs):
+    train_one_epoch(model, dataloader, optimizer)
+
+end_energy = read_rapl_energy()
+end_time = time.time()
+
+energy_joules = (end_energy - start_energy) / 1e6
+avg_power_watts = energy_joules / (end_time - start_time)
+print(f"Training energy: {energy_joules:.2f} J, Average power: {avg_power_watts:.2f} W")
+```
+:::
+
+RAPL measurements exclude discrete GPUs, which require separate monitoring through vendor-specific interfaces.
+
+#### GPU Power Monitoring {#sec-sustainable-ai-gpu-power-monitoring}
+
+NVIDIA GPUs expose power measurements through the NVIDIA Management Library (NVML), accessible via the `nvidia-smi` command-line tool or programmatic bindings. GPU power monitoring reports instantaneous power draw, which can vary significantly during computation due to dynamic voltage and frequency scaling.
+
+::: {#lst-gpu-power lst-cap="**GPU Power Monitoring**: Using NVIDIA's pynvml library to measure GPU power consumption during inference."}
+```python
+import pynvml
+import torch
+import time
+
+pynvml.nvmlInit()
+handle = pynvml.nvmlDeviceGetHandleByIndex(0)  # First GPU
+
+def measure_inference_power(model, input_data, num_iterations=100):
+    """Measure average GPU power during inference."""
+    power_readings = []
+
+    model.eval()
+    with torch.no_grad():
+        for _ in range(num_iterations):
+            # Run inference
+            _ = model(input_data)
+            torch.cuda.synchronize()
+
+            # Sample power (milliwatts)
+            power_mw = pynvml.nvmlDeviceGetPowerUsage(handle)
+            power_readings.append(power_mw / 1000)  # Convert to watts
+
+    avg_power = sum(power_readings) / len(power_readings)
+    return avg_power
+
+avg_power = measure_inference_power(model, sample_input)
+print(f"Average inference power: {avg_power:.1f} W")
+```
+:::
+
+For accurate energy measurement rather than instantaneous power sampling, integrate power readings over time or use NVIDIA's energy counter when available on datacenter GPUs.
+
+#### System-Level Energy Profiling {#sec-sustainable-ai-system-profiling}
+
+Comprehensive energy accounting requires combining chip-level measurements with infrastructure overhead. The total energy for an AI workload includes:
+
+$$E_{total} = (E_{CPU} + E_{GPU} + E_{memory} + E_{network}) \times PUE$$ {#eq-total-energy}
+
+System-level profilers like Intel VTune, NVIDIA Nsight Systems, and open-source tools such as PowerJoular aggregate measurements across components. For production deployments, smart power distribution units (PDUs) at the rack level provide facility-verified measurements that include cooling overhead.
+
+The relationship between measured component power and total facility energy follows from PUE:
+
+$$P_{facility} = P_{IT} \times PUE = (P_{servers} + P_{network} + P_{storage}) \times PUE$$ {#eq-facility-power}
+
+For a cluster consuming 1 MW of IT power in a facility with PUE of 1.4, total facility power consumption reaches 1.4 MW, with the additional 400 kW powering cooling, power conversion, and infrastructure systems.
+
+### Carbon Footprint Calculation {#sec-sustainable-ai-carbon-footprint-calculation}
+
+Translating energy measurements into carbon footprint requires accounting for the complete lifecycle of AI systems, including both operational emissions from electricity consumption and embodied emissions from hardware manufacturing. This lifecycle assessment approach reveals that hardware production contributes a larger fraction of total emissions than many practitioners assume.
+
+#### Operational Carbon Calculation {#sec-sustainable-ai-operational-carbon}
+
+Operational carbon emissions result from electricity consumption during training and inference, scaled by grid carbon intensity:
+
+$$C_{operational} = E_{total} \times CI_{grid} \times PUE$$ {#eq-operational-carbon}
+
+where $E_{total}$ is the energy consumed by IT equipment, $CI_{grid}$ is the carbon intensity of the electricity grid, and $PUE$ accounts for facility overhead.
+
+::: {.callout-example title="Worked Example: Training Emissions Calculation"}
+
+Consider training a 7 billion parameter model on 64 A100 GPUs for 14 days:
+
+**Step 1: Compute Energy**
+
+- GPU power: 400W per A100 at typical training utilization
+- Training time: 14 days times 24 hours = 336 hours
+- GPU energy: 64 GPUs times 400W times 336h = 8,601,600 Wh = 8,602 kWh
+
+**Step 2: Apply PUE**
+
+- Facility PUE: 1.2 (efficient hyperscale datacenter)
+- Total facility energy: 8,602 kWh times 1.2 = 10,322 kWh
+
+**Step 3: Calculate Emissions**
+
+- Grid carbon intensity: 429 gCO2/kWh (US average)
+- Operational emissions: 10,322 kWh times 429 g/kWh = 4,428 kg CO2 = 4.4 metric tons
+
+**Comparison: Same training in low-carbon region**
+
+- Quebec grid intensity: 20 gCO2/kWh
+- Emissions: 10,322 kWh times 20 g/kWh = 206 kg CO2
+
+The geographic choice alone produces a 21-fold difference in training emissions.
+:::
+
+#### Embodied Carbon Assessment {#sec-sustainable-ai-embodied-carbon}
+
+Embodied carbon encompasses emissions from raw material extraction, semiconductor fabrication, assembly, transportation, and end-of-life disposal. For AI hardware, manufacturing emissions are substantial due to the energy-intensive nature of advanced semiconductor processes.
+
+A single NVIDIA H100 GPU embodies approximately 150 to 200 kg CO2eq from manufacturing, including wafer fabrication at advanced process nodes, high-bandwidth memory production, and packaging. Amortizing this embodied carbon over the hardware lifetime provides per-use emissions:
+
+$$C_{embodied,daily} = \frac{C_{manufacturing}}{L_{lifetime} \times 365}$$ {#eq-embodied-daily}
+
+For an H100 with 175 kg embodied carbon and 4-year datacenter lifetime:
+
+$$C_{embodied,daily} = \frac{175 \text{ kg}}{4 \times 365} = 0.12 \text{ kg/day}$$
+
+Over a 14-day training run using 64 GPUs:
+
+$$C_{embodied,training} = 64 \times 14 \times 0.12 = 108 \text{ kg CO2}$$
+
+This embodied contribution of 108 kg represents approximately 2.4% of the operational emissions (4,428 kg) calculated above for US average grid, but would represent 52% of total emissions if training occurred in Quebec's low-carbon grid.
+
+#### Lifecycle Carbon Accounting {#sec-sustainable-ai-lifecycle-carbon}
+
+Complete lifecycle assessment combines operational and embodied emissions across all phases:
+
+$$C_{lifecycle} = C_{training} + C_{inference} + C_{embodied}$$ {#eq-lifecycle-carbon}
+
+For models deployed at scale, inference emissions often dominate the lifecycle. Consider a model serving 10 million queries per day at 0.001 kWh per query:
+
+**Annual Inference Energy and Emissions:**
+
+- Daily energy: 10 million times 0.001 kWh = 10,000 kWh
+- Annual energy: 10,000 times 365 = 3,650,000 kWh
+- Annual emissions (US grid): 3,650,000 times 0.429 = 1,565,850 kg = 1,566 metric tons CO2
+
+Compare to single training run of 4.4 metric tons. After less than 2 days of deployment at this scale, cumulative inference emissions exceed training emissions.
+
+This lifecycle perspective reveals that optimization efforts should prioritize inference efficiency for widely-deployed models, while training efficiency matters most for models that undergo frequent retraining or experimental iteration.
+
+#### Regional Grid Intensity Data Sources {#sec-sustainable-ai-grid-intensity-sources}
+
+Accurate carbon accounting requires reliable grid intensity data. Real-time carbon intensity varies with generation mix, which changes hourly based on demand, renewable availability, and plant dispatch decisions. Several data sources provide this information:
+
+The US Energy Information Administration (EIA) publishes historical grid emissions factors by region, updated annually. For prospective analysis, these annual averages provide reasonable estimates. ElectricityMap and WattTime provide real-time carbon intensity APIs covering major grids worldwide, enabling carbon-aware scheduling systems. For retrospective analysis of completed training runs, hourly marginal emissions data from these sources enables accurate attribution.
+
+::: {#lst-carbon-calculation lst-cap="**Lifecycle Carbon Calculation**: Computing total carbon footprint including operational and embodied emissions."}
+```python
+def calculate_carbon_footprint(
+    gpu_power_watts: float,
+    num_gpus: int,
+    training_hours: float,
+    pue: float,
+    grid_intensity_gco2_kwh: float,
+    gpu_embodied_kg: float,
+    gpu_lifetime_years: float
+) -> dict:
+    """Calculate lifecycle carbon footprint for a training run."""
+
+    # Operational emissions
+    energy_kwh = (gpu_power_watts * num_gpus * training_hours) / 1000
+    facility_energy_kwh = energy_kwh * pue
+    operational_kg = facility_energy_kwh * grid_intensity_gco2_kwh / 1000
+
+    # Embodied emissions (amortized)
+    daily_embodied = gpu_embodied_kg / (gpu_lifetime_years * 365)
+    training_days = training_hours / 24
+    embodied_kg = num_gpus * training_days * daily_embodied
+
+    return {
+        'energy_kwh': facility_energy_kwh,
+        'operational_carbon_kg': operational_kg,
+        'embodied_carbon_kg': embodied_kg,
+        'total_carbon_kg': operational_kg + embodied_kg,
+        'embodied_fraction': embodied_kg / (operational_kg + embodied_kg)
+    }
+
+# Example: 7B model training
+result = calculate_carbon_footprint(
+    gpu_power_watts=400,
+    num_gpus=64,
+    training_hours=336,  # 14 days
+    pue=1.2,
+    grid_intensity_gco2_kwh=429,  # US average
+    gpu_embodied_kg=175,
+    gpu_lifetime_years=4
+)
+print(f"Total carbon footprint: {result['total_carbon_kg']:.0f} kg CO2")
+print(f"Embodied fraction: {result['embodied_fraction']:.1%}")
+```
+:::
+
 ### Data Center Energy Consumption Patterns {#sec-sustainable-ai-data-center-energy-consumption-patterns-09c0}
 
 AI systems represent among the most energy-intensive computational workloads, involving dense operations[^fn-dense-operations] with consumption patterns that extend across training, inference, data storage, and communication infrastructure. Understanding these patterns reveals where optimization efforts can achieve environmental impact reduction. Energy consumption scales non-linearly with model complexity, creating opportunities for efficiency improvements through targeted architectural and operational optimizations.
