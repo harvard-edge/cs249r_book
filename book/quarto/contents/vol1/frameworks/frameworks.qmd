@@ -570,9 +570,11 @@ Modern frameworks combine eager execution flexibility with static graph performa
 
 **TorchScript: Trace and Script**
 
-PyTorch's TorchScript provides two ways to capture computations for compilation:
+PyTorch's TorchScript provides two complementary approaches for converting eager PyTorch code into an optimizable intermediate representation (IR) that can be serialized, optimized, and executed without the Python interpreter. The choice between tracing and scripting depends on whether your model contains data-dependent control flow.
 
-**Tracing** captures operations during one execution:
+**Tracing: Recording Execution Paths**
+
+Tracing captures operations by executing the function once with example inputs and recording every operation that occurs:
 
 ```python
 import torch
@@ -588,13 +590,40 @@ def forward(x):
 x_example = torch.tensor([1.0])
 traced = torch.jit.trace(forward, x_example)
 
-# traced is now a compiled version of forward()
-# Can serialize, optimize, run without Python
+# traced is now a compiled TorchScript module
+# Can serialize: torch.jit.save(traced, "model.pt")
+# Can optimize: fusion, constant folding
+# Can run without Python interpreter
 ```
 
-Tracing records operations during execution, producing a static graph from the observed execution path. This works well for feed-forward models but cannot handle data-dependent control flow: if your function contains `if x.sum() > 0`, tracing only captures the branch taken during the example execution.
+During tracing, PyTorch observes tensor operations and records them into a static computation graph. This graph becomes the TorchScript IR: a sequence of operations independent of Python execution. The traced graph captures the **execution path** taken during tracing, not the Python source code structure.
 
-**Scripting** compiles a subset of Python to TorchScript:
+**Tracing limitations**: Because tracing records a single execution path, it cannot handle data-dependent control flow. Consider:
+
+```python
+def conditional_forward(x):
+    if x.sum() > 0:  # Data-dependent condition
+        return x * 2
+    else:
+        return x * 3
+
+
+traced = torch.jit.trace(conditional_forward, torch.tensor([1.0]))
+# Tracing captures ONLY the x.sum() > 0 branch
+# If input later has sum <= 0, traced version still executes x * 2 branch
+```
+
+Tracing records whichever branch executed during the example input. Subsequent executions always follow the traced path regardless of input values, silently producing incorrect results for inputs that would have taken the other branch.
+
+**When to use tracing**:
+
+- Feed-forward models without conditionals (ResNet, VGG, Vision Transformer)
+- Models where control flow depends on hyperparameters fixed at trace time
+- Simpler conversion process (just provide example inputs)
+
+**Scripting: Source Code Analysis**
+
+Scripting analyzes Python source code directly and compiles it to TorchScript IR without executing:
 
 ```python
 @torch.jit.script
@@ -604,11 +633,100 @@ def forward(x):
     return z
 
 
-# Compiles Python code to TorchScript IR
-# Supports control flow but requires TorchScript-compatible Python subset
+# Compiles Python source code to TorchScript IR
+# No example inputs needed
+# Preserves control flow structure
 ```
 
-Scripting analyzes Python source code and compiles it to an intermediate representation that can be optimized and executed without Python. This supports dynamic control flow but only works with a restricted Python subset (no arbitrary Python objects, limited standard library access).
+The scripting compiler parses Python abstract syntax tree (AST), converts supported operations to TorchScript IR operations, and handles control flow (if/else, for loops, while loops) by preserving the branching structure in the IR. This enables data-dependent control flow to work correctly:
+
+```python
+@torch.jit.script
+def conditional_forward(x: torch.Tensor) -> torch.Tensor:
+    if x.sum() > 0:
+        return x * 2
+    else:
+        return x * 3
+# Both branches preserved in IR
+# Correct branch executes based on runtime input values
+```
+
+**Scripting limitations**: Scripting requires a restricted Python subset because TorchScript cannot support all Python language features:
+
+- **Type annotations required**: TorchScript needs explicit types for function signatures and variables when type inference fails
+- **No arbitrary Python objects**: Only tensor operations, numeric types, lists, dicts, tuples, and TorchScript classes
+- **Limited standard library**: Cannot use most Python standard library modules (no `os`, `sys`, arbitrary imports)
+- **Restricted dynamic behavior**: Cannot dynamically modify class structure or use Python metaprogramming
+
+Example of scripting restrictions:
+
+```python
+@torch.jit.script
+def invalid_script(x):
+    import numpy as np  # ERROR: Cannot import arbitrary modules
+    result = np.array([1, 2, 3])  # ERROR: NumPy not supported
+    print(f"Debug: {x}")  # ERROR: f-strings not supported
+    return result
+
+
+# Valid alternative:
+@torch.jit.script
+def valid_script(x: torch.Tensor) -> torch.Tensor:
+    # Use TorchScript-compatible operations
+    result = torch.tensor([1, 2, 3], dtype=x.dtype, device=x.device)
+    return result
+```
+
+**When to use scripting**:
+
+- Models with data-dependent control flow (RNN variants, recursive networks, adaptive computation)
+- When you need to preserve loops and conditionals that depend on tensor values
+- When deploying to environments without Python interpreter (mobile, embedded)
+
+**TorchScript Intermediate Representation**
+
+Both tracing and scripting produce TorchScript IR, a lower-level representation of computations:
+
+```python
+@torch.jit.script
+def example(x: torch.Tensor) -> torch.Tensor:
+    return x * 2 + 1
+
+
+# Inspect generated IR:
+print(example.graph)
+# graph(%x : Tensor):
+#   %1 : int = prim::Constant[value=2]()
+#   %2 : Tensor = aten::mul(%x, %1)
+#   %3 : int = prim::Constant[value=1]()
+#   %4 : Tensor = aten::add(%2, %3, %3)
+#   return (%4)
+```
+
+The TorchScript IR represents operations using:
+
+- **aten namespace**: Core tensor operations (`aten::mul`, `aten::add`, `aten::matmul`)
+- **prim namespace**: Primitives and control flow (`prim::If`, `prim::Loop`, `prim::Constant`)
+- **Static types**: Each value has a declared type (`Tensor`, `int`, `float`)
+- **SSA form**: Single Static Assignment, each value assigned once
+
+This IR enables optimizations independent of Python:
+
+- **Operator fusion**: Combine adjacent operations into single kernels (`x * 2 + 1` fused to single `fma` operation)
+- **Constant folding**: Evaluate constant expressions at compile time
+- **Dead code elimination**: Remove unused operations
+- **Memory optimization**: Reuse buffers when possible
+
+**Comparison: When to Use Each**
+
+| Aspect | Tracing | Scripting |
+|--------|---------|-----------|
+| **Input requirement** | Example inputs needed | No inputs needed |
+| **Control flow** | Cannot handle data-dependent | Supports data-dependent |
+| **Conversion ease** | Simpler (just run function) | Harder (restricted Python) |
+| **Type annotations** | Not required | Required when inference fails |
+| **Error detection** | Runtime (wrong results) | Compile time (syntax errors) |
+| **Best for** | Feed-forward models | Models with conditionals |
 
 **torch.compile: Compiler-Based Execution**
 
