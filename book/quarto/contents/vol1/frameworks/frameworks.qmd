@@ -1136,6 +1136,215 @@ with torch.set_grad_enabled(True):
 ```
 :::
 
+##### PyTorch Autograd Internals {#sec-ai-frameworks-pytorch-autograd-internals}
+
+Understanding PyTorch's autograd implementation reveals how modern frameworks efficiently track and compute gradients. This knowledge is essential for debugging gradient issues, implementing custom operations, and reasoning about memory consumption during training.
+
+**The grad_fn Chain**
+
+Every tensor with `requires_grad=True` stores a `grad_fn` attribute pointing to the `Function` object that created it. These Function objects link to their input tensors, forming a backward computation graph. Consider this example:
+
+```python
+import torch
+
+x = torch.tensor([2.0], requires_grad=True)
+y = x * 3
+z = y.pow(2)
+
+print(z.grad_fn)
+# <PowBackward0 object at 0x...>
+
+print(z.grad_fn.next_functions)
+# ((<MulBackward0 object at 0x...>, 0),)
+
+print(z.grad_fn.next_functions[0][0].next_functions)
+# ((<AccumulateGrad object at 0x...>, 0),)
+```
+
+The `grad_fn` chain connects operations in reverse order: `PowBackward0` (for `z = y.pow(2)`) links to `MulBackward0` (for `y = x * 3`), which links to `AccumulateGrad` (for the leaf tensor `x`). The tuple format `(Function, index)` tracks which output of the Function this connection corresponds to (important for operations with multiple outputs).
+
+**AccumulateGrad and Leaf Tensors**
+
+`AccumulateGrad` is a special Function node for leaf tensors (tensors with `requires_grad=True` but no `grad_fn`). When backpropagation reaches an `AccumulateGrad` node, it accumulates the gradient into the tensor's `.grad` attribute rather than passing it to another Function.
+
+This accumulation behavior explains why gradients sum across multiple `backward()` calls:
+
+```python
+x = torch.tensor([1.0], requires_grad=True)
+
+# First backward pass
+y = x * 2
+y.backward()
+print(x.grad)  # tensor([2.])
+
+# Second backward pass (without zero_grad)
+y = x * 3
+y.backward()
+print(x.grad)  # tensor([5.]) = 2 + 3 (accumulated!)
+
+# Reset gradients
+x.grad.zero_()
+y = x * 3
+y.backward()
+print(x.grad)  # tensor([3.])
+```
+
+**Saved Tensors and Memory Implications**
+
+Many operations require values from the forward pass to compute gradients. For example:
+
+- **Multiplication**: $\frac{\partial}{\partial x}(x \cdot y) = y$ (needs $y$ value)
+- **Power**: $\frac{\partial}{\partial x}(x^2) = 2x$ (needs $x$ value)
+- **Softmax**: $\frac{\partial}{\partial x_i}\text{softmax}(x)$ involves output values
+
+PyTorch's autograd saves these tensors in the `Function` object's `saved_tensors` attribute during forward pass. This introduces significant memory overhead:
+
+- **L-layer network**: Must save approximately L activation tensors (one per layer)
+- **Large batch size**: Saves activations for the entire batch
+- **Total training memory** $\approx$ forward activations + gradients + optimizer state $\approx$ 2-3× inference memory
+
+For a ResNet-50 processing batch size 64 with 224×224 images:
+- Forward activations: ~7 GB
+- Gradients: ~7 GB
+- Optimizer state (Adam): ~7 GB
+- **Total**: ~21 GB for training vs. ~7 GB for inference only
+
+**Custom Autograd Functions**
+
+When implementing custom operations, you explicitly specify what to save and how to compute gradients:
+
+```python
+class MultiplyAdd(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, y, z):
+        # Save tensors needed for backward
+        ctx.save_for_backward(x, y)
+        return x * y + z
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # Retrieve saved tensors
+        x, y = ctx.saved_tensors
+
+        # Compute gradients using chain rule
+        grad_x = grad_output * y  # ∂L/∂x = ∂L/∂out * ∂out/∂x
+        grad_y = grad_output * x  # ∂L/∂y = ∂L/∂out * ∂out/∂y
+        grad_z = grad_output      # ∂L/∂z = ∂L/∂out * 1
+
+        return grad_x, grad_y, grad_z
+
+# Usage
+x = torch.tensor([2.0], requires_grad=True)
+y = torch.tensor([3.0], requires_grad=True)
+z = torch.tensor([1.0], requires_grad=True)
+
+output = MultiplyAdd.apply(x, y, z)
+output.backward()
+
+print(x.grad, y.grad, z.grad)  # tensor([3.]), tensor([2.]), tensor([1.])
+```
+
+**Retaining the Computation Graph**
+
+By default, `backward()` frees the computation graph after use to minimize memory consumption. To run multiple backward passes on the same graph (rare), use `retain_graph=True`:
+
+```python
+x = torch.tensor([1.0], requires_grad=True)
+y = x * 2
+loss = y.pow(2)
+
+# First backward (graph freed)
+loss.backward(retain_graph=True)
+print(x.grad)  # tensor([8.])
+
+# Second backward on same graph
+x.grad.zero_()
+loss.backward()
+print(x.grad)  # tensor([8.])
+```
+
+Common use cases for `retain_graph=True`:
+- Computing gradients with respect to multiple losses
+- Higher-order derivatives (gradients of gradients)
+- Gradient penalty terms in GANs
+
+The cost is doubled memory consumption since the graph cannot be freed.
+
+**Gradient Hooks for Debugging and Modification**
+
+Hooks allow inspecting or modifying gradients during backpropagation:
+
+```python
+def gradient_hook(grad):
+    print(f'Gradient: {grad}')
+    # Modify gradient (e.g., gradient clipping)
+    return grad.clamp(-1.0, 1.0)
+
+x = torch.tensor([2.0], requires_grad=True)
+x.register_hook(gradient_hook)
+
+y = x * 10
+y.backward()
+# Prints: Gradient: tensor([10.])
+# x.grad contains clamped value: tensor([1.])
+```
+
+Common hook use cases:
+- **Debugging**: Inspect gradient flow, identify NaN sources
+- **Gradient clipping**: Clip per-tensor gradients before optimizer step
+- **Monitoring**: Log gradient statistics (norm, sparsity) during training
+- **Custom gradient manipulation**: Implement gradient reversal layers, stop gradients selectively
+
+**Detach vs. Data: Breaking Gradient Flow**
+
+Two ways to create tensors that don't track gradients:
+
+**Using .detach()** (recommended):
+
+```python
+x = torch.tensor([1.0], requires_grad=True)
+y = x.detach()
+
+# y shares storage with x but requires_grad=False
+# Gradients don't flow through y
+z = y * 2
+z.backward()  # Error: z doesn't require grad
+```
+
+**Using .data** (deprecated, dangerous):
+
+```python
+x = torch.tensor([1.0], requires_grad=True)
+y = x.data
+
+# DANGEROUS: In-place operations on y affect x but break autograd
+y.mul_(2)  # x is now [2.0] but autograd doesn't know!
+z = x + 1
+z.backward()  # Computes wrong gradient!
+```
+
+**Always use `.detach()` in new code.** The `.data` attribute exists for backward compatibility but can silently break gradient computation when used with in-place operations.
+
+**Memory Management for Saved Tensors**
+
+PyTorch provides mechanisms to reduce memory consumption from saved tensors:
+
+1. **Gradient checkpointing**: Recompute activations during backward instead of storing them. Trades computation for memory (typically 2× slower backward, 50% less memory).
+
+2. **Hooks to free saved tensors**: Manually remove saved tensors after they're no longer needed:
+
+```python
+def hook(grad):
+    # Free saved tensors after computing gradient
+    return grad
+
+tensor.register_hook(hook)
+```
+
+3. **Mixed-precision training**: Use FP16 for activations (half memory) while maintaining FP32 gradients for numerical stability.
+
+These autograd internals enable PyTorch's flexibility: users write forward passes in natural Python, and autograd automatically constructs backward passes with correct gradients and efficient memory management. Understanding these mechanisms is crucial for debugging training issues, implementing custom operations, and optimizing memory usage in production systems.
+
 ##### The Systems Engineering Breakthrough {#sec-ai-frameworks-systems-engineering-breakthrough-ab13}
 
 While the mathematical foundations of automatic differentiation were established decades ago, the practical implementation in machine learning frameworks represents a significant systems engineering achievement. Understanding this perspective illuminates why automatic differentiation systems enabled the deep learning revolution.
