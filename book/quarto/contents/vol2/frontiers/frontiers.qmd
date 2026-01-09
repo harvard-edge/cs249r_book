@@ -264,6 +264,50 @@ The Joint Embedding Predictive Architecture (JEPA)[^fn-jepa] demonstrates a more
 
 [^fn-jepa]: **Joint Embedding Predictive Architecture (JEPA)**: Meta AI's framework [@lecun2022path] for learning abstract world models. V-JEPA [@bardes2024vjepa] learns object permanence and physics from video alone, without labels or rewards. Key innovation: predicting in latent space rather than pixel space, similar to how humans imagine scenarios abstractly rather than visualizing every detail.
 
+**Mathematical Framework for Self-Supervised Learning**
+
+To understand why self-supervised learning fundamentally differs from supervised learning, consider the mathematical structure. Supervised learning optimizes:
+
+$$\min_\theta \mathbb{E}_{(x,y) \sim p_{data}}[\mathcal{L}(f_\theta(x), y)]$$
+
+where $(x, y)$ pairs require human annotation. Each sample needs explicit labels, creating an $O(N)$ annotation cost for $N$ training examples. This dependency on labeled data constitutes the fundamental bottleneck: human annotation bandwidth limits training set size, which in turn limits model capability through sample complexity bounds.
+
+Self-supervised learning eliminates explicit labels by constructing supervision from data structure itself. The general form is:
+
+$$\min_\theta \mathbb{E}_{x \sim p_{data}}[\mathcal{L}(f_\theta(x), g(x))]$$
+
+where $g(x)$ derives pseudo-labels from $x$ automatically without human intervention. The function $g$ varies by modality and learning objective, but critically requires no annotation cost. This enables training on arbitrarily large unlabeled datasets, with sample complexity limited only by data availability rather than annotation bandwidth.
+
+**Contrastive Learning Framework.** Contrastive methods learn representations by distinguishing similar pairs from dissimilar ones. Given input $x$, generate two augmented views $x_i = t_i(x)$ and $x_j = t_j(x)$ where $t$ represents transformations (cropping, color jittering, masking). The InfoNCE objective maximizes agreement between positive pairs while separating negatives:
+
+$$\mathcal{L}_{contrastive} = -\log \frac{\exp(\text{sim}(z_i, z_j) / \tau)}{\sum_{k=1}^{2N} \mathbb{1}_{k \neq i} \exp(\text{sim}(z_i, z_k) / \tau)}$$
+
+where $z_i = h(f_\theta(x_i))$ projects representations through encoder $f_\theta$ and projection head $h$, $\text{sim}(u,v) = u^\top v / \|u\| \|v\|$ computes cosine similarity, and $\tau$ is a temperature parameter controlling concentration. The numerator encourages similar representations for augmented views of the same input (positive pairs), while the denominator pushes apart representations from different inputs (negative pairs).
+
+This formulation provides several quantitative advantages. First, it scales with unlabeled data: training on 1 billion images achieves 5-10% better downstream accuracy than 1 million images, with improvements continuing beyond supervised learning's saturation point. Second, it learns transferable representations: a model pre-trained contrastively on ImageNet achieves 92% of supervised performance when fine-tuned on target tasks using only 1% of labeled data, demonstrating 100× label efficiency improvement. Third, the learned representations encode semantic similarity: objects from the same category cluster in embedding space even without category labels during pre-training, with 72% accuracy on nearest-neighbor classification despite zero labeled training examples.
+
+**Masked Prediction Framework.** Instead of contrasting examples, masked prediction reconstructs corrupted inputs. Given input $x$, mask a subset $M \subset \{1, ..., |x|\}$ and predict masked content from visible context:
+
+$$\mathcal{L}_{masked} = \mathbb{E}_{M}[\sum_{i \in M} -\log p_\theta(x_i | x_{M^c})]$$
+
+where $M^c$ denotes unmasked positions. For language (BERT), mask 15% of tokens and predict them from bidirectional context. For vision (MAE), mask 75% of image patches and reconstruct pixels through a decoder. This asymmetry (high masking rate for images, low for text) reflects information density: natural images contain substantial spatial redundancy, enabling reconstruction from sparse observations, while language encodes denser semantic content requiring more context.
+
+The mathematical advantage appears in the reconstruction objective's information theoretic interpretation. Minimizing reconstruction loss upper bounds mutual information between learned representations and input data: $I(Z; X) \geq H(X) - \mathcal{L}_{masked}$, where $H(X)$ is input entropy and $Z = f_\theta(x)$ represents learned embeddings. Successful reconstruction from partial observations requires capturing underlying data structure, forcing the model to learn generalizable features rather than memorizing surface statistics.
+
+Quantitatively, masked image modeling achieves 87.8% ImageNet accuracy using only Vision Transformer encoders, matching supervised pre-training without any labeled data. For language, BERT masked prediction enables 93.2% GLUE benchmark performance from self-supervised pre-training on web text, approaching human-level language understanding without task-specific supervision. The key insight: predicting missing information from context forces learning representations that capture data relationships, enabling transfer to downstream tasks.
+
+**JEPA Mathematical Formulation.** The Joint Embedding Predictive Architecture formalizes the distinction between generative and predictive modeling. Rather than reconstructing input $x$ itself, JEPA predicts representations in latent space:
+
+$$\mathcal{L}_{JEPA} = \mathbb{E}_{x,t}[\|s_\theta(x_t) - z_\theta(x_{t-\Delta t})\|^2]$$
+
+where $s_\theta$ computes target representations from future states $x_t$, $z_\theta$ encodes context from past states $x_{t-\Delta t}$, and prediction occurs in embedding space rather than pixel/token space. The critical difference: by predicting abstract representations rather than raw observations, JEPA avoids modeling irrelevant details. When predicting video frames, pixel-level prediction must account for texture patterns, lighting variations, and background clutter. Representation-level prediction ignores such details, focusing on semantically relevant dynamics like object motion and interaction.
+
+This abstraction provides measurable efficiency gains. V-JEPA processes 2000 video frames to learn object permanence and basic physics, while pixel-prediction models require 10,000+ frames for equivalent understanding (5× sample efficiency improvement). The learned representations transfer across contexts: trained on balls rolling down ramps, JEPA generalizes to predicting trajectories for novel objects without retraining, demonstrating compositional understanding impossible for pixel-level models that memorize specific visual patterns.
+
+**Sample Complexity Analysis.** Self-supervised learning's fundamental advantage lies in sample complexity. Supervised learning requires $O(d/\epsilon^2)$ labeled examples to learn a classifier with $d$ dimensions and error $\epsilon$ (VC dimension bound). Self-supervised learning amortizes this cost: pre-train once on $10^9$ unlabeled examples, then fine-tune for specific tasks using $10^2$-$10^3$ labeled examples. The effective sample complexity becomes $O(d_{pretrain}/\epsilon_{pretrain}^2 + d_{finetune}/\epsilon_{finetune}^2)$ where typically $d_{pretrain} \gg d_{finetune}$, enabling massive labeled data reduction for downstream tasks.
+
+Empirically, this manifests as label efficiency. ImageNet classification requires 1.28M labeled images to achieve 76% supervised accuracy. With self-supervised pre-training, the same 76% accuracy requires only 12,800 labeled images (100× reduction), and 1% labeled data achieves 72% accuracy. For language understanding, GPT-3 achieves few-shot learning: providing 10-100 examples in context enables task performance approaching supervised fine-tuning on thousands of labeled examples, representing 10-100× label efficiency improvement from self-supervised pre-training on web text.
+
 For compound systems, self-supervised learning enables each specialized component to develop expertise from its natural data domain. A vision module learns from images, a language module from text, a dynamics module from video, all without manual labeling. The engineering challenge involves coordinating these diverse learning processes: ensuring representations align across modalities, preventing catastrophic forgetting when components update, and maintaining consistency as the system scales. Framework infrastructure (PyTorch, TensorFlow, JAX) must evolve to support these heterogeneous self-supervised objectives within unified training loops.
 
 #### Synthetic Data Generation {#sec-agi-systems-synthetic-data-generation-a05e}
