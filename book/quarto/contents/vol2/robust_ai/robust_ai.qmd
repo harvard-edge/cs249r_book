@@ -863,6 +863,84 @@ Mitigating permanent faults requires comprehensive fault-tolerant design combini
 
 [^fn-checkpoint-restart]: **Checkpoint and Restart Mechanisms**: Fault tolerance techniques that periodically save complete program state to persistent storage, enabling recovery from failures. Modern distributed training checkpoints 100GB+ model states every 10-30 minutes. Google's TPU pods achieve 99.9% training completion rates through coordinated checkpointing, reducing wasted computation from node failures to <1% of total training time.
 
+#### Optimal Checkpoint Frequency: Young's Formula {#sec-robust-ai-youngs-formula-checkpoint}
+
+Checkpoint-restart mechanisms provide essential fault tolerance for long-running ML training jobs, but determining optimal checkpoint frequency requires balancing competing costs. Checkpointing too frequently wastes computational resources on I/O operations, while checkpointing too infrequently risks losing significant work when failures occur.
+
+##### Checkpoint Overhead Analysis {#sec-robust-ai-checkpoint-overhead}
+
+Checkpoint operations impose several quantifiable costs on ML training systems. The direct I/O time $T_c$ required to write model state to persistent storage ranges from seconds to tens of minutes depending on model size and storage bandwidth. For a 70-billion-parameter model with mixed-precision training (16-bit weights, 32-bit optimizer states), checkpoint size exceeds 2 TB, requiring 10-20 minutes to write to distributed storage at 2-4 GB/s bandwidth.
+
+Beyond I/O time, checkpointing introduces computational overhead from serialization, compression, and synchronization across distributed nodes. Modern frameworks implement asynchronous checkpointing to overlap I/O with computation, but memory bandwidth contention still reduces training throughput by 5-15% during checkpoint operations.
+
+When failures occur, recovery costs include restart time $T_r$ (reloading checkpoint from storage) and recomputation time for work lost since the last checkpoint. If failure occurs at time $t$ after the previous checkpoint at interval $T$, lost work equals $t$ fraction of checkpoint interval, averaging $T/2$ for uniformly distributed failures.
+
+##### Young's Approximation {#sec-robust-ai-youngs-approximation}
+
+John W. Young derived an analytical formula for optimal checkpoint interval in 1974 [@young1974first], minimizing total expected wasted work including both checkpoint overhead and recomputation after failures. For systems with exponential failure distributions (characteristic of hardware faults), the optimal checkpoint interval $T_{\text{opt}}$ is:
+
+$$T_{\text{opt}} = \sqrt{2 \times T_c \times \text{MTBF}}$$
+
+This formula emerges from balancing two competing costs:
+
+1. **Checkpoint overhead**: More frequent checkpoints (smaller $T$) waste more time on I/O
+2. **Recomputation cost**: Less frequent checkpoints (larger $T$) lose more work when failures occur
+
+The derivation assumes:
+
+- Exponential failure distribution with mean $\text{MTBF}$
+- Checkpoint time $T_c$ independent of checkpoint interval
+- Restart time $T_r \ll T_c$ (restart much faster than checkpoint)
+- Uniform failure probability throughout checkpoint interval
+
+Young's formula provides a first-order approximation. More sophisticated models account for non-uniform failure distributions, correlated failures in distributed systems, and checkpoint size variations, but Young's approximation remains widely used due to its simplicity and practical accuracy within 10-20% of optimal for most ML training scenarios.
+
+##### Worked Example: 1,000-GPU Training Job {#sec-robust-ai-checkpoint-example}
+
+Consider training a GPT-class language model on a cluster with 1,000 NVIDIA A100 GPUs. From our earlier reliability analysis, this cluster has $\text{MTBF}_{\text{cluster}} \approx 35$ minutes with ECC protection. Model state (weights, optimizer parameters, gradient buffers) totals 2 TB.
+
+**Checkpoint parameters:**
+
+Writing 2 TB to distributed storage at 2 GB/s aggregate bandwidth requires:
+$$T_c = \frac{2,000 \text{ GB}}{2 \text{ GB/s}} = 1,000 \text{ seconds} \approx 17 \text{ minutes}$$
+
+System MTBF with ECC protection:
+$$\text{MTBF} = 35 \text{ minutes} = 2,100 \text{ seconds}$$
+
+**Applying Young's formula:**
+
+$$T_{\text{opt}} = \sqrt{2 \times 17 \times 35} = \sqrt{2 \times 1,000 \times 2,100} = \sqrt{4,200,000} \approx 2,050 \text{ seconds} \approx 34 \text{ minutes}$$
+
+This optimal interval closely matches industry practice of checkpointing every 30-45 minutes for large-scale training jobs, validating Young's formula applicability to ML systems.
+
+**Efficiency analysis:**
+
+With optimal checkpointing every 34 minutes:
+
+- **Checkpoint overhead per cycle**: $\frac{17}{34} \approx 50\%$ of interval spent checkpointing
+- **Expected failures per day**: $\frac{1,440 \text{ min/day}}{35 \text{ min/failure}} \approx 41$ failures
+- **Average lost work per failure**: $\frac{T_{\text{opt}}}{2} = 17$ minutes recomputation
+- **Recovery time per failure**: $T_c + \frac{T_{\text{opt}}}{2} = 17 + 17 = 34$ minutes total
+- **Daily wasted work**: $41 \times 34 = 1,394$ minutes $\approx 97\%$ of day
+
+This calculation reveals the severe reliability challenge: without improved MTBF, the cluster spends comparable time recovering from failures as performing useful computation. This motivates aggressive error correction (improving MTBF from 35 to 6+ hours with advanced ECC) and hierarchical checkpoint strategies.
+
+##### Checkpoint Frequency Sensitivity {#sec-robust-ai-checkpoint-sensitivity}
+
+Young's formula exhibits square root scaling: doubling MTBF increases optimal checkpoint interval by only $\sqrt{2} \approx 1.4\times$. This sub-linear relationship means reliability improvements provide diminishing returns for checkpoint frequency optimization.
+
+For the example above with improved MTBF of 6 hours (360 minutes):
+
+$$T_{\text{opt}} = \sqrt{2 \times 17 \times 360} = \sqrt{12,240} \approx 111 \text{ minutes}$$
+
+Increasing MTBF by $10\times$ (from 35 to 360 minutes) increases optimal checkpoint interval by only $3.2\times$ (from 34 to 111 minutes). However, efficiency improves dramatically:
+
+- **Checkpoint overhead**: $\frac{17}{111} \approx 15\%$ per interval
+- **Expected failures per day**: $\frac{1,440}{360} = 4$ failures
+- **Daily wasted work**: $4 \times (17 + 55.5) = 290$ minutes $\approx 20\%$ of day
+
+This demonstrates why ECC memory protection is essential: the $10\times$ MTBF improvement transforms an unusable system (97% overhead) into a practical training infrastructure (20% overhead).
+
 Regular monitoring, testing, and maintenance help detect and replace failing components before critical errors occur.
 
 ### Intermittent Faults {#sec-robust-ai-intermittent-faults-35e9}
