@@ -840,6 +840,75 @@ A key insight from LeCun's world model hypothesis is the distinction between gen
 
 Instead of generating text tokens sequentially, future AGI systems predict consequences of actions in abstract representation spaces. For robotics, this means predicting how objects move when pushed (physics world model). For language, this means predicting how conversations evolve based on speaking strategies (social world model). For reasoning, this means predicting how mathematical statements follow from axioms (logical world model).
 
+**Causal Reasoning Framework for World Models**
+
+World models must distinguish correlation from causation to support genuine reasoning. Judea Pearl's causal hierarchy provides the formal framework for understanding this distinction, essential for ML systems engineers building world model components.
+
+**Pearl's Causal Hierarchy.** Causal reasoning operates at three levels, each requiring increasingly sophisticated capabilities:
+
+**Level 1: Association** ($P(Y | X)$) answers "What is the probability of $Y$ given we observe $X$?" This requires only observational data and standard conditional probability. Current LLMs operate at this level, modeling $P(\text{next\_token} | \text{context})$ from training distribution patterns. They learn that "rain" and "umbrella" co-occur but not why. A model achieves high accuracy predicting $P(\text{umbrella} | \text{rain})$ purely from statistical association, sufficient for many predictive tasks but insufficient for reasoning about interventions.
+
+**Level 2: Intervention** ($P(Y | do(X))$) answers "What happens to $Y$ if we force $X$ to occur?" This requires causal structure and cannot be computed from observational data alone. The distinction matters when confounders exist. Consider:
+
+$$P(\text{umbrella} | \text{rain}) \neq P(\text{umbrella} | do(\text{rain}))$$
+
+if weather forecasts confound the relationship. Observing rain updates beliefs about forecasts (which caused people to bring umbrellas), but forcing rain artificially doesn't change forecasts. Planning requires $do()$ operations: "What if I move this object?" demands predicting consequences of actions, not mere observation. Current LLMs cannot reliably perform Level 2 reasoning because they model $P(X)$ from passive observation, lacking the causal graph structure necessary for intervention calculus.
+
+**Level 3: Counterfactual** ($P(Y_x | X', Y')$) answers "What would $Y$ have been if $X$ had been different, given we observed $X'$ and $Y'$?" This requires structural causal models with latent variables. Example: "Would there have been an accident if I hadn't braked?" given that braking occurred and no accident resulted. Counterfactual reasoning enables learning from near-misses, credit assignment in multi-agent systems, and robust decision-making under uncertainty. This represents the most sophisticated causal reasoning, requiring models of unobserved factors affecting both actions and outcomes.
+
+**Structural Causal Models for World Modeling.** To achieve Level 2 and 3 reasoning, world models require structural causal models (SCMs) that explicitly represent causal relationships. An SCM consists of:
+
+1. Variables $V = \{X_1, ..., X_n\}$ representing observable states
+2. Structural equations $X_i = f_i(PA_i, U_i)$ where $PA_i$ are causal parents and $U_i$ are latent factors
+3. Distribution $P(U)$ over unobserved variables
+
+For world models, this translates to forward and inverse models:
+
+**Forward Model**: Predicts next state from current state and action
+$$s_{t+1} = f(s_t, a_t, u_t)$$
+
+where $s_t$ is current state, $a_t$ is action, and $u_t$ represents unobserved factors (noise, environmental randomness, hidden variables). Learning $f$ from observations where $u_t$ is latent constitutes the world modeling challenge. Unlike supervised learning with paired $(x,y)$ examples, world models must infer causal structure from sequential observations where latent factors create stochasticity.
+
+**Inverse Model**: Infers actions from state transitions
+$$a_t = g(s_t, s_{t+1}, u_t)$$
+
+This enables planning through optimization: find actions $a_{1:T}$ that achieve desired state $s_{goal}$. The inverse problem is fundamentally harder than forward prediction because state transitions are many-to-one (multiple action sequences can produce the same outcome) while inverse inference is one-to-many (a single transition may result from many possible actions).
+
+**Quantitative Diagnostic: Why Causality Matters.** Compositional physical reasoning provides measurable evidence for causal understanding's importance. Consider:
+
+**Setup**: Train models on objects A and B in isolation (push, stack, separate manipulation primitives). Test on novel compositions (stack A on B then push both, push A to enable stacking B on top).
+
+**Level 1 System Performance** (LLM, correlation-based): 23% accuracy on compositional tasks. These models retrieve similar seen scenarios from training data but fail when asked to compose known operations in novel ways. When asked "What happens if you push the stack?" the model searches for training examples matching "push" and "stack" rather than composing causal understanding of pushing (applies force causing motion) with stacking (requires supporting surface).
+
+**Level 2 System Performance** (World model with causal graph): 78% accuracy on compositional tasks. These systems understand that push CAUSES movement through force application, and stack REQUIRES stable support, enabling them to reason about compositions absent from training. When asked "What happens if you push the stack?" the model composes: push causes force on bottom object, which propagates to top object via contact, causing both to move together.
+
+**Quantitative Gap**: 78% - 23% = 55 percentage points. This absolute improvement quantifies causal reasoning's value for compositional generalization. The performance difference emerges specifically on out-of-distribution compositions: both systems achieve 95%+ accuracy on in-distribution tasks seen during training, but only causal world models generalize systematically to novel combinations.
+
+**Learning Causal Structure.** How do world models acquire causal graphs from observation? Three approaches emerge:
+
+1. **Intervention-based learning**: Actively manipulate environment and observe consequences. Robotics systems learn physics by pushing objects and observing motion, building causal models mapping actions to effects. This requires embodied interaction: $10^4$ push actions suffice to learn basic mechanics, while passive observation of $10^6$ video frames yields weaker models lacking intervention understanding.
+
+2. **Temporal precedence**: Exploit time's arrow—causes precede effects. From video sequences showing rain followed by wet surfaces, temporal models infer rain→wet causality. This succeeds when temporal ordering reflects causality but fails with confounders (forecasts cause both umbrella-carrying and subsequent rain observation).
+
+3. **Invariance-based learning**: Identify relationships stable across distribution shifts. Causal relationships (rain causes wetness) remain constant across locations and times, while spurious correlations (rain correlates with traffic) vary by context. Training on diverse environments and identifying invariant patterns enables causal discovery [@peters2016causal].
+
+**Systems Engineering for Causal World Models.** Implementing causal reasoning at scale creates distinct engineering challenges:
+
+**Evaluation Infrastructure**: Testing causal understanding requires intervention experiments, not passive prediction metrics. Standard benchmarks measure $P(Y | X)$ accuracy, but causal models need evaluation on $P(Y | do(X))$. This demands simulation environments supporting counterfactual queries or carefully designed A/B tests in production systems. Offline evaluation must construct intervention distributions from observational data using causal inference techniques (propensity score matching, instrumental variables).
+
+**Data Requirements**: Learning causal structure requires diverse intervention data. Passive observation of $10^9$ examples may produce worse causal models than active intervention on $10^6$ examples. For embodied systems, this motivates curiosity-driven exploration: agents actively seek state-action pairs informative about causal structure rather than passively observing common trajectories. The data engineering challenge involves generating or collecting interventional data at scale, requiring simulation environments, human demonstrations of diverse strategies, or active learning protocols.
+
+**Architectural Design**: Causal world models separate dynamics (how states evolve causally) from observation (how states map to perceptions). This factorization enables:
+- **Modularity**: Swap dynamics models when environment physics change while preserving observation models
+- **Transfer**: Causal structure learned in simulation transfers to physical systems despite appearance differences
+- **Interpretability**: Causal graphs provide human-readable explanations for predictions
+
+These benefits require architectural choices encoding causal structure: graph neural networks representing relational dynamics, modular architectures separating object-level causal models, and symbolic layers encoding logical constraints.
+
+**Connection to Systems Engineering.** As ML systems engineers designing AGI components, causal reasoning provides formal tools for intervention analysis—the essence of engineering. When you design a serving system, you reason causally: "If I increase batch size (intervention), latency will rise (consequence) because per-request processing time grows." This is Level 2 reasoning. World models achieving this capability can plan effectively, while those limited to Level 1 correlation cannot.
+
+The causal hierarchy clarifies why scaled LLMs struggle with novel reasoning despite vast training data: they model $P(\text{text})$ from observation, lacking the causal structure necessary for $P(\text{outcome} | do(\text{action}))$ inference. Future AGI systems require world models implementing Level 2 reasoning at minimum, with Level 3 capabilities emerging as systems handle increasing environmental complexity.
+
 Systems engineering challenges span multiple dimensions. Data requirements grow substantially: learning accurate world models requires petabytes of multimodal interaction data capturing diverse causal patterns, far exceeding text-only training. Architecture design must support temporal synchronization across multiple sensory modalities (vision at 30 Hz, audio at 16 kHz, proprioception at 1 kHz), requiring careful buffer management and alignment. Training procedures must enable continuous learning from streaming data without catastrophic forgetting (challenges explored in @sec-agi-systems-continual-learning-lifelong-adaptation-7aee), updating world models as environments change while preserving previously learned causal relationships.
 
 Verification poses unique challenges. Evaluating world models requires testing causal predictions, not just statistical accuracy. A model predicting "umbrellas appear when it rains" achieves high statistical accuracy but fails causally, as umbrellas don't cause rain. Testing requires intervention experiments: if the model believes rain causes umbrellas, removing umbrellas shouldn't affect predicted rain. Implementing such causal testing at scale demands sophisticated evaluation infrastructure beyond standard ML benchmarking.
