@@ -320,6 +320,163 @@ For example, a facial recognition system might have 99% accuracy for "Men" and 9
 
 A principled approach to fairness must account for overlapping and intersectional identities, ensuring that model behavior remains consistent across subgroups that may not be explicitly labeled in advance. Recent work in this area emphasizes the need for predictive reliability across a wide range of population slices [@hebert2018multicalibration], reinforcing the idea that fairness must be considered a system-level requirement, not a localized adjustment. This expanded view of fairness highlights the importance of designing architectures, evaluation protocols, and monitoring strategies that support more nuanced, context-sensitive assessments of model behavior.
 
+#### Quantitative Fairness Measurement {#sec-responsible-ai-quantitative-fairness-measurement-a8f2}
+
+While the fairness criteria above provide formal definitions, practitioners need quantitative methods to measure the degree of fairness violation and establish actionable thresholds for intervention. This section develops the mathematical framework for quantifying disparities and determining when they warrant corrective action.
+
+##### Disparate Impact Ratio
+
+The **disparate impact ratio** (also called the **four-fifths rule** in employment law) quantifies the ratio of favorable outcome rates between groups [@feldman2015certifying]:
+$$
+\text{DI}(a,b) = \frac{P(h(x) = 1 \mid S = a)}{P(h(x) = 1 \mid S = b)}
+$$
+
+where group $b$ is typically the majority or privileged group. U.S. Equal Employment Opportunity Commission guidelines suggest disparate impact when $\text{DI} < 0.8$, meaning the protected group receives favorable outcomes at less than 80% the rate of the reference group.
+
+For the loan approval example from earlier, we calculated $P(h(x)=1 \mid S=A) = 0.70$ and $P(h(x)=1 \mid S=B) = 0.40$. The disparate impact ratio is:
+$$
+\text{DI}(B,A) = \frac{0.40}{0.70} = 0.57
+$$
+
+This violates the four-fifths rule substantially, with Group B receiving approvals at only 57% the rate of Group A. This quantifies the severity of demographic parity violation and provides a legally recognized threshold for intervention.
+
+##### Statistical Parity Difference
+
+An alternative metric measures the absolute difference in favorable outcome rates [@calders2009building]:
+$$
+\text{SPD}(a,b) = P(h(x) = 1 \mid S = a) - P(h(x) = 1 \mid S = b)
+$$
+
+This metric ranges from -1 to +1, with 0 indicating perfect demographic parity. For our loan example: $\text{SPD}(A,B) = 0.70 - 0.40 = 0.30$, indicating a 30 percentage point gap in approval rates.
+
+Unlike disparate impact ratio (which is multiplicative), statistical parity difference provides an additive measure that is easier to interpret when comparing multiple groups or tracking changes over time. A threshold of $|\text{SPD}| \leq 0.10$ (10 percentage points) is commonly used in fairness audits, though context-specific thresholds should be established through stakeholder deliberation.
+
+##### Equal Opportunity Difference
+
+To quantify violations of equality of opportunity, measure the difference in true positive rates:
+$$
+\text{EOD}(a,b) = P(h(x) = 1 \mid S = a, Y = 1) - P(h(x) = 1 \mid S = b, Y = 1)
+$$
+
+From the loan example: $\text{EOD}(A,B) = 0.89 - 0.60 = 0.29$. This 29 percentage point gap means qualified Group A applicants are 29% more likely to be correctly approved than equally qualified Group B applicants. The metric directly measures opportunity inequality among deserving individuals.
+
+##### Equalized Odds Metrics
+
+Full equalized odds compliance requires equalizing both true positive rates and false positive rates. Define the **average odds difference** [@hardt2016equality]:
+\begin{align*}
+\text{AOD}(a,b) = \frac{1}{2}\Big[&\big|P(h(x) = 1 \mid S = a, Y = 1) - P(h(x) = 1 \mid S = b, Y = 1)\big| \\
+&+ \big|P(h(x) = 1 \mid S = a, Y = 0) - P(h(x) = 1 \mid S = b, Y = 0)\big|\Big]
+\end{align*}
+
+For the loan example:
+\begin{align*}
+\text{AOD}(A,B) &= \frac{1}{2}\big[|0.89 - 0.60| + |0.55 - 0.20|\big] \\
+&= \frac{1}{2}[0.29 + 0.35] = 0.32
+\end{align*}
+
+This composite metric captures both types of errors, revealing that the model has an average 32 percentage point disparity in error rates across positive and negative outcomes. Perfect equalized odds requires $\text{AOD} = 0$.
+
+##### Calibration
+
+A model is **calibrated** with respect to a sensitive attribute if, among individuals assigned score $s$ by the model, the fraction with positive outcomes is equal across groups [@kleinberg2016inherent]:
+$$
+P(Y = 1 \mid h(x) = s, S = a) = P(Y = 1 \mid h(x) = s, S = b), \quad \forall s
+$$
+
+For binary classifiers, calibration means that among individuals predicted positive, the fraction who are truly positive should be equal across groups. This is equivalent to equal **positive predictive value** (precision):
+$$
+\text{PPV}(a) = \frac{P(Y=1, h(x)=1 \mid S=a)}{P(h(x)=1 \mid S=a)} = \text{PPV}(b)
+$$
+
+From the loan example:
+\begin{align*}
+\text{PPV}(A) &= \frac{40}{70} = 0.571 \\
+\text{PPV}(B) &= \frac{30}{40} = 0.750
+\end{align*}
+
+The calibration gap is $0.750 - 0.571 = 0.179$. Group B's predicted positives are actually positive 75% of the time, while Group A's are only 57% accurate. This violates calibration and reveals that the model is less reliable when predicting approval for Group A.
+
+Calibration is critical for high-stakes decisions where individuals rely on predicted probabilities. A miscalibrated model systematically over or underpredicts risk for specific groups, leading to misallocated resources and eroded trust.
+
+##### Threshold Setting and Fairness Trade-offs
+
+In practice, fairness metrics can be manipulated by adjusting classification thresholds per group. Given a scoring function $s(x)$ (e.g., predicted probability), define group-specific thresholds $\tau_a$ and $\tau_b$ such that $h_a(x) = \mathbb{1}[s(x) \geq \tau_a]$ for group $a$ and similarly for group $b$.
+
+To achieve demographic parity, solve:
+$$
+P(s(x) \geq \tau_a \mid S = a) = P(s(x) \geq \tau_b \mid S = b)
+$$
+
+To achieve equal opportunity, solve:
+$$
+P(s(x) \geq \tau_a \mid S = a, Y = 1) = P(s(x) \geq \tau_b \mid S = b, Y = 1)
+$$
+
+For equalized odds, both true positive and false positive rate constraints must hold simultaneously. This is a constrained optimization problem that can be solved via post-processing [@hardt2016equality].
+
+However, threshold adjustment has limitations. If base rates differ substantially between groups (i.e., $P(Y=1 \mid S=a) \neq P(Y=1 \mid S=b)$), achieving one fairness criterion through thresholding will necessarily violate others due to the impossibility theorems. Furthermore, differential thresholds require access to sensitive attributes at inference time and raise concerns about explicit group-based treatment, which may itself be considered unfair or illegal in certain jurisdictions.
+
+::: {.callout-example title="Worked Example: Threshold Optimization for Equal Opportunity"}
+
+Consider a credit scoring model that outputs a probability $s(x) \in [0,1]$. Historical data shows:
+
+**Group A:** 1000 applicants, 600 would repay ($Y=1$), 400 would default ($Y=0$)
+
+- Score distribution for $Y=1$: Mean $\mu_A^+ = 0.72$, SD $\sigma_A^+ = 0.15$
+- Score distribution for $Y=0$: Mean $\mu_A^- = 0.45$, SD $\sigma_A^- = 0.18$
+
+**Group B:** 1000 applicants, 400 would repay ($Y=1$), 600 would default ($Y=0$)
+
+- Score distribution for $Y=1$: Mean $\mu_B^+ = 0.65$, SD $\sigma_B^+ = 0.16$
+- Score distribution for $Y=0$: Mean $\mu_B^- = 0.40$, SD $\sigma_B^- = 0.17$
+
+Using a single threshold $\tau = 0.60$ for both groups yields true positive rates:
+\begin{align*}
+\text{TPR}_A &= P(s(x) \geq 0.60 \mid S=A, Y=1) \approx 0.79 \\
+\text{TPR}_B &= P(s(x) \geq 0.60 \mid S=B, Y=1) \approx 0.62
+\end{align*}
+
+This 17 percentage point gap violates equal opportunity. To equalize TPR at approximately 0.70, we could lower Group B's threshold to $\tau_B = 0.52$ while keeping $\tau_A = 0.60$. However, this adjustment increases Group B's false positive rate from 0.28 to 0.38, degrading precision for Group B applicants from 0.69 to 0.61.
+
+This illustrates the fundamental trade-off: achieving equal opportunity through threshold adjustment comes at the cost of reduced calibration and increased false positives for the group receiving the lower threshold. The decision involves weighing opportunity equity against prediction reliability.
+
+:::
+
+##### Measuring Fairness Violations Statistically
+
+To determine whether observed disparities are statistically significant rather than sampling noise, practitioners should compute confidence intervals and conduct hypothesis tests.
+
+For demographic parity, test the null hypothesis $H_0: P(h(x)=1 \mid S=a) = P(h(x)=1 \mid S=b)$ using a two-proportion z-test. The test statistic is:
+$$
+z = \frac{\hat{p}_a - \hat{p}_b}{\sqrt{\hat{p}(1-\hat{p})\left(\frac{1}{n_a} + \frac{1}{n_b}\right)}}
+$$
+
+where $\hat{p}_a$ and $\hat{p}_b$ are the sample approval rates, $\hat{p} = \frac{n_a\hat{p}_a + n_b\hat{p}_b}{n_a + n_b}$ is the pooled proportion, and $n_a$, $n_b$ are sample sizes.
+
+For the loan example with $n_A = n_B = 100$, $\hat{p}_A = 0.70$, $\hat{p}_B = 0.40$:
+\begin{align*}
+\hat{p} &= \frac{100(0.70) + 100(0.40)}{200} = 0.55 \\
+z &= \frac{0.70 - 0.40}{\sqrt{0.55(0.45)(0.02)}} = \frac{0.30}{0.070} = 4.29
+\end{align*}
+
+With $z = 4.29$ (far exceeding critical value $z_{0.05/2} = 1.96$), we reject $H_0$ and conclude the demographic parity violation is statistically significant at $p < 0.001$.
+
+Similar tests can be constructed for equal opportunity and equalized odds by restricting to subpopulations where $Y=1$ or $Y=0$ respectively. Statistical significance does not imply practical significance; even statistically significant disparities may be acceptable if the magnitude is small. Conversely, large disparities in small samples may not reach statistical significance but still warrant intervention.
+
+##### Fairness Metrics in Practice
+
+Deploying fairness metrics in production requires careful consideration of measurement overhead, data requirements, and organizational governance:
+
+**Measurement Overhead**: Computing group-specific metrics requires maintaining separate statistics for each protected group. For $k$ groups and $m$ metrics, this requires $O(km)$ additional counters and $O(km)$ statistical tests per evaluation cycle. In high-throughput systems (>10K QPS), this overhead must be managed through sampling or asynchronous aggregation.
+
+**Data Requirements**: Fairness auditing requires ground truth labels ($Y$) and sensitive attributes ($S$) for a representative sample. In federated or privacy-preserving settings, obtaining this data may conflict with privacy goals. Techniques like encrypted aggregate statistics or differential privacy for group metrics can help reconcile fairness monitoring with privacy requirements.
+
+**Threshold Selection**: Establishing acceptable disparity thresholds requires domain expertise and stakeholder input. Legal thresholds (e.g., four-fifths rule) provide starting points, but context-specific harm assessments should inform final values. Document threshold rationale to support audits and regulatory compliance.
+
+**Temporal Stability**: Fairness metrics should be monitored over time to detect degradation due to distribution shift, feedback loops, or model updates. Continuous monitoring with automated alerting (e.g., "alert if $|\text{SPD}| > 0.15$ for 7 consecutive days") enables proactive intervention before harms accumulate.
+
+The quantitative framework developed here transforms fairness from an abstract principle into measurable engineering constraints. By establishing metrics, thresholds, and statistical tests, practitioners can systematically evaluate fairness throughout the ML lifecycle and make data-driven decisions about when intervention is required.
+
 Fairness considerations extend beyond algorithmic outcomes to encompass the computational resources and infrastructure required to deploy responsible AI systems. These broader equity implications, including environmental justice concerns, arise when energy-intensive AI infrastructure is concentrated in already disadvantaged communities[^fn-datacenter-environmental-justice].
 
 [^fn-datacenter-environmental-justice]: **Datacenter Environmental Justice**: Research suggests that a significant percentage of major cloud computing facilities in the U.S. are located within 10 miles of low-income communities or communities of color. These areas experience increased air pollution from backup generators, higher local temperatures from cooling systems, and strained local electrical grids. Meanwhile, high-speed internet access required for advanced AI services remains limited in many of these same communities, creating a computational equity gap where communities bear environmental costs without receiving proportional benefits.
