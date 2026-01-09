@@ -1332,6 +1332,121 @@ For **memory-bound operations**: reduce data movement through operator fusion, u
 
 For **compute-bound operations**: maximize hardware utilization through batching and parallelism, use Tensor Cores and specialized compute units, and optimize compute efficiency through tiling and scheduling.
 
+**Calculating Memory Bandwidth Bounds**: The roofline model's memory-bound region is determined by the peak memory bandwidth. For an operation to achieve performance $P$ (TFLOPS) in the memory-bound regime, the required bandwidth is:
+$$\text{Required Bandwidth} = \frac{P}{\text{AI}} \text{ bytes/sec}$$
+
+When Required Bandwidth exceeds Peak Bandwidth, performance is capped at:
+$$P_{\text{attainable}} = \text{Peak Bandwidth} \times \text{AI}$$
+
+**Worked Example: Convolutional Layer Analysis**
+
+Consider a Conv2D layer with input shape (batch=32, channels=128, height=56, width=56), output channels=256, kernel size 3×3 on an A100 GPU:
+
+*Computational Requirements*:
+
+- Output size: $32 \times 256 \times 56 \times 56 = 25.7M$ elements
+- FLOPs per output: $128 \times 3 \times 3 \times 2 = 2,304$ (multiply-add)
+- Total FLOPs: $25.7M \times 2,304 = 59.2$ billion FLOPs
+
+*Memory Traffic Analysis*:
+
+- Input: $32 \times 128 \times 56 \times 56 \times 2 = 25.7$ MB (FP16)
+- Weights: $256 \times 128 \times 3 \times 3 \times 2 = 1.2$ MB (FP16)
+- Output: $32 \times 256 \times 56 \times 56 \times 2 = 51.4$ MB (FP16)
+- Total: $78.3$ MB
+
+*Arithmetic Intensity*:
+$$\text{AI} = \frac{59.2 \text{ GFLOPs}}{78.3 \text{ MB}} = 756 \text{ FLOP/byte}$$
+
+This is **well above** A100's ridge point of 156 FLOP/byte, making this operation **compute-bound**. The layer will achieve near-peak performance of ~312 TFLOPS (FP16 with Tensor Cores).
+
+**Worked Example: Dense Layer Analysis**
+
+Consider a fully connected layer: input (batch=32, features=2048) → output (batch=32, features=2048) on the same A100:
+
+*Computational Requirements*:
+
+- Matrix multiply: $(32 \times 2048) \times (2048 \times 2048)$
+- Total FLOPs: $2 \times 32 \times 2048 \times 2048 = 274$ million FLOPs
+
+*Memory Traffic Analysis*:
+
+- Input: $32 \times 2048 \times 2 = 131$ KB (FP16)
+- Weights: $2048 \times 2048 \times 2 = 8.4$ MB (FP16)
+- Output: $32 \times 2048 \times 2 = 131$ KB (FP16)
+- Total: $8.7$ MB
+
+*Arithmetic Intensity*:
+$$\text{AI} = \frac{274 \text{ MFLOPs}}{8.7 \text{ MB}} = 31.5 \text{ FLOP/byte}$$
+
+This is **below** A100's ridge point of 156 FLOP/byte, making this operation **memory-bound**. Attainable performance:
+$$P_{\text{attainable}} = 2000 \text{ GB/s} \times 31.5 \text{ FLOP/byte} = 63 \text{ TFLOPS}$$
+
+This is only 20% of peak compute capability, demonstrating the memory wall effect for small batch sizes.
+
+**Worked Example: LayerNorm Analysis**
+
+LayerNorm with input shape (batch=32, seq=512, hidden=768):
+
+*Computational Requirements*:
+
+- Elements: $32 \times 512 \times 768 = 12.6M$
+- Operations per element: mean (1 ADD), variance (2 ADD, 1 MUL), normalize (1 ADD, 1 MUL, 1 DIV) ≈ 6 FLOPs
+- Total FLOPs: $12.6M \times 6 = 75.5M$ FLOPs
+
+*Memory Traffic*:
+
+- Input: $12.6M \times 2 = 25.2$ MB
+- Parameters (scale, bias): $768 \times 2 \times 2 = 3$ KB (negligible)
+- Output: $12.6M \times 2 = 25.2$ MB
+- Total: $50.4$ MB
+
+*Arithmetic Intensity*:
+$$\text{AI} = \frac{75.5 \text{ MFLOPs}}{50.4 \text{ MB}} = 1.5 \text{ FLOP/byte}$$
+
+This is **severely memory-bound** (156× below ridge point). Performance is limited to:
+$$P_{\text{attainable}} = 2000 \text{ GB/s} \times 1.5 \text{ FLOP/byte} = 3 \text{ TFLOPS}$$
+
+This represents less than 1% of A100's compute capacity, explaining why normalization layers contribute negligible compute time but significant latency.
+
+**Optimization Strategy Selection by Arithmetic Intensity**:
+
+The roofline analysis directly informs optimization priorities:
+
+1. **High AI (>200 FLOP/byte)**: Compute-bound operations like large convolutions
+   - Priority: Maximize compute utilization
+   - Techniques: Use Tensor Cores, optimize thread block dimensions, maximize occupancy
+   - Impact: Can approach 90-95% of peak TFLOPS
+
+2. **Medium AI (20-200 FLOP/byte)**: Borderline operations like medium-sized dense layers
+   - Priority: Balance compute and memory optimization
+   - Techniques: Increase batch size to improve AI, use register tiling, fuse with adjacent operations
+   - Impact: Can move from memory-bound to compute-bound regime
+
+3. **Low AI (<20 FLOP/byte)**: Memory-bound operations like small dense layers, element-wise operations
+   - Priority: Reduce memory traffic
+   - Techniques: Aggressive operator fusion, reduce precision (FP16 → INT8), algorithmic changes
+   - Impact: 2-4× speedup possible through fusion alone
+
+4. **Very Low AI (<2 FLOP/byte)**: Severely memory-bound operations like normalization, activation functions
+   - Priority: Eliminate memory round-trips
+   - Techniques: Mandatory fusion with adjacent operations, in-place computation where possible
+   - Impact: Can achieve 10× speedup through fusion (e.g., LayerNorm + GELU → single fused kernel)
+
+**Batch Size Impact on Arithmetic Intensity**:
+
+Increasing batch size improves AI for matrix operations by amortizing weight loading:
+
+For dense layer $(B \times M) \times (M \times N)$:
+$$\text{AI} = \frac{2BMN}{2BM + 2MN + 2BN} \approx \frac{2BMN}{2MN} = B \text{ as } B \to \infty$$
+
+Example: Dense layer with M=N=2048
+- Batch=1: AI = 2 FLOP/byte (memory-bound)
+- Batch=32: AI = 32 FLOP/byte (memory-bound)
+- Batch=256: AI = 186 FLOP/byte (compute-bound on A100)
+
+This explains the 10-100× throughput improvement from batching in production serving systems, as discussed in @sec-serving-optimization.
+
 #### Irregular Memory Access {#sec-ai-acceleration-irregular-memory-access-c6ec}
 
 Unlike traditional computing workloads, where memory access follows well-structured and predictable patterns, machine learning models often exhibit irregular memory access behaviors that make efficient data retrieval a challenge. These irregularities arise due to the nature of ML computations, where memory access patterns are influenced by factors such as batch size, layer type, and sparsity. As a result, standard caching mechanisms and memory hierarchies often struggle to optimize performance, leading to increased memory latency and inefficient bandwidth utilization.

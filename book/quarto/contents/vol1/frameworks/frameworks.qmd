@@ -4357,6 +4357,231 @@ The organization of these API layers reflects fundamental trade-offs in framewor
 
 These carefully designed API layers provide the interface between developers and framework capabilities, but they represent only one component of the complete development experience. While APIs define how developers interact with frameworks, the complete development experience depends on the broader ecosystem of tools, libraries, and resources that surround the core framework. This ecosystem extends framework capabilities beyond basic model implementation to encompass the entire machine learning lifecycle.
 
+### nn.Module: The Building Block Abstraction {#sec-ai-frameworks-nn-module-mechanics}
+
+The `nn.Module` class serves as the fundamental abstraction for building neural networks in PyTorch. Understanding its internal mechanics is essential for effective framework usage, as it provides parameter management, state handling, and extensibility through hooks. While @lst-mid_level_api demonstrated basic usage, the underlying implementation details determine how frameworks track trainable parameters, manage computational state, and enable debugging capabilities.
+
+#### Parameter Registration and Management
+
+PyTorch automatically tracks parameters through attribute assignment. When a developer assigns an `nn.Module` or `nn.Parameter` to a class attribute during initialization, the framework registers these objects for subsequent access through methods like `.parameters()` and `.named_parameters()`. This registration mechanism enables optimizers to access all trainable parameters without manual specification, as demonstrated in @lst-parameter_registration.
+
+::: {#lst-parameter_registration lst-cap="**Parameter Registration**: Demonstrates automatic parameter tracking through nn.Module attribute assignment, enabling optimizer access to all trainable weights."}
+```{.python}
+import torch
+import torch.nn as nn
+
+
+class CustomLayer(nn.Module):
+    def __init__(self, input_size, output_size):
+        super().__init__()
+        # Automatically registered as parameter
+        self.weight = nn.Parameter(
+            torch.randn(output_size, input_size)
+        )
+        self.bias = nn.Parameter(torch.randn(output_size))
+
+        # Non-trainable state (buffer)
+        self.register_buffer("running_mean", torch.zeros(output_size))
+
+    def forward(self, x):
+        return torch.matmul(x, self.weight.t()) + self.bias
+
+
+# Parameter access
+layer = CustomLayer(10, 20)
+for name, param in layer.named_parameters():
+    print(f"{name}: shape {param.shape}")
+# Output:
+# weight: shape torch.Size([20, 10])
+# bias: shape torch.Size([20])
+```
+:::
+
+The distinction between parameters and buffers affects both training and device management. Parameters with `requires_grad=True` participate in gradient computation and optimization, while buffers registered through `register_buffer()` move with the model during device transfers (e.g., `.to('cuda')`) but remain excluded from gradient computation. This separation proves essential for tracking statistics in normalization layers, where running averages update during training but do not receive gradients.
+
+#### Module State and Training Modes
+
+Modules maintain internal state that affects forward pass behavior. The `.train()` and `.eval()` methods toggle the `training` flag, which layers like Dropout and BatchNormalization query to adjust their behavior. During training mode, Dropout randomly zeros elements with probability $p$, while in evaluation mode it performs identity mapping. Similarly, BatchNormalization updates running statistics in training mode but uses frozen statistics during evaluation, as shown in @lst-module_state.
+
+::: {#lst-module_state lst-cap="**Module State Management**: Illustrates how training and evaluation modes affect layer behavior, particularly for Dropout and BatchNormalization."}
+```{.python}
+import torch
+import torch.nn as nn
+
+
+class Net(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.dropout = nn.Dropout(p=0.5)
+        self.bn = nn.BatchNorm1d(10)
+        self.fc = nn.Linear(10, 5)
+
+    def forward(self, x):
+        x = self.dropout(x)  # Behavior depends on self.training
+        x = self.bn(x)  # Updates running stats if training
+        return self.fc(x)
+
+
+model = Net()
+model.train()  # Sets self.training = True for all modules
+# Dropout active, BatchNorm updates statistics
+
+model.eval()  # Sets self.training = False for all modules
+# Dropout disabled, BatchNorm uses frozen statistics
+```
+:::
+
+Parameter freezing provides fine-grained control over which weights update during training. Setting `requires_grad=False` on specific parameters excludes them from gradient computation, effectively freezing those weights. This technique enables transfer learning workflows where pretrained feature extractors remain fixed while newly initialized classification layers train on target datasets. The implementation achieves computational savings by excluding frozen parameters from backward pass computation.
+
+::: {#lst-parameter_freezing lst-cap="**Parameter Freezing**: Demonstrates selective parameter freezing for transfer learning, where pretrained layers remain fixed while new layers train."}
+```{.python}
+# Freeze all parameters in a pretrained model
+pretrained_model = torch.hub.load(
+    "pytorch/vision", "resnet18", pretrained=True
+)
+
+for param in pretrained_model.parameters():
+    param.requires_grad = False
+
+# Replace final layer with trainable parameters
+pretrained_model.fc = nn.Linear(512, 10)  # New layer is trainable
+
+# Only fc.parameters() will receive gradients during training
+optimizer = torch.optim.Adam(
+    filter(lambda p: p.requires_grad, pretrained_model.parameters()),
+    lr=0.001,
+)
+```
+:::
+
+#### Module Hooks for Inspection and Debugging
+
+PyTorch provides hook mechanisms for intercepting and inspecting intermediate computations during forward and backward passes. Forward hooks execute after a module's forward computation completes, receiving the module instance, input tensors, and output tensors. Backward hooks execute during the backward pass, providing access to gradients flowing through the module. These hooks enable debugging gradient flow, implementing custom gradient transformations, and monitoring activation statistics without modifying model code, as illustrated in @lst-module_hooks.
+
+::: {#lst-module_hooks lst-cap="**Module Hooks**: Shows forward and backward hooks for inspecting activations and gradients during training."}
+```{.python}
+import torch
+import torch.nn as nn
+
+model = nn.Sequential(nn.Linear(10, 20), nn.ReLU(), nn.Linear(20, 5))
+
+
+# Forward hook to inspect activations
+def forward_hook(module, input, output):
+    print(f"Layer output shape: {output.shape}")
+    print(
+        f"Output statistics: mean={output.mean():.3f}, "
+        f"std={output.std():.3f}"
+    )
+
+
+# Backward hook to inspect gradients
+def backward_hook(module, grad_input, grad_output):
+    print(f"Gradient norm: {grad_output[0].norm():.3f}")
+
+
+# Register hooks on specific layer
+handle_fwd = model[0].register_forward_hook(forward_hook)
+handle_bwd = model[0].register_full_backward_hook(backward_hook)
+
+# Execute forward and backward pass
+x = torch.randn(32, 10)
+y = model(x)
+loss = y.sum()
+loss.backward()
+
+# Remove hooks when done
+handle_fwd.remove()
+handle_bwd.remove()
+```
+:::
+
+Hooks provide powerful debugging capabilities for identifying gradient pathologies. By registering backward hooks on all layers, developers can detect gradient vanishing (norms approaching zero) or gradient explosion (norms diverging to infinity) at specific layers. This diagnostic information proves invaluable when debugging training instabilities, as it localizes problematic layers without requiring manual gradient inspection after every training step.
+
+#### State Dictionary and Model Serialization
+
+The state dictionary mechanism provides a standardized interface for model serialization and checkpoint management. The `state_dict()` method returns an OrderedDict mapping parameter names to tensor values, capturing all parameters and registered buffers. The inverse operation `load_state_dict()` restores model state from a saved dictionary, enabling checkpoint recovery and model distribution, as shown in @lst-state_dict.
+
+::: {#lst-state_dict lst-cap="**State Dictionary**: Demonstrates model serialization and loading for checkpoint management."}
+```{.python}
+import torch
+import torch.nn as nn
+
+# Save model checkpoint
+model = nn.Sequential(nn.Linear(10, 20), nn.ReLU(), nn.Linear(20, 5))
+
+checkpoint = {
+    "model_state_dict": model.state_dict(),
+    "epoch": 42,
+    "optimizer_state_dict": optimizer.state_dict(),
+}
+torch.save(checkpoint, "checkpoint.pt")
+
+# Load checkpoint
+loaded_checkpoint = torch.load("checkpoint.pt")
+model.load_state_dict(loaded_checkpoint["model_state_dict"])
+optimizer.load_state_dict(loaded_checkpoint["optimizer_state_dict"])
+start_epoch = loaded_checkpoint["epoch"]
+```
+:::
+
+State dictionary semantics affect transfer learning and fine-tuning workflows. When loading a state dictionary with `strict=False`, the framework permits mismatched parameter names, enabling partial model loading where only compatible parameters transfer. This capability supports architecture modifications during fine-tuning, such as replacing classification heads while retaining feature extraction layers. The `missing_keys` and `unexpected_keys` return values identify which parameters failed to transfer, providing diagnostic information for debugging loading issues.
+
+#### Nested Module Composition
+
+Modules compose hierarchically, with parent modules automatically tracking child module parameters through the module tree. When a module contains other modules as attributes, the parent's `.parameters()` method recursively collects parameters from all descendants. This compositional structure enables modular architecture design where complex models assemble from reusable components, as demonstrated in @lst-nested_modules.
+
+::: {#lst-nested_modules lst-cap="**Nested Module Composition**: Shows hierarchical module composition where parent modules automatically track child parameters."}
+```{.python}
+import torch
+import torch.nn as nn
+
+
+class ResidualBlock(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.conv1 = nn.Conv2d(channels, channels, 3, padding=1)
+        self.bn1 = nn.BatchNorm2d(channels)
+        self.conv2 = nn.Conv2d(channels, channels, 3, padding=1)
+        self.bn2 = nn.BatchNorm2d(channels)
+
+    def forward(self, x):
+        residual = x
+        x = torch.relu(self.bn1(self.conv1(x)))
+        x = self.bn2(self.conv2(x))
+        return torch.relu(x + residual)
+
+
+class ResNet(nn.Module):
+    def __init__(self, num_blocks, channels=64):
+        super().__init__()
+        self.conv_in = nn.Conv2d(3, channels, 7, padding=3)
+        # Nested modules automatically tracked
+        self.blocks = nn.ModuleList(
+            [ResidualBlock(channels) for _ in range(num_blocks)]
+        )
+        self.fc = nn.Linear(channels, 10)
+
+    def forward(self, x):
+        x = self.conv_in(x)
+        for block in self.blocks:
+            x = block(x)
+        x = x.mean(dim=[2, 3])  # Global average pooling
+        return self.fc(x)
+
+
+# All parameters automatically accessible
+model = ResNet(num_blocks=4)
+print(
+    f"Total parameters: {sum(p.numel() for p in model.parameters())}"
+)
+```
+:::
+
+The hierarchical structure extends to module traversal and selective operations. Methods like `.named_modules()` enable iteration over the entire module tree, returning tuples of (name, module) for all descendants. This traversal mechanism supports operations requiring module-level access, such as replacing specific layer types (e.g., substituting all BatchNorm layers with GroupNorm) or applying initialization schemes to particular layer classes (e.g., Xavier initialization for all Linear layers).
+
+Understanding nn.Module mechanics enables effective model construction, debugging, and optimization. The automatic parameter registration simplifies optimizer setup, state dictionaries provide checkpoint management, hooks enable gradient inspection, and hierarchical composition supports modular architecture design. These mechanisms form the foundation for practical PyTorch development, bridging the gap between high-level model definitions and framework internals.
+
 ## Framework Ecosystem {#sec-ai-frameworks-framework-ecosystem-4f2e}
 
 Machine learning frameworks organize their fundamental capabilities into distinct components that work together to provide a complete development and deployment environment. These components create layers of abstraction that make frameworks both usable for high-level model development and efficient for low-level execution. Understanding how these components interact helps developers choose and use frameworks effectively, particularly as they support the complete ML lifecycle from data preprocessing @sec-data-engineering through training @sec-ai-training to deployment @sec-ml-operations. This ecosystem approach bridges the theoretical foundations presented in @sec-dl-primer with the practical requirements of production ML systems described in @sec-ml-systems.
