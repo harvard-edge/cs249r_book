@@ -1679,6 +1679,113 @@ This bound ensures that the algorithm's behavior remains statistically indisting
 
 [^fn-dp-sgd-adoption]: **DP-SGD Industry Adoption**: Apple was the first major company to deploy differential privacy at scale in 2016, protecting 1+ billion users' data in iOS. Their implementation adds noise to emoji usage, Safari crashes, and QuickType suggestions, balancing privacy (ε=4-16) with utility for improving user experience across their ecosystem.
 
+#### Mathematical Foundations and Privacy Parameters {#sec-security-privacy-dp-mathematical-foundations-7e4a}
+
+While the basic $\epsilon$-differential privacy definition provides intuition, production deployments of private ML systems require more sophisticated mathematical machinery. This section formalizes the privacy guarantees, noise mechanisms, and composition properties that enable rigorous privacy accounting in distributed training environments.
+
+**The $(\epsilon, \delta)$-Differential Privacy Formulation**
+
+The pure $\epsilon$-DP definition provides strong guarantees but can be overly restrictive for practical ML applications. A relaxed formulation, $(\epsilon, \delta)$-differential privacy, allows a small probability $\delta$ of privacy loss exceeding $\epsilon$. This relaxation proves essential for deep learning, where Gaussian noise (which has unbounded support) is preferred over Laplace noise for gradient perturbation.
+
+Formally, a randomized algorithm $\mathcal{A}$ satisfies $(\epsilon, \delta)$-differential privacy if for all adjacent datasets $D, D'$ and all measurable output sets $S$:
+$$
+\Pr[\mathcal{A}(D) \in S] \leq e^{\epsilon} \Pr[\mathcal{A}(D') \in S] + \delta
+$$
+
+The parameter $\delta$ represents the probability that the privacy guarantee fails catastrophically. In practice, $\delta$ must be set cryptographically small, typically $\delta < 1/n^2$ for a dataset of size $n$, ensuring negligible probability of privacy breach. For a dataset with 1 million records, $\delta = 10^{-12}$ ensures the probability of exceeding the $\epsilon$ bound remains vanishingly small.
+
+**Noise Mechanisms for Achieving Differential Privacy**
+
+Differential privacy is operationalized through carefully calibrated noise injection. The two primary mechanisms used in ML systems differ in their noise distributions and applicability:
+
+*Laplace Mechanism*: For pure $\epsilon$-DP, the Laplace mechanism adds noise drawn from $\text{Lap}(\Delta f/\epsilon)$, where $\Delta f$ is the global sensitivity of the function (the maximum change in output when one record changes). For a query $f$, the privatized output is:
+$$
+\tilde{f}(D) = f(D) + \text{Lap}\left(\frac{\Delta f}{\epsilon}\right)
+$$
+
+The Laplace distribution has density $p(x) = \frac{\epsilon}{2\Delta f}\exp\left(-\frac{\epsilon|x|}{\Delta f}\right)$, with scale parameter $b = \Delta f/\epsilon$. The noise magnitude scales inversely with $\epsilon$: stronger privacy ($\epsilon = 0.1$) requires 10× more noise than moderate privacy ($\epsilon = 1.0$).
+
+*Gaussian Mechanism*: For $(\epsilon, \delta)$-DP, the Gaussian mechanism adds noise $\mathcal{N}(0, \sigma^2)$ where $\sigma$ is calibrated based on $\epsilon, \delta$, and the $\ell_2$ sensitivity $\Delta_2 f$:
+$$
+\tilde{f}(D) = f(D) + \mathcal{N}\left(0, \sigma^2 \cdot (\Delta_2 f)^2\right)
+$$
+
+The noise scale must satisfy $\sigma \geq \frac{\Delta_2 f}{\epsilon}\sqrt{2\ln(1.25/\delta)}$ to achieve $(\epsilon, \delta)$-DP. For typical ML hyperparameters ($\epsilon=1, \delta=10^{-7}$), this requires $\sigma \approx 4.45 \cdot \Delta_2 f$.
+
+Gaussian noise is preferred in deep learning because gradient norms are naturally bounded in $\ell_2$ space, making sensitivity analysis tractable. The Gaussian mechanism also composes more tightly under Rényi Differential Privacy accounting (discussed below).
+
+**Privacy Loss Random Variable and Moments Accountant**
+
+A more refined approach to privacy analysis tracks the privacy loss random variable (PLRV), which quantifies how much information about an individual leaks from a single observation. For adjacent datasets $D, D'$ and algorithm output $O$, the privacy loss is:
+$$
+L^{(O)}_{(D,D')} = \ln\frac{\Pr[\mathcal{A}(D) = O]}{\Pr[\mathcal{A}(D') = O]}
+$$
+
+The PLRV characterizes the log-likelihood ratio between outputs on adjacent datasets. For $(\epsilon, \delta)$-DP, the tail probability must satisfy $\Pr[L > \epsilon] \leq \delta$. This formulation enables composition analysis through moment-generating functions.
+
+The *moments accountant* technique, introduced for DP-SGD by @abadi2016deep, tracks higher-order moments of the privacy loss distribution. Rather than computing worst-case composition, it analyzes the actual privacy loss distribution across training iterations. For mechanism $\mathcal{M}$ with privacy loss $L$, the moments accountant computes:
+$$
+\alpha_{\mathcal{M}}(\lambda) = \max_{D,D'} \ln \mathbb{E}_{O \sim \mathcal{M}(D)}\left[\left(\frac{\Pr[\mathcal{M}(D) = O]}{\Pr[\mathcal{M}(D') = O]}\right)^{\lambda}\right]
+$$
+
+for moment order $\lambda$. After $k$ compositions, the accumulated moment is $k \cdot \alpha_{\mathcal{M}}(\lambda)$. Applying the Markov inequality then yields $(\epsilon, \delta)$ bounds:
+$$
+\epsilon(\delta) = \min_{\lambda} \left[\frac{k \cdot \alpha_{\mathcal{M}}(\lambda) - \ln(1/\delta)}{\lambda - 1}\right]
+$$
+
+For DP-SGD training a ResNet-20 on CIFAR-10 with 100 epochs, batch size 256, and clipping norm $C=1.0$, the moments accountant yields $\epsilon \approx 2.3$ (for $\delta=10^{-5}$), compared to $\epsilon \approx 23$ under naive composition. This tighter accounting makes private deep learning practically feasible.
+
+**Rényi Differential Privacy and Composition**
+
+Rényi Differential Privacy (RDP), introduced by @mironov2017renyi, provides even tighter composition bounds by tracking Rényi divergence rather than KL divergence. A mechanism $\mathcal{M}$ satisfies $(\alpha, \varepsilon)$-RDP if for all adjacent $D, D'$:
+$$
+D_{\alpha}(\mathcal{M}(D) \| \mathcal{M}(D')) = \frac{1}{\alpha-1}\ln \mathbb{E}_{x \sim \mathcal{M}(D')}\left[\left(\frac{\Pr[\mathcal{M}(D) = x]}{\Pr[\mathcal{M}(D') = x]}\right)^{\alpha}\right] \leq \varepsilon
+$$
+
+where $\alpha > 1$ is the Rényi order. RDP composition is remarkably simple: if mechanism $\mathcal{M}_i$ satisfies $(\alpha, \varepsilon_i)$-RDP, then their composition satisfies $(\alpha, \sum_i \varepsilon_i)$-RDP. This linearity contrasts with the suboptimal $\sqrt{k}$ scaling of advanced composition for $(\epsilon, \delta)$-DP.
+
+For Gaussian noise with scale $\sigma$, the RDP guarantee is:
+$$
+\varepsilon(\alpha) = \frac{\alpha}{2\sigma^2}
+$$
+
+After $k$ iterations of DP-SGD with noise $\sigma$ and sampling rate $q$, the RDP guarantee is approximately:
+$$
+\varepsilon_{\text{total}}(\alpha) \approx \frac{k \cdot q^2 \cdot \alpha}{2\sigma^2}
+$$
+
+This RDP guarantee can be converted to $(\epsilon, \delta)$-DP using:
+$$
+\epsilon = \varepsilon + \frac{\ln(1/\delta)}{\alpha - 1}
+$$
+
+optimized over $\alpha$. For typical ML workloads, RDP provides 2-3× tighter bounds than moments accountant, enabling longer training with fixed privacy budget.
+
+**Practical Privacy Budget Example: DP-SGD for Image Classification**
+
+Consider training a CNN on 50,000 CIFAR-10 images with $(\epsilon, \delta) = (3.0, 10^{-5})$ target privacy. Using DP-SGD with:
+
+- Batch size $B = 4000$ (sampling rate $q = B/N = 0.08$)
+- Gradient clipping norm $C = 1.0$ (sensitivity $\Delta_2 = 2C/B = 0.0005$)
+- Noise multiplier $\sigma = 1.3$ (noise scale relative to clipping)
+- Training for $T = 60$ epochs ($k = T \cdot N/B = 750$ steps)
+
+The RDP analysis proceeds as follows:
+
+1. Per-step RDP: $\varepsilon_{\text{step}}(\alpha) \approx \frac{q^2 \alpha}{2\sigma^2} = \frac{(0.08)^2 \alpha}{2(1.3)^2} \approx 0.00189\alpha$
+
+2. Total RDP after 750 steps: $\varepsilon_{\text{total}}(\alpha) = 750 \cdot 0.00189\alpha = 1.42\alpha$
+
+3. Converting to $(\epsilon, \delta)$-DP, we optimize over $\alpha$:
+   - For $\alpha = 10$: $\epsilon = 1.42(10) + \ln(10^5)/9 = 14.2 + 1.28 = 15.48$ (too high)
+   - For $\alpha = 4$: $\epsilon = 1.42(4) + \ln(10^5)/3 = 5.68 + 3.83 = 9.51$
+   - For $\alpha = 3$: $\epsilon = 1.42(3) + \ln(10^5)/2 = 4.26 + 5.76 = 10.02$
+   - Optimal $\alpha^* \approx 3.5$ yields $\epsilon \approx 8.4$
+
+To achieve target $\epsilon = 3.0$, we must either: (1) reduce $\sigma$ to 0.7 (more noise, accuracy drops ~5%), (2) train for fewer epochs ($T = 25$, underfitting risk), or (3) increase batch size to $B = 8000$ (better sampling, requires more memory).
+
+This quantitative analysis demonstrates the fundamental privacy-utility-computational resource tradeoff in production ML systems.
+
 While differential privacy offers strong theoretical assurances, it introduces a trade-off between privacy and utility[^fn-privacy-utility-tension] that has measurable computational and accuracy costs.
 
 [^fn-privacy-utility-tension]: **Privacy-Utility Tension**: This core tradeoff was formalized by Dwork and McSherry, who proved that perfect privacy (infinite noise) yields no utility, while perfect utility (no noise) provides no privacy. The "privacy budget" concept emerged from this insight—you can only spend privacy once, making every query a strategic decision.
