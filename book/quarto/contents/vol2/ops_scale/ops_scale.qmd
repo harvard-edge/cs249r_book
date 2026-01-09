@@ -1017,6 +1017,106 @@ Interleaving implementation:
 
 This pattern is essential for recommendation systems where detecting small engagement changes quickly enables rapid iteration.
 
+**A/B Testing Statistical Foundations**
+
+A/B testing provides rigorous frameworks for comparing model variants, but at scale requires careful attention to statistical power, significance thresholds, and multiple testing correction. Improper statistical practices lead to false positives that waste engineering resources or false negatives that miss genuine improvements.
+
+**Sample Size Calculation**
+
+The required sample size for detecting an effect depends on four parameters: significance level (α), statistical power (1-β), baseline conversion rate (p), and minimum detectable effect (δ). For comparing two proportions, the sample size per variant follows (@eq-ab-sample-size):
+
+$$n = \frac{(Z_\alpha + Z_\beta)^2 \times 2p(1-p)}{\delta^2}$$ {#eq-ab-sample-size}
+
+where $Z_\alpha$ is the critical value for significance level α (typically 1.96 for α=0.05), $Z_\beta$ is the critical value for power (typically 0.84 for 80% power), $p$ is the baseline rate, and $\delta$ is the minimum detectable effect as an absolute difference.
+
+**Worked Example: Sample Size for Recommendation Model**
+
+A recommendation system has baseline click-through rate (CTR) of 5%. The team wants to detect a 10% relative improvement (0.5 percentage points absolute) with 95% confidence and 80% power.
+
+Parameters:
+- $Z_\alpha = 1.96$ (95% confidence, two-tailed)
+- $Z_\beta = 0.84$ (80% power)
+- $p = 0.05$ (baseline CTR)
+- $\delta = 0.005$ (0.5 percentage point improvement)
+
+Calculation:
+
+$$n = \frac{(1.96 + 0.84)^2 \times 2 \times 0.05 \times 0.95}{0.005^2}$$
+
+$$n = \frac{7.84 \times 0.095}{0.000025} = \frac{0.7448}{0.000025} = 29,792$$
+
+Each variant requires approximately 30,000 samples, totaling 60,000 observations. At 1 million requests per day, this experiment requires less than 2 hours. However, for a model with 1% baseline CTR detecting a 5% relative improvement (0.05 percentage points), the calculation yields:
+
+$$n = \frac{7.84 \times 2 \times 0.01 \times 0.99}{0.0005^2} = \frac{0.1552}{0.00000025} = 620,800$$
+
+Now each variant needs 620K samples, requiring approximately 15 hours at 1M requests/day. The lower the baseline rate and smaller the effect, the longer the experiment must run.
+
+**Statistical Significance Testing**
+
+Once data is collected, a two-proportion z-test determines if the observed difference is statistically significant. The test statistic is (@eq-ab-ztest):
+
+$$z = \frac{\hat{p}_B - \hat{p}_A}{\sqrt{\hat{p}(1-\hat{p})(\frac{1}{n_A} + \frac{1}{n_B})}}$$ {#eq-ab-ztest}
+
+where $\hat{p}_A$ and $\hat{p}_B$ are the observed conversion rates for control and treatment, $n_A$ and $n_B$ are sample sizes, and $\hat{p} = \frac{n_A\hat{p}_A + n_B\hat{p}_B}{n_A + n_B}$ is the pooled proportion.
+
+If $|z| > Z_\alpha$, reject the null hypothesis and conclude the variants differ significantly.
+
+**Multiple Testing Correction**
+
+Running multiple A/B tests simultaneously or sequentially without correction inflates the familywise error rate. With 20 independent tests at α=0.05, the probability of at least one false positive is:
+
+$$P(\text{at least one false positive}) = 1 - (1-\alpha)^k = 1 - 0.95^{20} = 0.642$$
+
+This means a 64% chance of falsely detecting an improvement. Three correction approaches address this:
+
+*Bonferroni correction* adjusts the significance threshold to $\alpha' = \frac{\alpha}{k}$ for $k$ tests. This is conservative but simple. For 20 tests with α=0.05, use α'=0.0025 for each test. This controls the familywise error rate but reduces statistical power.
+
+*Šidák correction* provides a less conservative adjustment:
+
+$$\alpha' = 1 - (1-\alpha)^{1/k}$$ {#eq-sidak-correction}
+
+For 20 tests: $\alpha' = 1 - 0.95^{1/20} = 0.00256$, slightly more lenient than Bonferroni.
+
+*False Discovery Rate (FDR)* control using Benjamini-Hochberg procedure allows a specified proportion of false positives among all rejections. This is appropriate when some false positives are acceptable. Order p-values from smallest to largest: $p_{(1)} \leq p_{(2)} \leq \ldots \leq p_{(k)}$. Find the largest $i$ such that:
+
+$$p_{(i)} \leq \frac{i}{k} \times \alpha$$
+
+Reject all hypotheses $H_{(1)}, \ldots, H_{(i)}$. This procedure is more powerful than Bonferroni when running many tests.
+
+**Sequential Testing and Early Stopping**
+
+Traditional A/B tests fix sample size in advance and evaluate once. Sequential testing allows monitoring results during data collection with principled early stopping rules. This can significantly reduce experiment duration while controlling error rates.
+
+The sequential probability ratio test (SPRT) evaluates the likelihood ratio after each observation:
+
+$$\Lambda_n = \frac{P(X_1, \ldots, X_n | H_1)}{P(X_1, \ldots, X_n | H_0)}$$
+
+Stop and reject $H_0$ if $\Lambda_n \geq \frac{1-\beta}{\alpha}$, stop and accept $H_0$ if $\Lambda_n \leq \frac{\beta}{1-\alpha}$, otherwise continue collecting data.
+
+For large-scale A/B testing, group sequential methods divide the experiment into planned analysis stages. At each stage, compare test statistic to adjusted thresholds (computed using methods such as O'Brien-Fleming or Pocock boundaries) that maintain overall α.
+
+**Practical Implementation Considerations**
+
+Real-world A/B testing faces complications beyond textbook statistics:
+
+*Carryover effects*: Users exposed to treatment may retain behavior changes after returning to control. This violates independence assumptions. Mitigation: use sufficient washout periods or cookie-based consistent assignment.
+
+*Network effects*: In social platforms, treating user A may affect user B's behavior if they interact. This violates the stable unit treatment value assumption (SUTVA). Mitigation: cluster randomization at network community level, though this reduces statistical power.
+
+*Novelty effects*: New model variants may show artificial improvement because users respond to novelty, not genuine superiority. Mitigation: extend experiment duration (typically 2-4 weeks) to observe steady-state behavior.
+
+*Metric selection*: Surrogate metrics (clicks, engagement) may not align with long-term objectives (retention, revenue). Mitigation: track both short-term surrogate metrics and long-term guardrail metrics, even if the latter require longer observation periods.
+
+**Worked Example: Multiple Testing Scenario**
+
+A platform team runs 30 A/B tests per quarter comparing candidate models. Using α=0.05 without correction, expect $30 \times 0.05 = 1.5$ false positives per quarter. Over a year, expect approximately 6 models falsely identified as improvements, wasting engineering effort on deployments that provide no actual value.
+
+Applying Bonferroni correction: $\alpha' = \frac{0.05}{30} = 0.00167$ per test. This requires larger sample sizes. For the recommendation model example above (5% baseline, 0.5pp effect), original requirement was 30K samples per variant. With Bonferroni correction, the more stringent $Z_{\alpha'}$ increases sample requirements to approximately 36K per variant (20% increase).
+
+Using FDR control at q=0.05: Among all significant results, expect at most 5% to be false positives. If 10 of 30 tests show significant results, expect at most 0.5 false positives rather than 10 × 0.05 = 0.5 with uncorrected tests. This provides better power than Bonferroni when running many tests.
+
+The choice of correction method depends on consequences of false positives. For high-stakes decisions (financial models, safety-critical systems), use conservative Bonferroni correction. For exploratory analysis where missing true effects is costly, use FDR control.
+
 ### Rollout Risk Management
 
 Not all deployments carry equal risk. Effective CI/CD systems classify and handle deployments based on their risk profile as categorized in @tbl-ops-scale-risk-categories.
