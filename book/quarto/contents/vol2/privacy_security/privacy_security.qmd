@@ -1032,6 +1032,171 @@ The attack does not reconstruct the full model, but reveals internal architectur
 
 As shown in their empirical evaluation, reproduced in @tbl-openai-theft, model parameters could be extracted with root mean square errors as low as $10^{-4}$, confirming that high-fidelity approximation is achievable at scale. These findings raise important implications for system design, suggesting that innocuous API features, like returning top-k logits, can serve as significant leakage vectors if not tightly controlled.
 
+#### Defenses Against Model Extraction {#sec-security-privacy-model-extraction-defenses-8f3b}
+
+Model extraction attacks exploit the input-output behavior of deployed models accessed through APIs. Defending against these attacks requires mechanisms that limit information leakage while maintaining model utility for legitimate users. The defensive strategy balances three competing concerns: preventing unauthorized model replication, preserving service quality for valid queries, and maintaining acceptable inference latency and cost.
+
+**Query Monitoring and Anomaly Detection**
+
+The first line of defense monitors query patterns to identify extraction attempts. Model extraction requires substantial query volume to achieve high-fidelity replication, often involving systematic probing of the input space. Detection systems track per-user query statistics and flag anomalous behavior.
+
+*Query Volume Monitoring*: Track the number of queries per user over time windows. Legitimate users typically exhibit bursty, irregular usage patterns, while extraction attacks require sustained high-volume querying. For an image classification API, a threshold might be:
+
+$$
+\text{alert}(\text{user}) = \begin{cases}
+1 & \text{if } q_{\text{daily}} > 10,000 \text{ or } q_{\text{hourly}} > 2,000 \\
+0 & \text{otherwise}
+\end{cases}
+$$
+
+where $q_{\text{daily}}$ and $q_{\text{hourly}}$ represent query counts. These thresholds must be calibrated based on legitimate usage statistics, use-case requirements, and service tier (free vs. paid).
+
+*Input Distribution Analysis*: Extraction attacks often use synthetic or systematically generated inputs that differ from natural user queries. Detection systems compute distributional divergence between a user's query distribution and the expected input distribution:
+
+$$
+D_{\text{KL}}(P_{\text{user}} \| P_{\text{expected}}) > \tau
+$$
+
+where $D_{\text{KL}}$ is Kullback-Leibler divergence and $\tau$ is an alert threshold. For a language model API, this might detect unusual token distributions, repetitive patterns, or adversarially crafted prompts designed to probe model boundaries.
+
+*Temporal Pattern Analysis*: Extraction attacks exhibit regular, automated query patterns. Features include inter-query time distribution (automated tools have low variance, human users have high variance), query diversity (extraction uses systematic sampling, legitimate use follows task-specific patterns), and session duration (extraction involves long, uninterrupted sessions).
+
+Machine learning-based anomaly detection can combine these features. Training a binary classifier on historical data (benign vs. known extraction attempts) enables real-time classification:
+
+$$
+\text{score}_{\text{anomaly}}(u) = f_\theta(\text{qps}(u), D_{\text{KL}}(u), \sigma_{\text{inter-query}}(u), \ldots)
+$$
+
+where $f_\theta$ is a trained classifier (e.g., random forest, neural network) and features capture query volume, distribution, and temporal patterns.
+
+**Rate Limiting and Quota Management**
+
+Complementing detection, rate limiting mechanically constrains the information an attacker can extract within a given time period. However, limits must accommodate legitimate high-volume users (e.g., production applications making batch predictions).
+
+*Tiered Rate Limiting*: Implement different limits based on authentication level and payment tier:
+
+- Free tier: 1,000 queries/day, 10 queries/second burst
+- Basic tier: 100,000 queries/day, 100 queries/second
+- Enterprise tier: 10M queries/day, custom burst limits
+
+This economic barrier raises the cost of extraction (attackers must pay for high query volumes) while serving legitimate enterprise customers.
+
+*Adaptive Rate Limiting*: Dynamically adjust limits based on anomaly scores. Users with high anomaly scores face stricter limits, while verified legitimate users receive relaxed limits:
+
+$$
+\text{limit}_{\text{effective}}(u) = \text{limit}_{\text{base}} \times \exp(-\alpha \cdot \text{score}_{\text{anomaly}}(u))
+$$
+
+where $\alpha$ controls sensitivity. A user with anomaly score 0.8 might face 55% rate reduction ($e^{-0.8} \approx 0.45$), while score 0.1 faces negligible impact.
+
+**Output Perturbation and Rounding**
+
+Reducing the precision of model outputs makes extraction more difficult without significantly degrading utility for legitimate use cases.
+
+*Confidence Rounding*: Round output probabilities to coarser precision. Instead of returning full-precision logits or probabilities:
+
+$$
+\tilde{p}_i = \text{round}(p_i, d)
+$$
+
+where $d$ is the number of decimal places. For a 1000-class ImageNet classifier, rounding from 6 decimals to 2 decimals (e.g., 0.384627 → 0.38) reduces information leakage by ~4 bits per class while maintaining decision boundaries.
+
+*Top-k Truncation*: Return only the top-$k$ predicted classes rather than the full probability distribution:
+
+$$
+\text{output} = \{(c_i, p_i) : i \in \text{top-}k\}
+$$
+
+For $k=5$ on a 1000-class problem, this reduces information leakage by $\log_2(1000/5) \approx 7.6$ bits per query. Legitimate users rarely need beyond top-5 predictions, making this a practical defense.
+
+*Additive Noise Injection*: Add calibrated noise to outputs to reduce extraction fidelity while preserving decision quality:
+
+$$
+\tilde{p}_i = p_i + \mathcal{N}(0, \sigma^2)
+$$
+
+followed by re-normalization to ensure $\sum_i \tilde{p}_i = 1$. The noise scale $\sigma$ must balance extraction defense with utility preservation. For a sentiment classifier, $\sigma = 0.05$ adds sufficient uncertainty to impede extraction while rarely flipping prediction decisions.
+
+*Differential Privacy for Predictions*: Apply differential privacy mechanisms to inference outputs, providing formal privacy guarantees. For a query $q$, the privatized response satisfies $(\epsilon, \delta)$-DP:
+
+$$
+\Pr[\mathcal{M}(D, q) = o] \leq e^{\epsilon} \Pr[\mathcal{M}(D', q) = o] + \delta
+$$
+
+This protects against both model extraction and membership inference attacks. However, the privacy budget must be carefully managed across queries, as repeated queries on similar inputs deplete the budget.
+
+**Economic Deterrents**
+
+Pricing strategies can make extraction economically infeasible. If training a model from scratch costs $C_{\text{train}}$ and extraction requires $N$ queries at price $p$ per query, extraction is economically rational only if:
+
+$$
+N \cdot p < C_{\text{train}}
+$$
+
+Setting $p$ such that $N \cdot p > C_{\text{train}}$ eliminates the economic incentive. For example, if training a competitive language model costs $5M and extraction requires 100M queries, pricing at $p > \$0.05/query$ ($5M/100M$) makes extraction more expensive than training.
+
+This pricing must account for the attacker's alternative: purchasing compute to train their own model. Cloud GPU costs, dataset acquisition, and engineering effort determine $C_{\text{train}}$. As model training becomes more expensive (frontier LLMs cost $50M-$100M+), API pricing can increase proportionally while remaining economical for legitimate users making smaller query volumes.
+
+**API Design and Information Leakage Minimization**
+
+Careful API design reduces exploitable information channels:
+
+- *Minimal Output Format*: Return only class predictions, not full probability distributions or logits
+- *Coarse Confidence Bins*: Return categorical confidence ("high", "medium", "low") instead of numeric probabilities
+- *Disable Intermediate Outputs*: Prevent access to hidden layer activations, attention weights, or embeddings
+- *Version Abstraction*: Avoid exposing model version details that enable targeted extraction
+
+::: {.callout-example title="Worked Example: Protecting a Production Image Classification API"}
+
+Consider a production API serving a ResNet-50 image classifier (1000 ImageNet classes) with 1M daily queries from 10K users.
+
+**Extraction Threat Analysis**:
+
+- Model training cost: ~$5K (GPU time, data, engineering)
+- Extraction requirements: ~5M queries for 90% fidelity (0.5% of ImageNet per class)
+- Without defenses: Attacker queries 25K/day for 200 days, cost $0 (free tier abuse)
+- Total extraction cost: $0 vs $5K training → extraction is economically favorable
+
+**Defense Implementation**:
+
+1. **Rate Limiting**:
+   - Free tier: 100 queries/day (prevents sustained extraction)
+   - Paid tier ($50/month): 10K queries/day
+   - Enterprise: Custom (authenticated, monitored)
+
+2. **Query Monitoring**:
+   - Deploy anomaly detector: 3-sigma threshold on query volume, inter-query timing variance, input diversity
+   - Alert on: >5K queries/day from single user, <100ms median inter-query time, input entropy <threshold
+   - Implementation: Lightweight online ML model, 2ms overhead per query
+
+3. **Output Perturbation**:
+   - Round confidences to 2 decimal places (reduces precision from 32-bit to ~7 bits)
+   - Return top-5 classes only (eliminates 99.5% of distribution)
+   - Add Gaussian noise: $\sigma = 0.03$ to output probabilities before rounding
+
+4. **Economic Deterrent**:
+   - Pricing: $0.001 per query for paid tier
+   - Extraction cost: 5M queries × $0.001 = $5K (matches training cost)
+   - Legitimate user cost: 300 queries/day × 30 days × $0.001 = $9/month (acceptable)
+
+**Quantitative Impact**:
+
+- **Extraction Fidelity**: Without defenses, 90% accuracy surrogate. With defenses, surrogate accuracy drops to 72% (output perturbation reduces information by ~60%)
+- **Legitimate User Impact**: Top-5 accuracy preserved at 99.2% (vs 99.3% baseline). Latency increase: +2ms for monitoring, +0.5ms for perturbation = +2.5ms total (2% overhead on 100ms inference)
+- **False Positive Rate**: 0.3% of users flagged for manual review (10K users → 30 reviews/day, manageable)
+- **Economic Viability**: Extraction cost $5K equals training cost, eliminating economic incentive
+
+**Deployment Lessons**:
+
+- Multi-layered defense (rate limiting + monitoring + perturbation) is more robust than single mechanism
+- Output perturbation provides best fidelity-protection trade-off for classification tasks
+- Query monitoring enables early detection before significant extraction occurs
+- Economic deterrents require accurate cost modeling for both training and extraction
+
+:::
+
+These defense mechanisms, deployed in combination, significantly raise the bar for model extraction while maintaining service quality for legitimate users. The optimal defense configuration depends on threat model (sophistication of attackers), model value (cost of training, competitive advantage), and user experience requirements (latency tolerance, prediction precision needs).
+
 #### Case Study: Tesla IP Theft {#sec-security-privacy-case-study-tesla-ip-theft-9d78}
 
 In 2018, Tesla filed a [lawsuit](https://storage.courtlistener.com/recap/gov.uscourts.nvd.131251/gov.uscourts.nvd.131251.1.0_1.pdf) against the self-driving car startup [Zoox](https://zoox.com/), alleging that former Tesla employees had stolen proprietary data and trade secrets related to Tesla's autonomous driving technology. According to the lawsuit, several employees transferred over 10 gigabytes of confidential files, including machine learning models and source code, before leaving Tesla to join Zoox.
