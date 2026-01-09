@@ -101,6 +101,7 @@ Specialized architectures constrain the hypothesis space, effectively reducing t
 Consider classifying 28×28 MNIST digits (784 input pixels, 10 output classes).
 
 **MLP Approach**:
+
 - Architecture: 784 → 4096 → 4096 → 10
 - Parameters: $(784 \times 4096) + (4096 \times 4096) + (4096 \times 10) \approx 20\text{M parameters}$
 - Training: 60,000 examples (standard MNIST training set)
@@ -108,6 +109,7 @@ Consider classifying 28×28 MNIST digits (784 input pixels, 10 output classes).
 - Rationale: Treats every pixel independently. Must learn all spatial correlations from data alone. No prior knowledge about spatial structure.
 
 **CNN Approach**:
+
 - Architecture: Conv(32, 3×3) → Pool → Conv(64, 3×3) → Pool → FC(128) → 10
 - Parameters: $(3 \times 3 \times 32) + (3 \times 3 \times 32 \times 64) + (64 \times 7 \times 7 \times 128) + (128 \times 10) \approx 100\text{K parameters}$
 - Training: 60,000 examples (same data)
@@ -115,6 +117,7 @@ Consider classifying 28×28 MNIST digits (784 input pixels, 10 output classes).
 - Rationale: Embeds locality bias (nearby pixels are related) and translation invariance (digit patterns are meaningful regardless of position). These structural assumptions reduce parameter count and improve generalization.
 
 **Comparison**:
+
 - Parameter Efficiency: CNN uses 200× fewer parameters
 - Sample Efficiency: CNN achieves better accuracy with the same training data
 - Systems Implications: CNN requires 20× less memory, trains faster, and runs faster at inference
@@ -2108,6 +2111,7 @@ where $I$ is the identity matrix. The identity ensures that the Jacobian has eig
 Training identical 50-layer networks on CIFAR-10 with and without residual connections demonstrates the practical impact:
 
 **Plain 50-layer network**:
+
 - Architecture: 50 convolutional layers with ReLU, no skip connections
 - Training loss (epoch 1): 2.3 (random initialization)
 - Training loss (epoch 50): 1.8 (minimal improvement)
@@ -2117,6 +2121,7 @@ Training identical 50-layer networks on CIFAR-10 with and without residual conne
 - Observation: Training stagnates, early layers barely update
 
 **ResNet-50**:
+
 - Architecture: 50 layers organized in residual blocks
 - Training loss (epoch 1): 2.3
 - Training loss (epoch 50): 0.05 (near perfect training fit)
@@ -2149,9 +2154,103 @@ Perhaps even more influential was the introduction of skip connections through R
 
 [^fn-dnn-resnet]: **ResNet Revolution**: ResNet (2016) solved the "degradation problem" where deeper networks performed worse than shallow ones. The key insight: adding identity shortcuts ($\mathcal{F}(\mathbf{x}) + \mathbf{x}$) let networks learn residual mappings instead of full transformations, enabling training of 1000+ layer networks and winning ImageNet 2015.
 
-CNNs also introduced batch normalization, a technique for stabilizing neural network optimization by normalizing intermediate features [@ioffe2015batch]. This concept of feature normalization, while originating in CNNs, evolved into layer normalization and is now a key component in modern architectures.
+#### Normalization Layers: Mathematical Foundations {#sec-normalization-layers}
 
-These innovations, such as parameter sharing, skip connections, and normalization, transcended their origins in spatial processing to become essential building blocks in the deep learning toolkit.
+While skip connections provide direct gradient pathways, normalization layers address a complementary problem: controlling the scale and distribution of activations throughout the network. CNNs introduced batch normalization [@ioffe2015batch], which has since evolved into variants essential for modern architectures. Understanding the mathematics of normalization reveals why these layers are not merely optimization tricks but fundamental components enabling deep network training.
+
+**Batch Normalization: Definition and Formulation**
+
+Batch normalization normalizes activations across the batch dimension during training. For a mini-batch $\mathcal{B} = \{x_1, \ldots, x_m\}$ of activations at a particular layer, the transformation proceeds in two stages.
+
+First, compute the batch statistics:
+
+$$
+\mu_{\mathcal{B}} = \frac{1}{m}\sum_{i=1}^{m} x_i \qquad \sigma_{\mathcal{B}}^2 = \frac{1}{m}\sum_{i=1}^{m} (x_i - \mu_{\mathcal{B}})^2
+$$
+
+Then normalize and apply learnable scale and shift:
+
+$$
+\hat{x}_i = \frac{x_i - \mu_{\mathcal{B}}}{\sqrt{\sigma_{\mathcal{B}}^2 + \epsilon}}
+$$ {#eq-batchnorm-normalize}
+
+$$
+y_i = \gamma \hat{x}_i + \beta
+$$ {#eq-batchnorm-transform}
+
+The parameters $\gamma$ (scale) and $\beta$ (shift) are learned during training, while $\epsilon$ (typically $10^{-5}$) prevents division by zero. This formulation ensures the network can represent the identity transformation if optimal ($\gamma = \sigma_{\mathcal{B}}$, $\beta = \mu_{\mathcal{B}}$), preserving representational capacity.
+
+**Jacobian Conditioning: Why Normalization Helps Gradient Flow**
+
+The mathematical insight into why normalization aids training lies in how it conditions the Jacobian matrix of the layer. Consider the gradient of the normalized output with respect to the input:
+
+$$
+\frac{\partial \hat{x}_i}{\partial x_j} = \frac{1}{\sqrt{\sigma_{\mathcal{B}}^2 + \epsilon}} \left( \delta_{ij} - \frac{1}{m} - \frac{(x_i - \mu_{\mathcal{B}})(x_j - \mu_{\mathcal{B}})}{m\sigma_{\mathcal{B}}^2} \right)
+$$
+
+where $\delta_{ij}$ is the Kronecker delta. The critical observation is that this Jacobian has bounded eigenvalues. Without normalization, the Jacobian of a linear layer $W$ can have eigenvalues spanning orders of magnitude (empirically, 0.01 to 100 in deep networks). With batch normalization, the effective Jacobian eigenvalues are constrained to a much narrower range, typically within $[0.5, 2.0]$.
+
+This constraint prevents both vanishing gradients (eigenvalues $\ll 1$) and exploding gradients (eigenvalues $\gg 1$) through the normalization layer itself. The quantitative impact on training stability is substantial:
+
+- **Without normalization**: Gradient norms can vary by factors of $10^4$ across layers
+- **With batch normalization**: Gradient norms typically vary by factors of 2 to 4 across layers
+
+This stability enables significantly higher learning rates. Networks with batch normalization commonly train with learning rates 10 to 30 times larger than unnormalized networks, directly accelerating convergence.
+
+**Layer Normalization: Architecture Independence**
+
+While batch normalization proved transformative for CNNs, it introduced a problematic dependency on batch statistics. This creates issues for small batch sizes (noisy statistics), varying sequence lengths (incompatible batch dimensions), and inference (requires running mean/variance estimation). Layer normalization addresses these limitations by normalizing across features rather than across the batch [@ba2016layer].
+
+For an input vector $\mathbf{x} \in \mathbb{R}^H$ with $H$ features:
+
+$$
+\mu_L = \frac{1}{H}\sum_{i=1}^{H} x_i \qquad \sigma_L^2 = \frac{1}{H}\sum_{i=1}^{H} (x_i - \mu_L)^2
+$$
+
+$$
+\text{LayerNorm}(\mathbf{x}) = \frac{\mathbf{x} - \mu_L}{\sqrt{\sigma_L^2 + \epsilon}} \odot \boldsymbol{\gamma} + \boldsymbol{\beta}
+$$ {#eq-layernorm}
+
+where $\odot$ denotes element-wise multiplication. Each sample is normalized independently, making layer normalization invariant to batch size and suitable for autoregressive models where future tokens must not influence current computations.
+
+This architectural difference explains why Transformers universally adopt layer normalization: the self-attention mechanism processes sequences of varying length, and autoregressive generation requires each position to be normalized independently of batch composition.
+
+**Comparative Analysis: When to Use Each Variant**
+
+The choice between normalization variants depends on the computational context:
+
++---------------------------+---------------------------+---------------------------+---------------------------+
+| **Characteristic**        | **BatchNorm**             | **LayerNorm**             | **RMSNorm**               |
++:==========================+:==========================+:==========================+:==========================+
+| **Normalization Axis**    | Batch dimension           | Feature dimension         | Feature dimension         |
++---------------------------+---------------------------+---------------------------+---------------------------+
+| **Batch Size Dependency** | High (noisy for small     | None                      | None                      |
+|                           | batches)                  |                           |                           |
++---------------------------+---------------------------+---------------------------+---------------------------+
+| **Typical Use Case**      | CNNs, vision models       | Transformers, RNNs        | LLaMA, efficient          |
+|                           |                           |                           | Transformers              |
++---------------------------+---------------------------+---------------------------+---------------------------+
+| **Computation Cost**      | Higher (mean + variance)  | Higher (mean + variance)  | Lower (variance only)     |
++---------------------------+---------------------------+---------------------------+---------------------------+
+| **Training/Inference**    | Different (running stats) | Identical                 | Identical                 |
+| **Behavior**              |                           |                           |                           |
++---------------------------+---------------------------+---------------------------+---------------------------+
+
+: **Normalization Variant Comparison**: Different normalization techniques trade off between computational efficiency, batch size sensitivity, and architectural compatibility. RMSNorm, used in LLaMA and other efficient architectures, omits mean centering: $\text{RMSNorm}(\mathbf{x}) = \mathbf{x} / \sqrt{\frac{1}{H}\sum_i x_i^2 + \epsilon} \cdot \boldsymbol{\gamma}$. {#tbl-normalization-comparison}
+
+**Systems Implications**
+
+Normalization layers introduce specific systems costs that architects must consider:
+
+**Memory overhead**: Batch normalization maintains running statistics (mean and variance) for each normalized feature, requiring $2 \times H$ additional parameters per layer during training, where $H$ is the feature dimension. For inference, these become fixed constants. Layer normalization computes statistics on-the-fly, adding no persistent memory but requiring temporary buffers.
+
+**Batch size constraints**: Batch normalization requires sufficiently large batches for stable statistics. Empirically, batch sizes below 16 degrade performance noticeably, and sizes below 8 can cause training instability. This constraint impacts memory-limited scenarios such as high-resolution images or very large models.
+
+**Computational cost**: Computing mean and variance adds $O(m \times H)$ operations per batch normalization layer for batch size $m$ and feature dimension $H$. For layer normalization, the cost is $O(H)$ per sample. RMSNorm reduces this further by eliminating the mean computation.
+
+**Training versus inference**: Batch normalization exhibits different behavior between training (batch statistics) and inference (running statistics), requiring explicit mode switching. Incorrect mode handling is a common source of training-serving skew. Layer normalization behaves identically in both modes, simplifying deployment.
+
+These innovations, including parameter sharing, skip connections, and normalization, transcended their origins in spatial processing to become essential building blocks in the deep learning toolkit.
 
 ### Evolution of Sequence Processing {#sec-dnn-architectures-evolution-sequence-processing-8a78}
 

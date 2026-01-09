@@ -989,6 +989,112 @@ The organization might configure:
 
 Total rollout: approximately 4 hours for a confident deployment.
 
+### Multi-Region Deployment Coordination {#sec-multi-region-deployment}
+
+Global ML deployments spanning multiple geographic regions introduce coordination challenges absent from single-region operations. Model version consistency, traffic routing during transitions, and coordinated rollback require explicit protocol design to prevent mixed-version serving that can corrupt A/B test validity and user experience.
+
+**Coordination Challenges**
+
+Multi-region deployments must address four fundamental challenges:
+
+*Clock skew and timing coordination* creates ambiguity about canary phase boundaries. When a deployment starts at 2:00 PM UTC, Region A may begin its 1% canary while Region B, due to network delays or operational variation, still serves the old version. Defining deployment phases using wall-clock time leads to inconsistent user experiences as users crossing region boundaries encounter different model versions.
+
+*Regional traffic variation* means uniform global percentages produce non-uniform statistical samples. A 1% global canary might represent 5% of traffic in a low-volume region (sufficient for statistical significance) but only 0.3% in a high-volume region (potentially insufficient). Per-region sample sizes must be validated independently.
+
+*Cross-region request routing* complicates version consistency. Users may be routed to different regions based on latency, load balancing, or failover. A user whose requests span multiple regions during a deployment window may receive predictions from different model versions, violating the consistency assumptions underlying A/B test analysis.
+
+*Coordinated rollback* requires global synchronization. Rolling back one region while others continue serving the new version creates the same mixed-version problems that careful deployment coordination was designed to prevent.
+
+**Deployment Strategies**
+
+Three architectural approaches address multi-region coordination with different tradeoffs:
+
+*Sequential regional rollout* deploys to regions one at a time, completing the full canary progression in each region before proceeding to the next. This approach maximizes safety by limiting blast radius to a single region, but extends total deployment duration proportionally to region count.
+
+Typical progression for 5 regions:
+1. Canary region (lowest traffic): Full canary cycle, 24 to 48 hours
+2. Early adopter regions (2 regions, 20% global traffic): Parallel deployment, 24 to 48 hours
+3. Majority regions (2 regions, 70% global traffic): Parallel deployment, 24 to 48 hours
+4. Final validation: Cross-region consistency check, 12 to 24 hours
+
+Total deployment duration: 4 to 8 days for a conservative rollout.
+
+*Synchronized global rollout* maintains identical deployment state across all regions simultaneously. A global coordination service ensures that all regions transition between canary phases at the same logical timestamp. This provides consistent user experience but means any region experiencing issues affects the global deployment decision.
+
+Implementation requires:
+
+- Centralized deployment coordinator with global view
+- Logical sequence numbers rather than wall-clock timestamps
+- Two-phase transitions: announce phase change, wait for acknowledgment from all regions, then execute
+- Global metrics aggregation for deployment decisions
+
+*Hybrid approaches* balance regional independence with global consistency. The deployment coordinator enforces minimum and maximum phase boundaries while allowing regions to progress independently within those bounds. Regions can accelerate through phases if local metrics are strong, or pause if issues emerge, while global constraints prevent excessive version skew.
+
+**Traffic Management During Transitions**
+
+Maintaining request consistency during deployment transitions requires explicit traffic management:
+
+*Sticky routing* ensures that a user's requests consistently route to the same region throughout the deployment window. This is typically implemented through consistent hashing on user identifier, directing each user to a primary region. Users experience either the old version or new version consistently, never mixing within a session.
+
+*Version pinning* allows clients to request specific model versions. The request includes a model version hash; the serving infrastructure routes to replicas serving that version. This supports gradual client migration independent of server-side deployment state.
+
+*Request isolation* prevents cross-region traffic during critical deployment phases. Temporarily disabling cross-region failover during canary evaluation ensures that metrics reflect single-region behavior rather than mixed routing patterns.
+
+**Consistency Models for Deployment**
+
+The choice of consistency model affects both deployment complexity and validity of deployment metrics:
+
+| Model | Guarantee | Use Case | Coordination Overhead |
+|-------|-----------|----------|----------------------|
+| Strong | All regions serve identical version | Financial predictions, safety-critical | High (global synchronization) |
+| Eventual | Regions converge to same version | Content recommendations | Low (independent progression) |
+| Bounded staleness | Regions within $k$ versions of each other | Real-time ranking | Medium (version monitoring) |
+
+: Consistency models for multi-region ML deployment {#tbl-multi-region-consistency}
+
+For A/B testing validity, model serving typically requires strong consistency within treatment groups. If some users assigned to treatment receive old-version predictions due to deployment timing, the measured treatment effect is diluted. Eventual consistency across treatment groups is acceptable since each group is analyzed independently.
+
+**Rollback Coordination**
+
+Rolling back a multi-region deployment requires careful coordination to prevent oscillation and mixed-version serving:
+
+*Two-phase rollback protocol*:
+
+Phase 1: Stop traffic to new version globally
+- Deployment coordinator broadcasts rollback intent
+- All regions acknowledge and stop routing new traffic to new version
+- Continue serving in-flight requests to completion
+- Timeout: regions that do not acknowledge within threshold are marked unhealthy
+
+Phase 2: Restore old version globally
+- Coordinator confirms all regions serving old version only
+- Re-enable normal traffic routing
+- Clear deployment state and prepare for re-attempt
+
+This protocol ensures that at no point do some regions serve the new version while others have rolled back, which would create inconsistent user experiences.
+
+*Partial rollback* allows rolling back individual regions while others continue. This is appropriate when issues are region-specific (infrastructure problems, regional traffic patterns) rather than model-inherent. The deployment coordinator tracks per-region state and prevents inconsistent global decisions based on partial information.
+
+**Worked Example: Multi-Region Coordination Overhead**
+
+A recommendation system deploys across 5 regions with average inter-region latency of 80ms. The coordination protocol requires:
+
+1. Announce deployment intent (broadcast to all regions): 80ms
+2. Receive acknowledgments (wait for slowest region): 80ms
+3. Execute deployment phase (region-local): variable
+4. Confirm completion (broadcast): 80ms
+5. Receive confirmations (wait for slowest region): 80ms
+
+Minimum coordination overhead per phase transition: 320ms for the synchronization protocol itself. For a deployment with 5 canary phases, coordination adds 1.6 seconds to total deployment time, negligible compared to the hours spent in each phase.
+
+However, the coordination service becomes a critical dependency. If the coordinator fails during a deployment:
+
+- With strong consistency: All regions freeze in current state until coordinator recovers
+- With eventual consistency: Regions continue independent progression, potentially diverging
+- With bounded staleness: Regions continue but coordinator failure triggers alerts if staleness exceeds bounds
+
+Organizations deploying safety-critical models typically implement coordinator redundancy through consensus protocols (Raft, Paxos) that survive single-node failures while maintaining consistency guarantees.
+
 **Shadow Deployment and Traffic Replay**
 
 Shadow deployment runs the new model in parallel with production, receiving the same inputs and logging outputs, but not affecting user-visible results. This provides the highest fidelity testing environment short of actual production exposure, enabling detection of issues that escape offline validation.
@@ -1227,6 +1333,96 @@ Applying Bonferroni correction: $\alpha' = \frac{0.05}{30} = 0.00167$ per test. 
 Using FDR control at q=0.05: Among all significant results, expect at most 5% to be false positives. If 10 of 30 tests show significant results, expect at most 0.5 false positives rather than 10 × 0.05 = 0.5 with uncorrected tests. This provides better power than Bonferroni when running many tests.
 
 The choice of correction method depends on consequences of false positives. For high-stakes decisions (financial models, safety-critical systems), use conservative Bonferroni correction. For exploratory analysis where missing true effects is costly, use FDR control.
+
+### SUTVA Violations and Network Effects {#sec-sutva-violations}
+
+Standard A/B testing relies on the Stable Unit Treatment Value Assumption (SUTVA): user $i$'s outcome $Y_i(t)$ depends only on their own treatment assignment $t$, not on the treatments assigned to other users. This assumption fails systematically in networked products and distributed ML systems, leading to biased effect estimates that can mislead deployment decisions.
+
+**Network Effect Categories**
+
+Network effects manifest in three primary forms, each requiring different detection and mitigation strategies:
+
+*Direct network effects* occur when user A's treatment directly influences user B's outcome through platform interactions. In a social feed ranking experiment, the treatment group receives algorithmically optimized content that they share with connections. Control group users now see content influenced by the treatment algorithm through their social graph, contaminating the control condition. This treatment leakage biases measured effects toward zero because control users partially receive the treatment through network propagation.
+
+*Indirect network effects* operate through market-level mechanisms that affect all users regardless of their individual treatment assignment. A ride-sharing pricing experiment that increases driver compensation in the treatment group attracts more drivers to the platform overall. Control group users experience shorter wait times due to increased driver supply, an effect driven entirely by the treatment condition. The measured treatment effect underestimates the true benefit because the control group also improves.
+
+*Spillover effects* create geographic or temporal contagion where treatment effects spread across boundaries. A local recommendation system experiment showing treatment users restaurants in a specific neighborhood influences foot traffic patterns. Control group users in adjacent neighborhoods experience changed recommendation quality because the underlying popularity signals shift. Geographic clustering of users means spatial spillover can systematically bias experiments.
+
+**Quantifying SUTVA Violations**
+
+The severity of network effect bias depends on network structure and outcome correlation. For a social graph with clustering coefficient $C$ (probability that two connected users share a common connection), the variance inflation factor due to network effects follows:
+
+$$VIF \approx 1 + C \times \rho$$ {#eq-sutva-vif}
+
+where $\rho$ is the intra-cluster correlation of outcomes (how similar outcomes are within connected user groups). This factor indicates how much larger sample sizes must be to achieve equivalent statistical power.
+
+**Worked Example: Network Effect Bias in Social Recommendation**
+
+A social platform tests a new feed ranking algorithm. Individual user randomization assigns 50% of users to treatment.
+
+Experimental setup:
+
+- 10 million users, average 150 connections each
+- Clustering coefficient $C = 0.4$ (typical for social networks)
+- Outcome: daily engagement minutes
+
+Naive analysis results:
+
+- Treatment group: 45.2 minutes average
+- Control group: 43.8 minutes average
+- Measured effect: +1.4 minutes (+3.2%)
+
+However, network analysis reveals that control group users have on average 15% of their connections in treatment. These treatment connections share algorithmically-boosted content that control users see, inflating control group engagement.
+
+Corrected analysis using inverse probability weighting for network exposure:
+
+- Adjusted control baseline: 42.3 minutes (what control would show without spillover)
+- True treatment effect: +2.9 minutes (+6.9%)
+- SUTVA violation inflated control by 1.5 minutes, halving the measured effect
+
+With intra-cluster correlation $\rho = 0.15$ (users connected to each other have correlated engagement):
+$$VIF = 1 + 0.4 \times 0.15 = 1.06$$
+
+This 6% variance inflation requires 6% larger sample sizes for equivalent power, but the bias correction is far more impactful than the variance adjustment.
+
+**Detection Strategies**
+
+Detecting SUTVA violations requires explicit measurement of network exposure:
+
+*Ego-network analysis* measures each user's exposure to treatment through their connections. For control user $i$ with connection set $N_i$, compute treatment exposure:
+
+$$E_i = \frac{|\{j \in N_i : T_j = 1\}|}{|N_i|}$$
+
+where $T_j$ indicates treatment assignment for user $j$. If control group outcomes correlate with $E_i$, network effects are present. Regression of control outcomes on exposure quantifies spillover magnitude.
+
+*Interference tests* compare outcomes for control users with high versus low treatment exposure. Under SUTVA, these groups should show identical outcomes. Significant differences indicate network contamination.
+
+*Temporal analysis* examines whether treatment effects propagate over time. If day-over-day control group metrics trend toward treatment group metrics, spillover is accumulating through the network.
+
+**Mitigation Approaches**
+
+When SUTVA violations are detected, several experimental design modifications can recover valid causal estimates:
+
+*Graph cluster randomization* assigns treatment at the community level rather than individual level. Using graph partitioning algorithms (Louvain, spectral clustering), divide the user graph into clusters with dense internal connections and sparse cross-cluster edges. Randomize clusters to treatment or control, ensuring users primarily interact with others in the same condition.
+
+The tradeoff is reduced statistical power. With $k$ clusters, effective sample size becomes $k$ rather than $n$ individual users. An experiment with 10 million users in 1,000 clusters has effective $n = 1000$ for statistical calculations, requiring proportionally larger effects to detect.
+
+*Ego-exclusion designs* exclude users whose network exposure exceeds a threshold from analysis. By analyzing only control users with minimal treatment connections (e.g., $E_i < 0.05$), the control condition remains uncontaminated. This sacrifices sample size for validity.
+
+*Switchback experiments* alternate all users between treatment and control over time periods (hours, days). Since all users receive both conditions, there is no cross-user contamination within periods. Analysis compares outcomes across time periods rather than across users. This design is particularly effective for supply-side effects in marketplace platforms.
+
+*Geo-based experiments* leverage geographic boundaries as natural barriers to network effects. For location-dependent services, randomize at the city or region level. Users in different cities rarely interact directly, eliminating most spillover pathways.
+
+**Practical Implementation**
+
+Implementing network-aware A/B testing requires infrastructure investment:
+
+- Graph analysis pipelines that compute network statistics and cluster assignments
+- Exposure calculation for every user based on their connections' treatment status
+- Modified statistical tests that account for clustered randomization
+- Monitoring dashboards showing spillover indicators
+
+For recommendation systems at scale, the engineering cost is justified by the magnitude of bias that network effects introduce. A system measuring +3% improvement when the true effect is +6% may incorrectly reject valuable model changes or incorrectly prioritize inferior alternatives.
 
 ### Rollout Risk Management
 
