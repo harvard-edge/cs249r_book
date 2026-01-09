@@ -459,317 +459,245 @@ These four layers work together through carefully designed interfaces and depend
 
 Our exploration begins with computational graphs because they form the structural foundation that enables all other framework capabilities. This core abstraction provides the mathematical representation underlying automatic differentiation, optimization, and hardware acceleration capabilities that distinguish modern frameworks from simple numerical libraries.
 
-### Computational Graphs {#sec-ai-frameworks-computational-graphs-f0ff}
+### Execution Models: Eager, Graph, and Hybrid {#sec-ai-frameworks-computational-graphs-f0ff}
 
-The computational graph is the central abstraction that enables frameworks to transform intuitive model descriptions into efficient hardware execution. This representation organizes mathematical operations and their dependencies to enable automatic optimization, parallelization, and hardware specialization.
+Modern machine learning frameworks execute computations through fundamentally different execution models, each with distinct trade-offs for performance, flexibility, and debuggability. Understanding these execution models is critical for framework selection, performance optimization, and debugging. The three primary approaches are eager execution with autograd tape (PyTorch default), static computation graphs (TensorFlow 1.x), and hybrid Just-In-Time (JIT) compilation (torch.compile, TorchScript).
 
-#### Computational Graph Fundamentals {#sec-ai-frameworks-computational-graph-fundamentals-4979}
+#### Eager Execution with Autograd Tape {#sec-ai-frameworks-eager-execution-autograd}
 
-Computational graphs emerged as a key abstraction in machine learning frameworks to address the growing complexity of deep learning models. As models grew larger and more complex, efficient execution across diverse hardware platforms became necessary. The computational graph transforms high-level model descriptions into efficient low-level hardware execution [@baydin2018], representing a machine learning model as a directed acyclic graph[^fn-dag-ml] (DAG) where nodes represent operations and edges represent data flow. This DAG abstraction enables automatic differentiation and efficient optimization across diverse hardware platforms.
+PyTorch's default execution mode executes operations immediately as encountered. When you write `y = x * 2`, the multiplication happens instantly, and the result is available for immediate use. This eager execution provides the flexibility of normal Python programming: you can print intermediate values, use conditionals based on tensor contents, and debug with standard tools.
 
-[^fn-dag-ml]: **Directed Acyclic Graph (DAG)**: In machine learning frameworks, DAGs represent computation where nodes are operations (like matrix multiplication or activation functions) and edges are data dependencies. Unlike general DAGs in computer science, ML computational graphs specifically optimize for automatic differentiation, enabling frameworks to compute gradients by traversing the graph in reverse order.
+For gradient computation, PyTorch records a history of operations in a transient **autograd tape**[^fn-autograd-tape]. This tape is not pre-built, but constructed dynamically during the forward pass. Each tensor operation creates a `Function` node that records the operation performed, references to input tensors, and how to compute gradients (the backward method). These nodes form a directed acyclic graph (DAG) of operations built **during** forward pass execution, not before.
 
-For example, a node might represent a matrix multiplication operation, taking two input matrices (or tensors) and producing an output matrix (or tensor). To visualize this, consider the simple example in @fig-comp-graph. The directed acyclic graph computes $z = x \times y$, where each variable is just numbers.
+[^fn-autograd-tape]: **Autograd Tape**: A dynamically constructed data structure recording operations during forward pass execution. Each operation adds a node to the tape containing: (1) the operation type (e.g., `MulBackward0`, `AddBackward0`), (2) references to input tensors, (3) saved intermediate values needed for gradient computation, and (4) the backward function implementing chain rule application. The tape is destroyed after backward pass to free memory.
 
-::: {#fig-comp-graph fig-env="figure" fig-pos="htb"}
-```{.tikz}
-\begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
-%
-\tikzset{%
-    Line/.style={line width=1.0pt,black!50,rounded corners
-},
-  Box/.style={align=flush center,
-   shape=circle,
-    inner xsep=1pt,
-    node distance=1.4,
-    draw=BlueLine,
-    line width=0.75pt,
-    fill=BlueL,
-    minimum width=8mm,
-  },
-}
-\node[Box,fill=GreenL,draw=GreenLine,minimum width=13mm, ](B1){$f(x,y)$};
-\node[Box,right=of B1,fill=OliveL,draw=OliveLine](B2){$z$};
-\node[Box,above left=0.1 and 2 of B1,fill=OliveL,draw=OliveLine](B3){$x$};
-\node[Box,below left=0.1 and 2 of B1,fill=OliveL,draw=OliveLine](B4){$y$};
-\draw[-latex,Line](B1)--(B2);
-\draw[-latex,Line](B3)to[bend left=25](B1);
-\draw[-latex,Line](B4)to[bend right=25](B1);
-\end{tikzpicture}
+Consider this simple example:
+
+```python
+import torch
+
+x = torch.tensor([1.0], requires_grad=True)
+y = x * 2  # Creates MulBackward0 node in autograd tape
+z = y + 1  # Creates AddBackward0 node in autograd tape
+# The autograd tape exists NOW, built during execution
 ```
-**Computational Graph**: Directed acyclic graphs represent machine learning models as a series of interconnected operations, enabling efficient computation and automatic differentiation. This example presents a simple computation, $z = x \times y$, where nodes define operations and edges specify the flow of data between them.
-:::
 
-This simple example illustrates the fundamental principle, but real machine learning models require much more complex graph structures. As shown in @fig-mlfm-comp-graph, the structure of the computation graph involves defining interconnected layers, such as convolution, activation, pooling, and normalization, which are optimized before execution. The figure also demonstrates key system-level interactions, including memory management and device placement, showing how the static graph approach enables complete pre-execution analysis and resource allocation.
+After these two operations, PyTorch has constructed an autograd tape with two nodes: `MulBackward0` (for the multiplication) and `AddBackward0` (for the addition). The tape records that `z` depends on `y`, and `y` depends on `x`.
 
-::: {#fig-mlfm-comp-graph fig-env="figure" fig-pos="htb"}
-```{.tikz}
-\begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
-%
-\tikzset{Line/.style={line width=1.0pt,black!50
-},
-  Box/.style={align=flush center,
-    inner xsep=2pt,
-    node distance=1.1,
-    draw=BlueLine,
-    line width=0.75pt,
-    fill=BlueL,
-    text width=26mm,
-    minimum width=26mm, minimum height=10mm
-  },
- Text/.style={%
-    inner sep=3pt,
-    draw=none,
-    line width=0.75pt,
-    fill=TextColor!80,
-    text=black,
-    font=\usefont{T1}{phv}{m}{n}\footnotesize,
-    align=flush center,
-    minimum width=7mm, minimum height=5mm
-  }
-}
-\begin{scope}[local bounding box=scope1]
-\node[Box,fill=BlueL,draw=BlueLine](B1){Operation Node 1};
-\node[Box,fill=BlueL,draw=BlueLine,below=of B1](B2){Operation Node 2};
-\node[Box,fill=BlueL,draw=BlueLine,below left=0.75 and 0.1 of B2](B3){Operation Node 3};
-\node[Box,fill=BlueL,draw=BlueLine,below right=0.75 and 0.1 of B2](B4){Operation Node 4};
-\node[Box,fill=BlueL,draw=BlueLine,below=of B3](B5){Operation Node 5};
-\node[Box,fill=BlueL,draw=BlueLine,below=of B4](B6){Operation Node 6};
-%
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=4mm,inner ysep=6mm,yshift=2mm,
-           fill=BackColor!80,fit=(B1)(B3)(B6),line width=0.75pt](BB1){};
-\node[below=2pt of  BB1.north east,anchor=north east]{Computational Graph};
-\end{scope}
-%
-\begin{scope}[local bounding box=scope2, shift={($(scope1.east)+(45mm,10mm)$)}]
-\node[Box,fill=OrangeL,draw=OrangeLine](2B1){Memory Management};
-\node[Box,fill=OrangeL,draw=OrangeLine,below=of 2B1](2B2){Device Placement};
-%
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=4mm,inner ysep=6mm,yshift=2mm,
-           fill=BackColor!50,fit=(2B1)(2B2),line width=0.75pt](2BB1){};
-\node[below=2pt of  2BB1.north east,anchor=north east]{System Components};
-\end{scope}
-\draw[-latex,Line](B1)--node[Text,pos=0.45]{Data Flow}(B2);
-\draw[-latex,Line](B3)--node[Text,pos=0.45]{Data Flow}(B5);
-\draw[-latex,Line](B4)--node[Text,pos=0.45]{Data Flow}(B6);
-\draw[-latex,Line](B2)-|node[Text,pos=0.45]{Data Flow}(B3);
-\draw[-latex,Line](B2)-|node[Text,pos=0.45]{Data Flow}(B4);
-\draw[latex-,Line](2B2) --node[Text,pos=0.55]{Interacts with} (scope1.east|-2B2);
-\draw[latex-,Line](2B1) --node[Text,pos=0.55]{Interacts with} (scope1.east|-2B1);
-\end{tikzpicture}
+Calling `z.backward()` traverses this tape in reverse topological order, applying the chain rule at each node:
+
+1. Compute $\frac{\partial z}{\partial z} = 1$ (seed gradient)
+2. Call `AddBackward0.backward()` $\rightarrow \frac{\partial z}{\partial y} = 1$
+3. Call `MulBackward0.backward()` $\rightarrow \frac{\partial z}{\partial x} = 2$
+4. Accumulate gradient in `x.grad`
+
+After `backward()` completes, the autograd tape is **destroyed** to free memory. The next forward pass builds a completely new tape. This design enables memory-efficient training: you only pay for gradient computation storage during the backward pass.
+
+**Systems Implications: Flexibility**
+
+The dynamic autograd tape enables powerful capabilities impossible with static graphs:
+
+- **Data-dependent control flow**: Conditionals and loops can depend on tensor values computed during execution. For example, you can implement beam search, dynamic RNN lengths, or adaptive computation based on intermediate results.
+- **Variable-length sequences**: Different iterations can process tensors of different sizes without redefining the computation. This is essential for natural language processing where sentence lengths vary.
+- **Debugging**: You can print tensors, inspect values, and use standard Python debuggers (`pdb`, breakpoints) because operations execute immediately in standard Python execution.
+
+**Systems Implications: Overhead**
+
+The flexibility of eager execution with autograd tape comes with performance costs:
+
+- **Graph construction overhead**: Each forward pass rebuilds the autograd tape from scratch. This overhead includes Python object creation, reference counting, and node linking.
+- **Python interpreter overhead**: Every operation goes through Python dispatch, including function lookup, argument parsing, and type checking. At ~1μs per operation, this becomes significant for models with thousands of operations.
+- **Limited optimization opportunities**: Because the graph is built during execution, the framework cannot optimize across operations. Each operation launches its own GPU kernel, preventing kernel fusion.
+- **Memory overhead**: The autograd tape stores references to all intermediate tensors and Function nodes, increasing memory consumption by 2-3× compared to forward-only execution.
+
+For a typical ResNet-50 forward pass, eager execution overhead adds approximately 5-10ms compared to an optimized compiled version, with the majority spent in Python dispatch and tape construction rather than actual computation.
+
+#### Static Computation Graphs {#sec-ai-frameworks-static-graphs}
+
+TensorFlow 1.x pioneered the **static computation graph** approach with a "define-then-run" execution model. In this paradigm, you first build a complete computational graph as a symbolic representation, then execute it repeatedly with different input data. The graph is defined **before** any computation occurs, enabling aggressive ahead-of-time optimization.
+
+**Two-Phase Execution**
+
+Static graphs implement a clear separation between graph construction and execution:
+
+**Phase 1: Graph Construction** (symbolic, no computation)
+
+```python
+import tensorflow.compat.v1 as tf
+
+tf.disable_v2_behavior()
+
+# Define graph symbolically
+x = tf.placeholder(tf.float32, shape=[1])  # Just a placeholder
+y = x * 2  # Not executed, just recorded
+z = y + 1  # Still no execution
+# At this point, nothing has been computed
 ```
-**Computation Graph**: This diagram represents a computation as a directed acyclic graph, where nodes denote variables and edges represent operations. By expressing computations in this form, systems can efficiently perform automatic differentiation, which is essential for training machine learning models through gradient-based optimization, and optimize resource allocation before execution.
-:::
 
-##### Layers and Tensors {#sec-ai-frameworks-layers-tensors-5008}
+During construction, `x`, `y`, and `z` are not tensors containing values but rather symbolic nodes in a graph. Operations like `*` and `+` add nodes to the graph definition without performing any arithmetic.
 
-Modern machine learning frameworks implement neural network computations through two key abstractions: layers and tensors. Layers represent computational units that perform operations like convolution, pooling, or dense transformations. Each layer maintains internal states, including weights and biases, that evolve during model training. When data flows through these layers, it takes the form of tensors, immutable mathematical objects that hold and transmit numerical values.
+**Phase 2: Graph Execution** (actual computation)
 
-The relationship between layers and tensors mirrors the distinction between operations and data in traditional programming. A layer defines how to transform input tensors into output tensors, much like a function defines how to transform its inputs into outputs. However, layers add an extra dimension: they maintain and update internal parameters during training. For example, a convolutional layer not only specifies how to perform convolution operations but also learns and stores the optimal convolution filters for a given task.
-
-This abstraction becomes particularly powerful when frameworks automate the graph construction process. When a developer writes `tf.keras.layers.Conv2D`, the framework constructs the necessary graph nodes for convolution operations, parameter management, and data flow, shielding developers from implementation complexities.
-
-##### Neural Network Construction {#sec-ai-frameworks-neural-network-construction-e6ef}
-
-The power of computational graphs extends beyond basic layer operations. Activation functions, essential for introducing non-linearity in neural networks, become nodes in the graph. Functions like ReLU, sigmoid, and tanh transform the output tensors of layers, enabling networks to approximate complex mathematical functions. Frameworks provide optimized implementations of these activation functions, allowing developers to experiment with different non-linearities without worrying about implementation details.
-
-Modern frameworks extend this modular approach by providing complete model architectures as pre-configured computational graphs. Models like ResNet and MobileNet come ready to use, allowing developers to customize specific layers and leverage transfer learning from pre-trained weights.
-
-##### System-Level Consequences {#sec-ai-frameworks-systemlevel-consequences-3032}
-
-Using the computational graph abstraction established earlier, frameworks can analyze and optimize entire computations before execution begins. The explicit representation of data dependencies enables automatic differentiation for gradient-based optimization.
-
-Beyond optimization capabilities, this graph structure also provides flexibility in execution. The same model definition can run efficiently across different hardware platforms, from CPUs to GPUs to specialized accelerators. The framework handles the complexity of mapping operations to specific hardware capabilities, optimizing memory usage, and coordinating parallel execution. The graph structure also enables model serialization, allowing trained models to be saved, shared, and deployed across different environments.
-
-These system benefits distinguish computational graphs from simpler visualization tools. While neural network diagrams help visualize model architecture, computational graphs serve a deeper purpose. They provide the precise mathematical representation needed to transform intuitive model design into efficient execution. Understanding this representation reveals how frameworks transform high-level model descriptions into optimized, hardware-specific implementations, making modern deep learning practical at scale.
-
-It is important to differentiate computational graphs from neural network diagrams, such as those for multilayer perceptrons (MLPs), which depict nodes and layers. Neural network diagrams visualize the architecture and flow of data through nodes and layers, providing an intuitive understanding of the model's structure. In contrast, computational graphs provide a low-level representation of the underlying mathematical operations and data dependencies required to implement and train these networks.
-
-These representational capabilities have far-reaching implications for framework design and performance. From a systems perspective, computational graphs provide several key capabilities that influence the entire machine learning pipeline. They enable automatic differentiation, which we will examine next, provide clear structure for analyzing data dependencies and potential parallelism, and serve as an intermediate representation that can be optimized and transformed for different hardware targets. However, the power of computational graphs depends critically on how and when they are executed, which brings us to the fundamental distinction between static and dynamic graph execution models.
-
-#### Pre-Defined Computational Structure {#sec-ai-frameworks-predefined-computational-structure-2f49}
-
-Static computation graphs, pioneered by early versions of TensorFlow, implement a "define-then-run" execution model. In this approach, developers must specify the entire computation graph before execution begins. This architectural choice has significant implications for both system performance and development workflow, as we will examine later.
-
-A static computation graph implements a clear separation between the definition of operations and their execution. During the definition phase, each mathematical operation, variable, and data flow connection is explicitly declared and added to the graph structure. This graph is a complete specification of the computation but does not perform any actual calculations. Instead, the framework constructs an internal representation of all operations and their dependencies, which will be executed in a subsequent phase.
-
-This upfront definition enables powerful system-level optimizations. The framework can analyze the complete structure to identify opportunities for operation fusion, eliminating unnecessary intermediate results and reducing memory traffic by 3-10x through kernel fusion. Memory requirements can be precisely calculated and optimized in advance, leading to efficient allocation strategies. Static graphs enable compilation frameworks like XLA[^fn-xla] (Accelerated Linear Algebra) to perform aggressive optimizations. Graph rewriting can eliminate substantial numbers of redundant operations while hardware-specific kernel generation can provide significant speedups over generic implementations. This abstraction, while elegant, imposes fundamental constraints on expressible computations: static graphs achieve these performance gains by sacrificing flexibility in control flow and dynamic computation patterns. Once validated, the same computation can be run repeatedly with high confidence in its behavior and performance characteristics.
-
-@fig-mlfm-static-graph illustrates this fundamental two-phase approach: first, the complete computational graph is constructed and optimized; then, during the execution phase, actual data flows through the graph to produce results. This separation enables the framework to perform thorough analysis and optimization of the entire computation before any execution begins.
-
-::: {#fig-mlfm-static-graph fig-env="figure" fig-pos="htb"}
-```{.tikz}
-\begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
-%
-\tikzset{Line/.style={line width=1.0pt,black!50,rounded corners
-},
-  Box/.style={align=flush center,
-    inner xsep=2pt,
-    node distance=0.7,
-    draw=BlueLine,
-    line width=0.75pt,
-    fill=BlueL,
-    text width=18mm,
-    minimum width=18mm, minimum height=10mm
-  },
-}
-\node[Box,fill=VioletL,draw=VioletLine](B1){Define Operations};
-\node[Box,fill=VioletL,draw=VioletLine,right=of B1](B2){Declare Variables};
-\node[Box,fill=VioletL,draw=VioletLine,right=of B2](B3){Build Graph};
-%
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=4mm,inner ysep=6mm,yshift=2mm,
-           fill=BackColor!80,fit=(B1)(B2)(B3),line width=0.75pt](BB1){};
-\node[below=2pt of  BB1.north,anchor=north]{Definition Phase};
-%
-\node[Box,node distance=1.5,fill=BrownL,draw=BrownLine,right=of B3](B4){Load Data};
-\node[Box,fill=BrownL,draw=BrownLine,right=of B4](B5){Run Graph};
-\node[Box,fill=BrownL,draw=BrownLine,right=of B5](B6){Get Results};
-%
-\scoped[on background layer]
-\node[draw=GreenLine,inner xsep=4mm,inner ysep=6mm,yshift=2mm,
-           fill=GreenL!20,fit=(B4)(B5)(B6),line width=0.75pt](BB2){};
-\node[below=2pt of  BB2.north,anchor=north]{Execution Phase};
-%
-\foreach \x/\y in{1/2,2/3,3/4,4/5,5/6}
-\draw[-latex,Line](B\x)--(B\y);
-\end{tikzpicture}
+```python
+with tf.Session() as sess:
+    result = sess.run(z, feed_dict={x: [1.0]})
+    # Now computation happens: result = [3.0]
 ```
-**Static Computation Graph**: Machine learning frameworks first define computations as a graph of operations, enabling global optimizations like operation fusion and efficient resource allocation before any data flows through the system. This two-phase approach separates graph construction and optimization from execution, improving performance and predictability.
-:::
 
-#### Runtime-Adaptive Computational Structure {#sec-ai-frameworks-runtimeadaptive-computational-structure-156d}
+The `Session.run()` call triggers graph execution. TensorFlow analyzes the complete graph, optimizes it, and then executes the optimized version with the provided input data.
 
-Dynamic computation graphs, popularized by PyTorch, implement a "define-by-run" execution model. This approach constructs the graph during execution, offering greater flexibility in model definition and debugging. PyTorch employs a CUDA caching memory allocator that maintains memory pools and reuses allocations, mitigating fragmentation concerns that might otherwise affect long-running tasks. While historically dynamic graphs limited certain compiler optimizations, modern approaches like torch.compile (PyTorch 2.0+) and TorchDynamo capture computational graphs from eager execution, enabling optimization while preserving the dynamic programming model. This evolution allows dynamic frameworks to achieve performance competitive with static graph approaches while retaining their debugging and flexibility advantages.
+**Ahead-of-Time Optimization**
 
-As shown in @fig-mlfm-dynamic-graph-flow, each operation is defined, executed, and completed before moving on to define the next operation. This contrasts sharply with static graphs, where all operations must be defined upfront. When an operation is defined, it is immediately executed, and its results become available for subsequent operations or for inspection during debugging. This cycle continues until all operations are complete.
+Because the framework has the complete graph before execution, it can perform optimizations impossible in eager mode:
 
-::: {#fig-mlfm-dynamic-graph-flow fig-env="figure" fig-pos="htb"}
-```{.tikz}
-\begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
-\tikzset{Line/.style={line width=1.0pt,black!50
-},
-  Box/.style={align=flush center,
-    inner xsep=2pt,
-    node distance=1.0,
-    draw=BlueLine,
-    line width=0.75pt,
-    fill=BlueL,
-    text width=18mm,
-    minimum width=18mm,
-    minimum height=10mm
-  },
-   Text/.style={%
-    inner sep=4pt,
-    draw=none,
-    line width=0.75pt,
-    fill=TextColor!80,
-    text=black,
-    font=\usefont{T1}{phv}{m}{n}\footnotesize,
-    align=flush center,
-    minimum width=7mm, minimum height=5mm
-  },
-}
-\node[Box,text width=12mm,minimum width=14mm,
-             fill=OliveL!70,draw=OliveLine](B1){Start};
-\node[Box,fill=VioletL,draw=VioletLine,right=of B1](B2){Operation 1};
-\node[Box,fill=GreenL,draw=GreenLine,right=of B2,
-            minimum height=14mm](B3){Operation 1 Executed};
-\node[Box,node distance=2.1,fill=VioletL,draw=VioletLine,right=of B3](B4){Operation 2};
-\node[Box,fill=GreenL,draw=GreenLine,right=of B4,
-            minimum height=14mm](B5){Operation 2 Executed};
-\node[Box,right=of B5,text width=12mm,minimum width=14mm,
-             fill=OliveL!70,draw=OliveLine](B6){End};
-%%
-\foreach \x/\y in{1/2,2/3,3/4,4/5,5/6}
-\draw[-latex,Line](B\x)--(B\y);
-\def\vi{15mm}
-\draw[thick]($(B1.east)!0.5!(B2.west)$)--++(90:\vi)
-node[Text]{Define\\ Operation};
-\draw[thick]($(B2.east)!0.5!(B3.west)$)--++(90:\vi)
-node[Text]{Execute\\ Operation};
-\draw[thick]($(B3.east)!0.5!(B4.west)$)--++(90:\vi)
-node[Text]{Define Next\\ Operation};
-\draw[thick]($(B4.east)!0.5!(B5.west)$)--++(90:\vi)
-node[Text]{Execute\\ Operation};
-\draw[thick]($(B5.east)!0.5!(B6.west)$)--++(90:\vi)
-node[Text](BB6){Repeat\\ Until Done};
-%
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=4mm,inner ysep=8mm,yshift=2mm,
-           fill=BackColor!80,fit=(B1)(B2)(BB6)(B6),line width=0.75pt](BB2){};
-\node[below=2pt of  BB2.north,anchor=north]{Runtime Execution};
-\end{tikzpicture}
+- **Operation fusion**: Combine `y = x * 2` and `z = y + 1` into a single fused kernel `z = x * 2 + 1`, eliminating the intermediate `y` and reducing memory traffic by 50%.
+- **Memory pre-allocation**: Calculate exact memory requirements for all tensors before execution, allocating memory in a single pass and reusing buffers where possible.
+- **Data layout optimization**: Transform tensor layouts (e.g., NCHW to NHWC) to match hardware preferences without copying.
+- **Dead code elimination**: Remove operations not needed to compute the requested outputs.
+- **Constant folding**: Pre-compute operations on constant values at graph construction time.
+
+Compilation frameworks like XLA[^fn-xla] (Accelerated Linear Algebra) take this further, compiling the TensorFlow graph to optimized machine code for specific hardware. For a transformer encoder block, XLA can achieve 1.5-2× speedup over unoptimized execution through aggressive fusion and hardware-specific code generation.
+
+**Systems Implications**
+
+**Performance**: Static graphs achieve high performance through ahead-of-time optimization. Kernel fusion reduces memory bandwidth requirements (often the bottleneck for ML workloads), and hardware-specific compilation enables near-peak utilization.
+
+**Limitations**: The cost of this performance is reduced flexibility. Static graphs require fixed control flow: you cannot have conditionals or loops that depend on computed values. While TensorFlow provides `tf.cond` and `tf.while_loop`, these require static unrolling or special handling. Debugging is difficult because stack traces point to graph construction code, not execution code. Error messages often reference symbolic node names rather than the actual operations that failed.
+
+#### Hybrid Approaches: JIT Compilation {#sec-ai-frameworks-hybrid-jit}
+
+Modern frameworks combine eager execution flexibility with static graph performance through Just-In-Time (JIT) compilation. These hybrid approaches capture computational patterns from eager execution and compile them to optimized code, bridging the flexibility-performance gap.
+
+**TorchScript: Trace and Script**
+
+PyTorch's TorchScript provides two ways to capture computations for compilation:
+
+**Tracing** captures operations during one execution:
+
+```python
+import torch
+
+
+def forward(x):
+    y = x * 2
+    z = y + 1
+    return z
+
+
+# Trace the function by running it once
+x_example = torch.tensor([1.0])
+traced = torch.jit.trace(forward, x_example)
+
+# traced is now a compiled version of forward()
+# Can serialize, optimize, run without Python
 ```
-**Dynamic Graph Execution**: Machine learning frameworks define and execute operations sequentially at runtime, enabling flexible model construction and immediate evaluation of intermediate results. This contrasts with static graphs which require complete upfront definition, and supports debugging and adaptive computation during model training and inference.
-:::
 
-Dynamic graphs excel in scenarios that require conditional execution or dynamic control flow, such as when processing variable-length sequences or implementing complex branching logic. They provide immediate feedback during development, making it easier to identify and fix issues in the computational pipeline. This flexibility aligns naturally with imperative programming patterns familiar to most developers, allowing them to inspect and modify computations at runtime. These characteristics make dynamic graphs particularly valuable during the research and development phase of ML projects.
+Tracing records operations during execution, producing a static graph from the observed execution path. This works well for feed-forward models but cannot handle data-dependent control flow: if your function contains `if x.sum() > 0`, tracing only captures the branch taken during the example execution.
 
-#### Framework Architecture Trade-offs {#sec-ai-frameworks-framework-architecture-tradeoffs-6f3c}
+**Scripting** compiles a subset of Python to TorchScript:
 
-The architectural differences between static and dynamic computational graphs have multiple implications for how machine learning systems are designed and executed. These implications touch on various aspects of memory usage, device utilization, execution optimization, and debugging, all of which play important roles in determining the efficiency and scalability of a system. We focus on memory management and device placement as foundational concepts, with optimization techniques covered in detail in @sec-ai-training. This allows us to build a clear understanding before exploring more complex topics like optimization and fault tolerance.
+```python
+@torch.jit.script
+def forward(x):
+    y = x * 2
+    z = y + 1
+    return z
 
-##### Memory Management {#sec-ai-frameworks-memory-management-10a6}
 
-Memory management occurs when executing computational graphs. Static graphs benefit from their predefined structure, allowing for precise memory planning before execution. Frameworks can calculate memory requirements in advance, optimize allocation, and minimize overhead through techniques like memory reuse. This structured approach helps ensure consistent performance, particularly in resource-constrained environments, such as Mobile and TinyML systems. For large models, frameworks must efficiently handle memory bandwidth requirements that can range from 100GB/s for smaller models to over 1TB/s for large language models with billions of parameters, making memory planning critical for achieving optimal throughput.
+# Compiles Python code to TorchScript IR
+# Supports control flow but requires TorchScript-compatible Python subset
+```
 
-Dynamic graphs, by contrast, allocate memory dynamically as operations are executed. While this flexibility is invaluable for handling dynamic control flows or variable input sizes, it can result in higher memory overhead and fragmentation. These trade-offs are often most apparent during development, where dynamic graphs enable rapid iteration and debugging but may require additional optimization for production deployment. The dynamic allocation overhead becomes particularly significant when memory bandwidth utilization drops below 50% of available capacity due to fragmentation and suboptimal access patterns.
+Scripting analyzes Python source code and compiles it to an intermediate representation that can be optimized and executed without Python. This supports dynamic control flow but only works with a restricted Python subset (no arbitrary Python objects, limited standard library access).
 
-##### Device Placement {#sec-ai-frameworks-device-placement-fb7e}
+**torch.compile: Compiler-Based Execution**
 
-Device placement, the process of assigning operations to hardware resources such as CPUs, GPUs, or specialized ASICS like TPUs, is another system-level consideration. Static graphs allow for detailed pre-execution analysis, enabling the framework to map computationally intensive operations to devices while minimizing communication overhead. This capability makes static graphs well-suited for optimizing execution on specialized hardware, where performance gains can be significant.
+PyTorch 2.0 introduced `torch.compile`, a major advancement that combines eager execution's flexibility with static graph performance. Unlike TorchScript, torch.compile uses Python's frame evaluation API (PEP 523) to capture execution without requiring manual tracing or Python subset restrictions.
 
-Dynamic graphs, in contrast, handle device placement at runtime. This allows them to adapt to changing conditions, such as hardware availability or workload demands. However, the lack of a complete graph structure before execution can make it challenging to optimize device utilization fully, potentially leading to inefficiencies in large-scale or distributed setups.
+```python
+@torch.compile
+def forward(x):
+    return x * 2 + 1
 
-##### Broader Perspective {#sec-ai-frameworks-broader-perspective-b041}
 
-The trade-offs between static and dynamic graphs extend well beyond memory and device considerations. As shown in @tbl-mlfm-graphs, these architectures influence optimization potential, debugging capabilities, scalability, and deployment complexity. These broader implications are explored in detail in @sec-ai-training for training workflows and @sec-ai-acceleration for system-level optimizations.
+# First call: captures execution, compiles optimized kernel
+result1 = forward(torch.tensor([1.0]))
 
-These hybrid solutions aim to provide the flexibility of dynamic graphs during development while enabling the performance optimizations of static graphs in production environments. The choice between static and dynamic graphs often depends on specific project requirements, balancing factors like development speed, production performance, and system complexity.
+# Subsequent calls: runs compiled version (~2-5× faster)
+result2 = forward(torch.tensor([2.0]))
+```
 
-+----------------------------------+------------------------------------------------------+-------------------------------------------------+
-| **Aspect**                       | **Static Graphs**                                    | **Dynamic Graphs**                              |
-+:=================================+:=====================================================+:================================================+
-| **Memory Management**            | Precise allocation planning, optimized memory usage  | Flexible but likely less efficient allocation   |
-+----------------------------------+------------------------------------------------------+-------------------------------------------------+
-| **Optimization Potential**       | Comprehensive graph-level optimizations possible     | Limited to local optimizations due to runtime   |
-+----------------------------------+------------------------------------------------------+-------------------------------------------------+
-| **Hardware Utilization**         | Can generate highly optimized hardware-specific code | May sacrifice  hardware-specific optimizations  |
-+----------------------------------+------------------------------------------------------+-------------------------------------------------+
-| **Development Experience**       | Requires more upfront planning, harder to debug      | Better debugging, faster iteration cycles       |
-+----------------------------------+------------------------------------------------------+-------------------------------------------------+
-| **Debugging Workflow**           | Framework-specific tools, disconnected stack traces  | Standard Python debugging (pdb, print, inspect) |
-+----------------------------------+------------------------------------------------------+-------------------------------------------------+
-| **Error Reporting**              | Execution-time errors disconnected from definition   | Intuitive stack traces pointing to exact lines  |
-+----------------------------------+------------------------------------------------------+-------------------------------------------------+
-| **Research Velocity**            | Slower iteration due to define-then-run requirement  | Faster prototyping and model experimentation    |
-+----------------------------------+------------------------------------------------------+-------------------------------------------------+
-| **Runtime Flexibility**          | Fixed computation structure                          | Can adapt to runtime conditions                 |
-+----------------------------------+------------------------------------------------------+-------------------------------------------------+
-| **Production Performance**       | Generally better performance at scale                | May have overhead from graph construction       |
-+----------------------------------+------------------------------------------------------+-------------------------------------------------+
-| **Integration with Legacy Code** | More separation between definition and execution     | Natural integration with imperative code        |
-+----------------------------------+------------------------------------------------------+-------------------------------------------------+
-| **Memory Overhead**              | Lower memory overhead due to planned allocations     | Higher  overhead due to dynamic allocations     |
-+----------------------------------+------------------------------------------------------+-------------------------------------------------+
-| **Deployment Complexity**        | Simpler deployment due to fixed structure            | May require additional runtime support          |
-+----------------------------------+------------------------------------------------------+-------------------------------------------------+
+**How torch.compile Works**
 
-: **Graph Computation Modes**: Static graphs define the entire computation upfront, enabling optimization, while dynamic graphs construct the computation on-the-fly, offering flexibility for variable-length inputs and control flow. This distinction impacts both the efficiency of execution and the ease of model development and debugging. {#tbl-mlfm-graphs}
+The torch.compile compilation pipeline has three stages:
 
-#### Graph-Based Gradient Computation Implementation {#sec-ai-frameworks-graphbased-gradient-computation-implementation-2731}
+1. **TorchDynamo** (graph capture): Intercepts Python bytecode execution using PEP 523 frame evaluation API. As operations execute, TorchDynamo records them into FX (PyTorch's intermediate representation). Unlike tracing, this happens at bytecode level, allowing capture without manually invoking functions.
 
-The computational graph serves as more than just an execution plan; it is the core data structure that makes reverse-mode automatic differentiation feasible and efficient. Understanding this connection reveals how frameworks compute gradients through arbitrarily complex neural networks.
+2. **FX Graph** (intermediate representation): Operations are represented in a structured format that can be analyzed and transformed. The FX graph is PyTorch's equivalent of LLVM IR or TensorFlow's GraphDef—a standardized representation enabling optimization passes.
 
-During the forward pass, the framework constructs a computational graph where each node represents an operation and stores both the result and the information needed to compute gradients. This graph is not just a visualization tool but an actual data structure maintained in memory. When `loss.backward()` is called, the framework performs a reverse traversal of this graph in reverse topological order, systematically applying the chain rule at each node.
+3. **TorchInductor** (code generation): Compiles the FX graph to optimized kernels for specific hardware (CUDA, CPU, ROCm). TorchInductor performs kernel fusion, generates efficient memory access patterns, and produces specialized code matching hardware characteristics. For CUDA, it generates Triton kernels; for CPU, it produces C++ with vectorization.
 
-The key insight is that the graph structure encodes all the dependency relationships needed for the chain rule. Each edge in the graph represents a partial derivative, and reverse traversal automatically composes these partial derivatives according to the chain rule. The forward pass builds the computation history, and the backward pass is simply a graph traversal algorithm that accumulates gradients by following the recorded dependencies.
+**Graph Breaks**
 
-This design enables automatic differentiation to scale to networks with millions of parameters because the complexity is linear in the number of operations, not exponential in the number of variables. The graph structure ensures that each gradient computation is performed exactly once and that shared subcomputations are properly handled through the dependency tracking built into the graph representation.
+torch.compile cannot compile all Python code. When it encounters unsupported operations, it creates a **graph break**: the compiled region ends, execution falls back to eager mode, and a new compilation region begins after the unsupported code.
 
+Common causes of graph breaks:
+
+- **Data-dependent control flow**: `if x.sum() > 0: ...` requires knowing tensor values, which aren't available at compile time.
+- **Unsupported operations**: Calls to arbitrary Python functions, debugging code (`print`, `breakpoint`), or operations outside torch.compile's scope.
+- **Dynamic shapes**: Tensors that change size across iterations prevent compiled code reuse (though dynamic shapes support has improved).
+- **Python object manipulation**: Creating or modifying lists, dictionaries, or custom objects in ways torch.compile cannot analyze.
+
+Each graph break incurs overhead: results must be marshalled from compiled code back to Python, then from Python into the next compiled region. Minimizing graph breaks is key to achieving good performance with torch.compile.
+
+**Systems Implications**
+
+**Performance**: Compiled regions achieve 2-5× speedup for many models through kernel fusion and optimized code generation. The speedup approaches static graph performance while maintaining eager mode's programming model. For transformer models, torch.compile typically achieves 1.5-2× training speedup and 2-3× inference speedup.
+
+**Flexibility**: Unlike static graphs or TorchScript, torch.compile preserves eager execution's debugging experience. You can add print statements, use standard Python debuggers, and inspect intermediate values. Compilation is automatic and transparent; removing `@torch.compile` reverts to standard eager execution without code changes.
+
+**Memory overhead**: Compilation requires tracing execution and storing compiled artifacts. For large models, compilation can add 1-2 GB memory overhead. Additionally, the first execution (compilation phase) is slower than eager execution (5-30 seconds for transformer models), amortized over subsequent iterations.
+
+#### Comparison Table {#sec-ai-frameworks-execution-model-comparison}
+
+@tbl-framework-execution-models summarizes the trade-offs between execution models:
+
++-------------------------+-----------------------------+-----------------------------+-----------------------------+
+| **Aspect**              | **Eager + Autograd Tape**   | **Static Graph**            | **JIT Compilation**         |
+|                         | **(PyTorch default)**       | **(TensorFlow 1.x)**        | **(torch.compile)**         |
++:========================+:============================+:============================+:============================+
+| **Execution Model**     | Immediate                   | Deferred                    | Hybrid                      |
++-------------------------+-----------------------------+-----------------------------+-----------------------------+
+| **Graph Construction**  | During forward pass         | Before execution            | First execution (cached)    |
++-------------------------+-----------------------------+-----------------------------+-----------------------------+
+| **Optimization**        | None (per-operation)        | Ahead-of-time               | JIT compilation             |
++-------------------------+-----------------------------+-----------------------------+-----------------------------+
+| **Dynamic Control Flow**| Full support                | Limited (static unroll)     | Partial (graph breaks)      |
++-------------------------+-----------------------------+-----------------------------+-----------------------------+
+| **Debugging**           | Easy (standard Python)      | Difficult (symbolic)        | Moderate (mixed)            |
++-------------------------+-----------------------------+-----------------------------+-----------------------------+
+| **Performance**         | Baseline                    | High (optimized)            | High (compiled regions)     |
++-------------------------+-----------------------------+-----------------------------+-----------------------------+
+| **Memory Overhead**     | 2-3× (autograd tape)        | 1× (pre-allocated)          | 1.5-2× (compiled cache)     |
++-------------------------+-----------------------------+-----------------------------+-----------------------------+
+| **Compilation Time**    | Zero                        | Graph construction time     | 5-30s first execution       |
++-------------------------+-----------------------------+-----------------------------+-----------------------------+
+| **First Iteration Time**| Fast                        | Slow (optimization)         | Slow (compilation)          |
++-------------------------+-----------------------------+-----------------------------+-----------------------------+
+| **Typical Speedup**     | 1× (baseline)               | 1.5-3× (vs eager)           | 2-5× (vs eager)             |
++-------------------------+-----------------------------+-----------------------------+-----------------------------+
+
+: **Framework Execution Models**: Eager execution with autograd tape provides maximum flexibility through immediate operation execution and dynamic graph construction. Static graphs enable aggressive optimization through ahead-of-time analysis at the cost of limited control flow. JIT compilation combines eager execution flexibility with compiled performance through transparent bytecode-level capture and kernel fusion. {#tbl-framework-execution-models}
+
+#### Computational Graphs as Foundation for Automatic Differentiation {#sec-ai-frameworks-graphs-enable-autodiff}
+
+All three execution models rely on computational graphs to implement automatic differentiation, but they construct and traverse these graphs differently. In eager execution, the autograd tape is built during forward pass and traversed immediately during backward pass. In static graphs, the computation graph is built before execution and includes both forward and backward operations. In JIT compilation, the captured graph is analyzed to generate optimized forward and backward kernels.
+
+The key insight connecting execution models to automatic differentiation is that **all frameworks need a representation of operation dependencies to apply the chain rule**. The execution model determines when this representation is built (before, during, or after first execution) and how long it persists (destroyed after each backward pass, or cached for reuse).
+
+The graph structure encodes dependency relationships needed for the chain rule. Each edge represents a partial derivative, and reverse traversal composes these partial derivatives according to the chain rule. This design enables automatic differentiation to scale to networks with millions of parameters because complexity is linear in the number of operations, not exponential in the number of variables. The graph structure ensures each gradient computation is performed exactly once, and shared subcomputations are handled through dependency tracking.
+
+We examine the mechanics of automatic differentiation using these graph structures in @sec-ai-frameworks-automatic-differentiation-e286, including the mathematical foundations of reverse-mode differentiation, memory management for saved tensors, and gradient accumulation strategies.
 ### Automatic Differentiation {#sec-ai-frameworks-automatic-differentiation-e286}
 
 Machine learning frameworks must solve a core computational challenge: calculating derivatives through complex chains of mathematical operations accurately and efficiently. This capability enables the training of neural networks by computing how millions of parameters require adjustment to improve the model's performance [@baydin2018].
