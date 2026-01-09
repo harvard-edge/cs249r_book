@@ -1260,9 +1260,79 @@ Bridging this gap necessitates learning approaches that exploit additional struc
 
 - **Prior knowledge integration**: Incorporating medical expertise to constrain hypothesis space
 - **Multi-task learning**: Sharing representations across related diseases
-- **Active learning**[^fn-active-learning]: Strategically selecting informative examples for labeling
+- **Active learning**: Strategically selecting informative examples for labeling
 
-[^fn-active-learning]: **Active Learning**: A machine learning approach where the model identifies which unlabeled examples would be most informative to label next, rather than labeling data randomly. For social good deployments, this is particularly valuable because expert annotation time is scarce and expensive. An active learning system might identify 50 ambiguous crop images from thousands collected and request expert labeling only for those, achieving the same accuracy improvement as labeling 500 random images. This 10× reduction in labeling effort makes expert involvement feasible in resource-constrained contexts.
+#### Human-in-the-Loop Active Learning Under Budget Constraints {#sec-ai-good-human-in-loop-active-learning-c8f2}
+
+Resource-constrained deployments face a fundamental annotation paradox: achieving acceptable model performance requires hundreds of labeled examples, yet expert annotation time costs far more than the communities can afford. A medical specialist charging $100 per hour reviewing diagnostic images at 5 minutes per image creates $33 per label annotation costs, making the 500-1000 labels required for traditional supervised learning economically infeasible for low-resource healthcare systems.
+
+Active learning addresses this paradox by strategically selecting which examples to annotate, maximizing model improvement per annotation dollar spent. Rather than randomly labeling data, active learning algorithms identify examples where model uncertainty is highest, label disagreement occurs, or information gain would be maximum. This targeted approach reduces annotation requirements by 5-10× compared to random sampling while achieving equivalent model performance.
+
+**Query Strategy Selection for Resource-Constrained Contexts**
+
+Active learning algorithms employ various query strategies to select informative examples. The choice of strategy significantly impacts annotation efficiency under resource constraints:
+
+**Uncertainty sampling** selects examples where the model's prediction confidence is lowest. For a binary classifier, this means choosing examples where predicted probability P(y=1|x) approaches 0.5. In medical diagnostic applications, this strategy identifies ambiguous cases that challenge the model: skin lesions with features resembling both benign and malignant conditions, X-rays showing borderline pneumonia indicators, or crop diseases with overlapping visual symptoms.
+
+Quantitatively, uncertainty sampling achieves learning curves of N^0.6-0.7 compared to N^0.3-0.4 for random sampling, where N is number of labeled examples. A deployment requiring 500 randomly labeled examples might achieve equivalent 85% accuracy with only 100-150 uncertainty-sampled examples, reducing annotation costs from $16,500 to $3,300-4,950 at $33 per label.
+
+**Query-by-committee** maintains an ensemble of models trained on the current labeled set and selects examples where ensemble predictions disagree most. This strategy proves particularly effective when model uncertainty correlates poorly with true annotation value, such as when models confidently misclassify unusual but informative examples.
+
+Implementation under resource constraints requires balancing ensemble size against computational overhead. A practical deployment might maintain 3-5 diverse models (varying architectures, hyperparameters, or random initializations) rather than the 10-20 models used in unconstrained settings. This trades some query quality for feasible on-device computation, with disagreement measured via prediction entropy across the ensemble.
+
+**Expected model change** selects examples predicted to cause largest gradient updates if labeled, directly optimizing for learning progress. This strategy requires computing expected gradients under different possible label assignments, creating computational overhead of 2-10× compared to uncertainty sampling. For resource-constrained deployments, this approach becomes feasible only at regional nodes with sufficient computation for gradient estimation, not on edge devices.
+
+**Annotation Budget Allocation and Scheduling**
+
+Resource-constrained deployments rarely receive annotation budgets as lump sums. Instead, experts provide annotations in small batches as time permits: a medical specialist reviewing 10-20 cases weekly, an agricultural extension officer labeling 30-50 crop images monthly, or conservation biologists annotating 100 wildlife camera trap images quarterly. Active learning systems must adapt to these irregular, budget-limited annotation schedules.
+
+**Batch mode active learning** selects multiple examples simultaneously rather than the single example chosen by traditional active learning algorithms. This better matches expert annotation workflows, where reviewing 10 similar cases in sequence proves more efficient than context-switching between unrelated individual cases. However, batch selection introduces statistical dependencies: selecting the 10 most uncertain examples often yields redundant information if those examples are similar.
+
+Diversity-aware batch selection addresses this by jointly optimizing for uncertainty and diversity. One practical approach computes pairwise similarities between candidate examples using learned representations, then selects batches maximizing both total uncertainty and minimum pairwise distance. For a batch of size k=10 from 1000 candidates, this approach might achieve 80-90% of the information gain from the optimal batch while reducing computation from O(1000^10) exhaustive search to O(1000k^2) greedy selection.
+
+**Annotation budget smoothing** distributes limited expert time effectively across deployment lifecycle. Consider a rural health clinic receiving 50 diagnostic images daily with a consulting specialist available for 2 hours monthly (approximately 24 annotations at 5 minutes each). A naive approach would accumulate 1500 monthly images and select 24 for labeling, creating temporal gaps where model improvement lags deployment needs.
+
+An alternative approach implements continuous learning with weekly annotation cycles: accumulate 350 weekly images, select 6 most informative cases for specialist review, retrain model, and deploy updates before next cycle. This 4× higher update frequency enables model improvement to track distribution shifts and emerging disease patterns more responsively, though each update uses fewer labels.
+
+**Quantitative analysis** reveals the trade-off: monthly batches achieve 2-3% higher accuracy given identical total annotations (24 examples enable better statistical coverage), but weekly updates reduce average model staleness from 15 days to 3.5 days. In domains where distribution shift is rapid (seasonal disease patterns, changing environmental conditions), the responsiveness gain outweighs the modest accuracy loss.
+
+**Human Annotation Quality and Expertise Levels**
+
+Resource constraints often force deployments to use non-expert annotators with limited training, introducing label noise that degrades model performance. Community health workers labeling medical images achieve inter-annotator agreement (Cohen's kappa) of κ=0.6-0.7 compared to κ=0.85-0.95 for medical specialists, while agricultural extension officers labeling crop diseases achieve κ=0.5-0.6 versus κ=0.8-0.9 for PhDs in plant pathology.
+
+**Noise-robust active learning** adapts to imperfect annotations by incorporating uncertainty about label quality into query selection. One approach models each annotator's confusion matrix (probability of assigning label j when true label is i) learned from a small calibration set of expert-verified labels. The active learning algorithm then selects examples maximizing expected information gain accounting for annotation noise:
+
+Expected information gain = I(y;x) × (1 - annotation_entropy)
+
+where annotation_entropy quantifies expected label uncertainty from the specific annotator. This prevents wasting annotation budget on examples where annotator uncertainty is high regardless of model state.
+
+**Consensus mechanisms** improve annotation quality when multiple community annotators are available at lower cost than single expert. A deployment might obtain 3 community health worker annotations at $5 each ($15 total) versus 1 specialist annotation at $33. When κ_community=0.65, three-way majority voting achieves effective agreement of κ_consensus=0.78-0.82, approaching specialist quality at half the cost.
+
+Quantitatively, consensus strategies become cost-effective when:
+
+cost_consensus / quality_consensus < cost_expert / quality_expert
+
+For the medical example: $15 / 0.80 = 18.75 versus $33 / 0.90 = 36.67, making consensus 2× more cost-effective despite requiring more total annotation time.
+
+**Adaptive expertise allocation** dynamically routes examples to appropriate annotator skill levels based on predicted difficulty. Simple, unambiguous cases receive community annotator labels ($5), while ambiguous cases requiring specialist knowledge escalate to experts ($33). A practical system might implement:
+
+- Automated easy cases (model confidence >95%): No human annotation, add to training set with model pseudolabel
+- Community annotator cases (model confidence 70-95%): Low-cost annotation sufficient
+- Specialist cases (model confidence <70%): Expert annotation required
+
+This tiered approach reduces average annotation cost from $33 per example (all specialist) to $8-12 per example (mixed workforce) while maintaining label quality on difficult examples where it matters most.
+
+**System Integration and Deployment Workflow**
+
+Implementing human-in-the-loop active learning in resource-constrained settings requires careful workflow design accommodating intermittent connectivity, asynchronous expert availability, and limited communication bandwidth.
+
+**Offline annotation interfaces** enable experts to review queued examples during connectivity windows or via periodic dataset synchronization. The system maintains a priority queue of unlabeled examples ranked by active learning scores, synchronized to expert devices when connectivity permits. Annotations flow back asynchronously, triggering model retraining when sufficient new labels accumulate (typically 10-50 examples depending on domain).
+
+**Annotation bandwidth optimization** reduces synchronization overhead by transmitting only essential data. For image-based tasks, systems send downsampled images (512×512 rather than full 2048×2048 resolution) for annotation, reducing bandwidth from 3-5 MB to 150-300 KB per image while preserving diagnostic information. When experts require full resolution, they flag cases for high-resolution synchronization during the next connectivity window.
+
+**Incremental model updates** retrain models efficiently as new labels arrive. Rather than retraining from scratch with each annotation batch (computationally expensive), systems implement online or incremental learning algorithms that update model parameters using only new examples. For neural networks, this might involve fine-tuning the final layers while freezing earlier layers, reducing training time from hours to minutes and enabling more responsive model improvement cycles.
+
+These human-in-the-loop active learning patterns address the annotation paradox by extracting maximum value from scarce expert time. Deployments implementing these strategies achieve model performance comparable to fully supervised baselines while reducing annotation requirements by 5-10× and costs by similar factors, making expert-quality ML systems economically viable in resource-constrained contexts.
 
 ### Learning Without Labeled Data {#sec-ai-good-learning-without-labeled-data-88fb}
 
