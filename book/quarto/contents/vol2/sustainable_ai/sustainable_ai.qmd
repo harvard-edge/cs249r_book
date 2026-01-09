@@ -401,6 +401,126 @@ The carbon impact of electricity consumption depends critically on the energy ge
 
 These variations create opportunities for carbon-aware computing. Training the same model in Quebec (hydro-powered grid at approximately 20 gCO2eq/kWh) versus Poland (coal-dominated grid at approximately 700 gCO2eq/kWh) produces a 35-fold difference in carbon emissions. Even within a single grid, carbon intensity varies temporally with renewable generation: midday solar peaks can reduce intensity by 30% to 50% compared to evening hours when natural gas peaker plants operate.
 
+### Systematic Energy Metrics {#sec-sustainable-ai-systematic-energy-metrics}
+
+Quantifying energy efficiency requires systematic metrics that enable comparison across hardware architectures and algorithmic approaches. These metrics provide the foundation for reasoning about optimization trade-offs and identifying bottlenecks in AI system energy consumption.
+
+#### Energy Per Operation {#sec-sustainable-ai-energy-per-operation}
+
+The fundamental metric for computational energy efficiency is energy consumed per operation, typically measured in picojoules (pJ). For AI workloads, the most relevant metrics are energy per floating-point operation (pJ/FLOP) and energy per multiply-accumulate (pJ/MAC), where one MAC operation performs both a multiplication and addition, equivalent to two FLOPs.
+
+Hardware architecture determines energy efficiency across orders of magnitude:
+
++----------------------+---------------------------+----------------------------------+
+| Architecture         | Energy Efficiency         | Characteristics                  |
+|                      | (pJ/FLOP)                 |                                  |
++:=====================+:==========================+:=================================+
+| CPU (general)        | 100 pJ/FLOP               | Low utilization, high            |
+|                      |                           | flexibility                      |
++----------------------+---------------------------+----------------------------------+
+| GPU (tensor cores)   | 10 pJ/FLOP                | High throughput, parallel        |
+|                      |                           | execution                        |
++----------------------+---------------------------+----------------------------------+
+| TPU (systolic array) | 1-2 pJ/FLOP               | Specialized matrix operations,   |
+|                      |                           | optimized dataflow               |
++----------------------+---------------------------+----------------------------------+
+| ASIC (INT8)          | 0.1 pJ/operation          | Fixed-function, low precision    |
++----------------------+---------------------------+----------------------------------+
+
+: **Energy Efficiency by Architecture**: Hardware specialization provides up to three orders of magnitude improvement in energy per operation. These values represent typical operations under high utilization. {#tbl-energy-per-op}
+
+These differences reflect not just circuit-level efficiency but also architectural choices affecting utilization. CPUs execute diverse instruction mixes with low average utilization of arithmetic units. GPUs achieve higher utilization through massive parallelism. TPUs and ASICs maximize utilization through specialized datapaths optimized for specific operation types.
+
+Precision significantly affects energy per operation. INT8 integer arithmetic consumes approximately one-sixteenth the energy of FP32 floating-point at the same frequency and voltage, combining reduced datapath capacitance (4× from bit width) with lower voltage requirements (2× from larger noise margins) and simpler control logic (2× from reduced complexity).
+
+#### Energy Per Byte {#sec-sustainable-ai-energy-per-byte}
+
+Data movement often dominates energy consumption in modern AI systems. The energy cost of memory access varies dramatically across the storage hierarchy:
+
++----------------------+---------------------------+----------------------------------+
+| Memory Level         | Energy Cost               | Access Latency                   |
+|                      | (pJ/byte)                 |                                  |
++:=====================+:==========================+:=================================+
+| Register             | 0.1 pJ/byte               | 1 cycle                          |
++----------------------+---------------------------+----------------------------------+
+| L1 Cache             | 1 pJ/byte                 | 3-5 cycles                       |
++----------------------+---------------------------+----------------------------------+
+| L2 Cache             | 5 pJ/byte                 | 10-20 cycles                     |
++----------------------+---------------------------+----------------------------------+
+| DRAM                 | 100 pJ/byte               | 200-300 cycles                   |
++----------------------+---------------------------+----------------------------------+
+| NVMe SSD             | 1,000 pJ/byte             | 50,000-100,000 cycles            |
++----------------------+---------------------------+----------------------------------+
+| Network              | 10,000+ pJ/byte           | Millions of cycles               |
++----------------------+---------------------------+----------------------------------+
+
+: **Memory Hierarchy Energy Costs**: Energy per byte increases by orders of magnitude moving down the memory hierarchy. Data movement can easily dominate computation energy. {#tbl-energy-per-byte}
+
+The critical insight is that moving data from DRAM consumes 10 to 100 times more energy than performing arithmetic operations. For a GPU operating at 10 pJ/FLOP, accessing one FP32 operand from DRAM (4 bytes times 100 pJ/byte = 400 pJ) costs 40 times more than the computation itself. This energy gap drives architectural innovations including:
+
+- On-chip memory for data reuse (NVIDIA tensor cores with shared memory)
+- Optimized data layouts minimizing DRAM access (Google TPU systolic arrays)
+- Compression reducing data movement (sparse tensor representations)
+
+#### Arithmetic Intensity and Energy Roofline {#sec-sustainable-ai-arithmetic-intensity-energy}
+
+The balance between computation and data movement determines whether energy consumption is compute-bound or memory-bound. Arithmetic intensity (AI) quantifies this relationship:
+
+$$AI = \frac{\text{Total FLOPs}}{\text{Total Bytes Moved}}$$ {#eq-arithmetic-intensity}
+
+Arithmetic intensity measured in FLOPs per byte determines the dominant energy consumer. The energy roofline model extends traditional performance rooflines to energy analysis:
+
+$$E_{total} = \max\left(E_{compute}, E_{memory}\right) = \max\left(\text{FLOPs} \times e_{flop}, \text{Bytes} \times e_{byte}\right)$$ {#eq-energy-roofline}
+
+where $e_{flop}$ is energy per FLOP and $e_{byte}$ is energy per byte moved. The crossover arithmetic intensity where compute and memory energy balance is:
+
+$$AI_{crossover} = \frac{e_{byte}}{e_{flop}}$$ {#eq-ai-crossover}
+
+For a GPU with $e_{flop} = 10$ pJ/FLOP and $e_{byte} = 100$ pJ/byte (DRAM access):
+
+$$AI_{crossover} = \frac{100 \text{ pJ/byte}}{10 \text{ pJ/FLOP}} = 10 \text{ FLOPs/byte}$$
+
+Operations with arithmetic intensity below 10 FLOPs/byte are memory-bound, with data movement dominating energy consumption. Operations above this threshold are compute-bound.
+
+::: {.callout-example title="Worked Example: Matrix Multiplication Energy Analysis"}
+
+Consider matrix multiplication $C = A \times B$ for $N \times N$ matrices in FP32 precision on a GPU with the energy characteristics above.
+
+**Step 1: Calculate FLOPs and Bytes**
+
+- FLOPs: $2N^3$ (one multiply-add for each of $N^2$ output elements, accumulating over $N$ elements)
+- Bytes: $3N^2 \times 4$ bytes (read matrices $A$ and $B$, write matrix $C$, each FP32 = 4 bytes)
+- Arithmetic intensity: $AI = \frac{2N^3}{12N^2} = \frac{N}{6}$ FLOPs/byte
+
+**Step 2: Determine Energy-Limiting Factor**
+
+For small matrices ($N = 60$):
+
+- $AI = 60/6 = 10$ FLOPs/byte (at crossover)
+- Compute energy: $2 \times 60^3 \times 10 \text{ pJ} = 4.32$ mJ
+- Memory energy: $3 \times 60^2 \times 4 \times 100 \text{ pJ} = 4.32$ mJ
+- Balanced: both compute and memory contribute equally
+
+For large matrices ($N = 1000$):
+
+- $AI = 1000/6 = 167$ FLOPs/byte (compute-bound)
+- Compute energy: $2 \times 10^9 \times 10 \text{ pJ} = 20$ mJ (dominates)
+- Memory energy: $3 \times 10^6 \times 4 \times 100 \text{ pJ} = 1.2$ mJ (negligible)
+- Optimization priority: Focus on compute efficiency
+
+For element-wise operations ($N = 1000$, vector addition):
+
+- FLOPs: $N = 1000$ (one addition per element)
+- Bytes: $3N \times 4 = 12,000$ bytes (read two vectors, write one)
+- $AI = 1000 / 12000 = 0.083$ FLOPs/byte (memory-bound)
+- Compute energy: $1000 \times 10 \text{ pJ} = 0.01$ mJ (negligible)
+- Memory energy: $12000 \times 100 \text{ pJ} = 1.2$ mJ (dominates)
+- Optimization priority: Reduce data movement through fusion
+
+:::
+
+The energy roofline model reveals why different optimization strategies suit different workloads. Large dense matrix operations benefit from faster arithmetic units. Memory-bound operations like element-wise kernels benefit from data layout optimization, kernel fusion to reduce memory round-trips, and on-chip memory utilization. This framework guides architectural and algorithmic choices for sustainable AI system design.
+
 ### Energy Measurement Techniques {#sec-sustainable-ai-energy-measurement}
 
 Quantifying AI system energy consumption requires measurement at multiple levels of the hardware stack, from chip-level instrumentation to facility-wide monitoring. Each measurement approach offers different granularity, accuracy, and overhead trade-offs that practitioners must understand to select appropriate methods for their use case.
