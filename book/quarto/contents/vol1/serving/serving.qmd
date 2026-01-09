@@ -603,6 +603,154 @@ However, batching forces requests to wait. A request arriving just after a batch
 
 Typical configurations use windows of 5-50ms with maximum batch sizes of 8-32 for latency-sensitive applications. The optimal configuration depends on request arrival patterns, model characteristics, and latency requirements.
 
+### Dynamic Batching Latency-Throughput Trade-offs {#sec-serving-batching-tradeoffs}
+
+Dynamic batching introduces a fundamental tension between throughput optimization and latency constraints. Understanding this trade-off quantitatively enables principled configuration decisions rather than trial-and-error tuning. The total user-perceived latency for a batched request decomposes into two components as shown in @eq-batching-latency:
+
+$$L_{\text{total}} = L_{\text{wait}} + L_{\text{compute}}(b)$$ {#eq-batching-latency}
+
+where $L_{\text{wait}}$ is the time spent waiting in the batching queue and $L_{\text{compute}}(b)$ is the inference time for batch size $b$. The batching window $T$ bounds wait time ($L_{\text{wait}} \leq T$), while batch size affects compute time through GPU utilization characteristics.
+
+**Queue Waiting Time Analysis**
+
+For Poisson arrivals with rate $\lambda$ and batching window $T$, requests arrive uniformly within the window. A request arriving at time $t$ within the window waits $T - t$ for the batch to close. The average wait time is half the window:
+
+$$E[L_{\text{wait}}] = \frac{T}{2}$$ {#eq-avg-wait}
+
+This simple relationship has profound implications. A 20ms batching window adds 10ms average latency regardless of batch size achieved. If your latency SLO is 50ms and inference takes 5ms, the batching window consumes 20% of your latency budget before any computation begins.
+
+**Batch Size Distribution**
+
+The number of requests collected during window $T$ follows a Poisson distribution with mean $\lambda T$:
+
+$$P(\text{batch size} = k) = \frac{(\lambda T)^k e^{-\lambda T}}{k!}$$ {#eq-batch-distribution}
+
+This distribution reveals batch size variability. @tbl-batch-variability shows how batch size fluctuates for different traffic levels with a fixed 10ms window:
+
+| Arrival Rate | Mean Batch | Std Dev | P(batch=0) | P(batch≥2×mean) |
+|:-------------|:-----------|:--------|:-----------|:----------------|
+| 50 QPS | 0.5 | 0.7 | 61% | 1% |
+| 200 QPS | 2.0 | 1.4 | 14% | 9% |
+| 500 QPS | 5.0 | 2.2 | 0.7% | 12% |
+| 1000 QPS | 10.0 | 3.2 | 0.005% | 13% |
+
+: **Batch Size Variability**: At low traffic, batching windows frequently contain zero requests (wasted GPU cycles). At moderate traffic, batch sizes fluctuate significantly around the mean. High traffic provides more stable batching but still sees 13% of batches exceeding twice the mean size. {#tbl-batch-variability}
+
+**Throughput Maximization Strategy**
+
+Throughput optimization requires maximizing the number of requests processed per unit time. For a system with service time $S(b)$ for batch size $b$, throughput follows:
+
+$$\text{Throughput}(b) = \frac{b}{T + S(b)}$$ {#eq-batch-throughput}
+
+The numerator increases linearly with batch size while the denominator increases sub-linearly (due to GPU parallelism). This creates an optimal batch size that balances these competing effects.
+
+For ResNet-50 on a V100 GPU, service time scales as $S(b) = 5\text{ms} + 0.6b$ (5ms fixed overhead plus 0.6ms per additional image in the batch). With $T = 10$ms batching window:
+
+| Batch Size | Service Time | Total Latency | Throughput | Efficiency |
+|:-----------|:-------------|:--------------|:-----------|:-----------|
+| 1 | 5.6ms | 15.6ms | 64 img/s | Low |
+| 4 | 7.4ms | 17.4ms | 230 img/s | Moderate |
+| 8 | 9.8ms | 19.8ms | 404 img/s | Good |
+| 16 | 14.6ms | 24.6ms | 650 img/s | High |
+| 32 | 24.2ms | 34.2ms | 935 img/s | Maximum |
+
+: **Batching Throughput Analysis**: Throughput increases with batch size but total latency grows. The optimal configuration depends on whether the latency SLO or throughput target is the binding constraint. {#tbl-batching-throughput}
+
+**Latency-Constrained Optimization**
+
+When latency SLOs provide the binding constraint, the optimization problem becomes finding the maximum batch size that meets the SLO. For SLO $L_{\text{SLO}}$ and average wait time $T/2$:
+
+$$b_{\text{max}} = \max\{b : \frac{T}{2} + S(b) \leq L_{\text{SLO}}\}$$ {#eq-latency-constrained-batch}
+
+Consider a 50ms p95 latency SLO for ResNet-50 serving:
+
+**Scenario 1: Conservative window (T = 5ms)**
+- Average wait: 2.5ms
+- Latency budget for inference: 47.5ms
+- Maximum batch size: 71 (but typically capped at 32 for memory)
+- Achieved throughput: ~1,140 img/s (batch=32)
+
+**Scenario 2: Aggressive window (T = 25ms)**
+- Average wait: 12.5ms
+- Latency budget for inference: 37.5ms
+- Maximum batch size: 48
+- Achieved throughput: ~1,280 img/s (batch=48)
+
+The aggressive window achieves only 12% higher throughput but increases average latency by 10ms and p99 latency by 25ms. For latency-sensitive applications, the conservative window provides better user experience at modest throughput cost.
+
+**SLO Violation Analysis**
+
+Batch size variability causes SLO violations even when mean latency appears safe. The p99 latency includes both worst-case wait time (full window) and worst-case batch size (governed by Poisson tail):
+
+$$L_{p99} \approx T + S(b_{p99})$$ {#eq-p99-batch-latency}
+
+where $b_{p99}$ is the 99th percentile batch size. For $\lambda = 500$ QPS and $T = 10$ms:
+
+- Mean batch size: 5
+- p99 batch size: 11 (from Poisson distribution)
+- Mean latency: $5\text{ms} + 9.0\text{ms} = 14\text{ms}$
+- p99 latency: $10\text{ms} + 11.6\text{ms} = 21.6\text{ms}$
+
+The p99 latency is 1.54× the mean, reflecting both wait time variance and batch size variance. Systems that provision based on mean latency will experience SLO violations.
+
+**Adaptive Batching Windows**
+
+Fixed batching windows waste latency budget during high traffic when large batches form quickly. Adaptive strategies adjust the window based on queue depth:
+
+```python
+def adaptive_batching_window(queue_depth, arrival_rate, slo_ms):
+    # Close batch early if sufficient requests queued
+    target_batch_size = 16
+    if queue_depth >= target_batch_size:
+        return 0  # Close immediately
+
+    # Estimate time to reach target batch
+    if arrival_rate > 0:
+        estimated_wait = (target_batch_size - queue_depth) / arrival_rate
+        max_wait = slo_ms * 0.3  # Use 30% of SLO budget for waiting
+        return min(estimated_wait, max_wait)
+
+    return max_wait  # Default to maximum wait
+```
+
+This approach reduces average wait time during high traffic while maintaining batch sizes. For traffic varying between 200-1000 QPS:
+
+- Fixed window (10ms): Average latency 15ms, throughput 650 img/s
+- Adaptive window: Average latency 11ms (27% reduction), throughput 680 img/s (5% improvement)
+
+**Throughput-Latency Pareto Frontier**
+
+The batching configuration space forms a Pareto frontier where improving throughput requires accepting higher latency. @tbl-pareto-batching shows this trade-off for different window configurations:
+
+| Window (ms) | Max Batch | Avg Latency | p99 Latency | Throughput | Configuration |
+|:------------|:----------|:------------|:------------|:-----------|:--------------|
+| 2 | 16 | 8ms | 18ms | 890 img/s | Ultra-low latency |
+| 5 | 32 | 10ms | 22ms | 1,140 img/s | Balanced |
+| 10 | 32 | 15ms | 35ms | 1,240 img/s | Moderate latency |
+| 20 | 64 | 23ms | 52ms | 1,310 img/s | Throughput-optimized |
+| 50 | 128 | 38ms | 98ms | 1,350 img/s | Maximum throughput |
+
+: **Batching Pareto Frontier**: Each configuration represents a different point on the throughput-latency trade-off curve. Moving from 2ms to 50ms windows improves throughput by only 52% while increasing p99 latency by 5.4×. Diminishing returns make aggressive batching costly for latency-sensitive applications. {#tbl-pareto-batching}
+
+**Practical Configuration Guidelines**
+
+Based on quantitative analysis, principled batching configuration follows these guidelines:
+
+1. **Start with latency budget**: Allocate 20-30% of SLO to batching wait time
+2. **Estimate traffic**: Use p95 arrival rate, not average (account for traffic spikes)
+3. **Calculate maximum window**: $T_{\text{max}} = 0.3 \times L_{\text{SLO}}$
+4. **Determine batch size limit**: From GPU memory and p99 latency constraints
+5. **Monitor actual distribution**: Batch size variance indicates whether traffic assumptions hold
+
+For ResNet-50 with 50ms SLO and 500 QPS traffic:
+- Latency budget for batching: 15ms
+- Maximum window: 15ms
+- Expected batch size: 7.5
+- Maximum batch size: 32 (memory limit)
+- Configuration: $T = 12$ms, $b_{\text{max}} = 32$
+- Predicted p99 latency: 43ms (within SLO)
+- Predicted throughput: 1,180 img/s
+
 ### Continuous Batching {#sec-serving-continuous-batching}
 
 Autoregressive models like language models generate outputs token by token, creating a batching challenge that differs fundamentally from single-pass models like ResNet-50. Traditional batching processes all sequences in a batch for all generation steps, wasting compute when sequences complete at different times [@yu2022orca]. If one sequence in a batch of 8 finishes after 10 tokens while others need 100 tokens, 87.5% of the compute for that sequence slot is wasted. This inefficiency becomes critical as language models dominate production inference workloads.
