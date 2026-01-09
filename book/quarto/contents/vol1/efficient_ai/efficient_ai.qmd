@@ -813,9 +813,124 @@ The **Lottery Ticket Hypothesis** suggests that iterative pruning's success come
 
 The specific implementation details including pruning schedules, fine-tuning strategies, layer-wise sensitivity analysis, and structured pruning algorithms are covered in @sec-model-optimizations.
 
-**Knowledge Transfer** distills capabilities from large teacher models into efficient student models. Knowledge distillation[^fn-knowledge-distillation] achieves 40-60% parameter reduction while retaining 95-97% of original performance, addressing both computational efficiency and data efficiency by requiring fewer training examples. The specific distillation algorithms, loss functions, and training procedures are covered in @sec-model-optimizations.
+##### Knowledge Distillation: Learning from Teacher Models {#sec-efficient-ai-knowledge-distillation-e5f6}
+
+Knowledge distillation[^fn-knowledge-distillation] transfers capabilities from large teacher models to efficient student models through a fundamentally different approach than quantization or pruning. While those techniques modify an existing architecture, distillation creates an entirely new smaller architecture trained to mimic the teacher's behavior.
 
 [^fn-knowledge-distillation]: **Knowledge Distillation**: Technique where a large "teacher" model transfers knowledge to a smaller "student" model by training the student to mimic the teacher's output probabilities. DistilBERT achieves ~97% of BERT's performance on GLUE benchmark with 40% fewer parameters and 60% faster inference through distillation.
+
+**Core Concept.** The key insight is that a teacher's probability distribution contains more information than hard labels alone. Consider image classification: the hard label is "cat," but the teacher's output reveals similarity structure: "cat" (90%), "dog" (8%), "car" (2%). This "dark knowledge"—the pattern of similarities encoded in soft predictions—helps the student generalize more effectively.
+
+**Distillation Loss Function.** Training combines two objectives:
+
+$$
+\mathcal{L}_{\text{distill}} = \alpha \cdot \mathcal{L}_{\text{hard}} + (1-\alpha) \cdot \mathcal{L}_{\text{soft}}
+$$ {#eq-distillation-loss}
+
+where:
+
+$$
+\mathcal{L}_{\text{hard}} = \text{CrossEntropy}(y_{\text{true}}, \mathbf{p}_{\text{student}})
+$$ {#eq-hard-loss}
+
+is the standard loss against true labels, and:
+
+$$
+\mathcal{L}_{\text{soft}} = T^2 \cdot \text{KL}(\mathbf{p}_{\text{teacher}}^T || \mathbf{p}_{\text{student}}^T)
+$$ {#eq-soft-loss}
+
+is the distillation loss measuring divergence between teacher and student probability distributions. The hyperparameters are $\alpha$ (weight balancing hard/soft losses, typically 0.1-0.5) and $T$ (temperature for softening distributions, typically 3-20). The $T^2$ factor compensates for gradient scaling with temperature.
+
+**Temperature Softening.** Temperature $T$ controls distribution sharpness through softmax with temperature:
+
+$$
+p_i = \frac{\exp(z_i / T)}{\sum_j \exp(z_j / T)}
+$$ {#eq-temperature-softmax}
+
+where $z_i$ are the logits (pre-softmax values). As $T$ increases, the distribution becomes more uniform, revealing similarity structure:
+
+- **$T = 1$** (standard softmax): Sharp, winner-take-all distribution. Example: Cat (0.90), Dog (0.08), Car (0.02).
+- **$T = 5$** (higher temperature): Softer distribution revealing similarities. Example: Cat (0.50), Dog (0.30), Car (0.15), revealing that "dog is more similar to cat than car."
+- **$T \to \infty$**: Approaches uniform distribution where all classes are equally likely.
+
+Higher temperature reveals the relative similarity between incorrect classes, providing rich training signal beyond the binary correct/incorrect from hard labels.
+
+**Why Soft Labels Help: Dark Knowledge.** The information content differs dramatically:
+
+- **Hard labels**: $[0, 0, 1, 0, 0]$ (one-hot encoding, no similarity information)
+- **Soft labels**: $[0.05, 0.30, 0.50, 0.10, 0.05]$ (similarity structure preserved)
+
+Soft labels encode:
+
+1. **Relative similarity between classes**: Which incorrect classes are "close" to the correct one
+2. **Uncertainty in predictions**: How confident the teacher is about its prediction
+3. **Generalization structure**: Patterns learned beyond the training labels
+
+**Example:** MNIST digit classification for a "3" image:
+
+- **Hard label**: 3 (no ambiguity, binary signal)
+- **Soft label**: 3 (0.8), 5 (0.10), 8 (0.08), others (0.02)
+- **Dark knowledge revealed**: The digit "3" shares visual features with "5" (curved bottom) and "8" (curved shapes), but not with "1" or "4" (straight lines)
+
+The student learns this similarity structure, improving generalization to ambiguous or out-of-distribution examples.
+
+**Mathematical Justification.** Why does matching soft targets work better than hard targets? Consider the gradient of the cross-entropy loss with respect to student logits $z_i$:
+
+$$
+\frac{\partial \mathcal{L}_{\text{soft}}}{\partial z_i} = \frac{1}{T}(p_i^{\text{student}} - p_i^{\text{teacher}})
+$$ {#eq-soft-gradient}
+
+The gradient magnitude is inversely proportional to temperature, and the direction points toward matching the teacher's distribution. For incorrect classes with $p_i^{\text{teacher}} > 0$ (even if small), the student receives positive gradient signal to increase its probability for those classes, encoding the similarity structure.
+
+In contrast, hard labels provide no gradient signal for incorrect classes (probability is exactly 0), losing this similarity information.
+
+**Distillation Effectiveness.** Empirical results demonstrate significant compression with minimal accuracy loss:
+
+**BERT → DistilBERT:**
+- Compression: 110M → 66M parameters (40% reduction)
+- Accuracy: 97% of BERT's GLUE performance
+- Speedup: 1.6× inference speedup
+- Training: 40% less compute than training BERT from scratch
+
+**ResNet-34 → MobileNetV2:**
+- Compression: 21M → 3.4M parameters (6× reduction)
+- Accuracy: 92% of ResNet-34 ImageNet performance
+- Speedup: 3× inference speedup on mobile devices
+
+General observation across tasks: distillation typically enables 2-4× compression with 95-98% accuracy retention.
+
+**When Distillation Works Best.**
+
+1. **Teacher is overparameterized**: Large capacity models (billions of parameters) learn rich representations with substantial redundancy. The teacher's expressiveness provides high-quality soft targets. Example: Distilling GPT-3.5 → Phi-2 benefits from the teacher's massive pre-training.
+
+2. **Student architecture is reasonable**: The student must have sufficient capacity to capture the teacher's knowledge. Generally, 0.25-0.5× teacher size works well. Too small: cannot represent the learned function. Too large: minimal benefit from distillation.
+
+3. **Sufficient training data**: Distillation requires the teacher to be well-trained first. More data → better teacher → better distillation quality. In low-data regimes, distillation provides less benefit as the teacher itself may not have learned robust representations.
+
+4. **Combined with other techniques**: Distillation composes multiplicatively with other compression methods:
+   - Distillation + quantization: DistilBERT INT8 achieves 8× compression (2× from distillation, 4× from quantization)
+   - Distillation + pruning: Sparse student networks further reduce computation
+   - Multiplicative benefits: combining techniques yields larger total compression than either alone
+
+**Feature-Based Distillation.** Beyond matching output distributions, intermediate layer representations can also be transferred:
+
+$$
+\mathcal{L}_{\text{feature}} = \|\mathbf{h}_{\text{student}} - W\mathbf{h}_{\text{teacher}}\|^2
+$$ {#eq-feature-distillation}
+
+where $\mathbf{h}_{\text{student}}$ and $\mathbf{h}_{\text{teacher}}$ are intermediate layer activations, and $W$ is a learned projection matrix (when dimensions differ). This approach transfers the teacher's internal representations, not just final predictions, often improving student performance particularly for vision tasks where intermediate features capture visual hierarchies.
+
+**Practical Considerations.** Key design choices include:
+
+- **Temperature selection**: Start with $T=3$ to 5, increase if student struggles to learn. Too low (T=1): distributions too sharp, minimal dark knowledge. Too high (T>20): distributions too uniform, signal diluted.
+
+- **Balance parameter $\alpha$**: Typical range 0.1 to 0.5. Higher $\alpha$ emphasizes hard labels (ground truth), lower $\alpha$ emphasizes teacher matching. Start with $\alpha=0.5$ and adjust based on student performance.
+
+- **Data augmentation**: Distillation benefits from augmented data even if the teacher was trained without it, as the teacher provides consistent soft targets across augmentations.
+
+- **Multiple teachers**: Ensemble distillation aggregates predictions from multiple teachers, improving student robustness and accuracy beyond single-teacher distillation.
+
+The specific implementation details including distillation training loops, temperature tuning strategies, feature-based distillation architectures, self-distillation, and online distillation variants are covered in @sec-model-optimizations.
 
 #### Hardware-Algorithm Co-Design {#sec-efficient-ai-hardwarealgorithm-codesign-67e8}
 
