@@ -941,6 +941,40 @@ Increasing MTBF by $10\times$ (from 35 to 360 minutes) increases optimal checkpo
 
 This demonstrates why ECC memory protection is essential: the $10\times$ MTBF improvement transforms an unusable system (97% overhead) into a practical training infrastructure (20% overhead).
 
+##### Extensions to Young's Formula {#sec-robust-ai-checkpoint-extensions}
+
+While Young's formula provides a solid foundation for checkpoint optimization, real-world ML systems require extensions that account for heterogeneity and I/O efficiency improvements.
+
+**Heterogeneous System MTBF**
+
+Production ML clusters often combine different hardware types with varying reliability characteristics. A training cluster might include older V100 GPUs ($\text{MTBF} = 40,000$ hours), newer A100 GPUs ($\text{MTBF} = 80,000$ hours), and specialized networking hardware ($\text{MTBF} = 100,000$ hours). For such heterogeneous systems, the effective MTBF follows series reliability composition:
+
+$$\text{MTBF}_{\text{eff}} = \frac{1}{\sum_{i=1}^{n} \frac{1}{\text{MTBF}_i}}$$
+
+Consider a cluster with 500 V100 GPUs, 500 A100 GPUs, and 1 networking switch:
+
+$$\text{MTBF}_{\text{eff}} = \frac{1}{\frac{500}{40,000} + \frac{500}{80,000} + \frac{1}{100,000}} = \frac{1}{0.0125 + 0.00625 + 0.00001} \approx 53 \text{ hours}$$
+
+This weighted average MTBF (53 hours vs the cluster's best-case 80 hours) reveals how heterogeneity degrades overall reliability. The optimal checkpoint interval becomes:
+
+$$T_{\text{opt}} = \sqrt{2 \times 17 \times (53 \times 60)} = \sqrt{108,120} \approx 329 \text{ minutes} \approx 5.5 \text{ hours}$$
+
+Heterogeneity analysis guides upgrade decisions: replacing 500 V100s with A100s would increase $\text{MTBF}_{\text{eff}}$ to 106 hours, doubling the optimal checkpoint interval to 11 hours and reducing checkpoint overhead from 15% to 8%.
+
+**Incremental Checkpointing**
+
+Full model checkpoints write complete state (weights, optimizer parameters, gradient buffers) to storage, but most parameters change slowly between checkpoints. Incremental checkpointing exploits this observation by saving only modified parameters, dramatically reducing $T_c$.
+
+For a 2 TB model where only 10% of parameters change significantly between checkpoints, incremental checkpoint size drops to 200 GB, reducing $T_c$ from 17 minutes to 1.7 minutes. Applying Young's formula with $\text{MTBF} = 360$ minutes:
+
+$$T_{\text{opt}} = \sqrt{2 \times 1.7 \times 360} = \sqrt{1,224} \approx 35 \text{ minutes}$$
+
+Compared to full checkpoints ($T_{\text{opt}} = 111$ minutes), incremental checkpointing enables 3$\times$ more frequent saves with lower overhead ($\frac{1.7}{35} = 4.9\%$ vs $\frac{17}{111} = 15\%$).
+
+However, incremental checkpointing introduces recovery complexity. Restoring state requires loading the base checkpoint plus $k$ incremental deltas, increasing restart time from $T_r$ to $T_r + k \cdot T_{\text{delta}}$. For $k=3$ incremental checkpoints with $T_{\text{delta}} = 30$ seconds, recovery adds 90 seconds overhead. Systems balance checkpoint frequency against recovery complexity by periodically writing full checkpoints (every 10-20 incremental saves) to bound reconstruction costs.
+
+Modern frameworks like DeepSpeed and PyTorch FSDP implement incremental checkpointing through memory-mapped files and copy-on-write mechanisms, tracking parameter modifications at sub-tensor granularity. These optimizations reduce $T_c$ by 5-10$\times$ for typical training workloads, enabling more aggressive checkpointing strategies that minimize wasted computation while maintaining fast recovery paths.
+
 Regular monitoring, testing, and maintenance help detect and replace failing components before critical errors occur.
 
 ### Intermittent Faults {#sec-robust-ai-intermittent-faults-35e9}
