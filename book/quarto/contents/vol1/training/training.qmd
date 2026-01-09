@@ -47,45 +47,33 @@ Training neural networks transforms theoretical optimization algorithms into con
 
 Training represents the most demanding phase in machine learning systems, where theoretical constructs become practical reality through computational optimization. Building upon the system design methodologies established in @sec-ml-systems, data pipeline architectures explored in @sec-data-engineering, and computational frameworks examined in @sec-ai-frameworks, this chapter examines how algorithmic theory, data processing, and hardware architecture converge in the iterative refinement of intelligent systems.
 
-Training constitutes the most computationally demanding phase in the machine learning systems lifecycle, requiring careful orchestration of mathematical optimization with systems engineering principles. Contemporary training workloads impose computational requirements that exceed conventional computing paradigms: models with billions of parameters demand terabytes of memory capacity, training corpora span petabyte-scale storage systems, and gradient-based optimization algorithms require synchronized computation across thousands of processing units. These computational scales create systems engineering challenges in memory hierarchy management, inter-node communication efficiency, and resource allocation strategies that distinguish training infrastructure from general-purpose computing architectures.
+Training constitutes the most computationally demanding phase in the machine learning systems lifecycle, requiring careful orchestration of mathematical optimization with systems engineering principles. Contemporary training workloads impose computational requirements that exceed conventional computing paradigms. Models with billions of parameters demand terabytes of memory capacity, training corpora span petabyte storage systems, and gradient optimization algorithms require synchronized computation across thousands of processing units. These computational scales create systems engineering challenges in memory hierarchy management, communication efficiency, and resource allocation that distinguish training infrastructure from general computing architectures.
 
 The design methodologies established in preceding chapters serve as architectural foundations during the training phase. The modular system architectures from @sec-ml-systems enable distributed training orchestration, the engineered data pipelines from @sec-data-engineering provide continuous training sample streams, and the computational frameworks from @sec-ai-frameworks supply necessary algorithmic abstractions. Training systems integration represents where theoretical design principles meet performance engineering constraints, establishing the computational foundation for the optimization techniques investigated in Part III.
 
-This chapter develops systems engineering foundations for scalable training infrastructure. We examine the translation of mathematical operations in parametric models into concrete computational requirements, analyze performance bottlenecks within training pipelines including memory bandwidth limitations and computational throughput constraints, and architect systems that achieve high efficiency while maintaining fault-tolerant behavior. Through exploration of single-node optimization strategies, distributed training methodologies, and specialized hardware utilization patterns, this chapter develops the systems engineering perspective needed for constructing training infrastructure capable of scaling from experimental prototypes to production-grade deployments.
+This chapter develops systems engineering foundations for scalable training infrastructure. We examine the translation of mathematical operations in parametric models into concrete computational requirements, analyze performance bottlenecks within training pipelines including memory bandwidth limitations and computational throughput constraints, and architect systems that achieve high efficiency while maintaining fault tolerance. Through exploration of optimization strategies for single machines, distributed training methodologies, and specialized hardware utilization patterns, this chapter develops the systems engineering perspective needed for constructing training infrastructure capable of scaling from experimental prototypes to production deployments.
 
 ::: {.callout-note title="Lighthouse Example: Training GPT-2"}
 
-This chapter uses **training GPT-2 (1.5 billion parameters)** as a consistent reference point to ground abstract concepts in concrete reality. GPT-2 represents an ideal teaching example because it:
-
-- **Spans the scale spectrum**: Large enough to require serious optimization, small enough to train without massive infrastructure
-- **Has well-documented architecture**: 48 transformer layers, 1280 hidden dimensions, 20 attention heads
-- **Exhibits all key training challenges**: Memory pressure, computational intensity, data pipeline complexity
-- **Represents modern ML systems**: Transformer-based models dominate contemporary machine learning
+This chapter uses **training GPT-2 (1.5 billion parameters)** as a consistent reference point to ground abstract concepts in concrete reality. GPT-2 represents an ideal teaching example because it spans the scale spectrum (large enough to require serious optimization, small enough to train without massive infrastructure), has well-documented architecture (48 transformer layers, 1280 hidden dimensions, 20 attention heads), exhibits all key training challenges (memory pressure, computational intensity, data pipeline complexity), and represents modern ML systems dominated by transformer architectures.
 
 **Transformer Architecture Primer:**
 
-GPT-2 uses a transformer architecture (detailed in @sec-dnn-architectures) that processes text through self-attention mechanisms. Understanding these key computational patterns provides essential context for the training examples throughout this chapter:
+GPT-2 uses a transformer architecture (detailed in @sec-dnn-architectures) that processes text through self-attention mechanisms. Understanding these key computational patterns provides essential context for the training examples throughout this chapter.
 
-- **Self-attention**: Computes relationships between all words in a sequence through matrix operations (Query × Key^T), producing attention scores that weight how much each word should influence others
-- **Multi-head attention**: Parallelizes attention across multiple "heads" (GPT-2 uses 20), each learning different relationship patterns
-- **Transformer layers**: Stack attention with feed-forward networks (GPT-2 has 48 layers), enabling hierarchical feature learning
-- **Key computational pattern**: Dominated by large matrix multiplications (attention score calculation, feed-forward networks) that benefit from GPU parallelization
+Self-attention computes relationships between all words in a sequence through matrix operations (Query × Key^T), producing attention scores that weight how much each word should influence others. Multi-head attention parallelizes this computation across multiple heads (GPT-2 uses 20), each learning different relationship patterns. Transformer layers stack attention with feed-forward networks (GPT-2 has 48 layers), enabling hierarchical feature learning. The key computational pattern is dominated by large matrix multiplications (attention score calculation, feed-forward networks) that benefit from GPU parallelization.
 
 This architecture's heavy reliance on matrix multiplication and sequential dependencies creates the specific training system challenges we explore: massive activation memory requirements, communication bottlenecks in distributed training, and opportunities for mixed-precision optimization.
 
 **Key GPT-2 Specifications:**
 
-- **Parameters**: 1.542B (1,558,214,656 exact count)
-- **Training Data**: OpenWebText (~40GB text, ~9B tokens)
-- **Batch Configuration**: Often on the order of tens to hundreds of sequences per update, depending on parallelism strategy and memory budget
-- **Memory Footprint**: A useful rule of thumb is that **weights alone** require \(\text{parameters} \times \text{bytes per parameter}\). For example, 1B parameters in FP16 is \(\approx 2\) GB. Training adds optimizer state and activations, which can multiply this footprint depending on batch size and sequence length.
-- **Training Time**: Ranges from days to weeks depending on hardware, software stack, and training budget
+The model contains 1.542 billion parameters (1,558,214,656 exact count) and trains on OpenWebText (approximately 40GB text, 9 billion tokens). Batch configuration often involves tens to hundreds of sequences per update, depending on parallelism strategy and memory budget. A useful rule of thumb for memory footprint is that weights alone require parameters × bytes per parameter. For example, 1 billion parameters in FP16 requires approximately 2 GB. Training adds optimizer state and activations, which can multiply this footprint depending on batch size and sequence length. Training time ranges from days to weeks depending on hardware, software stack, and training budget.
 
-**Representative snapshot (for scale intuition)**: In a well-tuned multi-GPU setup, effective batch sizes on the order of a few hundred sequences and training runs on the order of days to a few weeks are common for models in this size regime. Treat these as illustrative, since realized throughput depends on sequence length, optimizer, parallelism strategy, and I/O pipeline.
+In a well-tuned multi-GPU setup, effective batch sizes of a few hundred sequences and training runs of days to weeks are common for models in this size regime. These numbers are illustrative; realized throughput depends on sequence length, optimizer, parallelism strategy, and I/O pipeline.
 
-**Note on precision formats**: Throughout this chapter, we reference **FP32** (32-bit) and **FP16** (16-bit) floating-point formats. FP16 halves memory requirements and enables faster computation on modern GPUs with Tensor Cores. **Mixed-precision training** (detailed in @sec-ai-training-mixedprecision-training-77ad) strategically combines FP16 for most operations with FP32 for numerical stability, achieving 2× memory savings and 2-3× speedups while maintaining accuracy.
+Throughout this chapter, we reference **FP32** (32-bit) and **FP16** (16-bit) floating-point formats. FP16 halves memory requirements and enables faster computation on modern GPUs with Tensor Cores. **Mixed-precision training** (detailed in @sec-ai-training-mixedprecision-training-77ad) strategically combines FP16 for most operations with FP32 for numerical stability, achieving 2× memory savings and 2–3× speedups while maintaining accuracy.
 
-**GPT-2 anchor examples** appear at strategic points where this specific model illuminates the concept under discussion. Each example provides quantitative specifications, performance tradeoffs, and concrete implementation decisions encountered in training this model.
+GPT-2 anchor examples appear at strategic points where this specific model illuminates the concept under discussion. Each example provides quantitative specifications, performance tradeoffs, and concrete implementation decisions encountered in training this model.
 
 :::
 
@@ -101,7 +89,7 @@ The development of modern machine learning models relies on specialized computat
 
 Designing effective training architectures requires recognizing that machine learning training systems represent a distinct class of computational workload with unique demands on hardware and software infrastructure. When you execute training commands in frameworks like PyTorch or TensorFlow, these systems must efficiently orchestrate repeated computations over large datasets while managing memory requirements and data movement patterns that exceed the capabilities of general-purpose computing architectures.
 
-Training workloads exhibit three characteristics that distinguish them from traditional computing: extreme computational intensity from iterative gradient computations across massive models, substantial memory pressure from storing parameters, activations, and optimizer states simultaneously, and complex data dependencies requiring synchronized parameter updates across distributed resources. Large language model training can require on the order of \(10^{23}\) floating-point operations [@brown2020language], memory footprints reaching terabytes when including activation storage, and coordination across many devices—demands that general-purpose systems were not designed to handle.
+Training workloads exhibit three characteristics that distinguish them from traditional computing: extreme computational intensity from iterative gradient computations across massive models, substantial memory pressure from storing parameters, activations, and optimizer states simultaneously, and complex data dependencies requiring synchronized parameter updates across distributed resources. Large language model training can require on the order of \(10^{23}\) floating-point operations [@brown2020language], memory footprints reaching terabytes when including activation storage, and coordination across many devices. General-purpose systems were not designed to handle these demands.
 
 Understanding why contemporary training systems evolved their current architectures requires examining how computing systems progressively adapted to increasingly demanding workloads. While training focuses on iterative optimization for learning, inference systems (detailed throughout this book) optimize for low-latency prediction serving. These represent two complementary but distinct computational paradigms. The architectural progression from general-purpose computing to specialized training systems reveals systems principles that inform modern training infrastructure design. Unlike traditional high-performance computing workloads, training systems exhibit specific characteristics that influence their design and implementation.
 
@@ -218,19 +206,19 @@ As the demand for internet-scale processing grew, warehouse-scale computing mark
 
 WSC systems introduced architectural changes to support high throughput for independent tasks, with robust fault tolerance and recovery mechanisms. The storage and memory systems adapted to handle sparse data structures efficiently, moving away from the dense array optimizations of HPC. Resource management systems evolved to support multiple applications sharing the computing infrastructure, contrasting with HPC's dedicated application execution model.
 
-Neither HPC nor warehouse-scale systems fully addressed the unique demands of machine learning training. Each computing era optimized for distinct workload characteristics that only partially matched AI training requirements:
+Neither HPC nor warehouse-scale systems fully addressed the unique demands of machine learning training. Each computing era optimized for distinct workload characteristics that only partially matched AI training requirements.
 
-- **High-Performance Computing**: Optimized for dense, floating-point heavy, tightly-coupled simulations. HPC established the foundation for high-bandwidth interconnects and parallel numerical computation essential for AI training, but focused on regular, predictable access patterns unsuited to the dynamic memory requirements of neural network training.
+**High-Performance Computing** optimized for dense, floating-point heavy, tightly-coupled simulations. HPC established the foundation for high-bandwidth interconnects and parallel numerical computation essential for AI training, but focused on regular, predictable access patterns unsuited to the dynamic memory requirements of neural network training.
 
-- **Warehouse-Scale Computing**: Optimized for sparse, integer-heavy, loosely-coupled data processing. WSC demonstrated fault tolerance and massive scale essential for production AI systems, but emphasized independent parallel tasks that contrasted with the synchronized gradient updates required in distributed training.
+**Warehouse-Scale Computing** optimized for sparse, integer-heavy, loosely-coupled data processing. WSC demonstrated fault tolerance and massive scale essential for production AI systems, but emphasized independent parallel tasks that contrasted with the synchronized gradient updates required in distributed training.
 
-- **AI Training**: Presents the unique challenge of requiring **both** dense FP16/FP32 computation (like HPC) **and** massive data scale (like WSC), while adding the complexity of iterative, synchronized gradient updates. This unique combination of requirements—intensive parameter updates, complex memory access patterns, and coordinated distributed computation—drove the development of today's specialized AI hypercomputing systems.
+**AI Training** presents the unique challenge of requiring both dense FP16/FP32 computation (like HPC) and massive data scale (like WSC), while adding the complexity of iterative, synchronized gradient updates. This unique combination of intensive parameter updates, complex memory access patterns, and coordinated distributed computation drove the development of today's specialized AI hypercomputing systems.
 
 AlexNet's[^fn-training-alexnet] [@krizhevsky2012imagenet] success in 2012 demonstrated that existing systems could not efficiently handle this convergence of requirements. Neural network training demanded new approaches to memory management and inter-device communication that neither HPC's tightly-coupled scientific focus nor warehouse computing's loosely-coupled data processing had addressed.
 
 [^fn-training-alexnet]: **AlexNet**: Developed by Alex Krizhevsky, Ilya Sutskever, and Geoffrey Hinton, AlexNet won ImageNet 2012 with 15.3% error rate (vs. 26.2% for second place), using two GTX 580 GPUs for 5-6 days of training. This breakthrough launched the deep learning revolution and demonstrated that GPUs could accelerate neural network training by 10-50x over CPUs.
 
-This need for specialization ushered in the AI hypercomputing era, beginning in 2015, which represents the latest step in this evolutionary chain. NVIDIA GPUs[^fn-nvidia-gpus] and Google TPUs[^fn-google-tpus] introduced hardware designs specifically optimized for neural network computations, moving beyond adaptations of existing architectures. These systems implemented new approaches to parallel processing, memory access, and device communication to handle the distinct patterns of model training. The resulting architectures balanced the numerical precision needs of scientific computing with the scale requirements of warehouse systems, while adding specialized support for the iterative nature of neural network optimization. The comprehensive design principles, architectural details, and optimization strategies for these specialized training accelerators are explored in detail in @sec-ai-acceleration, while this chapter focuses on training system orchestration and pipeline optimization.
+This need for specialization ushered in the AI hypercomputing era beginning in 2015, which represents the latest step in this evolutionary chain. NVIDIA GPUs[^fn-nvidia-gpus] and Google TPUs[^fn-google-tpus] introduced hardware designs specifically optimized for neural network computations, moving beyond adaptations of existing architectures. These systems implemented new approaches to parallel processing, memory access, and device communication to handle the distinct patterns of model training. The resulting architectures balanced the numerical precision needs of scientific computing with the scale requirements of warehouse systems, while adding specialized support for the iterative nature of neural network optimization. @sec-ai-acceleration explores the comprehensive design principles, architectural details, and optimization strategies for these specialized training accelerators in detail, while this chapter focuses on training system orchestration and pipeline optimization.
 
 [^fn-nvidia-gpus]: **NVIDIA AI GPUs**: NVIDIA GPUs have increased AI-relevant throughput substantially over the past decade through architectural changes (e.g., tensor cores) and higher memory bandwidth. A useful scale anchor is that reduced-precision dense throughput has grown from roughly single-digit TFLOPS in early GPU deep learning to on the order of hundreds of TFLOPS on modern datacenter accelerators, with memory bandwidth reaching the TB/s regime. Exact TFLOPS figures vary by precision mode, sparsity assumptions, and workload; treat headline numbers and pricing as time- and configuration-dependent.
 
@@ -262,7 +250,7 @@ These training systems provide the core infrastructure required for developing p
 
 Training systems function as integral components within the broader machine learning pipeline, building upon the foundational concepts introduced in @sec-introduction. They interface with preprocessing frameworks that standardize and transform raw data, while connecting to deployment architectures that enable model serving. The computational efficiency and reliability of training systems directly influence the development cycle, from initial experimentation through model validation to production deployment. This end-to-end perspective connects training optimization with the broader AI system lifecycle considerations explored in @sec-ml-operations.
 
-This operational scope has expanded with recent architectural advances. The emergence of transformer architectures[^fn-transformers] and large-scale models has introduced new requirements for training systems. Current implementations must efficiently process petabyte-scale datasets, orchestrate distributed training across multiple accelerators, and optimize memory utilization for models containing billions of parameters. The management of data parallelism[^fn-training-data-parallelism], model parallelism[^fn-training-model-parallelism], and inter-device communication presents technical challenges in modern training architectures. These distributed system complexities motivate the specialized AI workflow management tools (@sec-ai-workflow) that automate many aspects of large-scale training orchestration.
+This operational scope has expanded with recent architectural advances. The emergence of transformer architectures[^fn-transformers] and large-scale models has introduced new requirements for training systems. Current implementations must efficiently process petabyte datasets, orchestrate distributed training across multiple accelerators, and optimize memory utilization for models containing billions of parameters. The management of data parallelism[^fn-training-data-parallelism], model parallelism[^fn-training-model-parallelism], and inter-device communication presents technical challenges in modern training architectures. These distributed system complexities motivate the specialized AI workflow management tools (@sec-ai-workflow) that automate many aspects of training orchestration at scale.
 
 [^fn-training-data-parallelism]: **Data Parallelism Scaling**: Linear scaling works until communication becomes the bottleneck, typically around 64-128 GPUs for most models. BERT-Large typically achieves 60-80x speedup on 128 GPUs (45-65% efficiency), while GPT-3 required 1,024 GPUs with only 45% efficiency. The key constraint is AllReduce communication cost scales as O(n) with number of devices, requiring high-bandwidth interconnects like InfiniBand.
 
@@ -274,7 +262,7 @@ Training systems also impact the operational considerations of machine learning 
 
 Training implementation requires a systems perspective. The practical execution of training models is deeply tied to system design. Training is not merely a mathematical optimization problem; it is a system-driven process that requires careful orchestration of computing hardware, memory, and data movement.
 
-Training workflows consist of interdependent stages: data preprocessing, forward and backward passes, and parameter updates, extending the basic neural network concepts from @sec-dl-primer. Each stage imposes specific demands on system resources. The data preprocessing stage, for instance, relies on storage and I/O subsystems to provide computing hardware with continuous input. The quality and reliability of this input data are critical—data validation, corruption detection, feature engineering, schema enforcement, and pipeline reliability strategies are covered in @sec-data-engineering. While @sec-data-engineering focuses on ensuring data quality and consistency, this chapter examines the systems-level efficiency of data movement, transformation throughput, and delivery to computational resources during training.
+Training workflows consist of interdependent stages: data preprocessing, forward and backward passes, and parameter updates, extending the basic neural network concepts from @sec-dl-primer. Each stage imposes specific demands on system resources. The data preprocessing stage, for instance, relies on storage and I/O subsystems to provide computing hardware with continuous input. The quality and reliability of this input data are critical. @sec-data-engineering covers data validation, corruption detection, feature engineering, schema enforcement, and pipeline reliability strategies. While @sec-data-engineering focuses on ensuring data quality and consistency, this chapter examines the efficiency of data movement, transformation throughput, and delivery to computational resources during training.
 
 While traditional processors like CPUs handle many training tasks effectively, increasingly complex models have driven the adoption of hardware accelerators. Graphics Processing Units (GPUs) and specialized machine learning processors can process mathematical operations in parallel, offering substantial speedups for matrix-heavy computations. These accelerators, alongside CPUs, handle operations like gradient computation and parameter updates, enabling the training of hierarchical representations whose theoretical foundations are explored in @sec-dnn-architectures. The performance of these stages depends on how well the system manages bottlenecks such as memory bandwidth and communication latency.
 
@@ -370,13 +358,9 @@ Recognizing the limitations of matrix-vector operations, the introduction of bat
 Hardware accelerators like Google's TPU [@jouppi2017tpu] reflect this evolution, incorporating specialized matrix units and memory hierarchies for these diverse multiplication patterns. These hardware adaptations enable training of large-scale models like GPT-3 [@brown2020language] through efficient handling of varied matrix operations.
 
 ::: {.callout-note title="Systems Implication: Why GPUs Dominate Training" collapse="false"}
-The matrix operations described above directly explain modern training hardware architecture. GPUs dominate training because:
+The matrix operations described above directly explain modern training hardware architecture. GPUs dominate training for three reasons. First, matrix multiplication's independent element calculations map perfectly to thousands of GPU cores (NVIDIA A100 has 6,912 CUDA cores). Second, specialized hardware units like Tensor Cores accelerate matrix operations by 10–20× through dedicated hardware for the dominant workload. Third, blocked matrix computation patterns enable efficient use of GPU memory hierarchy (L1/L2 cache, shared memory, global memory).
 
-- **Massive parallelism**: Matrix multiplication's independent element calculations map perfectly to GPU's thousands of cores (NVIDIA A100: 6,912 CUDA cores)
-- **Specialized hardware units**: Tensor Cores accelerate matrix operations by 10-20× through dedicated hardware for the dominant workload
-- **Memory bandwidth optimization**: Blocked matrix computation patterns enable efficient use of GPU memory hierarchy (L1/L2 cache → shared memory → global memory)
-
-When GPT-2 examples later show why V100 GPUs achieve 2.4× speedup with mixed precision (line 2018), this acceleration comes from Tensor Cores executing the matrix multiplications we just analyzed. Understanding matrix operation characteristics is prerequisite for appreciating why pipeline optimizations like mixed-precision training provide such substantial benefits.
+When GPT-2 examples later show why V100 GPUs achieve 2.4× speedup with mixed precision, this acceleration comes from Tensor Cores executing the matrix multiplications we just analyzed. Understanding matrix operation characteristics is prerequisite for appreciating why pipeline optimizations like mixed-precision training provide such substantial benefits.
 :::
 
 #### Activation Functions {#sec-ai-training-activation-functions-e5aa}
@@ -521,13 +505,9 @@ This approximation reduces computational cost to ~1.5x ReLU while maintaining GE
 :::
 
 ::: {.callout-note title="Systems Implication: Memory Bandwidth Bottlenecks" collapse="false"}
-Activation functions reveal a critical systems principle: not all operations are compute-bound. While matrix multiplications saturate GPU compute units, activation functions often become **memory-bandwidth-bound**:
+Activation functions reveal a critical systems principle: not all operations are compute-bound. While matrix multiplications saturate GPU compute units, activation functions often become memory-bandwidth-bound for three reasons. First, element-wise operations perform few calculations per memory access (ReLU performs 1 operation per load). Second, simple operations complete faster than memory transfer time, limiting parallelism benefits. Third, modern GPUs have 10–100× more compute throughput than memory bandwidth.
 
-- **Low arithmetic intensity**: Element-wise operations perform few calculations per memory access (ReLU: 1 operation per load)
-- **Limited parallelism benefit**: Simple operations complete faster than memory transfer time
-- **Bandwidth constraints**: Modern GPUs have 10-100× more compute throughput than memory bandwidth
-
-This explains why activation function choice matters less than expected—ReLU vs sigmoid shows only 2-3× difference despite vastly different computational complexity, because both are bottlenecked by memory access. The forward pass must carefully manage activation storage to prevent memory bandwidth from limiting overall training throughput.
+This explains why activation function choice matters less than expected. ReLU versus sigmoid shows only 2–3× difference despite vastly different computational complexity, because both are bottlenecked by memory access. The forward pass must carefully manage activation storage to prevent memory bandwidth from limiting overall training throughput.
 :::
 
 ### Optimization Algorithms {#sec-ai-training-optimization-algorithms-506e}
@@ -2225,22 +2205,15 @@ This 16× theoretical speedup for FP16 materializes in practice because matrix m
 
 Brain Float 16 (BF16) maintains FP32's 8-bit exponent while reducing the mantissa to 7 bits. This design choice prioritizes dynamic range preservation over precision, crucial for gradient-based learning where values span many orders of magnitude. Google's TPUs natively support BF16, while NVIDIA's Ampere architecture (A100) and newer provide full hardware support.
 
-The hardware advantage of BF16 over FP16 emerges in gradient accumulation scenarios. Consider summing 1000 gradients with values around $10^{-4}$:
-
-- **FP16**: Smallest representable value is $6 \times 10^{-8}$. Gradients below $10^{-7}$ underflow to zero.
-- **BF16**: Smallest representable value matches FP32 at approximately $10^{-45}$. No underflow occurs.
-- **FP32**: Full range, but 2× slower to compute.
+The hardware advantage of BF16 over FP16 emerges in gradient accumulation scenarios. Consider summing 1000 gradients with values around $10^{-4}$. FP16's smallest representable value is $6 \times 10^{-8}$, so gradients below $10^{-7}$ underflow to zero. BF16's smallest representable value matches FP32 at approximately $10^{-45}$, so no underflow occurs. FP32 has full range but computes 2× slower.
 
 For transformer training where attention gradients vary from $10^{-10}$ to $10^3$, BF16's range prevents the loss scaling complexity required for FP16, simplifying implementation without sacrificing throughput.
 
 **FP8 Precision:**
 
-NVIDIA's Hopper architecture (H100) introduces FP8 support with two formats:
+NVIDIA's Hopper architecture (H100) introduces FP8 support with two formats. E4M3 uses 4 exponent bits and 3 mantissa bits (prioritizing range), while E5M2 uses 5 exponent bits and 2 mantissa bits (prioritizing precision).
 
-- **E4M3**: 4 exponent bits, 3 mantissa bits (range priority)
-- **E5M2**: 5 exponent bits, 2 mantissa bits (precision priority)
-
-FP8 training doubles Tensor Core throughput again (3.9 PFLOPs on H100 vs 1.98 PFLOPs for FP16). However, FP8's severely limited precision requires per-tensor scaling factors maintained in higher precision, adding algorithmic complexity. The decision tree becomes:
+FP8 training doubles Tensor Core throughput again (3.9 PFLOPs on H100 versus 1.98 PFLOPs for FP16). However, FP8's severely limited precision requires per-tensor scaling factors maintained in higher precision, adding algorithmic complexity. The decision tree becomes:
 
 | Precision | When to Use | Hardware Requirement |
 |-----------|-------------|---------------------|
@@ -2341,12 +2314,7 @@ $$
 
 The memory bottleneck emerges from storing the $n \times n$ matrices $S$ and $P$. For a sequence length of 4096 tokens with embedding dimension 64 (typical for a single attention head), the attention score matrix $S$ alone requires $4096^2 \times 4 \text{ bytes} = 64 \text{ MB}$ in FP32. With 16 attention heads, this grows to 1 GB just for intermediate attention matrices, not including the keys, queries, values, or output tensors.
 
-Modern GPU memory hierarchy exacerbates this bottleneck:
-
-- **HBM (High Bandwidth Memory)**: 40-80 GB capacity, 1-2 TB/s bandwidth
-- **SRAM (on-chip memory)**: 20-40 MB capacity, 20+ TB/s bandwidth (10× faster)
-
-Standard attention stores $S$ and $P$ in slow HBM and repeatedly loads them during the backward pass. For GPT-2 scale models processing 2048-token sequences, attention operations spend 70-80% of execution time waiting for memory transfers rather than computing, leaving expensive tensor cores underutilized.
+Modern GPU memory hierarchy exacerbates this bottleneck. HBM (High Bandwidth Memory) provides 40–80 GB capacity with 1–2 TB/s bandwidth, while SRAM (on-chip memory) provides only 20–40 MB capacity but delivers 20+ TB/s bandwidth (10× faster). Standard attention stores $S$ and $P$ in slow HBM and repeatedly loads them during the backward pass. For GPT-2 scale models processing 2048-token sequences, attention operations spend 70-80% of execution time waiting for memory transfers rather than computing, leaving expensive tensor cores underutilized.
 
 The backward pass compounds this problem. Computing gradients requires storing attention scores from the forward pass:
 
@@ -2410,11 +2378,7 @@ Standard attention performs:
 - Backward pass: Read $Q, K, V, S, P, O, dO$ from HBM, write $dQ, dK, dV$: $O(n \cdot d + n^2)$ bytes
 - Total: $O(n \cdot d + n^2)$ HBM accesses
 
-Flash Attention performs:
-
-- Forward pass: Read $Q, K, V$ once, write $O$ once: $O(n \cdot d)$ bytes
-- Backward pass: Recompute $S, P$ in SRAM from $Q, K, V$, write $dQ, dK, dV$: $O(n \cdot d)$ bytes
-- Total: $O(n \cdot d)$ HBM accesses
+Flash Attention performs different memory operations. In the forward pass, it reads $Q, K, V$ once and writes $O$ once, requiring $O(n \cdot d)$ bytes. In the backward pass, it recomputes $S, P$ in SRAM from $Q, K, V$ and writes $dQ, dK, dV$, again requiring $O(n \cdot d)$ bytes. Total HBM accesses are $O(n \cdot d)$.
 
 For large sequence lengths where $n \gg d$, Flash Attention reduces memory traffic by a factor of $n$. With $n = 4096$ and $d = 64$, this represents a **64× reduction** in memory bandwidth consumption.
 
@@ -2668,11 +2632,7 @@ Activation checkpointing reduces memory usage during the backward pass by discar
 
 With checkpointing, only a subset of the activations is retained during the forward pass. When gradients need to be computed during the backward pass, the discarded activations are recomputed on demand by re-executing parts of the forward pass, as illustrated in @fig-activation-checkpointing. This approach trades computational efficiency for memory savings, as the recomputation increases training time but allows deeper models to be trained within limited memory constraints. The figure shows how memory is saved by avoiding storage of unnecessarily large intermediate tensors from the forward pass, and simply recomputing them on demand in the backwards pass.
 
-The implementation involves:
-
-1. Splitting the model into segments.
-2. Retaining activations only at the boundaries of these segments during the forward pass.
-3. Recomputing activations for intermediate layers during the backward pass when needed.
+The implementation involves three steps. First, split the model into segments. Second, retain activations only at the boundaries of these segments during the forward pass. Third, recompute activations for intermediate layers during the backward pass when needed.
 
 ::: {#fig-activation-checkpointing fig-env="figure" fig-pos="htb"}
 ```{.tikz}
@@ -3118,9 +3078,7 @@ Hardware selection significantly impacts GPT-2 training economics and timeline. 
 
 **Key Hardware-Driven Tradeoffs**
 
-1. Memory capacity enables larger batches: V100's 32GB limits batch_size=16, while A100's 80GB allows batch_size=32 → faster convergence
-2. Tensor Core generations: H100's 4th-gen Tensor Cores provide 3.7× speedup over V100 for FP16 operations
-3. NVLink bandwidth: H100's 900 GB/s (vs V100's 300 GB/s) reduces gradient synchronization time by 65%
+Memory capacity enables larger batches. V100's 32GB limits batch size to 16, while A100's 80GB allows batch size of 32, enabling faster convergence. Tensor Core generations matter. H100's 4th-generation Tensor Cores provide 3.7× speedup over V100 for FP16 operations. NVLink bandwidth reduces synchronization time. H100's 900 GB/s (versus V100's 300 GB/s) reduces gradient synchronization time by 65%.
 
 **Why H100 Wins Despite Higher $/hour**
 

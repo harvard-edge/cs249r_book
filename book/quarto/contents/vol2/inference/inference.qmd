@@ -163,7 +163,7 @@ Single-machine model serving establishes foundational principles that this chapt
 
 The transition from single-machine to distributed inference parallels the transition from single-machine to distributed training, but with fundamentally different constraints. Training optimizes throughput over extended periods and tolerates latency variations measured in minutes or hours. Inference at scale must maintain strict latency bounds measured in milliseconds while handling request volumes that fluctuate unpredictably. This inversion of priorities transforms every design decision, from how requests are batched to how failures are handled.
 
-Distributed inference systems must solve problems that simply do not exist at single-machine scale. Load balancing[^fn-load-balancing] becomes critical when requests must be distributed across hundreds of GPU instances while maintaining latency guarantees. Request routing must account for model-specific characteristics: a recommendation system with trillion-parameter embedding tables requires different placement strategies than a large language model that generates responses token by token. Autoscaling must anticipate demand fluctuations that can change request volume by orders of magnitude within minutes, all while maintaining latency bounds that users expect.
+Distributed inference systems must solve problems that simply do not exist at single-machine scale. Load balancing[^fn-load-balancing] becomes critical when requests must be distributed across hundreds of GPU instances while maintaining latency guarantees. Request routing must account for model-specific characteristics. A recommendation system with trillion-parameter embedding tables requires different placement strategies than a large language model that generates responses token by token. Autoscaling must anticipate demand fluctuations that can change request volume by orders of magnitude within minutes while maintaining latency bounds that users expect.
 
 [^fn-load-balancing]: **Load balancing** in inference systems differs fundamentally from traditional web load balancing. Web servers typically complete requests in milliseconds with uniform processing time; GPU inference workers handle requests lasting from 10ms to 30+ seconds with high variance. This variance makes techniques like least-connections and queue-depth-aware routing essential, whereas simple round-robin suffices for stateless web workloads.
 
@@ -173,7 +173,7 @@ This chapter develops the principles and techniques for building inference syste
 
 ### When Single-Machine Serving Is Insufficient {#sec-inference-when-insufficient}
 
-Three distinct signals indicate when distributed inference becomes necessary rather than merely optional, as summarized in @tbl-distribution-triggers.
+Three distinct signals indicate when distributed inference becomes necessary rather than merely optional (@tbl-distribution-triggers).
 
 **Memory exhaustion** occurs when model parameters, key-value caches, or embedding tables exceed single-device capacity. A single NVIDIA H100 GPU provides 80GB of HBM3[^fn-hbm3] memory. GPT-4 class models with hundreds of billions of parameters require 200-400GB just for weights in FP16 precision, forcing distribution across multiple GPUs regardless of throughput requirements. Recommendation systems with trillion-parameter embedding tables face similar constraints: Meta's DLRM[^fn-dlrm] model stores embedding tables that require multiple terabytes of memory.
 
@@ -195,7 +195,7 @@ Three distinct signals indicate when distributed inference becomes necessary rat
 
 ### The Fundamental Inversion: Training vs Inference {#sec-inference-inversion}
 
-The contrast between training and inference optimization extends beyond the basic throughput versus latency distinction. Training optimizes for samples processed per hour and tolerates latency variations; inference optimizes for response time and must meet strict latency bounds. At scale, this inversion manifests in system architecture, resource allocation, and operational priorities as compared in @tbl-training-inference-inversion.
+The contrast between training and inference optimization extends beyond the basic throughput versus latency distinction. Training optimizes for samples processed per hour and tolerates latency variations. Inference optimizes for response time and must meet strict latency bounds. At scale, this inversion manifests in system architecture, resource allocation, and operational priorities (@tbl-training-inference-inversion).
 
 | Aspect | Distributed Training | Distributed Inference |
 |--------|---------------------|----------------------|
@@ -212,7 +212,7 @@ Training tolerates substantial latency variance because the optimization target 
 
 State management differs fundamentally. Training maintains model state (parameters, optimizer states) that evolves gradually and can be captured in periodic checkpoints. Inference often maintains session state (conversation history, key-value caches, user context) that must be preserved across requests and cannot tolerate the staleness that checkpoint-based recovery would introduce.
 
-Failure handling diverges correspondingly. Training failures trigger checkpoint restoration and continuation, with minutes of lost progress being acceptable. Inference failures must be invisible to users: requests redirect to healthy replicas, degraded results substitute for unavailable models, and SLOs must be maintained despite infrastructure instability.
+Failure handling diverges correspondingly. Training failures trigger checkpoint restoration and continuation, with minutes of lost progress being acceptable. Inference failures must be invisible to users. Requests redirect to healthy replicas, degraded results substitute for unavailable models, and SLOs must be maintained despite infrastructure instability.
 
 ### The Serving Tax: Overhead of Distribution {#sec-inference-serving-tax}
 
@@ -228,7 +228,7 @@ Distributing inference across multiple machines introduces overhead absent from 
 
 **Coordination overhead** emerges when requests require fan-out to multiple services. A recommendation system that queries a user model, item model, and ranking model in parallel must coordinate these queries and aggregate results. The coordination logic itself consumes CPU cycles and introduces latency variation.
 
-The total serving tax often consumes 10-30% of the latency budget in distributed systems as shown in @eq-serving-tax:
+The total serving tax often consumes 10-30% of the latency budget in distributed systems (@eq-serving-tax):
 
 $$L_{total} = L_{compute} + L_{network} + L_{serialization} + L_{coordination} + L_{queuing}$$ {#eq-serving-tax}
 
@@ -238,7 +238,7 @@ Minimizing this tax requires co-locating communicating components, using high-ba
 
 A critical insight for infrastructure planning is that serving cost typically dominates training cost over a model's operational lifetime. This reversal from the training-centric view of model development has profound implications for where optimization effort should focus.
 
-The total cost of operating a model comprises training cost (a one-time expense) and serving cost (an ongoing expense) as defined in @eq-total-cost:
+The total cost of operating a model comprises training cost (a one-time expense) and serving cost (an ongoing expense) (@eq-total-cost):
 
 $$C_{total} = C_{training} + C_{serving} \times T_{deployment} \times Q_{rate}$$ {#eq-total-cost}
 
@@ -272,7 +272,7 @@ Even reducing serving cost by 10% saves $631,000, far exceeding the entire train
 
 :::
 
-The cost dominance ratio varies by application as shown in @tbl-cost-ratios:
+The cost dominance ratio varies by application (@tbl-cost-ratios):
 
 | Application | Training Cost | Annual Serving Cost | Ratio |
 |-------------|--------------|-------------------|-------|
@@ -287,7 +287,7 @@ This cost structure motivates the optimization techniques throughout this chapte
 
 ### The Inference Landscape: Beyond LLMs {#sec-inference-landscape}
 
-A critical misconception in current discourse frames inference at scale as synonymous with LLM serving. While large language models present distinctive challenges and attract significant attention, they represent a small fraction of production inference volume. The full inference landscape summarized in @tbl-inference-landscape is essential for appropriate technique selection.
+A critical misconception in current discourse frames inference at scale as synonymous with LLM serving. While large language models present distinctive challenges and attract significant attention, they represent a small fraction of production inference volume. The full inference landscape (@tbl-inference-landscape) is essential for appropriate technique selection.
 
 ::: {.callout-important title="Production Inference by Request Volume"}
 
@@ -304,7 +304,7 @@ Source: Industry reports from Meta, Google, and Netflix infrastructure teams.
 
 Recommendation systems dominate because they serve predictions for every user interaction: every page load, scroll, or click triggers inference. A user browsing an e-commerce site might generate 100 recommendation requests in a single session. In contrast, LLM queries typically require explicit user action and occur less frequently.
 
-This distribution has important implications. Recommendation systems have driven most production inference innovation: dynamic batching, embedding sharding, feature store architectures, and low-latency serving were developed primarily for recommendation workloads. LLM-specific techniques like continuous batching and KV cache management are important but address a narrower slice of production inference.
+This distribution has important implications. Recommendation systems have driven most production inference innovation. Dynamic batching, embedding sharding, feature store architectures, and low-latency serving were developed primarily for recommendation workloads. LLM-specific techniques like continuous batching and KV cache management are important but address a narrower slice of production inference.
 
 | Model Type | Request Volume | Latency Target | Key Challenge |
 |------------|---------------|----------------|---------------|
@@ -341,7 +341,7 @@ Replica Level     [GPU Utilization, Memory Management]
 Request Level     [Batching, Caching, Preprocessing]
 ```
 
-Each level has distinct optimization levers as summarized in @tbl-serving-hierarchy:
+Each level has distinct optimization levers (@tbl-serving-hierarchy):
 
 | Level | Optimization Target | Key Techniques |
 |-------|-------------------|----------------|
@@ -382,25 +382,13 @@ Before examining specific serving techniques, practitioners must select appropri
 
 Serving frameworks fall into distinct categories based on their design philosophy and target workloads:
 
-**General-purpose inference servers** provide broad model support with configurable optimization:
+**General-purpose inference servers** provide broad model support with configurable optimization. Triton Inference Server (NVIDIA) offers multi-framework support (PyTorch, TensorFlow, ONNX, TensorRT), dynamic batching, model ensemble orchestration, and concurrent model execution. TensorFlow Serving provides native TensorFlow support, gRPC/REST APIs, model versioning, and batching scheduler. TorchServe (PyTorch) delivers native PyTorch support, model archiving, metrics, and multi-model serving.
 
-- **Triton Inference Server** (NVIDIA): Multi-framework support (PyTorch, TensorFlow, ONNX, TensorRT), dynamic batching, model ensemble orchestration, concurrent model execution
-- **TensorFlow Serving**: Native TensorFlow support, gRPC/REST APIs, model versioning, batching scheduler
-- **TorchServe** (PyTorch): Native PyTorch support, model archiving, metrics, multi-model serving
-
-**LLM-specialized servers** optimize specifically for autoregressive generation[^fn-autoregressive]:
-
-- **vLLM**: PagedAttention, continuous batching, tensor parallelism, OpenAI-compatible API
-- **TensorRT-LLM**: NVIDIA-optimized kernels, in-flight batching, quantization, multi-GPU support
-- **Text Generation Inference (TGI)**: Hugging Face integration, flash attention, tensor parallelism, watermarking
+**LLM-specialized servers** optimize specifically for autoregressive generation[^fn-autoregressive]. vLLM provides PagedAttention, continuous batching, tensor parallelism, and OpenAI-compatible API. TensorRT-LLM delivers NVIDIA-optimized kernels, in-flight batching, quantization, and multi-GPU support. Text Generation Inference (TGI) offers Hugging Face integration, flash attention, tensor parallelism, and watermarking.
 
 [^fn-autoregressive]: **Autoregressive generation**: The process of generating output tokens one at a time, where each new token depends on all previously generated tokens. This sequential dependency creates the memory-bandwidth bottleneck that dominates LLM serving costs, as the entire model must be read from memory for each generated token.
 
-**Optimization-focused runtimes** maximize inference speed through compilation:
-
-- **TensorRT**: Graph optimization, kernel fusion, precision calibration, NVIDIA GPU specific
-- **ONNX Runtime**: Cross-platform optimization, execution providers for different hardware
-- **OpenVINO**: Intel hardware optimization, model compression, heterogeneous execution
+**Optimization-focused runtimes** maximize inference speed through compilation. TensorRT provides graph optimization, kernel fusion, precision calibration, and NVIDIA GPU specific optimizations. ONNX Runtime offers cross-platform optimization and execution providers for different hardware. OpenVINO delivers Intel hardware optimization, model compression, and heterogeneous execution.
 
 ### Framework Selection Criteria {#sec-inference-framework-criteria}
 
@@ -440,12 +428,7 @@ vLLM[^fn-vllm-name] [@kwon2023vllm] has emerged as the leading open-source LLM s
 
 [^fn-vllm-name]: **vLLM**: The name stands for "virtual LLM," reflecting its core innovation of applying virtual memory concepts to KV cache management. Developed at UC Berkeley and released in 2023, vLLM achieved 24x throughput improvement over HuggingFace Transformers in initial benchmarks.
 
-**Core innovations**:
-
-1. **PagedAttention**: Virtual memory for KV cache (covered in @sec-inference-paged-attention)
-2. **Continuous batching**: Add/remove requests mid-generation
-3. **Optimized attention kernels**: FlashAttention [@dao2022flashattention] integration
-4. **Tensor parallelism**: Automatic model sharding across GPUs
+The core innovations in vLLM include PagedAttention (virtual memory for KV cache, covered in @sec-inference-paged-attention), continuous batching (add/remove requests mid-generation), optimized attention kernels (FlashAttention [@dao2022flashattention] integration), and tensor parallelism (automatic model sharding across GPUs).
 
 **Architecture overview**:
 
@@ -497,12 +480,7 @@ outputs = llm.generate(prompts, sampling_params)
 
 TensorRT-LLM provides NVIDIA-optimized LLM inference with deep hardware integration.
 
-**Core capabilities**:
-
-1. **Optimized kernels**: Custom CUDA kernels for attention, GEMM, and layer norms
-2. **In-flight batching**: NVIDIA's continuous batching implementation
-3. **Quantization**: INT8, INT4, FP8 with minimal accuracy loss
-4. **Multi-GPU**: Tensor and pipeline parallelism with NVLink optimization
+TensorRT-LLM provides several core capabilities. Optimized kernels include custom CUDA kernels for attention, GEMM, and layer norms. In-flight batching implements NVIDIA's continuous batching. Quantization supports INT8, INT4, FP8 with minimal accuracy loss. Multi-GPU configurations enable tensor and pipeline parallelism with NVLink optimization.
 
 **Build and deployment workflow**:
 
@@ -543,13 +521,7 @@ TensorRT-LLM typically achieves 20-50% higher throughput than vLLM on NVIDIA har
 
 Triton provides enterprise-grade multi-model serving with sophisticated orchestration capabilities.
 
-**Key features for production**:
-
-1. **Multi-framework**: Single server hosts PyTorch, TensorFlow, TensorRT, ONNX models
-2. **Dynamic batching**: Configurable batching with latency targets
-3. **Model ensembles**: Chain models in inference pipelines
-4. **Concurrent execution**: Multiple models share GPU resources
-5. **Metrics and monitoring**: Prometheus integration, detailed latency breakdown
+Triton provides several key features for production. Multi-framework support allows a single server to host PyTorch, TensorFlow, TensorRT, and ONNX models. Dynamic batching offers configurable batching with latency targets. Model ensembles enable chaining models in inference pipelines. Concurrent execution allows multiple models to share GPU resources. Metrics and monitoring integrate with Prometheus and provide detailed latency breakdown.
 
 **Model repository structure**:
 
@@ -676,15 +648,9 @@ The framework selection made here influences all subsequent serving optimization
 
 ### Orchestration Platforms for Production Serving {#sec-inference-orchestration}
 
-Individual inference runtimes (vLLM, TensorRT-LLM, Triton) handle the mechanics of efficient inference on a single node or small cluster. Production systems require an **orchestration layer** that manages service composition, autoscaling, traffic management, fault tolerance, and multi-tenancy. Choosing an inference runtime without considering the orchestration layer is like choosing a database engine without considering connection pooling, replication, and query routing.
+Individual inference runtimes (vLLM, TensorRT-LLM, Triton) handle the mechanics of efficient inference on a single node or small cluster. Production systems require an orchestration layer that manages service composition, autoscaling, traffic management, fault tolerance, and multi-tenancy. Choosing an inference runtime without considering the orchestration layer is like choosing a database engine without considering connection pooling, replication, and query routing.
 
-**Key orchestration responsibilities**:
-
-1. **Service composition**: Combining multiple models and components into request pipelines
-2. **Autoscaling**: Scaling replicas based on traffic patterns and resource utilization
-3. **Traffic management**: Load balancing, canary deployments, A/B testing
-4. **Fault tolerance**: Replica health monitoring, automatic recovery
-5. **Multi-tenancy**: Isolating workloads and managing resource allocation across teams
+The orchestration layer handles several key responsibilities. Service composition combines multiple models and components into request pipelines. Autoscaling adjusts replicas based on traffic patterns and resource utilization. Traffic management encompasses load balancing, canary deployments, and A/B testing. Fault tolerance provides replica health monitoring and automatic recovery. Multi-tenancy isolates workloads and manages resource allocation across teams.
 
 **Major orchestration platforms**:
 
@@ -745,7 +711,7 @@ app = LLMDeployment.bind()
 serve.run(app)
 ```
 
-This pattern provides automatic scaling from 2 to 16 replicas based on load, request batching at the serve layer, fault tolerance with automatic replica restart, and zero-downtime deployments.
+This pattern provides automatic scaling from 2 to 16 replicas based on load. It includes request batching at the serve layer, fault tolerance with automatic replica restart, and zero-downtime deployments.
 
 **Stateless vs stateful serving**: The orchestration layer must account for whether inference is stateless or stateful.
 
@@ -756,12 +722,7 @@ This pattern provides automatic scaling from 2 to 16 replicas based on load, req
 
 Vision models and embedding lookups are typically stateless: any replica can serve any request. LLM serving with KV cache is stateful: the cache accumulated during conversation creates replica-specific state.
 
-**Implications of stateful LLM serving**:
-
-- **Sticky routing required**: Subsequent requests in a conversation must reach the same replica holding the KV cache
-- **Failure recovery is complex**: When a stateful replica fails, cached state is lost. Options include regenerating cache from history (high latency), replicating cache to backups (high bandwidth), or accepting session restart (poor experience)
-- **Autoscaling must account for sessions**: Scaling down stateful replicas requires draining active sessions, which can take minutes for long conversations
-- **Memory sizing determines capacity**: Each active session consumes KV cache memory, limiting concurrent sessions per replica regardless of compute capacity
+Stateful LLM serving has several implications. Sticky routing is required because subsequent requests in a conversation must reach the same replica holding the KV cache. Failure recovery becomes complex because when a stateful replica fails, cached state is lost. Options include regenerating cache from history (high latency), replicating cache to backups (high bandwidth), or accepting session restart (poor experience). Autoscaling must account for sessions because scaling down stateful replicas requires draining active sessions, which can take minutes for long conversations. Memory sizing determines capacity because each active session consumes KV cache memory, limiting concurrent sessions per replica regardless of compute capacity.
 
 **Consistency during model updates**:
 
@@ -773,11 +734,7 @@ When updating models across distributed replicas, requests may hit different mod
 | **Canary** | Eventual (gradual shift) | Slow (hours) | Low (progressive) |
 | **Rolling update** | Weak (mixed versions) | Medium | Medium |
 
-For applications requiring deterministic outputs (compliance, audit trails, reproducible debugging):
-
-1. **Pin model version**: Include version identifier in request routing to ensure same model handles related requests
-2. **Use temperature=0**: Eliminates sampling variance, though beam search still has implementation-dependent tiebreaking
-3. **Version-aware caching**: Cache responses with model version tags; invalidate on version change
+Applications requiring deterministic outputs (compliance, audit trails, reproducible debugging) should implement several practices. Pin model version by including version identifier in request routing to ensure same model handles related requests. Use temperature=0 to eliminate sampling variance, though beam search still has implementation-dependent tiebreaking. Implement version-aware caching by caching responses with model version tags and invalidating on version change.
 
 **Failure scenario: Stateful replica crash**
 
@@ -912,7 +869,7 @@ This section develops a taxonomy of batching strategies matched to model charact
 
 ### Why Batching Differs Across Model Types {#sec-inference-batching-differences}
 
-The core insight is that batching efficiency depends on how computation scales with batch size relative to how memory and communication scale. Different model architectures exhibit different scaling relationships, requiring different batching strategies as summarized in @tbl-batching-by-model.
+The core insight is that batching efficiency depends on how computation scales with batch size relative to how memory and communication scale. Different model architectures exhibit different scaling relationships, requiring different batching strategies (@tbl-batching-by-model).
 
 ::: {.callout-note title="Figure Placeholder: Batching Strategies" collapse="true"}
 ```{.tikz}
@@ -942,9 +899,9 @@ For **recommendation systems**, the bottleneck is often embedding lookup rather 
 
 Vision models represent the simplest batching case because inputs have uniform size (after preprocessing) and computation follows a predictable pattern. Single-machine batching principles apply directly, with scale introducing considerations of batch formation across multiple replicas.
 
-**Static batching** collects exactly $B$ requests before processing. This maximizes GPU utilization when request arrival is predictable but causes unbounded latency during low-traffic periods.
+Static batching collects exactly $B$ requests before processing. This maximizes GPU utilization when request arrival is predictable but causes unbounded latency during low-traffic periods.
 
-**Dynamic batching** collects requests for a maximum time window $T_{window}$ or until reaching maximum batch size $B_{max}$, whichever occurs first. The expected latency under Poisson arrivals with rate $\lambda$ follows @eq-dynamic-batch-latency:
+Dynamic batching collects requests for a maximum time window $T_{window}$ or until reaching maximum batch size $B_{max}$, whichever occurs first. The expected latency under Poisson arrivals with rate $\lambda$ follows @eq-dynamic-batch-latency:
 
 $$E[L_{total}] = E[L_{queue}] + L_{batch} + L_{inference}(B)$$ {#eq-dynamic-batch-latency}
 
@@ -998,11 +955,7 @@ Utilization: $\rho = 500 \times 0.0012 = 0.6$ (comfortable)
 
 :::
 
-At scale with multiple replicas, batch formation can occur either at individual replicas or at a centralized batching layer:
-
-**Replica-local batching**: Each replica independently forms batches from its assigned traffic. Simpler to implement but may result in uneven batch sizes across replicas when load is imbalanced.
-
-**Centralized batching**: A batching service collects requests and dispatches formed batches to replicas. Achieves more uniform batch sizes but adds a centralization bottleneck and additional network hop.
+At scale with multiple replicas, batch formation can occur either at individual replicas or at a centralized batching layer. Replica-local batching has each replica independently form batches from its assigned traffic. This approach is simpler to implement but may result in uneven batch sizes across replicas when load is imbalanced. Centralized batching uses a batching service to collect requests and dispatch formed batches to replicas. This achieves more uniform batch sizes but adds a centralization bottleneck and additional network hop.
 
 Production systems typically use replica-local batching with load balancing that ensures roughly equal traffic distribution, achieving the benefits of centralized batching without the complexity.
 
@@ -1018,12 +971,7 @@ $$\text{Wasted compute} = \frac{(100 - 10) \times 1}{100 \times 8} = 11.25\%$$
 
 For realistic output length distributions with high variance, wasted compute can exceed 50%.
 
-**Continuous batching** (also called iteration-level batching) decouples batch membership from iteration boundaries:
-
-1. At each decode iteration, check for completed sequences
-2. Remove completed sequences from the batch immediately
-3. Insert waiting sequences into freed slots
-4. Process the reorganized batch for the next iteration
+Continuous batching (also called iteration-level batching) decouples batch membership from iteration boundaries. At each decode iteration, the system checks for completed sequences, removes completed sequences from the batch immediately, inserts waiting sequences into freed slots, and processes the reorganized batch for the next iteration.
 
 This dynamic batch management maintains high GPU utilization regardless of sequence length variance.
 
@@ -1035,17 +983,7 @@ With typical LLM output lengths having $CV \approx 1.0$, continuous batching ach
 
 ::: {.callout-note title="Implementation: Continuous Batching in vLLM"}
 
-vLLM implements continuous batching with the following key mechanisms:
-
-**Iteration-level scheduling**: At each decode step, the scheduler evaluates:
-
-- Which sequences have generated end-of-sequence tokens (remove from batch)
-- Which waiting sequences can fit in available KV cache slots (add to batch)
-- Which sequences should be preempted if memory pressure exists (swap to CPU)
-
-**Memory management**: The KV cache is managed using PagedAttention (see @sec-inference-kv-cache), which enables dynamic allocation without fragmentation. When a sequence completes, its KV cache pages are immediately available for new sequences.
-
-**Batched decode kernel**: Despite dynamic batch composition, the decode kernel processes all active sequences in a single batched operation. Sequences at different generation lengths are padded to a common shape within the kernel.
+vLLM implements continuous batching with several key mechanisms. Iteration-level scheduling evaluates at each decode step which sequences have generated end-of-sequence tokens (remove from batch), which waiting sequences can fit in available KV cache slots (add to batch), and which sequences should be preempted if memory pressure exists (swap to CPU). Memory management uses PagedAttention (see @sec-inference-kv-cache), which enables dynamic allocation without fragmentation. When a sequence completes, its KV cache pages are immediately available for new sequences. The batched decode kernel processes all active sequences in a single batched operation despite dynamic batch composition. Sequences at different generation lengths are padded to a common shape within the kernel.
 
 #### Preemption and Swapping
 
@@ -1067,7 +1005,7 @@ The 3x throughput improvement from continuous batching comes from eliminating id
 
 ### Prefill vs Decode: The Two-Phase Challenge {#sec-inference-prefill-decode}
 
-LLM inference consists of two distinct phases with different computational characteristics, requiring different batching strategies within the same request as summarized in @tbl-prefill-decode:
+LLM inference consists of two distinct phases with different computational characteristics, requiring different batching strategies within the same request (@tbl-prefill-decode):
 
 **Prefill phase**: Process the entire input prompt in parallel. Computation scales with prompt length. Memory access pattern is compute-bound (high arithmetic intensity[^fn-arithmetic-intensity]).
 
@@ -1328,7 +1266,7 @@ This section examines four sharding strategies, each suited to different model a
 
 ### When Sharding Becomes Necessary {#sec-inference-sharding-when}
 
-Model sharding for inference is driven by two distinct requirements as summarized in @tbl-sharding-triggers:
+Model sharding for inference is driven by two distinct requirements (@tbl-sharding-triggers):
 
 **Memory requirements**: A model that cannot fit in single-GPU memory must be sharded regardless of performance considerations. For a model with $P$ parameters at precision $b$ bits, the weight memory is calculated by @eq-weight-memory:
 
@@ -1340,7 +1278,7 @@ $$\text{Memory} = 70 \times 10^9 \times \frac{16}{8} = 140 \text{ GB}$$
 
 This exceeds the 80GB capacity of an H100 GPU, requiring at minimum 2-way sharding.
 
-**Latency requirements**: Even when a model fits in memory, sharding can reduce latency by parallelizing computation. The potential speedup depends on the parallelization efficiency as shown in @eq-parallel-time:
+**Latency requirements**: Even when a model fits in memory, sharding can reduce latency by parallelizing computation. The potential speedup depends on the parallelization efficiency (@eq-parallel-time):
 
 $$T_{parallel} = \frac{T_{sequential}}{P} + T_{communication}$$ {#eq-parallel-time}
 
@@ -1584,7 +1522,7 @@ Each device stores a slice of every embedding.
 
 **Hybrid sharding** combines both approaches: frequently accessed embeddings are column-sharded for faster access, while the long tail uses row sharding.
 
-The choice of embedding sharding strategy depends on lookup patterns and communication overhead as compared in @tbl-embedding-sharding.
+The choice of embedding sharding strategy depends on lookup patterns and communication overhead (@tbl-embedding-sharding).
 
 | Sharding Strategy | Lookup Pattern | Communication | Best For |
 |------------------|----------------|---------------|----------|
@@ -1611,15 +1549,7 @@ Meta's recommendation infrastructure demonstrates embedding sharding at extreme 
 - **Warm embeddings** (next 10%): Column-sharded with 8-way parallelism
 - **Cold embeddings** (remaining 89%): Row-sharded with consistent hashing
 
-**Access pattern optimization**:
-
-Each inference request requires ~5,000 embedding lookups. Without optimization, this would require 5,000 network round trips. Instead:
-
-1. **Batch accumulation**: Collect lookups for 1ms
-2. **Lookup deduplication**: Remove duplicate entities across requests
-3. **Shard-aware batching**: Group lookups by destination shard
-4. **Parallel dispatch**: Send batched requests to all shards simultaneously
-5. **Streaming assembly**: Reconstruct embeddings as responses arrive
+Each inference request requires approximately 5,000 embedding lookups. Without optimization, this would require 5,000 network round trips. Instead, the system applies several optimizations. Batch accumulation collects lookups for 1ms. Lookup deduplication removes duplicate entities across requests. Shard-aware batching groups lookups by destination shard. Parallel dispatch sends batched requests to all shards simultaneously. Streaming assembly reconstructs embeddings as responses arrive.
 
 **Performance**:
 
@@ -1670,19 +1600,19 @@ DLRM-scale model:
 
 The practical speedup from sharding depends critically on communication efficiency. Each sharding strategy has characteristic communication patterns with different bandwidth and latency requirements.
 
-**AllReduce** (tensor parallelism): Combines data from all devices, with result available on all devices as shown in @eq-allreduce-time.
+AllReduce (tensor parallelism) combines data from all devices, with result available on all devices (@eq-allreduce-time).
 
 $$T_{allreduce} = 2 \times \frac{(P-1)}{P} \times \frac{M}{B}$$ {#eq-allreduce-time}
 
 where $P$ is the number of devices, $M$ is the message size, and $B$ is the interconnect bandwidth. The factor of 2 accounts for the reduce-scatter and all-gather phases.
 
-**Point-to-point** (pipeline parallelism): Sends data from one device to the next as calculated by @eq-p2p-time.
+Point-to-point (pipeline parallelism) sends data from one device to the next (@eq-p2p-time).
 
 $$T_{p2p} = L + \frac{M}{B}$$ {#eq-p2p-time}
 
 where $L$ is the network latency and $M/B$ is the transfer time.
 
-**AllToAll** (expert parallelism): Exchanges data where each device sends different data to each other device as defined in @eq-alltoall-time.
+AllToAll (expert parallelism) exchanges data where each device sends different data to each other device (@eq-alltoall-time).
 
 $$T_{alltoall} = (P-1) \times \left(L + \frac{M/P}{B}\right)$$ {#eq-alltoall-time}
 
@@ -1719,7 +1649,7 @@ NVLink bandwidth has evolved significantly over GPU generations.[^fn-nvlink]
 
 ### Sharding Strategy Selection {#sec-inference-sharding-selection}
 
-The choice of sharding strategy depends on model architecture and deployment priorities as summarized in @tbl-sharding-selection.
+The choice of sharding strategy depends on model architecture and deployment priorities (@tbl-sharding-selection).
 
 | Factor | Tensor Parallel | Pipeline Parallel | Expert Parallel | Embedding Shard |
 |--------|----------------|-------------------|-----------------|-----------------|
@@ -1746,26 +1676,17 @@ Load balancing serves two primary goals that sometimes conflict:
 
 The tension arises because latency-optimal routing may concentrate load on fast replicas, reducing their performance and leaving other replicas underutilized.
 
-**Key metrics** for load balancing evaluation:
-
-- **Maximum queue length**: The longest queue across all replicas (determines worst-case latency)
-- **Load variance**: Standard deviation of queue lengths (measures balance)
-- **Utilization spread**: Difference between most and least utilized replicas
-- **Decision overhead**: Time required to make routing decisions
+Load balancing evaluation uses several key metrics. Maximum queue length measures the longest queue across all replicas and determines worst-case latency. Load variance captures the standard deviation of queue lengths and measures balance. Utilization spread represents the difference between most and least utilized replicas. Decision overhead quantifies the time required to make routing decisions.
 
 ### Round-Robin and Random Assignment {#sec-inference-lb-round-robin}
 
 The simplest load balancing strategies assign requests without considering server state:
 
-**Round-robin** assigns requests in circular order: request 1 to server 1, request 2 to server 2, and so on. This guarantees perfect distribution when servers are homogeneous and request processing times are identical.
+Round-robin assigns requests in circular order. Request 1 goes to server 1, request 2 to server 2, and so on. This guarantees perfect distribution when servers are homogeneous and request processing times are identical.
 
-**Random assignment** selects a server uniformly at random for each request. With large numbers of requests, this converges to even distribution but with higher variance than round-robin.
+Random assignment selects a server uniformly at random for each request. With large numbers of requests, this converges to even distribution but with higher variance than round-robin.
 
-For homogeneous servers with identical service times, both achieve near-optimal load distribution. However, production systems rarely meet these assumptions:
-
-- **Heterogeneous hardware**: Different GPU generations, memory configurations
-- **Variable request sizes**: Some requests take 10x longer than others
-- **Server state variations**: Some replicas warming up, others near memory limits
+For homogeneous servers with identical service times, both achieve near-optimal load distribution. However, production systems rarely meet these assumptions. Heterogeneous hardware introduces different GPU generations and memory configurations. Variable request sizes mean some requests take 10x longer than others. Server state variations occur when some replicas are warming up while others approach memory limits.
 
 Under these realistic conditions, uninformed strategies perform poorly. The maximum queue length under random assignment follows @eq-random-max-queue[^fn-theta-notation]:
 
@@ -1781,13 +1702,9 @@ A remarkable result in load balancing theory [@mitzenmacher2001power] shows that
 
 [^fn-balls-bins]: **Balls-into-bins problem**: The power-of-two-choices result comes from probabilistic analysis of throwing balls into bins. With random placement, maximum load is $\Theta(\log n / \log \log n)$. With two choices and placing in the less-loaded bin, maximum load drops to $\Theta(\log \log n)$. This exponential improvement from a constant-factor change in the algorithm is a foundational result in randomized algorithms.
 
-**Power-of-two-choices algorithm**:
+The power-of-two-choices algorithm operates as follows. Select two servers uniformly at random. Query both for their current queue length. Route the request to the server with the shorter queue.
 
-1. Select two servers uniformly at random
-2. Query both for their current queue length
-3. Route the request to the server with the shorter queue
-
-This simple modification reduces maximum queue length from $O(\log n / \log \log n)$ to $O(\log \log n)$ as shown in @eq-two-choices-max-queue:
+This simple modification reduces maximum queue length from $O(\log n / \log \log n)$ to $O(\log \log n)$ (@eq-two-choices-max-queue):
 
 $$E[\text{max queue}]_{\text{two choices}} = \Theta(\log \log n)$$ {#eq-two-choices-max-queue}
 
@@ -2287,13 +2204,7 @@ PagedAttention [@kwon2023vllm], introduced in vLLM, applies virtual memory[^fn-v
 
 [^fn-virtual-memory]: **Virtual memory for KV cache**: Just as operating systems use virtual memory to provide processes with contiguous address spaces backed by non-contiguous physical memory, PagedAttention provides sequences with logically contiguous KV caches backed by non-contiguous GPU memory blocks. This enables dynamic allocation, sharing, and efficient memory utilization without fragmentation.
 
-**Key concepts**:
-
-**Page table**: Maps logical sequence positions to physical memory pages.
-
-**Block size**: Number of tokens per page (typically 16 tokens).
-
-**Physical blocks**: Fixed-size memory allocations that can be assigned to any sequence.
+The key concepts include page tables that map logical sequence positions to physical memory pages, block size that defines the number of tokens per page (typically 16 tokens), and physical blocks that provide fixed-size memory allocations assignable to any sequence.
 
 ```
 Sequence A (150 tokens, 10 pages allocated):
@@ -2305,12 +2216,7 @@ Logical:  [Page 0][Page 1][Page 2][Page 3][Page 4]
 Physical: [Block 1][Block 7][Block 15][Block 2][Block 11]
 ```
 
-**Benefits**:
-
-1. **No internal fragmentation**: Allocate only the pages needed for actual tokens
-2. **No external fragmentation**: Any free page can be used by any sequence
-3. **Dynamic growth**: Sequences can grow without pre-allocation
-4. **Memory sharing**: Common prefixes can share physical pages
+PagedAttention provides several benefits. It eliminates internal fragmentation by allocating only the pages needed for actual tokens. It eliminates external fragmentation because any free page can be used by any sequence. It enables dynamic growth so sequences can grow without pre-allocation. It supports memory sharing so common prefixes can share physical pages.
 
 ::: {.callout-note title="PagedAttention Implementation Details"}
 
@@ -2371,13 +2277,7 @@ The 2.5-4x throughput improvement comes from fitting more concurrent sequences i
 
 ### Prefix Caching {#sec-inference-prefix-caching}
 
-Many LLM workloads share common prefixes across requests:
-
-- **System prompts**: "You are a helpful assistant..." prepended to every request
-- **Few-shot examples**: Same examples used for many queries
-- **Document context**: Multiple questions about the same document
-
-Recomputing these shared prefixes wastes both compute (prefill) and memory (duplicate KV cache entries).
+Many LLM workloads share common prefixes across requests. System prompts like "You are a helpful assistant..." are prepended to every request. Few-shot examples use the same examples for many queries. Document context involves multiple questions about the same document. Recomputing these shared prefixes wastes both compute (prefill) and memory (duplicate KV cache entries).
 
 **Prefix caching** shares KV cache entries across requests with common prefixes:
 
@@ -2596,20 +2496,11 @@ KV pool size = 0.9 × Available  # Leave 10% headroom
 Max concurrent sequences = KV pool size / (avg_seq_length × per_token_cache)
 ```
 
-**Eviction policies** when cache is full:
-
-- **LRU (Least Recently Used)**: Evict sequences with oldest last access
-- **Size-based**: Evict longest sequences first (free most memory)
-- **Priority-based**: Protect high-priority or paid-tier requests
+When cache is full, systems use several eviction policies. LRU (Least Recently Used) evicts sequences with oldest last access. Size-based eviction removes longest sequences first to free most memory. Priority-based eviction protects high-priority or paid-tier requests.
 
 **Preemption** for continuous batching:
 
-When a new high-priority request cannot fit:
-
-1. Select victim sequence(s) using eviction policy
-2. Swap victim's KV cache to CPU memory
-3. Allocate GPU memory to new request
-4. When victim is resumed, swap back from CPU
+When a new high-priority request cannot fit, the system follows a sequence of steps. It selects victim sequences using the eviction policy. It swaps the victim's KV cache to CPU memory. It allocates GPU memory to the new request. When the victim is resumed, it swaps back from CPU.
 
 ::: {.callout-note title="KV Cache Memory Hierarchy"}
 
@@ -2665,12 +2556,7 @@ GPTQ [@frantar2023gptq] quantizes LLM weights using Hessian-based[^fn-hessian] e
 
 [^fn-hessian]: **Hessian matrix in quantization**: The Hessian matrix $H = X^T X$ captures second-order information about how output changes with respect to weight perturbations. Weights with large Hessian diagonal entries have outsized impact on model outputs; GPTQ uses this information to prioritize preserving important weights and compensate for errors in less important ones.
 
-**Algorithm overview**:
-
-1. Process model layer by layer
-2. For each layer, calibrate using small dataset (128-256 samples)
-3. Quantize weights in order of decreasing Hessian magnitude
-4. Adjust remaining weights to minimize output error
+The GPTQ algorithm processes the model layer by layer. For each layer, it calibrates using a small dataset (128-256 samples). It quantizes weights in order of decreasing Hessian magnitude. It adjusts remaining weights to minimize output error.
 
 **Key insight**: The Hessian matrix $H = X^T X$ captures which weights most affect outputs. GPTQ builds on the Optimal Brain Surgeon (OBS) framework, using the inverse Hessian to guide error compensation.
 

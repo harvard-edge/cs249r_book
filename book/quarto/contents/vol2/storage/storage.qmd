@@ -115,25 +115,25 @@ Machine learning workloads create distinctive storage demands. Training requires
 
 ## Storage Fundamentals for ML {#sec-storage-fundamentals}
 
-The infrastructure foundations established in @sec-infrastructure provide the compute fabric and networking topology for large-scale ML systems. Yet even the most powerful GPU clusters remain idle without data to process. Storage systems determine whether thousands of accelerators receive training data at the rates they require, whether model checkpoints can be saved before failures corrupt hours of computation, and whether features can be retrieved within the latency budgets that production inference demands. Understanding storage architecture for ML begins with recognizing how fundamentally ML workloads differ from the applications that shaped traditional storage system design.
+The infrastructure foundations established in @sec-infrastructure provide the compute fabric and networking topology for large-scale ML systems. Even the most powerful GPU clusters remain idle without data to process. Storage systems determine whether thousands of accelerators receive training data at the rates they require, whether model checkpoints can be saved before failures corrupt hours of computation, and whether features can be retrieved within the latency budgets that production inference demands. Understanding storage architecture for ML begins with recognizing how ML workloads differ from the applications that shaped traditional storage system design.
 
-Traditional enterprise storage systems evolved to serve transactional databases and file servers, workloads characterized by small random accesses, strong consistency requirements, and moderate bandwidth demands. A database server might issue thousands of 4KB reads per second to serve user queries, each read potentially touching different storage locations. The storage industry optimized relentlessly for this pattern, developing sophisticated caching algorithms, RAID[^fn-raid] configurations, and file systems tuned for small-block random access with transactional guarantees.
+Traditional enterprise storage systems evolved to serve transactional databases and file servers, workloads characterized by small random accesses, strong consistency requirements, and moderate bandwidth demands. A database server might issue thousands of 4KB reads per second to serve user queries, each read potentially touching different storage locations. The storage industry optimized for this pattern, developing sophisticated caching algorithms, RAID[^fn-raid] configurations, and file systems tuned for small-block random access with transactional guarantees.
 
 [^fn-raid]: **RAID (Redundant Array of Independent Disks)**: A storage virtualization technology that combines multiple physical drives into a single logical unit for performance and redundancy. RAID 0 stripes data across drives for speed but no redundancy; RAID 1 mirrors data for redundancy; RAID 5/6 uses parity for fault tolerance with better capacity utilization. ML training workloads typically use RAID 0 or JBOD (Just a Bunch of Disks) for maximum bandwidth, accepting the risk of data loss since training data is immutable and backed up elsewhere.
 
 ML workloads invert nearly every assumption that shaped these systems. Training data access is predominantly sequential, streaming through datasets that may span hundreds of terabytes. Individual accesses are large, often megabytes rather than kilobytes, as models consume batches of images, text sequences, or feature vectors. Consistency requirements are relaxed; slightly stale feature values rarely affect model quality, and training can tolerate occasional data corruption through its inherent noise tolerance. But bandwidth demands are extreme, frequently requiring sustained throughput that would overwhelm systems designed for transactional workloads.
 
-This mismatch between traditional storage design and ML requirements creates challenges that surface at every level of the storage hierarchy. Object stores designed for web-scale applications deliver excellent scalability but introduce latencies that starve GPU pipelines. Parallel file systems engineered for scientific computing provide the bandwidth but struggle with the metadata operations that ML checkpointing generates. Local NVMe[^fn-nvme] drives offer the latency characteristics that inference demands but lack the capacity for training datasets. Effective ML storage architecture requires understanding these trade-offs and composing storage tiers that match each phase of the ML lifecycle.
+This mismatch between traditional storage design and ML requirements creates challenges that surface at every level of the storage hierarchy. Object stores designed for web-scale applications deliver excellent scalability but introduce latencies that starve GPU pipelines. Parallel file systems engineered for scientific computing provide the bandwidth but struggle with the metadata operations that ML checkpointing generates. Local NVMe[^fn-nvme] drives offer the latency characteristics that inference demands but lack the capacity for training datasets. Effective ML storage architecture requires understanding these tradeoffs and composing storage tiers that match each phase of the ML lifecycle.
 
 [^fn-nvme]: **NVMe (Non-Volatile Memory Express)**: A storage protocol designed specifically for solid-state drives, bypassing the legacy AHCI interface created for spinning disks. NVMe achieves 3-7 GB/s sequential throughput and sub-10 microsecond latency by using multiple command queues (65,535 queues with 65,536 commands each) rather than SATA's single queue of 32 commands. For ML inference, NVMe's low latency enables rapid model loading during cold starts; for training, its high bandwidth supports local caching of datasets fetched from distributed storage.
 
 ### The ML Storage Hierarchy {#sec-storage-hierarchy}
 
-Computer architecture courses teach the memory hierarchy as a fundamental organizing abstraction: registers at nanosecond latencies, caches at microseconds, DRAM at hundreds of nanoseconds, and storage devices at milliseconds. This hierarchy exists because of a persistent truth in computing: faster memory is more expensive per bit, so systems use smaller amounts of fast memory as caches for larger amounts of slower memory. The principle of locality, both temporal (recently accessed data will likely be accessed again) and spatial (nearby data will likely be accessed soon), makes caching effective for most workloads.
+Computer architecture courses teach the memory hierarchy as a fundamental organizing abstraction: registers at nanosecond latencies, caches at microseconds, DRAM at hundreds of nanoseconds, and storage devices at milliseconds. This hierarchy exists because faster memory is more expensive per bit, so systems use smaller amounts of fast memory as caches for larger amounts of slower memory. The principle of locality, both temporal (recently accessed data will likely be accessed again) and spatial (nearby data will likely be accessed soon), makes caching effective for most workloads.
 
 ML systems extend this hierarchy with two critical additions: GPU High Bandwidth Memory (HBM)[^fn-hbm] and distributed storage spanning multiple tiers. The extended hierarchy (@tbl-storage-hierarchy) reveals the extreme bandwidth disparities that ML systems must navigate.
 
-[^fn-hbm]: **High Bandwidth Memory (HBM)**: A 3D-stacked memory technology that places DRAM dies vertically atop the processor using through-silicon vias (TSVs), achieving bandwidth impossible with traditional off-package memory. The H100 GPU uses HBM3 delivering 3.35 TB/s across a 5120-bit interface, compared to 200 GB/s for DDR5. This 17x bandwidth advantage is essential for ML workloads where model weights, activations, and gradients must flow continuously through the processor. The trade-off is capacity: HBM costs approximately $15/GB versus $3/GB for standard DRAM, limiting GPUs to 80-192 GB while CPUs access terabytes of DDR memory.
+[^fn-hbm]: **High Bandwidth Memory (HBM)**: A 3D-stacked memory technology that places DRAM dies vertically atop the processor using through-silicon vias (TSVs), achieving bandwidth impossible with traditional off-package memory. The H100 GPU uses HBM3 delivering 3.35 TB/s across a 5120-bit interface, compared to 200 GB/s for DDR5. This 17x bandwidth advantage is essential for ML workloads where model weights, activations, and gradients must flow continuously through the processor. The tradeoff is capacity: HBM costs approximately $15/GB versus $3/GB for standard DRAM, limiting GPUs to 80-192 GB while CPUs access terabytes of DDR memory.
 
 | Storage Tier | Typical Capacity | Bandwidth | Latency | Cost ($/GB) |
 |--------------|------------------|-----------|---------|-------------|
@@ -166,7 +166,7 @@ At 1,979 TFLOPS, this computation completes in approximately 1.4 seconds, during
 
 ### How ML Workloads Invert Traditional Assumptions {#sec-storage-inverted-assumptions}
 
-Traditional storage system design optimizes for workloads with specific characteristics: random access patterns, working sets that fit in cache, and write-heavy transactional loads. ML workloads systematically violate each of these assumptions as summarized in @tbl-storage-assumptions, requiring fundamentally different storage architectures.
+Traditional storage system design optimizes for workloads with specific characteristics: random access patterns, working sets that fit in cache, and write-heavy transactional loads. ML workloads systematically violate each of these assumptions (@tbl-storage-assumptions), requiring fundamentally different storage architectures.
 
 **Sequential streaming dominates.** Database workloads exhibit random access patterns as queries retrieve specific records from large tables. ML training, by contrast, performs massive sequential scans through datasets. A training epoch reads every sample once, in whatever order the shuffling algorithm produces, before repeating. This access pattern resembles video streaming more than database queries. Storage systems optimized for random IOPS[^fn-iops] (input/output operations per second) waste their capabilities on ML workloads, while systems optimized for sequential throughput excel.
 
@@ -174,7 +174,7 @@ Traditional storage system design optimizes for workloads with specific characte
 
 **Working sets exceed any cache level.** Traditional applications exhibit locality: a web server repeatedly accesses the same popular pages, a database repeatedly queries hot rows. Caching exploits this locality, keeping frequently accessed data in fast memory. ML training datasets are accessed uniformly: each sample is read once per epoch, with no sample more likely to be accessed than any other during training. A 10 TB image dataset cannot be cached in DRAM; each sample is effectively cold when accessed. This lack of locality renders traditional caching strategies ineffective for training data.
 
-**Write patterns are bursty rather than continuous.** Transactional systems generate continuous streams of small writes as users update records. ML systems generate occasional massive writes when saving checkpoints. A 175 billion parameter model checkpoint [@brown2020gpt3] occupies approximately 700 GB; saving it every 10 minutes generates 70 GB/minute average throughput but concentrated into bursts that may saturate storage bandwidth for 1-2 minutes followed by idle periods. This bursty pattern requires storage systems that can absorb high-bandwidth writes without blocking ongoing reads.
+**Write patterns are bursty rather than continuous.** Transactional systems generate continuous streams of small writes as users update records. ML systems generate occasional massive writes when saving checkpoints. A 175 billion parameter model checkpoint [@brown2020gpt3] occupies approximately 700 GB; saving it every 10 minutes generates 70 GB/minute average throughput but concentrated into bursts that saturate storage bandwidth for 1-2 minutes followed by idle periods. This bursty pattern requires storage systems that can absorb high-bandwidth writes without blocking ongoing reads.
 
 **Read/write ratios vary dramatically by phase.** Training reads vastly exceed writes: a typical training run reads the dataset dozens of times (one per epoch) while writing only periodic checkpoints. The read-to-write ratio can exceed 100:1. Inference, conversely, is almost entirely read-only, loading model weights once and then serving requests without writes. Feature stores for recommendation systems present yet another pattern: continuous reads for serving interleaved with batch writes from offline feature computation. No single storage configuration optimizes all three patterns.
 
@@ -326,7 +326,7 @@ Distributed storage systems face fundamental tradeoffs between consistency (all 
 
 [^fn-cap-theorem]: **CAP Theorem**: Proven by Eric Brewer in 2000 and formalized by Gilbert and Lynch in 2002, the CAP theorem states that during a network partition, a distributed system must choose between consistency (all nodes see the same data) and availability (every request receives a response). Since partitions are inevitable in distributed systems, the practical choice is between CP (consistent but may reject requests during partitions) and AP (available but may return stale data). For ML storage, training data and checkpoints favor CP (correctness over availability), while feature stores often accept AP (fresh-enough features are better than failed requests).
 
-Understanding consistency models precisely enables correct storage system selection for different ML components.
+Understanding consistency models enables correct storage system selection for different ML components.
 
 ::: {.callout-definition title="Consistency Model Definitions"}
 
@@ -350,21 +350,11 @@ The key insight: stronger consistency requires more coordination, reducing throu
 
 For ML systems, the appropriate consistency model depends on the storage tier and access pattern.
 
-**Training data storage** can sacrifice strong consistency for availability. Training samples are immutable once created: the same image or text sequence is read identically by all workers. Eventual consistency suffices because:
-
-1. Training order does not affect final model quality (samples are shuffled anyway)
-2. Stale reads of a dataset do not corrupt training (reading an older version of a sample causes no harm)
-3. Dataset updates are infrequent (new data is added between training runs, not during)
+**Training data storage** can sacrifice strong consistency for availability. Training samples are immutable once created: the same image or text sequence is read identically by all workers. Eventual consistency suffices because training order does not affect final model quality (samples are shuffled anyway), stale reads of a dataset do not corrupt training (reading an older version of a sample causes no harm), and dataset updates are infrequent (new data is added between training runs, not during).
 
 Object storage systems like S3 and GCS are suitable for training data. Since December 2020, AWS S3 provides strong read-after-write consistency for all operations [@aws2020s3], eliminating previous eventual consistency concerns. GCS has always provided strong consistency. Both systems prioritize availability and can serve training data reliably at scale.
 
-**Checkpoint storage** requires strong consistency for correctness. A checkpoint must be complete and consistent before training can safely continue: a partially written checkpoint that appears complete causes catastrophic failure on recovery. The consistency requirements are:
-
-1. Atomic writes: A checkpoint is either fully written or not visible at all
-2. Read-after-write consistency: Immediately after a checkpoint completes, it must be readable
-3. Durable writes: Once acknowledged, a checkpoint must survive storage system failures
-
-These requirements favor strongly consistent storage systems or careful application-level protocols that implement atomic writes atop eventually consistent storage.
+**Checkpoint storage** requires strong consistency for correctness. A checkpoint must be complete and consistent before training can safely continue: a partially written checkpoint that appears complete causes catastrophic failure on recovery. The checkpoint must be either fully written or not visible at all (atomic writes), immediately readable after completion (read-after-write consistency), and must survive storage system failures once acknowledged (durable writes). These requirements favor strongly consistent storage systems or careful application-level protocols that implement atomic writes atop eventually consistent storage.
 
 **Feature store storage** requires consistency guarantees that vary by access pattern. Offline features can tolerate eventual consistency: batch computations produce new feature versions that propagate to serving over minutes to hours. Online features for serving require read-your-writes consistency at minimum: after a user action updates their features, subsequent requests must see those updated features. Strong consistency may be necessary for use cases like fraud detection where stale features could enable fraudulent transactions.
 
@@ -376,7 +366,7 @@ These requirements favor strongly consistent storage systems or careful applicat
 | Online features | Read-your-writes or stronger | User experience requires fresh features | Redis, Bigtable, DynamoDB |
 | Model weights | Read-after-write | Model updates must be immediately visible | Consistent object storage |
 
-: Consistency requirements vary by storage tier and access pattern as shown in @tbl-consistency-requirements. {#tbl-consistency-requirements}
+: Consistency requirements vary by storage tier and access pattern. {#tbl-consistency-requirements}
 
 ::: {.callout-note title="CAP Theorem Implications for ML Storage"}
 
@@ -398,23 +388,9 @@ $$P(\text{at least one slow}) = 1 - (0.99)^{100} = 0.634$$
 
 More than 63% of training steps will experience at least one slow storage access, making the tail latency the effective latency for the system.
 
-**Tail latency sources:**
+**Tail latency sources** include garbage collection pauses (JVM-based storage systems like HDFS NameNode can stall for seconds during GC), disk queue depth (when too many concurrent requests hit one disk, queue wait time dominates), network congestion (shared network fabric experiences transient congestion), background maintenance (compaction, replication, and verification compete with foreground requests), and resource contention (multiple tenants sharing storage create interference).
 
-1. **Garbage collection pauses**: JVM-based storage systems (HDFS NameNode) can stall for seconds during GC
-2. **Disk queue depth**: When too many concurrent requests hit one disk, queue wait time dominates
-3. **Network congestion**: Shared network fabric experiences transient congestion
-4. **Background maintenance**: Compaction, replication, and verification compete with foreground requests
-5. **Resource contention**: Multiple tenants sharing storage create interference
-
-**Mitigation strategies:**
-
-| Strategy | Mechanism | Trade-off |
-|----------|-----------|-----------|
-| Hedged requests | Issue redundant reads, take first response | 2x read amplification |
-| Backup requests | Issue second request if first is slow | Lower amplification, higher complexity |
-| Selective replica choice | Route to least-loaded replica | Requires load monitoring |
-| Request cancellation | Cancel in-flight requests when first completes | Reduces wasted work |
-| Deadline propagation | Drop requests exceeding deadline | Prioritizes freshness |
+**Mitigation strategies** include hedged requests (issue redundant reads, take first response; tradeoff: 2x read amplification), backup requests (issue second request if first is slow; tradeoff: lower amplification, higher complexity), selective replica choice (route to least-loaded replica; tradeoff: requires load monitoring), request cancellation (cancel in-flight requests when first completes; reduces wasted work), and deadline propagation (drop requests exceeding deadline; prioritizes freshness).
 
 **Production example:**
 
@@ -430,23 +406,7 @@ For ML training, tail latency tolerance is higher (seconds of delay are acceptab
 
 Given the diversity of ML storage requirements, practitioners need a systematic framework for selecting appropriate storage systems. The decision depends on access pattern, scale, latency requirements, and cost constraints.
 
-**For training data exceeding local storage:**
-
-- Scale < 10 TB: Local NVMe RAID or network-attached storage
-- Scale 10 TB - 1 PB: Parallel file system (Lustre, GPFS) or high-performance object storage
-- Scale > 1 PB: Object storage (S3, GCS) with intelligent caching
-
-**For checkpoint storage:**
-
-- Single node: Local NVMe with backup to durable storage
-- Multi-node, model < 100 GB: Parallel file system with atomic write support
-- Multi-node, model > 100 GB: Distributed checkpoint across multiple storage targets
-
-**For feature stores:**
-
-- Offline only: Data warehouse (Snowflake, BigQuery) or data lake
-- Online serving < 10 ms: In-memory cache (Redis) backed by persistent storage
-- Online serving with scale: Purpose-built feature store (Feast, Tecton, Vertex Feature Store)
+For training data exceeding local storage, systems under 10 TB can use local NVMe RAID or network-attached storage; systems between 10 TB and 1 PB benefit from parallel file systems (Lustre, GPFS) or high-performance object storage; systems exceeding 1 PB typically require object storage (S3, GCS) with intelligent caching. For checkpoint storage, single nodes can use local NVMe with backup to durable storage; multi-node deployments with models under 100 GB need parallel file systems with atomic write support; models exceeding 100 GB require distributed checkpointing across multiple storage targets. For feature stores, offline-only workloads can use data warehouses (Snowflake, BigQuery) or data lakes; online serving with sub-10ms requirements needs in-memory cache (Redis) backed by persistent storage; online serving at scale requires purpose-built feature stores (Feast, Tecton, Vertex Feature Store).
 
 The storage fundamentals established in this section provide the foundation for examining specific storage system architectures in subsequent sections. Training data infrastructure (@sec-training-data-infrastructure) examines distributed file systems and object storage at scale. Checkpoint storage systems (@sec-checkpoint-storage) develop quantitative models for checkpoint frequency and distribution. Feature stores (@sec-feature-stores) address the unique requirements of recommendation and real-time ML systems.
 
@@ -495,11 +455,7 @@ HDFS[^fn-hdfs] [@shvachko2010hadoop], the open-source implementation inspired by
 
 HDFS optimizes for the same access patterns as GFS: large sequential reads and writes, with files written once and read many times. A typical HDFS deployment achieves 100-200 MB/s per DataNode, scaling to aggregate cluster throughput of 10-100 GB/s depending on cluster size.
 
-**HDFS limitations for modern ML** include:
-
-1. **Single NameNode bottleneck**: File system operations serialize through one server, limiting metadata operations to ~10,000/second
-2. **JVM overhead**: Java implementation adds latency and memory overhead compared to native implementations
-3. **Small file problem**: Each file consumes NameNode memory regardless of size; millions of small files exhaust metadata capacity
+**HDFS limitations for modern ML** include the single NameNode bottleneck (file system operations serialize through one server, limiting metadata operations to roughly 10,000 per second), JVM overhead (Java implementation adds latency and memory overhead compared to native implementations), and the small file problem (each file consumes NameNode memory regardless of size, so millions of small files exhaust metadata capacity).
 
 #### The Small File Problem: IOPS vs Bandwidth
 
@@ -519,11 +475,7 @@ Lustre[^fn-lustre] [@schwan2003lustre], developed for high-performance computing
 
 [^fn-lustre]: **Lustre**: A parallel distributed file system developed by Cluster File Systems starting in 1999 and now maintained as open source. The name combines "Linux" and "cluster." Lustre powers seven of the top ten supercomputers globally and is the dominant storage solution for scientific computing. Its design prioritizes aggregate bandwidth over fault tolerance: Lustre achieves 1+ TB/s throughput by striping files across hundreds of storage servers, achieving performance characteristics summarized in @tbl-lustre-performance, but requires careful administration and can be less forgiving of hardware failures than cloud-native solutions. For ML training on HPC clusters, Lustre's bandwidth often exceeds cloud object storage by 10-100x.
 
-**Lustre architecture** separates metadata from data more aggressively:
-
-- **Metadata Servers (MDS)**: Handle file system namespace operations (create, open, stat)
-- **Object Storage Servers (OSS)**: Store actual file data
-- **Object Storage Targets (OST)**: Individual storage devices attached to OSSs
+**Lustre architecture** separates metadata from data more aggressively. Metadata Servers (MDS) handle file system namespace operations (create, open, stat), Object Storage Servers (OSS) store actual file data, and Object Storage Targets (OST) represent individual storage devices attached to OSSs.
 
 Files are striped across multiple OSTs, enabling parallel access that aggregates bandwidth from many storage devices. A large file might be striped across 100 OSTs; reading the file in parallel achieves 100x the bandwidth of a single OST.
 
@@ -537,11 +489,7 @@ Files are striped across multiple OSTs, enabling parallel access that aggregates
 
 : Lustre scales linearly with storage server count. {#tbl-lustre-performance}
 
-For ML training, Lustre excels when:
-
-- Training data is stored as large files that can be striped across many OSTs
-- Multiple training jobs read the same data concurrently (shared datasets)
-- Checkpoint writes require high bandwidth to minimize training interruption
+For ML training, Lustre excels when training data is stored as large files that can be striped across many OSTs, multiple training jobs read the same data concurrently (shared datasets), or checkpoint writes require high bandwidth to minimize training interruption.
 
 Lustre's disadvantage is operational complexity: tuning stripe sizes, managing quota, and handling metadata server failures requires specialized expertise that cloud-native teams may lack.
 
@@ -573,13 +521,9 @@ Object stores organize data as flat namespaces of key-value pairs. An object has
 
 This design eliminates the metadata bottlenecks that limit distributed file systems. Without directories to traverse or hierarchies to maintain, object stores scale to billions of objects without architectural changes.
 
-**Durability through redundancy.** Object stores achieve extreme durability[^fn-eleven-nines] (S3 advertises 99.999999999% or "eleven nines") through:
+**Durability through redundancy.** Object stores achieve extreme durability[^fn-eleven-nines] (S3 advertises 99.999999999% or "eleven nines") through erasure coding (data is split into fragments with redundant parity fragments, enabling reconstruction if any fragment is lost), geographic distribution (fragments are spread across multiple availability zones or regions), and continuous verification (background processes detect and repair bit rot).
 
 [^fn-eleven-nines]: **Eleven Nines Durability (99.999999999%)**: This seemingly abstract number has concrete meaning: for one million objects stored for 10 million years, you would statistically expect to lose one object. Achieving this requires geographic replication, erasure coding, continuous integrity verification, and automated repair of detected corruption. For ML training data representing months of curation effort, this level of durability justifies the higher latency of object storage compared to local disks. The durability guarantee applies to stored data, not availability: objects are durably stored but may be temporarily inaccessible during availability zone outages.
-
-1. **Erasure coding**: Data is split into fragments with redundant parity fragments, enabling reconstruction if any fragment is lost
-2. **Geographic distribution**: Fragments are spread across multiple availability zones or regions
-3. **Continuous verification**: Background processes detect and repair bit rot
 
 **Consistency model evolution.** Historically, object stores provided eventual consistency: after writing an object, some readers might not immediately see the new version. This changed significantly in December 2020 when AWS S3 upgraded to strong read-after-write consistency for all operations at no additional cost [@aws2020s3]. GCS has always provided strong consistency. This evolution simplifies ML storage architecture: checkpoints can now rely on object stores providing immediate visibility after successful writes, though application-level verification remains prudent for critical data.
 
@@ -587,20 +531,11 @@ This design eliminates the metadata bottlenecks that limit distributed file syst
 
 S3, launched in 2006, pioneered the object storage model and remains the dominant cloud storage service. GCS provides similar capabilities with Google Cloud integration.
 
-**S3 performance characteristics**:
-
-- Single object throughput: 100 MB/s per connection
-- Aggregate throughput: Scales with parallel connections (100s of GB/s possible)
-- Latency: 50-100 ms for first byte
-- Request rate: 5,500 GET/s and 3,500 PUT/s per prefix
+**S3 performance characteristics** include single object throughput of 100 MB/s per connection, aggregate throughput that scales with parallel connections (hundreds of GB/s possible), latency of 50-100 ms for first byte, and request rate of 5,500 GET/s and 3,500 PUT/s per prefix.
 
 The request rate limit is significant for ML: a dataset organized as `s3://bucket/class_name/image.jpg` limits each class to 5,500 reads per second. Sharding data across random prefixes (`s3://bucket/shard_id/sample.dat`) avoids this bottleneck.
 
-**GCS performance** is similar, with some differences:
-
-- Single object throughput: 100+ MB/s per connection
-- Strong consistency: Both GCS and S3 (since December 2020) provide read-after-write consistency
-- Composite objects: Multiple objects can be composed into one without re-upload
+**GCS performance** is similar, providing single object throughput of 100+ MB/s per connection, strong consistency (both GCS and S3 since December 2020 provide read-after-write consistency), and composite objects (multiple objects can be composed into one without re-upload).
 
 Practical throughput depends heavily on access patterns as detailed in @tbl-object-storage-throughput:
 
@@ -649,18 +584,9 @@ TFRecord, TensorFlow's native format, stores data as sequential records in binar
 [length][crc32 of length][data][crc32 of data]
 ```
 
-**Advantages:**
+**Advantages** include sequential read optimization (records are stored contiguously, enabling high-throughput streaming), schema flexibility (protocol buffers support arbitrary nested structures), compression (GZIP or ZSTD compression can be applied transparently), and splitting (large datasets can be sharded across multiple TFRecord files).
 
-- Sequential read optimization: Records are stored contiguously, enabling high-throughput streaming
-- Schema flexibility: Protocol buffers support arbitrary nested structures
-- Compression: GZIP or ZSTD compression can be applied transparently
-- Splitting: Large datasets can be sharded across multiple TFRecord files
-
-**Limitations:**
-
-- Random access: Accessing a specific record requires scanning from the beginning
-- TensorFlow coupling: While readable from other frameworks, optimized for TensorFlow
-- No indexing: Cannot query or filter without reading entire file
+**Limitations** include random access (accessing a specific record requires scanning from the beginning), TensorFlow coupling (while readable from other frameworks, optimized for TensorFlow), and no indexing (cannot query or filter without reading entire file).
 
 For large-scale training that processes entire datasets sequentially, TFRecord achieves near-optimal throughput. A well-configured TFRecord pipeline can saturate 10+ GB/s NVMe storage.
 
@@ -670,11 +596,7 @@ Parquet[^fn-parquet], developed for the Hadoop ecosystem and inspired by Google'
 
 [^fn-parquet]: **Apache Parquet**: An open-source columnar storage format created in 2013 by Twitter and Cloudera. The name references the geometric floor pattern where pieces fit together efficiently. Parquet stores data column-by-column rather than row-by-row, enabling efficient compression (similar values compress well) and selective column reads (skip columns not needed for analysis). For ML feature datasets with hundreds of columns where training uses only a subset, Parquet can reduce I/O by 10x compared to row-oriented formats. The trade-off is write amplification: updating a single value requires rewriting an entire row group (typically 128 MB).
 
-**Columnar advantages for ML:**
-
-- Column pruning: Read only the columns needed (e.g., skip metadata, read only pixels)
-- Compression efficiency: Similar values in a column compress better than mixed values in a row
-- Predicate pushdown: Filter data without reading irrelevant rows
+**Columnar advantages for ML** include column pruning (read only the columns needed, such as skipping metadata and reading only pixels), compression efficiency (similar values in a column compress better than mixed values in a row), and predicate pushdown (filter data without reading irrelevant rows).
 
 **Parquet structure:**
 
@@ -690,16 +612,9 @@ Footer (schema, statistics, locations)
 
 The footer contains statistics (min/max values) for each column chunk, enabling queries to skip row groups that cannot match filter predicates.
 
-**Parquet for ML** works well when:
+**Parquet for ML** works well when datasets have many columns but training uses few (feature selection), filtering is needed (such as training only on samples meeting criteria), or data is shared with analytics tools (Spark, pandas, DuckDB).
 
-- Datasets have many columns but training uses few (feature selection)
-- Filtering is needed (e.g., train only on samples meeting criteria)
-- Data is shared with analytics tools (Spark, pandas, DuckDB)
-
-**Limitations:**
-
-- Write amplification: Updating a single value requires rewriting the row group
-- Not optimized for image/binary data: Columnar layout provides little benefit
+**Limitations** include write amplification (updating a single value requires rewriting the row group) and lack of optimization for image or binary data (columnar layout provides little benefit).
 
 #### WebDataset {#sec-webdataset}
 
@@ -716,18 +631,9 @@ sample0002.cls
 ...
 ```
 
-**WebDataset advantages:**
+**WebDataset advantages** include HTTP compatibility (TAR files can be streamed directly from web servers or object storage), simple format (standard UNIX tools can inspect and manipulate archives), shuffling (shuffle buffers can be applied during streaming), and no framework dependency (works with PyTorch, TensorFlow, JAX).
 
-- HTTP compatible: TAR files can be streamed directly from web servers or object storage
-- Simple format: Standard UNIX tools can inspect and manipulate archives
-- Shuffling: Shuffle buffers can be applied during streaming
-- No framework dependency: Works with PyTorch, TensorFlow, JAX
-
-**For distributed training,** WebDataset enables efficient data loading from object storage:
-
-1. Each worker is assigned different TAR shards
-2. Workers stream shards in parallel, no coordination needed
-3. Local shuffle buffers randomize sample order within each worker
+**For distributed training**, WebDataset enables efficient data loading from object storage. Each worker is assigned different TAR shards, workers stream shards in parallel with no coordination needed, and local shuffle buffers randomize sample order within each worker.
 
 **Throughput:** WebDataset achieves 1-5 GB/s per worker from object storage, scaling linearly with worker count.
 
@@ -759,14 +665,7 @@ The data loading pipeline connects storage to accelerators, transforming raw dat
 
 #### Pipeline Stages {#sec-pipeline-stages}
 
-A typical data loading pipeline includes:
-
-1. **Data reading**: Fetch bytes from storage (disk, network, object store)
-2. **Decompression**: Decompress compressed formats (GZIP, ZSTD, JPEG)
-3. **Deserialization**: Parse structured data (protobuf, JSON)
-4. **Transformation**: Apply augmentations (resize, crop, normalize)
-5. **Batching**: Collate samples into batches
-6. **Transfer**: Move batches to accelerator memory
+A typical data loading pipeline includes data reading (fetch bytes from storage such as disk, network, or object store), decompression (decompress compressed formats like GZIP, ZSTD, or JPEG), deserialization (parse structured data such as protobuf or JSON), transformation (apply augmentations like resize, crop, or normalize), batching (collate samples into batches), and transfer (move batches to accelerator memory).
 
 Each stage has different compute and bandwidth characteristics as summarized in @tbl-pipeline-stages:
 
@@ -797,11 +696,7 @@ For a 200 ms batch time with 100 ms storage latency, prefetching just 1 batch hi
 
 Caching can dramatically improve data loading performance when datasets are accessed repeatedly.
 
-**Local disk caching:** First access fetches from remote storage and writes to local NVMe. Subsequent accesses read from local disk at 7-25 GB/s rather than network speeds. Effective when:
-
-- Dataset fits on local storage
-- Multiple epochs are trained
-- Network bandwidth is limited
+**Local disk caching** fetches from remote storage on first access and writes to local NVMe. Subsequent accesses read from local disk at 7-25 GB/s rather than network speeds. This approach is effective when the dataset fits on local storage, multiple epochs are trained, or network bandwidth is limited.
 
 **Memory caching:** Entire dataset or frequently accessed portions are loaded into DRAM. Achieves 100+ GB/s bandwidth but limited by DRAM capacity (typically 512 GB - 2 TB per node).
 
@@ -813,11 +708,7 @@ Caching can dramatically improve data loading performance when datasets are acce
 
 #### Shuffling in Distributed Training {#sec-shuffling}
 
-Shuffling is essential for training: without shuffling, the model sees samples in the same order every epoch, potentially learning spurious ordering correlations. Distributed shuffling is challenging because:
-
-1. Each worker must see different samples
-2. Samples should be randomly ordered within and across workers
-3. Communication for global shuffle is expensive
+Shuffling is essential for training: without shuffling, the model sees samples in the same order every epoch, potentially learning spurious ordering correlations. Distributed shuffling is challenging because each worker must see different samples, samples should be randomly ordered within and across workers, and communication for global shuffle is expensive.
 
 **Common approaches:**
 
@@ -841,13 +732,7 @@ Consider loading ImageNet data for 1024-GPU training with optimal throughput.
 - Target iteration time: 200 ms
 - Required bandwidth: 157 GB/s (from earlier calculation)
 
-**Solution architecture:**
-
-1. **Data storage:** 1.4 TB ImageNet stored as 1000 WebDataset TAR shards in object storage
-2. **Per-node allocation:** Each node is assigned ~8 shards (non-overlapping)
-3. **Local caching:** First epoch caches shards to local NVMe (10 TB per node available)
-4. **Data loaders:** 16 worker processes per node (2 per GPU)
-5. **Prefetch buffer:** 4 batches per GPU
+**Solution architecture** stores 1.4 TB ImageNet as 1000 WebDataset TAR shards in object storage, assigns each node roughly 8 non-overlapping shards, caches shards to local NVMe (10 TB per node available) on first epoch, uses 16 worker processes per node (2 per GPU), and maintains a prefetch buffer of 4 batches per GPU.
 
 **Bandwidth calculation:**
 
@@ -891,11 +776,7 @@ For training data loading:
 
 **When Locality Fails:**
 
-Locality optimization breaks down when:
-
-1. **Hot data**: Popular embeddings accessed by many workers cannot all be local
-2. **Random access**: Feature store lookups are inherently non-local
-3. **Small data**: Scheduling overhead exceeds data transfer time for small objects
+Locality optimization breaks down when hot data (popular embeddings accessed by many workers) cannot all be local, feature store lookups are inherently non-local (random access), or small data causes scheduling overhead to exceed data transfer time.
 
 For these cases, replication and caching substitute for locality.
 
@@ -936,19 +817,9 @@ Training large models requires days to months of continuous computation. During 
 
 ### Checkpoint Architecture Fundamentals {#sec-checkpoint-architecture}
 
-A checkpoint captures the complete state needed to resume training exactly where it left off. This includes:
-
-**Model parameters.** The current values of all trainable weights. For a 175 billion parameter model in FP16 [@brown2020gpt3], this is 350 GB of dense data.
-
-**Optimizer state.** Optimizers like Adam[^fn-adam-optimizer] [@kingma2015adam] maintain per-parameter statistics (first and second moments). Adam's state is 2x the size of model parameters, adding 700 GB for the 175B parameter case.
+A checkpoint captures the complete state needed to resume training exactly where it left off. This includes model parameters (the current values of all trainable weights; for a 175 billion parameter model in FP16 [@brown2020gpt3], this is 350 GB of dense data), optimizer state (optimizers like Adam[^fn-adam-optimizer] [@kingma2015adam] maintain per-parameter statistics such as first and second moments, with Adam's state being 2x the size of model parameters, adding 700 GB for the 175B parameter case), learning rate scheduler state (the current position in the learning rate schedule including step count and warmup progress), random number generator state (to ensure reproducibility, the RNG state for each worker must be saved), and data loader state (which samples have been seen in the current epoch, enabling resumption without repeating or skipping samples).
 
 [^fn-adam-optimizer]: **Adam (Adaptive Moment Estimation)**: The most widely used optimizer for deep learning, introduced in 2014. Adam maintains two exponential moving averages per parameter: the first moment (mean of gradients, for momentum) and second moment (mean of squared gradients, for adaptive learning rates). This 2x memory overhead becomes significant at scale: a 175B parameter model requires 350 GB for weights and 700 GB for Adam state, totaling over 1 TB per checkpoint. Memory-efficient optimizers like Adafactor reduce this overhead by factorizing the second moment matrix, trading some convergence speed for 4-8x memory savings.
-
-**Learning rate scheduler state.** The current position in the learning rate schedule (step count, warmup progress).
-
-**Random number generator state.** To ensure reproducibility, the RNG state for each worker must be saved.
-
-**Data loader state.** Which samples have been seen in the current epoch, enabling resumption without repeating or skipping samples.
 
 The total checkpoint size for a large model can reach several terabytes:
 
@@ -962,12 +833,7 @@ $$S_{checkpoint} = 350 \text{ GB} + 700 \text{ GB} + \text{~1 GB} \approx 1.05 \
 
 Checkpointing can be performed synchronously (training stops during checkpoint) or asynchronously (checkpoint happens in background while training continues).
 
-**Synchronous checkpointing** is simpler but introduces overhead:
-
-1. Training pauses
-2. All workers save their state to storage
-3. Coordinator confirms checkpoint complete
-4. Training resumes
+**Synchronous checkpointing** is simpler but introduces overhead: training pauses, all workers save their state to storage, the coordinator confirms checkpoint complete, and training resumes.
 
 The overhead depends on checkpoint size and storage bandwidth:
 
@@ -977,18 +843,9 @@ For a 1 TB checkpoint writing to a parallel file system at 50 GB/s aggregate ban
 
 $$\text{Overhead} = \frac{T_{checkpoint}}{T_{interval}} = \frac{20 \text{ s}}{600 \text{ s}} = 3.3\%$$
 
-**Asynchronous checkpointing** overlaps checkpoint I/O with training computation:
+**Asynchronous checkpointing** overlaps checkpoint I/O with training computation. Training continues normally, a background thread copies model state to CPU memory, the background thread writes to storage while training proceeds, and the next checkpoint begins only after the previous completes.
 
-1. Training continues normally
-2. Background thread copies model state to CPU memory
-3. Background thread writes to storage while training proceeds
-4. Next checkpoint begins only after previous completes
-
-Asynchronous checkpointing hides I/O latency but introduces complexity:
-
-- Memory overhead: Must maintain a copy of model state for checkpointing while training modifies the live copy
-- Consistency: Must snapshot state at a consistent point (between optimizer steps)
-- Backpressure: If checkpoint I/O is slower than training, memory fills with pending checkpoints
+Asynchronous checkpointing hides I/O latency but introduces complexity: memory overhead (must maintain a copy of model state for checkpointing while training modifies the live copy), consistency (must snapshot state at a consistent point between optimizer steps), and backpressure (if checkpoint I/O is slower than training, memory fills with pending checkpoints).
 
 For most training runs, asynchronous checkpointing reduces overhead to near zero. The memory overhead (one additional copy of model state) is typically acceptable on systems with sufficient host memory.
 
@@ -1002,12 +859,7 @@ When models are sharded across multiple devices using tensor parallelism or pipe
 
 **Data parallel checkpointing** can save just one replica's state (since all replicas are identical) or save all replicas for verification. Saving one replica reduces storage by the data parallelism degree.
 
-**Hybrid parallel checkpointing** combines these considerations. Consider a 3D parallel configuration with 8x data parallel, 4x tensor parallel, and 4x pipeline parallel across 128 GPUs. The checkpoint strategy might:
-
-1. Barrier synchronization across all 128 GPUs
-2. Each pipeline stage saves its portion of model and optimizer state
-3. Only rank 0 of each data parallel group saves (others are identical)
-4. Total checkpoint: 1/8 of full model size, distributed across 16 storage targets
+**Hybrid parallel checkpointing** combines these considerations. Consider a 3D parallel configuration with 8x data parallel, 4x tensor parallel, and 4x pipeline parallel across 128 GPUs. The checkpoint strategy performs barrier synchronization across all 128 GPUs, has each pipeline stage save its portion of model and optimizer state, only saves from rank 0 of each data parallel group (others are identical), resulting in a total checkpoint of 1/8 of full model size distributed across 16 storage targets.
 
 **Checkpoint aggregation** reduces storage overhead by having ranks aggregate their state before writing. Rather than 128 small writes, a few ranks collect and write large aggregated files. This improves storage efficiency (fewer small files) at the cost of additional memory and communication.
 
@@ -1137,19 +989,11 @@ Total overhead: 0.7% (checkpointing) + 0.7% (failures) = 1.4%
 
 Full checkpoints save the complete model state regardless of how much has changed. For models where only a portion of parameters change significantly between checkpoints, incremental approaches reduce storage and I/O costs.
 
-**Incremental checkpointing** saves only parameters that have changed since the last checkpoint. This requires:
-
-1. Tracking which parameters have been modified
-2. Maintaining a base checkpoint plus deltas
-3. Periodically consolidating into a new full checkpoint
+**Incremental checkpointing** saves only parameters that have changed since the last checkpoint. This requires tracking which parameters have been modified, maintaining a base checkpoint plus deltas, and periodically consolidating into a new full checkpoint.
 
 For dense models where all parameters update every step, incremental checkpointing provides little benefit. For sparse models or fine-tuning scenarios where many parameters are frozen, the savings can be substantial.
 
-**Delta compression** compresses the difference between consecutive checkpoints rather than the absolute values. If parameters change by small amounts each step, the delta is highly compressible. Techniques include:
-
-- XOR encoding: Store the XOR of current and previous parameter values
-- Floating-point prediction: Predict next value from previous, store residual
-- Lossy compression: Accept small errors in checkpoint for large compression ratios
+**Delta compression** compresses the difference between consecutive checkpoints rather than the absolute values. If parameters change by small amounts each step, the delta is highly compressible. Techniques include XOR encoding (store the XOR of current and previous parameter values), floating-point prediction (predict next value from previous and store residual), and lossy compression (accept small errors in checkpoint for large compression ratios).
 
 Practical compression ratios depend on model type and training dynamics as shown in @tbl-delta-checkpoint:
 
@@ -1163,23 +1007,13 @@ Practical compression ratios depend on model type and training dynamics as shown
 
 ### Checkpoint Storage Architecture {#sec-checkpoint-storage-architecture-storage}
 
-The storage system for checkpoints must satisfy several requirements:
-
-1. **High bandwidth**: Minimize checkpoint time
-2. **Strong consistency**: Partial checkpoints must not appear complete
-3. **Durability**: Checkpoints must survive storage failures
-4. **Low latency for reads**: Fast recovery after failures
+The storage system for checkpoints must satisfy several requirements: high bandwidth (minimize checkpoint time), strong consistency (partial checkpoints must not appear complete), durability (checkpoints must survive storage failures), and low latency for reads (fast recovery after failures).
 
 **Parallel file systems** (Lustre, GPFS) provide the highest bandwidth through striping and parallel I/O. A large Lustre deployment can deliver 100+ GB/s aggregate bandwidth, enabling TB-scale checkpoints in seconds. The tradeoff is operational complexity and cost.
 
 **Object storage** (S3, GCS) provides durability and low cost but higher latency and lower bandwidth than parallel file systems. Object storage works well for infrequent checkpoints of moderate size (< 100 GB) but becomes bottleneck for TB-scale checkpoints every few minutes.
 
-**Tiered storage** combines the benefits of both:
-
-1. Write checkpoints to fast parallel file system
-2. Asynchronously copy to durable object storage
-3. Delete from fast tier after copy completes
-4. Recover from fast tier if available, otherwise from object storage
+**Tiered storage** combines the benefits of both by writing checkpoints to fast parallel file system, asynchronously copying to durable object storage, deleting from fast tier after copy completes, and recovering from fast tier if available or otherwise from object storage.
 
 This architecture provides both performance (fast writes) and durability (object storage backup) while managing cost (limited fast storage).
 
@@ -1223,18 +1057,9 @@ The core problem feature stores solve is the training-serving gap: features comp
 
 **During serving**, features must be available within milliseconds for real-time inference. A recommendation system making personalized content suggestions has perhaps 50ms total latency budget; feature retrieval might consume 5-10ms of that budget. The priority is latency and availability.
 
-Without a feature store, teams face painful tradeoffs:
+Without a feature store, teams face painful tradeoffs: duplicate implementation (engineers write feature computation logic twice, once in batch Python or Spark for training and once in low-latency Java or C++ for serving, creating maintenance burden and inconsistency risk), point-in-time bugs (training features are computed with access to future data that would not be available at serving time, causing training-serving skew), and freshness problems (features computed in batch become stale and serving uses outdated information).
 
-1. **Duplicate implementation**: Engineers write feature computation logic twice (once in batch Python/Spark for training, once in low-latency Java/C++ for serving), creating maintenance burden and inconsistency risk
-2. **Point-in-time bugs**: Training features are computed with access to future data that would not be available at serving time, causing training-serving skew
-3. **Freshness problems**: Features computed in batch become stale; serving uses outdated information
-
-Feature stores solve these problems by providing:
-
-- **Unified feature computation**: Write feature logic once, execute in both batch and streaming contexts
-- **Point-in-time correctness**: Retrieve features as they were at a specific historical moment
-- **Low-latency serving**: Pre-computed features available with single-digit millisecond latency
-- **Feature reuse**: Features computed once can be shared across many models
+Feature stores solve these problems by providing unified feature computation (write feature logic once, execute in both batch and streaming contexts), point-in-time correctness (retrieve features as they were at a specific historical moment), low-latency serving (pre-computed features available with single-digit millisecond latency), and feature reuse (features computed once can be shared across many models).
 
 ### Feature Store Architecture {#sec-feature-store-architecture}
 
@@ -1698,11 +1523,7 @@ Colossus integrates deeply with TPU training infrastructure:
 - TPU hosts run Colossus clients that prefetch training data during computation
 - Checkpoint writes use dedicated bandwidth allocation to prevent interference with training data reads
 
-**Lessons:**
-
-1. At Google scale, the file system must be redesigned, not just scaled. GFS concepts (large blocks, append-optimized, single namespace) remain valid, but implementation must be distributed.
-2. Erasure coding is essential for cost-effective storage at petabyte scale.
-3. Tight integration between storage and compute systems enables efficiencies impossible with generic storage.
+**Lessons** include that at Google scale, the file system must be redesigned rather than just scaled (GFS concepts like large blocks, append-optimized, and single namespace remain valid, but implementation must be distributed), that erasure coding is essential for cost-effective storage at petabyte scale, and that tight integration between storage and compute systems enables efficiencies impossible with generic storage.
 
 ### Meta Feature Store: Recommendation at Scale {#sec-case-study-meta}
 
@@ -1732,12 +1553,7 @@ This tiering exploits the power-law distribution of feature access: the most act
 
 **Point-in-time correctness.** The offline feature store maintains timestamped feature values, enabling training data generation with correct historical features. Training pipelines join labels (user interactions) with features as they existed at interaction time, preventing data leakage.
 
-**Lessons:**
-
-1. Feature store design is dominated by the access pattern: billions of point lookups per second require in-memory storage for hot data.
-2. Streaming feature computation is essential for recommendation freshness.
-3. Tiered caching exploits access pattern skew to provide good latency at reasonable cost.
-4. Point-in-time correctness is a non-negotiable requirement; retrofitting it is extremely difficult.
+**Lessons** include that feature store design is dominated by the access pattern (billions of point lookups per second require in-memory storage for hot data), that streaming feature computation is essential for recommendation freshness, that tiered caching exploits access pattern skew to provide good latency at reasonable cost, and that point-in-time correctness is a non-negotiable requirement that is extremely difficult to retrofit.
 
 ### Tesla: Video Data Pipeline for Vision Training {#sec-case-study-tesla}
 
@@ -1753,34 +1569,17 @@ Tesla's Autopilot and Full Self-Driving systems are trained on video data collec
 
 **Architecture decisions:**
 
-**Hierarchical data selection.** Not all collected video is valuable for training. Tesla's pipeline implements progressive filtering:
-
-1. **On-vehicle filtering**: Neural networks on vehicle hardware identify interesting scenarios (edge cases, novel situations)
-2. **Upload filtering**: Only flagged clips are uploaded over cellular/WiFi
-3. **Offline filtering**: More sophisticated models further filter uploaded data
-4. **Labeling queue**: High-value clips are prioritized for human labeling
+**Hierarchical data selection** recognizes that not all collected video is valuable for training. Tesla's pipeline implements progressive filtering through on-vehicle filtering (neural networks on vehicle hardware identify interesting scenarios like edge cases or novel situations), upload filtering (only flagged clips are uploaded over cellular or WiFi), offline filtering (more sophisticated models further filter uploaded data), and labeling queue (high-value clips are prioritized for human labeling).
 
 This filtering reduces storage requirements by orders of magnitude while focusing training on the most valuable data.
 
-**Object storage with intelligent tiering.** Raw video is stored in object storage with automatic tiering:
+**Object storage with intelligent tiering** stores raw video in object storage with automatic tiering. Recent uploads reside in hot storage for immediate processing, processed clips move to warm storage, and archived raw footage resides in cold storage for potential re-processing.
 
-- Recent uploads in hot storage for immediate processing
-- Processed clips moved to warm storage
-- Archived raw footage in cold storage for potential re-processing
-
-**Custom data format.** Tesla developed custom video formats optimized for ML training:
-
-- Temporal compression aware of training access patterns (random frame access)
-- Multiple resolution variants for different training stages
-- Sensor metadata (GPS, IMU, camera calibration) embedded in format
+**Custom data format** was developed by Tesla specifically for ML training. The format uses temporal compression aware of training access patterns (random frame access), provides multiple resolution variants for different training stages, and embeds sensor metadata (GPS, IMU, camera calibration) in the format.
 
 **Distributed video decoding.** Video decoding is CPU-intensive. Tesla's data pipeline distributes decoding across many CPU workers, with decoded frames streamed to GPUs. This decouples decode throughput from GPU count.
 
-**Lessons:**
-
-1. For video data, the storage problem is inseparable from the data selection problem. Storing everything is infeasible; intelligent filtering is essential.
-2. Custom data formats can provide significant efficiency gains when standard formats impose unacceptable overhead.
-3. Decoding and augmentation pipelines require dedicated compute; they cannot be an afterthought.
+**Lessons** include that for video data, the storage problem is inseparable from the data selection problem (storing everything is infeasible and intelligent filtering is essential), that custom data formats can provide significant efficiency gains when standard formats impose unacceptable overhead, and that decoding and augmentation pipelines require dedicated compute and cannot be an afterthought.
 
 ### Spotify: Hybrid ML Platform Storage {#sec-case-study-spotify}
 
@@ -1824,11 +1623,7 @@ This cloud-native approach reduces operational burden while providing the scale 
 
 **Model versioning for A/B testing.** Spotify runs continuous A/B tests with many model variants serving traffic simultaneously. The model registry tracks which variants are in each test, enabling analysis of model performance in production.
 
-**Lessons:**
-
-1. Different ML workloads (recommendation, content understanding) can share storage infrastructure when designed with flexibility.
-2. Cloud-managed services provide operational simplicity at the cost of some customization.
-3. Feature platforms that serve multiple teams create significant organizational value through feature reuse.
+**Lessons** include that different ML workloads (recommendation and content understanding) can share storage infrastructure when designed with flexibility, that cloud-managed services provide operational simplicity at the cost of some customization, and that feature platforms serving multiple teams create significant organizational value through feature reuse.
 
 ### Cross-Cutting Themes {#sec-case-studies-themes}
 
