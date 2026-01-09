@@ -707,6 +707,112 @@ Selection factors include hardware support (Tensor Cores prefer INT8), accuracy 
 
 The specific quantization algorithms including post-training quantization (PTQ) calibration methods, quantization-aware training (QAT) with fake quantization nodes, mixed-precision strategies, and hardware-specific optimizations are detailed in @sec-model-optimizations.
 
+##### Pruning Criteria: Choosing What to Remove {#sec-efficient-ai-pruning-criteria-c3d4}
+
+While quantization reduces numerical precision, pruning eliminates unnecessary parameters entirely. The critical question is: which weights should be removed? Multiple pruning criteria have been developed, each with distinct theoretical foundations and practical trade-offs.
+
+**Magnitude-Based Pruning.** The simplest and most widely used criterion prunes weights with smallest absolute values:
+
+$$
+\text{Prune if: } |w_{ij}| < \tau
+$$ {#eq-magnitude-pruning}
+
+where $\tau$ is a threshold typically set to achieve target sparsity. The rationale: small weights contribute minimally to network output, making them safe to remove. For a linear layer $y = Wx + b$, removing weight $w_{ij}$ eliminates its contribution $w_{ij}x_j$ to output $y_i$. When $|w_{ij}| \approx 0$, this contribution is negligible.
+
+**Advantages:** Simple to compute, requires only forward pass, no second-order information needed, works well empirically (90%+ sparsity achievable on many networks).
+
+**Limitations:** Ignores gradient information (a small weight might have large gradients, indicating importance for optimization), does not account for weight correlations (multiple small weights might collectively be important), scale-dependent (batch normalization scaling affects magnitude rankings).
+
+**Gradient-Based Pruning.** Incorporates optimization dynamics by considering both magnitude and gradient:
+
+$$
+\text{Score}(w_{ij}) = |w_{ij}| \cdot |\frac{\partial \mathcal{L}}{\partial w_{ij}}|
+$$ {#eq-gradient-pruning}
+
+where $\mathcal{L}$ is the loss function. This criterion approximates the change in loss when removing $w_{ij}$ using first-order Taylor expansion:
+
+$$
+\Delta \mathcal{L} \approx -\frac{\partial \mathcal{L}}{\partial w_{ij}} \cdot \Delta w_{ij} = -\frac{\partial \mathcal{L}}{\partial w_{ij}} \cdot w_{ij}
+$$ {#eq-gradient-taylor}
+
+Pruning weights with smallest $|w_{ij} \cdot \nabla_{w_{ij}} \mathcal{L}|$ minimizes loss increase.
+
+**Advantages:** Incorporates gradient information reflecting training dynamics, better theoretical justification than magnitude alone, accounts for optimization trajectory.
+
+**Limitations:** Requires gradient computation (more expensive than magnitude alone), gradients vary during training (scores unstable), still first-order approximation (ignores curvature).
+
+**Hessian-Based Pruning (Second-Order Methods).** Uses second-order information to estimate loss change more accurately. The second-order Taylor expansion provides:
+
+$$
+\Delta \mathcal{L} \approx \frac{\partial \mathcal{L}}{\partial w_{ij}} \cdot \Delta w_{ij} + \frac{1}{2} \Delta w_{ij}^T H_{ij} \Delta w_{ij}
+$$ {#eq-hessian-taylor}
+
+where $H_{ij}$ is the Hessian (second derivative of loss with respect to weights). For pruning ($\Delta w_{ij} = -w_{ij}$):
+
+$$
+\Delta \mathcal{L} \approx -\frac{\partial \mathcal{L}}{\partial w_{ij}} \cdot w_{ij} + \frac{1}{2} w_{ij}^2 H_{ij}
+$$ {#eq-hessian-loss}
+
+At trained network where $\frac{\partial \mathcal{L}}{\partial w_{ij}} \approx 0$, the dominant term becomes:
+
+$$
+\text{Score}(w_{ij}) \approx \frac{1}{2} w_{ij}^2 H_{ij}
+$$ {#eq-hessian-score}
+
+This is the **Optimal Brain Damage** criterion: prune weights with smallest $w_{ij}^2 H_{ij}$ (saliency).
+
+**Advantages:** Most accurate loss change estimate, accounts for weight interactions through Hessian, strong theoretical foundation, can achieve higher sparsity with less accuracy loss.
+
+**Limitations:** Computing full Hessian is prohibitively expensive for large networks ($O(n^2)$ parameters), typically use diagonal approximation $H_{ii}$ (assumes parameter independence, less accurate), requires well-trained network where $\nabla \mathcal{L} \approx 0$.
+
+**Structured Pruning Criteria.** While the above criteria apply to individual weights, structured pruning removes entire groups (channels, filters, attention heads). For channel pruning in CNNs, common criteria include:
+
+**Channel norm:** Remove channels with smallest L1 or L2 norm:
+
+$$
+\text{Score}(\text{channel}_k) = \|\mathbf{w}_k\|_1 = \sum_i |w_{ik}|
+$$ {#eq-channel-norm}
+
+**Feature map statistics:** Measure activation magnitudes across training data:
+
+$$
+\text{Score}(\text{channel}_k) = \mathbb{E}_{\mathbf{x}}[|\mathbf{a}_k(\mathbf{x})|]
+$$ {#eq-channel-activation}
+
+where $\mathbf{a}_k(\mathbf{x})$ is the activation of channel $k$ for input $\mathbf{x}$.
+
+**Taylor expansion for structured pruning:** Extend gradient-based methods to measure importance of entire structures.
+
+@tbl-pruning-criteria compares these criteria systematically.
+
+| Criterion | Computational Cost | Accuracy | Sparsity | Theoretical Foundation | Best Use Case |
+|-----------|-------------------|----------|----------|----------------------|---------------|
+| Magnitude | O(n) (single pass) | Good | High (90%+) | Weak (intuitive) | Fast pruning, initial experiments |
+| Gradient | O(n) (+ backprop) | Better | High (90%+) | First-order Taylor | Incorporating training dynamics |
+| Hessian | O(n²) or O(n) approx | Best | Highest (95%+) | Second-order optimal | Maximum accuracy retention |
+| Channel Norm | O(n) (per channel) | Moderate | Moderate (50-70%) | Structural importance | Guaranteed speedup on hardware |
+
+: Pruning criteria comparison: computational requirements, accuracy preservation, achievable sparsity, and appropriate use cases. {#tbl-pruning-criteria}
+
+**Practical Recommendations:**
+
+1. **Start with magnitude pruning**: Simple, fast, works well for initial exploration. Achieves 80-90% sparsity on many networks with <1% accuracy loss.
+
+2. **Use gradient-based for better accuracy**: When magnitude pruning shows accuracy degradation, incorporate gradient information. Particularly useful during iterative pruning where network continues training.
+
+3. **Apply Hessian methods for extreme sparsity**: When pushing beyond 90% sparsity or working with accuracy-critical applications. Use diagonal Hessian approximation for tractability.
+
+4. **Choose structured pruning for deployment**: When actual speedup matters more than theoretical compression. Guarantees hardware-friendly computation regardless of criterion used.
+
+**Iterative vs. One-Shot Pruning.** All criteria can be applied iteratively (prune-train-prune cycles) or in one shot. Iterative pruning typically achieves higher sparsity with better accuracy:
+
+- **One-shot**: Prune once to target sparsity, fine-tune. Faster but may lose accuracy.
+- **Iterative**: Gradually increase sparsity (e.g., 20% → 40% → 60% → 80%). Each cycle allows network to recover. Slower but better accuracy retention.
+
+The **Lottery Ticket Hypothesis** suggests that iterative pruning's success comes from finding "winning tickets"—sparse subnetworks that, when trained from the original initialization, match full network performance. This theoretical insight validates iterative approaches empirically.
+
+The specific implementation details including pruning schedules, fine-tuning strategies, layer-wise sensitivity analysis, and structured pruning algorithms are covered in @sec-model-optimizations.
+
 **Knowledge Transfer** distills capabilities from large teacher models into efficient student models. Knowledge distillation[^fn-knowledge-distillation] achieves 40-60% parameter reduction while retaining 95-97% of original performance, addressing both computational efficiency and data efficiency by requiring fewer training examples. The specific distillation algorithms, loss functions, and training procedures are covered in @sec-model-optimizations.
 
 [^fn-knowledge-distillation]: **Knowledge Distillation**: Technique where a large "teacher" model transfers knowledge to a smaller "student" model by training the student to mimic the teacher's output probabilities. DistilBERT achieves ~97% of BERT's performance on GLUE benchmark with 40% fewer parameters and 60% faster inference through distillation.
