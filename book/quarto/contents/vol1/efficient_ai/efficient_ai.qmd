@@ -950,6 +950,115 @@ Modern efficiency requires architectures designed for resource constraints. Mode
 
 Different deployment contexts require different efficiency trade-offs. Cloud inference prioritizes throughput and can tolerate higher memory usage, favoring parallel-friendly operations. Edge deployment prioritizes latency and memory efficiency, requiring architectures that minimize memory access. Mobile deployment constrains energy usage, demanding architectures optimized for energy-efficient operations.
 
+##### AutoML for Efficiency: Neural Architecture Search {#sec-efficient-ai-automl-nas-b7c8}
+
+Designing efficient architectures manually requires extensive expertise and experimentation. AutoML, particularly Neural Architecture Search (NAS), automates this process by systematically exploring architecture design spaces to discover models optimized for efficiency constraints.
+
+**The NAS Problem Formulation.** NAS frames architecture design as an optimization problem:
+
+$$
+\mathbf{a}^* = \arg\max_{\mathbf{a} \in \mathcal{A}} \text{Accuracy}(\mathbf{a}) \quad \text{subject to} \quad \text{Cost}(\mathbf{a}) \leq C
+$$ {#eq-nas-problem}
+
+where $\mathbf{a}$ represents an architecture from search space $\mathcal{A}$, and $C$ is the resource budget (FLOPs, latency, energy, or memory). This formulation enables discovering architectures that balance accuracy and efficiency rather than maximizing accuracy alone.
+
+**Search Space Design.** The search space defines what architectures can be discovered. Three common approaches offer different trade-offs:
+
+**Macro search spaces** define entire network structures from scratch, searching over layer types, connections, and topology. Highly flexible but expensive to search (thousands of GPU-days). Example: discovering novel architectures like NASNet.
+
+**Cell-based search spaces** discover reusable building blocks ("cells") that are stacked to form complete networks. More efficient search (hundreds of GPU-days) by exploiting modularity. Example: EfficientNet's discovered cells.
+
+**Network morphism spaces** start from existing architectures and apply transformations (widening, deepening, inserting layers). Fastest search (tens of GPU-days) by leveraging transfer learning. Example: Efficient architectures derived from ResNet.
+
+**Search Strategies.** Finding optimal architectures requires navigating massive search spaces. Three primary strategies balance exploration quality and computational cost:
+
+**Reinforcement Learning (RL)-based search** treats architecture selection as sequential decision-making. An RL agent proposes architectures, trains them to measure accuracy, and receives accuracy as reward signal. The agent learns to propose better architectures over time.
+
+$$
+\mathbb{E}_{\mathbf{a} \sim \pi_\theta} [R(\mathbf{a})] \to \max_\theta
+$$ {#eq-nas-rl}
+
+where $\pi_\theta$ is the policy network parameterized by $\theta$, and $R(\mathbf{a})$ is the reward (validation accuracy minus cost penalty).
+
+**Advantages:** Can discover novel architectures, handles discrete search spaces naturally.
+
+**Limitations:** Sample inefficient (requires training thousands of architectures), expensive (10,000+ GPU-hours typical).
+
+**Evolutionary algorithms** maintain a population of architectures, mutating and recombining high-performing candidates. Better exploration than random search but still expensive.
+
+**Gradient-based search (differentiable NAS)** relaxes the discrete architecture search to continuous optimization. The key insight: represent the search space as a differentiable supernet where all candidate operations are computed in parallel, weighted by architecture parameters $\alpha$:
+
+$$
+\bar{o}^{(i,j)} = \sum_{o \in \mathcal{O}} \frac{\exp(\alpha_o^{(i,j)})}{\sum_{o' \in \mathcal{O}} \exp(\alpha_{o'}^{(i,j)})} \cdot o(x)
+$$ {#eq-darts}
+
+where $\mathcal{O}$ is the set of candidate operations (e.g., 3×3 conv, 5×5 conv, identity, zero), and $\alpha$ weights determine which operations are selected. After training, discrete architectures are extracted by selecting the operation with highest weight per edge.
+
+**Advantages:** Much faster (1-4 GPU-days), gradient-based optimization is sample efficient.
+
+**Limitations:** Memory intensive (all operations computed), discretization gap (continuous relaxation may not match discrete performance).
+
+**Performance Estimation.** Training thousands of architectures to convergence is prohibitively expensive. Efficiency-focused NAS employs several acceleration techniques:
+
+**Weight sharing (one-shot NAS):** Train a single supernet containing all candidate architectures as subnetworks. Evaluate candidates by inheriting shared weights rather than training from scratch. Reduces search cost from thousands to single GPU-days, but weight sharing introduces bias (shared weights may not reflect independent training performance).
+
+**Early stopping:** Train candidates for few epochs (e.g., 5-10) and use early performance to predict final accuracy. Assumes relative ranking remains stable, which holds for many architectures but not all.
+
+**Learning curve extrapolation:** Fit parametric curves to early training dynamics and extrapolate to convergence. More accurate than raw early stopping but still approximates final performance.
+
+**Efficiency-Aware Search Objectives.** Pure accuracy maximization often yields inefficient architectures. Efficiency-aware NAS incorporates resource constraints directly:
+
+**Latency-constrained search:**
+
+$$
+\mathbf{a}^* = \arg\max_{\mathbf{a}} \text{Accuracy}(\mathbf{a}) \quad \text{s.t.} \quad \text{Latency}(\mathbf{a}) \leq L_{\text{target}}
+$$ {#eq-nas-latency}
+
+**Multi-objective optimization:**
+
+$$
+\mathbf{a}^* = \arg\max_{\mathbf{a}} [\text{Accuracy}(\mathbf{a}) - \lambda \cdot \text{Cost}(\mathbf{a})]
+$$ {#eq-nas-multiobjective}
+
+where $\lambda$ balances accuracy and efficiency. By varying $\lambda$, we discover the Pareto frontier of accuracy-efficiency trade-offs.
+
+**Hardware-Aware NAS.** Efficiency depends on target hardware. Hardware-aware NAS incorporates platform-specific costs:
+
+- **Measured latency:** Profile candidate operations on target hardware (mobile CPU, GPU, edge TPU) and use measured latencies as cost.
+- **Learned cost models:** Train regression models predicting latency from architecture features when profiling is expensive.
+- **Energy modeling:** Incorporate energy consumption models for battery-constrained devices.
+
+MnasNet pioneered this approach, discovering MobileNetV2-like architectures by searching directly for mobile inference latency [@tan2019mnasnet]. This hardware-awareness proved crucial: FLOPs alone correlate poorly with actual latency due to memory access patterns, parallelism, and hardware-specific optimizations.
+
+**Practical Impact: EfficientNet Case Study.** EfficientNet demonstrates NAS impact on efficiency. The search discovered:
+
+1. **Optimal baseline architecture (EfficientNet-B0):** 5.3M parameters, 0.39B FLOPs, 77.1% ImageNet accuracy—matching larger ResNet-50 (25M parameters, 4.1B FLOPs).
+
+2. **Compound scaling coefficients:** Rather than manually tuning depth/width/resolution, NAS discovered scaling relationships: depth $\propto 1.2^\phi$, width $\propto 1.1^\phi$, resolution $\propto 1.15^\phi$. This principled scaling yielded EfficientNet-B7: 84.4% accuracy (state-of-the-art 2019) with 8.4× fewer parameters than previous best.
+
+3. **Efficiency gains:** Across the EfficientNet family, NAS architectures achieve 5-10× better accuracy/FLOPs ratio than manually designed counterparts (ResNet, DenseNet, Inception).
+
+**Limitations and Considerations.** NAS is not a panacea:
+
+**Search cost:** Even efficient NAS requires significant resources (100-1000 GPU-hours typical). Diminishing returns for well-studied domains where manual designs are mature.
+
+**Transferability:** Architectures discovered for one task may not transfer to others. Domain-specific NAS often required.
+
+**Interpretability:** Discovered architectures can be complex and difficult to understand, hindering manual improvements.
+
+**Overfitting to search objective:** Architectures may overfit validation sets used during search, requiring careful held-out test evaluation.
+
+**When to Use NAS.** NAS provides most value in:
+
+- **Novel deployment scenarios:** New hardware platforms (emerging edge accelerators) where no established architectures exist.
+- **Extreme efficiency requirements:** Applications needing last 1-2% accuracy with tight resource budgets.
+- **Large-scale production:** Efficiency gains (e.g., 20% latency reduction) amortize search costs across millions of inferences.
+- **Research exploration:** Discovering architectural principles rather than single architectures.
+
+For standard deployments with mature architecture families (ResNet, ViT, BERT), manual architecture selection often suffices. NAS shines when pushing efficiency frontiers for specific, well-defined deployment constraints.
+
+The implementation details of NAS algorithms, search space encodings, and efficient search strategies are covered in @sec-model-optimizations within the broader context of architecture optimization techniques.
+
 #### Parameter-Efficient Adaptation {#sec-efficient-ai-parameterefficient-adaptation-1bce}
 
 Parameter-efficient fine-tuning[^fn-param-efficient] techniques demonstrate how the three efficiency dimensions work together. These methods update less than 1% of model parameters while achieving full fine-tuning performance, addressing all three efficiency pillars: algorithmic efficiency through reduced parameter updates, compute efficiency through lower memory requirements and faster training, and data efficiency by leveraging pre-trained representations that require fewer task-specific examples.
