@@ -1808,6 +1808,92 @@ Production feature stores manage:
 - Terabytes of online data, petabytes of historical data
 - Multi-region replication for availability and latency
 
+### Data Quality Operations
+
+Data quality issues cause 80% of production ML incidents [@polyzotis2017data]. While model monitoring detects symptoms, data quality monitoring prevents problems at their source. At scale, data quality operations become as critical as model quality operations, requiring systematic monitoring, validation, and incident response procedures.
+
+**Data Quality Metrics**
+
+Data quality can be quantified across four primary dimensions:
+
+*Completeness*: The percentage of expected records and fields that are present. For instance, a daily data pipeline expected to produce 10 million user events that delivers only 8.2 million indicates 82% completeness. Alert thresholds typically trigger if completeness drops below 95% for two consecutive hours, as this indicates pipeline failures or upstream data source issues.
+
+*Consistency*: Schema compliance and referential integrity. Features should conform to expected types and ranges. For example, an `age` feature should fall between 0 and 120; values of 999 or -1 suggest sentinel values or data errors. Production systems reject batches failing more than 5% of validation rules to prevent corrupt data from reaching models.
+
+*Timeliness*: Data freshness relative to SLO requirements. Fraud detection systems might require features less than 100 milliseconds old, while demographic features can tolerate staleness measured in days. Alerts trigger when feature freshness exceeds the SLO plus a 50% safety margin.
+
+*Accuracy*: Correctness of data values within expected distributions. Temperature sensor readings that drift after calibration lapses represent accuracy violations. Statistical tests including Kolmogorov-Smirnov for continuous features, chi-square for categorical features, and Maximum Mean Discrepancy for high-dimensional data detect distribution shifts on hourly aggregations.
+
+**Data Validation Patterns**
+
+Production data quality operations employ three validation patterns:
+
+*Schema validation* enforces expected schema at ingestion, verifying column names, types, and constraints. Tools such as Great Expectations, TensorFlow Data Validation, and Pandera provide declarative schema definitions with automated validation.
+
+*Distribution monitoring* tracks feature distributions over time to detect drift that may not violate schema constraints but indicates upstream changes. A feature might remain within type constraints while shifting distribution in ways that degrade model performance. Statistical tests applied to rolling windows detect these shifts before they manifest as model quality degradation.
+
+*Cross-field validation* checks logical relationships between fields. If `country="USA"`, the `zip_code` should match US postal formats. If `order_status="shipped"`, a `shipping_date` should exist. Age derived from birthdate should match any explicit age field. These relationships encode business logic that schema validation alone cannot enforce.
+
+**Worked Example: Debugging Data Quality Incident**
+
+A recommendation model's click-through rate (CTR) drops 8% over five days. Initial hypothesis focuses on model drift, but data quality investigation reveals the root cause.
+
+*Investigation steps*:
+
+1. **Model metrics**: CTR degradation confirmed, declining from 4.2% to 3.87%
+2. **Data freshness**: Feature freshness within SLO (< 1 hour)
+3. **Distribution analysis**: `user_engagement_score` mean shifted from 0.42 to 0.31 (26% decline)
+4. **Lineage tracking**: Upstream pipeline version change deployed five days prior
+5. **Root cause**: Feature computation bug in new pipeline version
+
+*Quantitative impact*:
+
+$$\text{Revenue impact} = 0.08 \times \$15M\text{/week} \times 5\text{ days}/7 = \$857K$$
+
+Detection latency of five days cost \$857K in revenue. Distribution monitoring with automated alerts would detect the shift within four hours, reducing impact by 97%.
+
+*Resolution*: Rollback pipeline to previous version, redeploy models with correctly computed features, add distribution validation gate to prevent future pipeline deployments with feature shifts exceeding 10% threshold.
+
+**Operational Integration**
+
+Data quality operations integrate into production systems through three mechanisms:
+
+*Data contracts* establish formal agreements between data producers and consumers. Contracts specify schema requirements, freshness SLOs, quality thresholds for completeness and accuracy, and escalation procedures for violations. When a data producer changes schema or computation logic, contracts force explicit negotiation with consumers.
+
+*Continuous validation* integrates checks throughout data pipelines: pre-ingestion validation at source before accepting data, post-transformation verification of transformation logic correctness, and pre-serving validation as final checks before features reach models. Each stage acts as a quality gate.
+
+*Incident response* procedures activate when quality degrades:
+
+1. Automated alerting to on-call team with degradation severity and affected systems
+2. Circuit breaker activation to prevent bad data reaching models
+3. Fallback to last-known-good data or cached features
+4. Quarantine bad batches for forensic analysis
+5. Root cause analysis and pipeline remediation
+
+**Feature Monitoring at Scale**
+
+At enterprise scale with thousands of features, monitoring requires aggregation strategies. Individual feature monitoring creates alert fatigue; hierarchical monitoring groups features by:
+
+*Source system*: Features from the same upstream system likely share failure modes. An outage in the payment processing system affects all payment-related features simultaneously.
+
+*Computation pipeline*: Features computed by the same pipeline share failure risks. Pipeline configuration errors or dependency issues affect entire feature groups.
+
+*Update frequency*: Real-time streaming features require different monitoring than daily batch features. Staleness thresholds and alerting sensitivity vary by update pattern.
+
+*Business domain*: User demographics, product catalog, and interaction features serve different models and have different consumers. Domain-level aggregation enables targeted alerting.
+
+**Freshness Tracking at Scale**
+
+Feature freshness monitoring becomes computationally intensive at scale. For 10,000 features updated at different frequencies, continuous freshness checking generates substantial overhead. Efficient implementations employ:
+
+*Sampling*: Monitor freshness for representative samples rather than every feature value. For features with millions of entities (users, items), sampling 1% provides sufficient signal for detecting systemic freshness issues.
+
+*Aggregation windows*: Track freshness at the pipeline level rather than individual features. If a pipeline updates 500 features, monitoring the pipeline's update timestamp suffices.
+
+*Threshold stratification*: Different features have different freshness requirements. Stratify monitoring by criticality. Revenue-critical features warrant per-feature monitoring; less critical features can use aggregated monitoring.
+
+The computational overhead of freshness monitoring scales with the number of distinct features, not the volume of feature values. Efficient implementations maintain $O(F)$ overhead where $F$ is the feature count, even when feature values scale to billions of entities.
+
 ## Organizational Patterns {#sec-ops-scale-organizational}
 
 Technical infrastructure alone is insufficient for ML operations at scale. Organizational structure determines how effectively teams can leverage platform capabilities. This section examines organizational patterns for ML platform teams and the tradeoffs each presents.

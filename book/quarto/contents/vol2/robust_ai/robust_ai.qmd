@@ -462,6 +462,104 @@ These theoretical fault rates translate into practical reliability metrics that 
 
 These MTBF values compound significantly in distributed training scenarios. A cluster of 1,000 accelerators with individual MTBF of 50,000 hours experiences an expected failure every 50 hours, necessitating robust checkpointing and recovery mechanisms.
 
+#### Quantitative Reliability Analysis {#sec-robust-ai-quantitative-reliability-analysis-mtbf}
+
+Building quantitative understanding of system reliability requires moving beyond qualitative descriptions to precise mathematical frameworks. Reliability engineering provides formal methods for calculating failure rates, predicting system availability, and designing fault tolerance strategies based on measurable metrics.
+
+##### MTBF and FIT Rate Calculations {#sec-robust-ai-mtbf-fit-calculations}
+
+Mean Time Between Failures (MTBF) quantifies the expected operational time between successive failures. For a system experiencing $N$ failures over total operational time $T$, MTBF is defined as:
+
+$$\text{MTBF} = \frac{T}{N}$$
+
+For AI accelerators, manufacturers typically specify MTBF values based on reliability testing under controlled conditions. However, real-world deployment conditions often differ significantly from test environments, requiring adjustment of published values.
+
+Complementing MTBF, the Failures In Time (FIT) rate provides a normalized measure of component reliability, defined as the number of failures per billion ($10^9$) device-hours of operation:
+
+$$\text{FIT} = \frac{10^9}{\text{MTBF}}$$
+
+Converting between MTBF and FIT enables consistent comparison of component reliabilities across different scales. A GPU with MTBF of 50,000 hours has a FIT rate of:
+
+$$\text{FIT} = \frac{10^9}{50,000} = 20,000 \text{ failures per billion hours}$$
+
+##### System Reliability Composition {#sec-robust-ai-system-reliability-composition}
+
+Complex ML systems comprise multiple components whose individual failure rates combine to determine overall system reliability. The composition rules depend on system architecture.
+
+For **series systems** where all components must function correctly, failure of any component causes system failure. The system reliability $R_{\text{sys}}$ is the product of individual component reliabilities:
+
+$$R_{\text{sys}} = R_1 \times R_2 \times \cdots \times R_n = \prod_{i=1}^{n} R_i$$
+
+For components with exponential failure distributions (characteristic of electronic systems), reliability at time $t$ is:
+
+$$R(t) = e^{-\lambda t}$$
+
+where $\lambda = 1/\text{MTBF}$ is the failure rate. System MTBF for series configuration becomes:
+
+$$\text{MTBF}_{\text{sys}} = \frac{1}{\sum_{i=1}^{n} \lambda_i} = \frac{1}{\sum_{i=1}^{n} \frac{1}{\text{MTBF}_i}}$$
+
+This formula reveals the critical scaling challenge: adding components reduces system MTBF. A cluster of 1,000 identical GPUs, each with 50,000-hour MTBF, achieves system MTBF of only 50 hours.
+
+For **parallel systems** providing redundancy, failure occurs only when all redundant components fail simultaneously. System reliability is:
+
+$$R_{\text{sys}} = 1 - \prod_{i=1}^{n} (1 - R_i)$$
+
+For $n$ identical components with reliability $R$, this simplifies to:
+
+$$R_{\text{sys}} = 1 - (1 - R)^n$$
+
+This redundancy dramatically improves reliability. Two parallel components with 90% reliability achieve 99% system reliability: $1 - (1-0.9)^2 = 0.99$.
+
+##### GPU Cluster Reliability Example {#sec-robust-ai-gpu-cluster-example}
+
+Consider training a 70-billion-parameter language model on a cluster with 1,024 NVIDIA A100 GPUs. Each GPU contains 80 GB of HBM2 memory. We calculate the expected cluster reliability accounting for both GPU logic faults and memory soft errors.
+
+**Component failure rates:**
+
+- GPU logic: 4,000 FIT per GPU (from manufacturer specifications)
+- HBM2 memory: 250 FIT per megabit (standard DRAM specification)
+
+**GPU logic failure analysis:**
+
+Total GPU FIT rate for the cluster:
+$$\text{FIT}_{\text{GPU}} = 1,024 \times 4,000 = 4,096,000 \text{ FIT}$$
+
+Corresponding MTBF:
+$$\text{MTBF}_{\text{GPU}} = \frac{10^9}{4,096,000} \approx 244 \text{ hours}$$
+
+**Memory soft error analysis:**
+
+Total memory capacity in megabits:
+$$\text{Memory} = 1,024 \text{ GPUs} \times 80 \text{ GB} \times 8 \text{ bits/byte} \times 1,024 \text{ Mb/GB} = 671,088,640 \text{ Mb}$$
+
+Total memory FIT rate:
+$$\text{FIT}_{\text{memory}} = 671,088,640 \times 250 = 167,772,160,000 \text{ FIT}$$
+
+Memory subsystem MTBF:
+$$\text{MTBF}_{\text{memory}} = \frac{10^9}{167,772,160,000} \approx 0.006 \text{ hours} = 21 \text{ seconds}$$
+
+**Combined system reliability:**
+
+The memory soft error rate dominates GPU logic failures by approximately 40,000$\times$. System MTBF is primarily determined by memory reliability:
+
+$$\text{MTBF}_{\text{cluster}} \approx 21 \text{ seconds}$$
+
+This calculation reveals why large GPU clusters experience failures approximately every 21 seconds due to uncorrected memory soft errors. Without ECC memory protection, multi-day training jobs would be impossible, as model corruption would occur within minutes.
+
+**Impact of ECC protection:**
+
+ECC memory (standard on A100) reduces soft error rates by 100-1,000$\times$ by correcting single-bit errors. With ECC providing 100$\times$ reduction:
+
+$$\text{FIT}_{\text{memory,ECC}} = \frac{167,772,160,000}{100} = 1,677,721,600 \text{ FIT}$$
+
+$$\text{MTBF}_{\text{memory,ECC}} = \frac{10^9}{1,677,721,600} \approx 0.6 \text{ hours} = 36 \text{ minutes}$$
+
+Combined with GPU logic (244-hour MTBF), system MTBF becomes:
+
+$$\text{MTBF}_{\text{cluster,ECC}} \approx 35 \text{ minutes}$$
+
+This quantitative analysis justifies checkpoint frequencies of 15-30 minutes for large-scale training: the system experiences expected failures at comparable intervals, making periodic checkpointing essential for recovering lost work rather than restarting multi-week training runs from scratch.
+
 Beyond understanding failure rates, system designers must account for protection costs. Hardware fault tolerance mechanisms introduce measurable performance and energy penalties that must be considered in system design. @tbl-fault-tolerance-overhead quantifies these trade-offs across different protection mechanisms:
 
 +-------------------------------+-----------------+---------------------+-------------------+

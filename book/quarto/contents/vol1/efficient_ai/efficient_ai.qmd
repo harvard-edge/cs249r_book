@@ -625,7 +625,87 @@ Three major approaches dominate modern algorithmic efficiency, each targeting di
 
 **Model Compression** systematically removes redundant components from neural networks. Pruning techniques achieve 2-4x inference speedup with 1-3% accuracy loss by removing unnecessary weights and structures. Research demonstrates that ResNet-50 can be reduced to 20% of original parameters while maintaining 99% of ImageNet accuracy [@gholami2021survey]. The specific pruning algorithms—including magnitude-based selection, structured vs. unstructured approaches, and layer-wise sensitivity analysis—are covered in detail in @sec-model-optimizations.
 
-**Precision Optimization** reduces computational requirements through quantization, which maps high-precision floating-point values to lower-precision representations. Neural networks demonstrate inherent robustness to precision reduction, with INT8 quantization achieving 4x memory reduction and 2-4x inference speedup while typically maintaining 98-99% of FP32 accuracy [@Jacob_et_al_2018]. Modern techniques range from simple post-training quantization to sophisticated quantization-aware training. The specific quantization algorithms, calibration methods, and training procedures are detailed in @sec-model-optimizations.
+**Precision Optimization** reduces computational requirements through quantization, which maps high-precision floating-point values to lower-precision representations. Neural networks demonstrate inherent robustness to precision reduction, with INT8 quantization achieving 4x memory reduction and 2-4x inference speedup while typically maintaining 98-99% of FP32 accuracy [@Jacob_et_al_2018]. Understanding the mathematical foundations of quantization error enables informed decisions about when precision reduction will succeed and when it will fail.
+
+##### Quantization: Mathematical Foundations {#sec-efficient-ai-quantization-foundations-a1b2}
+
+Neural networks typically use 32-bit floating point (FP32) for weights and activations, providing high precision but consuming substantial memory and computation. Quantization reduces bit width to INT8, INT4, or lower to improve efficiency at the cost of approximation error. The fundamental quantization operation maps continuous floating-point values to discrete integer levels:
+
+$$
+q = \text{clamp}\left(\left\lfloor \frac{x}{s} \right\rfloor + z, 0, 2^b - 1\right)
+$$ {#eq-quantization-function}
+
+where $x$ represents the original floating-point value, $s$ is the scale factor determining the range per quantized level, $z$ is the zero-point ensuring 0.0 maps to an integer, $b$ is the bit width (8 for INT8, 4 for INT4), and clamp ensures the result fits in $[0, 2^b - 1]$. Dequantization recovers the approximate value:
+
+$$
+\hat{x} = (q - z) \cdot s
+$$ {#eq-dequantization}
+
+The scale and zero-point parameters depend on the value range $[x_{\min}, x_{\max}]$. For symmetric quantization with $z = 0$:
+
+$$
+s = \frac{2 \cdot \max(|x_{\min}|, |x_{\max}|)}{2^b - 1}
+$$ {#eq-symmetric-scale}
+
+For asymmetric quantization:
+
+$$
+s = \frac{x_{\max} - x_{\min}}{2^b - 1}, \quad z = \left\lfloor -\frac{x_{\min}}{s} \right\rfloor
+$$ {#eq-asymmetric-scale}
+
+Symmetric quantization provides simpler arithmetic (no zero-point addition) and efficient zero multiplication, but asymmetric quantization achieves better range utilization for unbalanced distributions where $|x_{\min}| \neq |x_{\max}|$.
+
+**Quantization Error Analysis.** The quantization error $e = \hat{x} - x$ depends on the rounding operation. For uniform quantization with step size $\Delta = s$, the error is bounded:
+
+$$
+|e| \leq \frac{\Delta}{2}
+$$ {#eq-error-bound}
+
+Assuming uniform distribution of values within each quantization interval, the error variance is:
+
+$$
+\mathbb{E}[e^2] = \frac{\Delta^2}{12}
+$$ {#eq-error-variance}
+
+The Signal-to-Quantization-Noise Ratio (SQNR) quantifies relative precision:
+
+$$
+\text{SQNR} = 6.02b + 1.76 \text{ dB}
+$$ {#eq-sqnr}
+
+This relationship shows each additional bit improves SQNR by approximately 6 dB. For INT8 ($b=8$), SQNR $\approx$ 49.9 dB, while for INT4 ($b=4$), SQNR $\approx$ 25.8 dB. Lower SQNR indicates higher relative error, establishing quantitative thresholds for acceptable precision reduction.
+
+**When Quantization Preserves Accuracy.** Neural networks tolerate quantization error when:
+
+1. **Model has redundant precision**: Many weights cluster near zero with minimal gradient contribution, making them prunable candidates. Smooth loss landscapes with small gradients indicate robustness to perturbation.
+
+2. **Careful calibration**: Representative calibration data ensures scale factors capture actual value distributions. Per-channel scaling (separate $s, z$ for each output channel) provides 2-3% accuracy improvement over per-tensor scaling with minimal hardware overhead, as modern Tensor Cores support per-channel quantization natively.
+
+3. **Architecture compatibility**: Batch normalization layers absorb quantization error by renormalizing activations. Deeper networks demonstrate greater robustness through error averaging across layers. However, attention mechanisms prove sensitive due to outlier activations requiring dynamic per-token quantization.
+
+**Bit Width Selection.** @tbl-quantization-bitwidth summarizes compression-accuracy-speedup trade-offs across bit widths.
+
+| Bit Width | Memory Reduction | Typical Speedup | Accuracy Impact | Primary Use Case |
+|-----------|------------------|-----------------|-----------------|------------------|
+| FP32 | 1× (baseline) | 1× | Baseline | Training default |
+| FP16/BF16 | 2× | 1.5-3× | Negligible | Training standard |
+| INT8 | 4× | 2-4× | <1% typical | Inference default |
+| INT4 | 8× | 3-6× | 1-3% typical | Aggressive inference |
+| INT2/Binary | 16-32× | 5-10× | 5-10% typical | Extreme constraints |
+
+: Quantization bit width trade-offs for neural network inference. {#tbl-quantization-bitwidth}
+
+Selection factors include hardware support (Tensor Cores prefer INT8), accuracy tolerance (production systems typically require <1% loss), deployment constraints (mobile and edge favor INT4+), and development time (post-training quantization is faster, but quantization-aware training achieves better accuracy).
+
+**Quantization Granularity.** The granularity at which scale and zero-point are computed significantly affects accuracy:
+
+- **Per-tensor quantization**: Single $(s, z)$ pair for the entire weight tensor. Simple and hardware-efficient but performs poorly with outliers.
+
+- **Per-channel quantization**: Separate $(s, z)$ for each output channel. Provides 2-3% accuracy improvement with minimal hardware overhead. Recommended for weights as modern Tensor Cores support this natively.
+
+- **Per-token quantization** (activations): Dynamic scaling for each token or sample. Essential for transformer activations with outlier values but introduces higher overhead. Necessary for maintaining accuracy in attention mechanisms.
+
+The specific quantization algorithms including post-training quantization (PTQ) calibration methods, quantization-aware training (QAT) with fake quantization nodes, mixed-precision strategies, and hardware-specific optimizations are detailed in @sec-model-optimizations.
 
 **Knowledge Transfer** distills capabilities from large teacher models into efficient student models. Knowledge distillation[^fn-knowledge-distillation] achieves 40-60% parameter reduction while retaining 95-97% of original performance, addressing both computational efficiency and data efficiency by requiring fewer training examples. The specific distillation algorithms, loss functions, and training procedures are covered in @sec-model-optimizations.
 
