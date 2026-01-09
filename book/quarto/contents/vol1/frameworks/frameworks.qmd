@@ -1648,6 +1648,184 @@ tensor.register_hook(hook)
 
 These autograd internals enable PyTorch's flexibility: users write forward passes in natural Python, and autograd automatically constructs backward passes with correct gradients and efficient memory management. Understanding these mechanisms is crucial for debugging training issues, implementing custom operations, and optimizing memory usage in production systems.
 
+##### Mixed-Precision Training Mechanics {#sec-ai-frameworks-mixed-precision-training}
+
+Mixed-precision training combines lower-precision arithmetic (FP16) with higher-precision accumulation (FP32) to reduce memory usage and accelerate computation while maintaining numerical stability. Modern GPUs provide 2-8× higher throughput for FP16 operations compared to FP32, making mixed precision essential for training large models efficiently. However, naive FP16 training fails due to gradient underflow—many gradients fall below FP16's representable range (minimum ~6×10⁻⁸), becoming zero and preventing learning.
+
+PyTorch's Automatic Mixed Precision (AMP) system solves this through two key mechanisms: the `autocast` context manager for automatic precision selection and `GradScaler` for loss scaling to prevent gradient underflow.
+
+**autocast Context Manager**
+
+The `autocast` context manager automatically selects appropriate precision for each operation based on numerical stability requirements. Not all operations benefit equally from reduced precision—some are sensitive to numerical errors while others are memory-bound and benefit from FP16's reduced bandwidth requirements.
+
+@lst-autocast-usage demonstrates basic autocast usage in a training loop:
+
+::: {#lst-autocast-usage lst-cap="**Autocast Usage**: The autocast context manager automatically casts operations to FP16 where safe, maintaining FP32 precision for numerically sensitive operations."}
+```python
+import torch
+from torch.cuda.amp import autocast
+
+model = MyModel().cuda()
+optimizer = torch.optim.Adam(model.parameters())
+
+for inputs, targets in dataloader:
+    inputs, targets = inputs.cuda(), targets.cuda()
+
+    # Enable automatic mixed precision for forward pass
+    with autocast():
+        outputs = model(inputs)
+        loss = criterion(outputs, targets)
+
+    # Backward pass (outside autocast)
+    loss.backward()
+    optimizer.step()
+    optimizer.zero_grad()
+```
+:::
+
+Inside the `autocast` context, PyTorch automatically applies precision rules:
+
+- **FP16 operations**: Matrix multiplications, convolutions (memory-bound, benefit from reduced bandwidth)
+- **FP32 operations**: Loss functions, softmax, layer normalization (numerically sensitive)
+- **Automatic casting**: Tensors are cast as needed; if FP16 and FP32 tensors interact, FP16 is promoted to FP32
+
+This selective precision maintains accuracy while achieving speedups. On NVIDIA A100 GPUs, FP16 matrix multiplication achieves 312 TFLOPS compared to 156 TFLOPS for FP32—a 2× throughput improvement.
+
+**GradScaler for Loss Scaling**
+
+Even with careful operation selection, gradients often underflow in FP16. Consider a gradient of magnitude 10⁻⁷: this rounds to zero in FP16 (minimum normal value ≈6×10⁻⁸), effectively stopping learning for those parameters.
+
+Loss scaling solves this by multiplying the loss by a large scale factor before backward pass, shifting gradients into FP16's representable range. After computing scaled gradients, we divide by the scale factor to recover true gradient values before the optimizer step.
+
+@lst-gradscaler-usage shows GradScaler integration:
+
+::: {#lst-gradscaler-usage lst-cap="**GradScaler Usage**: Loss scaling prevents gradient underflow by scaling losses before backward pass, then unscaling gradients before optimizer update."}
+```python
+from torch.cuda.amp import autocast, GradScaler
+
+model = MyModel().cuda()
+optimizer = torch.optim.Adam(model.parameters())
+scaler = GradScaler()
+
+for inputs, targets in dataloader:
+    inputs, targets = inputs.cuda(), targets.cuda()
+
+    optimizer.zero_grad()
+
+    # Forward pass in FP16
+    with autocast():
+        outputs = model(inputs)
+        loss = criterion(outputs, targets)
+
+    # Backward pass with scaled loss
+    scaler.scale(loss).backward()  # loss *= scale_factor
+
+    # Unscale gradients and step optimizer
+    scaler.step(optimizer)  # grads /= scale_factor, then optimizer.step()
+    scaler.update()  # Adjust scale factor for next iteration
+```
+:::
+
+**Why Loss Scaling Prevents Underflow**
+
+Loss scaling shifts gradient magnitudes into FP16's representable range through multiplication:
+
+$$
+\text{scaled\_loss} = \text{loss} \times s
+$$
+
+where $s$ is the scale factor (typically 2¹⁶ = 65536 initially). During backward pass:
+
+$$
+\frac{\partial (\text{scaled\_loss})}{\partial w} = s \cdot \frac{\partial \text{loss}}{\partial w}
+$$
+
+For a gradient of magnitude 10⁻⁷:
+- **Without scaling**: 10⁻⁷ → 0 in FP16 (underflow)
+- **With scaling** (s=65536): 65536 × 10⁻⁷ = 6.5×10⁻³ (representable in FP16)
+
+After backward pass, GradScaler divides gradients by $s$ before the optimizer step, recovering the true gradient values in FP32 for the parameter update.
+
+**Dynamic Loss Scaling Algorithm**
+
+Static scaling factors fail when gradients vary across training. Too large a scale causes overflow (gradients exceed FP16's maximum ~65504), while too small a scale still permits underflow. Dynamic loss scaling adapts the scale factor automatically.
+
+The algorithm maintains a scale factor $s$ and adjusts it based on gradient overflow detection:
+
+1. **Overflow check**: After backward pass, check if any gradients are inf or NaN (indicating overflow)
+2. **Overflow response**: If overflow detected:
+   - Skip optimizer step (gradients are invalid)
+   - Reduce scale factor: $s \leftarrow s / 2$
+   - Reset counter
+3. **No overflow**: If no overflow for $N$ consecutive iterations (typically $N=2000$):
+   - Increase scale factor: $s \leftarrow s \times 2$
+   - Maintains aggressive scaling without causing frequent overflows
+
+@lst-dynamic-scaling shows the conceptual implementation:
+
+::: {#lst-dynamic-scaling lst-cap="**Dynamic Loss Scaling**: Scale factor adapts based on gradient overflow, maximizing precision utilization while preventing numerical errors."}
+```python
+class GradScaler:
+    def __init__(self):
+        self.scale = 2**16  # Initial scale factor
+        self.growth_interval = 2000
+        self.no_overflow_iters = 0
+
+    def step(self, optimizer):
+        # Unscale gradients (divide by scale factor)
+        for param in optimizer.param_groups[0]['params']:
+            if param.grad is not None:
+                param.grad.div_(self.scale)
+
+        # Check for inf/NaN (overflow indicator)
+        found_inf = any(torch.isinf(p.grad).any() or torch.isnan(p.grad).any()
+                       for p in optimizer.param_groups[0]['params']
+                       if p.grad is not None)
+
+        if found_inf:
+            # Overflow: reduce scale, skip update
+            self.scale /= 2.0
+            self.no_overflow_iters = 0
+        else:
+            # No overflow: proceed with update
+            optimizer.step()
+            self.no_overflow_iters += 1
+
+    def update(self):
+        # Increase scale after sustained success
+        if self.no_overflow_iters >= self.growth_interval:
+            self.scale *= 2.0
+            self.no_overflow_iters = 0
+```
+:::
+
+**Mixed-Precision Memory Savings**
+
+Mixed precision reduces memory consumption across multiple components:
+
+1. **Activation storage**: FP16 activations require half the memory of FP32 (2 bytes vs 4 bytes per element)
+2. **Gradient storage**: Gradients computed in FP16 before unscaling
+3. **Master weights**: Optimizer maintains FP32 master copy of weights for accurate updates
+
+Total memory savings typically range from 25-50% depending on model architecture. For a model with $P$ parameters and batch size $B$ with $L$ layers:
+
+- **FP32 training**: $4P$ (weights) + $4P$ (gradients) + $4P$ (optimizer state) + $4BL$ (activations) ≈ $12P + 4BL$ bytes
+- **Mixed precision**: $2P$ (FP16 weights) + $4P$ (FP32 master) + $4P$ (optimizer state) + $2BL$ (FP16 activations) ≈ $10P + 2BL$ bytes
+
+For large models where activations dominate (large $B$ and $L$), the $4BL \rightarrow 2BL$ reduction provides substantial savings, often enabling 2× larger batch sizes.
+
+**Numerical Stability Considerations**
+
+Mixed precision succeeds because neural network training has inherent noise tolerance. Gradient descent convergence depends on gradient direction more than exact magnitude, and the combination of FP16 computation with FP32 accumulation preserves sufficient precision for learning.
+
+However, certain operations require special handling:
+
+1. **Large reductions**: Summing many FP16 values accumulates rounding error. Use FP32 accumulation for operations like `torch.sum()` over large tensors.
+2. **Exponentials**: Softmax and layer normalization involve $e^x$, which can overflow in FP16 for moderate $x$ values. These operations automatically use FP32 under autocast.
+3. **Small learning rates**: For learning rates below 10⁻⁵, FP32 optimizer updates are essential to prevent weight staleness (updates smaller than FP16 representable increments).
+
+Modern frameworks handle these cases automatically through autocast's operation whitelist/blacklist, ensuring that numerically sensitive operations maintain FP32 precision while memory-bound operations benefit from FP16's bandwidth advantages.
+
 ##### Optimizer State Mechanics {#sec-ai-frameworks-optimizer-state-mechanics}
 
 While gradients capture how to adjust parameters, optimizers maintain additional state to improve training convergence. Understanding optimizer state structure is essential for checkpointing, memory optimization, and debugging training resumption issues.
