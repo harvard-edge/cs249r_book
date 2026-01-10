@@ -376,7 +376,9 @@ Throughout, we maintain the model-type diversity essential for practitioners: ev
 
 ## Serving Framework Selection {#sec-inference-frameworks}
 
-Before examining specific serving techniques, practitioners must select appropriate serving infrastructure. The choice of serving framework determines which optimizations are available, how models are deployed, and what performance characteristics are achievable. This section provides a systematic framework for selecting among the major options.
+The batching, sharding, and load balancing techniques described in the chapter roadmap do not exist in isolation; they are implemented within serving frameworks that constrain and enable different optimizations. Before examining these techniques in depth, practitioners face an immediate practical decision: which serving infrastructure to build upon?
+
+The choice of serving framework determines which optimizations are available, how models are deployed, and what performance characteristics are achievable. Understanding this landscape first provides essential context: when we discuss continuous batching in @sec-inference-continuous-batching, we will see how vLLM and TensorRT-LLM implement it differently. This section provides a systematic framework for selecting among the major options.
 
 ### Framework Categories {#sec-inference-framework-categories}
 
@@ -861,7 +863,11 @@ This configuration handles the 500 QPS peak with 4 replicas, can scale to 8 duri
 
 ## Batching Strategies at Scale {#sec-inference-batching}
 
-Single-machine serving relies on batching fundamentals: dynamic batching trades latency for throughput by grouping requests, and traffic patterns determine optimal batch sizes. At scale, batching becomes more complex because different model architectures have fundamentally different batching requirements. A strategy optimal for vision models may be catastrophic for LLMs, and techniques developed for recommendation systems may not apply to either.
+Having established the framework landscape, we now turn to the first level of the serving hierarchy: request-level optimization through batching. The framework selection made in the previous section determines implementation details, but the underlying principles apply across frameworks.
+
+The core insight of batching is that processing multiple requests together amortizes fixed costs, including model loading, kernel launch overhead, and memory transfer latency, across more work. This trades higher per-request latency for dramatically improved throughput. Single-machine serving applies this through dynamic batching, which collects requests within a time window before processing them together.
+
+At scale, batching becomes more complex because different model architectures have fundamentally different batching requirements. A strategy optimal for vision models may be catastrophic for LLMs, and techniques developed for recommendation systems may not apply to either.
 
 **Production reality**: Recommendation systems constitute 80-90% of inference requests at major technology companies, with vision models handling most of the remainder, and LLMs currently representing 1-5% of request volume (though growing rapidly). Despite this distribution, we present batching strategies in order of conceptual complexity: vision (straightforward batching), LLMs (continuous batching with KV cache), and recommendation (feature-parallel batching with distributed embedding). This pedagogical ordering builds understanding progressively, even though practitioners will most frequently encounter recommendation workloads first.
 
@@ -1260,7 +1266,9 @@ For each strategy, the key parameters to tune are summarized in @tbl-batching-pa
 
 ## Model Sharding for Inference {#sec-inference-sharding}
 
-When models exceed single-GPU memory or when latency requirements demand parallel computation, model sharding distributes inference across multiple devices. Unlike training, where throughput is the primary concern, inference sharding must carefully balance parallelization benefits against communication overhead within strict latency budgets.
+Batching strategies from the previous section address how to efficiently process requests on a given model replica. But what constitutes a "replica" when models exceed single-GPU memory? And how can we reduce latency when even batch-size-one inference is too slow? Model sharding answers both questions by distributing inference across multiple devices.
+
+This moves us from request-level optimization to replica-level concerns in the serving hierarchy. Unlike training sharding where throughput is the primary concern, inference sharding must carefully balance parallelization benefits against communication overhead within strict latency budgets.
 
 This section examines four sharding strategies, each suited to different model architectures and deployment requirements: tensor parallelism for attention-heavy models, pipeline parallelism for sequential architectures, expert parallelism for mixture-of-experts models, and embedding sharding for recommendation systems.
 
@@ -1418,17 +1426,7 @@ Once the pipeline is full, throughput equals $P$ times single-stage throughput, 
 - When throughput is more important than individual request latency
 - When network bandwidth between devices is limited (only point-to-point communication)
 
-**Pipeline vs tensor parallelism tradeoffs**:
-
-| Aspect | Tensor Parallelism | Pipeline Parallelism |
-|--------|-------------------|---------------------|
-| Single-request latency | Reduced by ~$P$x | No improvement |
-| Throughput | $P$x | $P$x (when pipelined) |
-| Communication pattern | AllReduce (bandwidth-intensive) | Point-to-point (latency-sensitive) |
-| Memory efficiency | Activations replicated | Activations passed along |
-| Complexity | Higher (requires custom kernels) | Lower (layer-level partitioning) |
-
-: **Pipeline vs Tensor Parallelism**: Each strategy has distinct tradeoffs in latency, throughput, and implementation complexity as compared in @tbl-pipeline-tensor-comparison.
+@tbl-pipeline-tensor-comparison summarizes the key tradeoffs between pipeline and tensor parallelism:
 
 | Aspect | Tensor Parallelism | Pipeline Parallelism |
 |--------|-------------------|---------------------|
@@ -2537,7 +2535,9 @@ async def swap_to_gpu(sequence_id):
 
 ## Weight Quantization for Serving {#sec-inference-weight-quantization}
 
-Quantization reduces numerical precision of model weights and activations, decreasing memory footprint and increasing throughput. The fundamentals include post-training quantization (PTQ), which quantizes after training without retraining; quantization-aware training (QAT), which simulates quantization during training for better accuracy; and precision format tradeoffs between INT8, INT4, and mixed precision schemes. Serving at scale introduces distinct challenges beyond these fundamentals. Models must be quantized after training without access to training data. Quantization must preserve quality across diverse inputs. Hardware deployment targets vary from datacenter GPUs to edge accelerators. This section examines quantization techniques specifically designed for production inference.
+The KV cache techniques we just examined address dynamic memory allocation during inference. But model weights themselves represent static memory consumption that persists regardless of batch size or sequence length. For a 70B model, weights alone consume 140GB in FP16, leaving limited capacity for KV cache on even the largest GPUs. Quantization offers a complementary approach: reduce the memory footprint of weights themselves.
+
+Quantization reduces numerical precision of model weights and activations, decreasing memory footprint by 2-4x while increasing decode throughput, which is memory-bandwidth limited rather than compute limited. While quantization fundamentals like post-training quantization (PTQ) and quantization-aware training (QAT) are established techniques, serving at scale introduces distinct challenges. Models must be quantized after training without access to training data. Quantization must preserve quality across diverse inputs. Hardware deployment targets vary from datacenter GPUs to edge accelerators. This section examines quantization techniques specifically designed for production inference.
 
 ### LLM-Specific Quantization Challenges {#sec-inference-llm-quantization}
 
@@ -2858,7 +2858,9 @@ Quantization can reduce serving costs by 2-4x while maintaining acceptable quali
 
 ## Multi-Tenancy and Isolation {#sec-inference-multitenancy}
 
-Production inference platforms serve multiple customers, models, and workloads on shared infrastructure. Multi-tenancy enables efficient resource utilization but introduces challenges around isolation, fairness, and quality of service guarantees. A noisy neighbor consuming excessive resources can degrade performance for all other tenants.
+The optimizations we have examined so far, from batching through sharding, caching, and quantization, focus on individual model deployments. This moves us to the platform level of the serving hierarchy, where the challenge shifts from optimizing a single model to managing multiple models, customers, and workloads on shared infrastructure.
+
+Multi-tenancy enables efficient resource utilization but introduces challenges around isolation, fairness, and quality of service guarantees. A noisy neighbor consuming excessive resources can degrade performance for all other tenants.
 
 This section examines the techniques for sharing inference infrastructure while maintaining isolation between tenants.
 

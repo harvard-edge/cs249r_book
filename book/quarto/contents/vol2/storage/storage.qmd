@@ -113,6 +113,8 @@ Machine learning workloads create distinctive storage demands. Training requires
 
 :::
 
+This chapter examines storage systems through the lens of ML workload requirements, following data through the ML lifecycle. We begin with storage fundamentals that explain why ML inverts traditional storage assumptions, establishing the bandwidth and latency requirements that drive architecture decisions. From there, we examine training data infrastructure, including distributed file systems and object storage at scale. Checkpoint storage systems address fault tolerance for long-running training jobs. Feature stores bridge training and serving for recommendation and real-time ML systems. Finally, model registries provide the versioning and governance layer that connects training to deployment. Case studies from Google, Meta, Tesla, and Spotify illustrate how these principles manifest in production.
+
 ## Storage Fundamentals for ML {#sec-storage-fundamentals}
 
 The infrastructure foundations established in @sec-infrastructure provide the compute fabric and networking topology for large-scale ML systems. Even the most powerful GPU clusters remain idle without data to process. Storage systems determine whether thousands of accelerators receive training data at the rates they require, whether model checkpoints can be saved before failures corrupt hours of computation, and whether features can be retrieved within the latency budgets that production inference demands. Understanding storage architecture for ML begins with recognizing how ML workloads differ from the applications that shaped traditional storage system design.
@@ -156,7 +158,7 @@ The bandwidth column in @tbl-storage-hierarchy deserves particular attention. GP
 **ML Storage Hierarchy**. A pyramid visualization extending the classic memory hierarchy. The peak shows GPU HBM (3+ TB/s, small capacity), descending through Host DRAM, Local NVMe, and Distributed File Systems, to the base of Object Storage (100+ GB/s aggregate, unlimited capacity). The bandwidth gap between HBM and storage tiers drives the need for sophisticated caching and prefetching.
 :::
 
-Consider what happens when an H100 GPU processes a training batch. At 1,979 TFLOPS[^fn-tflops] of FP16 compute capability, the GPU can perform approximately 2 quadrillion floating-point operations per second. A typical transformer forward pass requires roughly 6 FLOPs per parameter per token. For a 7 billion parameter model processing 2048-token sequences with a batch size of 32, each forward pass involves:
+These bandwidth specifications become concrete when we trace data flow through a single training iteration. Consider what happens when an H100 GPU processes a training batch. At 1,979 TFLOPS[^fn-tflops] of FP16 compute capability, the GPU can perform approximately 2 quadrillion floating-point operations per second. A typical transformer forward pass requires roughly 6 FLOPs per parameter per token. For a 7 billion parameter model processing 2048-token sequences with a batch size of 32, each forward pass involves:
 
 [^fn-tflops]: **TFLOPS (Tera Floating-Point Operations Per Second)**: A measure of computational throughput representing one trillion ($10^{12}$) floating-point operations per second. The H100's 1,979 TFLOPS uses FP16 (16-bit floating-point) precision with sparsity optimization; dense FP16 achieves 990 TFLOPS, and FP32 (32-bit) achieves 67 TFLOPS. This 15x difference between FP16 and FP32 explains why ML training increasingly uses mixed-precision techniques, performing bulk computation in FP16 while maintaining FP32 precision for numerically sensitive operations like loss accumulation.
 
@@ -408,7 +410,7 @@ Given the diversity of ML storage requirements, practitioners need a systematic 
 
 For training data exceeding local storage, systems under 10 TB can use local NVMe RAID or network-attached storage; systems between 10 TB and 1 PB benefit from parallel file systems (Lustre, GPFS) or high-performance object storage; systems exceeding 1 PB typically require object storage (S3, GCS) with intelligent caching. For checkpoint storage, single nodes can use local NVMe with backup to durable storage; multi-node deployments with models under 100 GB need parallel file systems with atomic write support; models exceeding 100 GB require distributed checkpointing across multiple storage targets. For feature stores, offline-only workloads can use data warehouses (Snowflake, BigQuery) or data lakes; online serving with sub-10ms requirements needs in-memory cache (Redis) backed by persistent storage; online serving at scale requires purpose-built feature stores (Feast, Tecton, Vertex Feature Store).
 
-The storage fundamentals established in this section provide the foundation for examining specific storage system architectures in subsequent sections. Training data infrastructure (@sec-training-data-infrastructure) examines distributed file systems and object storage at scale. Checkpoint storage systems (@sec-checkpoint-storage) develop quantitative models for checkpoint frequency and distribution. Feature stores (@sec-feature-stores) address the unique requirements of recommendation and real-time ML systems.
+The selection framework above maps requirements to storage tiers. We now examine each tier in depth, following data through the ML lifecycle: first the training data that feeds models, then the checkpoints that preserve training progress, then the features required for serving, and finally the model artifacts themselves.
 
 ## Training Data Infrastructure {#sec-training-data-infrastructure}
 
@@ -507,6 +509,8 @@ The choice between distributed file systems depends on workload characteristics,
 
 : Distributed file system comparison for ML workloads. {#tbl-dfs-comparison}
 
+The architectural principles pioneered by GFS found their way into the broader ecosystem through open-source implementations like HDFS and parallel file systems like Lustre. Each system makes different tradeoffs between throughput, operational complexity, and integration with existing infrastructure. For many organizations, however, the operational burden of running distributed file systems has driven adoption of a simpler alternative: object storage.
+
 ### Object Storage at Scale {#sec-object-storage}
 
 Object storage provides a simpler abstraction than file systems: objects are stored and retrieved by key, without directories, hierarchies, or POSIX semantics. This simplicity enables massive scale, high durability, and low cost.
@@ -524,6 +528,8 @@ This design eliminates the metadata bottlenecks that limit distributed file syst
 **Durability through redundancy.** Object stores achieve extreme durability[^fn-eleven-nines] (S3 advertises 99.999999999% or "eleven nines") through erasure coding (data is split into fragments with redundant parity fragments, enabling reconstruction if any fragment is lost), geographic distribution (fragments are spread across multiple availability zones or regions), and continuous verification (background processes detect and repair bit rot).
 
 [^fn-eleven-nines]: **Eleven Nines Durability (99.999999999%)**: This seemingly abstract number has concrete meaning: for one million objects stored for 10 million years, you would statistically expect to lose one object. Achieving this requires geographic replication, erasure coding, continuous integrity verification, and automated repair of detected corruption. For ML training data representing months of curation effort, this level of durability justifies the higher latency of object storage compared to local disks. The durability guarantee applies to stored data, not availability: objects are durably stored but may be temporarily inaccessible during availability zone outages.
+
+Durability guarantees that data survives once written. But when does written data become visible to readers? This is the domain of consistency guarantees, which have evolved significantly in recent years.
 
 **Consistency model evolution.** Historically, object stores provided eventual consistency: after writing an object, some readers might not immediately see the new version. This changed significantly in December 2020 when AWS S3 upgraded to strong read-after-write consistency for all operations at no additional cost [@aws2020s3]. GCS has always provided strong consistency. This evolution simplifies ML storage architecture: checkpoints can now rely on object stores providing immediate visibility after successful writes, though application-level verification remains prudent for critical data.
 
@@ -638,16 +644,6 @@ sample0002.cls
 **Throughput:** WebDataset achieves 1-5 GB/s per worker from object storage, scaling linearly with worker count.
 
 #### Format Selection Guidelines {#sec-format-selection}
-
-| Model Type | Recommended Format | Rationale |
-|------------|-------------------|-----------|
-| LLM | TFRecord or custom binary | Token sequences are fixed-length arrays, columnar offers no benefit |
-| Vision | WebDataset or TFRecord | Large binary blobs (images), sequential access pattern |
-| RecSys | Parquet | Many sparse features, column pruning valuable |
-| Scientific | HDF5 or domain-specific | Multi-dimensional arrays, random access sometimes needed |
-| Multimodal | WebDataset | Different modalities (image, text, audio) naturally grouped |
-
-: Format selection depends on data characteristics and access patterns as recommended in @tbl-format-selection:
 
 | Model Type | Recommended Format | Rationale |
 |------------|-------------------|-----------|
@@ -1312,7 +1308,9 @@ For most organizations, starting with an open-source solution (Feast) or cloud-m
 
 ## Model Registries and Artifact Management {#sec-model-registries}
 
-Training produces model weights, but deploying those weights to production requires additional infrastructure. Model registries provide the storage, versioning, and governance layer between training completion and production deployment. They answer questions that become critical at scale: Which model version is currently in production? What training data and hyperparameters produced this model? Who approved this model for deployment?
+Feature stores handle the data flowing into models at serving time. But what about the models themselves? Training produces model weights, but deploying those weights to production requires its own infrastructure: storage, versioning, and governance for the trained artifacts.
+
+Model registries provide the storage, versioning, and governance layer between training completion and production deployment. They answer questions that become critical at scale: Which model version is currently in production? What training data and hyperparameters produced this model? Who approved this model for deployment?
 
 ### Model Registry Architecture {#sec-registry-architecture}
 
@@ -1641,7 +1639,7 @@ Several themes emerge across these case studies:
 
 ## Fallacies and Pitfalls {#sec-storage-fallacies-pitfalls}
 
-Storage systems present numerous opportunities for costly misconceptions, particularly when assumptions from traditional computing fail to transfer to ML workloads.
+Even organizations operating at the scales described above encounter recurring misconceptions. The following fallacies and pitfalls represent hard-won lessons from production ML systems, where assumptions from traditional computing fail to transfer to ML workloads.
 
 **Fallacy: Object storage latency is acceptable for training data.**
 

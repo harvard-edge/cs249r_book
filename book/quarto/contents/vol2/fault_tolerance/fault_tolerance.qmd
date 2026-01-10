@@ -207,7 +207,7 @@ $$
 
 **Interpretation**: This cluster experiences a failure approximately every 3.7 hours on average. Over a 24-hour period, the expected number of failures is 6.5. A training run lasting one week will experience approximately 45 failures. Any training system operating at this scale must treat failure as a continuous condition, not an exceptional event.
 
-@tbl-cluster-mtbf-scaling shows how cluster MTBF scales with system size, demonstrating the mathematical inevitability of frequent failures at scale.
+To generalize this analysis beyond a single cluster configuration, @tbl-cluster-mtbf-scaling shows how cluster MTBF scales with system size, demonstrating the mathematical inevitability of frequent failures at scale.
 
 | Cluster Size (GPUs) | Individual GPU MTBF | Cluster MTBF | Expected Failures per Day |
 |:-------------------:|:------------------:|:------------:|:------------------------:|
@@ -223,7 +223,7 @@ $$
 
 ### Failure Taxonomy {#sec-failure-taxonomy}
 
-Not all failures are equivalent. Understanding failure characteristics guides the selection of appropriate recovery mechanisms. The taxonomy presented here classifies failures along two primary dimensions: temporal behavior (transient versus persistent) and failure manifestation (fail-stop versus Byzantine).
+The MTBF calculations above tell us HOW OFTEN failures occur, which is critical for setting checkpoint intervals and sizing recovery infrastructure. But designing effective fault tolerance also requires understanding WHAT KIND of failures occur. A network partition that resolves in seconds demands different handling than a permanent GPU failure. A silent memory corruption that produces incorrect gradients requires different detection mechanisms than a node crash that stops responding entirely. Not all failures are equivalent, and understanding failure characteristics guides the selection of appropriate recovery mechanisms. The taxonomy presented here classifies failures along two primary dimensions: temporal behavior (transient versus persistent) and failure manifestation (fail-stop versus Byzantine).
 
 #### Transient Failures {#sec-transient-failures}
 
@@ -265,7 +265,7 @@ where $k$ typically ranges from 3 to 5 to achieve low false positive rates while
 
 #### Byzantine Failures {#sec-byzantine-failures}
 
-Byzantine failures represent the most challenging class: components continue operating but produce incorrect results. Named after the Byzantine Generals Problem[^fn-byzantine-generals] [@lamport1982byzantine] in distributed systems theory, these failures include:
+While fail-stop failures are relatively straightforward to handle because the component stops responding, we detect the absence, and we replace it, a far more insidious class exists. What happens when a component continues operating but produces incorrect results? A GPU that returns wrong gradients without throwing errors, a network that delivers corrupted packets that pass CRC checks, or a worker that computes different results for identical inputs? These Byzantine failures represent the most challenging class, named after the Byzantine Generals Problem[^fn-byzantine-generals] [@lamport1982byzantine] in distributed systems theory. They include:
 
 [^fn-byzantine-generals]: **Byzantine Generals Problem**: A foundational problem in distributed systems posed by Lamport, Shostak, and Pease in 1982. The problem asks how generals (distributed nodes) can reach consensus on a battle plan when some generals may be traitors (faulty or malicious). The key result: agreement is impossible with fewer than 3f+1 total nodes when f nodes are Byzantine. This explains why Byzantine-resilient ML training requires significant redundancy overhead.
 
@@ -327,7 +327,7 @@ Proactive maintenance strategies aim to replace components approaching wear-out 
 
 ### Model-Type Diversity in Failure Impact {#sec-failure-impact-diversity}
 
-The cost of failure differs dramatically across model types due to differences in training duration, checkpoint size, and state that must be preserved. @tbl-failure-impact-by-model illustrates these differences.
+While the mathematics of failure rates apply universally, the cost of failure differs dramatically across model types. The impact of losing an hour of training depends on what that training costs, how much state must be recovered, and how long recovery takes. These factors vary by orders of magnitude between different model architectures. @tbl-failure-impact-by-model illustrates these differences.
 
 | Model Type | Typical Training Duration | Checkpoint Size | State Sensitivity | Failure Cost |
 |:-----------|:-------------------------|:----------------|:------------------|:-------------|
@@ -701,7 +701,7 @@ The challenge is distinguishing stragglers from failures. Stragglers should trig
 
 ### Elastic Training {#sec-elastic-training}
 
-Traditional distributed training operates with a fixed number of workers. Failures require either waiting for replacement resources or restarting with fewer workers. Restarting with fewer workers requires checkpoint resharding. **Elastic training** enables dynamic scaling by adding or removing workers without stopping training.
+The checkpoint and restart mechanisms developed above share a common assumption: training operates with a fixed number of workers. When failures occur, we stop, recover state from checkpoint, and restart, ideally with replacement resources. But what if the system could adapt to failures dynamically, continuing training with fewer workers rather than stopping entirely? This alternative approach, **elastic training**, enables dynamic scaling by adding or removing workers without stopping training.
 
 Elastic training provides several advantages. For fault tolerance, failures reduce worker count rather than stopping training. For resource efficiency, training can use variable resource allocations. For preemption handling, systems gracefully handle preemption in shared clusters. For cost optimization, systems scale based on spot instance availability.
 
@@ -816,7 +816,7 @@ Scientific models (protein structure prediction, molecular dynamics, climate sim
 
 ## Serving Fault Tolerance {#sec-serving-fault-tolerance}
 
-Training fault tolerance accepts minutes of recovery time in exchange for protecting hours or days of training progress. Serving fault tolerance operates under fundamentally different constraints: millisecond latency requirements and continuous availability expectations. A training system that takes five minutes to recover loses five minutes of training time. A serving system that takes five minutes to recover may lose millions of requests and substantial revenue.
+With training fault tolerance mechanisms established, we now turn to a fundamentally different challenge. Training fault tolerance accepts minutes of recovery time in exchange for protecting hours or days of training progress, a reasonable trade when each training hour on a large cluster costs thousands of dollars. Serving fault tolerance operates under constraints that make this trade impossible: millisecond latency requirements mean users cannot wait for recovery, and continuous availability expectations mean every minute of downtime directly impacts users and revenue. A training system that takes five minutes to recover loses five minutes of training time. A serving system that takes five minutes to recover may lose millions of requests and substantial revenue. This fundamental difference, minutes versus milliseconds, batch versus real-time, demands entirely different approaches.
 
 This section develops fault tolerance mechanisms appropriate for serving's stringent requirements, building on single-machine serving fundamentals while addressing the scale and complexity of distributed serving systems.
 
@@ -995,7 +995,7 @@ Vision models deployed on edge devices face different fault tolerance challenges
 
 ## Graceful Degradation {#sec-graceful-degradation}
 
-Fault tolerance aims to maintain service despite failures. When maintaining full service quality is impossible, graceful degradation maintains partial service at reduced quality rather than complete failure. Users experience degraded quality but still receive value from the system.
+The serving fault tolerance mechanisms developed above, redundancy, replication, and health monitoring, aim to maintain full service despite failures. But what happens when failures accumulate faster than redundancy can absorb them, or when resources become so constrained that full-quality service is impossible? Rather than failing completely, well-designed systems degrade gracefully: maintaining partial service at reduced quality rather than total failure. Users experience degraded quality but still receive value from the system.
 
 ### Degradation Dimensions {#sec-degradation-dimensions}
 
@@ -1116,7 +1116,7 @@ After degradation events, conduct post-incident analysis. Analyze root cause of 
 
 ## Distributed Debugging and Observability {#sec-distributed-debugging}
 
-Diagnosing failures in distributed ML systems presents unique challenges. The non-determinism inherent in distributed computation, combined with the complexity of ML inference pipelines, makes failures difficult to reproduce and diagnose. This section develops the observability infrastructure necessary for effective debugging.
+The graceful degradation strategies developed above assume we understand what is failing and why. Deciding whether to shed load, fall back to simpler models, or serve cached results requires knowing which components are degraded and how severely. But diagnosing failures in distributed ML systems presents unique challenges that demand specialized observability infrastructure. The non-determinism inherent in distributed computation, combined with the complexity of ML inference pipelines, makes failures difficult to reproduce and diagnose. This section develops the observability infrastructure necessary for effective debugging and informed degradation decisions.
 
 ### Why Distributed ML Systems Are Hard to Debug {#sec-debugging-challenges}
 

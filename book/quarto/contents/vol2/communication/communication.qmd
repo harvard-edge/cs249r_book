@@ -114,7 +114,9 @@ Large-scale machine learning systems spread computation across many machines to 
 
 The distributed training strategies examined in @sec-distributed-training (data parallelism, model parallelism, pipeline parallelism) all share a common assumption: workers can exchange data efficiently. That assumption hides what becomes the dominant engineering challenge at scale. The transition from single-machine to distributed training fundamentally changes which resource constrains system performance. On a single GPU, computation throughput typically limits training speed. Add a second GPU, and memory bandwidth often becomes the constraint. Scale to hundreds or thousands of GPUs, and network communication emerges as the dominant bottleneck that determines whether distributed training achieves meaningful speedup or wastes computational resources waiting for data to arrive.
 
-This transition reveals a fundamental asymmetry in how computation and communication scale. Adding more GPUs increases aggregate compute capacity proportionally, but the coordination required between those GPUs creates communication demands that grow in ways that cannot be eliminated through better algorithms alone. The physics of data movement, constrained by the speed of light and the finite bandwidth of network links, imposes hard limits that no amount of software optimization can circumvent.
+This transition reveals a fundamental asymmetry in how computation and communication scale. Computation is inherently local: each GPU operates on its own data independently, so adding GPUs increases aggregate compute capacity proportionally. Communication, however, is inherently global: ensuring all GPUs converge on the same synchronized state requires information to traverse physical distances between them. Adding more independent workers scales local work linearly, but coordinating those workers requires moving data across physical space.
+
+This asymmetry cannot be eliminated through better algorithms. The physics of data movement, constrained by the speed of light and the finite bandwidth of network links, imposes hard limits that no amount of software optimization can circumvent.
 
 Understanding these limits requires developing quantitative models that predict communication costs and reveal when distributed systems will achieve efficient scaling versus when they will waste resources waiting for data. The $\alpha$-$\beta$ model[^fn-alpha-beta-model] introduced in this section captures the essential physics of network communication: latency that does not depend on message size and bandwidth that determines transfer time for large messages. This simple model, combined with analysis of collective communication patterns, explains why certain distributed training configurations succeed while others fail to scale.
 
@@ -496,7 +498,9 @@ For small messages, tree AllReduce is 100x faster than ring AllReduce due to the
 
 ### Ring AllReduce {#sec-ring-allreduce}
 
-Ring AllReduce[^fn-ring-history] arranges processes in a logical ring and pipelines communication to achieve optimal bandwidth utilization. Originally developed for MPI implementations, it became the standard for distributed deep learning after adoption by Baidu [@gibiansky2017baidu] in 2017.
+Tree AllReduce's bandwidth inefficiency stems from a fundamental structural problem: at each tree level, only half the links are active, leaving bandwidth unutilized. What if we could keep all links busy simultaneously? Ring AllReduce achieves exactly this by abandoning hierarchical structure. Instead of aggregating toward a root, it circulates data through every node in sequence, ensuring that every link carries useful data at every moment.
+
+Ring AllReduce[^fn-ring-history] arranges processes in a logical ring and pipelines communication to achieve optimal bandwidth utilization. Originally developed for MPI implementations, it became the standard for distributed deep learning after Baidu demonstrated its effectiveness [@gibiansky2017baidu] in 2017.
 
 [^fn-ring-history]: **Ring AllReduce History**: Andrew Gibiansky's 2017 blog post "Bringing HPC Techniques to Deep Learning" at Baidu popularized ring AllReduce for ML, demonstrating near-linear scaling to hundreds of GPUs. The algorithm itself dates to the 1990s HPC community, but its application to gradient synchronization catalyzed modern distributed training. Uber's Horovod (2017) and NVIDIA's NCCL subsequently optimized ring AllReduce for GPU clusters, making it the default algorithm in PyTorch's DistributedDataParallel.
 
@@ -784,7 +788,9 @@ This explains why large-scale LLM training requires: (1) High-bandwidth intercon
 
 ## Beyond AllReduce: Other Collective Operations {#sec-other-collectives}
 
-AllReduce dominates discussions of distributed training communication, but production ML systems require a richer vocabulary of collective operations. Recommendation systems, mixture-of-experts models, and distributed inference patterns demand collectives like AlltoAll, AllGather, ReduceScatter, and Broadcast. Understanding when to use each primitive is essential for efficient system design.
+AllReduce is optimized for one specific communication pattern: all workers contribute to computing the same result, and all workers receive that result. This pattern fits data-parallel gradient synchronization perfectly. However, production ML systems exhibit diverse communication patterns that AllReduce cannot efficiently express. Recommendation systems require each worker to fetch specific embeddings from specific other workers, not a global average. Mixture-of-experts models route different tokens to different experts, requiring targeted exchanges rather than global reductions. Memory-efficient training techniques like FSDP distribute model parameters across workers, requiring gather and scatter operations rather than reductions.
+
+These diverse patterns demand a richer vocabulary of collective operations. Understanding when to use each primitive is essential for efficient system design.
 
 ::: {.callout-warning title="The AllReduce Trap"}
 Students who learn only AllReduce are unprepared for half of production ML workloads. Recommendation systems at Meta, Google, and Amazon use AlltoAll as their primary collective. Mixture-of-Experts models like GPT-4 rely on AlltoAll for expert routing. FSDP and ZeRO use ReduceScatter and AllGather, not AllReduce. A complete understanding of distributed ML requires mastery of the full collective operation vocabulary.
@@ -926,13 +932,15 @@ This temporal decoupling enables pipeline parallelism between gradient accumulat
 
 AlltoAll is the most general collective operation where each process sends unique data to every other process. It appears infrequently in LLM training but dominates communication in recommendation systems and mixture-of-experts architectures.
 
+Unlike AllReduce, AlltoAll cannot benefit from tree or ring optimizations. In AllReduce, all processes contribute to computing the same result, enabling aggregation (tree) or sequential accumulation (ring). In AlltoAll, each process sends different data to each destination. There is no opportunity to aggregate or pipeline because the payloads share no mathematical relationship. This fundamental difference forces AlltoAll toward simpler implementations with worse scaling properties.
+
 **Algorithm**: The simplest AlltoAll implementation has each process send $N-1$ point-to-point messages. More sophisticated implementations use Bruck's algorithm for small messages or pairwise exchange for large messages.
 
 $$
 T_{AlltoAll} = (N-1) \cdot \alpha + \frac{N-1}{N} \cdot \frac{M}{\beta}
 $$
 
-The bandwidth term matches other collectives, but the latency term is $O(N)$ rather than $O(\log N)$, making AlltoAll the most latency-sensitive collective.
+The bandwidth term matches other collectives, but the latency term is $O(N)$ rather than $O(\log N)$, making AlltoAll the most latency-sensitive collective. This $O(N)$ scaling is not an implementation limitation but a fundamental consequence of AlltoAll's semantics: each node must directly address every other node because there is no shared computation to leverage.
 
 **Embedding Table Exchange in Recommendation Systems**
 
@@ -1394,7 +1402,11 @@ In practice, most production LLM training uses FP16/BF16 gradients without addit
 
 ## Network Topology and Collective Mapping {#sec-topology}
 
-Network topology determines how GPUs connect to each other and fundamentally shapes collective operation performance. A topology optimized for AllReduce may perform poorly for AlltoAll. Understanding the relationship between physical network structure and communication patterns enables systems designers to match workloads to infrastructure effectively.
+Gradient compression addresses bandwidth limitations through algorithmic means, reducing the volume of data that must be transferred. Network topology addresses the same challenge through hardware means, determining the physical paths and bandwidth available for transfers. Understanding both enables engineers to optimize communication from both algorithmic and infrastructure perspectives.
+
+Network topology determines how GPUs connect to each other and fundamentally shapes collective operation performance. A topology optimized for AllReduce may perform poorly for AlltoAll. Different ML workloads benefit from different network topologies, and understanding these trade-offs helps engineers select appropriate infrastructure or adapt algorithms to existing hardware.
+
+We examine four topologies in order of deployment frequency: fat-tree (dominant in datacenters, providing full bisection bandwidth), rail-optimized (common in GPU supercomputers, optimized for tensor parallelism), torus (Google TPU pods, excellent for dimension-ordered collectives), and dragonfly (HPC systems, balancing cost and performance). Each topology makes different trade-offs between bisection bandwidth, diameter, cost, and cabling complexity.
 
 ### Topology Fundamentals {#sec-topology-fundamentals}
 
