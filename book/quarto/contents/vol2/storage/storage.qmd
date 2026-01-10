@@ -376,6 +376,8 @@ The CAP theorem's implications for ML storage differ from traditional applicatio
 
 :::
 
+Consistency guarantees determine what data readers see. Equally important is when they see it. This brings us to latency, and specifically the challenge of tail latency in distributed systems.
+
 ### Tail Latency in Distributed Storage {#sec-tail-latency}
 
 At scale, tail latency[^fn-tail-latency] dominates storage system behavior. The median access latency tells an incomplete story; what matters for ML systems is the 99th or 99.9th percentile latency (P99, P999). Dean and Barroso's seminal paper "The Tail at Scale" [@dean2013tail] formalized why: when a system makes parallel requests to many storage nodes, the overall latency is determined by the slowest response.
@@ -813,7 +815,7 @@ Training large models requires days to months of continuous computation. During 
 
 ### Checkpoint Architecture Fundamentals {#sec-checkpoint-architecture}
 
-A checkpoint captures the complete state needed to resume training exactly where it left off. This includes model parameters (the current values of all trainable weights; for a 175 billion parameter model in FP16 [@brown2020gpt3], this is 350 GB of dense data), optimizer state (optimizers like Adam[^fn-adam-optimizer] [@kingma2015adam] maintain per-parameter statistics such as first and second moments, with Adam's state being 2x the size of model parameters, adding 700 GB for the 175B parameter case), learning rate scheduler state (the current position in the learning rate schedule including step count and warmup progress), random number generator state (to ensure reproducibility, the RNG state for each worker must be saved), and data loader state (which samples have been seen in the current epoch, enabling resumption without repeating or skipping samples).
+With the cost of lost computation established, we can examine precisely what state must be preserved to enable recovery. A checkpoint captures the complete state needed to resume training exactly where it left off. This includes model parameters (the current values of all trainable weights; for a 175 billion parameter model in FP16 [@brown2020gpt3], this is 350 GB of dense data), optimizer state (optimizers like Adam[^fn-adam-optimizer] [@kingma2015adam] maintain per-parameter statistics such as first and second moments, with Adam's state being 2x the size of model parameters, adding 700 GB for the 175B parameter case), learning rate scheduler state (the current position in the learning rate schedule including step count and warmup progress), random number generator state (to ensure reproducibility, the RNG state for each worker must be saved), and data loader state (which samples have been seen in the current epoch, enabling resumption without repeating or skipping samples).
 
 [^fn-adam-optimizer]: **Adam (Adaptive Moment Estimation)**: The most widely used optimizer for deep learning, introduced in 2014. Adam maintains two exponential moving averages per parameter: the first moment (mean of gradients, for momentum) and second moment (mean of squared gradients, for adaptive learning rates). This 2x memory overhead becomes significant at scale: a 175B parameter model requires 350 GB for weights and 700 GB for Adam state, totaling over 1 TB per checkpoint. Memory-efficient optimizers like Adafactor reduce this overhead by factorizing the second moment matrix, trading some convergence speed for 4-8x memory savings.
 
@@ -1041,7 +1043,7 @@ Checkpoint strategies vary significantly by model architecture as summarized in 
 
 ## Feature Stores {#sec-feature-stores}
 
-Feature stores represent one of the most consequential but often overlooked components of production ML infrastructure. While academic ML curricula focus heavily on model architectures and training algorithms, production systems at companies like Meta, Google, and Netflix depend critically on feature stores that transform raw data into ML-ready signals. For recommendation systems, the dominant ML workload in production, feature stores are not merely useful but essential: every user request triggers hundreds of feature lookups that must complete in milliseconds.
+Feature stores transform raw data into ML-ready signals with strict latency guarantees. For recommendation systems, the dominant ML workload in production, feature stores are essential infrastructure: every user request triggers hundreds of feature lookups that must complete in milliseconds. Production systems at companies like Meta, Google, and Netflix depend critically on feature stores to bridge the gap between offline training pipelines and real-time serving requirements.
 
 This section develops the architecture and design principles of feature stores, with particular attention to why they matter enormously for recommendation systems while playing a smaller role for LLMs and vision models.
 
@@ -1228,6 +1230,8 @@ Recommendation systems present a unique storage challenge: embedding tables cont
 | Sparse ID embeddings | 100 billion | 64 | 25 TB |
 
 : Embedding table sizes for production recommendation systems. {#tbl-embedding-sizes}
+
+Tables of this scale cannot fit in memory on a single machine, requiring distributed storage strategies that balance latency, cost, and capacity.
 
 **Storage strategies:**
 

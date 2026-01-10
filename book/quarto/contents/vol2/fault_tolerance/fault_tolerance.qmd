@@ -846,6 +846,8 @@ When a replica fails, in-flight requests to that replica fail but can be retried
 
 #### Stateful Serving {#sec-stateful-serving}
 
+The simplicity of stateless serving makes it the preferred architecture whenever possible. However, many ML applications inherently require state across requests. Consider a chatbot: a single-turn question-answering system can operate statelessly, processing each question independently. But a conversational assistant that remembers previous exchanges must maintain conversation history, transforming fault tolerance from simple retry to state preservation.
+
 Stateful serving maintains state across requests within a session. Subsequent requests depend on state accumulated from previous requests.
 
 Stateful serving appears in multiple applications. LLM conversations accumulate KV cache across turns. Streaming speech recognition maintains context from previous audio. Recommendation sessions accumulate user context. Interactive editing maintains document state across edits.
@@ -1262,7 +1264,7 @@ Stragglers arise from multiple root causes. Hardware issues include thermal thro
 
 ### Common Failure Patterns {#sec-common-failure-patterns}
 
-Experience with large-scale ML systems reveals recurring failure patterns:
+The observability pillars above enable detection of recurring failure patterns that experience with large-scale ML systems has identified. The following patterns illustrate how metrics, logs, and traces work together in diagnosis.
 
 #### Training Failures {#sec-training-failure-patterns}
 
@@ -1283,6 +1285,18 @@ Experience with large-scale ML systems reveals recurring failure patterns:
 **Silent quality degradation**: Model drift, feature degradation, or data pipeline issues. Requires quality monitoring to detect.
 
 **Cascade failure**: One failing component causes others to fail through timeout exhaustion, resource depletion, or error propagation. Requires circuit breakers and isolation.
+
+::: {.callout-tip title="Worked Example: Diagnosing a Cascade Failure"}
+Consider a recommendation system experiencing sudden latency spikes. The three observability pillars work together to diagnose the root cause:
+
+**Metrics** reveal the symptom: p99 latency jumped from 45ms to 800ms at 14:32, with error rate increasing from 0.1% to 15%.
+
+**Traces** isolate the bottleneck: traces show the feature-service span consuming 700ms instead of the normal 12ms. The model-inference span remains normal at 40ms.
+
+**Logs** identify the root cause: feature-service logs show repeated connection timeouts to the user embedding cache at 14:31, followed by cache miss storms as requests bypass the failed cache and hit the embedding database directly.
+
+The diagnosis: cache node failure caused cache miss avalanche, overwhelming the embedding database and propagating latency to all requests. The fix: circuit breaker on cache access, falling back to default embeddings when cache is unavailable.
+:::
 
 ## Case Studies {#sec-fault-tolerance-case-studies}
 
@@ -1350,7 +1364,7 @@ Results and learnings show the value of chaos engineering. Chaos experiments reg
 
 ### Synthesis: Common Themes Across Case Studies {#sec-case-study-synthesis}
 
-Several themes emerge across these diverse implementations:
+These case studies demonstrate the principles developed throughout this chapter operating at production scale. The mathematical frameworks, from the exponential reliability model that predicts failure frequency to the Young-Daly formula that optimizes checkpoint intervals, inform real design decisions at Meta, Google, and Netflix. Several themes emerge across these diverse implementations:
 
 1. **Proactive over reactive**: Leading organizations invest in predicting and preventing failures rather than just recovering from them.
 

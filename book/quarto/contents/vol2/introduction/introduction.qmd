@@ -180,7 +180,7 @@ At large scale, communication often dominates. Distributed training requires syn
 
 [^fn-all-reduce]: **Ring All-Reduce**: The dominant collective communication algorithm for distributed training gradient synchronization [@patarasuk2009bandwidth]. In ring all-reduce, N workers arrange logically in a ring. Each worker sends 1/N of its gradient to its neighbor, which adds the received gradient to its own before forwarding. After N-1 steps, each worker has the sum of all gradients for 1/N of parameters. A second ring pass distributes the complete sum to all workers. The algorithm achieves optimal bandwidth utilization. Total data transferred equals 2(N-1)/N times the gradient size, approaching 2× regardless of worker count. For 1,000 workers with 700GB of gradients and 200 Gb/s links, theoretical completion time is approximately 2 × 700GB / 200 Gb/s = 56 seconds for the full reduce-scatter plus all-gather. Practical implementations achieve 60-80% of theoretical bandwidth, making communication a significant fraction of large-scale training time.
 
-This ratio explains why distributed training systems optimize communication aggressively. Gradient compression[^fn-gradient-compression] reduces transfer volume by 10× to 100× at the cost of some accuracy [@lin2018deep]. Overlapping communication with computation hides transfer latency during the next batch's forward pass. Hierarchical aggregation reduces cross-rack traffic by combining gradients locally first. These optimizations, unnecessary at small scale, become essential at production scale.
+This ratio explains why distributed training systems optimize communication aggressively. Gradient compression[^fn-gradient-compression] reduces transfer volume by 10× to 100× at the cost of some accuracy [@lin2018deep]. Overlapping communication with computation hides transfer latency during the next batch's forward pass. Hierarchical aggregation reduces cross-rack traffic by combining gradients locally first. These optimizations, unnecessary at small scale, become essential at production scale. @sec-communication examines these techniques in depth, developing the quantitative framework for reasoning about when communication becomes the bottleneck and how to address it.
 
 [^fn-gradient-compression]: **Gradient Compression**: Techniques that reduce the size of gradient data transmitted between workers during distributed training. Common approaches include sparsification (transmitting only the largest gradient values, with Top-K methods achieving 99% sparsity), quantization (reducing precision from 32-bit to 8-bit or lower), and error feedback (accumulating dropped gradients to prevent training divergence). Deep Gradient Compression [@lin2018deep] demonstrated that transmitting only 0.1% of gradients with error feedback achieves training accuracy comparable to uncompressed baselines while reducing communication by 270-600×. The trade-off is additional computation for compression and decompression, plus potential convergence slowdown from information loss. Modern implementations like PowerSGD use low-rank decomposition to balance compression ratio with computational overhead, achieving 10× compression with minimal accuracy impact on production workloads.
 
@@ -200,6 +200,8 @@ At large scale, failure becomes statistical certainty. With 10,000 GPUs, multipl
 - **Detection**: Monitoring that identifies failures within seconds
 - **Recovery**: Automated procedures that restore service without human intervention
 
+@sec-fault-tolerance develops these principles systematically, showing how to design training systems that treat failure as expected rather than exceptional.
+
 [^fn-checkpointing]: **Checkpointing in Distributed Training**: The practice of periodically saving model state (weights, optimizer state, training progress) to persistent storage, enabling recovery from failures without restarting from scratch. For frontier models, checkpoint sizes reach terabytes (GPT-3's checkpoint exceeds 700GB for weights alone; with optimizer state and training metadata, checkpoints can exceed 2TB). At scale, checkpointing itself becomes a systems challenge: writing 2TB every hour across 1,000 workers requires careful coordination to avoid I/O bottlenecks. Asynchronous checkpointing overlaps with training, while distributed checkpointing shards state across workers to parallelize writes. The checkpoint frequency trade-off balances storage costs and I/O overhead against maximum acceptable work loss during failure recovery. Meta's LLaMA 3 training checkpointed approximately every 1-2 hours to balance these concerns.
 
 ### Heterogeneity Emerges
@@ -210,9 +212,11 @@ At large scale, heterogeneity becomes unavoidable. A fleet of 10,000 GPUs contai
 
 This heterogeneity creates engineering challenges absent at small scale. Load balancing must account for hardware capability differences. Gradient aggregation must handle workers completing at different rates. Inference routing must direct requests to servers with appropriate model versions. Testing must verify behavior across the combinatorial explosion of configuration variants.
 
+Managing heterogeneity is one of many challenges that emerge from scale. But scale alone does not capture all the difficulties. Distribution itself introduces fundamental constraints that exist even at modest scales, arising from the physics of information transfer rather than the quantity of computation.
+
 ## Why Distribution is Hard {#sec-vol2-introduction-why-distribution-hard}
 
-Scale forces distribution: no single machine provides the thousands of GPUs that frontier training requires, no single datacenter serves global user bases with acceptable latency, and no centralized system can collect the distributed data that edge devices generate. Yet distribution is not merely scale by another name. Coordinating computation across physically separated machines connected by finite bandwidth, non-zero latency networks creates fundamental constraints that exist even at modest scales. These constraints arise from the physics of information transfer, not from the quantity of computation, and no amount of engineering cleverness can eliminate them.
+Scale forces distribution: no single machine provides the thousands of GPUs that frontier training requires, no single datacenter serves global user bases with acceptable latency, and no centralized system can collect the distributed data that edge devices generate. Coordinating computation across physically separated machines connected by finite bandwidth, non-zero latency networks creates constraints that no amount of engineering cleverness can eliminate. These constraints manifest in three forms: the impossibility theorems that bound what distributed systems can guarantee, the coordination overhead that taxes every synchronization point, and the amplified complexity when distribution extends beyond the datacenter to edge devices.
 
 ### The CAP Theorem Reality
 
@@ -224,7 +228,7 @@ Distributed ML systems make different CAP trade-offs depending on their requirem
 
 ### Coordination Overhead
 
-Distributed systems require coordination that consumes resources. Every synchronization point introduces latency. Every consensus protocol requires network round-trips. Every distributed lock limits parallelism.
+Beyond the impossibility theorems, distributed systems pay a practical tax on every operation that requires agreement across machines. Every synchronization point introduces latency. Every consensus protocol requires network round-trips. Every distributed lock limits parallelism.
 
 Consider the overhead of distributed training synchronization. Each training iteration requires:
 
@@ -238,7 +242,7 @@ Steps 1-3 and 5 parallelize efficiently. Step 4, gradient aggregation, requires 
 
 ### Edge Distribution Complexity
 
-Datacenter distribution is challenging but controlled. All machines run in managed facilities with reliable power, cooling, and networking. Administrators can access any machine for diagnosis and repair.
+The coordination challenges discussed so far assume datacenter distribution, where all machines run in managed facilities with reliable power, cooling, and networking. Administrators can access any machine for diagnosis and repair. These assumptions fail entirely when distribution extends to edge devices.
 
 Edge distribution amplifies every challenge. Billions of smartphones, IoT devices, and embedded systems operate in uncontrolled environments with unreliable connectivity, limited power, and heterogeneous capabilities. Google's Gboard keyboard runs on over 1 billion Android devices, each potentially participating in federated learning[^fn-federated-learning] to improve predictions [@hard2018federated]. This deployment context introduces unique constraints:
 
@@ -251,6 +255,8 @@ Edge distribution amplifies every challenge. Billions of smartphones, IoT device
 - **Monitoring limitations**: Cannot install arbitrary diagnostics on user devices
 
 These constraints require architectural approaches that differ from datacenter ML in essential ways. Federated learning aggregates model updates without collecting data. On-device inference optimizes for varied hardware capabilities. Differential privacy[^fn-differential-privacy] (which adds calibrated noise to protect individual data points while preserving aggregate statistical properties) provides mathematical guarantees about information leakage [@dwork2014algorithmic]. These techniques, largely unnecessary for centralized ML, become essential for edge deployment.
+
+The edge deployment challenges just described illustrate how distribution multiplies engineering complexity. Yet the implications extend beyond technical difficulty. When ML systems operate at the scale of billions of users across distributed infrastructure, their impact on society demands consideration beyond engineering excellence.
 
 [^fn-differential-privacy]: **Differential Privacy**: A mathematical framework providing provable privacy guarantees by ensuring that query results are nearly identical whether or not any individual's data is included. The privacy guarantee is quantified by epsilon (lower values mean stronger privacy). In ML, differential privacy is typically achieved through gradient clipping (bounding individual contributions) and noise addition (obscuring individual influences). Apple uses differential privacy with epsilon around 2-8 for keyboard predictions, while Google's federated learning implementations target epsilon around 1-2 for sensitive applications. The trade-off is utility: stronger privacy requires more noise, degrading model accuracy. Differential privacy is explored in depth in @sec-security-privacy.
 
@@ -406,11 +412,11 @@ The societal impact we examined, where recommendation algorithms shape public di
 
 **AGI Systems** examines emerging directions including foundation models, compound AI systems, and novel computing paradigms. Understanding these trajectories prepares you for continued learning as the field evolves.
 
-For detailed guidance on reading paths, learning outcomes, prerequisite knowledge, and navigation strategies for both volumes, refer to the [About](../../frontmatter/about/about.qmd) section.
+This progression from infrastructure through governance reflects how production ML systems are actually built: infrastructure determines what distribution strategies are feasible, distribution capabilities shape what governance is possible, and governance requirements constrain both. For detailed guidance on reading paths, prerequisite knowledge, and navigation strategies, refer to the [About](../../frontmatter/about/about.qmd) section.
 
 ## The Journey Ahead {#sec-vol2-introduction-journey-ahead}
 
-The six systems engineering principles introduced earlier provide a vision for building ML systems that matter. This textbook extends that vision to the scale at which most consequential ML systems operate.
+Having mapped the territory from infrastructure foundations through governance practices, consider what mastering this material means for your professional growth. The six systems engineering principles introduced earlier provide a vision for building ML systems that matter. This textbook extends that vision to the scale at which most consequential ML systems operate.
 
 The transition from building systems that work to building systems that scale, distribute, and govern responsibly represents significant professional growth. The ML systems that will define this era require precisely these capabilities: foundation models serving hundreds of millions of users, edge deployments spanning billions of devices, and AI systems making consequential decisions about human lives.
 
