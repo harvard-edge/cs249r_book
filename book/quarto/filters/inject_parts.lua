@@ -362,11 +362,13 @@ function RawBlock(el)
 
         part_cmd = "\\numberedpart{" .. formatted_title .. "}"  -- Use custom command instead
         local toc_cmd = "\\addtocontents{toc}{\\par\\addvspace{12pt}\\noindent\\hfil\\bfseries\\color{crimson}Part~" .. roman_numeral .. "~" .. formatted_title .. "\\color{black}\\hfil\\par\\addvspace{6pt}}"
+        local reset_cmd = "\\haspartsummaryfalse"  -- Reset flag after display
         log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' (Part " .. roman_numeral .. ", division: " .. (part_entry.division or "mainmatter") .. ")")
         return {
           pandoc.RawBlock("latex", setpartsummary_cmd),
           pandoc.RawBlock("latex", toc_cmd),
-          pandoc.RawBlock("latex", part_cmd)
+          pandoc.RawBlock("latex", part_cmd),
+          pandoc.RawBlock("latex", reset_cmd)
         }
       end
     else
