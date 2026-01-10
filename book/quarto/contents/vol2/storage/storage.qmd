@@ -59,14 +59,16 @@ ML systems extend this hierarchy with two critical additions: GPU High Bandwidth
 
 [^fn-hbm]: **High Bandwidth Memory (HBM)**: Building on the GPU architecture discussion in @sec-infrastructure, HBM is a 3D-stacked memory technology that places DRAM dies vertically atop the processor using through-silicon vias (TSVs), achieving bandwidth impossible with traditional off-package memory. The H100 GPU uses HBM3 delivering 3.35 TB/s across a 5120-bit interface, compared to 200 GB/s for DDR5. This 17x bandwidth advantage is essential for ML workloads where model weights, activations, and gradients must flow continuously through the processor. The tradeoff is capacity: HBM costs approximately $15/GB versus $3/GB for standard DRAM, limiting GPUs to 80-192 GB while CPUs access terabytes of DDR memory.
 
-| Storage Tier | Typical Capacity | Bandwidth | Latency | Cost ($/GB) |
-|--------------|------------------|-----------|---------|-------------|
-| GPU HBM | 80 GB | 3.35 TB/s | ~10 ns | ~15.00 |
-| Host DRAM | 512 GB - 2 TB | 200 GB/s | ~100 ns | ~3.00 |
-| Local NVMe SSD | 4-30 TB | 7-25 GB/s | ~10 μs | ~0.10 |
-| Parallel File System | 100+ PB | 1+ TB/s aggregate | ~1 ms | ~0.03 |
-| Object Storage | Unlimited | 100 GB/s aggregate | ~50 ms | ~0.02 |
-| Archive/Cold Storage | Unlimited | 1 GB/s | Minutes to hours | ~0.004 |
++--------------------------+----------------------+--------------------+------------------+-----------------+
+| **Storage Tier**         | **Typical Capacity** | **Bandwidth**      | **Latency**      | **Cost ($/GB)** |
++:=========================+:=====================+===================:+=================:+================:+
+| **GPU HBM**              | 80 GB                | 3.35 TB/s          | ~10 ns           | ~15.00          |
+| **Host DRAM**            | 512 GB - 2 TB        | 200 GB/s           | ~100 ns          | ~3.00           |
+| **Local NVMe SSD**       | 4-30 TB              | 7-25 GB/s          | ~10 μs           | ~0.10           |
+| **Parallel File System** | 100+ PB              | 1+ TB/s aggregate  | ~1 ms            | ~0.03           |
+| **Object Storage**       | Unlimited            | 100 GB/s aggregate | ~50 ms           | ~0.02           |
+| **Archive/Cold Storage** | Unlimited            | 1 GB/s             | Minutes to hours | ~0.004          |
++--------------------------+----------------------+--------------------+------------------+-----------------+
 
 : Extended memory hierarchy for ML systems. Bandwidth figures represent practical throughput; latency represents typical access times. {#tbl-storage-hierarchy}
 
@@ -102,13 +104,15 @@ Traditional storage system design optimizes for workloads with specific characte
 
 **Read/write ratios vary dramatically by phase.** Training reads vastly exceed writes: a typical training run reads the dataset dozens of times (one per epoch) while writing only periodic checkpoints. The read-to-write ratio can exceed 100:1. Inference, conversely, is almost entirely read-only, loading model weights once and then serving requests without writes. Feature stores for recommendation systems present yet another pattern: continuous reads for serving interleaved with batch writes from offline feature computation. No single storage configuration optimizes all three patterns.
 
-| Workload Pattern | Traditional Assumption | ML Reality |
-|------------------|------------------------|------------|
-| Access pattern | Random access | Sequential streaming |
-| Working set | Fits in cache | Exceeds all cache levels |
-| Write pattern | Continuous small writes | Bursty large writes |
-| Read/write ratio | Balanced | Phase-dependent (100:1 to 1:0) |
-| Locality | Strong temporal locality | No locality (uniform sampling) |
++----------------------+----------------------------+--------------------------------+
+| **Workload Pattern** | **Traditional Assumption** | **ML Reality**                 |
++:=====================+:===========================+:===============================+
+| **Access pattern**   | Random access              | Sequential streaming           |
+| **Working set**      | Fits in cache              | Exceeds all cache levels       |
+| **Write pattern**    | Continuous small writes    | Bursty large writes            |
+| **Read/write ratio** | Balanced                   | Phase-dependent (100:1 to 1:0) |
+| **Locality**         | Strong temporal locality   | No locality (uniform sampling) |
++----------------------+----------------------------+--------------------------------+
 
 : Contrast between traditional storage assumptions and ML workload characteristics. {#tbl-storage-assumptions}
 
@@ -143,12 +147,14 @@ The checkpoint write burst must complete before the next training step can safel
 
 **Model serving access** loads model weights at startup, then serves inference requests using weights cached in GPU memory. The access pattern is write-once-read-many with extreme read amplification: a 7 billion parameter model loaded once serves millions of inference requests. Storage bandwidth matters only during model loading; once loaded, storage is unused until model updates or server restarts.
 
-| Model Type | Training Data Pattern | Checkpoint Pattern | Feature Pattern | Serving Pattern |
-|------------|----------------------|-------------------|-----------------|-----------------|
-| LLM | Sequential streaming, TB-scale | Infrequent, 100GB-1TB bursts | Minimal | Load once, cache in GPU |
-| RecSys | Log streaming, continuous | Incremental embedding updates | Continuous random lookups | Hot embeddings in memory |
-| Vision | Sequential with augmentation | Regular, 1-10GB | Minimal | Load once per model |
-| Scientific | Irregular, domain-specific | Regular or continuous | Domain-specific | Varies by application |
++----------------+--------------------------------+-------------------------------+---------------------------+--------------------------+
+| **Model Type** | **Training Data Pattern**      | **Checkpoint Pattern**        | **Feature Pattern**       | **Serving Pattern**      |
++:===============+:===============================+:==============================+:==========================+:=========================+
+| **LLM**        | Sequential streaming, TB-scale | Infrequent, 100GB-1TB bursts  | Minimal                   | Load once, cache in GPU  |
+| **RecSys**     | Log streaming, continuous      | Incremental embedding updates | Continuous random lookups | Hot embeddings in memory |
+| **Vision**     | Sequential with augmentation   | Regular, 1-10GB               | Minimal                   | Load once per model      |
+| **Scientific** | Irregular, domain-specific     | Regular or continuous         | Domain-specific           | Varies by application    |
++----------------+--------------------------------+-------------------------------+---------------------------+--------------------------+
 
 : Access patterns vary significantly by model type and system phase. {#tbl-access-patterns}
 
@@ -282,13 +288,15 @@ Object storage systems like S3 and GCS are suitable for training data. Since Dec
 
 **Feature store storage** requires consistency guarantees that vary by access pattern. Offline features can tolerate eventual consistency: batch computations produce new feature versions that propagate to serving over minutes to hours. Online features for serving require read-your-writes consistency at minimum: after a user action updates their features, subsequent requests must see those updated features. Strong consistency may be necessary for use cases like fraud detection where stale features could enable fraudulent transactions.
 
-| Storage Tier | Consistency Requirement | Rationale | Suitable Systems |
-|--------------|------------------------|-----------|------------------|
-| Training data | Strong consistency (now standard) | Immutable data, modern object stores provide strong consistency | S3, GCS, HDFS |
-| Checkpoints | Strong consistency | Partial checkpoints cause catastrophic failure | Parallel FS with atomic writes |
-| Offline features | Eventual consistency | Batch updates, staleness acceptable | Data warehouses, object storage |
-| Online features | Read-your-writes or stronger | User experience requires fresh features | Redis, Bigtable, DynamoDB |
-| Model weights | Read-after-write | Model updates must be immediately visible | Consistent object storage |
++----------------------+-----------------------------------+-----------------------------------------------------------------+---------------------------------+
+| **Storage Tier**     | **Consistency Requirement**       | **Rationale**                                                   | **Suitable Systems**            |
++:=====================+:==================================+:================================================================+:================================+
+| **Training data**    | Strong consistency (now standard) | Immutable data, modern object stores provide strong consistency | S3, GCS, HDFS                   |
+| **Checkpoints**      | Strong consistency                | Partial checkpoints cause catastrophic failure                  | Parallel FS with atomic writes  |
+| **Offline features** | Eventual consistency              | Batch updates, staleness acceptable                             | Data warehouses, object storage |
+| **Online features**  | Read-your-writes or stronger      | User experience requires fresh features                         | Redis, Bigtable, DynamoDB       |
+| **Model weights**    | Read-after-write                  | Model updates must be immediately visible                       | Consistent object storage       |
++----------------------+-----------------------------------+-----------------------------------------------------------------+---------------------------------+
 
 : Consistency requirements vary by storage tier and access pattern. {#tbl-consistency-requirements}
 
@@ -407,11 +415,13 @@ Files are striped across multiple OSTs, enabling parallel access that aggregates
 
 **Lustre performance characteristics**:
 
-| Configuration | Aggregate Bandwidth | Typical Use |
-|---------------|---------------------|-------------|
-| Small cluster (10 OSTs) | 10-20 GB/s | Research lab ML training |
-| Medium cluster (100 OSTs) | 100-200 GB/s | Production ML training |
-| Large cluster (1000+ OSTs) | 1+ TB/s | Exascale HPC, large LLM training |
++--------------------------------+-------------------------+----------------------------------+
+| **Configuration**              | **Aggregate Bandwidth** | **Typical Use**                  |
++===============================:+========================:+:=================================+
+| **Small cluster (10 OSTs)**    | 10-20 GB/s              | Research lab ML training         |
+| **Medium cluster (100 OSTs)**  | 100-200 GB/s            | Production ML training           |
+| **Large cluster (1000+ OSTs)** | 1+ TB/s                 | Exascale HPC, large LLM training |
++--------------------------------+-------------------------+----------------------------------+
 
 : Lustre scales linearly with storage server count. {#tbl-lustre-performance}
 
@@ -423,13 +433,15 @@ Lustre's disadvantage is operational complexity: tuning stripe sizes, managing q
 
 The choice between distributed file systems depends on workload characteristics, operational expertise, and existing infrastructure as compared in @tbl-dfs-comparison.
 
-| System | Strengths | Weaknesses | Best For |
-|--------|-----------|------------|----------|
-| GFS/Colossus | Massive scale, Google ecosystem integration | Proprietary to Google | Google Cloud ML |
-| HDFS | Open source, Hadoop ecosystem | Single NameNode, JVM overhead | Spark-based data processing |
-| Lustre | Raw throughput, HPC optimized | Operational complexity | On-premise HPC clusters |
-| GPFS/Spectrum Scale [@schmuck2002gpfs] | Enterprise features, mixed workloads | Cost, complexity | Large enterprise ML |
-| BeeGFS | Ease of deployment, good performance | Smaller community | Academic/research clusters |
++--------------------------------------------+---------------------------------------------+-------------------------------+-----------------------------+
+| **System**                                 | **Strengths**                               | **Weaknesses**                | **Best For**                |
++:===========================================+:============================================+:==============================+:============================+
+| **GFS/Colossus**                           | Massive scale, Google ecosystem integration | Proprietary to Google         | Google Cloud ML             |
+| **HDFS**                                   | Open source, Hadoop ecosystem               | Single NameNode, JVM overhead | Spark-based data processing |
+| **Lustre**                                 | Raw throughput, HPC optimized               | Operational complexity        | On-premise HPC clusters     |
+| **GPFS/Spectrum Scale [@schmuck2002gpfs]** | Enterprise features, mixed workloads        | Cost, complexity              | Large enterprise ML         |
+| **BeeGFS**                                 | Ease of deployment, good performance        | Smaller community             | Academic/research clusters  |
++--------------------------------------------+---------------------------------------------+-------------------------------+-----------------------------+
 
 : Distributed file system comparison for ML workloads. {#tbl-dfs-comparison}
 
@@ -469,12 +481,14 @@ The request rate limit is significant for ML: a dataset organized as `s3://bucke
 
 Practical throughput depends heavily on access patterns as detailed in @tbl-object-storage-throughput:
 
-| Access Pattern | Typical Throughput | Optimization |
-|----------------|-------------------|--------------|
-| Sequential single object | 100 MB/s | Use large objects (100+ MB) |
-| Parallel multiple objects | 10-100 GB/s | Use multiple connections, random prefixes |
-| Small object reads | Limited by request rate | Batch into larger objects |
-| Listing operations | 1000 objects/s | Use flat namespaces, avoid deep hierarchies |
++-------------------------------+-------------------------+---------------------------------------------+
+| **Access Pattern**            | **Typical Throughput**  | **Optimization**                            |
++:==============================+========================:+:============================================+
+| **Sequential single object**  | 100 MB/s                | Use large objects (100+ MB)                 |
+| **Parallel multiple objects** | 10-100 GB/s             | Use multiple connections, random prefixes   |
+| **Small object reads**        | Limited by request rate | Batch into larger objects                   |
+| **Listing operations**        | 1000 objects/s          | Use flat namespaces, avoid deep hierarchies |
++-------------------------------+-------------------------+---------------------------------------------+
 
 : Object storage throughput varies dramatically by access pattern. {#tbl-object-storage-throughput}
 
@@ -569,13 +583,15 @@ sample0002.cls
 
 #### Format Selection Guidelines {#sec-format-selection}
 
-| Model Type | Recommended Format | Rationale |
-|------------|-------------------|-----------|
-| LLM | TFRecord or custom binary | Token sequences are fixed-length arrays, columnar offers no benefit |
-| Vision | WebDataset or TFRecord | Large binary blobs (images), sequential access pattern |
-| RecSys | Parquet | Many sparse features, column pruning valuable |
-| Scientific | HDF5 or domain-specific | Multi-dimensional arrays, random access sometimes needed |
-| Multimodal | WebDataset | Different modalities (image, text, audio) naturally grouped |
++----------------+---------------------------+---------------------------------------------------------------------+
+| **Model Type** | **Recommended Format**    | **Rationale**                                                       |
++:===============+:==========================+:====================================================================+
+| **LLM**        | TFRecord or custom binary | Token sequences are fixed-length arrays, columnar offers no benefit |
+| **Vision**     | WebDataset or TFRecord    | Large binary blobs (images), sequential access pattern              |
+| **RecSys**     | Parquet                   | Many sparse features, column pruning valuable                       |
+| **Scientific** | HDF5 or domain-specific   | Multi-dimensional arrays, random access sometimes needed            |
+| **Multimodal** | WebDataset                | Different modalities (image, text, audio) naturally grouped         |
++----------------+---------------------------+---------------------------------------------------------------------+
 
 : Format selection guidelines matched to model type and access characteristics. {#tbl-format-selection}
 
@@ -589,14 +605,16 @@ A typical data loading pipeline includes data reading (fetch bytes from storage 
 
 Each stage has different compute and bandwidth characteristics as summarized in @tbl-pipeline-stages:
 
-| Stage | Bound By | Parallelizable | Typical Duration |
-|-------|----------|----------------|------------------|
-| Reading | Storage bandwidth | Yes (sharded data) | 1-100 ms |
-| Decompression | CPU compute | Yes (per sample) | 0.1-10 ms |
-| Deserialization | CPU compute | Yes (per sample) | 0.01-1 ms |
-| Transformation | CPU compute | Yes (per sample) | 0.1-50 ms |
-| Batching | Memory bandwidth | Limited | 0.1-1 ms |
-| Transfer | PCIe bandwidth | Limited (few DMA channels) | 0.1-10 ms |
++---------------------+-------------------+----------------------------+----------------------+
+| **Stage**           | **Bound By**      | **Parallelizable**         | **Typical Duration** |
++:====================+:==================+:===========================+=====================:+
+| **Reading**         | Storage bandwidth | Yes (sharded data)         | 1-100 ms             |
+| **Decompression**   | CPU compute       | Yes (per sample)           | 0.1-10 ms            |
+| **Deserialization** | CPU compute       | Yes (per sample)           | 0.01-1 ms            |
+| **Transformation**  | CPU compute       | Yes (per sample)           | 0.1-50 ms            |
+| **Batching**        | Memory bandwidth  | Limited                    | 0.1-1 ms             |
+| **Transfer**        | PCIe bandwidth    | Limited (few DMA channels) | 0.1-10 ms            |
++---------------------+-------------------+----------------------------+----------------------+
 
 : Pipeline stages have different performance characteristics. {#tbl-pipeline-stages}
 
@@ -670,12 +688,14 @@ The cost of moving data between nodes dominates computation time for many ML wor
 
 **Locality Hierarchy:**
 
-| Locality Level | Description | Typical Latency | Bandwidth |
-|----------------|-------------|-----------------|-----------|
-| GPU_LOCAL | Data in GPU HBM | ~10 ns | 3+ TB/s |
-| CPU_LOCAL | Data in same-node CPU memory | ~100 ns | 200 GB/s |
-| RACK_LOCAL | Data on another node in same rack | ~100 μs | 25 GB/s |
-| ANY | Data on any node in cluster | ~1 ms | 10 GB/s |
++--------------------+-----------------------------------+---------------------+---------------+
+| **Locality Level** | **Description**                   | **Typical Latency** | **Bandwidth** |
++:===================+:==================================+====================:+==============:+
+| **GPU_LOCAL**      | Data in GPU HBM                   | ~10 ns              | 3+ TB/s       |
+| **CPU_LOCAL**      | Data in same-node CPU memory      | ~100 ns             | 200 GB/s      |
+| **RACK_LOCAL**     | Data on another node in same rack | ~100 μs             | 25 GB/s       |
+| **ANY**            | Data on any node in cluster       | ~1 ms               | 10 GB/s       |
++--------------------+-----------------------------------+---------------------+---------------+
 
 The 100x bandwidth difference between CPU_LOCAL (200 GB/s) and ANY (10 GB/s via network) makes locality-aware scheduling essential for bandwidth-intensive ML workloads.
 
@@ -713,13 +733,15 @@ Locality provides 100x throughput improvement for this workload.
 
 Training data requirements vary dramatically across model types as shown in @tbl-training-data-diversity, affecting storage architecture, data format selection, and pipeline design.
 
-| Model Type | Data Format | Typical Volume | Key Storage Challenge |
-|------------|------------|----------------|----------------------|
-| LLM | Tokenized text | 10-100 TB | Deduplication at scale, quality filtering |
-| Vision | Images/Video | 100 TB - 10 PB | Augmentation pipeline throughput |
-| RecSys | User interaction logs | 1+ PB | Privacy compliance, real-time freshness |
-| Scientific | Simulations, sensor data | 10+ PB | Irregular structure, domain-specific formats |
-| Speech/Audio | Waveforms, spectrograms | 10-100 TB | Variable length sequences |
++------------------+--------------------------+--------------------+----------------------------------------------+
+| **Model Type**   | **Data Format**          | **Typical Volume** | **Key Storage Challenge**                    |
++:=================+:=========================+===================:+:=============================================+
+| **LLM**          | Tokenized text           | 10-100 TB          | Deduplication at scale, quality filtering    |
+| **Vision**       | Images/Video             | 100 TB - 10 PB     | Augmentation pipeline throughput             |
+| **RecSys**       | User interaction logs    | 1+ PB              | Privacy compliance, real-time freshness      |
+| **Scientific**   | Simulations, sensor data | 10+ PB             | Irregular structure, domain-specific formats |
+| **Speech/Audio** | Waveforms, spectrograms  | 10-100 TB          | Variable length sequences                    |
++------------------+--------------------------+--------------------+----------------------------------------------+
 
 : Training data characteristics vary significantly by model type. {#tbl-training-data-diversity}
 
@@ -917,11 +939,13 @@ For dense models where all parameters update every step, incremental checkpointi
 
 Practical compression ratios depend on model type and training dynamics as shown in @tbl-delta-checkpoint:
 
-| Model Type | Full Checkpoint | Delta Size | Compression Ratio |
-|------------|-----------------|------------|-------------------|
-| LLM (dense updates) | 1 TB | 50-100 GB | 10-20x |
-| RecSys (sparse embedding updates) | 10 TB | 100-500 GB | 20-100x |
-| Vision (fine-tuning) | 10 GB | 100 MB | 100x |
++---------------------------------------+---------------------+----------------+-----------------------+
+| **Model Type**                        | **Full Checkpoint** | **Delta Size** | **Compression Ratio** |
++:======================================+====================:+===============:+======================:+
+| **LLM (dense updates)**               | 1 TB                | 50-100 GB      | 10-20x                |
+| **RecSys (sparse embedding updates)** | 10 TB               | 100-500 GB     | 20-100x               |
+| **Vision (fine-tuning)**              | 10 GB               | 100 MB         | 100x                  |
++---------------------------------------+---------------------+----------------+-----------------------+
 
 : Delta checkpointing effectiveness varies by model type and training phase. {#tbl-delta-checkpoint}
 
@@ -941,13 +965,15 @@ This architecture provides both performance (fast writes) and durability (object
 
 Checkpoint strategies vary significantly by model architecture as summarized in @tbl-checkpoint-strategies:
 
-| Model Type | Checkpoint Size | Typical Frequency | Recommended Strategy |
-|------------|-----------------|-------------------|---------------------|
-| LLM (175B) | 700 GB - 1 TB | Every 10-30 min | Distributed async, tiered storage |
-| LLM (7B) | 14-28 GB | Every 5-15 min | Single-node, parallel FS |
-| RecSys (10TB embeddings) | 10+ TB | Incremental every hour | Delta compression, streaming |
-| Vision (ResNet-50) | 200 MB | Every epoch | Simple sync, local + remote copy |
-| Vision (ViT-22B) | 88-175 GB | Every 15-30 min | Distributed, parallel FS |
++------------------------------+---------------------+------------------------+-----------------------------------+
+| **Model Type**               | **Checkpoint Size** | **Typical Frequency**  | **Recommended Strategy**          |
++=============================:+====================:+:=======================+:==================================+
+| **LLM (175B)**               | 700 GB - 1 TB       | Every 10-30 min        | Distributed async, tiered storage |
+| **LLM (7B)**                 | 14-28 GB            | Every 5-15 min         | Single-node, parallel FS          |
+| **RecSys (10TB embeddings)** | 10+ TB              | Incremental every hour | Delta compression, streaming      |
+| **Vision (ResNet-50)**       | 200 MB              | Every epoch            | Simple sync, local + remote copy  |
+| **Vision (ViT-22B)**         | 88-175 GB           | Every 15-30 min        | Distributed, parallel FS          |
++------------------------------+---------------------+------------------------+-----------------------------------+
 
 : Checkpoint strategies should be tailored to model size and training dynamics. {#tbl-checkpoint-strategies}
 
@@ -1004,11 +1030,13 @@ The offline store contains the complete historical record of feature values, ena
 **Data organization**: Features are stored with timestamps, enabling point-in-time queries:
 
 ```text
-| user_id | feature_name      | value | timestamp           |
-|---------|-------------------|-------|---------------------|
-| 12345   | purchase_count_7d | 3     | 2024-01-15 00:00:00 |
-| 12345   | purchase_count_7d | 5     | 2024-01-16 00:00:00 |
-| 12345   | avg_session_length| 4.2   | 2024-01-15 00:00:00 |
++-------------+--------------------+-----------+---------------------+
+| **user_id** | **feature_name**   | **value** | **timestamp**       |
++============:+:===================+==========:+====================:+
+| 12345       | purchase_count_7d  | 3         | 2024-01-15 00:00:00 |
+| 12345       | purchase_count_7d  | 5         | 2024-01-16 00:00:00 |
+| 12345       | avg_session_length | 4.2       | 2024-01-15 00:00:00 |
++-------------+--------------------+-----------+---------------------+
 ```
 
 **Point-in-time joins**: Training requires joining features to labels at the exact time the label event occurred. If a user clicked an ad at 2024-01-15 14:23:00, training needs the features that were available at 14:22:59, not the features computed later that day.
@@ -1151,12 +1179,14 @@ Recommendation systems present a unique storage challenge: embedding tables cont
 
 **Scale of embedding tables:**
 
-| Application | Entities | Embedding Dim | Total Size |
-|-------------|----------|---------------|------------|
-| User embeddings | 1 billion | 128 | 512 GB |
-| Product embeddings | 100 million | 256 | 100 GB |
-| Ad embeddings | 10 million | 512 | 20 GB |
-| Sparse ID embeddings | 100 billion | 64 | 25 TB |
++--------------------------+--------------+-------------------+----------------+
+| **Application**          | **Entities** | **Embedding Dim** | **Total Size** |
++:=========================+=============:+==================:+===============:+
+| **User embeddings**      | 1 billion    | 128               | 512 GB         |
+| **Product embeddings**   | 100 million  | 256               | 100 GB         |
+| **Ad embeddings**        | 10 million   | 512               | 20 GB          |
+| **Sparse ID embeddings** | 100 billion  | 64                | 25 TB          |
++--------------------------+--------------+-------------------+----------------+
 
 : Embedding table sizes for production recommendation systems. {#tbl-embedding-sizes}
 
@@ -1180,15 +1210,17 @@ Each shard stores 1/N of the embeddings. Lookup requires determining the correct
 
 Feature store importance varies dramatically by model type as shown in @tbl-feature-store-criticality:
 
-| Model Type | Feature Store Criticality | Rationale |
-|------------|---------------------------|-----------|
-| RecSys | **Critical** | Millions of lookups/second, user/item features essential |
-| Fraud Detection | **Critical** | Real-time features detect fraud patterns |
-| Ad Ranking | **Critical** | User context, ad features, bid signals |
-| Search Ranking | High | Query understanding, user history |
-| LLMs | Low | Minimal runtime features, prompt is the input |
-| Vision | Low-Medium | Optional context features, mainly model input |
-| Speech | Low | Audio input, minimal runtime features |
++---------------------+-------------------------------+----------------------------------------------------------+
+| **Model Type**      | **Feature Store Criticality** | **Rationale**                                            |
++:====================+:==============================+:=========================================================+
+| **RecSys**          | **Critical**                  | Millions of lookups/second, user/item features essential |
+| **Fraud Detection** | **Critical**                  | Real-time features detect fraud patterns                 |
+| **Ad Ranking**      | **Critical**                  | User context, ad features, bid signals                   |
+| **Search Ranking**  | High                          | Query understanding, user history                        |
+| **LLMs**            | Low                           | Minimal runtime features, prompt is the input            |
+| **Vision**          | Low-Medium                    | Optional context features, mainly model input            |
+| **Speech**          | Low                           | Audio input, minimal runtime features                    |
++---------------------+-------------------------------+----------------------------------------------------------+
 
 : Feature store criticality varies by ML application. {#tbl-feature-store-criticality}
 
@@ -1227,13 +1259,15 @@ Several platforms provide feature store functionality, each with different trade
 
 **Build vs buy considerations:**
 
-| Factor | Build In-House | Use Platform |
-|--------|---------------|--------------|
-| Customization | Full control | Limited by platform |
-| Development cost | High initial investment | Lower initial cost |
-| Operations | Requires dedicated team | Managed by vendor |
-| Scale | Requires expertise | Built-in scaling |
-| Integration | Custom to stack | May require adaptation |
++----------------------+-------------------------+------------------------+
+| **Factor**           | **Build In-House**      | **Use Platform**       |
++:=====================+:========================+:=======================+
+| **Customization**    | Full control            | Limited by platform    |
+| **Development cost** | High initial investment | Lower initial cost     |
+| **Operations**       | Requires dedicated team | Managed by vendor      |
+| **Scale**            | Requires expertise      | Built-in scaling       |
+| **Integration**      | Custom to stack         | May require adaptation |
++----------------------+-------------------------+------------------------+
 
 : Feature store build vs buy tradeoffs. {#tbl-feature-store-buildbuy}
 
@@ -1375,12 +1409,14 @@ Model artifacts range from megabytes (small classifiers) to terabytes (large fou
 
 **Storage cost optimization strategies for model artifacts are detailed in @tbl-artifact-storage:**
 
-| Strategy | Benefit | Tradeoff |
-|----------|---------|----------|
-| Compression | 2-5x size reduction | CPU overhead on load |
-| Deduplication | Shared layers stored once | Complexity in artifact management |
-| Tiered storage | Cold storage for old versions | Retrieval latency |
-| Differential storage | Store only changed weights | Requires base model + diffs |
++--------------------------+-------------------------------+-----------------------------------+
+| **Strategy**             | **Benefit**                   | **Tradeoff**                      |
++:=========================+:==============================+:==================================+
+| **Compression**          | 2-5x size reduction           | CPU overhead on load              |
+| **Deduplication**        | Shared layers stored once     | Complexity in artifact management |
+| **Tiered storage**       | Cold storage for old versions | Retrieval latency                 |
+| **Differential storage** | Store only changed weights    | Requires base model + diffs       |
++--------------------------+-------------------------------+-----------------------------------+
 
 : Artifact storage optimization strategies. {#tbl-artifact-storage}
 
@@ -1402,13 +1438,15 @@ Several platforms provide model registry functionality as compared in @tbl-regis
 
 **Comparison:**
 
-| Platform | Open Source | Deployment Integration | Lineage | Approval Workflows |
-|----------|-------------|------------------------|---------|-------------------|
-| MLflow | Yes | Via plugins | Basic | Basic |
-| W&B | No | Limited | Strong | Limited |
-| Vertex AI | No | Native GCP | Good | Yes |
-| SageMaker | No | Native AWS | Good | Yes |
-| Azure ML | No | Native Azure | Good | Yes |
++---------------+-----------------+----------------------------+-------------+------------------------+
+| **Platform**  | **Open Source** | **Deployment Integration** | **Lineage** | **Approval Workflows** |
++:==============+:================+:===========================+:============+:=======================+
+| **MLflow**    | Yes             | Via plugins                | Basic       | Basic                  |
+| **W&B**       | No              | Limited                    | Strong      | Limited                |
+| **Vertex AI** | No              | Native GCP                 | Good        | Yes                    |
+| **SageMaker** | No              | Native AWS                 | Good        | Yes                    |
+| **Azure ML**  | No              | Native Azure               | Good        | Yes                    |
++---------------+-----------------+----------------------------+-------------+------------------------+
 
 : Model registry platform comparison. {#tbl-registry-platforms}
 

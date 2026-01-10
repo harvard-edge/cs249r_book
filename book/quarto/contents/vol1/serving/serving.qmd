@@ -137,15 +137,17 @@ Understanding where time goes requires instrumenting each phase independently. C
 
 A typical serving request for our ResNet-50 classifier shows the following latency distribution:
 
-| Phase | Operation | Time | Percentage |
-|-------|-----------|------|------------|
-| Preprocessing | JPEG decode | 3.0ms | 30% |
-| Preprocessing | Resize to 224×224 | 1.0ms | 10% |
-| Preprocessing | Normalize (mean/std) | 0.5ms | 5% |
-| Data Transfer | CPU→GPU copy | 0.5ms | 5% |
-| **Inference** | **ResNet-50 forward pass** | **5.0ms** | **50%** |
-| Postprocessing | Softmax + top-5 | 0.1ms | ~0% |
-| **Total** | | **10.1ms** | **100%** |
++--------------------+----------------------------+------------+----------------+
+| **Phase**          | **Operation**              | **Time**   | **Percentage** |
++:===================+:===========================+===========:+===============:+
+| **Preprocessing**  | JPEG decode                | 3.0ms      | 30%            |
+| **Preprocessing**  | Resize to 224×224          | 1.0ms      | 10%            |
+| **Preprocessing**  | Normalize (mean/std)       | 0.5ms      | 5%             |
+| **Data Transfer**  | CPU→GPU copy               | 0.5ms      | 5%             |
+| **Inference**      | **ResNet-50 forward pass** | **5.0ms**  | **50%**        |
+| **Postprocessing** | Softmax + top-5            | 0.1ms      | ~0%            |
+| **Total**          |                            | **10.1ms** | **100%**       |
++--------------------+----------------------------+------------+----------------+
 
 Key insight: **Preprocessing consumes 45% of latency** despite model inference being the computationally intensive phase. With TensorRT optimization reducing inference to 2ms, preprocessing would dominate at 75%.
 
@@ -171,12 +173,14 @@ $$\frac{T(r_2)}{T(r_1)} = \left(\frac{r_1}{r_2}\right)^2$$ {#eq-resolution-throu
 
 Doubling resolution from 224 to 448 theoretically yields 4× slowdown (measured: 3.6× due to fixed overhead amortization). However, at high resolutions, models transition from compute-bound to memory-bound as activation tensors exceed cache capacity. @tbl-resolution-bottleneck illustrates this transition for ResNet-50:
 
-| Resolution | Activation Size | Arith. Intensity | Bottleneck |
-|:-----------|:----------------|:-----------------|:-----------|
-| 224×224 | 12.5MB | 290 FLOPS/byte | Compute |
-| 384×384 | 36.8MB | 168 FLOPS/byte | Transitional |
-| 512×512 | 65.5MB | 95 FLOPS/byte | Memory BW |
-| 640×640 | 102.4MB | 61 FLOPS/byte | Memory BW |
++----------------+---------------------+----------------------+----------------+
+| **Resolution** | **Activation Size** | **Arith. Intensity** | **Bottleneck** |
++===============:+====================:+=====================:+:===============+
+| **224×224**    | 12.5MB              | 290 FLOPS/byte       | Compute        |
+| **384×384**    | 36.8MB              | 168 FLOPS/byte       | Transitional   |
+| **512×512**    | 65.5MB              | 95 FLOPS/byte        | Memory BW      |
+| **640×640**    | 102.4MB             | 61 FLOPS/byte        | Memory BW      |
++----------------+---------------------+----------------------+----------------+
 
 : **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity decreases with resolution as activation sizes grow. The V100 crossover point (~125 FLOPS/byte) occurs around 384×384, above which memory bandwidth limits throughput more than compute capacity. {#tbl-resolution-bottleneck}
 
@@ -212,13 +216,15 @@ where $\mu$ is the service rate (requests per second the server can handle), and
 
 This equation reveals why serving systems exhibit nonlinear behavior. At 50% utilization, average wait time is $2\times$ the service time. At 80% utilization, it is $5\times$. At 90% utilization, it is $10\times$. The relationship is hyperbolic: small increases in load near capacity cause disproportionate latency increases.
 
-| Utilization ($\rho$) | Wait Time Multiple | Example (5ms service) |
-|:---------------------|:-------------------|:----------------------|
-| 50% | 2.0× | 10ms |
-| 70% | 3.3× | 17ms |
-| 80% | 5.0× | 25ms |
-| 90% | 10.0× | 50ms |
-| 95% | 20.0× | 100ms |
++--------------------------+------------------------+---------------------------+
+| **Utilization ($\rho$)** | **Wait Time Multiple** | **Example (5ms service)** |
++=========================:+=======================:+==========================:+
+| 50%                      | 2.0×                   | 10ms                      |
+| 70%                      | 3.3×                   | 17ms                      |
+| 80%                      | 5.0×                   | 25ms                      |
+| 90%                      | 10.0×                  | 50ms                      |
+| 95%                      | 20.0×                  | 100ms                     |
++--------------------------+------------------------+---------------------------+
 
 : **Utilization-Latency Relationship**: Average wait time as a multiple of service time for an M/M/1 queue. The nonlinear relationship explains why systems that perform well at moderate load can suddenly violate SLOs when traffic increases. {#tbl-utilization-latency}
 
@@ -411,15 +417,17 @@ Cold start latency compounds from multiple sources, each adding to the time betw
 
 Loading ResNet-50 for production serving involves the following cold start phases:
 
-| Phase | Duration | Notes |
-|-------|----------|-------|
-| Weight loading (SSD) | 0.5s | 98MB FP32 weights from local storage |
-| Weight loading (S3) | 3-5s | Network latency dominates for cloud storage |
-| CUDA context | 0.3-0.5s | CUDA 11+ lazy loading significantly reduced this |
-| TensorRT compilation | 15-30s | Converts PyTorch model to optimized engine |
-| Warmup (10 inferences) | 0.2s | Triggers remaining lazy initialization |
-| **Total (local, optimized)** | **~1.5s** | With pre-compiled TensorRT engine, warm container |
-| **Total (cloud, first deploy)** | **~35s** | Including compilation from cold state |
++---------------------------------+--------------+---------------------------------------------------+
+| **Phase**                       | **Duration** | **Notes**                                         |
++:================================+=============:+:==================================================+
+| **Weight loading (SSD)**        | 0.5s         | 98MB FP32 weights from local storage              |
+| **Weight loading (S3)**         | 3-5s         | Network latency dominates for cloud storage       |
+| **CUDA context**                | 0.3-0.5s     | CUDA 11+ lazy loading significantly reduced this  |
+| **TensorRT compilation**        | 15-30s       | Converts PyTorch model to optimized engine        |
+| **Warmup (10 inferences)**      | 0.2s         | Triggers remaining lazy initialization            |
+| **Total (local, optimized)**    | **~1.5s**    | With pre-compiled TensorRT engine, warm container |
+| **Total (cloud, first deploy)** | **~35s**     | Including compilation from cold state             |
++---------------------------------+--------------+---------------------------------------------------+
 
 **Key insight**: Pre-compiling models and storing the optimized engine eliminates the 30-second compilation phase on subsequent deployments. Production systems use CUDA MPS (Multi-Process Service) or pre-warmed container pools to amortize CUDA initialization costs across requests.
 
@@ -479,13 +487,15 @@ Modern accelerators achieve peak efficiency only at sufficient batch sizes [@she
 
 The throughput-latency tradeoff for ResNet-50 on a V100 GPU illustrates the power of batching:
 
-| Batch Size | Inference Time* | Per-Image Compute | Throughput | GPU Util. |
-|:-----------|:----------------|:------------------|:-----------|:----------|
-| 1 | 5.0ms | 5.0ms | 200 img/s | 15% |
-| 4 | 7.2ms | 1.8ms | 556 img/s | 42% |
-| 8 | 9.1ms | 1.1ms | 879 img/s | 65% |
-| 16 | 14.0ms | 0.9ms | 1,143 img/s | 85% |
-| 32 | 25.0ms | 0.8ms | 1,280 img/s | 95% |
++----------------+---------------------+-----------------------+----------------+---------------+
+| **Batch Size** | **Inference Time*** | **Per-Image Compute** | **Throughput** | **GPU Util.** |
++===============:+====================:+======================:+===============:+==============:+
+| 1              | 5.0ms               | 5.0ms                 | 200 img/s      | 15%           |
+| 4              | 7.2ms               | 1.8ms                 | 556 img/s      | 42%           |
+| 8              | 9.1ms               | 1.1ms                 | 879 img/s      | 65%           |
+| 16             | 14.0ms              | 0.9ms                 | 1,143 img/s    | 85%           |
+| 32             | 25.0ms              | 0.8ms                 | 1,280 img/s    | 95%           |
++----------------+---------------------+-----------------------+----------------+---------------+
 
 *Times shown are pure inference time, excluding queue wait. User-perceived latency includes batching window wait (see @sec-serving-traffic-patterns).
 
@@ -527,12 +537,14 @@ $$P(\text{batch size} = k) = \frac{(\lambda T)^k e^{-\lambda T}}{k!}$$ {#eq-batc
 
 This distribution reveals batch size variability. @tbl-batch-variability shows how batch size fluctuates for different traffic levels with a fixed 10ms window:
 
-| Arrival Rate | Mean Batch | Std Dev | P(batch=0) | P(batch≥2×mean) |
-|:-------------|:-----------|:--------|:-----------|:----------------|
-| 50 QPS | 0.5 | 0.7 | 61% | 1% |
-| 200 QPS | 2.0 | 1.4 | 14% | 9% |
-| 500 QPS | 5.0 | 2.2 | 0.7% | 12% |
-| 1000 QPS | 10.0 | 3.2 | 0.005% | 13% |
++------------------+----------------+-------------+----------------+---------------------+
+| **Arrival Rate** | **Mean Batch** | **Std Dev** | **P(batch=0)** | **P(batch≥2×mean)** |
++=================:+===============:+============:+===============:+====================:+
+| **50 QPS**       | 0.5            | 0.7         | 61%            | 1%                  |
+| **200 QPS**      | 2.0            | 1.4         | 14%            | 9%                  |
+| **500 QPS**      | 5.0            | 2.2         | 0.7%           | 12%                 |
+| **1000 QPS**     | 10.0           | 3.2         | 0.005%         | 13%                 |
++------------------+----------------+-------------+----------------+---------------------+
 
 : **Batch Size Variability**: At low traffic, batching windows frequently contain zero requests (wasted GPU cycles). At moderate traffic, batch sizes fluctuate significantly around the mean. High traffic provides more stable batching but still sees 13% of batches exceeding twice the mean size. {#tbl-batch-variability}
 
@@ -546,13 +558,15 @@ The numerator increases linearly with batch size while the denominator increases
 
 For ResNet-50 on a V100 GPU, service time scales as $S(b) = 5\text{ms} + 0.6b$ (5ms fixed overhead plus 0.6ms per additional image in the batch). With $T = 10$ms batching window:
 
-| Batch Size | Service Time | Total Latency | Throughput | Efficiency |
-|:-----------|:-------------|:--------------|:-----------|:-----------|
-| 1 | 5.6ms | 15.6ms | 64 img/s | Low |
-| 4 | 7.4ms | 17.4ms | 230 img/s | Moderate |
-| 8 | 9.8ms | 19.8ms | 404 img/s | Good |
-| 16 | 14.6ms | 24.6ms | 650 img/s | High |
-| 32 | 24.2ms | 34.2ms | 935 img/s | Maximum |
++----------------+------------------+-------------------+----------------+----------------+
+| **Batch Size** | **Service Time** | **Total Latency** | **Throughput** | **Efficiency** |
++===============:+=================:+==================:+===============:+:===============+
+| 1              | 5.6ms            | 15.6ms            | 64 img/s       | Low            |
+| 4              | 7.4ms            | 17.4ms            | 230 img/s      | Moderate       |
+| 8              | 9.8ms            | 19.8ms            | 404 img/s      | Good           |
+| 16             | 14.6ms           | 24.6ms            | 650 img/s      | High           |
+| 32             | 24.2ms           | 34.2ms            | 935 img/s      | Maximum        |
++----------------+------------------+-------------------+----------------+----------------+
 
 : **Batching Throughput Analysis**: Throughput increases with batch size but total latency grows. The optimal configuration depends on whether the latency SLO or throughput target is the binding constraint. {#tbl-batching-throughput}
 
@@ -633,13 +647,15 @@ This approach reduces average wait time during high traffic while maintaining ba
 
 The batching configuration space forms a Pareto frontier where improving throughput requires accepting higher latency. @tbl-pareto-batching shows this trade-off for different window configurations:
 
-| Window (ms) | Max Batch | Avg Latency | p99 Latency | Throughput | Configuration |
-|:------------|:----------|:------------|:------------|:-----------|:--------------|
-| 2 | 16 | 8ms | 18ms | 890 img/s | Ultra-low latency |
-| 5 | 32 | 10ms | 22ms | 1,140 img/s | Balanced |
-| 10 | 32 | 15ms | 35ms | 1,240 img/s | Moderate latency |
-| 20 | 64 | 23ms | 52ms | 1,310 img/s | Throughput-optimized |
-| 50 | 128 | 38ms | 98ms | 1,350 img/s | Maximum throughput |
++-----------------+---------------+-----------------+-----------------+----------------+----------------------+
+| **Window (ms)** | **Max Batch** | **Avg Latency** | **p99 Latency** | **Throughput** | **Configuration**    |
++================:+==============:+================:+================:+===============:+:=====================+
+| 2               | 16            | 8ms             | 18ms            | 890 img/s      | Ultra-low latency    |
+| 5               | 32            | 10ms            | 22ms            | 1,140 img/s    | Balanced             |
+| 10              | 32            | 15ms            | 35ms            | 1,240 img/s    | Moderate latency     |
+| 20              | 64            | 23ms            | 52ms            | 1,310 img/s    | Throughput-optimized |
+| 50              | 128           | 38ms            | 98ms            | 1,350 img/s    | Maximum throughput   |
++-----------------+---------------+-----------------+-----------------+----------------+----------------------+
 
 : **Batching Pareto Frontier**: Each configuration represents a different point on the throughput-latency trade-off curve. Moving from 2ms to 50ms windows improves throughput by only 52% while increasing p99 latency by 5.4×. Diminishing returns make aggressive batching costly for latency-sensitive applications. {#tbl-pareto-batching}
 
@@ -713,12 +729,14 @@ $$T_{\text{optimal}} = \min\left(L - S, \sqrt{\frac{S}{\lambda}}\right)$$ {#eq-o
 
 where $L$ is the latency SLO and $S$ is the service time. A counterintuitive result emerges from this equation: as traffic increases, the optimal window decreases while achieved batch sizes still grow. @tbl-traffic-adaptive demonstrates this relationship across traffic levels.
 
-| Arrival Rate | Optimal Window | Avg Batch Size | p99 Latency |
-|:-------------|:---------------|:---------------|:------------|
-| 100 QPS | 20ms | 2.0 | 45ms |
-| 500 QPS | 8ms | 4.0 | 42ms |
-| 1,000 QPS | 5ms | 5.0 | 38ms |
-| 5,000 QPS | 2ms | 10.0 | 35ms |
++------------------+--------------------+--------------------+-----------------+
+| **Arrival Rate** | **Optimal Window** | **Avg Batch Size** | **p99 Latency** |
++=================:+===================:+===================:+================:+
+| **100 QPS**      | 20ms               | 2.0                | 45ms            |
+| **500 QPS**      | 8ms                | 4.0                | 42ms            |
+| **1,000 QPS**    | 5ms                | 5.0                | 38ms            |
+| **5,000 QPS**    | 2ms                | 10.0               | 35ms            |
++------------------+--------------------+--------------------+-----------------+
 
 : **Traffic-Adaptive Batching**: Higher traffic enables shorter windows while still achieving larger batches. The optimal window decreases even as batch sizes grow because more requests arrive per unit time. {#tbl-traffic-adaptive}
 
@@ -732,15 +750,17 @@ Consider a vehicle with 6 cameras capturing at 30 FPS, requiring spatial fusion:
 
 **Timeline for processing frame set N:**
 
-| Time | Event |
-|:-----|:------|
-| T = 0ms | Cameras begin capturing frame N |
-| T = 8ms | Camera 1 frame arrives |
-| T = 10ms | Cameras 2-5 frames arrive |
-| T = 15ms | Camera 6 arrives (jitter) |
++----------+-----------------------------------+
+| **Time** | **Event**                         |
++=========:+:==================================+
+| T = 0ms  | Cameras begin capturing frame N   |
+| T = 8ms  | Camera 1 frame arrives            |
+| T = 10ms | Cameras 2-5 frames arrive         |
+| T = 15ms | Camera 6 arrives (jitter)         |
 | T = 15ms | Batch inference begins (6 images) |
-| T = 25ms | Inference complete |
-| T = 32ms | Result ready for planning module |
+| T = 25ms | Inference complete                |
+| T = 32ms | Result ready for planning module  |
++----------+-----------------------------------+
 
 **Key constraints:**
 
@@ -759,14 +779,16 @@ Mobile and embedded applications serve one user at a time, with requests arrivin
 
 ::: {.callout-note title="ResNet-50: Mobile Single-User Serving (Pixel 6 NPU)"}
 
-| Phase | Duration | Notes |
-|:------|:---------|:------|
-| Camera buffer read | 8ms | System API overhead |
-| JPEG decode (CPU) | 15ms | Single-threaded |
-| Resize + Normalize | 5ms | CPU preprocessing |
-| NPU inference | 12ms | 82% NPU utilization |
-| Post-process + UI | 5ms | Result rendering |
-| **Total** | **45ms** | Perceived as "instant" |
++------------------------+--------------+------------------------+
+| **Phase**              | **Duration** | **Notes**              |
++:=======================+=============:+:=======================+
+| **Camera buffer read** | 8ms          | System API overhead    |
+| **JPEG decode (CPU)**  | 15ms         | Single-threaded        |
+| **Resize + Normalize** | 5ms          | CPU preprocessing      |
+| **NPU inference**      | 12ms         | 82% NPU utilization    |
+| **Post-process + UI**  | 5ms          | Result rendering       |
+| **Total**              | **45ms**     | Perceived as "instant" |
++------------------------+--------------+------------------------+
 
 **Critical insight**: Even at batch size 1, the mobile NPU achieves 82% utilization because its compute capacity matches single-image workloads. This differs fundamentally from datacenter GPUs, which achieve only 15% utilization at batch size 1 because their massive parallelism requires larger batches to saturate.
 
@@ -881,14 +903,16 @@ TensorRT (NVIDIA GPUs), OpenVINO (Intel hardware), and similar engines optimize 
 
 Performance comparison for ResNet-50 inference on V100 GPU (batch size 1):
 
-| Runtime | Latency | Speedup | Notes |
-|---------|---------|---------|-------|
-| PyTorch (eager) | 8.5ms | 1.0× | Baseline, no optimization |
-| TorchScript | 6.2ms | 1.4× | JIT compilation |
-| ONNX Runtime | 5.1ms | 1.7× | Cross-platform |
-| TensorRT FP32 | 2.8ms | 3.0× | NVIDIA-specific |
-| TensorRT FP16 | 1.4ms | 6.1× | Tensor Core acceleration |
-| TensorRT INT8 | 0.9ms | 9.4× | Requires calibration |
++-----------------+-------------+-------------+---------------------------+
+| **Runtime**     | **Latency** | **Speedup** | **Notes**                 |
++:================+============:+============:+:==========================+
+| PyTorch (eager) | 8.5ms       | 1.0×        | Baseline, no optimization |
+| TorchScript     | 6.2ms       | 1.4×        | JIT compilation           |
+| ONNX Runtime    | 5.1ms       | 1.7×        | Cross-platform            |
+| TensorRT FP32   | 2.8ms       | 3.0×        | NVIDIA-specific           |
+| TensorRT FP16   | 1.4ms       | 6.1×        | Tensor Core acceleration  |
+| TensorRT INT8   | 0.9ms       | 9.4×        | Requires calibration      |
++-----------------+-------------+-------------+---------------------------+
 
 **Key insight**: The 9.4× speedup from TensorRT INT8 comes at the cost of: (1) quantization calibration data, (2) potential accuracy loss (<1% for ResNet-50), and (3) NVIDIA-specific deployment.
 
@@ -914,12 +938,14 @@ In practice, GPU compute pipelines and Tensor Core alignment requirements limit 
 
 ::: {.callout-note title="ResNet-50: Precision Tradeoffs on V100"}
 
-| Precision | Latency | Memory | Accuracy | Tensor Core Util. | Calibration |
-|:----------|:--------|:-------|:---------|:------------------|:------------|
-| FP32 | 2.8ms | 98MB | 76.13% | 0% | None |
-| FP16 | 1.4ms | 49MB | 76.13% | 85% | None |
-| INT8 (PTQ) | 0.9ms | 25MB | 75.80% | 92% | 1,000 samples |
-| INT8 (QAT) | 0.9ms | 25MB | 76.05% | 92% | Full retraining |
++----------------+-------------+------------+--------------+-----------------------+-----------------+
+| **Precision**  | **Latency** | **Memory** | **Accuracy** | **Tensor Core Util.** | **Calibration** |
++===============:+============:+===========:+=============:+======================:+:================+
+| **FP32**       | 2.8ms       | 98MB       | 76.13%       | 0%                    | None            |
+| **FP16**       | 1.4ms       | 49MB       | 76.13%       | 85%                   | None            |
+| **INT8 (PTQ)** | 0.9ms       | 25MB       | 75.80%       | 92%                   | 1,000 samples   |
+| **INT8 (QAT)** | 0.9ms       | 25MB       | 76.05%       | 92%                   | Full retraining |
++----------------+-------------+------------+--------------+-----------------------+-----------------+
 
 **Key observations:**
 
@@ -959,11 +985,13 @@ Total serving cost decomposes into several components including compute time for
 
 Consider serving ResNet-50 on AWS infrastructure:
 
-| Instance Type | Cost/Hour | Throughput | Cost per 1M Images |
-|---------------|-----------|------------|-------------------|
-| c5.xlarge (CPU) | $0.17 | 50 img/s | $0.94 |
-| g4dn.xlarge (T4 GPU) | $0.53 | 400 img/s | $0.37 |
-| p3.2xlarge (V100 GPU) | $3.06 | 1,200 img/s | $0.71 |
++---------------------------+---------------+----------------+------------------------+
+| **Instance Type**         | **Cost/Hour** | **Throughput** | **Cost per 1M Images** |
++==========================:+==============:+===============:+=======================:+
+| **c5.xlarge (CPU)**       | $0.17         | 50 img/s       | $0.94                  |
+| **g4dn.xlarge (T4 GPU)**  | $0.53         | 400 img/s      | $0.37                  |
+| **p3.2xlarge (V100 GPU)** | $3.06         | 1,200 img/s    | $0.71                  |
++---------------------------+---------------+----------------+------------------------+
 
 **Key insight**: The T4 GPU instance achieves the lowest cost per inference despite higher hourly cost, because GPU throughput dramatically exceeds CPU throughput. The V100 is only cost-effective at very high sustained traffic where its higher throughput justifies the 6× price increase.
 

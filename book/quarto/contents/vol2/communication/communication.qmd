@@ -161,14 +161,16 @@ Messages smaller than 250 KB are latency-bound; larger messages are bandwidth-bo
 
 This crossover point has profound implications for different model architectures:
 
-| Model Type | Typical Gradient Size | Communication Regime | Primary Optimization |
-|------------|----------------------|---------------------|---------------------|
-| Small CNN (ResNet-18) | 45 MB | Bandwidth-bound | Compression |
-| Large CNN (ResNet-152) | 240 MB | Bandwidth-bound | Compression, pipelining |
-| BERT-Base | 440 MB | Bandwidth-bound | Compression |
-| GPT-3 | 350 GB | Heavily bandwidth-bound | Must have fast network |
-| Embedding update (RecSys) | Variable, sparse | Often latency-bound | Batching, aggregation |
-| GNN message passing | Small, frequent | Latency-bound | Message aggregation |
++-------------------------------+---------------------------+--------------------------+--------------------------+
+| **Model Type**                | **Typical Gradient Size** | **Communication Regime** | **Primary Optimization** |
++:==============================+:==========================+:=========================+:=========================+
+| **Small CNN (ResNet-18)**     | 45 MB                     | Bandwidth-bound          | Compression              |
+| **Large CNN (ResNet-152)**    | 240 MB                    | Bandwidth-bound          | Compression, pipelining  |
+| **BERT-Base**                 | 440 MB                    | Bandwidth-bound          | Compression              |
+| **GPT-3**                     | 350 GB                    | Heavily bandwidth-bound  | Must have fast network   |
+| **Embedding update (RecSys)** | Variable, sparse          | Often latency-bound      | Batching, aggregation    |
+| **GNN message passing**       | Small, frequent           | Latency-bound            | Message aggregation      |
++-------------------------------+---------------------------+--------------------------+--------------------------+
 
 Understanding which regime applies to your workload determines which optimizations will be effective. Compressing gradients helps bandwidth-bound workloads but adds overhead that hurts latency-bound communication. Batching small messages helps latency-bound workloads but increases memory pressure.
 
@@ -212,14 +214,16 @@ Communication volume is similar to synchronous training, but the timing is distr
 
 [^fn-model-parallelism]: **Model Parallelism**: Distributing different parts of a single model across multiple devices, required when models are too large for one GPU's memory. Tensor parallelism splits individual layers (e.g., dividing a large matrix multiplication across 8 GPUs), while pipeline parallelism assigns different layers to different GPUs in a sequential pipeline. Tensor parallelism is latency-sensitive (communication on every layer), while pipeline parallelism is throughput-sensitive (activation transfers between stages). Modern LLM training combines both: tensor parallelism within nodes (fast NVLink), pipeline parallelism across nodes (tolerates InfiniBand latency).
 
-| Strategy | Communication Frequency | Message Size | Pattern Regularity |
-|----------|------------------------|--------------|-------------------|
-| Sync data parallel | Once per iteration | Gradient size ($2M$ bytes) | Highly regular |
-| Async data parallel | Continuous | Gradient size | Irregular |
-| Tensor parallel | Multiple per layer | Activation slices | Regular |
-| Pipeline parallel | Once per micro-batch per stage | Activation tensors | Regular |
-| Embedding parallel (RecSys) | Once per iteration | Embedding slices | Regular |
-| MoE routing | Once per expert layer | Token subsets | Data-dependent |
++---------------------------------+--------------------------------+----------------------------+------------------------+
+| **Strategy**                    | **Communication Frequency**    | **Message Size**           | **Pattern Regularity** |
++:================================+:===============================+:===========================+:=======================+
+| **Sync data parallel**          | Once per iteration             | Gradient size ($2M$ bytes) | Highly regular         |
+| **Async data parallel**         | Continuous                     | Gradient size              | Irregular              |
+| **Tensor parallel**             | Multiple per layer             | Activation slices          | Regular                |
+| **Pipeline parallel**           | Once per micro-batch per stage | Activation tensors         | Regular                |
+| **Embedding parallel (RecSys)** | Once per iteration             | Embedding slices           | Regular                |
+| **MoE routing**                 | Once per expert layer          | Token subsets              | Data-dependent         |
++---------------------------------+--------------------------------+----------------------------+------------------------+
 
 **Embedding Parallelism** in recommendation systems produces a fundamentally different pattern. Rather than reducing gradients across all parameters, workers exchange embedding vectors for the specific items in each training batch. This creates an AlltoAll communication pattern where each worker sends different data to each other worker, contrasting with AllReduce where all workers contribute to computing the same result.
 
@@ -253,12 +257,14 @@ The critical insight is that $\rho$ depends on three factors we can potentially 
 
 Different model architectures exhibit dramatically different $\rho$ values at the same scale:
 
-| Model | Parameters | FLOP/iteration | Gradient Size | Typical $\rho$ at 256 GPUs |
-|-------|-----------|----------------|---------------|---------------------------|
-| ResNet-50 | 25M | 8.2 GFLOP | 100 MB | 0.3 |
-| BERT-Large | 340M | 1.5 TFLOP | 1.3 GB | 0.8 |
-| GPT-3 | 175B | 1 PFLOP | 350 GB | 2.5 |
-| DLRM (Meta) | 12T embeddings | Variable | Sparse | 0.5-5.0 (data dependent) |
++-----------------+----------------+--------------------+-------------------+--------------------------------+
+| **Model**       | **Parameters** | **FLOP/iteration** | **Gradient Size** | **Typical $\rho$ at 256 GPUs** |
++:================+===============:+===================:+==================:+===============================:+
+| **ResNet-50**   | 25M            | 8.2 GFLOP          | 100 MB            | 0.3                            |
+| **BERT-Large**  | 340M           | 1.5 TFLOP          | 1.3 GB            | 0.8                            |
+| **GPT-3**       | 175B           | 1 PFLOP            | 350 GB            | 2.5                            |
+| **DLRM (Meta)** | 12T embeddings | Variable           | Sparse            | 0.5-5.0 (data dependent)       |
++-----------------+----------------+--------------------+-------------------+--------------------------------+
 
 GPT-3's high $\rho$ value explains why training requires extremely high-bandwidth networks (InfiniBand) and sophisticated communication overlap techniques. DLRM's variable $\rho$ reflects the data-dependent nature of embedding lookups, where communication volume depends on which items appear in each batch.
 
@@ -298,14 +304,16 @@ Mini-batch training on graphs introduces the "neighborhood explosion" problem: c
 
 The table below summarizes key communication characteristics across model types:
 
-| Model Type | Primary Collective | Sparsity | Pattern Predictability | Sensitivity |
-|-----------|-------------------|----------|----------------------|-------------|
-| LLM (data parallel) | AllReduce | Dense | High | Bandwidth |
-| LLM (tensor parallel) | AllReduce | Dense | High | Latency |
-| RecSys (DLRM) | AlltoAll | Sparse | Low | Both |
-| Vision CNN | AllReduce | Dense | High | Bandwidth |
-| GNN | Custom | Sparse | Low | Latency |
-| MoE | AlltoAll | Variable | Low | Both |
++---------------------------+------------------------+--------------+----------------------------+-----------------+
+| **Model Type**            | **Primary Collective** | **Sparsity** | **Pattern Predictability** | **Sensitivity** |
++:==========================+:=======================+:=============+:===========================+:================+
+| **LLM (data parallel)**   | AllReduce              | Dense        | High                       | Bandwidth       |
+| **LLM (tensor parallel)** | AllReduce              | Dense        | High                       | Latency         |
+| **RecSys (DLRM)**         | AlltoAll               | Sparse       | Low                        | Both            |
+| **Vision CNN**            | AllReduce              | Dense        | High                       | Bandwidth       |
+| **GNN**                   | Custom                 | Sparse       | Low                        | Latency         |
+| **MoE**                   | AlltoAll               | Variable     | Low                        | Both            |
++---------------------------+------------------------+--------------+----------------------------+-----------------+
 
 Understanding these differences is essential for system design. A communication library optimized for LLM training (large, dense, predictable AllReduce) may perform poorly for recommendation systems (sparse, unpredictable AlltoAll). Production systems must match communication implementations to workload characteristics.
 
@@ -503,11 +511,13 @@ Both phases combined: $2 \cdot M \cdot (N-1)/N$, matching the bandwidth lower bo
 
 **Worked Example (N=8)**:
 
-| Step | Partner Distance | Data Exchanged | Cumulative Transfer |
-|------|------------------|----------------|---------------------|
-| 1 | 4 | M/2 | M/2 |
-| 2 | 2 | M/4 | 3M/4 |
-| 3 | 1 | M/8 | 7M/8 |
++----------+----------------------+--------------------+-------------------------+
+| **Step** | **Partner Distance** | **Data Exchanged** | **Cumulative Transfer** |
++=========:+=====================:+===================:+========================:+
+| 1        | 4                    | M/2                | M/2                     |
+| 2        | 2                    | M/4                | 3M/4                    |
+| 3        | 1                    | M/8                | 7M/8                    |
++----------+----------------------+--------------------+-------------------------+
 
 After 3 steps, each process has transferred $(7/8) \cdot M = (N-1)/N \cdot M$, achieving the bandwidth lower bound in $\log_2 N$ steps.
 :::
@@ -584,13 +594,15 @@ Messages smaller than 25.6 GB should use tree AllReduce; larger messages should 
 
 The table below shows optimal algorithm selection for various scenarios:
 
-| Gradient Size | Network Scale | Recommended Algorithm | Rationale |
-|--------------|---------------|----------------------|-----------|
-| < 1 MB | Any | Tree | Latency-bound |
-| 1 MB - 100 MB | < 64 GPUs | Tree or Ring | Near crossover |
-| 1 MB - 100 MB | > 64 GPUs | Hierarchical | Balance both terms |
-| 100 MB - 10 GB | Any | Ring | Bandwidth-bound |
-| > 10 GB | Multi-node | Hierarchical Ring | Exploit topology |
++--------------------+-------------------+---------------------------+--------------------+
+| **Gradient Size**  | **Network Scale** | **Recommended Algorithm** | **Rationale**      |
++===================:+:==================+:==========================+:===================+
+| **&lt; 1 MB**      | Any               | Tree                      | Latency-bound      |
+| **1 MB - 100 MB**  | &lt; 64 GPUs      | Tree or Ring              | Near crossover     |
+| **1 MB - 100 MB**  | &gt; 64 GPUs      | Hierarchical              | Balance both terms |
+| **100 MB - 10 GB** | Any               | Ring                      | Bandwidth-bound    |
+| **&gt; 10 GB**     | Multi-node        | Hierarchical Ring         | Exploit topology   |
++--------------------+-------------------+---------------------------+--------------------+
 
 ### AllReduce Fault Tolerance {#sec-allreduce-fault-tolerance}
 
@@ -662,13 +674,15 @@ AllReduce for RecSys: Standard AllReduce is inappropriate because it would waste
 
 AllReduce for GNNs: Standard AllReduce handles parameter gradients, but the dominant communication cost is often neighborhood aggregation rather than gradient sync. Custom collectives for graph topology are often more important than AllReduce optimization.
 
-| Model Type | Typical Gradient Size | AllReduce Variant | Key Challenge |
-|-----------|----------------------|-------------------|---------------|
-| ResNet-50 | 100 MB | Ring | Overlap with compute |
-| BERT-Large | 1.3 GB | Ring | Moderate scale |
-| GPT-3 | 350 GB | Hierarchical Ring | Massive bandwidth |
-| DLRM | Sparse, variable | Sparse AllReduce / AlltoAll | Sparsity handling |
-| GNN | 50-500 MB | Ring + Custom | Graph communication |
++----------------+---------------------------+-----------------------------+----------------------+
+| **Model Type** | **Typical Gradient Size** | **AllReduce Variant**       | **Key Challenge**    |
++:===============+==========================:+:============================+:=====================+
+| **ResNet-50**  | 100 MB                    | Ring                        | Overlap with compute |
+| **BERT-Large** | 1.3 GB                    | Ring                        | Moderate scale       |
+| **GPT-3**      | 350 GB                    | Hierarchical Ring           | Massive bandwidth    |
+| **DLRM**       | Sparse, variable          | Sparse AllReduce / AlltoAll | Sparsity handling    |
+| **GNN**        | 50-500 MB                 | Ring + Custom               | Graph communication  |
++----------------+---------------------------+-----------------------------+----------------------+
 
 ### Worked Examples: End-to-End AllReduce Analysis {#sec-allreduce-worked-examples}
 
@@ -787,16 +801,18 @@ Use cases: embedding table exchanges, MoE expert routing, distributed matrix tra
 
 Each collective operation has characteristic time complexity based on its communication pattern. Using the $\alpha$-$\beta$ model with $N$ processes, message size $M$, latency $\alpha$, and bandwidth $\beta$:
 
-| Operation | Optimal Bandwidth Term | Optimal Latency Term | Notes |
-|-----------|----------------------|---------------------|-------|
-| Broadcast | $\frac{M}{\beta}$ | $\log_2 N \cdot \alpha$ | Tree optimal |
-| Reduce | $\frac{M}{\beta}$ | $\log_2 N \cdot \alpha$ | Tree optimal |
-| AllReduce | $2 \cdot \frac{N-1}{N} \cdot \frac{M}{\beta}$ | $\log_2 N \cdot \alpha$ | Can't achieve both |
-| Scatter | $\frac{N-1}{N} \cdot \frac{M}{\beta}$ | $\log_2 N \cdot \alpha$ | $M$ is total size |
-| Gather | $\frac{N-1}{N} \cdot \frac{M}{\beta}$ | $\log_2 N \cdot \alpha$ | $M$ is total size |
-| AllGather | $\frac{N-1}{N} \cdot \frac{M}{\beta}$ | $\log_2 N \cdot \alpha$ | $M$ is per-process size |
-| ReduceScatter | $\frac{N-1}{N} \cdot \frac{M}{\beta}$ | $\log_2 N \cdot \alpha$ | $M$ is per-process size |
-| AlltoAll | $\frac{N-1}{N} \cdot \frac{M}{\beta}$ | $(N-1) \cdot \alpha$ | Worst latency |
++-------------------+-----------------------------------------------+--------------------------+-------------------------+
+| **Operation**     | **Optimal Bandwidth Term**                    | **Optimal Latency Term** | **Notes**               |
++:==================+==============================================:+=========================:+:========================+
+| **Broadcast**     | $\frac{M}{\beta}$                             | $\log_2 N \cdot \alpha$  | Tree optimal            |
+| **Reduce**        | $\frac{M}{\beta}$                             | $\log_2 N \cdot \alpha$  | Tree optimal            |
+| **AllReduce**     | $2 \cdot \frac{N-1}{N} \cdot \frac{M}{\beta}$ | $\log_2 N \cdot \alpha$  | Can't achieve both      |
+| **Scatter**       | $\frac{N-1}{N} \cdot \frac{M}{\beta}$         | $\log_2 N \cdot \alpha$  | $M$ is total size       |
+| **Gather**        | $\frac{N-1}{N} \cdot \frac{M}{\beta}$         | $\log_2 N \cdot \alpha$  | $M$ is total size       |
+| **AllGather**     | $\frac{N-1}{N} \cdot \frac{M}{\beta}$         | $\log_2 N \cdot \alpha$  | $M$ is per-process size |
+| **ReduceScatter** | $\frac{N-1}{N} \cdot \frac{M}{\beta}$         | $\log_2 N \cdot \alpha$  | $M$ is per-process size |
+| **AlltoAll**      | $\frac{N-1}{N} \cdot \frac{M}{\beta}$         | $(N-1) \cdot \alpha$     | Worst latency           |
++-------------------+-----------------------------------------------+--------------------------+-------------------------+
 
 AlltoAll stands out with its $(N-1) \cdot \alpha$ latency term, which scales linearly with process count rather than logarithmically. This makes AlltoAll particularly expensive for large clusters with small messages, explaining why MoE models face scaling challenges at thousands of GPUs.
 
@@ -830,12 +846,14 @@ The bandwidth term equals one full AllReduce worth of data, but the latency term
 
 **Model-Type Considerations for AllGather**:
 
-| Model Type | Layer Count | Typical Layer Size | AllGather Efficiency |
-|-----------|-------------|-------------------|---------------------|
-| GPT-3 (175B) | 96 | 1.8B params | Good (large layers) |
-| BERT-Large | 24 | 14M params | Moderate |
-| ResNet-152 | 152 | 0.4M params | Poor (many small layers) |
-| DLRM | 3-5 dense | Variable | Good for dense layers |
++------------------+-----------------+------------------------+--------------------------+
+| **Model Type**   | **Layer Count** | **Typical Layer Size** | **AllGather Efficiency** |
++:=================+================:+=======================:+:=========================+
+| **GPT-3 (175B)** | 96              | 1.8B params            | Good (large layers)      |
+| **BERT-Large**   | 24              | 14M params             | Moderate                 |
+| **ResNet-152**   | 152             | 0.4M params            | Poor (many small layers) |
+| **DLRM**         | 3-5 dense       | Variable               | Good for dense layers    |
++------------------+-----------------+------------------------+--------------------------+
 
 ### ReduceScatter: Sharded Gradient Accumulation {#sec-reducescatter}
 
@@ -962,12 +980,14 @@ For models like Switch Transformer with one MoE layer every other transformer bl
 
 **Scaling Challenges for MoE**: The $O(N)$ latency of AlltoAll makes MoE communication increasingly expensive at scale:
 
-| Workers | AlltoAll Latency (5 microsecond per hop) |
-|---------|------------------------------------------|
-| 8 | 35 microseconds |
-| 64 | 315 microseconds |
-| 512 | 2.6 ms |
-| 4096 | 20.5 ms |
++-------------+----------------------------------------------+
+| **Workers** | **AlltoAll Latency (5 microsecond per hop)** |
++============:+=============================================:+
+| 8           | 35 microseconds                              |
+| 64          | 315 microseconds                             |
+| 512         | 2.6 ms                                       |
+| 4096        | 20.5 ms                                      |
++-------------+----------------------------------------------+
 
 At 4096 workers, AlltoAll latency alone exceeds typical layer computation time, making naive MoE implementations communication-bound. Several solutions address this challenge. Hierarchical AlltoAll performs intra-node communication first, then inter-node communication. Expert placement optimization minimizes cross-node communication by strategically locating experts. Capacity factors limit the number of tokens routed to each expert. Local expert replication creates copies of popular experts to reduce communication distance.
 
@@ -1004,25 +1024,29 @@ With 50 GB/s bandwidth, transfer time is approximately 1 ms per stage transition
 
 Choosing the appropriate collective operation depends on the distributed training strategy and model architecture. The table below provides guidance:
 
-| Training Strategy | Primary Collective | Secondary | Use Case |
-|------------------|-------------------|-----------|----------|
-| Data Parallelism | AllReduce | None | Gradient sync |
-| FSDP / ZeRO-3 | ReduceScatter, AllGather | None | Sharded gradients, parameter gathering |
-| Tensor Parallelism | AllReduce, AllGather | None | Partial result combination |
-| Pipeline Parallelism | Point-to-Point | None | Activation/gradient transfer |
-| Embedding Parallelism | AlltoAll | AllReduce | Embedding exchange, dense gradient sync |
-| Mixture of Experts | AlltoAll | AllReduce | Token routing, dense gradient sync |
++---------------------------+--------------------------+---------------+-----------------------------------------+
+| **Training Strategy**     | **Primary Collective**   | **Secondary** | **Use Case**                            |
++:==========================+:=========================+:==============+:========================================+
+| **Data Parallelism**      | AllReduce                | None          | Gradient sync                           |
+| **FSDP / ZeRO-3**         | ReduceScatter, AllGather | None          | Sharded gradients, parameter gathering  |
+| **Tensor Parallelism**    | AllReduce, AllGather     | None          | Partial result combination              |
+| **Pipeline Parallelism**  | Point-to-Point           | None          | Activation/gradient transfer            |
+| **Embedding Parallelism** | AlltoAll                 | AllReduce     | Embedding exchange, dense gradient sync |
+| **Mixture of Experts**    | AlltoAll                 | AllReduce     | Token routing, dense gradient sync      |
++---------------------------+--------------------------+---------------+-----------------------------------------+
 
 **Model-Type to Collective Mapping**:
 
-| Model Type | Architecture | Primary Communication Pattern |
-|-----------|--------------|------------------------------|
-| LLM (GPT, LLaMA) | Dense transformer | AllReduce (DP), AllGather (FSDP) |
-| Vision (ResNet, ViT) | CNN or ViT | AllReduce |
-| Recommendation (DLRM) | Embedding + MLP | AlltoAll (embeddings), AllReduce (MLP) |
-| MoE (Switch, Mixtral) | Sparse MoE | AlltoAll (routing), AllReduce (shared layers) |
-| GNN | Message passing | Custom neighbor exchange, AllReduce |
-| Speech (Whisper) | Transformer | AllReduce |
++---------------------------+-------------------+-----------------------------------------------+
+| **Model Type**            | **Architecture**  | **Primary Communication Pattern**             |
++:==========================+:==================+:==============================================+
+| **LLM (GPT, LLaMA)**      | Dense transformer | AllReduce (DP), AllGather (FSDP)              |
+| **Vision (ResNet, ViT)**  | CNN or ViT        | AllReduce                                     |
+| **Recommendation (DLRM)** | Embedding + MLP   | AlltoAll (embeddings), AllReduce (MLP)        |
+| **MoE (Switch, Mixtral)** | Sparse MoE        | AlltoAll (routing), AllReduce (shared layers) |
+| **GNN**                   | Message passing   | Custom neighbor exchange, AllReduce           |
+| **Speech (Whisper)**      | Transformer       | AllReduce                                     |
++---------------------------+-------------------+-----------------------------------------------+
 
 The decision process for selecting the appropriate collective follows a structured evaluation. First, determine if communication is for gradient synchronization. If all workers need the full gradient, use AllReduce. If workers only need gradient shards, use ReduceScatter. Second, check if communication is for parameter gathering. If workers need to reconstruct sharded parameters, use AllGather. Third, evaluate if communication is for data exchange. If each worker needs different data from each other worker, use AlltoAll. If one worker distributes to all, use Broadcast or Scatter. Fourth, identify if communication occurs between adjacent pipeline stages, in which case use point-to-point Send/Recv operations.
 
@@ -1051,12 +1075,14 @@ This inequality is more likely to hold when:
 
 **Model-Type Sensitivity to Compression**:
 
-| Model Type | Gradient Structure | Compression Benefit | Notes |
-|-----------|-------------------|---------------------|-------|
-| Vision CNN | Dense, smooth | High | Gradients have spatial structure |
-| LLM | Dense, variable | Moderate | Attention gradients vary widely |
-| RecSys | Sparse by nature | Low | Already sparse, compression adds overhead |
-| GNN | Sparse, irregular | Low | Sparsity patterns unpredictable |
++----------------+------------------------+-------------------------+-------------------------------------------+
+| **Model Type** | **Gradient Structure** | **Compression Benefit** | **Notes**                                 |
++:===============+:=======================+:========================+:==========================================+
+| **Vision CNN** | Dense, smooth          | High                    | Gradients have spatial structure          |
+| **LLM**        | Dense, variable        | Moderate                | Attention gradients vary widely           |
+| **RecSys**     | Sparse by nature       | Low                     | Already sparse, compression adds overhead |
+| **GNN**        | Sparse, irregular      | Low                     | Sparsity patterns unpredictable           |
++----------------+------------------------+-------------------------+-------------------------------------------+
 
 ### Quantization: Reducing Precision {#sec-quantization}
 
@@ -1228,13 +1254,15 @@ Recommendation models have naturally sparse embedding gradients, while dense MLP
 
 GNN models generate irregular gradient patterns through message-passing. Graph structure determines gradient sparsity, and compression effectiveness varies with graph properties. These models generally achieve lower compression benefit than dense models.
 
-| Model Type | Best Compression Method | Typical Ratio | Accuracy Impact |
-|-----------|------------------------|---------------|-----------------|
-| ResNet-50 | Top-K + Error Feedback | 100-1000x | < 1% |
-| BERT | Block Quantization | 4-8x | < 0.5% |
-| GPT-3 | FP8/INT8 + Sparsification | 8-32x | Variable |
-| DLRM embeddings | Sparse encoding | Native | None |
-| GNN | Quantization | 2-4x | < 1% |
++---------------------+-----------------------------+-------------------+---------------------+
+| **Model Type**      | **Best Compression Method** | **Typical Ratio** | **Accuracy Impact** |
++:====================+:============================+==================:+:====================+
+| **ResNet-50**       | Top-K + Error Feedback      | 100-1000x         | &lt; 1%             |
+| **BERT**            | Block Quantization          | 4-8x              | &lt; 0.5%           |
+| **GPT-3**           | FP8/INT8 + Sparsification   | 8-32x             | Variable            |
+| **DLRM embeddings** | Sparse encoding             | Native            | None                |
+| **GNN**             | Quantization                | 2-4x              | &lt; 1%             |
++---------------------+-----------------------------+-------------------+---------------------+
 
 ### Compression-Communication Trade-offs {#sec-compression-tradeoffs}
 
@@ -1502,28 +1530,34 @@ Optimal collective performance requires mapping collective algorithms to physica
 
 **Fat-Tree Mapping**:
 
-| Collective | Optimal Mapping | Bandwidth Utilization |
-|-----------|-----------------|----------------------|
-| AllReduce | Hierarchical (pod-aware ring) | 85-95% |
-| AllGather | Ring within pods, tree across | 80-90% |
-| AlltoAll | Distributed across core | 60-80% |
-| Broadcast | Tree rooted at source | 90%+ |
++----------------+-------------------------------+---------------------------+
+| **Collective** | **Optimal Mapping**           | **Bandwidth Utilization** |
++:===============+:==============================+==========================:+
+| **AllReduce**  | Hierarchical (pod-aware ring) | 85-95%                    |
+| **AllGather**  | Ring within pods, tree across | 80-90%                    |
+| **AlltoAll**   | Distributed across core       | 60-80%                    |
+| **Broadcast**  | Tree rooted at source         | 90%+                      |
++----------------+-------------------------------+---------------------------+
 
 **Rail-Optimized Mapping**:
 
-| Collective | Optimal Mapping | Notes |
-|-----------|-----------------|-------|
-| TP AllReduce | Single rail | Dedicated bandwidth |
-| DP AllReduce | Hierarchical across rails | NVLink intra-node |
-| AlltoAll | Cross-rail, higher latency | Not optimal topology |
++------------------+----------------------------+----------------------+
+| **Collective**   | **Optimal Mapping**        | **Notes**            |
++:=================+:===========================+:=====================+
+| **TP AllReduce** | Single rail                | Dedicated bandwidth  |
+| **DP AllReduce** | Hierarchical across rails  | NVLink intra-node    |
+| **AlltoAll**     | Cross-rail, higher latency | Not optimal topology |
++------------------+----------------------------+----------------------+
 
 **Torus Mapping**:
 
-| Collective | Optimal Mapping | Notes |
-|-----------|-----------------|-------|
-| AllReduce | Dimension-ordered rings | Matches topology |
-| AlltoAll | Dimension-exchange | Moderate efficiency |
-| Pipeline P2P | Neighbor nodes | Minimal hops |
++------------------+-------------------------+---------------------+
+| **Collective**   | **Optimal Mapping**     | **Notes**           |
++:=================+:========================+:====================+
+| **AllReduce**    | Dimension-ordered rings | Matches topology    |
+| **AlltoAll**     | Dimension-exchange      | Moderate efficiency |
+| **Pipeline P2P** | Neighbor nodes          | Minimal hops        |
++------------------+-------------------------+---------------------+
 
 ### Topology-Aware Algorithm Selection {#sec-topology-aware}
 
@@ -1563,13 +1597,15 @@ MoE models with expert and data parallelism create dynamic communication. Expert
 
 Pipeline parallelism has simpler topology requirements. Inter-stage communication uses point-to-point operations in a sequential pattern. Any topology with low-latency neighbor links works well. The key metrics are diameter for pipeline depth and neighbor bandwidth.
 
-| Training Strategy | Critical Collective | Optimal Topology | Topology Metric |
-|------------------|--------------------|--------------------|-----------------|
-| LLM (TP+DP) | AllReduce | Rail-optimized | Rail bandwidth |
-| RecSys | AlltoAll | Fat-tree | Bisection BW |
-| MoE | AlltoAll | Fat-tree | Bisection BW |
-| Pipeline | Point-to-Point | Any, low diameter | Neighbor latency |
-| Vision (DP only) | AllReduce | Any, balanced | Aggregate BW |
++-----------------------+-------------------------+----------------------+---------------------+
+| **Training Strategy** | **Critical Collective** | **Optimal Topology** | **Topology Metric** |
++:======================+:========================+:=====================+:====================+
+| **LLM (TP+DP)**       | AllReduce               | Rail-optimized       | Rail bandwidth      |
+| **RecSys**            | AlltoAll                | Fat-tree             | Bisection BW        |
+| **MoE**               | AlltoAll                | Fat-tree             | Bisection BW        |
+| **Pipeline**          | Point-to-Point          | Any, low diameter    | Neighbor latency    |
+| **Vision (DP only)**  | AllReduce               | Any, balanced        | Aggregate BW        |
++-----------------------+-------------------------+----------------------+---------------------+
 
 ### Cross-Datacenter Communication {#sec-cross-dc}
 
@@ -1826,13 +1862,15 @@ hvd.init()  # Uses MPI for initialization
 
 **MPI vs NCCL**:
 
-| Aspect | MPI | NCCL |
-|--------|-----|------|
-| Target | CPU, general HPC | GPU, ML training |
-| GPU support | Via CUDA-aware MPI | Native |
-| Performance | Good for CPU | Excellent for GPU |
-| Features | Complete MPI standard | ML-focused subset |
-| Ecosystem | HPC tools, debuggers | DL frameworks |
++-----------------+-----------------------+-------------------+
+| **Aspect**      | **MPI**               | **NCCL**          |
++:================+:======================+:==================+
+| **Target**      | CPU, general HPC      | GPU, ML training  |
+| **GPU support** | Via CUDA-aware MPI    | Native            |
+| **Performance** | Good for CPU          | Excellent for GPU |
+| **Features**    | Complete MPI standard | ML-focused subset |
+| **Ecosystem**   | HPC tools, debuggers  | DL frameworks     |
++-----------------+-----------------------+-------------------+
 
 ### In-Network Computing {#sec-in-network}
 
@@ -1983,12 +2021,14 @@ dist.all_reduce(activations, group=tp_group)
 
 **Process Group Patterns for Different Models**:
 
-| Model Type | Primary Group | Secondary Group | Communication Pattern |
-|-----------|--------------|-----------------|----------------------|
-| LLM (TP+DP) | Tensor parallel | Data parallel | AllReduce (TP), AllReduce (DP) |
-| RecSys | Embedding shard | Data parallel | AlltoAll, AllReduce |
-| MoE | Expert group | Data parallel | AlltoAll, AllReduce |
-| Vision | Data parallel | None | AllReduce only |
++-----------------+-------------------+---------------------+--------------------------------+
+| **Model Type**  | **Primary Group** | **Secondary Group** | **Communication Pattern**      |
++:================+:==================+:====================+:===============================+
+| **LLM (TP+DP)** | Tensor parallel   | Data parallel       | AllReduce (TP), AllReduce (DP) |
+| **RecSys**      | Embedding shard   | Data parallel       | AlltoAll, AllReduce            |
+| **MoE**         | Expert group      | Data parallel       | AlltoAll, AllReduce            |
+| **Vision**      | Data parallel     | None                | AllReduce only                 |
++-----------------+-------------------+---------------------+--------------------------------+
 
 ### Debugging Distributed Communication {#sec-debugging-comm}
 
@@ -2027,13 +2067,15 @@ def test_communication():
 
 **Common Issues and Solutions**:
 
-| Symptom | Likely Cause | Solution |
-|---------|-------------|----------|
-| Hang at init | Network configuration | Check IB ports, firewall |
-| Hang mid-training | Deadlock | Verify collective order matches |
-| Slow performance | Wrong algorithm | Check NCCL_DEBUG, tune parameters |
-| Data mismatch | Race condition | Synchronize before reduction |
-| Timeout | Straggler | Profile per-rank timing |
++-----------------------+-----------------------+-----------------------------------+
+| **Symptom**           | **Likely Cause**      | **Solution**                      |
++:======================+:======================+:==================================+
+| **Hang at init**      | Network configuration | Check IB ports, firewall          |
+| **Hang mid-training** | Deadlock              | Verify collective order matches   |
+| **Slow performance**  | Wrong algorithm       | Check NCCL_DEBUG, tune parameters |
+| **Data mismatch**     | Race condition        | Synchronize before reduction      |
+| **Timeout**           | Straggler             | Profile per-rank timing           |
++-----------------------+-----------------------+-----------------------------------+
 
 **Profiling Communication**:
 
@@ -2245,13 +2287,15 @@ This mapping minimizes cross-dimension communication, which has higher latency.
 
 **Key Architectural Differences from GPUs**:
 
-| Aspect | TPU Pod | GPU Cluster |
-|--------|---------|-------------|
-| Topology | 3D torus | Fat-tree / rail |
-| Interconnect | ICI (custom) | InfiniBand + NVLink |
-| AllReduce | Dimension-ordered | Hierarchical ring |
-| Collective library | XLA collective ops | NCCL |
-| Flexibility | Less (fixed topology) | More (arbitrary placement) |
++------------------------+-----------------------+----------------------------+
+| **Aspect**             | **TPU Pod**           | **GPU Cluster**            |
++:=======================+:======================+:===========================+
+| **Topology**           | 3D torus              | Fat-tree / rail            |
+| **Interconnect**       | ICI (custom)          | InfiniBand + NVLink        |
+| **AllReduce**          | Dimension-ordered     | Hierarchical ring          |
+| **Collective library** | XLA collective ops    | NCCL                       |
+| **Flexibility**        | Less (fixed topology) | More (arbitrary placement) |
++------------------------+-----------------------+----------------------------+
 
 ### Case Study: Mixture-of-Experts Communication {#sec-moe-case-study}
 
@@ -2305,12 +2349,14 @@ With 2x imbalance on popular experts:
 
 **Scaling Challenges**:
 
-| Expert Count | AlltoAll Latency Term | Practical Limit |
-|-------------|----------------------|-----------------|
-| 64 | 32 microseconds | Easy |
-| 256 | 128 microseconds | Moderate |
-| 1024 | 512 microseconds | Challenging |
-| 4096 | 2048 microseconds | Requires hierarchical |
++------------------+---------------------------+-----------------------+
+| **Expert Count** | **AlltoAll Latency Term** | **Practical Limit**   |
++=================:+==========================:+:======================+
+| 64               | 32 microseconds           | Easy                  |
+| 256              | 128 microseconds          | Moderate              |
+| 1024             | 512 microseconds          | Challenging           |
+| 4096             | 2048 microseconds         | Requires hierarchical |
++------------------+---------------------------+-----------------------+
 
 **Mitigation Strategies**:
 
@@ -2385,12 +2431,14 @@ Examining these production systems reveals consistent patterns:
 
 **1. Match Collectives to Workload**
 
-| Workload | Primary Pattern | Secondary |
-|----------|-----------------|-----------|
-| LLM training | AllReduce (TP, DP) | P2P (pipeline) |
-| Recommendation | AlltoAll (embeddings) | AllReduce (dense) |
-| MoE | AlltoAll (routing) | AllReduce (shared) |
-| GNN | Custom (neighbors) | AllReduce (grads) |
++--------------------+-----------------------+--------------------+
+| **Workload**       | **Primary Pattern**   | **Secondary**      |
++:===================+:======================+:===================+
+| **LLM training**   | AllReduce (TP, DP)    | P2P (pipeline)     |
+| **Recommendation** | AlltoAll (embeddings) | AllReduce (dense)  |
+| **MoE**            | AlltoAll (routing)    | AllReduce (shared) |
+| **GNN**            | Custom (neighbors)    | AllReduce (grads)  |
++--------------------+-----------------------+--------------------+
 
 **2. Exploit Hierarchy**
 
@@ -2480,24 +2528,28 @@ Communication is the binding constraint that determines whether distributed trai
 
 ### Algorithm Selection Guide
 
-| Scenario | Message Size | Best Algorithm | Key Optimization |
-|----------|-------------|----------------|------------------|
-| Small model, few GPUs | < 100 MB | Tree AllReduce | Minimize latency |
-| Large model, few GPUs | > 1 GB | Ring AllReduce | Maximize bandwidth |
-| Large model, many GPUs | > 10 GB | Hierarchical Ring | Exploit topology |
-| Embeddings (RecSys) | Variable | AlltoAll | Handle sparsity |
-| FSDP/ZeRO | Per-layer | ReduceScatter + AllGather | Overlap with compute |
-| MoE routing | Variable | Hierarchical AlltoAll | Manage $O(N)$ latency |
++----------------------------+------------------+---------------------------+-----------------------+
+| **Scenario**               | **Message Size** | **Best Algorithm**        | **Key Optimization**  |
++:===========================+:=================+:==========================+:======================+
+| **Small model, few GPUs**  | &lt; 100 MB      | Tree AllReduce            | Minimize latency      |
+| **Large model, few GPUs**  | &gt; 1 GB        | Ring AllReduce            | Maximize bandwidth    |
+| **Large model, many GPUs** | &gt; 10 GB       | Hierarchical Ring         | Exploit topology      |
+| **Embeddings (RecSys)**    | Variable         | AlltoAll                  | Handle sparsity       |
+| **FSDP/ZeRO**              | Per-layer        | ReduceScatter + AllGather | Overlap with compute  |
+| **MoE routing**            | Variable         | Hierarchical AlltoAll     | Manage $O(N)$ latency |
++----------------------------+------------------+---------------------------+-----------------------+
 
 ### Model-Type Communication Summary
 
-| Model Type | Primary Challenge | Primary Collective | Optimization Focus |
-|-----------|------------------|-------------------|-------------------|
-| LLM | Gradient size | AllReduce | Bandwidth, hierarchy |
-| RecSys | Embedding exchange | AlltoAll | Sparsity, caching |
-| Vision | Moderate gradients | AllReduce | Overlap, compression |
-| MoE | Dynamic routing | AlltoAll | Load balance, latency |
-| GNN | Graph structure | Custom | Partitioning, sampling |
++----------------+-----------------------+------------------------+------------------------+
+| **Model Type** | **Primary Challenge** | **Primary Collective** | **Optimization Focus** |
++:===============+:======================+:=======================+:=======================+
+| **LLM**        | Gradient size         | AllReduce              | Bandwidth, hierarchy   |
+| **RecSys**     | Embedding exchange    | AlltoAll               | Sparsity, caching      |
+| **Vision**     | Moderate gradients    | AllReduce              | Overlap, compression   |
+| **MoE**        | Dynamic routing       | AlltoAll               | Load balance, latency  |
+| **GNN**        | Graph structure       | Custom                 | Partitioning, sampling |
++----------------+-----------------------+------------------------+------------------------+
 
 ### Equations to Remember
 
