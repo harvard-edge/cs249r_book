@@ -47,7 +47,7 @@ Parts I through III built a complete foundation for creating optimized ML models
 
 Serving introduces a fundamental inversion that transforms everything established in prior chapters. Training optimizes for samples processed per hour over days of computation; serving must deliver predictions within milliseconds under unpredictable load. The benchmarking techniques from @sec-benchmarking-ai measured throughput and accuracy under controlled conditions; production serving faces traffic patterns that no benchmark could anticipate. The quantization methods from @sec-model-optimizations reduced model size; serving must validate that those optimizations preserve accuracy under real traffic distributions. This inversion from throughput to latency, from controlled to unpredictable, from offline to real time, defines the serving challenge.
 
-This inversion of priorities has profound consequences. The benchmarking techniques from @sec-benchmarking-ai now target percentile latencies rather than aggregate throughput. The quantization methods from @sec-model-optimizations must be validated not just for accuracy preservation but for calibration with production traffic. The hardware acceleration from @sec-ai-acceleration must be configured for single-request responsiveness rather than batch throughput. Understanding these connections enables practitioners to apply earlier optimizations correctly in the serving context.
+These consequences manifest concretely in how we measure and optimize. The benchmarking techniques from @sec-benchmarking-ai now target percentile latencies rather than aggregate throughput. The quantization methods from @sec-model-optimizations must be validated not just for accuracy preservation but for calibration with production traffic, since quantization error that averages out over training batches may concentrate in specific request types. The hardware acceleration from @sec-ai-acceleration must be configured for single-request responsiveness rather than batch throughput, often leaving compute capacity idle to ensure low latency. Understanding these connections enables practitioners to apply earlier optimizations correctly in the serving context.
 
 The serving systems examined here focus on single-machine deployment, establishing the foundational principles that govern all inference systems. These foundations prepare practitioners for understanding when and why scaling to multiple machines becomes necessary.
 
@@ -276,7 +276,7 @@ $$W_{M/M/c} \approx \frac{W_{M/M/1}}{c} \quad \text{(for low utilization)}$$
 
 : **Multi-Server Queuing Benefits**: Horizontal scaling improves tail latency even when adding capacity, because the queuing dynamics fundamentally improve with multiple servers. {#tbl-multi-server-queuing}
 
-This explains why horizontal scaling improves tail latency even when adding capacity: the queuing dynamics fundamentally improve with multiple servers.
+This multi-server advantage becomes even more pronounced at higher percentiles: the probability of all servers being simultaneously slow drops exponentially with server count, explaining why large-scale systems provision many smaller servers rather than fewer larger ones.
 
 **When M/M/1 Analysis Applies**: Despite multi-server reality, M/M/1 analysis remains useful for understanding fundamental queuing dynamics, performing worst-case analysis when load concentrates on one server, and conducting capacity planning for individual server sizing.
 
@@ -716,6 +716,8 @@ These LLM-specific optimizations build directly on the foundations this chapter 
 
 :::
 
+While continuous batching represents the frontier for LLM serving, not all deployment scenarios benefit from batching at all. The sophistication of modern batching techniques should not obscure a fundamental question: when does batching hurt rather than help?
+
 ### When Not to Batch {#sec-serving-no-batch}
 
 Some scenarios require single-request processing. Ultra-low latency requirements where p99 latency must stay under 10ms make any batching delay unacceptable. Highly variable request sizes where inputs vary dramatically in size cause batching to create padding overhead that wastes compute. Memory constraints where models already consume most GPU memory mean batch activations may cause out-of-memory errors.
@@ -834,7 +836,7 @@ Mobile serving optimization focuses on preprocessing efficiency and power manage
 
 ## Postprocessing {#sec-serving-postprocessing}
 
-Batching determines how inputs flow through inference, but the journey does not end when the model produces output tensors. Model outputs are arrays of floating-point numbers. Users need predictions: labels, probabilities, generated text, structured data. Postprocessing bridges this gap, transforming raw model outputs into responses that applications can consume. While often overlooked in system design, postprocessing significantly impacts both latency and the usefulness of predictions.
+Batching optimizes how requests traverse the inference phase, but even optimally batched inference produces only raw tensors. These floating-point arrays carry no inherent meaning to applications or users. The final phase of the serving pipeline, postprocessing, transforms these tensors into actionable predictions: a 0.95 probability becomes a confident "dog" label, a sequence of token IDs becomes readable text, or a bounding box tensor becomes a highlighted region in an image. While often overlooked in system design, postprocessing significantly impacts both latency and the usefulness of predictions, and it can determine whether raw model capability translates into practical value.
 
 ### From Logits to Predictions {#sec-serving-logits}
 
@@ -887,7 +889,7 @@ Streaming responses for generative models add complexity. Rather than waiting fo
 
 ## Inference Runtime Selection {#sec-serving-runtimes}
 
-The preprocessing, inference, and postprocessing pipeline we have examined runs on an inference runtime that significantly impacts latency, throughput, and operational complexity. Choosing appropriately requires understanding the tradeoffs between framework-native serving, general-purpose optimization, and specialized inference engines. This decision often determines whether a model can meet its latency SLOs.
+The complete preprocessing, inference, and postprocessing pipeline we have examined must execute somewhere, and that execution environment significantly impacts whether the latency budgets we established earlier are achievable. The inference runtime, the software layer that orchestrates tensor operations and manages hardware resources, can vary by an order of magnitude in performance for identical models. Choosing appropriately requires understanding the tradeoffs between framework-native serving, general-purpose optimization, and specialized inference engines.
 
 ### Framework-Native Serving {#sec-serving-framework-native}
 
@@ -970,6 +972,8 @@ Post-training quantization requires a calibration dataset to determine optimal s
 **Dynamic Precision Selection**
 
 Advanced serving systems select precision per request based on runtime conditions. If the system is ahead of latency SLO, it uses higher precision for better accuracy. For low-confidence INT8 results, it recomputes at FP16. Different customer tiers may receive different precision levels. This pattern enables adaptive quality-latency tradeoffs while maximizing throughput during normal operation.
+
+The precision decision has direct infrastructure consequences: INT8 inference achieves roughly 3x higher throughput than FP32, meaning a workload requiring 30 GPUs at FP32 needs only 10 at INT8. This connection between model-level optimization and infrastructure economics is why precision selection cannot be treated as purely a model concern, and why the next section examines cost and capacity planning in detail.
 
 ## Cost and Capacity Planning {#sec-serving-cost}
 
