@@ -85,6 +85,8 @@ class MLSysBookCLI:
         vol_table.add_column("Description", style="white", width=30)
         vol_table.add_column("Example", style="dim", width=30)
 
+        vol_table.add_row("html --vol1", "Build Volume I website", "./binder html --vol1")
+        vol_table.add_row("html --vol2", "Build Volume II website", "./binder html --vol2")
         vol_table.add_row("pdf --vol1", "Build Volume I as PDF", "./binder pdf --vol1")
         vol_table.add_row("pdf --vol2", "Build Volume II as PDF", "./binder pdf --vol2")
         vol_table.add_row("epub --vol1", "Build Volume I as EPUB", "./binder epub --vol1")
@@ -175,13 +177,21 @@ class MLSysBookCLI:
 
         if len(args) < 1:
             # No target specified - show error
-            console.print("[red]❌ Error: Please specify chapters or use --all flag[/red]")
-            console.print("[yellow]💡 Usage: ./binder html <chapter> or ./binder html --all[/yellow]")
+            console.print("[red]❌ Error: Please specify chapters, --vol1, --vol2, or --all[/red]")
+            console.print("[yellow]💡 Usage: ./binder html <chapter> | --vol1 | --vol2 | --all[/yellow]")
             return False
         elif args[0] == "--all":
             # Build all chapters using HTML config
             console.print("[green]🌐 Building HTML with ALL chapters...[/green]")
             return self.build_command.build_html_only()
+        elif args[0] == "--vol1":
+            # Build Volume I only
+            console.print("[magenta]🌐 Building Volume I (HTML)...[/magenta]")
+            return self.build_command.build_volume("vol1", "html")
+        elif args[0] == "--vol2":
+            # Build Volume II only
+            console.print("[magenta]🌐 Building Volume II (HTML)...[/magenta]")
+            return self.build_command.build_volume("vol2", "html")
         else:
             # Chapters specified
             chapters = args[0]

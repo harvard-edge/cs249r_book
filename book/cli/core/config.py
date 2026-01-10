@@ -34,17 +34,27 @@ class ConfigManager:
             # We're in quarto directory
             self.book_dir = self.root_dir
 
-        # Configuration file paths
+        # Configuration file paths (combined configs)
         self.html_config = self.book_dir / "config" / "_quarto-html.yml"
         self.pdf_config = self.book_dir / "config" / "_quarto-pdf.yml"
         self.epub_config = self.book_dir / "config" / "_quarto-epub.yml"
+
+        # Volume-specific configuration file paths
+        self.html_vol1_config = self.book_dir / "config" / "_quarto-html-vol1.yml"
+        self.html_vol2_config = self.book_dir / "config" / "_quarto-html-vol2.yml"
+        self.pdf_vol1_config = self.book_dir / "config" / "_quarto-pdf-vol1.yml"
+        self.pdf_vol2_config = self.book_dir / "config" / "_quarto-pdf-vol2.yml"
+        self.epub_vol1_config = self.book_dir / "config" / "_quarto-epub-vol1.yml"
+        self.epub_vol2_config = self.book_dir / "config" / "_quarto-epub-vol2.yml"
+
         self.active_config = self.book_dir / "_quarto.yml"
 
-    def get_config_file(self, format_type: str) -> Path:
-        """Get the configuration file for a specific format.
+    def get_config_file(self, format_type: str, volume: Optional[str] = None) -> Path:
+        """Get the configuration file for a specific format and optional volume.
 
         Args:
             format_type: Format type ('html', 'pdf', 'epub')
+            volume: Optional volume ('vol1', 'vol2') for volume-specific builds
 
         Returns:
             Path to the configuration file
@@ -52,6 +62,25 @@ class ConfigManager:
         Raises:
             ValueError: If format_type is not supported
         """
+        # Volume-specific config map
+        if volume:
+            volume_config_map = {
+                ("html", "vol1"): self.html_vol1_config,
+                ("html", "vol2"): self.html_vol2_config,
+                ("pdf", "vol1"): self.pdf_vol1_config,
+                ("pdf", "vol2"): self.pdf_vol2_config,
+                ("epub", "vol1"): self.epub_vol1_config,
+                ("epub", "vol2"): self.epub_vol2_config,
+            }
+            key = (format_type, volume)
+            if key in volume_config_map:
+                config_file = volume_config_map[key]
+                if config_file.exists():
+                    return config_file
+                else:
+                    console.print(f"[yellow]⚠️ Volume config not found: {config_file}, falling back to combined config[/yellow]")
+
+        # Combined config map (fallback)
         config_map = {
             "html": self.html_config,
             "pdf": self.pdf_config,
@@ -63,11 +92,12 @@ class ConfigManager:
 
         return config_map[format_type]
 
-    def setup_symlink(self, format_type: str) -> str:
-        """Setup _quarto.yml symlink for the specified format.
+    def setup_symlink(self, format_type: str, volume: Optional[str] = None) -> str:
+        """Setup _quarto.yml symlink for the specified format and optional volume.
 
         Args:
             format_type: Format type ('html', 'pdf', 'epub')
+            volume: Optional volume ('vol1', 'vol2') for volume-specific builds
 
         Returns:
             Name of the config file that was linked
@@ -75,7 +105,7 @@ class ConfigManager:
         Raises:
             ValueError: If format_type is not supported
         """
-        config_file = self.get_config_file(format_type)
+        config_file = self.get_config_file(format_type, volume)
 
         if not config_file.exists():
             raise FileNotFoundError(f"Config file not found: {config_file}")
@@ -90,22 +120,24 @@ class ConfigManager:
 
         return config_file.name
 
-    def get_output_dir(self, format_type: str) -> Path:
+    def get_output_dir(self, format_type: str, volume: Optional[str] = None) -> Path:
         """Get the output directory from Quarto configuration.
 
         Args:
             format_type: Format type ('html', 'pdf', 'epub')
+            volume: Optional volume ('vol1', 'vol2') for volume-specific builds
 
         Returns:
             Path to the output directory
         """
         try:
-            config_file = self.get_config_file(format_type)
+            config_file = self.get_config_file(format_type, volume)
 
             if not config_file.exists():
                 console.print(f"[yellow]⚠️  Config file not found: {config_file}[/yellow]")
                 # Fallback to default
-                return self.book_dir / f"_build/{format_type}"
+                suffix = f"-{volume}" if volume else ""
+                return self.book_dir / f"_build/{format_type}{suffix}"
 
             # Read and parse the YAML config
             with open(config_file, 'r', encoding='utf-8') as f:
@@ -117,17 +149,20 @@ class ConfigManager:
                 return self.book_dir / output_path
             else:
                 # Fallback to default
-                return self.book_dir / f"_build/{format_type}"
+                suffix = f"-{volume}" if volume else ""
+                return self.book_dir / f"_build/{format_type}{suffix}"
 
         except Exception as e:
             console.print(f"[yellow]⚠️  Error reading config: {e}[/yellow]")
-            return self.book_dir / f"_build/{format_type}"
+            suffix = f"-{volume}" if volume else ""
+            return self.book_dir / f"_build/{format_type}{suffix}"
 
-    def read_config(self, format_type: str) -> Dict[str, Any]:
+    def read_config(self, format_type: str, volume: Optional[str] = None) -> Dict[str, Any]:
         """Read and parse a configuration file.
 
         Args:
             format_type: Format type ('html', 'pdf', 'epub')
+            volume: Optional volume ('vol1', 'vol2') for volume-specific builds
 
         Returns:
             Parsed configuration as dictionary
@@ -136,7 +171,7 @@ class ConfigManager:
             FileNotFoundError: If config file doesn't exist
             yaml.YAMLError: If config file is invalid YAML
         """
-        config_file = self.get_config_file(format_type)
+        config_file = self.get_config_file(format_type, volume)
 
         if not config_file.exists():
             raise FileNotFoundError(f"Config file not found: {config_file}")

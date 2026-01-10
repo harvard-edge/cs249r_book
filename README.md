@@ -17,11 +17,12 @@
 <p align="center">
 
   <!-- Reader Navigation -->
-  **[📖 Read Online](https://mlsysbook.ai)** •
-  **[Tiny🔥Torch](https://mlsysbook.ai/tinytorch)** •
-  **[📄 Download PDF](https://mlsysbook.ai/assets/downloads/Machine-Learning-Systems.pdf)** •
-  **[📓 Download EPUB](https://mlsysbook.ai/epub)** •
-  **[🌐 Explore Ecosystem](https://mlsysbook.org)**
+  **[📖 Read Online](https://mlsysbook.ai/book/)** •
+  **[📘 Volume I](https://mlsysbook.ai/vol1/)** •
+  **[📙 Volume II](https://mlsysbook.ai/vol2/)** •
+  **[Tiny🔥Torch](https://mlsysbook.ai/tinytorch/)** •
+  **[📄 PDF](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf)** •
+  **[🌐 Ecosystem](https://mlsysbook.org)**
 
 </p>
 
@@ -55,11 +56,13 @@ It includes the textbook source, TinyTorch, hardware kits, and upcoming co-labs 
 
 Choose a path based on your goal.
 
-**READ** Start with the [textbook](https://mlsysbook.ai). Try [Chapter 1](https://www.mlsysbook.ai/contents/core/introduction/introduction.html) and the [Benchmarking chapter](https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html).
+**READ** Start with the [textbook](https://mlsysbook.ai/book/):
+- [📘 Volume I: Foundations](https://mlsysbook.ai/vol1/) covers ML basics, training, optimization, and operations
+- [📙 Volume II: Advanced](https://mlsysbook.ai/vol2/) covers distributed systems, production deployment, and responsible AI
 
 **BUILD** Start TinyTorch with the [getting started guide](https://mlsysbook.ai/tinytorch/getting-started.html). Begin with Module 01 and work up from CNNs to transformers and the MLPerf benchmarks.
 
-**DEPLOY** Pick a [hardware kit](https://mlsysbook.ai/kits) and run the labs on Arduino, Raspberry Pi, and other edge devices.
+**DEPLOY** Pick a [hardware kit](https://mlsysbook.ai/kits/) and run the labs on Arduino, Raspberry Pi, and other edge devices.
 
 **CONNECT** Say hello in [Discussions](https://github.com/harvard-edge/cs249r_book/discussions). We will do our best to reply.
 
@@ -120,10 +123,12 @@ The learning stack below shows how the textbook connects to hands on work and de
 
 | | Component | What You Do | Link |
 |--|-----------|-------------|------|
-| **READ** | [📖 Textbook](https://mlsysbook.ai) | Understand ML systems concepts | [book/](book/README.md) |
+| **READ** | [📖 Textbook](https://mlsysbook.ai/book/) | Understand ML systems concepts | [book/](book/README.md) |
+| | [📘 Volume I](https://mlsysbook.ai/vol1/) | Foundations: Build, Optimize, Operate | |
+| | [📙 Volume II](https://mlsysbook.ai/vol2/) | Advanced: Scale, Distribute, Govern | |
 | **EXPLORE** | 🔮 Software Co-Labs | Run controlled experiments on latency, memory, energy, cost | *Coming 2026* |
-| **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch) | Understand frameworks by implementing them | [tinytorch/](tinytorch/README.md) |
-| **DEPLOY** | [🔧 Hardware Kits](https://mlsysbook.ai/kits) | Engineer under real constraints: memory, power, timing, safety | [kits/](kits/README.md) |
+| **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch/) | Understand frameworks by implementing them | [tinytorch/](tinytorch/README.md) |
+| **DEPLOY** | [🔧 Hardware Kits](https://mlsysbook.ai/kits/) | Engineer under real constraints: memory, power, timing, safety | [kits/](kits/README.md) |
 | **PROVE** | 🏆 AI Olympics | Compete and benchmark across all tracks | *Coming 2026* |
 
 **What each path teaches:**
@@ -153,13 +158,15 @@ This textbook teaches you to think at the intersection of machine learning and s
 
 This textbook is organized into **two volumes** following the Hennessy & Patterson pedagogical model:
 
-| Volume | Theme | Focus |
-|--------|-------|-------|
-| **Volume I** | Build, Optimize, Operate | Single-machine ML systems, foundational principles |
-| **Volume II** | Scale, Distribute, Govern | Distributed systems at production scale |
+| Volume | Theme | Focus | Link |
+|--------|-------|-------|------|
+| **Volume I** | Build, Optimize, Operate | Single-machine ML systems, foundational principles | [mlsysbook.ai/vol1](https://mlsysbook.ai/vol1/) |
+| **Volume II** | Scale, Distribute, Govern | Distributed systems at production scale | [mlsysbook.ai/vol2](https://mlsysbook.ai/vol2/) |
 
 **Volume I** teaches you to *understand* ML systems (like "Computer Organization and Design").
 **Volume II** teaches you to *build* ML systems at scale (like "Computer Architecture").
+
+The [full textbook](https://mlsysbook.ai/book/) combines both volumes for comprehensive coverage.
 
 #### Volume I: Build, Optimize, Operate
 
@@ -247,9 +254,11 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 | Resource | Description |
 |---|---|
-| [📖 **Textbook**](https://mlsysbook.ai) | Interactive online textbook |
-| [🔥 **TinyTorch**](https://mlsysbook.ai/tinytorch) | Build ML frameworks from scratch |
-| [🔧 **Hardware Kits**](https://mlsysbook.ai/kits) | Deploy to Arduino, Raspberry Pi, edge devices |
+| [📖 **Full Textbook**](https://mlsysbook.ai/book/) | Complete interactive online textbook (both volumes) |
+| [📘 **Volume I**](https://mlsysbook.ai/vol1/) | Foundations: Build, Optimize, Operate |
+| [📙 **Volume II**](https://mlsysbook.ai/vol2/) | Advanced: Scale, Distribute, Govern |
+| [🔥 **TinyTorch**](https://mlsysbook.ai/tinytorch/) | Build ML frameworks from scratch |
+| [🔧 **Hardware Kits**](https://mlsysbook.ai/kits/) | Deploy to Arduino, Raspberry Pi, edge devices |
 | [🌐 **Ecosystem**](https://mlsysbook.org) | Resources, workshops, and community |
 | [💬 **Discussions**](https://github.com/harvard-edge/cs249r_book/discussions) | Questions and ideas |
 
@@ -463,7 +472,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 <div align="center">
 
-**[⭐ Star us on GitHub](https://github.com/harvard-edge/cs249r_book#support-this-work) • [✉️ Subscribe](https://buttondown.email/mlsysbook) • [💬 Join discussions](https://github.com/harvard-edge/cs249r_book/discussions) • [🌐 Visit mlsysbook.ai](https://mlsysbook.ai)**
+**[⭐ Star us on GitHub](https://github.com/harvard-edge/cs249r_book#support-this-work) • [✉️ Subscribe](https://buttondown.email/mlsysbook) • [💬 Join discussions](https://github.com/harvard-edge/cs249r_book/discussions) • [🌐 Visit mlsysbook.ai](https://mlsysbook.ai/)**
 
 *Built with dedication by the MLSysBook community.*
 

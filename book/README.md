@@ -3,11 +3,11 @@
 *Principles and Practices of Engineering Artificially Intelligent Systems*
 
 [![Build](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&label=Build&logo=githubactions)](https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml)
-[![Website](https://img.shields.io/badge/Read-mlsysbook.ai-blue)](https://mlsysbook.ai)
-[![PDF](https://img.shields.io/badge/Download-PDF-red)](https://mlsysbook.ai/pdf)
-[![EPUB](https://img.shields.io/badge/Download-EPUB-green)](https://mlsysbook.ai/epub)
+[![Website](https://img.shields.io/badge/Read-mlsysbook.ai-blue)](https://mlsysbook.ai/book/)
+[![PDF](https://img.shields.io/badge/Download-PDF-red)](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf)
+[![EPUB](https://img.shields.io/badge/Download-EPUB-green)](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.epub)
 
-**[Read Online](https://mlsysbook.ai)** | **[PDF](https://mlsysbook.ai/pdf)** | **[EPUB](https://mlsysbook.ai/epub)**
+**[Read Online](https://mlsysbook.ai/book/)** | **[Volume I](https://mlsysbook.ai/vol1/)** | **[Volume II](https://mlsysbook.ai/vol2/)** | **[PDF](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf)**
 
 ---
 
@@ -86,11 +86,11 @@ This textbook is organized into **two volumes** following the Hennessy & Patters
 
 ```bash
 # Read online
-open https://mlsysbook.ai
+open https://mlsysbook.ai/book/
 
 # Download formats
-curl -O https://mlsysbook.ai/pdf
-curl -O https://mlsysbook.ai/epub
+curl -O https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf
+curl -O https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.epub
 ```
 
 ### For Contributors
@@ -143,7 +143,7 @@ book/
 
 | Audience | Resources |
 |----------|-----------|
-| **Readers** | [Online Book](https://mlsysbook.ai) ・ [PDF](https://mlsysbook.ai/pdf) ・ [EPUB](https://mlsysbook.ai/epub) |
+| **Readers** | [Online Book](https://mlsysbook.ai/book/) ・ [Volume I](https://mlsysbook.ai/vol1/) ・ [Volume II](https://mlsysbook.ai/vol2/) ・ [PDF](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf) |
 | **Contributors** | [CONTRIBUTING.md](docs/CONTRIBUTING.md) ・ [BUILD.md](docs/BUILD.md) |
 | **Developers** | [DEVELOPMENT.md](docs/DEVELOPMENT.md) ・ [BINDER.md](docs/BINDER.md) |
 
@@ -169,7 +169,7 @@ We welcome contributions! See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for g
 | **[Main README](../README.md)** | Project overview and ecosystem |
 | **[TinyTorch](../tinytorch/)** | Build ML frameworks from scratch |
 | **[Hardware Kits](../kits/)** | Deploy to Arduino, Raspberry Pi, edge devices |
-| **[Website](https://mlsysbook.ai)** | Read the book online |
+| **[Website](https://mlsysbook.ai/book/)** | Read the book online |
 
 ---
 

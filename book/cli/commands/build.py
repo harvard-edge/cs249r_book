@@ -205,11 +205,15 @@ class BuildCommand:
                 pass
 
     def build_volume(self, volume: str, format_type: str = "pdf") -> bool:
-        """Build all chapters in a specific volume.
+        """Build a specific volume using its dedicated configuration.
+
+        This uses the volume-specific config files (e.g., _quarto-pdf-vol1.yml)
+        which are pre-configured with all the correct chapters and settings
+        for that volume.
 
         Args:
             volume: Volume to build ('vol1' or 'vol2')
-            format_type: Format to build ('pdf', 'epub')
+            format_type: Format to build ('html', 'pdf', 'epub')
 
         Returns:
             True if build succeeded, False otherwise
@@ -217,20 +221,62 @@ class BuildCommand:
         volume_name = "Volume I" if volume == "vol1" else "Volume II"
         console.print(f"[magenta]📖 Building {volume_name} ({format_type.upper()})...[/magenta]")
 
-        # Get all chapters in this volume
-        chapter_files = self.chapter_discovery.get_volume_chapters(volume)
+        # Check if volume-specific config exists
+        config_file = self.config_manager.get_config_file(format_type, volume)
+        if not config_file.exists():
+            console.print(f"[yellow]⚠️ Volume-specific config not found: {config_file}[/yellow]")
+            console.print(f"[yellow]Falling back to chapter-based build...[/yellow]")
+            # Fallback to old behavior
+            chapter_files = self.chapter_discovery.get_volume_chapters(volume)
+            if not chapter_files:
+                console.print(f"[red]No chapters found in {volume}[/red]")
+                return False
+            console.print(f"[dim]Found {len(chapter_files)} chapters in {volume}[/dim]")
+            return self.build_chapters(
+                [f"{volume}/{ch.stem}" for ch in chapter_files],
+                format_type
+            )
 
-        if not chapter_files:
-            console.print(f"[red]No chapters found in {volume}[/red]")
-            return False
+        console.print(f"[dim]Using config: {config_file.name}[/dim]")
 
-        console.print(f"[dim]Found {len(chapter_files)} chapters in {volume}[/dim]")
+        # Create build directory
+        output_dir = self.config_manager.get_output_dir(format_type, volume)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Build using the same approach as build_chapters
-        return self.build_chapters(
-            [f"{volume}/{ch.stem}" for ch in chapter_files],
-            format_type
+        # Setup config symlink to volume-specific config
+        config_name = self.config_manager.setup_symlink(format_type, volume)
+        console.print(f"[dim]🔗 Linked _quarto.yml → {config_name}[/dim]")
+
+        # Determine render target
+        render_targets = {
+            "html": "html",
+            "pdf": "titlepage-pdf",
+            "epub": "epub"
+        }
+
+        if format_type not in render_targets:
+            raise ValueError(f"Unknown format type: {format_type}")
+
+        render_to = render_targets[format_type]
+        render_cmd = ["quarto", "render", f"--to={render_to}"]
+
+        # Show the command being executed
+        cmd_str = " ".join(render_cmd)
+        console.print(f"[blue]💻 Command: {cmd_str}[/blue]")
+
+        # Execute build
+        success = self._run_command(
+            render_cmd,
+            cwd=self.config_manager.book_dir,
+            description=f"Building {volume_name} ({format_type.upper()})"
         )
+
+        if success:
+            console.print(f"[green]✅ {volume_name} {format_type.upper()} build completed: {output_dir}/[/green]")
+        else:
+            console.print(f"[red]❌ {volume_name} {format_type.upper()} build failed[/red]")
+
+        return success
 
     def _build_both_formats(self) -> bool:
         """Build both HTML and PDF formats sequentially."""
