@@ -44,7 +44,9 @@ Machine learning systems require unprecedented access to personal data, institut
 
 ## Security and Privacy in ML Systems {#sec-security-privacy-security-privacy-ml-systems-0b1e}
 
-Distributed, adaptive machine learning systems present fundamentally different threat landscapes than centralized training architectures. Contemporary machine learning systems operate across heterogeneous computational environments spanning edge devices, federated networks, and hybrid cloud deployments (@sec-edge-intelligence). This architectural evolution enables new capabilities in adaptive intelligence while introducing attack vectors and privacy vulnerabilities that traditional cybersecurity frameworks cannot adequately address.
+The distributed training systems examined in @sec-distributed-training and edge deployments explored in @sec-edge-intelligence introduce attack surfaces absent in single-machine systems. Gradient synchronization protocols create channels for information leakage and manipulation. Federated aggregation exposes model updates to interception and inference attacks. Multi-tenant serving infrastructure presents opportunities for model extraction and side-channel attacks. Each architectural decision that enables scale also creates vulnerabilities requiring systematic defense.
+
+Contemporary machine learning systems operate across heterogeneous computational environments spanning edge devices, federated networks, and hybrid cloud deployments. This architectural evolution enables new capabilities in adaptive intelligence while introducing attack vectors and privacy vulnerabilities that traditional cybersecurity frameworks cannot adequately address.
 
 Machine learning systems exhibit different security characteristics compared to conventional software applications. Traditional software systems process data transiently and deterministically, whereas machine learning systems extract and encode patterns from training data into persistent model parameters. This learned knowledge representation creates unique vulnerabilities where sensitive information can be inadvertently memorized and later exposed through model outputs or systematic interrogation. Healthcare systems may leak patient information through model outputs, while proprietary models can be reverse-engineered through strategic query patterns, threatening both individual privacy and organizational intellectual property.
 
@@ -1815,7 +1817,7 @@ anchor=north]{\textbf{Data Privacy \& Governance}};
 
 ### Privacy-Preserving Data Techniques {#sec-security-privacy-privacypreserving-data-techniques-64f8}
 
-Our defense stack proceeds bottom-up, from foundational hardware trust anchors through system-level monitoring to model-layer protections and finally data-layer privacy. The subsequent sections on hardware security foundations will establish the TEEs, secure boot, HSMs, and PUFs that anchor system trust. With those foundations in place, we now examine the highest layer: data privacy techniques that protect sensitive information at the point where it enters the ML pipeline. This organizational logic ensures that each defensive layer builds on the trust guarantees established by the layer below it.
+Our defense stack spans multiple architectural layers: data-layer privacy mechanisms, model-layer protections, runtime monitoring, and foundational hardware trust anchors. We begin with data privacy techniques that protect sensitive information at the point where it enters the ML pipeline, then examine model security mechanisms, and conclude with the hardware foundations (TEEs, secure boot, HSMs, PUFs) that anchor system trust. This organization proceeds from the most visible privacy concerns to the foundational infrastructure, recognizing that effective security requires coordinated deployment across all layers.
 
 Protecting the privacy of individuals whose data fuels machine learning systems is a foundational requirement for trustworthy AI. Unlike traditional systems where data is often masked or anonymized before processing, ML workflows typically rely on access to raw, high-fidelity data to train effective models. This tension between utility and privacy has motivated a diverse set of techniques aimed at minimizing data exposure while preserving learning performance.
 
@@ -1982,7 +1984,11 @@ The practical implication is that organizations must manage a **global privacy b
 
 #### Federated Learning {#sec-security-privacy-federated-learning-3834}
 
-While differential privacy adds mathematical guarantees to data processing, federated learning (FL) offers a complementary approach that reduces privacy risks by restructuring the learning process itself. This technique directly addresses the privacy challenges of on-device learning explored in @sec-edge-intelligence, where models must adapt to local data patterns without exposing sensitive user information. Rather than aggregating raw data at a central location, FL distributes the training across a set of client devices, each holding local data [@mcmahan2017communicationefficient]. This distributed training paradigm, which builds on the adaptive deployment concepts from on-device learning, requires careful coordination of security measures across multiple participants and infrastructure providers. Clients compute model updates locally and share only parameter deltas with a central server for aggregation:
+While differential privacy adds mathematical guarantees to data processing, federated learning (FL) offers a complementary approach that reduces privacy risks by restructuring the learning process itself. The FL protocols and weighted aggregation mechanisms we examined in @sec-edge-intelligence provide structural privacy protection by keeping data localized on client devices. However, as noted there, FL alone does not guarantee privacy. The gradient updates that clients transmit can leak sensitive information, making FL a necessary but insufficient component of a comprehensive privacy strategy.
+
+**Gradient Inversion Risks**
+
+**Gradient inversion attacks** (such as Deep Leakage from Gradients) demonstrate that an adversary with access to a client's raw update can reconstruct the original training data (e.g., images or text) with high fidelity [@zhu2019deep; @nasr2019comprehensive]. The gradient vector encodes information about the data that produced it, creating a channel for information leakage even when raw data never leaves the device.
 
 ::: {.callout-note title="Figure Placeholder: Federated Privacy" collapse="true"}
 ```{.tikz}
@@ -1991,33 +1997,11 @@ While differential privacy adds mathematical guarantees to data processing, fede
 ```
 **Secure Aggregation in Federated Learning**. Visualization of the secure update protocol. Devices compute local updates $\Delta\theta$. Before uploading, devices add pairwise masking noise such that the sum of noise across all devices is zero. The server receives only the masked updates, aggregates them (canceling the noise), and recovers the true global update without ever seeing an individual devices raw contribution.
 :::
-$$
-\theta_{t+1} \leftarrow \sum_{k=1}^{K} \frac{n_k}{n} \cdot \theta_{t}^{(k)}
-$$
 
-Here, $\theta_{t}^{(k)}$ represents the model update from client $k$, $n_k$ the number of samples held by that client, and $n$ the total number of samples across all clients. This weighted aggregation allows the global model to learn from distributed data without direct access to it.
-
-**Gradient Inversion Risks**
-
-However, federated learning does not guarantee privacy by default. **Gradient inversion attacks** (such as Deep Leakage from Gradients) demonstrate that an adversary with access to a client's raw update can reconstruct the original training data (e.g., images or text) with high fidelity. The gradient vector contains information about the data that produced it.
-
-This vulnerability drives the need for **Secure Aggregation** protocols [@bonawitz2017practical] and local differential privacy. Secure aggregation ensures the server only sees the *sum* of updates, never an individual update, mathematically preventing inversion of any single user's data.
-
-FL reduces the exposure of raw data, but still leaks information through gradients [@zhu2019deep; @nasr2019comprehensive], motivating the use of DP, secure aggregation [@bonawitz2017practical], and hardware-based protections in federated settings.
+This vulnerability drives the need for **Secure Aggregation** protocols [@bonawitz2017practical] and local differential privacy. Secure aggregation ensures the server only sees the *sum* of updates, never an individual update, mathematically preventing inversion of any single user's data. Interestingly, the gradient compression techniques examined in @sec-communication for communication efficiency can also affect privacy properties: compressed gradients may leak less information than full-precision updates, though the interaction between compression and privacy guarantees requires careful analysis. Production systems typically combine FL with DP and secure aggregation to achieve formal privacy guarantees beyond structural protection alone.
 
 ::: {.callout-note title="Real-World Example: Google Gboard Federated Learning" icon=false}
-Google's Gboard keyboard uses federated learning to improve next-word prediction across 1+ billion Android devices without collecting typing data. The system works as follows:
-
-1. Local Training: Each device trains a small update to the language model using the user's recent typing (typically 100-1000 words)
-2. Secure Aggregation: Devices upload encrypted model updates (not raw text) to Google's servers
-3. Global Update: The server aggregates thousands of updates, computing an improved global model
-4. Distribution: The updated model is pushed back to devices in the next app update
-
-**Privacy Properties:** Individual typing data never leaves the device. Even Google's servers cannot decrypt individual updates, seeing only the aggregated result. The system combines FL with differential privacy $(\varepsilon\approx 6)$ and secure aggregation protocols.
-
-**Performance:** FL achieves 92% of the accuracy of centralized training while eliminating raw data collection. Communication efficiency optimizations (gradient compression, selective participation) reduce bandwidth to ~100 KB per device per day.
-
-**Trade-offs:** FL requires 10-100x more communication rounds than centralized training and introduces 2-5% accuracy degradation. However, for privacy-sensitive applications, these costs are acceptable compared to the alternative of not training at all.
+Google's Gboard keyboard, examined in @sec-edge-intelligence as a federated learning deployment, demonstrates how security mechanisms layer atop the FL protocol. From a privacy perspective, the system combines three defense mechanisms: FL keeps raw typing data on-device; differential privacy ($\varepsilon\approx 6$) bounds information leakage from gradient updates; and secure aggregation ensures Google's servers see only the sum of thousands of encrypted updates, never individual contributions. This combination achieves formal privacy guarantees while maintaining 92% of centralized training accuracy with approximately 100 KB bandwidth per device per day.
 :::
 
 To address scenarios requiring computation on encrypted data, homomorphic encryption (HE)[^fn-he-breakthrough] and secure multiparty computation (SMPC) allow models to perform inference or training over encrypted inputs [@gentry2009fully; @yao1982protocols]. The computational overhead of homomorphic operations often requires efficiency optimization techniques, including model compression (quantization reduces precision requirements for encrypted operations), architectural optimization (depthwise separable convolutions minimize encrypted multiplications), and hardware acceleration (specialized cryptographic accelerators), to maintain practical performance.

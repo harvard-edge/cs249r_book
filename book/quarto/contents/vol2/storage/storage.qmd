@@ -324,7 +324,7 @@ This 201 GB/s requirement exceeds even large parallel file systems. Recommendati
 
 ### Consistency Models for ML Storage {#sec-storage-consistency}
 
-Distributed storage systems face fundamental tradeoffs between consistency (all readers see the same data), availability (requests succeed even during failures), and partition tolerance (the system operates despite network failures). The CAP theorem[^fn-cap-theorem] [@brewer2000towards; @gilbert2002brewer] formalizes that distributed systems can provide at most two of these three guarantees simultaneously.
+The CAP theorem, which @sec-vol2-introduction introduced in the context of distributed system tradeoffs, directly shapes storage architecture decisions. As established there, during network partitions a distributed system must choose between consistency (all readers see the same data) and availability (requests succeed even during failures). The formal statement[^fn-cap-theorem] [@brewer2000towards; @gilbert2002brewer] is that distributed systems can provide at most two of these three guarantees: consistency, availability, and partition tolerance.
 
 [^fn-cap-theorem]: **CAP Theorem**: Proven by Eric Brewer in 2000 and formalized by Gilbert and Lynch in 2002, the CAP theorem states that during a network partition, a distributed system must choose between consistency (all nodes see the same data) and availability (every request receives a response). Since partitions are inevitable in distributed systems, the practical choice is between CP (consistent but may reject requests during partitions) and AP (available but may return stale data). For ML storage, training data and checkpoints favor CP (correctness over availability), while feature stores often accept AP (fresh-enough features are better than failed requests).
 
@@ -849,15 +849,15 @@ For most training runs, asynchronous checkpointing reduces overhead to near zero
 
 ### Distributed Checkpointing for Sharded Models {#sec-distributed-checkpointing-storage}
 
-When models are sharded across multiple devices using tensor parallelism or pipeline parallelism, each device holds only a portion of the model. Checkpointing must coordinate across all devices to produce a consistent, complete checkpoint.
+When models are sharded across multiple devices using parallelism strategies (examined in @sec-distributed-training), each device holds only a portion of the model state. Checkpointing must coordinate across all devices to produce a consistent, complete checkpoint at the same logical training point.
 
-**Tensor parallel checkpointing** is relatively straightforward: each tensor parallel rank saves its shard. Recovery loads shards to the same ranks. The challenge is ensuring all ranks checkpoint at the same logical point in training.
+**Coordination challenge.** The storage system must ensure all devices write their shards simultaneously, capturing a consistent snapshot of distributed model state. If devices checkpoint at different training steps, recovery would load inconsistent weights, corrupting the model. Barrier synchronization across all devices precedes checkpoint writes, ensuring global consistency.
 
-**Pipeline parallel checkpointing** is more complex because different pipeline stages may be processing different microbatches simultaneously. The checkpoint must capture a consistent cut across the pipeline: all in-flight activations and gradients must be either included or excluded.
+**Bandwidth challenge.** With 128 devices each writing simultaneously, the storage system must sustain 128x single-device write rates during checkpoint windows. For terabyte-scale checkpoints, this aggregate bandwidth requirement often exceeds what a single parallel file system can provide, necessitating tiered storage architectures that use local NVMe for immediate writes with background migration to durable distributed storage.
 
-**Data parallel checkpointing** can save just one replica's state (since all replicas are identical) or save all replicas for verification. Saving one replica reduces storage by the data parallelism degree.
+**Data parallel optimization.** When training uses data parallelism (where multiple devices hold identical model replicas), checkpointing can save just one replica's state. Since all replicas are identical, saving one replica reduces storage by the data parallelism degree. This optimization is transparent to the storage system but significantly reduces aggregate checkpoint volume.
 
-**Hybrid parallel checkpointing** combines these considerations. Consider a 3D parallel configuration with 8x data parallel, 4x tensor parallel, and 4x pipeline parallel across 128 GPUs. The checkpoint strategy performs barrier synchronization across all 128 GPUs, has each pipeline stage save its portion of model and optimizer state, only saves from rank 0 of each data parallel group (others are identical), resulting in a total checkpoint of 1/8 of full model size distributed across 16 storage targets.
+**Hybrid parallel checkpointing** combines coordination across multiple parallelism dimensions. For the hybrid approaches developed in @sec-distributed-training, storage systems must handle coordinated writes from many devices with optimizations like saving only one data-parallel replica (since replicas are identical) to reduce aggregate checkpoint volume.
 
 **Checkpoint aggregation** reduces storage overhead by having ranks aggregate their state before writing. Rather than 128 small writes, a few ranks collect and write large aggregated files. This improves storage efficiency (fewer small files) at the cost of additional memory and communication.
 
@@ -1719,7 +1719,7 @@ Model registries provide versioning, lineage tracking, and governance for model 
 * Checkpoint storage strategy must balance recovery granularity against overhead: frequent checkpoints minimize lost work but consume I/O bandwidth, requiring tiered approaches with local NVMe for speed and distributed storage for durability
 :::
 
-The storage architectures developed in this chapter enable the distributed training systems examined in @sec-distributed-training. Understanding checkpoint storage is prerequisite to understanding how distributed training maintains progress across failures. Training data pipelines must integrate with parallelism strategies: data parallel training requires different data sharding than model parallel training. Feature stores connect to the inference systems covered in @sec-inference-at-scale, where serving latency budgets constrain feature lookup time. Model registries interface with deployment pipelines and the operational concerns addressed in @sec-ops-scale.
+The storage architectures developed in this chapter enable the distributed training systems examined in @sec-distributed-training. Understanding checkpoint storage is prerequisite to understanding how distributed training maintains progress across failures. The Young-Daly checkpoint interval formula established here will inform the fault tolerance strategies developed in @sec-fault-tolerance, where we shift focus from storage optimization to recovery reliability. Training data pipelines must integrate with parallelism strategies: data parallel training requires different data sharding than model parallel training. Feature stores connect to the inference systems covered in @sec-inference-at-scale, where serving latency budgets constrain feature lookup time. Model registries interface with deployment pipelines and the operational concerns addressed in @sec-ops-scale.
 
 ```{=latex}
 \part{key:vol2_distributed_training}

@@ -1268,7 +1268,7 @@ For each strategy, the key parameters to tune are summarized in @tbl-batching-pa
 
 Batching strategies from the previous section address how to efficiently process requests on a given model replica. But what constitutes a "replica" when models exceed single-GPU memory? And how can we reduce latency when even batch-size-one inference is too slow? Model sharding answers both questions by distributing inference across multiple devices.
 
-This moves us from request-level optimization to replica-level concerns in the serving hierarchy. Unlike training sharding where throughput is the primary concern, inference sharding must carefully balance parallelization benefits against communication overhead within strict latency budgets.
+The parallelism strategies established for distributed training in @sec-distributed-training, including tensor parallelism, pipeline parallelism, and their communication patterns, apply to inference with an important inversion: training optimizes throughput over hours while inference must minimize per-request latency within milliseconds. This changes how we configure sharding strategies. Unlike training sharding where throughput is the primary concern, inference sharding must carefully balance parallelization benefits against communication overhead within strict latency budgets. This moves us from request-level optimization to replica-level concerns in the serving hierarchy.
 
 This section examines four sharding strategies, each suited to different model architectures and deployment requirements: tensor parallelism for attention-heavy models, pipeline parallelism for sequential architectures, expert parallelism for mixture-of-experts models, and embedding sharding for recommendation systems.
 
@@ -1303,17 +1303,13 @@ where $P$ is the parallelism degree and $T_{communication}$ is the synchronizati
 
 ### Tensor Parallelism {#sec-inference-tensor-parallelism}
 
-Tensor parallelism[^fn-megatron] [@shoeybi2019megatron] distributes individual layers across multiple devices, enabling parallel computation within each layer. For transformer models, the primary target is the attention mechanism and feed-forward layers, which contain the majority of computation.
-
-[^fn-megatron]: **Megatron-LM**: NVIDIA's framework for training and serving large transformer models, introduced in 2019. Megatron pioneered the column-row partitioning scheme for tensor parallelism that minimizes communication: splitting the first linear layer by columns and the second by rows requires only one AllReduce per transformer block rather than two.
+Tensor parallelism [@shoeybi2019megatron] distributes individual layers across multiple devices, enabling parallel computation within each layer. The column-row partitioning scheme introduced for training in @sec-distributed-training applies here: splitting the first linear layer by columns and the second by rows requires only one AllReduce per transformer block. For transformer models, the primary target is the attention mechanism and feed-forward layers, which contain the majority of computation.
 
 **Attention layer parallelism**: The multi-head attention computation naturally partitions across attention heads. For a model with $H$ attention heads distributed across $P$ devices, each device computes $H/P$ heads:
 
 $$\text{Attention}_i = \text{softmax}\left(\frac{Q_i K_i^T}{\sqrt{d_k}}\right) V_i \text{ for heads } i \in \{1, ..., H/P\}$$
 
-After computing local attention, an all-reduce[^fn-allreduce] operation combines results across devices.
-
-[^fn-allreduce]: **AllReduce**: A collective communication primitive that combines values from all processes and distributes the result back to all processes. For tensor parallelism, AllReduce sums partial attention outputs across devices, adding communication overhead proportional to the activation size divided by the interconnect bandwidth.
+After computing local attention, an AllReduce operation (covered in @sec-communication) combines results across devices, adding communication overhead proportional to the activation size divided by the interconnect bandwidth.
 
 **Feed-forward layer parallelism**: The feed-forward layer (typically two linear transformations with activation) partitions along the hidden dimension. For the first linear layer, columns are distributed; for the second, rows are distributed. This column-row partitioning requires only one all-reduce per feed-forward block.
 
@@ -2123,9 +2119,9 @@ This section examines the memory management techniques that enable efficient LLM
 
 ### KV Cache Fundamentals {#sec-inference-kv-cache-fundamentals}
 
-During autoregressive generation, each transformer layer computes attention over all previous tokens. Without caching, generating token $t$ would require recomputing attention keys and values for tokens $1$ through $t-1$, an $O(t^2)$ cost per generated token.
+As established in transformer architecture fundamentals, autoregressive generation without caching requires $O(t^2)$ computation per token because each transformer layer must recompute attention keys and values for all previous tokens. The KV cache stores these computed key and value vectors, reducing generation to $O(t)$ per token. For serving at scale, this memory savings creates a critical management challenge since KV cache memory can exceed model weights for long contexts.
 
-The KV cache stores these computed key and value vectors, reducing generation to $O(t)$ per token. However, this memory savings comes at the cost of storing past context as calculated by @eq-kv-cache-size:
+The cache size grows with context as calculated by @eq-kv-cache-size:
 
 $$\text{KV cache size} = 2 \times L \times H \times S \times B \times P$$ {#eq-kv-cache-size}
 

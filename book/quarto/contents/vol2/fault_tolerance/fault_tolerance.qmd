@@ -91,7 +91,7 @@ _DALL·E 3 Prompt: A dramatic visualization of fault tolerance mechanisms protec
 
 _Why must machine learning systems continue delivering predictions reliably despite inevitable hardware failures, network outages, and unexpected operational disruptions?_
 
-Machine learning systems deployed in production environments operate in a world of uncertainty: infrastructure fails, networks disconnect, data becomes corrupted, and computational resources become unavailable without warning. Unlike experimental systems that can simply restart when encountering failures, production ML systems serve millions of users and support critical decision-making, where reliability determines whether organizations can trust these systems with consequential outcomes. Traditional software failures manifest visibly through errors and exceptions, but ML system degradation under fault conditions often remains silent and undetected until catastrophic loss of service occurs. A recommendation system silently serving stale predictions erodes user trust over weeks before anyone notices. A healthcare diagnostic system becoming unavailable during peak hours jeopardizes patient care. An autonomous vehicle losing sensor redundancy becomes dangerous without warning. Mastering fault tolerance transforms ML systems from fragile prototypes dependent on perfect conditions into resilient production systems capable of sustained operation despite the failures that inevitably occur at scale.
+The distributed training infrastructure developed throughout Part II enables training across thousands of devices, but machine learning systems deployed in production environments operate in a world of uncertainty: infrastructure fails, networks disconnect, data becomes corrupted, and computational resources become unavailable without warning. Unlike experimental systems that can simply restart when encountering failures, production ML systems serve millions of users and support critical decision-making, where reliability determines whether organizations can trust these systems with consequential outcomes. Traditional software failures manifest visibly through errors and exceptions, but ML system degradation under fault conditions often remains silent and undetected until catastrophic loss of service occurs. A recommendation system silently serving stale predictions erodes user trust over weeks before anyone notices. A healthcare diagnostic system becoming unavailable during peak hours jeopardizes patient care. An autonomous vehicle losing sensor redundancy becomes dangerous without warning. Mastering fault tolerance transforms ML systems from fragile prototypes dependent on perfect conditions into resilient production systems capable of sustained operation despite the failures that inevitably occur at scale.
 
 ::: {.callout-tip title="Learning Objectives"}
 
@@ -387,41 +387,19 @@ where $x$ represents investment in fault tolerance mechanisms. In practice, this
 
 ## Training Fault Tolerance {#sec-training-fault-tolerance}
 
-The failure analysis in @sec-failure-analysis-scale established that large-scale training systems will experience failures frequently. This section develops the mechanisms that enable training to continue despite these failures. The fundamental approach, checkpoint and restart, captures training state periodically so that failures lose only the work since the last checkpoint rather than all work since training began. However, the apparent simplicity of "save state, restore on failure" conceals substantial engineering complexity when applied to distributed systems training models with hundreds of billions of parameters.
+The failure analysis in @sec-failure-analysis-scale established that large-scale training systems will experience failures frequently. The checkpoint storage infrastructure developed in @sec-storage provides the foundation for training fault tolerance. This section develops the recovery mechanisms that use those storage capabilities to enable training to continue despite failures. The fundamental approach, checkpoint and restart, captures training state periodically so that failures lose only the work since the last checkpoint rather than all work since training began. However, the apparent simplicity of "save state, restore on failure" conceals substantial engineering complexity when applied to distributed systems training models with hundreds of billions of parameters.
 
 ### Checkpoint and Restart Fundamentals {#sec-checkpoint-fundamentals}
 
-Checkpointing captures sufficient state to resume training from a recorded point. The minimal checkpoint must include:
-
-- **Model parameters**: All learnable weights and biases
-- **Optimizer state**: Momentum buffers, adaptive learning rate accumulators (Adam's $m$ and $v$)
-- **Training progress**: Current epoch, batch index, global step count
-- **Random state**: RNG seeds for reproducible data shuffling and augmentation
-- **Learning rate schedule state**: Current position in learning rate schedule
-
-For large models, optimizer state often exceeds model size. Adam[^fn-adam-state] maintains two state tensors per parameter, so optimizer state equals twice the model parameter count. The two state tensors are $m$ and $v$. For a 175B parameter model at FP32 precision:
+Checkpointing captures sufficient state to resume training from a recorded point: model parameters, optimizer state, training progress indicators, random state for reproducibility, and learning rate schedule position. The checkpoint sizes established in @sec-storage, reaching 2.1 TB for 175B parameter models with Adam optimizer state,[^fn-adam-state] create both storage demands and recovery time constraints that fault tolerance mechanisms must address.
 
 [^fn-adam-state]: **Adam Optimizer State**: Adam [@kingma2014adam] tracks first-moment ($m$, exponentially weighted gradient average) and second-moment ($v$, exponentially weighted squared gradient average) estimates for each parameter. This enables adaptive learning rates per parameter but triples memory requirements compared to vanilla SGD. For a 175B parameter model, this means 1.4 TB of optimizer state alone, which dominates checkpoint size and recovery time.
 
-$$
-\text{Model size} = 175 \times 10^9 \times 4 \text{ bytes} = 700 \text{ GB}
-$$
+#### Checkpoint Interval from Failure Analysis {#sec-optimal-checkpoint-interval}
 
-$$
-\text{Optimizer state (Adam)} = 2 \times 700 \text{ GB} = 1,400 \text{ GB}
-$$
+Checkpointing involves a fundamental trade-off: frequent checkpoints minimize lost work when failures occur but consume time and resources, while infrequent checkpoints minimize overhead but risk losing substantial work to failures.
 
-$$
-\text{Total checkpoint size} = 700 + 1,400 = 2,100 \text{ GB}
-$$
-
-With mixed-precision training storing model parameters and optimizer state at different precisions, checkpoint sizes can be reduced but remain substantial.
-
-#### The Optimal Checkpoint Interval {#sec-optimal-checkpoint-interval}
-
-Checkpointing involves a fundamental trade-off. Frequent checkpoints minimize lost work when failures occur but consume time and resources for checkpoint operations. Infrequent checkpoints minimize checkpoint overhead but risk losing substantial work to failures.
-
-The Young-Daly formula [@young1974first; @daly2006higher] provides the optimal checkpoint interval that minimizes expected total time including both checkpointing overhead and failure recovery:
+The Young-Daly formula developed in @sec-storage provides the optimal checkpoint interval: $T_{opt} = \sqrt{2 \times T_{save} \times MTBF}$. The failure analysis in this chapter allows us to calculate the MTBF term this formula requires.
 
 ::: {.callout-note title="Figure Placeholder: Checkpoint Timeline" collapse="true"}
 ```{.tikz}
@@ -431,11 +409,13 @@ The Young-Daly formula [@young1974first; @daly2006higher] provides the optimal c
 **Optimal Checkpoint Interval**. Visualizing the trade-off between checkpoint overhead and recovery cost. Too frequent checkpoints (left) waste time on I/O. Too infrequent checkpoints (right) waste time recomputing lost work after failures. The Young-Daly optimal point (center) minimizes total wasted time, providing a quantitative basis for configuration.
 :::
 
-$$
-T_{opt} = \sqrt{2 \times T_{save} \times MTBF}
-$$ {#eq-young-daly}
+For our 10,000 GPU cluster with calculated system MTBF of 3.69 hours (from @sec-cluster-mtbf-calculation) and checkpoint time of 21 seconds (from 2.1 TB checkpoint at 100 GB/s), the optimal interval is:
 
-where $T_{save}$ is the time to write a checkpoint and $MTBF$ is the mean time between failures.
+$$
+T_{opt} = \sqrt{2 \times 21s \times 3.69hr \times 3600s/hr} \approx 14.5 \text{ minutes}
+$$ {#eq-young-daly-applied}
+
+This result demonstrates why failure analysis matters: without knowing the system MTBF, we cannot set checkpoint intervals rationally. With this interval, checkpoint overhead consumes approximately 2.4% of training time.
 
 ::: {.callout-warning title="Young-Daly Formula Assumptions"}
 The Young-Daly formula provides valuable intuition but rests on assumptions that may not hold in practice:
@@ -451,40 +431,6 @@ The Young-Daly formula provides valuable intuition but rests on assumptions that
 5. **Infinite timeline**: Optimal for long training runs. Short runs (where total time is comparable to MTBF) require different analysis.
 
 When assumptions are violated, the optimal interval may shift significantly. As a rule of thumb, if restart overhead significantly exceeds checkpoint time, use $\sqrt{2 \times (T_{save} + T_{restart}) \times MTBF}$ instead.
-:::
-
-**Derivation sketch**: Let $T_c$ be the checkpoint interval. Expected wasted work per failure is $T_c/2$ plus recovery time. On average, failure occurs halfway through the interval. Checkpoint overhead per interval is $T_{save}/T_c$. Minimizing total expected time yields the square root relationship.
-
-::: {.callout-tip title="Worked Example: Optimal Checkpoint Interval for GPT-175B"}
-
-Consider training GPT-175B on a 10,000 GPU cluster:
-
-**Given:**
-
-- Checkpoint size: 2.1 TB (model + optimizer state)
-- Distributed storage write bandwidth: 100 GB/s aggregate
-- Cluster MTBF: 5 hours (from @sec-cluster-mtbf-calculation)
-
-**Step 1: Calculate checkpoint save time**
-
-$$
-T_{save} = \frac{2,100 \text{ GB}}{100 \text{ GB/s}} = 21 \text{ seconds}
-$$
-
-**Step 2: Apply Young-Daly formula**
-
-$$
-T_{opt} = \sqrt{2 \times 21 \text{ s} \times 5 \text{ hr}} = \sqrt{2 \times 21 \times 18,000 \text{ s}^2}
-$$
-
-$$
-T_{opt} = \sqrt{756,000} \approx 870 \text{ seconds} \approx 14.5 \text{ minutes}
-$$
-
-**Interpretation**: Optimal checkpoint interval is approximately 14.5 minutes. With this interval, checkpoint overhead consumes 2.4% of training time.
-
-**Verification**: Expected wasted work per failure is 435 seconds. Expected number of failures per hour is 0.2. Expected wasted work per hour is 87 seconds. Checkpoint overhead per hour is 87 seconds. The optimal interval balances these equal contributions to overhead, confirming the formula's validity.
-
 :::
 
 #### Checkpoint Overhead Analysis {#sec-checkpoint-overhead}
@@ -528,41 +474,21 @@ If checkpoints occur hourly, the system wastes **$24,000 per day** simply waitin
 
 #### Synchronous vs Asynchronous Checkpointing {#sec-sync-async-checkpoint-ft}
 
-**Synchronous checkpointing** pauses training while the checkpoint writes. All workers coordinate to reach a consistent state, write their portions of the checkpoint, and resume training only after all writes complete. This approach guarantees checkpoint consistency but introduces training pauses.
+The synchronous and asynchronous checkpointing approaches examined in @sec-storage create different failure recovery trade-offs. **Synchronous checkpointing** guarantees a globally consistent state, with all workers at the same training step, simplifying recovery logic. All workers coordinate to reach a consistent state, write their portions, and resume training only after all writes complete.
 
-**Asynchronous checkpointing** continues training while the checkpoint writes in the background. Workers snapshot their state to CPU memory or staging storage, then continue training while a background process writes the snapshot to persistent storage. This approach minimizes training disruption but introduces complexity.
-
-Snapshot data consumes additional memory until the write completes, creating memory pressure. The snapshot must represent a consistent point in training, requiring careful coordination. Background writes compete for storage bandwidth with data loading, causing I/O contention.
-
-Modern frameworks like PyTorch's FSDP [@zhao2023pytorch] provide asynchronous checkpointing support through memory-efficient state snapshotting and background writes. DeepSpeed's checkpointing [@rasley2020deepspeed] similarly supports overlap between checkpoint writes and continued training.[^fn-async-checkpoint]
+**Asynchronous checkpointing** reduces training disruption but requires tracking which workers have completed which checkpoints, adding complexity to recovery coordination. Workers snapshot their state to CPU memory or staging storage, then continue training while a background process writes the snapshot to persistent storage.[^fn-async-checkpoint]
 
 [^fn-async-checkpoint]: **Asynchronous Checkpoint Implementation**: DeepSpeed [@rasley2020deepspeed] implements asynchronous checkpointing by maintaining a checkpoint staging buffer in CPU memory. When a checkpoint triggers, GPU state is copied to CPU asynchronously using CUDA streams, allowing GPU computation to continue. A separate thread writes staged data to storage while training proceeds. This achieves near-zero checkpoint overhead for models where staging memory is available.
 
-#### Checkpoint Storage Architecture {#sec-checkpoint-storage-architecture-ft}
+#### Checkpoint Storage and Recovery {#sec-checkpoint-storage-architecture-ft}
 
-Where checkpoints are stored is as critical as how often they are written. Production systems use hierarchical storage with different tiers for different purposes:
+The tiered checkpoint storage architecture developed in @sec-storage, with local NVMe for speed, distributed filesystem for durability, and object storage for long-term retention, provides the storage foundation on which recovery mechanisms operate. This section focuses on how recovery mechanisms leverage that infrastructure rather than the storage design itself.
 
-| Tier | Technology | Write Bandwidth | Durability | Use Case |
-|------|------------|-----------------|------------|----------|
-| Tier 1 | Local NVMe | 5-10 GB/s per node | Not durable | Async staging buffer |
-| Tier 2 | Distributed FS (Lustre, GPFS) | 50-200 GB/s aggregate | Durable within datacenter | Primary checkpoint storage |
-| Tier 3 | Object storage (S3, GCS) | 10-50 GB/s aggregate | Cross-region durable | Disaster recovery, long-term retention |
-
-**Hierarchical checkpoint flow**:
-
-1. GPU state snapshots to local NVMe (fastest, enables async checkpoint)
-2. Background promotion to distributed filesystem (durable, fast random access for recovery)
-3. Periodic archival to object storage (cheapest per GB, disaster recovery)
-
-Checkpoints can consume significant storage budget at scale. A 175B model training with 14-minute checkpoint intervals for 30 days generates:
-
-$$\frac{30 \times 24 \times 60}{14} \times 2.1\text{ TB} = 6,480\text{ TB}$$
-
-At $0.02/GB/month for object storage, this costs $130,000/month just for checkpoint storage. Production systems implement checkpoint versioning and garbage collection. They retain only recent checkpoints plus periodic snapshots for long-term recovery.
+The critical concern for fault tolerance is not where checkpoints are stored but how quickly they can be read during recovery. Recovery time depends on storage tier bandwidth: local NVMe enables fastest recovery (5-10 GB/s per node), distributed filesystems provide moderate speed with durability (50-200 GB/s aggregate), while object storage offers slowest recovery but highest durability for disaster recovery scenarios.
 
 ### Distributed Checkpointing {#sec-distributed-checkpointing-ft}
 
-When training spans multiple workers, checkpoint coordination becomes essential. Two primary approaches exist: centralized checkpointing where a coordinator gathers all state and writes a single checkpoint, and distributed checkpointing where each worker writes its own portion of the checkpoint.
+Building on the distributed checkpoint architectures for sharded models established in @sec-storage, recovery requires understanding the coordination protocols that ensure checkpoint consistency. When training spans multiple workers, two primary approaches exist: centralized checkpointing where a coordinator gathers all state and writes a single checkpoint, and distributed checkpointing where each worker writes its own portion of the checkpoint.
 
 #### Centralized Checkpointing {#sec-centralized-checkpointing}
 
@@ -1492,7 +1418,7 @@ Silent data corruption is particularly insidious because it does not trigger err
 
 This chapter developed a comprehensive framework for understanding and implementing fault tolerance in machine learning systems at scale. The key insights can be organized around three themes: mathematical foundations, practical mechanisms, and operational considerations.
 
-Reliability engineering provides the quantitative tools for reasoning about failure. The exponential reliability model shows that system failure rate grows linearly with component count, making failures inevitable at scale. We presented this in @eq-system-reliability-n-components. The Young-Daly formula provides optimal checkpoint intervals that balance checkpoint overhead against expected lost work. We derived this in @eq-young-daly. These mathematical tools transform fault tolerance from intuition-based design to quantitative engineering.
+Reliability engineering provides the quantitative tools for reasoning about failure. The exponential reliability model shows that system failure rate grows linearly with component count, making failures inevitable at scale, as presented in @eq-system-reliability-n-components. The Young-Daly formula from @sec-storage provides optimal checkpoint intervals that balance checkpoint overhead against expected lost work, applied in this chapter using the MTBF values derived from failure analysis (@eq-young-daly-applied). These mathematical tools transform fault tolerance from intuition-based design to quantitative engineering.
 
 Training and serving require fundamentally different fault tolerance approaches due to their different latency tolerances. Training fault tolerance centers on checkpoint and restart. Distributed checkpointing, elastic training, and failure detection enable continued training despite failures. Serving fault tolerance emphasizes redundancy, replication, and graceful degradation. This enables continued service with minimal user impact. The distinction between stateless and stateful serving significantly affects fault tolerance complexity.
 
