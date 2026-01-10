@@ -1265,15 +1265,17 @@ $$
 
 As $T \to \infty$, the accumulated compressed gradients equal the accumulated true gradients (plus boundary terms that become negligible).
 
-**Top-K with Error Feedback**: The combination of Top-K sparsification with error feedback is widely used:
+**Top-K with Error Feedback**: The combination of Top-K sparsification with error feedback is widely used, as shown in @lst-topk-error-feedback.
 
-```
+::: {#lst-topk-error-feedback lst-cap="**Top-K Sparsification with Error Feedback**: Achieves high compression ratios (100-1000x) while maintaining convergence guarantees by accumulating discarded gradient components for future transmission."}
+```{.python}
 # At each worker, each iteration:
-accumulated = gradient + error_buffer
-compressed = top_k(accumulated, k)
-error_buffer = accumulated - decompress(compressed)
-allreduce(compressed)
+accumulated = gradient + error_buffer  # Include previously discarded gradients
+compressed = top_k(accumulated, k)     # Keep only k largest magnitude elements
+error_buffer = accumulated - decompress(compressed)  # Store discarded for next iteration
+allreduce(compressed)  # Synchronize compressed gradients across workers
 ```
+:::
 
 This achieves high compression ratios while maintaining convergence guarantees.
 
@@ -1594,18 +1596,21 @@ Communication libraries like NCCL automatically select algorithms based on detec
 
 Communication libraries detect topology through several mechanisms. NVLink topology detection queries NVML for the GPU interconnect graph. InfiniBand topology detection parses IB subnet manager data. PCIe topology detection determines NUMA affinity and switch hierarchy.
 
-**Algorithm Selection Heuristics**:
+**Algorithm Selection Heuristics**: Communication libraries implement decision logic similar to @lst-topology-algo-select.
 
-```
-if (all_gpus_nvlink_connected):
-    use_nvlink_optimized_allreduce()
-elif (hierarchical_topology_detected):
-    use_hierarchical_allreduce(intra=nvlink, inter=ib)
-elif (uniform_bandwidth):
-    use_ring_allreduce()
+::: {#lst-topology-algo-select lst-cap="**Topology-Aware Algorithm Selection**: Communication libraries detect hardware topology at initialization and select optimal collective algorithms based on interconnect capabilities, exploiting NVLink within nodes and InfiniBand across nodes."}
+```{.python}
+# Topology-aware algorithm selection logic used by communication libraries
+if all_gpus_nvlink_connected:
+    use_nvlink_optimized_allreduce()  # NVLink provides highest bandwidth
+elif hierarchical_topology_detected:
+    use_hierarchical_allreduce(intra=nvlink, inter=ib)  # Exploit multi-level topology
+elif uniform_bandwidth:
+    use_ring_allreduce()  # Bandwidth-optimal for homogeneous networks
 else:
-    use_tree_allreduce()  # Safe default
+    use_tree_allreduce()  # Safe default with O(log N) latency
 ```
+:::
 
 When automatic detection fails or produces suboptimal results, manual tuning becomes necessary. The `NCCL_ALGO` variable forces a specific algorithm such as ring, tree, or collnetdirect. The `NCCL_GRAPH_FILE` variable provides a custom topology description. The `NCCL_MIN_NCHANNELS` variable controls the parallelism level.
 
@@ -1690,11 +1695,14 @@ NCCL is NVIDIA's optimized collective communication library for GPU-based distri
 
 4. **Transport Layers**: Hardware-specific implementations (NVLink, PCIe, InfiniBand, Ethernet).
 
-**Execution Model**: NCCL operations are enqueued on CUDA streams:
+**Execution Model**: NCCL operations are enqueued on CUDA streams, as shown in @lst-nccl-async.
 
-```cpp
+::: {#lst-nccl-async lst-cap="**NCCL Asynchronous Execution**: All NCCL collective operations are non-blocking, returning immediately while communication proceeds on dedicated CUDA streams, enabling overlap with computation."}
+```{.cpp}
+// Asynchronous AllReduce: returns immediately, runs on specified CUDA stream
 ncclAllReduce(sendbuff, recvbuff, count, datatype, op, comm, stream);
 ```
+:::
 
 The call returns immediately; actual communication proceeds asynchronously. Synchronization with `cudaStreamSynchronize()` blocks until completion.
 
@@ -1715,9 +1723,10 @@ NCCL automatically selects algorithms based on message size, topology, and colle
 3. Number of ranks and GPUs per node
 4. Protocol capabilities (Simple, LL (Low Latency), LL128)
 
-**Manual Override**: Environment variables control algorithm selection:
+**Manual Override**: Environment variables control algorithm selection, as shown in @lst-nccl-algo-override.
 
-```bash
+::: {#lst-nccl-algo-override lst-cap="**NCCL Algorithm Override**: When automatic selection produces suboptimal results, environment variables force specific algorithms, protocols, and channel configurations for performance tuning."}
+```{.bash}
 # Force ring algorithm
 export NCCL_ALGO=Ring
 
@@ -1731,6 +1740,7 @@ export NCCL_PROTO=Simple  # or LL, LL128
 export NCCL_MIN_NCHANNELS=4
 export NCCL_MAX_NCHANNELS=16
 ```
+:::
 
 **Protocol Selection**:
 
@@ -1956,11 +1966,11 @@ model = DistributedDataParallel(
 
 Gradients become available during backpropagation from output to input layers. Optimal scheduling begins communicating early-layer gradients while later layers are still computing:
 
-```
-Layer N gradient → AllReduce starts
-Layer N-1 gradient computed → AllReduce continues
+```text
+Layer N gradient     → AllReduce starts
+Layer N-1 gradient   → AllReduce continues (overlapped with Layer N comm)
 ...
-Layer 1 gradient computed → AllReduce completes
+Layer 1 gradient     → AllReduce completes
 ```
 
 The communication graph describes dependencies between operations:

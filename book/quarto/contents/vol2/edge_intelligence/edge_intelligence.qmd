@@ -1302,11 +1302,15 @@ Systems typically deploy different LoRA configurations based on device capabilit
 class Adapter(nn.Module):
     def __init__(self, dim, bottleneck_dim):
         super().__init__()
-        self.down = nn.Linear(dim, bottleneck_dim)
-        self.up = nn.Linear(bottleneck_dim, dim)
+        # Project from full dimension to bottleneck (e.g., 768 -> 16)
+        self.down = nn.Linear(dim, bottleneck_dim)  # W1: learns compression
+        # Project back to original dimension (e.g., 16 -> 768)
+        self.up = nn.Linear(bottleneck_dim, dim)    # W2: learns expansion
         self.activation = nn.ReLU()
 
     def forward(self, x):
+        # Residual connection: original + low-rank adaptation
+        # Only adapter params trained; base model frozen
         return x + self.up(self.activation(self.down(x)))
 ```
 :::
@@ -1374,14 +1378,18 @@ This pattern can be extended with profiling logic to select layers based on cont
 
 ::: {#lst-selective-update lst-cap="**Selective Layer Updating**: This technique allows fine-tuning specific layers of a pre-trained model while keeping others frozen, optimizing computational resources for targeted improvements. *Source: PyTorch Documentation*"}
 ```{.python}
-# Assume model has named layers: ['conv1', 'conv2', 'fc']
-# We selectively update only conv2 and fc
+# Selective layer update based on contribution analysis
+# Layers selected via profiling: conv2 and fc have highest
+# accuracy-per-KB impact for this task
 
 for name, param in model.named_parameters():
     if "conv2" in name or "fc" in name:
-        param.requires_grad = True
+        param.requires_grad = True   # Train high-impact layers
     else:
-        param.requires_grad = False
+        param.requires_grad = False  # Freeze low-impact layers
+
+# Result: ~10% of params trainable, ~60% of adaptation quality
+# Memory savings: gradient storage only for selected layers
 ```
 :::
 
@@ -1483,21 +1491,23 @@ A practical on-device implementation might use a ring buffer to store a small se
 
 ::: {#lst-replay-buffer lst-cap="**Replay Buffer**: Implements a circular storage mechanism for efficient memory management in constrained environments. This approach allows models to efficiently retain and sample from recent data points, balancing the need to use historical information while incorporating new insights."}
 ```{.python}
-# Replay Buffer Techniques
+# Ring buffer for experience replay on memory-constrained devices
+# Stores compressed features (not raw inputs) to minimize footprint
 class ReplayBuffer:
     def __init__(self, capacity):
-        self.capacity = capacity
+        self.capacity = capacity  # Fixed size, e.g., 1000 examples
         self.buffer = []
-        self.index = 0
+        self.index = 0  # Circular write pointer
 
     def store(self, feature_vec, label):
         if len(self.buffer) < self.capacity:
-            self.buffer.append((feature_vec, label))
+            self.buffer.append((feature_vec, label))  # Fill phase
         else:
-            self.buffer[self.index] = (feature_vec, label)
-        self.index = (self.index + 1) % self.capacity
+            self.buffer[self.index] = (feature_vec, label)  # Overwrite oldest
+        self.index = (self.index + 1) % self.capacity  # Wrap around
 
     def sample(self, k):
+        # Random sampling prevents recency bias during replay
         return random.sample(self.buffer, min(k, len(self.buffer)))
 ```
 :::

@@ -586,7 +586,7 @@ TFRecord, TensorFlow's native format, stores data as sequential records in binar
 
 **Structure:**
 
-```
+```text
 [length][crc32 of length][data][crc32 of data]
 ```
 
@@ -606,7 +606,7 @@ Parquet[^fn-parquet], developed for the Hadoop ecosystem and inspired by Google'
 
 **Parquet structure:**
 
-```
+```text
 Row Group 1
   Column A chunk (values for rows 0-N)
   Column B chunk
@@ -628,7 +628,7 @@ WebDataset [@aizman2019webdataset] stores samples as TAR archives, with each sam
 
 **Structure:**
 
-```
+```text
 sample0001.jpg
 sample0001.cls
 sample0001.json
@@ -869,7 +869,7 @@ Storage fails after some but not all checkpoint shards are written. Without prot
 
 *Solution: Atomic commit protocol.* All shards are first written to temporary locations with unique names (e.g., `checkpoint_step_10000.tmp.worker_0`). After all workers confirm write completion, a single atomic operation (rename or commit record) marks the checkpoint complete. Recovery reads only committed checkpoints, identified by the presence of the commit marker.
 
-```
+```text
 1. Workers write: checkpoint_step_10000.tmp.worker_{0..N}
 2. Coordinator verifies all workers complete
 3. Coordinator writes: checkpoint_step_10000.COMPLETE
@@ -1079,7 +1079,7 @@ The offline store contains the complete historical record of feature values, ena
 
 **Data organization**: Features are stored with timestamps, enabling point-in-time queries:
 
-```
+```text
 | user_id | feature_name      | value | timestamp           |
 |---------|-------------------|-------|---------------------|
 | 12345   | purchase_count_7d | 3     | 2024-01-15 00:00:00 |
@@ -1109,7 +1109,9 @@ SELECT
 FROM training_labels labels
 LEFT JOIN features
     ON labels.user_id = features.user_id
+    -- Point-in-time correctness: only use features available before the event
     AND features.timestamp <= labels.event_time
+    -- Limit to most recent feature version within window
     AND features.timestamp > labels.event_time - INTERVAL 1 DAY
 ```
 
@@ -1123,7 +1125,7 @@ The online store provides low-latency access to the most recent feature values f
 
 **Data organization**: Features are stored by entity key with only the most recent value:
 
-```
+```json
 Key: user:12345
 Value: {
     "purchase_count_7d": 5,
@@ -1169,11 +1171,14 @@ def purchase_count_7d(user_id: str, date: datetime) -> int:
 # Streaming feature: user's purchases in current session
 @streaming_feature(source="purchase_events")
 def session_purchase_count(event: PurchaseEvent, state: State) -> int:
+    # Detect session boundary and reset counter
     if event.session_id != state.current_session:
-        state.reset()
+        state.reset()  # Clear accumulated state from previous session
         state.current_session = event.session_id
-    state.count += 1
-    return state.count
+    state.count += 1  # Increment within current session
+    return (
+        state.count
+    )  # Updated within seconds of each purchase event
 ```
 
 **Lambda architecture**[^fn-lambda-architecture] combines both: batch pipelines provide accurate but stale features; streaming pipelines provide fresh but potentially approximate features. The serving layer merges results, preferring fresh streaming values when available.
@@ -1427,7 +1432,7 @@ Models progress through lifecycle stages, with the registry tracking current sta
 
 **Deprecated**: Models scheduled for removal. Alerts generated if still accessed. Fully deleted after retention period.
 
-```
+```text
 Development --> Staging --> Production --> Archived
      ^              |             |
      |              v             v
