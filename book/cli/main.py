@@ -175,26 +175,43 @@ class MLSysBookCLI:
         """Handle HTML build command."""
         self.config_manager.show_symlink_status()
 
-        if len(args) < 1:
+        # Extract volume flag from args (can be anywhere)
+        volume = None
+        chapter_args = []
+        for arg in args:
+            if arg == "--vol1":
+                volume = "vol1"
+            elif arg == "--vol2":
+                volume = "vol2"
+            elif arg == "--all":
+                chapter_args.append(arg)
+            else:
+                chapter_args.append(arg)
+
+        if len(chapter_args) < 1 and not volume:
             # No target specified - show error
             console.print("[red]❌ Error: Please specify chapters, --vol1, --vol2, or --all[/red]")
             console.print("[yellow]💡 Usage: ./binder html <chapter> | --vol1 | --vol2 | --all[/yellow]")
             return False
-        elif args[0] == "--all":
+        elif len(chapter_args) > 0 and chapter_args[0] == "--all":
             # Build all chapters using HTML config
             console.print("[green]🌐 Building HTML with ALL chapters...[/green]")
             return self.build_command.build_html_only()
-        elif args[0] == "--vol1":
-            # Build Volume I only
-            console.print("[magenta]🌐 Building Volume I (HTML)...[/magenta]")
-            return self.build_command.build_volume("vol1", "html")
-        elif args[0] == "--vol2":
-            # Build Volume II only
-            console.print("[magenta]🌐 Building Volume II (HTML)...[/magenta]")
-            return self.build_command.build_volume("vol2", "html")
+        elif volume and len(chapter_args) == 0:
+            # Build entire volume
+            volume_name = "Volume I" if volume == "vol1" else "Volume II"
+            console.print(f"[magenta]🌐 Building {volume_name} (HTML)...[/magenta]")
+            return self.build_command.build_volume(volume, "html")
+        elif volume and len(chapter_args) > 0:
+            # Build specific chapters with volume config
+            chapters = chapter_args[0]
+            volume_name = "Volume I" if volume == "vol1" else "Volume II"
+            console.print(f"[green]🌐 Building HTML chapters with {volume_name} config: {chapters}[/green]")
+            chapter_list = [ch.strip() for ch in chapters.split(',')]
+            return self.build_command.build_chapters_with_volume(chapter_list, "html", volume)
         else:
-            # Chapters specified
-            chapters = args[0]
+            # Chapters specified without volume flag - use default config
+            chapters = chapter_args[0]
             console.print(f"[green]🌐 Building HTML with chapters: {chapters}[/green]")
             chapter_list = [ch.strip() for ch in chapters.split(',')]
             return self.build_command.build_html_only(chapter_list)
@@ -203,26 +220,43 @@ class MLSysBookCLI:
         """Handle PDF build command."""
         self.config_manager.show_symlink_status()
 
-        if len(args) < 1:
+        # Extract volume flag from args (can be anywhere)
+        volume = None
+        chapter_args = []
+        for arg in args:
+            if arg == "--vol1":
+                volume = "vol1"
+            elif arg == "--vol2":
+                volume = "vol2"
+            elif arg == "--all":
+                chapter_args.append(arg)
+            else:
+                chapter_args.append(arg)
+
+        if len(chapter_args) < 1 and not volume:
             # No target specified - show error
             console.print("[red]Error: Please specify chapters, --vol1, --vol2, or --all[/red]")
             console.print("[yellow]Usage: ./binder pdf <chapter> | --vol1 | --vol2 | --all[/yellow]")
             return False
-        elif args[0] == "--all":
+        elif len(chapter_args) > 0 and chapter_args[0] == "--all":
             # Build entire book (both volumes)
             console.print("[red]📄 Building entire book (PDF)...[/red]")
             return self.build_command.build_full("pdf")
-        elif args[0] == "--vol1":
-            # Build Volume I only
-            console.print("[magenta]📄 Building Volume I (PDF)...[/magenta]")
-            return self.build_command.build_volume("vol1", "pdf")
-        elif args[0] == "--vol2":
-            # Build Volume II only
-            console.print("[magenta]📄 Building Volume II (PDF)...[/magenta]")
-            return self.build_command.build_volume("vol2", "pdf")
+        elif volume and len(chapter_args) == 0:
+            # Build entire volume
+            volume_name = "Volume I" if volume == "vol1" else "Volume II"
+            console.print(f"[magenta]📄 Building {volume_name} (PDF)...[/magenta]")
+            return self.build_command.build_volume(volume, "pdf")
+        elif volume and len(chapter_args) > 0:
+            # Build specific chapters with volume config
+            chapters = chapter_args[0]
+            volume_name = "Volume I" if volume == "vol1" else "Volume II"
+            console.print(f"[red]📄 Building PDF chapters with {volume_name} config: {chapters}[/red]")
+            chapter_list = [ch.strip() for ch in chapters.split(',')]
+            return self.build_command.build_chapters_with_volume(chapter_list, "pdf", volume)
         else:
-            # Chapters specified
-            chapters = args[0]
+            # Chapters specified without volume flag - use default config
+            chapters = chapter_args[0]
             console.print(f"[red]📄 Building chapter(s) as PDF: {chapters}[/red]")
             chapter_list = [ch.strip() for ch in chapters.split(',')]
             return self.build_command.build_chapters(chapter_list, "pdf")
@@ -231,26 +265,43 @@ class MLSysBookCLI:
         """Handle EPUB build command."""
         self.config_manager.show_symlink_status()
 
-        if len(args) < 1:
+        # Extract volume flag from args (can be anywhere)
+        volume = None
+        chapter_args = []
+        for arg in args:
+            if arg == "--vol1":
+                volume = "vol1"
+            elif arg == "--vol2":
+                volume = "vol2"
+            elif arg == "--all":
+                chapter_args.append(arg)
+            else:
+                chapter_args.append(arg)
+
+        if len(chapter_args) < 1 and not volume:
             # No target specified - show error
             console.print("[red]Error: Please specify chapters, --vol1, --vol2, or --all[/red]")
             console.print("[yellow]Usage: ./binder epub <chapter> | --vol1 | --vol2 | --all[/yellow]")
             return False
-        elif args[0] == "--all":
+        elif len(chapter_args) > 0 and chapter_args[0] == "--all":
             # Build entire book (both volumes)
             console.print("[purple]📚 Building entire book (EPUB)...[/purple]")
             return self.build_command.build_full("epub")
-        elif args[0] == "--vol1":
-            # Build Volume I only
-            console.print("[magenta]📚 Building Volume I (EPUB)...[/magenta]")
-            return self.build_command.build_volume("vol1", "epub")
-        elif args[0] == "--vol2":
-            # Build Volume II only
-            console.print("[magenta]📚 Building Volume II (EPUB)...[/magenta]")
-            return self.build_command.build_volume("vol2", "epub")
+        elif volume and len(chapter_args) == 0:
+            # Build entire volume
+            volume_name = "Volume I" if volume == "vol1" else "Volume II"
+            console.print(f"[magenta]📚 Building {volume_name} (EPUB)...[/magenta]")
+            return self.build_command.build_volume(volume, "epub")
+        elif volume and len(chapter_args) > 0:
+            # Build specific chapters with volume config
+            chapters = chapter_args[0]
+            volume_name = "Volume I" if volume == "vol1" else "Volume II"
+            console.print(f"[purple]📚 Building EPUB chapters with {volume_name} config: {chapters}[/purple]")
+            chapter_list = [ch.strip() for ch in chapters.split(',')]
+            return self.build_command.build_chapters_with_volume(chapter_list, "epub", volume)
         else:
-            # Chapters specified
-            chapters = args[0]
+            # Chapters specified without volume flag - use default config
+            chapters = chapter_args[0]
             console.print(f"[purple]📚 Building chapter(s) as EPUB: {chapters}[/purple]")
             chapter_list = [ch.strip() for ch in chapters.split(',')]
             return self.build_command.build_chapters(chapter_list, "epub")

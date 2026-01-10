@@ -115,16 +115,30 @@ class ChapterDiscovery:
                 chapter_matches.append(match)
 
         if not chapter_matches:
-            # Try partial matches
-            pattern = f"*{chapter_name}*.qmd"
-            partial_matches = list(search_dir.rglob(pattern))
+            # Try "starts with" matches first (e.g., "ops" matches "ops_scale.qmd")
+            starts_with_matches = []
+            all_qmd_files = list(search_dir.rglob("*.qmd"))
 
-            # Filter to volume directories
-            for match in partial_matches:
+            for match in all_qmd_files:
                 vol = self._get_volume_from_path(match)
                 if vol or volume_filter:
-                    if chapter_name in match.stem or chapter_name in match.parent.name:
-                        chapter_matches.append(match)
+                    # Check if filename starts with the search term
+                    if match.stem.startswith(chapter_name):
+                        starts_with_matches.append(match)
+
+            if starts_with_matches:
+                chapter_matches = starts_with_matches
+            else:
+                # Fall back to partial matches (contains anywhere)
+                pattern = f"*{chapter_name}*.qmd"
+                partial_matches = list(search_dir.rglob(pattern))
+
+                # Filter to volume directories
+                for match in partial_matches:
+                    vol = self._get_volume_from_path(match)
+                    if vol or volume_filter:
+                        if chapter_name in match.stem or chapter_name in match.parent.name:
+                            chapter_matches.append(match)
 
         if not chapter_matches:
             return None

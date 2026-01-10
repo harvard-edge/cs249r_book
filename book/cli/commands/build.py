@@ -204,6 +204,122 @@ class BuildCommand:
             except:
                 pass
 
+    def build_chapters_with_volume(self, chapter_names: List[str], format_type: str, volume: str) -> bool:
+        """Build specific chapters using volume-specific configuration.
+
+        Args:
+            chapter_names: List of chapter names to build
+            format_type: Format to build ('html', 'pdf', 'epub')
+            volume: Volume config to use ('vol1' or 'vol2')
+
+        Returns:
+            True if build succeeded, False otherwise
+        """
+        volume_name = "Volume I" if volume == "vol1" else "Volume II"
+        console.print(f"[green]🚀 Building {len(chapter_names)} chapters[/green] [dim]({format_type}, {volume_name} config)[/dim]")
+        console.print(f"[dim]📋 Chapters: {', '.join(chapter_names)}[/dim]")
+
+        try:
+            # Auto-prefix chapter names with volume to disambiguate
+            prefixed_chapters = []
+            for ch in chapter_names:
+                # Only prefix if not already prefixed
+                if not ch.startswith(f"{volume}/"):
+                    prefixed_chapters.append(f"{volume}/{ch}")
+                else:
+                    prefixed_chapters.append(ch)
+
+            # Validate chapters exist
+            chapter_files = self.chapter_discovery.validate_chapters(prefixed_chapters)
+
+            # Show files that will be built
+            console.print("[dim]📄 Files to be rendered:[/dim]")
+            console.print(f"[dim]  • index.qmd[/dim]")
+            for chapter_file in chapter_files:
+                rel_path = chapter_file.relative_to(self.config_manager.book_dir)
+                console.print(f"[dim]  • {rel_path}[/dim]")
+
+            # Setup volume-specific configuration
+            config_file = self.config_manager.get_config_file(format_type, volume)
+
+            if not config_file.exists():
+                console.print(f"[yellow]⚠️ Volume config not found: {config_file}[/yellow]")
+                console.print(f"[yellow]Falling back to default config...[/yellow]")
+                return self.build_chapters(chapter_names, format_type)
+
+            format_args = {
+                "html": "html",
+                "pdf": "titlepage-pdf",
+                "epub": "epub"
+            }
+
+            if format_type not in format_args:
+                raise ValueError(f"Unknown format type: {format_type}")
+
+            format_arg = format_args[format_type]
+
+            # Create volume-specific build directory
+            output_dir = self.config_manager.get_output_dir(format_type, volume)
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            # Setup volume-specific configuration symlink
+            config_name = self.config_manager.setup_symlink(format_type, volume)
+            console.print(f"[dim]🔗 Linked _quarto.yml → {config_name}[/dim]")
+
+            # Set up fast build mode for the target chapters
+            self._setup_fast_build_mode(config_file, chapter_files)
+
+            # Track if config has been restored to avoid double restoration
+            self._config_restored = False
+
+            # Setup signal handler to restore config on Ctrl+C
+            def signal_handler(signum, frame):
+                if not self._config_restored:
+                    console.print("\n[yellow]🛡️ Ctrl+C detected - restoring config...[/yellow]")
+                    self._restore_config(config_file)
+                    self._config_restored = True
+                    console.print("[green]✅ Config restored[/green]")
+                sys.exit(0)
+
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+
+            # Build with project.render configuration
+            console.print("[yellow]🔨 Building with fast build configuration...[/yellow]")
+
+            render_cmd = ["quarto", "render", f"--to={format_arg}"]
+            cmd_str = " ".join(render_cmd)
+            console.print(f"[blue]💻 Command: {cmd_str}[/blue]")
+
+            # Execute build
+            success = self._run_command(
+                render_cmd,
+                cwd=self.config_manager.book_dir,
+                description=f"Building {len(chapter_names)} chapters ({format_type}, {volume_name})"
+            )
+
+            if success:
+                console.print(f"[green]✅ Build complete: {output_dir}/[/green]")
+            else:
+                console.print("[red]❌ Build failed[/red]")
+
+            return success
+
+        except Exception as e:
+            console.print(f"[red]❌ Build failed: {e}[/red]")
+            import traceback
+            traceback.print_exc()
+            return False
+        finally:
+            # Restore configuration
+            try:
+                if not self._config_restored:
+                    console.print("[yellow]🛡️ Restoring config...[/yellow]")
+                    self._restore_config(config_file)
+                    console.print("[green]✅ Configuration restored successfully[/green]")
+            except:
+                pass
+
     def build_volume(self, volume: str, format_type: str = "pdf") -> bool:
         """Build a specific volume using its dedicated configuration.
 
