@@ -300,6 +300,8 @@ Object storage systems like S3 and GCS are suitable for training data. Since Dec
 
 : Consistency requirements vary by storage tier and access pattern. {#tbl-consistency-requirements}
 
+As @tbl-consistency-requirements shows, each storage tier has distinct consistency requirements based on its access patterns and failure mode consequences.
+
 ::: {.callout-note title="CAP Theorem Implications for ML Storage"}
 
 The CAP theorem's implications for ML storage differ from traditional applications. As Stoica et al. observe [@stoica2017berkeley], training storage can sacrifice availability for consistency (a brief storage outage during checkpoint writes is acceptable if it ensures checkpoint correctness), while serving storage might sacrifice consistency for availability (serving stale features is preferable to failing requests entirely). Understanding these tradeoffs enables storage architecture decisions that match the actual requirements of each ML system component.
@@ -595,6 +597,8 @@ sample0002.cls
 
 : Format selection guidelines matched to model type and access characteristics. {#tbl-format-selection}
 
+@tbl-format-selection provides guidance for matching storage formats to model types, taking into account the specific access patterns and data characteristics of each workload.
+
 ### Data Loading Pipelines {#sec-data-loading-pipelines}
 
 The data loading pipeline connects storage to accelerators, transforming raw data into training batches. Pipeline design determines whether storage bandwidth is fully utilized and whether GPUs remain fed during training.
@@ -629,6 +633,14 @@ $$T_{hidden} = N_{prefetch} \times T_{batch}$$
 where $N_{prefetch}$ is the number of batches buffered and $T_{batch}$ is the GPU batch processing time.
 
 For a 200 ms batch time with 100 ms storage latency, prefetching just 1 batch hides the storage latency. However, variance in storage latency requires larger buffers: if storage latency varies from 50-500 ms, prefetching 3-5 batches ensures GPUs never wait.
+
+::: {.callout-note title="Figure Placeholder: Data Loading Pipeline" collapse="true"}
+```{.tikz}
+% TODO: Horizontal pipeline diagram showing CPU stages (Read, Decode, Transform) overlapping with GPU Compute.
+\node[draw, align=center] {Data Loading Pipeline\nPrefetch Buffer Hiding Latency};
+```
+**Hiding Storage Latency with Prefetching**. Without prefetching (top), the GPU sits idle while the CPU loads and transforms the next batch. With pipelining (bottom), the CPU prepares Batch $N+1$ while the GPU processes Batch $N$, ensuring the GPU is never starved of data. The prefetch buffer smooths out I/O latency jitter.
+:::
 
 #### Caching Strategies {#sec-caching-strategies}
 
@@ -791,6 +803,14 @@ Asynchronous checkpointing hides I/O latency but introduces complexity: memory o
 
 For most training runs, asynchronous checkpointing reduces overhead to near zero. The memory overhead (one additional copy of model state) is typically acceptable on systems with sufficient host memory.
 
+::: {.callout-note title="Figure Placeholder: Async vs Sync Checkpointing" collapse="true"}
+```{.tikz}
+% TODO: Two timelines comparing Blocking Checkpoint vs Async Checkpoint
+\node[draw, align=center] {Checkpointing Strategies\nStop-the-World vs Async Copy-on-Write};
+```
+**Zero-Overhead Checkpointing**. (A) Synchronous checkpointing halts training (`Stop-the-World`), wasting valuable accelerator time on I/O. (B) Asynchronous checkpointing captures a snapshot in CPU memory and writes to storage in the background while training resumes immediately. This overlaps the massive write I/O with useful computation.
+:::
+
 ### Distributed Checkpointing for Sharded Models {#sec-distributed-checkpointing-storage}
 
 When models are sharded across multiple devices using parallelism strategies (examined in @sec-distributed-training), each device holds only a portion of the model state. Checkpointing must coordinate across all devices to produce a consistent, complete checkpoint at the same logical training point.
@@ -891,6 +911,14 @@ where $T_{save}$ is the time to save a checkpoint and $MTBF$ is the mean time be
 :::
 
 This formula minimizes expected wasted work, accounting for both checkpoint overhead and work lost to failures. The MTBF[^fn-mtbf] for GPU clusters decreases inversely with cluster size, making optimal checkpoint intervals surprisingly short for large-scale training.
+
+::: {.callout-note title="Figure Placeholder: Young-Daly Tradeoff" collapse="true"}
+```{.tikz}
+% TODO: U-shaped cost curve. X-axis: Checkpoint Interval. Y-axis: Total Overhead.
+\node[draw, align=center] {Young-Daly Optimization\nBalancing Overhead vs Risk};
+```
+**The Checkpoint Tradeoff**. Plotting total training time overhead against checkpoint interval. Checkpointing too frequently (left side) incurs high I/O overhead. Checkpointing too rarely (right side) risks losing hours of work when failures occur. The optimal point $T_{opt}$ minimizes the sum of these costs.
+:::
 
 [^fn-mtbf]: **MTBF (Mean Time Between Failures)**: A reliability metric representing the average time a system operates before experiencing a failure. For a single GPU, MTBF might be 30,000 hours (about 3.5 years). For a cluster, MTBF decreases inversely with component count: 1,024 GPUs with individual MTBF of 30,000 hours yield a cluster MTBF of roughly 29 hours, meaning failures occur almost daily. This inverse scaling explains why large-scale ML training is fundamentally a distributed systems problem: at 10,000 GPUs, MTBF drops to about 3 hours, making failure handling the dominant engineering challenge rather than an edge case.
 
@@ -1066,6 +1094,14 @@ LEFT JOIN features
     -- Limit to most recent feature version within window
     AND features.timestamp > labels.event_time - INTERVAL 1 DAY
 ```
+
+::: {.callout-note title="Figure Placeholder: Point-in-Time Correctness" collapse="true"}
+```{.tikz}
+% TODO: Timeline showing 'Event Time' and 'Feature Time'. Correct join vs Leakage join.
+\node[draw, align=center] {Temporal Joins\nPreventing Data Leakage};
+```
+**Point-in-Time Correctness**. To prevent data leakage, features for a training example must be joined based on the timestamp of the event. If an ad impression occurred at $T_{event}$, the model must be trained using features as they existed at $T < T_{event}$. Using features from $T > T_{event}$ (e.g., "user clicked") to predict the click introduces future information, rendering the model useless in production.
+:::
 
 #### Online Store {#sec-online-store}
 

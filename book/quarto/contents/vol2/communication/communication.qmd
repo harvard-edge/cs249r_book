@@ -143,6 +143,14 @@ As the backward pass proceeds from the last layer to the first, gradients for th
 
 If the computation time for a bucket exceeds its communication time, the network cost is effectively zero because it is fully hidden. If communication is slower, the training time becomes determined solely by network speed. Tuning bucket sizes is a key optimization: too small, and latency overhead dominates; too large, and the pipeline stalls waiting for data.
 
+::: {.callout-note title="Figure Placeholder: Communication-Computation Overlap" collapse="true"}
+```{.tikz}
+% TODO: Timeline showing sequential (Compute -> Comm) vs Overlapped (Compute | Comm) execution.
+\node[draw, align=center] {Pipelining Strategy\nSequential vs Overlap};
+```
+**Hiding Communication Latency**. (Top) Naive execution serializes computation and communication, exposing full network latency. (Bottom) Overlapped execution pipelines gradient communication: as soon as the last layer's gradients are computed, they are sent while the GPU computes the second-to-last layer. If $T_{compute} > T_{comm}$, network cost is effectively zero.
+:::
+
 ### Bandwidth-Bound versus Latency-Bound Communication {#sec-bandwidth-latency-regimes}
 
 The $\alpha$-$\beta$ model reveals two distinct communication regimes that require different optimization strategies:
@@ -895,6 +903,14 @@ The bandwidth term matches other collectives, but the latency term is $O(N)$ rat
 
 **Embedding Table Exchange in Recommendation Systems**
 
+::: {.callout-note title="Figure Placeholder: AlltoAll Communication Pattern" collapse="true"}
+```{.tikz}
+% TODO: Diagram showing AlltoAll traffic. Each node sends different colored blocks to every other node.
+\node[draw, align=center] {AlltoAll Pattern\nPersonalized Exchange};
+```
+**AlltoAll vs AllReduce**. In AllReduce (left), all nodes compute the same global sum. In AlltoAll (right), each node sends distinct data to every other node (transposing the data matrix). This pattern is critical for recommendation systems where GPU 0 needs embeddings from GPU 1, while GPU 1 needs different embeddings from GPU 0.
+:::
+
 Recommendation models like DLRM have embedding tables that are too large for single-GPU memory. Tables are sharded across workers, and each training batch requires fetching embeddings from multiple shards.
 
 Consider a batch with $B$ items where each item requires $E$ embedding lookups. Embeddings have dimension $D$ and are distributed across $N$ workers. Each worker first identifies which embeddings it needs from each other worker. An AlltoAll operation exchanges embedding requests containing the indices. Workers then look up the requested embeddings from their local shards. A second AlltoAll operation exchanges the embedding values back to the requesters.
@@ -960,6 +976,14 @@ V_{route} = T \times k \times H \times \text{sizeof(dtype)}
 $$
 
 Each token is sent to $k$ experts. If experts are uniformly distributed, each worker sends $(N-1)/N$ of its routed tokens to other workers.
+
+::: {.callout-note title="Figure Placeholder: MoE Token Routing" collapse="true"}
+```{.tikz}
+% TODO: Visual of tokens being routed from a batch to specific experts (E1, E4, etc.)
+\node[draw, align=center] {MoE Routing\nDynamic Dispatch};
+```
+**Mixture-of-Experts Token Routing**. Tokens in a batch are dynamically routed to specific expert networks based on gating weights. This creates a data-dependent AlltoAll communication pattern where traffic volume varies based on input data, potentially creating hotspots if "popular" experts receive too many tokens.
+:::
 
 **Load Balancing Challenge**: MoE communication is sensitive to routing decisions. If routing is unbalanced (many tokens go to few experts), some workers receive disproportionate communication while others sit idle. This creates both communication hotspots and computation imbalance.
 
@@ -1057,6 +1081,14 @@ Understanding this decision framework enables systems engineers to select optima
 When network bandwidth limits training throughput, reducing the volume of data transmitted becomes essential. Gradient compression techniques trade computation and potentially some model accuracy for reduced communication volume. This section examines quantization, sparsification, and error feedback mechanisms that enable efficient distributed training under bandwidth constraints.
 
 ### The Case for Gradient Compression {#sec-compression-motivation}
+
+::: {.callout-note title="Figure Placeholder: Gradient Compression Techniques" collapse="true"}
+```{.tikz}
+% TODO: Visual comparison of FP32 vs INT8 Quantization vs Top-K Sparsification
+\node[draw, align=center] {Compression Methods\nQuantization (Precision) vs Sparsification (Count)};
+```
+**Gradient Compression Strategies**. Comparison of bandwidth reduction techniques. (A) Standard FP32 transmission. (B) Quantization reduces precision (e.g., INT8), shrinking each element. (C) Sparsification (Top-K) transmits only the largest magnitude gradients and their indices, discarding the majority of values. Error feedback (D) accumulates discarded residuals to ensure eventual convergence.
+:::
 
 Gradient compression addresses the bandwidth bottleneck by reducing the size of gradient messages. The potential benefit is straightforward: if communication time is $T_{comm} = M/\beta$, halving $M$ halves communication time. However, compression introduces three costs. Compression overhead consumes CPU or GPU time to compress gradients before sending. Decompression overhead requires time to reconstruct gradients after receiving. Accuracy loss occurs because compressed gradients approximate the true gradient, potentially affecting convergence.
 

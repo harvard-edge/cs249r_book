@@ -218,18 +218,13 @@ To organize the optimization techniques in this chapter, we introduce the servin
 
 **Platform level**: Optimizations across multiple services and tenants. Resource allocation, multi-tenancy, scheduling, and cluster management operate here. The target metric is overall resource efficiency while meeting diverse SLO requirements.
 
+::: {.callout-note title="Figure Placeholder: The Serving Hierarchy" collapse="true"}
+```{.tikz}
+% TODO: Pyramid diagram showing the four levels of the serving hierarchy
+\node[draw, align=center] {Platform Level (Multi-tenancy)\\Service Level (Load Balancing)\\Replica Level (GPU Utilization)\\Request Level (Batching)};
 ```
-Platform Level    [Multi-tenancy, Scheduling, Resource Allocation]
-      │
-      ▼
-Service Level     [Load Balancing, Routing, Autoscaling]
-      │
-      ▼
-Replica Level     [GPU Utilization, Memory Management]
-      │
-      ▼
-Request Level     [Batching, Caching, Preprocessing]
-```
+**The Serving Hierarchy**. Optimization occurs at four distinct levels, each with different objectives and techniques. The Request Level focuses on minimizing per-request latency via batching and caching. The Replica Level maximizes single-instance throughput through kernel optimization and memory management. The Service Level manages distribution across multiple replicas to meet aggregate demand. The Platform Level handles efficient resource sharing across multiple services and tenants.
+:::
 
 Each level has distinct optimization levers (@tbl-serving-hierarchy):
 
@@ -1251,27 +1246,13 @@ After computing local attention, an AllReduce operation (covered in @sec-communi
 
 The communication pattern for tensor-parallel inference follows:
 
+::: {.callout-note title="Figure Placeholder: Tensor Parallelism Inference Flow" collapse="true"}
+```{.tikz}
+% TODO: Diagram showing column-row partitioning and AllReduce synchronization
+\node[draw, align=center] {Tensor Parallelism\\Attention Heads Split -> AllReduce\\FFN Split (Column/Row) -> AllReduce};
 ```
-Input activations (replicated on all devices)
-    │
-    ▼
-Attention heads (computed in parallel, H/P heads per device)
-    │
-    ▼
-AllReduce (combine attention outputs)
-    │
-    ▼
-Feed-forward layer 1 (column-parallel)
-    │
-    ▼
-Feed-forward layer 2 (row-parallel)
-    │
-    ▼
-AllReduce (combine FF outputs)
-    │
-    ▼
-Output activations (replicated on all devices)
-```
+**Tensor Parallelism for Inference**. Computation is distributed across devices by splitting tensor operations. Attention heads are partitioned across GPUs, requiring an AllReduce operation to synchronize results. Feed-forward networks use a column-row splitting strategy that requires only one AllReduce synchronization per block. This approach reduces latency for large models but introduces communication overhead that demands high-bandwidth interconnects like NVLink.
+:::
 
 The inference time with tensor parallelism follows @eq-tensor-parallel-time:
 
@@ -1330,15 +1311,13 @@ Pipeline parallelism distributes layers across devices sequentially, with each d
 
 For inference, pipeline parallelism creates bubbles differently than in training:
 
+::: {.callout-note title="Figure Placeholder: Pipeline Parallelism Bubbles" collapse="true"}
+```{.tikz}
+% TODO: Diagram comparing single-request latency (sequential) vs pipelined throughput
+\node[draw, align=center] {Pipeline Parallelism\\Sequential processing of single request (High Latency)\\Pipelined processing of multiple requests (High Throughput)};
 ```
-Device 0 (Layers 1-20):  [Prefill] ─────────────────────────────
-                                  \
-Device 1 (Layers 21-40):           [Prefill] ──────────────────
-                                            \
-Device 2 (Layers 41-60):                     [Prefill] ────────
-                                                      \
-Device 3 (Layers 61-80):                               [Prefill]
-```
+**Pipeline Parallelism Bubbles**. For a single inference request, pipeline parallelism offers no latency benefit as the request must traverse all stages sequentially (top). However, when processing multiple concurrent requests, pipeline bubble utilization improves significantly (bottom), allowing throughput to scale with the number of stages. This makes pipeline parallelism ideal for high-throughput batch processing but less suitable for latency-critical interactive serving.
+:::
 
 For a single request, pipeline parallelism provides no latency benefit: the request must traverse all stages sequentially. The pipeline fill time equals the sequential execution time.
 
@@ -1386,14 +1365,13 @@ $$\text{Output} = \sum_{i \in \text{top-}k} g_i \cdot \text{Expert}_i(\text{inpu
 
 **Expert parallelism** distributes experts across devices, with each device hosting $E/P$ experts:
 
+::: {.callout-note title="Figure Placeholder: Mixture-of-Experts Routing" collapse="true"}
+```{.tikz}
+% TODO: Network diagram showing token routing to experts and AllToAll communication
+\node[draw, align=center] {MoE Routing\\Token -> Gating -> AllToAll Dispatch -> Experts -> AllToAll Gather};
 ```
-Token arrives with gating decision: [Expert 2, Expert 7]
-
-Device 0 (Experts 0-3):   Compute Expert 2
-Device 1 (Experts 4-7):   Compute Expert 7
-
-AllToAll: Gather results back to original device
-```
+**Mixture-of-Experts (MoE) Routing**. Expert parallelism distributes "experts" across different devices. For each token, a gating mechanism selects the top-k experts. An AllToAll communication step dispatches tokens to the devices hosting their selected experts (1). Experts process the tokens in parallel (2). A second AllToAll step gathers the results back to the original device (3). This pattern enables massive model capacity but introduces all-to-all communication overhead.
+:::
 
 The communication pattern differs from tensor parallelism: instead of all-reduce (same data to all devices), expert parallelism uses all-to-all (different data to different devices based on routing).
 
@@ -1469,6 +1447,14 @@ The choice of embedding sharding strategy depends on lookup patterns and communi
 +-----------------------+--------------------------+-------------------+-------------------------+
 
 : **Embedding Sharding Strategies**: Different strategies trade off lookup locality against load balance. {#tbl-embedding-sharding}
+
+::: {.callout-note title="Figure Placeholder: Embedding Sharding Strategies" collapse="true"}
+```{.tikz}
+% TODO: Visual comparison of Row-wise, Column-wise, and Hybrid sharding
+\node[draw, align=center] {Embedding Sharding\\Row-wise: By User ID (Network Gather)\\Column-wise: By Vector Dim (AllGather)\\Hybrid: Hot/Cold Split};
+```
+**Embedding Sharding Strategies**. **Row-wise sharding** places complete embedding vectors on specific servers based on entity ID, requiring a network gather for lookup. **Column-wise sharding** splits each vector across all servers, allowing parallel local lookups followed by an AllGather, which is efficient for popular "hot" embeddings. **Hybrid sharding** combines these approaches, using column sharding for hot items and row sharding for the "cold" long tail to balance load and memory.
+:::
 
 ::: {.callout-note title="Embedding Sharding at Scale: Meta Infrastructure"}
 
@@ -2166,15 +2152,13 @@ PagedAttention [@kwon2023vllm], introduced in vLLM, applies virtual memory[^fn-v
 
 The key concepts include page tables that map logical sequence positions to physical memory pages, block size that defines the number of tokens per page (typically 16 tokens), and physical blocks that provide fixed-size memory allocations assignable to any sequence.
 
+::: {.callout-note title="Figure Placeholder: PagedAttention Memory Mapping" collapse="true"}
+```{.tikz}
+% TODO: Diagram showing Logical KV Cache pages mapping to Non-continuous Physical Blocks
+\node[draw, align=center] {PagedAttention\\Logical View: Contiguous Sequence\\Physical View: Scattered Blocks in HBM\\Block Table: The Mapping};
 ```
-Sequence A (150 tokens, 10 pages allocated):
-Logical:  [Page 0][Page 1][Page 2]...[Page 9]
-Physical: [Block 5][Block 12][Block 3]...[Block 8]
-
-Sequence B (80 tokens, 5 pages allocated):
-Logical:  [Page 0][Page 1][Page 2][Page 3][Page 4]
-Physical: [Block 1][Block 7][Block 15][Block 2][Block 11]
-```
+**PagedAttention Memory Mapping**. Conceptually similar to virtual memory in operating systems, PagedAttention decouples the logical view of a sequence's KV cache (contiguous pages) from its physical storage (non-contiguous 16-token blocks). A block table maps logical pages to physical blocks, allowing the system to fill fragmentation gaps with small blocks from any sequence. This eliminates external fragmentation and enables near-100% memory utilization.
+:::
 
 PagedAttention provides several benefits. It eliminates internal fragmentation by allocating only the pages needed for actual tokens. It eliminates external fragmentation because any free page can be used by any sequence. It enables dynamic growth so sequences can grow without pre-allocation. It supports memory sharing so common prefixes can share physical pages.
 
@@ -2243,23 +2227,13 @@ Many LLM workloads share common prefixes across requests. System prompts like "Y
 
 **Prefix caching** shares KV cache entries across requests with common prefixes:
 
+::: {.callout-note title="Figure Placeholder: Prefix Caching with Shared Blocks" collapse="true"}
+```{.tikz}
+% TODO: Tree or Block diagram showing multiple requests pointing to the same System Prompt blocks
+\node[draw, align=center] {Prefix Caching\\System Prompt Blocks [0-5] (Shared)\\Request A [6-8] (Unique)\\Request B [6-9] (Unique)};
 ```
-Request A: [System prompt (500 tokens)] + [User query A (50 tokens)]
-Request B: [System prompt (500 tokens)] + [User query B (75 tokens)]
-Request C: [System prompt (500 tokens)] + [User query C (30 tokens)]
-
-Without prefix caching:
-
-- 3 × 500 = 1500 tokens of prefill compute
-- 3 × 500 tokens of KV cache storage
-
-With prefix caching:
-
-- 500 tokens of prefill compute (cached)
-- 500 tokens of KV cache storage (shared)
-- 155 tokens of unique prefill compute
-- 155 tokens of unique KV cache storage
-```
+**Prefix Caching via Block Sharing**. PagedAttention enables efficient prefix caching by allowing multiple sequences' block tables to point to the same physical blocks for shared content. In this example, the System Prompt is stored in blocks 0-5. Request A and Request B maps their first 6 logical pages to these same physical blocks, storing only their unique suffixes in new blocks. This dramatically reduces memory usage and prefill computation for workloads with shared context.
+:::
 
 **Implementation with PagedAttention**:
 
@@ -2375,22 +2349,13 @@ Autoregressive generation is inherently sequential: each token depends on previo
 
 **Scenario**: Generating "The quick brown fox jumps"
 
+::: {.callout-note title="Figure Placeholder: Speculative Decoding Timeline" collapse="true"}
+```{.tikz}
+% TODO: Sequence/Timeline diagram of Draft generation followed by Parallel Verification
+\node[draw, align=center] {Speculative Decoding\\Draft Model: Gen 4 tokens (Fast)\\Target Model: Verify 4 tokens (Parallel)\\Accept/Reject: Rollback to first error};
 ```
-Step 1: Draft model generates 4 tokens
-        "The" → [quick, brown, fox, jumps]
-        Time: 4/300 = 13ms
-
-Step 2: Target model verifies in parallel
-        Input: "The quick brown fox jumps"
-        Accepts: "quick", "brown" (match)
-        Rejects: "fox" → target predicted "lazy"
-        Time: 1/30 = 33ms
-
-Step 3: Output "quick brown", continue from "brown"
-        Effective tokens: 2 in 46ms = 43 tokens/second
-
-Step 4: Repeat from "brown"
-```
+**Speculative Decoding Process**. Instead of generating tokens sequentially with the large target model (slow), a small draft model quickly proposes a sequence of $K$ tokens. The target model then verifies all $K$ tokens in a single parallel forward pass (similar to prefill). If the draft tokens match the target's output, they are accepted, effectively generating multiple tokens per target model step. If a mismatch occurs, the sequence is rolled back to the first error.
+:::
 
 **Effective speedup**: 43/30 = 1.43x
 
@@ -3068,13 +3033,13 @@ The bulkhead pattern[^fn-bulkhead] [@nygard2007releaseit] physically isolates te
 
 **Deployment-level bulkheads**: Dedicate replicas to specific tenants or tenant groups.
 
+::: {.callout-note title="Figure Placeholder: Bulkhead Isolation Patterns" collapse="true"}
+```{.tikz}
+% TODO: Block diagram contrasting Shared Pool vs Directed/Dedicated Pools
+\node[draw, align=center] {Bulkhead Pattern\\Gold Tier -> Dedicated Replicas\\Standard Tier -> Shared Replicas w/ Quotas\\Failure in Shared Pool does not affect Gold Tier};
 ```
-GPU Cluster (24 GPUs):
-
-Tenant A (gold tier): GPUs 0-7 (dedicated)
-Tenant B (gold tier): GPUs 8-15 (dedicated)
-Tenants C-Z (shared): GPUs 16-23 (shared pool)
-```
+**Bulkhead Isolation Patterns**. To prevent cascading failures in multi-tenant systems, bulkheads isolate resources. **Deployment-level bulkheads** (shown) assign dedicated physical replicas to high-priority tenants, ensuring complete isolation. **Request-level bulkheads** enforce strict concurrency limits within shared processes. Like ship compartments, these boundaries ensure that a failure or resource exhaustion in one segment cannot sink the entire platform.
+:::
 
 **Pros**: Complete isolation for premium tenants
 **Cons**: Lower utilization, more operational overhead
@@ -3318,6 +3283,14 @@ Bringing up a new replica for Llama-70B on H100:
 
 :::
 
+::: {.callout-note title="Figure Placeholder: Cold Start Latency Breakdown" collapse="true"}
+```{.tikz}
+% TODO: Horizontal stacked bar chart showing time components of cold start
+\node[draw, align=center] {Cold Start Timeline\\Provisioning (60s) | Download (180s) | Load (45s) | Warmup (15s)\\Total: >5 mins};
+```
+**Anatomy of a Cold Start**. Bringing up a new GPU inference replica is a multi-step process taking minutes. While container startup is fast, provisioning the specialized instance and downloading massive model weights (100GB+) dominate the timeline. CUDA context initialization and "warmup" inference passes add further delay. This 5+ minute lag makes purely reactive scaling dangerous for handling sudden traffic spikes.
+:::
+
 ### Reactive Scaling {#sec-inference-reactive-scaling}
 
 Reactive scaling adjusts capacity based on observed metrics:
@@ -3452,6 +3425,14 @@ A chatbot service shows predictable daily patterns:
 - Predictive: Right-sized provisioning (30 replicas peak)
 - Savings: 33% GPU cost reduction
 
+:::
+
+::: {.callout-note title="Figure Placeholder: Predictive vs Reactive Scaling" collapse="true"}
+```{.tikz}
+% TODO: Line chart showing Traffic Curve, Reactive Capacity (lagging step function), and Predictive Capacity (smooth lead)
+\node[draw, align=center] {Scaling Strategies\\Traffic Curve (Sine wave)\\Reactive: Steps up AFTER spike (Late)\\Predictive: Ramps up BEFORE spike (On time)};
+```
+**Predictive vs. Reactive Scaling**. Reactive scaling (dashed line) responds to traffic spikes after they occur, leading to periods of under-provisioning (red zones) where SLOs are violated due to cold start latency. Predictive scaling (solid line) anticipates known traffic patterns (like daily cycles) and begins provisioning capacity *before* the traffic arrives, eliminating the deficit and ensuring consistent performance.
 :::
 
 ### Warm Pool Management {#sec-inference-warm-pools}
@@ -3913,14 +3894,13 @@ Google Search uses ensemble serving to combine multiple specialized models for q
 
 **Architecture overview**:
 
+::: {.callout-note title="Figure Placeholder: Ranking Cascade Funnel" collapse="true"}
+```{.tikz}
+% TODO: Funnel diagram showing candidate count reduction and model complexity increase
+\node[draw, align=center] {Ranking Cascade\\Retrieval (1M Items, Simple) ->\\L1 Ranking (10K Items, Linear) ->\\L2 Ranking (100 items, Small NN) ->\\Final Ranking (10 items, Large Ensemble)};
 ```
-Query → Query Understanding → Candidate Retrieval → Ranking Cascade → Results
-
-              │                        │                    │
-              ▼                        ▼                    ▼
-         BERT QU                  Embeddings            L1 → L2 → L3
-        (10 models)              (100s shards)       (progressively complex)
-```
+**Ranking Cascade Architecture**. To optimize latency and cost, search and recommendation systems use a cascade of increasingly complex models. Early stages (Retrieval) use cheap, fast models (embeddings, linear) to filter millions of candidates down to thousands. Later stages use expensive, high-precision models (transformers, ensembles) to rank the remaining few candidates. This funnel structure ensures that heavy computation is spent only on the most promising items.
+:::
 
 **Key design decisions**:
 

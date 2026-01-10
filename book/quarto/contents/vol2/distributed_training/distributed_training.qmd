@@ -503,6 +503,14 @@ To maintain consistency across the distributed system, the gradients computed by
 
 With 8 GPUs sharing gradients for a 100 MB model, ring all-reduce requires only 7 communication steps instead of the 56 steps needed for naive all-to-all synchronization. The ring topology creates bottlenecks where the slowest link in the ring determines the overall synchronization time, and network partitions can halt the entire training process. Alternative algorithms like tree-reduce achieve O(log n) latency at the cost of increased bandwidth requirements on root nodes. Modern systems often implement hierarchical topologies using high-speed links within nodes and lower-bandwidth connections between nodes to optimize these trade-offs.
 
+::: {.callout-note title="Figure Placeholder: Collective Communication Patterns" collapse="true"}
+```{.tikz}
+% TODO: Compare Ring AllReduce (circular) vs Tree AllReduce (hierarchical) vs Parameter Server (star)
+\node[draw, align=center] {Communication Patterns\nRing vs Tree vs Star};
+```
+**Gradient Synchronization Topologies**. Visual comparison of communication patterns. (A) Parameter Server uses a central node, creating bottlenecks. (B) Ring AllReduce distributes bandwidth evenly but has O(N) latency. (C) Tree AllReduce reduces latency to O(log N) but may congest root links. (D) Hierarchical AllReduce combines intra-node NVLink and inter-node InfiniBand.
+:::
+
 #### Synchronization Models {#sec-distributed-training-sync-models}
 
 Distributed training systems operate under explicit synchronization models that govern when workers observe each other's updates. Understanding these models is essential for reasoning about correctness and performance.
@@ -994,6 +1002,14 @@ Column-parallel linear layers split weights along columns. For input $X$ and wei
 $$Y = XW = X[W_1 | W_2] = [XW_1 | XW_2]$$
 Each GPU computes its partition independently. Outputs are concatenated (no communication needed if followed by row-parallel layer).
 
+::: {.callout-note title="Figure Placeholder: Tensor Parallelism Matrix Split" collapse="true"}
+```{.tikz}
+% TODO: Visual showing Matrix A split by columns, B split by rows.
+\node[draw, align=center] {Megatron-LM Partitioning\nColumn Split vs Row Split};
+```
+**Tensor Parallelism - Matrix Partitioning**. Illustration of Megatron-LM style tensor parallelism. The first linear layer (e.g., QKV) is split column-wise $[W_1 | W_2]$. The second layer (e.g., Output) is split row-wise $[W_1 ; W_2]$. This arrangement allows the output of the first layer to flow directly into the second without synchronization, requiring only one AllReduce after the second layer.
+:::
+
 Row-parallel linear layers split weights along rows. For $W = \begin{bmatrix} W_1 \\ W_2 \end{bmatrix}$:
 $$Y = XW = X_1 W_1 + X_2 W_2$$
 Each GPU computes a partial sum. Outputs require AllReduce to combine.
@@ -1124,7 +1140,15 @@ The primary advantage lies in simultaneous scaling across model size and dataset
 
 Hardware utilization improves substantially over single-strategy approaches. Pure model parallelism leaves devices idle during pipeline bubbles (20-30% of training time). Pure data parallelism leaves devices waiting during gradient synchronization (10-40% of training time). Hybrid approaches overlap these operations: while one pipeline stage computes, another synchronizes gradients within its data parallel group. Megatron-LM demonstrates 52% MFU (Model FLOPS Utilization) on 1024 A100 GPUs using 3D parallelism, compared to 35% MFU for pure data parallelism at similar scale.
 
-Communication overhead reduces through hierarchical structuring. Tensor parallelism restricts high-frequency communication to NVLink-connected GPUs within nodes (600 GB/s bandwidth). Pipeline parallelism limits cross-node communication to activation transfers at stage boundaries (requiring 100-200 GB/s per stage). Data parallelism performs AllReduce across replica groups using InfiniBand (200 GB/s aggregate). This hierarchy matches communication patterns to available bandwidth at each level, avoiding the scenario where all communication competes for the slowest interconnect.
+Communication overhead reduces through hierarchical structuring. Tensor parallelism restricts high-frequency communication to NVLink-connected GPUs within nodes (600 GB/s bandwidth). Pipeline parallelism limits cross-node communication to activation transfers at stage boundaries (requires 100-200 GB/s per stage). Data parallelism performs AllReduce across replica groups using InfiniBand (200 GB/s aggregate). This hierarchy matches communication patterns to available bandwidth at each level, avoiding the scenario where all communication competes for the slowest interconnect.
+
+::: {.callout-note title="Figure Placeholder: Hybrid Parallelism Physical Mapping" collapse="true"}
+```{.tikz}
+% TODO: Diagram showing a cluster of nodes. Tensor Parallel within Node (NVLink). Pipeline Parallel across groups of Nodes. Data Parallel across replicas.
+\node[draw, align=center] {Hybrid Parallelism Mapping\nTP(Intra) -> PP(Inter) -> DP(Replicas)};
+```
+**3D Parallelism Physical Mapping**. How Hybrid Parallelism maps to hardware topology. Tensor Parallelism uses high-bandwidth NVLink within a node. Pipeline Parallelism connects adjacent nodes via high-speed InfiniBand. Data Parallelism replicas can be placed anywhere, synchronizing gradients via the inter-node network.
+:::
 
 Hybrid parallelism enables training at scales that would otherwise be impossible. GPT-4 training required an estimated 10,000+ H100 GPUs for months. Without hybrid approaches, memory constraints would limit training to smaller models, throughput constraints would extend training time beyond practical limits, and communication overhead would waste the majority of available compute. The combination of tensor, pipeline, and data parallelism transforms these theoretical capabilities into practical training systems.
 

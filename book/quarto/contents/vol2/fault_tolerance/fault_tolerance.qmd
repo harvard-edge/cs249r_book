@@ -206,6 +206,14 @@ While fail-stop failures are relatively straightforward to handle because the co
 
 Byzantine failures are particularly dangerous in distributed training because the standard assumption that workers compute identical gradients for identical data no longer holds. A single Byzantine worker can corrupt the averaged gradient, potentially causing training to diverge or converge to a poor solution.
 
+::: {.callout-note title="Figure Placeholder: Fail-Stop vs Byzantine" collapse="true"}
+```{.tikz}
+% TODO: Visual comparison. Left: Fail-Stop (Node X's silent). Right: Byzantine (Node lies about gradient).
+\node[draw, align=center] {Failure Types\nSilent Death vs Malicious Lies};
+```
+**Fail-Stop vs. Byzantine Failures**. In the fail-stop model (left), a failed worker simply ceases to send messages, which is easily detected by timeouts. In the Byzantine model (right), a failed worker continues to participate but sends incorrect data (e.g., corrupted gradients), which can poison the global model state if not detected by validational redundancy.
+:::
+
 Detection of Byzantine failures requires redundant computation. Multiple workers computing gradients for the same data enable comparison of results. Statistical outlier detection can identify workers consistently producing anomalous gradients. These detection mechanisms add computational overhead and may not catch subtle corruption.
 
 Byzantine-resilient distributed training algorithms exist but impose significant overhead. Algorithms such as Krum [@blanchard2017machine] and coordinate-wise trimmed mean [@yin2018byzantine] compute aggregates that are robust to a bounded number of Byzantine workers, but they require more communication and computation than simple averaging. We examine hardware faults and Byzantine failures in greater depth in @sec-robust-ai.[^fn-byzantine-ml]
@@ -239,6 +247,14 @@ Defending against correlated failures requires understanding failure domains and
 
 : **Failure Domains in ML Infrastructure**: Understanding failure domain boundaries enables placement of redundant components across independent domains, preventing correlated failures from defeating redundancy strategies. {#tbl-failure-domains}
 
+::: {.callout-note title="Figure Placeholder: Failure Domains Hierarchy" collapse="true"}
+```{.tikz}
+% TODO: Nested boxes diagram. Rack contains Nodes. Node contains GPUs. Power Domain spans Racks.
+\node[draw, align=center] {Failure Domains\nScope of Impact};
+```
+**Hierarchy of Failure Domains**. Failure domains are often nested or overlapping. A GPU failure affects one device. A node failure affects 8 GPUs. A rack switch failure affects 32-64 GPUs. A power distribution unit (PDU) failure may affect multiple racks. Effective fault tolerance requires placing replicas across independent domains (e.g., different racks or rows) to survive correlated failures.
+:::
+
 ### The Bathtub Curve and Hardware Lifecycle {#sec-bathtub-curve}
 
 The failure taxonomy above classifies failure types and domains, answering WHAT KIND of failures occur. Equally important for designing fault tolerance is understanding WHEN in a component's lifetime failures are most likely to occur. Hardware failure rates are not constant over component lifetime. The bathtub curve, a well-established model in reliability engineering, describes how failure rates vary across three distinct phases:
@@ -254,6 +270,14 @@ The failure taxonomy above classifies failure types and domains, answering WHAT 
 [^fn-electromigration]: **Electromigration**: The gradual movement of metal atoms in conductors due to momentum transfer from electrons. At high current densities (common in modern chips with nanometer-scale wires), electromigration can create voids that increase resistance or opens that break circuits entirely. Operating at higher temperatures accelerates electromigration exponentially, which is why GPU thermal management directly impacts component lifespan.
 
 The practical implication for ML systems is that fleet-wide failure rates depend on age distribution. A cluster populated entirely with new GPUs will experience elevated failure rates during the first few weeks, followed by a stable period, then increasing failures as the fleet ages. Mixed-age fleets exhibit more consistent aggregate failure rates because different cohorts are in different lifecycle phases.
+
+::: {.callout-note title="Figure Placeholder: Bathtub Curve" collapse="true"}
+```{.tikz}
+% TODO: Plot failure rate lambda(t) vs time. High initial, flat middle, rising end.
+\node[draw, align=center] {Bathtub Curve\nFailure Rate vs Component Age};
+```
+**The Bathtub Curve**. Hardware failure rates $\lambda(t)$ vary over time. (1) **Infant Mortality**: High failure rate initially due to manufacturing defects. (2) **Useful Life**: Constant, low failure rate where random failures dominate. (3) **Wear-Out**: Increasing failure rate as components age. Burn-in testing aims to filter out infant mortality failures before deployment.
+:::
 
 Proactive maintenance strategies aim to replace components approaching wear-out before they fail in production. Predictive analytics using GPU telemetry can identify components likely to fail soon. Temperature trends, error counts, and performance degradation enable scheduled replacement during maintenance windows rather than unplanned outages during training runs.
 
@@ -564,6 +588,14 @@ The challenge is distinguishing stragglers from failures. Stragglers should trig
 - **Proactive replacement**: Detect degrading workers and replace before they fail
 
 ### Elastic Training {#sec-elastic-training}
+
+::: {.callout-note title="Figure Placeholder: Elastic Training Flow" collapse="true"}
+```{.tikz}
+% TODO: Flowchart. Training with N workers -> Failure -> Rescale to N-1 -> Continue.
+\node[draw, align=center] {Elastic Training\nDynamic Resizing Flow};
+```
+**Elastic Training Recovery**. Unlike static training which aborts on failure, elastic training adapts. When a worker fails, the job pauses, redistributes the dataset and model shards across the remaining $N-1$ workers, and resumes training from the last consistent state. This capability transforms hard failures into temporary throughput degradations.
+:::
 
 The checkpoint and restart mechanisms developed above share a common assumption: training operates with a fixed number of workers. When failures occur, we stop, recover state from checkpoint, and restart, ideally with replacement resources. But what if the system could adapt to failures dynamically, continuing training with fewer workers rather than stopping entirely? This alternative approach, **elastic training**, enables dynamic scaling by adding or removing workers without stopping training.
 
@@ -956,6 +988,14 @@ Circuit breakers[^fn-circuit-breaker] prevent resource exhaustion by failing fas
 [^fn-circuit-breaker]: **Circuit Breaker Pattern**: Borrowed from electrical engineering, where circuit breakers prevent electrical fires by cutting power during overload. In software, the pattern (popularized by Michael Nygard's "Release It!") wraps calls to external services and "trips open" after a threshold of failures, failing fast without attempting the call. This prevents resource exhaustion from waiting on failing services and gives downstream services time to recover.
 
 Circuit breakers operate in three states. In the closed state, normal operation proceeds and requests pass through. In the open state, downstream is failing and requests fail immediately without attempting downstream call. In the half-open state, the breaker tests recovery by allowing limited requests through to test if downstream recovered.
+
+::: {.callout-note title="Figure Placeholder: Circuit Breaker State Machine" collapse="true"}
+```{.tikz}
+% TODO: State machine diagram. Closed -(failure threshold)-> Open -(timeout)-> Half-Open -> (success/fail) -> Closed/Open.
+\node[draw, align=center] {Circuit Breaker\nState Transition Diagram};
+```
+**Circuit Breaker States**. The circuit breaker protects the system from cascading failure. **Closed**: Normal operation. **Open**: Error threshold exceeded; all requests fail fast to prevent resource exhaustion. **Half-Open**: After a timeout, a limited number of requests are allowed through to probe the dependency's health. Success resets to Closed; failure returns to Open.
+:::
 
 #### Graceful Degradation Implementation {#sec-degradation-implementation}
 
