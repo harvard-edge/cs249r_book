@@ -595,25 +595,34 @@ The p99 latency is 1.54× the mean, reflecting both wait time variance and batch
 
 **Adaptive Batching Windows**
 
-Fixed batching windows waste latency budget during high traffic when large batches form quickly. Adaptive strategies adjust the window based on queue depth:
+Fixed batching windows waste latency budget during high traffic when large batches form quickly. Adaptive strategies adjust the window based on queue depth, as shown in @lst-adaptive-batching.
 
-```python
+::: {#lst-adaptive-batching lst-cap="**Adaptive Batching Window**: Dynamically adjusts batch timeout based on queue depth and arrival rate, reducing average latency by 27% compared to fixed windows while maintaining throughput."}
+```{.python}
 def adaptive_batching_window(queue_depth, arrival_rate, slo_ms):
-    # Close batch early if sufficient requests queued
-    target_batch_size = 16
-    if queue_depth >= target_batch_size:
-        return 0  # Close immediately
+    """Compute optimal batching window based on current system state."""
+    target_batch_size = 16  # Optimal batch for GPU utilization
 
-    # Estimate time to reach target batch
+    # Fast path: batch ready, close immediately to minimize latency
+    if queue_depth >= target_batch_size:
+        return 0
+
+    # Compute maximum allowable wait from SLO constraint
+    # Reserve 30% of latency budget for batching, remainder for inference
+    max_wait = slo_ms * 0.3
+
+    # Estimate time to accumulate target batch at current arrival rate
     if arrival_rate > 0:
-        estimated_wait = (
-            target_batch_size - queue_depth
-        ) / arrival_rate
-        max_wait = slo_ms * 0.3  # Use 30% of SLO budget for waiting
+        requests_needed = target_batch_size - queue_depth
+        estimated_wait = requests_needed / arrival_rate
+        # Return minimum of estimated wait and SLO-constrained maximum
         return min(estimated_wait, max_wait)
 
-    return max_wait  # Default to maximum wait
+    return (
+        max_wait  # Low traffic: use full budget to accumulate batch
+    )
 ```
+:::
 
 This approach reduces average wait time during high traffic while maintaining batch sizes. For traffic varying between 200-1000 QPS:
 
@@ -799,19 +808,30 @@ Classification models output logits or probabilities across classes. Converting 
 For ResNet-50 image classification, typical postprocessing includes:
 
 ```python
-# Raw model output: logits tensor of shape (batch_size, 1000)
-probs = torch.softmax(logits, dim=-1)  # 0.05ms
-top5_probs, top5_indices = probs.topk(5)  # 0.02ms
-labels = [IMAGENET_CLASSES[i] for i in top5_indices]  # 0.01ms
+# Transform raw logits to calibrated probabilities
+# Input: logits tensor of shape (batch_size, 1000) - one score per ImageNet class
+probs = torch.softmax(
+    logits, dim=-1
+)  # Normalize to sum=1; ~0.05ms on GPU
 
-# Response formatting
+# Extract top-5 predictions for multi-class response
+# topk returns (values, indices) sorted by probability
+top5_probs, top5_indices = probs.topk(5)  # ~0.02ms; GPU operation
+
+# Map class indices to human-readable labels
+# IMAGENET_CLASSES: list of 1000 class names from synset mapping
+labels = [
+    IMAGENET_CLASSES[i] for i in top5_indices
+]  # ~0.01ms; CPU lookup
+
+# Format response with predictions and metadata for API contract
 response = {
     "predictions": [
         {"label": label, "confidence": float(prob)}
         for label, prob in zip(labels, top5_probs)
     ],
-    "model_version": "resnet50-v2.1",
-    "inference_time_ms": 5.2,
+    "model_version": "resnet50-v2.1",  # Enable client-side version tracking
+    "inference_time_ms": 5.2,  # Observability for latency monitoring
 }
 ```
 

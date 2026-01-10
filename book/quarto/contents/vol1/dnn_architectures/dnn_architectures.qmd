@@ -355,40 +355,44 @@ The mathematical representation of dense matrix multiplication maps to specific 
 
 The function mlp_layer_matrix directly mirrors the mathematical equation, employing high-level matrix operations (`matmul`) to express the computation in a single line while abstracting the underlying complexity. This implementation style characterizes deep learning frameworks, where optimized libraries manage the actual computation.
 
-::: {#lst-mlp_layer_matrix}
+::: {#lst-mlp_layer_matrix lst-cap="**Dense Layer Abstraction**: Framework-level matrix operations hide O(N x M) multiply-accumulate complexity behind a single function call, enabling hardware-optimized BLAS libraries to achieve 80-95% of peak throughput."}
 ```{.python}
 def mlp_layer_matrix(X, W, b):
-    # X: input matrix (batch_size × num_inputs)
-    # W: weight matrix (num_inputs × num_outputs)
+    """MLP forward pass using framework-level matrix operations."""
+    # X: input matrix (batch_size x num_inputs)
+    # W: weight matrix (num_inputs x num_outputs)
     # b: bias vector (num_outputs)
+
+    # Single GEMM call: frameworks dispatch to optimized BLAS/cuBLAS
+    # For MNIST: 784 x 100 = 78,400 MACs per sample
     H = activation(matmul(X, W) + b)
-    # One clean line of math
     return H
 ```
-This implementation shows neural networks performing weighted sum and activation functions across layers using matrix operations. The code emphasizes the core computational pattern in multi-layer perceptrons.
 :::
 
 To understand the system implications of this architecture, we must look "under the hood" of the high-level framework call. The elegant one-line matrix multiplication `output = matmul(X, W)` is, from the hardware's perspective, a series of nested loops that expose the true computational demands on the system. This translation from logical model to physical execution reveals critical patterns that determine memory access, parallelization strategies, and hardware utilization.
 
 The second implementation, `mlp_layer_compute` (shown in @lst-mlp_layer_compute), exposes the actual computational pattern through nested loops. This version reveals what really happens when we compute a layer's output: we process each sample in the batch, computing each output neuron by accumulating weighted contributions from all inputs.
 
-::: {#lst-mlp_layer_compute}
+::: {#lst-mlp_layer_compute lst-cap="**Dense Layer Computation**: Nested loops reveal O(batch x outputs x inputs) complexity where each output neuron requires num_inputs multiply-accumulate operations, explaining why MNIST classification demands 78,400 MACs per layer."}
 ```{.python}
 def mlp_layer_compute(X, W, b):
-    # Process each sample in the batch
+    """Explicit loop structure exposing MLP computational patterns."""
+    # Loop 1: Process each sample independently (parallelizable)
     for batch in range(batch_size):
-        # Compute each output neuron
+        # Loop 2: Compute each output neuron
         for out in range(num_outputs):
-            # Initialize with bias
-            Z[batch, out] = b[out]
-            # Accumulate weighted inputs
+            Z[batch, out] = b[out]  # Initialize with bias
+
+            # Loop 3: Accumulate weighted inputs (innermost loop)
+            # This is the MAC operation: result += input * weight
             for in_ in range(num_inputs):
                 Z[batch, out] += X[batch, in_] * W[in_, out]
+            # Total per output: num_inputs MACs + num_inputs memory reads
 
-    H = activation(Z)
+    H = activation(Z)  # Element-wise nonlinearity
     return H
 ```
-This implementation computes each output neuron by accumulating weighted contributions from all inputs across the batch. The detailed step-by-step process exposes how a single layer in a neural network processes data, emphasizing the role of biases and weighted sums in producing outputs.
 :::
 
 This translation from mathematical abstraction to concrete computation exposes how dense matrix multiplication decomposes into nested loops of simpler operations. The outer loop processes each sample in the batch, while the middle loop computes values for each output neuron. Within the innermost loop, the system performs repeated multiply-accumulate operations[^fn-mac], combining each input with its corresponding weight.

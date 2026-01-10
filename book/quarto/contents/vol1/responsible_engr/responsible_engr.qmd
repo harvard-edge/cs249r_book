@@ -287,6 +287,78 @@ Equalized odds requires both equal true positive rates and equal false positive 
 
 The pattern revealed by these metrics has a clear interpretation. The model rejects qualified applicants from Group B at a much higher rate (40% false negative rate versus 10%) while maintaining similar false positive rates. This suggests the model has learned stricter approval criteria for Group B, potentially encoding historical discrimination in lending patterns where minority applicants faced higher scrutiny despite equivalent qualifications.
 
+@lst-fairness-metrics-code demonstrates how to compute these fairness metrics programmatically using confusion matrix values, automating the calculations that production fairness monitoring systems perform continuously.
+
+::: {#lst-fairness-metrics-code lst-cap="**Disaggregated Fairness Metrics**: Computing demographic parity, equal opportunity, and equalized odds from confusion matrices reveals disparities invisible in aggregate accuracy. Production systems automate these calculations across all protected attributes, triggering alerts when disparities exceed predefined thresholds."}
+```{.python}
+import numpy as np
+
+
+def compute_fairness_metrics(confusion_matrix: dict) -> dict:
+    """
+    Compute fairness metrics from confusion matrix values.
+
+    Args:
+        confusion_matrix: Dict with keys 'TP', 'FP', 'TN', 'FN'
+
+    Returns:
+        Dict containing approval_rate, tpr, fpr, fnr
+    """
+    tp = confusion_matrix["TP"]
+    fp = confusion_matrix["FP"]
+    tn = confusion_matrix["TN"]
+    fn = confusion_matrix["FN"]
+
+    total = tp + fp + tn + fn
+    positives = tp + fn  # Actual positive class (would repay)
+    negatives = fp + tn  # Actual negative class (would default)
+
+    # Demographic parity: P(approved)
+    # Measures whether approval rates are equal across groups
+    approval_rate = (tp + fp) / total
+
+    # True positive rate (equal opportunity): P(approved | qualified)
+    # Measures whether qualified applicants are treated equally
+    tpr = tp / positives if positives > 0 else 0.0
+
+    # False positive rate: P(approved | unqualified)
+    # Together with TPR, determines equalized odds
+    fpr = fp / negatives if negatives > 0 else 0.0
+
+    # False negative rate: P(rejected | qualified)
+    # Reveals how often qualified applicants are incorrectly rejected
+    fnr = fn / positives if positives > 0 else 0.0
+
+    return {
+        "approval_rate": approval_rate,
+        "tpr": tpr,
+        "fpr": fpr,
+        "fnr": fnr,
+    }
+
+
+# Confusion matrices from loan approval example
+group_a = {"TP": 4500, "FP": 1000, "TN": 4000, "FN": 500}  # Majority
+group_b = {"TP": 600, "FP": 200, "TN": 800, "FN": 400}  # Minority
+
+metrics_a = compute_fairness_metrics(group_a)
+metrics_b = compute_fairness_metrics(group_b)
+
+# Compute disparities between groups
+tpr_disparity = metrics_a["tpr"] - metrics_b["tpr"]
+approval_disparity = (
+    metrics_a["approval_rate"] - metrics_b["approval_rate"]
+)
+
+print(f"Group A TPR: {metrics_a['tpr']:.1%}")  # 90.0%
+print(f"Group B TPR: {metrics_b['tpr']:.1%}")  # 60.0%
+print(f"TPR Disparity: {tpr_disparity:.1%}")  # 30.0 percentage points
+# Disparity exceeds typical 5% threshold for high-stakes decisions
+```
+:::
+
+The 30 percentage point TPR disparity far exceeds common industry thresholds of 5 percentage points for high-stakes applications, indicating the model requires fairness intervention before deployment.
+
 @tbl-fairness-metrics-summary presents the computed metrics and disparities.
 
 +-------------------------+-------------+-------------+---------------------+

@@ -478,31 +478,37 @@ These recurring multiply-accumulate operations exhibit a crucial property: they 
 
 This decomposition is illustrated in @lst-dense_layer_def, which defines a dense layer at the framework level.
 
-::: {#lst-dense_layer_def lst-cap="**Dense Layer Definition**: Defines a dense layer using a high-level API, illustrating how neural networks implement parallel transformations across input tensors."}
+::: {#lst-dense_layer_def lst-cap="**Dense Layer Abstraction**: High-level framework APIs encapsulate 131,072 multiply-accumulate operations (256 inputs times 512 outputs) in a single function call, hiding the computational complexity from developers while enabling automatic hardware optimization."}
 ```{.python}
-dense = Dense(512)(input_tensor)
+# Framework abstracts compute-intensive operations
+dense = Dense(512)(input_tensor)  # 256×512 = 131K MACs per sample
 ```
 :::
 
 This high-level call expands into mathematical operations as shown in @lst-dense_expansion.
 
-::: {#lst-dense_expansion lst-cap="**Layer Computation**: Neural networks compute each layer's output via weighted input summation followed by an activation function transformation."}
+::: {#lst-dense_expansion lst-cap="**Matrix Operation Expansion**: Each dense layer decomposes into matrix multiplication and element-wise operations, exposing the dominant compute pattern that consumes over 95% of neural network execution time."}
 ```{.python}
-output = matmul(input_weights) + bias
-output = activation(output)
+# Linear transformation: O(input_dim × output_dim × batch) operations
+output = (
+    matmul(input, weights) + bias
+)  # Matrix multiply dominates cost
+output = activation(output)  # Element-wise: O(output_dim × batch)
 ```
 :::
 
 At the processor level, the computation reduces to nested loops that multiply inputs and weights, sum the results, and apply a nonlinear function, as shown in @lst-loop_level_dense.
 
-::: {#lst-loop_level_dense lst-cap="**Nested Loops**: Computes output values through sequential matrix multiplications and bias additions, followed by activation function application to produce final outputs."}
+::: {#lst-loop_level_dense lst-cap="**Processor-Level Execution**: Nested loops reveal the O(batch times input times output) multiply-accumulate operations that accelerators must execute, with 4 million MACs for typical batch=32, input=256, output=512 configurations."}
 ```{.python}
-for n in range(batch_size):
-    for m in range(output_size):
-        sum = bias[m]
-        for k in range(input_size):
-            sum += input[n, k] * weights[k, m]
-        output[n, m] = activation(sum)
+# Total operations: batch_size × output_size × input_size MACs
+for n in range(batch_size):  # Batch dimension: parallelizable
+    for m in range(output_size):  # Output neurons: parallelizable
+        sum = bias[m]  # Initialize accumulator
+        for k in range(input_size):  # Reduction dimension: sequential
+            sum += input[n, k] * weights[k, m]  # MAC operation
+        output[n, m] = activation(sum)  # Non-linear transformation
+# Example: 32 × 512 × 256 = 4.2M multiply-accumulate operations
 ```
 :::
 
