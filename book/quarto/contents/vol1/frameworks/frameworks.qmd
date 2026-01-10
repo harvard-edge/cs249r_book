@@ -1173,7 +1173,7 @@ The power of reverse mode becomes clear when considering what would happen if we
 
 The implementation of reverse mode in machine learning frameworks requires careful orchestration of computation and memory. While forward mode simply augments each computation, reverse mode needs to maintain a record of the forward computation to enable the backward pass. Modern frameworks accomplish this through computational graphs and automatic gradient accumulation[^fn-gradient-accumulation].
 
-[^fn-gradient-accumulation]: **Gradient Accumulation**: A training technique where gradients from multiple mini-batches are computed and summed before updating model parameters, effectively simulating larger batch sizes without requiring additional memory. Essential for training large models where memory constraints limit batch size to as small as 1 sample per device.
+[^fn-gradient-accumulation]: **Gradient Accumulation**: A technique for simulating larger batch sizes by summing gradients over multiple mini-batches before parameter updates. Covered in detail in @sec-ai-training.
 
 We extend our previous example to a small neural network computation. See @lst-reverse_simple_nn for the code structure.
 
@@ -1581,130 +1581,16 @@ tensor.register_hook(hook)
 
 These autograd internals enable PyTorch's flexibility: users write forward passes in natural Python, and autograd automatically constructs backward passes with correct gradients and efficient memory management. Understanding these mechanisms is crucial for debugging training issues, implementing custom operations, and optimizing memory usage in production systems.
 
-##### Mixed-Precision Training Mechanics {#sec-ai-frameworks-mixed-precision-training}
+##### Mixed-Precision Training Support {#sec-ai-frameworks-mixed-precision-training}
 
-Mixed-precision training combines lower-precision arithmetic (FP16) with higher-precision accumulation (FP32) to reduce memory usage and accelerate computation while maintaining numerical stability. Modern GPUs provide 2-8× higher throughput for FP16 operations compared to FP32, making mixed precision essential for training large models efficiently. However, naive FP16 training fails due to gradient underflow—many gradients fall below FP16's representable range (minimum ~6×10⁻⁸), becoming zero and preventing learning.
+Modern frameworks provide automatic mixed-precision training through APIs like PyTorch's `autocast` and `GradScaler`. These tools automatically manage precision selection and gradient scaling to prevent underflow, enabling practitioners to achieve 2x or greater throughput improvements with minimal code changes.
 
-PyTorch's Automatic Mixed Precision (AMP) system solves this through two key mechanisms: the `autocast` context manager for automatic precision selection and `GradScaler` for loss scaling to prevent gradient underflow.
+@lst-autocast-usage demonstrates framework-level mixed precision support:
 
-**autocast Context Manager**
-
-The `autocast` context manager automatically selects appropriate precision for each operation based on numerical stability requirements. Not all operations benefit equally from reduced precision—some are sensitive to numerical errors while others are memory-bound and benefit from FP16's reduced bandwidth requirements.
-
-@lst-autocast-usage demonstrates basic autocast usage in a training loop:
-
-::: {#lst-autocast-usage lst-cap="**Autocast Usage**: The autocast context manager automatically casts operations to FP16 where safe, maintaining FP32 precision for numerically sensitive operations."}
+::: {#lst-autocast-usage lst-cap="**Mixed-Precision API**: Modern frameworks provide automatic mixed-precision support through context managers that handle precision selection and numerical stability."}
 ```python
 import torch
-from torch.amp import autocast  # Note: torch.cuda.amp is deprecated
-
-model = MyModel().cuda()
-optimizer = torch.optim.Adam(model.parameters())
-
-for inputs, targets in dataloader:
-    inputs, targets = inputs.cuda(), targets.cuda()
-
-    # Enable automatic mixed precision for forward pass
-    with autocast(device_type="cuda", dtype=torch.float16):
-        outputs = model(inputs)
-        loss = criterion(outputs, targets)
-
-    # Backward pass (outside autocast)
-    loss.backward()
-    optimizer.step()
-    optimizer.zero_grad()
-```
-:::
-
-Inside the `autocast` context, PyTorch automatically applies precision rules:
-
-- **FP16 operations**: Matrix multiplications, convolutions (memory-bound, benefit from reduced bandwidth)
-- **FP32 operations**: Loss functions, softmax, layer normalization (numerically sensitive)
-- **Automatic casting**: Tensors are cast as needed; if FP16 and FP32 tensors interact, FP16 is promoted to FP32
-
-This selective precision maintains accuracy while achieving speedups. On NVIDIA A100 GPUs, FP16 matrix multiplication achieves 312 TFLOPS compared to 156 TFLOPS for FP32, a 2x throughput improvement.
-
-**Hardware Support: Tensor Cores** {#sec-ai-frameworks-tensor-cores}
-
-The throughput improvement from reduced precision operations is not simply faster floating-point arithmetic. NVIDIA Tensor Cores, introduced with the Volta architecture in 2017, are specialized matrix multiply-accumulate (MMA) units that compute $D = A \times B + C$ where $A$ and $B$ are reduced-precision matrices and accumulation occurs in higher precision. Each Tensor Core computes a 4x4x4 matrix multiply per clock cycle, enabling the dramatic throughput gains observed with mixed-precision training.
-
-Understanding Tensor Core requirements is essential for achieving advertised performance. Tensor Core utilization depends on several architectural constraints:
-
-1. **Dimension alignment**: Matrix dimensions must be multiples of 8 for FP16 operations (ideally 16 for maximum efficiency). Misaligned dimensions fall back to standard CUDA cores, reducing throughput by up to 16x.
-2. **Memory layout**: Tensors must be contiguously laid out in memory. Strided access patterns prevent Tensor Core dispatch.
-3. **Supported data types**: Operations must use Tensor Core compatible types (FP16, BF16, TF32, INT8, INT4 on newer architectures).
-
-Without understanding these constraints, practitioners may observe their code running at CUDA core speeds (19.5 TFLOPS FP32 on A100) rather than Tensor Core speeds (312 TFLOPS FP16), a 16x performance difference with no obvious indication of the cause.
-
-@tbl-tensor-core-requirements summarizes Tensor Core activation requirements:
-
-| Requirement | Specification | Consequence of Violation |
-|-------------|---------------|--------------------------|
-| Matrix M dimension | Multiple of 8 (FP16) | Falls back to CUDA cores |
-| Matrix N dimension | Multiple of 8 (FP16) | Falls back to CUDA cores |
-| Matrix K dimension | Multiple of 8 (FP16) | Falls back to CUDA cores |
-| Memory layout | Contiguous | Falls back to CUDA cores |
-| Data type | FP16, BF16, TF32, INT8 | Falls back to CUDA cores |
-
-: Tensor Core activation requirements. Violating any requirement causes fallback to standard CUDA cores with dramatically reduced throughput. {#tbl-tensor-core-requirements}
-
-**Modern Precision Formats** {#sec-ai-frameworks-precision-formats}
-
-Beyond FP16, modern GPU architectures support additional precision formats that address specific training and inference requirements. Understanding these formats enables practitioners to select optimal precision for their workloads.
-
-@tbl-precision-formats compares the available precision formats:
-
-| Format | Exponent | Mantissa | Range | Primary Use Case |
-|--------|----------|----------|-------|------------------|
-| FP32 | 8 bits | 23 bits | ±3.4×10³⁸ | Reference precision, optimizer states |
-| TF32 | 8 bits | 10 bits | ±3.4×10³⁸ | Drop-in FP32 replacement for matrix ops |
-| BF16 | 8 bits | 7 bits | ±3.4×10³⁸ | Training stability (same range as FP32) |
-| FP16 | 5 bits | 10 bits | ±65504 | Inference, memory-bound training |
-| FP8 (E4M3) | 4 bits | 3 bits | ±448 | Inference on Hopper+ architectures |
-| FP8 (E5M2) | 5 bits | 2 bits | ±57344 | Training gradients on Hopper+ |
-
-: Precision formats available on modern NVIDIA GPUs. The exponent determines dynamic range; the mantissa determines precision within that range. {#tbl-precision-formats}
-
-**TensorFloat-32 (TF32)** uses FP32's 8-bit exponent for range but truncates the mantissa to 10 bits. On Ampere and later architectures, TF32 is enabled by default for matrix operations, providing Tensor Core acceleration for existing FP32 code without any code changes. This implicit acceleration can surprise practitioners who observe different performance characteristics on different hardware:
-
-```python
-# TF32 is enabled by default on Ampere+ GPUs
-# FP32 matrix operations automatically use TF32 precision
-
-# Disable TF32 for debugging numerical differences:
-torch.backends.cuda.matmul.allow_tf32 = False
-torch.backends.cudnn.allow_tf32 = False
-```
-
-**BFloat16 (BF16)** maintains FP32's dynamic range by keeping the 8-bit exponent while reducing mantissa precision to 7 bits. This design eliminates most gradient underflow issues that require GradScaler with FP16, simplifying mixed-precision training:
-
-```python
-# BF16 training typically does not require loss scaling
-with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-    outputs = model(inputs)
-    loss = criterion(outputs, targets)
-
-# No GradScaler needed - gradients stay in representable range
-loss.backward()
-optimizer.step()
-```
-
-The choice between FP16 and BF16 depends on workload characteristics. FP16 offers higher mantissa precision (10 bits vs 7 bits), beneficial for inference where small numerical differences affect output quality. BF16's larger dynamic range makes it preferable for training, where gradient magnitudes vary widely across layers and training stages.
-
-**GradScaler for Loss Scaling**
-
-Even with careful operation selection, gradients often underflow in FP16. Consider a gradient of magnitude 10⁻⁷: this rounds to zero in FP16 (minimum normal value ≈6×10⁻⁸), effectively stopping learning for those parameters.
-
-Loss scaling solves this by multiplying the loss by a large scale factor before backward pass, shifting gradients into FP16's representable range. After computing scaled gradients, we divide by the scale factor to recover true gradient values before the optimizer step.
-
-@lst-gradscaler-usage shows GradScaler integration:
-
-::: {#lst-gradscaler-usage lst-cap="**GradScaler Usage**: Loss scaling prevents gradient underflow by scaling losses before backward pass, then unscaling gradients before optimizer update."}
-```python
-from torch.amp import (
-    autocast,
-    GradScaler,
-)  # Note: torch.cuda.amp is deprecated
+from torch.amp import autocast, GradScaler
 
 model = MyModel().cuda()
 optimizer = torch.optim.Adam(model.parameters())
@@ -1712,135 +1598,42 @@ scaler = GradScaler("cuda")
 
 for inputs, targets in dataloader:
     inputs, targets = inputs.cuda(), targets.cuda()
-
     optimizer.zero_grad()
 
-    # Forward pass in FP16
+    # Framework automatically selects precision per operation
     with autocast(device_type="cuda", dtype=torch.float16):
         outputs = model(inputs)
         loss = criterion(outputs, targets)
 
-    # Backward pass with scaled loss
-    scaler.scale(loss).backward()  # loss *= scale_factor
-
-    # Unscale gradients and step optimizer
-    scaler.step(
-        optimizer
-    )  # grads /= scale_factor, then optimizer.step()
-    scaler.update()  # Adjust scale factor for next iteration
+    # GradScaler handles gradient scaling for numerical stability
+    scaler.scale(loss).backward()
+    scaler.step(optimizer)
+    scaler.update()
 ```
 :::
 
-**Why Loss Scaling Prevents Underflow**
+Inside the `autocast` context, frameworks automatically apply precision rules: matrix multiplications and convolutions use FP16 for bandwidth efficiency, while numerically sensitive operations like softmax and layer normalization remain in FP32. This selective precision maintains accuracy while achieving speedups on modern GPUs with specialized hardware units.
 
-Loss scaling shifts gradient magnitudes into FP16's representable range through multiplication:
+Frameworks also support multiple precision formats including FP16, BF16, and TF32, each with different trade-offs between range and precision. BF16 maintains FP32's dynamic range, simplifying training by eliminating most gradient underflow issues:
 
-$$
-\text{scaled\_loss} = \text{loss} \times s
-$$
-
-where $s$ is the scale factor (typically 2¹⁶ = 65536 initially). During backward pass:
-
-$$
-\frac{\partial (\text{scaled\_loss})}{\partial w} = s \cdot \frac{\partial \text{loss}}{\partial w}
-$$
-
-For a gradient of magnitude 10⁻⁷:
-
-- **Without scaling**: 10⁻⁷ → 0 in FP16 (underflow)
-- **With scaling** (s=65536): 65536 × 10⁻⁷ = 6.5×10⁻³ (representable in FP16)
-
-After backward pass, GradScaler divides gradients by $s$ before the optimizer step, recovering the true gradient values in FP32 for the parameter update.
-
-**Dynamic Loss Scaling Algorithm**
-
-Static scaling factors fail when gradients vary across training. Too large a scale causes overflow (gradients exceed FP16's maximum ~65504), while too small a scale still permits underflow. Dynamic loss scaling adapts the scale factor automatically.
-
-The algorithm maintains a scale factor $s$ and adjusts it based on gradient overflow detection:
-
-1. **Overflow check**: After backward pass, check if any gradients are inf or NaN (indicating overflow)
-2. **Overflow response**: If overflow detected:
-   - Skip optimizer step (gradients are invalid)
-   - Reduce scale factor: $s \leftarrow s / 2$
-   - Reset counter
-3. **No overflow**: If no overflow for $N$ consecutive iterations (typically $N=2000$):
-   - Increase scale factor: $s \leftarrow s \times 2$
-   - Maintains aggressive scaling without causing frequent overflows
-
-@lst-dynamic-scaling shows the conceptual implementation:
-
-::: {#lst-dynamic-scaling lst-cap="**Dynamic Loss Scaling**: Scale factor adapts based on gradient overflow, maximizing precision utilization while preventing numerical errors."}
 ```python
-class GradScaler:
-    def __init__(self):
-        self.scale = 2**16  # Initial scale factor
-        self.growth_interval = 2000
-        self.no_overflow_iters = 0
-
-    def step(self, optimizer):
-        # Unscale gradients (divide by scale factor)
-        for param in optimizer.param_groups[0]["params"]:
-            if param.grad is not None:
-                param.grad.div_(self.scale)
-
-        # Check for inf/NaN (overflow indicator)
-        found_inf = any(
-            torch.isinf(p.grad).any() or torch.isnan(p.grad).any()
-            for p in optimizer.param_groups[0]["params"]
-            if p.grad is not None
-        )
-
-        if found_inf:
-            # Overflow: reduce scale, skip update
-            self.scale /= 2.0
-            self.no_overflow_iters = 0
-        else:
-            # No overflow: proceed with update
-            optimizer.step()
-            self.no_overflow_iters += 1
-
-    def update(self):
-        # Increase scale after sustained success
-        if self.no_overflow_iters >= self.growth_interval:
-            self.scale *= 2.0
-            self.no_overflow_iters = 0
+# BF16 training typically does not require loss scaling
+with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+    outputs = model(inputs)
+    loss = criterion(outputs, targets)
+loss.backward()  # No GradScaler needed
+optimizer.step()
 ```
-:::
 
-**Mixed-Precision Memory Savings**
+The mechanics of mixed-precision training, including loss scaling algorithms, memory savings analysis, and hardware acceleration through specialized units like Tensor Cores, are examined in detail in @sec-ai-training. Hardware precision support and accelerator architectures are covered in @sec-ai-acceleration.
 
-Mixed precision reduces memory consumption across multiple components:
+##### Optimizer State and Checkpointing {#sec-ai-frameworks-optimizer-state-mechanics}
 
-1. **Activation storage**: FP16 activations require half the memory of FP32 (2 bytes vs 4 bytes per element)
-2. **Gradient storage**: Gradients computed in FP16 before unscaling
-3. **Master weights**: Optimizer maintains FP32 master copy of weights for accurate updates
+Optimizers maintain internal state (momentum buffers, adaptive learning rates) that must be saved with checkpoints to resume training correctly. Frameworks provide the `state_dict()` interface to access this state for serialization and loading.
 
-Total memory savings typically range from 25-50% depending on model architecture. For a model with $P$ parameters and batch size $B$ with $L$ layers:
+**State Dictionary Interface**
 
-- **FP32 training**: $4P$ (weights) + $4P$ (gradients) + $4P$ (optimizer state) + $4BL$ (activations) ≈ $12P + 4BL$ bytes
-- **Mixed precision**: $2P$ (FP16 weights) + $4P$ (FP32 master) + $4P$ (optimizer state) + $2BL$ (FP16 activations) ≈ $10P + 2BL$ bytes
-
-For large models where activations dominate (large $B$ and $L$), the $4BL \rightarrow 2BL$ reduction provides substantial savings, often enabling 2× larger batch sizes.
-
-**Numerical Stability Considerations**
-
-Mixed precision succeeds because neural network training has inherent noise tolerance. Gradient descent convergence depends on gradient direction more than exact magnitude, and the combination of FP16 computation with FP32 accumulation preserves sufficient precision for learning.
-
-However, certain operations require special handling:
-
-1. **Large reductions**: Summing many FP16 values accumulates rounding error. Use FP32 accumulation for operations like `torch.sum()` over large tensors.
-2. **Exponentials**: Softmax and layer normalization involve $e^x$, which can overflow in FP16 for moderate $x$ values. These operations automatically use FP32 under autocast.
-3. **Small learning rates**: For learning rates below 10⁻⁵, FP32 optimizer updates are essential to prevent weight staleness (updates smaller than FP16 representable increments).
-
-Modern frameworks handle these cases automatically through autocast's operation whitelist/blacklist, ensuring that numerically sensitive operations maintain FP32 precision while memory-bound operations benefit from FP16's bandwidth advantages.
-
-##### Optimizer State Mechanics {#sec-ai-frameworks-optimizer-state-mechanics}
-
-While gradients capture how to adjust parameters, optimizers maintain additional state to improve training convergence. Understanding optimizer state structure is essential for checkpointing, memory optimization, and debugging training resumption issues.
-
-**State Dictionary Structure**
-
-PyTorch optimizers expose their internal state through the `state_dict()` method, which returns a dictionary containing all information needed to resume training:
+PyTorch optimizers expose their internal state through a standardized interface:
 
 ```python
 import torch
@@ -1850,203 +1643,38 @@ import torch.optim as optim
 model = nn.Linear(10, 5)
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-# Initial state is empty (no steps taken yet)
-print(optimizer.state_dict())
-# {'state': {}, 'param_groups': [{'lr': 0.001, 'betas': (0.9, 0.999), ...}]}
-
-# After one training step
+# After training steps, optimizer accumulates state
 loss = model(torch.randn(3, 10)).sum()
 loss.backward()
 optimizer.step()
 
-# Now state contains momentum buffers
+# Access state for checkpointing
 state = optimizer.state_dict()
-print(state.keys())  # dict_keys(['state', 'param_groups'])
+# Contains: {'state': {...}, 'param_groups': [{'lr': 0.001, ...}]}
 ```
 
-The state dictionary has two main components:
+The state dictionary contains two components: `state` maps parameter IDs to optimizer-specific tensors (momentum buffers, moment estimates), while `param_groups` stores hyperparameters like learning rate and weight decay.
 
-1. **`state`**: Maps parameter IDs to optimizer-specific state tensors
-2. **`param_groups`**: Lists parameter groups with their hyperparameters (learning rate, momentum, weight decay)
+**Checkpoint Save and Load**
 
-**Momentum Buffer Storage**
-
-SGD with momentum maintains a velocity buffer for each parameter. For parameter $\theta$ with gradient $g_t$, momentum updates the velocity $v_t$ and parameter:
-
-$$
-\begin{aligned}
-v_t &= \mu v_{t-1} + g_t \\
-\theta_{t+1} &= \theta_t - \eta v_t
-\end{aligned}
-$$
-
-where $\mu$ is the momentum coefficient (typically 0.9) and $\eta$ is the learning rate.
-
-```python
-model = nn.Linear(100, 10)
-optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
-
-# Train for one step
-output = model(torch.randn(8, 100))
-loss = output.sum()
-loss.backward()
-optimizer.step()
-
-# Inspect momentum buffers
-state = optimizer.state_dict()
-for param_id, param_state in state["state"].items():
-    print(f"Parameter {param_id}:")
-    print(
-        f"  Momentum buffer shape: {param_state['momentum_buffer'].shape}"
-    )
-    # For Linear(100, 10): weight [10, 100], bias [10]
-```
-
-Each momentum buffer has the same shape as its corresponding parameter. For a model with $P$ parameters using FP32:
-
-- Parameters: $P \times 4$ bytes
-- Gradients: $P \times 4$ bytes (during backward)
-- Momentum buffers: $P \times 4$ bytes
-- **Total: 12 bytes per parameter**
-
-**Adam State: First and Second Moments**
-
-Adam maintains two exponential moving averages per parameter: first moment $m_t$ (momentum) and second moment $v_t$ (variance). The update rule is:
-
-$$
-\begin{aligned}
-m_t &= \beta_1 m_{t-1} + (1-\beta_1) g_t \\
-v_t &= \beta_2 v_{t-1} + (1-\beta_2) g_t^2 \\
-\hat{m}_t &= \frac{m_t}{1-\beta_1^t} \quad \text{(bias correction)} \\
-\hat{v}_t &= \frac{v_t}{1-\beta_2^t} \\
-\theta_{t+1} &= \theta_t - \eta \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}
-\end{aligned}
-$$
-
-where $\beta_1 = 0.9$, $\beta_2 = 0.999$, and $\epsilon = 10^{-8}$ are default values.
-
-```python
-model = nn.Linear(100, 10)  # 1,010 parameters total
-optimizer = optim.Adam(model.parameters(), lr=0.001)
-
-# Train for one step
-output = model(torch.randn(8, 100))
-loss = output.sum()
-loss.backward()
-optimizer.step()
-
-# Inspect Adam state
-state = optimizer.state_dict()
-for param_id, param_state in state["state"].items():
-    print(f"Parameter {param_id}:")
-    print(
-        f"  Step: {param_state['step']}"
-    )  # Iteration count for bias correction
-    print(
-        f"  exp_avg shape: {param_state['exp_avg'].shape}"
-    )  # m_t (first moment)
-    print(
-        f"  exp_avg_sq shape: {param_state['exp_avg_sq'].shape}"
-    )  # v_t (second moment)
-```
-
-Each parameter requires storing two state tensors (`exp_avg` and `exp_avg_sq`), both the same shape as the parameter. Memory cost for $P$ parameters in FP32:
-
-- Parameters: $P \times 4$ bytes
-- Gradients: $P \times 4$ bytes (during backward)
-- First moments: $P \times 4$ bytes
-- Second moments: $P \times 4$ bytes
-- **Total: 16 bytes per parameter**
-
-For a 7B parameter model (GPT-style):
-
-- Parameters: 28 GB
-- Adam state: 56 GB (2× parameters)
-- **Total optimizer state: 56 GB**
-
-This explains why training large models requires substantially more memory than inference.
-
-**Loading Optimizer State for Training Resumption**
-
-Resuming training requires loading both model parameters and optimizer state to continue from the exact training state:
+Resuming training requires loading both model parameters and optimizer state:
 
 ```python
 # Saving checkpoint
 checkpoint = {
-    'epoch': epoch,
-    'model_state_dict': model.state_dict(),
-    'optimizer_state_dict': optimizer.state_dict(),
-    'loss': loss,
+    "epoch": epoch,
+    "model_state_dict": model.state_dict(),
+    "optimizer_state_dict": optimizer.state_dict(),
 }
-torch.save(checkpoint, 'checkpoint.pt')
+torch.save(checkpoint, "checkpoint.pt")
 
 # Resuming training
-checkpoint = torch.load('checkpoint.pt')
-model.load_state_dict(checkpoint['model_state_dict'])
-optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-start_epoch = checkpoint['epoch'] + 1
-
-# Training continues with momentum buffers intact
-for epoch in range(start_epoch, num_epochs):
-    # ... training loop ...
+checkpoint = torch.load("checkpoint.pt")
+model.load_state_dict(checkpoint["model_state_dict"])
+optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 ```
 
-**Critical detail**: The optimizer must be created with the same parameter references as when the state was saved. Loading parameters into a different model instance and then loading optimizer state will fail:
-
-```python
-# INCORRECT: Optimizer loses parameter references
-model = MyModel()
-optimizer = optim.Adam(model.parameters())
-# ... train ...
-torch.save(
-    {"model": model.state_dict(), "opt": optimizer.state_dict()},
-    "ckpt.pt",
-)
-
-# New model instance (different parameter tensors)
-new_model = MyModel()
-new_model.load_state_dict(torch.load("ckpt.pt")["model"])
-optimizer = optim.Adam(new_model.parameters())
-optimizer.load_state_dict(
-    torch.load("ckpt.pt")["opt"]
-)  # May fail or load incorrectly!
-
-# CORRECT: Load parameters first, then create optimizer
-new_model = MyModel()
-new_model.load_state_dict(torch.load("ckpt.pt")["model"])
-optimizer = optim.Adam(new_model.parameters())
-optimizer.load_state_dict(
-    torch.load("ckpt.pt")["opt"]
-)  # Works correctly
-```
-
-**Memory Implications and Optimization Strategies**
-
-Optimizer state dominates memory consumption for large models. Consider a Llama-7B model:
-
-- Model parameters: 7B × 4 bytes = 28 GB
-- Adam optimizer state: 7B × 8 bytes = 56 GB (first + second moments)
-- Gradients: 7B × 4 bytes = 28 GB
-- Activations (batch 8, seq 2048): ~20 GB
-- **Total: 132 GB for single-GPU training**
-
-This exceeds most consumer GPU memory (24 GB for RTX 4090, 80 GB for A100). Memory reduction strategies:
-
-1. **8-bit optimizers** (e.g., `bitsandbytes`): Store moments in INT8 with block-wise quantization
-   - Reduces optimizer state from 56 GB to 14 GB (4× reduction)
-   - Minimal impact on convergence
-
-2. **SGD instead of Adam**: Reduces optimizer state from 2× to 1× parameter count
-   - May require more careful tuning (learning rate, momentum)
-   - Often sufficient for fine-tuning pre-trained models
-
-3. **Gradient accumulation**: Reduce batch size (smaller activations), accumulate gradients over multiple micro-batches
-   - Does not reduce optimizer state, but reduces activation memory
-
-4. **ZeRO optimizer** (Volume II, distributed training): Shard optimizer state across GPUs
-   - 8 GPUs: Each stores 1/8 of optimizer state (7 GB instead of 56 GB per GPU)
-
-Understanding optimizer state structure enables effective checkpointing, memory optimization, and debugging of training resumption issues. The memory overhead of optimizer state becomes the dominant factor in training large models, motivating distributed optimization strategies covered in Volume II.
+This interface enables training resumption, model versioning, and checkpoint management. Optimizer memory requirements and optimization strategies for large-scale training are covered in @sec-ai-training.
 
 ##### The Systems Engineering Breakthrough {#sec-ai-frameworks-systems-engineering-breakthrough-ab13}
 
@@ -3288,7 +2916,7 @@ One of the primary roles of execution structures is memory management. During tr
 
 These structures also handle operation scheduling, ensuring that computations are performed in the correct order and with optimal hardware utilization. On GPUs, for instance, execution structures can overlap computation and data transfer operations, hiding latency and improving throughput. When running on multiple devices, they synchronize dependent computations to maintain consistency without unnecessary delays.
 
-Distributed training introduces additional complexity, as execution structures must manage data and computation across multiple nodes. This includes partitioning computational graphs, synchronizing gradients, and redistributing data as needed. Efficient execution structures minimize communication overhead, allowing distributed systems to scale linearly with additional hardware [@mcmahan2023communicationefficient]. @fig-3d-parallelism shows how distributed training can be defined over a grid of accelerators to parallelize over multiple dimensions for faster throughput.
+Distributed training introduces additional complexity, as execution structures must manage data and computation across multiple nodes. This includes partitioning computational graphs, synchronizing gradients, and redistributing data as needed. Efficient execution structures minimize communication overhead, enabling distributed systems to scale with additional hardware [@mcmahan2023communicationefficient]. @fig-3d-parallelism provides awareness of how large-scale training distributes computation; implementation details are covered in @sec-distributed-training (Volume II).
 
 ::: {#fig-3d-parallelism fig-env="figure" fig-pos="htb"}
 ```{.tikz}
@@ -3393,7 +3021,7 @@ pics/square/.style = {
 ([xshift=2mm]28-1-ZDD)node[midway, below=4mm, anchor=west, sloped,pos=0.25] {Model Parallel};
 \end{tikzpicture}}
 ```
-**3D Parallelism**: Distributed training scales throughput by partitioning computation across multiple dimensions: data, pipeline stages, and model layers. This enables concurrent execution on a grid of accelerators. This approach minimizes communication overhead and maximizes hardware utilization by overlapping computation and communication across devices.
+**3D Parallelism**: Training can be parallelized across multiple dimensions including data batches, pipeline stages, and model partitions. This figure illustrates how large-scale training systems distribute computation across a grid of accelerators. These distributed training strategies are covered in @sec-distributed-training (Volume II).
 :::
 
 ### Programming and Execution Models {#sec-ai-frameworks-programming-execution-models-db59}
