@@ -115,7 +115,7 @@ With this infrastructure in place, practitioners face a fundamental decision: wh
 
 Three concrete signals indicate when distributed training becomes necessary rather than merely beneficial. First, **memory exhaustion** occurs when model parameters, optimizer states, and activation storage exceed single-device capacity. It is critical to distinguish between static memory, which includes parameters and optimizer states and remains constant per batch, and dynamic memory for activations, which scales with batch size and sequence length. For long-context LLMs, activation memory often dominates. Techniques like **gradient checkpointing**[^fn-gradient-checkpointing] address this by discarding intermediate activations during the forward pass and recomputing them during the backward pass, trading 30% more compute for O(sqrt(n)) memory reduction. Even with these optimizations, models beyond 10-20 billion parameters typically exceed the 40-80GB HBM capacity of modern GPUs.
 
-[^fn-gradient-checkpointing]: **Gradient Checkpointing**: A memory-compute trade-off technique that discards intermediate activations during the forward pass and recomputes them during backpropagation. This reduces memory usage from O(n) to O(sqrt(n)) for n layers, at the cost of roughly 30% additional compute. Essential for training deep networks or long sequences on memory-constrained devices.
+[^fn-gradient-checkpointing]: Gradient checkpointing trades approximately 30% additional compute for reduced activation memory, from O(n) to O(sqrt(n)) for n layers.
 
 [^fn-mixed-precision]: **Mixed Precision Training**: Using lower-precision formats (FP16 or BF16) for forward/backward computation while maintaining FP32 master weights for updates. Halves memory usage and doubles compute throughput on modern GPUs with tensor cores. Introduced by NVIDIA in 2017, mixed precision is now standard practice for training large models.
 
@@ -155,7 +155,7 @@ This coordination relies on consensus protocols and synchronization primitives t
 
 With these coordination mechanisms in place, practitioners follow a systematic progression from single-device to distributed training, with each stage building upon the previous level's challenges. Single GPU training requires only local memory management and straightforward forward/backward passes, establishing the baseline computational patterns. Scaling to multiple GPUs within a single node introduces high-bandwidth communication requirements, typically handled through NVLink[^nvlink] or PCIe connections with NCCL[^nccl] optimization while preserving the single-machine simplicity of fault tolerance and scheduling.
 
-[^nvlink]: **NVLink**: NVIDIA's proprietary high-speed interconnect providing up to 600 GB/s bidirectional bandwidth between GPUs, roughly 10x faster than PCIe Gen4. Essential for efficient multi-GPU training as it enables rapid gradient synchronization and tensor exchanges between devices.
+[^nvlink]: NVLink provides 600 GB/s bidirectional bandwidth, enabling efficient gradient synchronization within nodes. See @sec-infrastructure for detailed coverage of GPU interconnect architectures.
 
 [^nccl]: **NCCL (NVIDIA Collective Communications Library)**: Optimized library implementing efficient collective operations (AllReduce, Broadcast, etc.) for multi-GPU and multi-node communication. Automatically selects optimal communication patterns based on hardware topology, critical for distributed training performance.
 
@@ -412,21 +412,7 @@ Before examining specific parallelism strategies, understanding the quantitative
 Communication overhead represents the primary bottleneck in distributed training systems. AllReduce operations consume 10-40% of total training time in data parallel systems, and this overhead increases significantly at scale. BERT-Large on 128 GPUs experiences communication overhead reaching 35% of total runtime, while GPT-3 scale models experience 55% overhead on 1,024 GPUs.
 
 ::: {.callout-note title="AllReduce Communication Complexity"}
-AllReduce complexity depends on two components: latency ($\alpha$) and bandwidth ($\beta$). For a message of size $M$ across $N$ workers:
-
-**Ring AllReduce**:
-
-- Time: $2(N-1) \cdot \alpha + 2 \cdot \frac{N-1}{N} \cdot M \cdot \beta$
-- Bandwidth utilization: $(N-1)/N$, approaching optimal as $N$ grows
-- Each device sends/receives approximately $2M$ bytes total, not $2M \cdot N$
-
-**Tree AllReduce**:
-
-- Time: $2 \log_2(N) \cdot \alpha + 2 \log_2(N) \cdot M \cdot \beta$
-- Bandwidth utilization: $1/\log_2(N)$, decreasing with scale
-- Latency: $O(\log N)$ steps
-
-The crossover point depends on message size. Tree AllReduce wins for small messages that are latency-dominated, while ring AllReduce wins for large gradients that are bandwidth-dominated [@patarasuk2009allreduce]. Modern implementations like NCCL use hierarchical algorithms that achieve tree latency within nodes using NVLink and ring bandwidth between nodes using InfiniBand. For complete algorithm analysis including hierarchical, butterfly, and topology-aware variants, see @sec-communication.
+AllReduce complexity depends on two components: latency ($\alpha$) and bandwidth ($\beta$). Ring AllReduce achieves bandwidth-optimal communication with $(N-1)/N$ utilization, while tree-based approaches offer lower latency at $O(\log N)$ steps. The choice depends on message size: tree wins for latency-dominated small messages, ring wins for bandwidth-dominated large gradients. Modern implementations like NCCL use hierarchical algorithms that combine tree latency within nodes and ring bandwidth between nodes. For detailed algorithm analysis including complexity formulas, hierarchical variants, and topology-aware optimizations, see @sec-communication.
 :::
 
 Interconnect selection is critical for large-scale deployments, as these complexity characteristics determine when communication dominates computation.
@@ -619,12 +605,7 @@ Gradient mismatches occur when workers disagree on which tensors to synchronize 
 
 Straggler-induced delays arise because iteration time equals the slowest worker's time plus synchronization overhead. A single slow worker, whether due to thermal throttling, network congestion, or OS jitter, delays all workers and reduces cluster utilization. At 1000 GPUs with 1% probability of straggler per GPU per step, approximately 10 GPUs straggle every iteration.
 
-Production systems address these issues through:
-
-- **Timeouts**: AllReduce operations with configurable timeouts that trigger failure handling rather than indefinite blocking
-- **Heartbeat monitoring**: Detecting unresponsive workers before AllReduce blocks
-- **Elastic training**: Removing failed workers and continuing with reduced parallelism (see @sec-fault-tolerance)
-- **Backup workers**: Redundant computation to mask stragglers
+Production systems address these issues through timeouts, heartbeat monitoring, and elastic training mechanisms. See @sec-fault-tolerance for comprehensive coverage of failure detection and recovery strategies in distributed training systems.
 
 #### Parameter Updating {#sec-distributed-training-parameter-updating}
 
@@ -723,7 +704,7 @@ While data parallelism is an effective approach for distributed training, it int
 
 Communication overhead represents the most significant bottleneck in data parallelism. During gradient synchronization, each device must exchange gradient updates, often hundreds of megabytes per step for large models. With 8 GPUs training a 1-billion-parameter model, each synchronization step might require transferring several gigabytes of data across the network. While high-speed interconnects like NVLink at 300 GB/s or InfiniBand[^fn-infiniband] at 200 Gb/s help, the overhead remains substantial.
 
-[^fn-infiniband]: **InfiniBand**: A high-performance networking standard originally developed for supercomputers and now essential for multi-node GPU clusters. InfiniBand HDR provides 200 Gb/s per port with sub-microsecond latency, roughly 10x the bandwidth and 10x lower latency than standard Ethernet. RDMA (Remote Direct Memory Access) allows GPUs to read/write remote memory without CPU involvement, critical for efficient gradient synchronization across nodes.
+[^fn-infiniband]: InfiniBand provides 200 Gb/s per port with sub-microsecond latency, enabling efficient gradient synchronization across nodes via RDMA. See @sec-infrastructure for network topology design and InfiniBand architecture details.
 
 NCCL's ring-allreduce algorithm[^fn-allreduce-algorithm] reduces this burden by organizing devices in a ring topology, but communication costs still grow with model size and device count.
 

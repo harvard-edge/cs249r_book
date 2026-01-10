@@ -112,7 +112,7 @@ Large-scale machine learning systems spread computation across many machines to 
 
 ## Communication Fundamentals {#sec-communication-fundamentals}
 
-The distributed training strategies examined in @sec-distributed-training (data parallelism, model parallelism, pipeline parallelism) all share a common assumption: workers can exchange data efficiently. That assumption hides what becomes the dominant engineering challenge at scale. The transition from single-machine to distributed training fundamentally changes which resource constrains system performance. On a single GPU, computation throughput typically limits training speed. Add a second GPU, and memory bandwidth often becomes the constraint. Scale to hundreds or thousands of GPUs, and network communication emerges as the dominant bottleneck that determines whether distributed training achieves meaningful speedup or wastes computational resources waiting for data to arrive.
+The distributed training strategies examined in @sec-distributed-training (data parallelism, model parallelism, pipeline parallelism) all share a common assumption: workers can exchange data efficiently. That assumption hides what becomes the dominant engineering challenge at scale. The network architectures examined in @sec-infrastructure, from NVLink within nodes to InfiniBand across nodes, establish the physical substrate for distributed communication. The transition from single-machine to distributed training fundamentally changes which resource constrains system performance. On a single GPU, computation throughput typically limits training speed. Add a second GPU, and memory bandwidth often becomes the constraint. Scale to hundreds or thousands of GPUs, and network communication emerges as the dominant bottleneck that determines whether distributed training achieves meaningful speedup or wastes computational resources waiting for data to arrive.
 
 This transition reveals a fundamental asymmetry in how computation and communication scale. Computation is inherently local: each GPU operates on its own data independently, so adding GPUs increases aggregate compute capacity proportionally. Communication, however, is inherently global: ensuring all GPUs converge on the same synchronized state requires information to traverse physical distances between them. Adding more independent workers scales local work linearly, but coordinating those workers requires moving data across physical space.
 
@@ -667,7 +667,7 @@ The table below shows optimal algorithm selection for various scenarios:
 
 ### AllReduce Fault Tolerance {#sec-allreduce-fault-tolerance}
 
-Production AllReduce implementations must handle node failures gracefully. At 1000+ GPU scale, hardware failures occur multiple times per day, making fault tolerance a critical design consideration rather than an edge case. We examine fault tolerance in distributed training comprehensively in @sec-fault-tolerance; here we focus on the communication-specific failure modes and recovery strategies.
+Production AllReduce implementations must handle node failures gracefully. At 1000+ GPU scale, hardware failures occur multiple times per day, making fault tolerance a critical design consideration rather than an edge case. The checkpoint storage infrastructure developed in @sec-storage enables the recovery mechanisms discussed here; @sec-fault-tolerance provides comprehensive treatment of distributed training fault tolerance. Here we focus on the communication-specific failure modes and recovery strategies.
 
 Collective operations face several failure modes in production. Node crashes terminate processes and break ring or tree topologies, causing all other participants to block indefinitely waiting for the failed node's contribution. Network partitions create subsets of unreachable nodes where collectives cannot complete because not all participants can communicate. Stragglers occur when one node runs slower than others due to thermal throttling, OS jitter, or network congestion, forcing all participants to wait bounded only by timeout. Silent data corruption represents a rare but catastrophic failure where incorrect gradients propagate through the reduction and corrupt model training.
 
@@ -1270,10 +1270,18 @@ As $T \to \infty$, the accumulated compressed gradients equal the accumulated tr
 ::: {#lst-topk-error-feedback lst-cap="**Top-K Sparsification with Error Feedback**: Achieves high compression ratios (100-1000x) while maintaining convergence guarantees by accumulating discarded gradient components for future transmission."}
 ```{.python}
 # At each worker, each iteration:
-accumulated = gradient + error_buffer  # Include previously discarded gradients
-compressed = top_k(accumulated, k)     # Keep only k largest magnitude elements
-error_buffer = accumulated - decompress(compressed)  # Store discarded for next iteration
-allreduce(compressed)  # Synchronize compressed gradients across workers
+accumulated = (
+    gradient + error_buffer
+)  # Include previously discarded gradients
+compressed = top_k(
+    accumulated, k
+)  # Keep only k largest magnitude elements
+error_buffer = accumulated - decompress(
+    compressed
+)  # Store discarded for next iteration
+allreduce(
+    compressed
+)  # Synchronize compressed gradients across workers
 ```
 :::
 
@@ -1604,7 +1612,9 @@ Communication libraries detect topology through several mechanisms. NVLink topol
 if all_gpus_nvlink_connected:
     use_nvlink_optimized_allreduce()  # NVLink provides highest bandwidth
 elif hierarchical_topology_detected:
-    use_hierarchical_allreduce(intra=nvlink, inter=ib)  # Exploit multi-level topology
+    use_hierarchical_allreduce(
+        intra=nvlink, inter=ib
+    )  # Exploit multi-level topology
 elif uniform_bandwidth:
     use_ring_allreduce()  # Bandwidth-optimal for homogeneous networks
 else:
