@@ -3,105 +3,6 @@ title: "ML Operations at Scale"
 bibliography: ops_scale.bib
 ---
 
-<!--
-================================================================================
-EDITORIAL GUIDELINES: MODEL-TYPE DIVERSITY FOR ML OPERATIONS AT SCALE
-================================================================================
-
-EXPERT FEEDBACK FROM SERVING CHAPTER REVIEW (January 2025):
-The following production operations topics were identified by experts as important
-but appropriately deferred from Vol I Serving chapter to this chapter:
-
-FROM CHIP HUYEN:
-
-- Feature store integration (online vs offline stores, point-in-time correctness)
-- Shadow deployment patterns for model validation
-- Progressive rollout strategies with automatic rollback triggers
-- Model artifact registries and versioning schemes
-- Observability beyond latency (prediction logging, distributed tracing, alerting)
-- Error handling and fallback strategies (circuit breakers, fallback models)
-- Cost optimization (autoscaling policies, spot instances, serverless tradeoffs)
-
-FROM JEFF DEAN:
-
-- Retry budgets to prevent load amplification
-- Blue-green and canary deployment patterns
-- Graceful shutdown and draining procedures
-- Observability architecture (metrics, distributed tracing, anomaly detection)
-
-FROM ION STOICA:
-
-- Health checking infrastructure (liveness vs readiness probes)
-- Graceful shutdown and connection draining
-- Resource isolation vs sharing tradeoffs
-
-================================================================================
-
-CORE PRINCIPLE: MLOps practices vary by model type and deployment context.
-Recommendation systems have different operational needs than LLMs.
-Ensemble management differs from single-model operations.
-
-MODEL-SPECIFIC OPERATIONS CONSIDERATIONS:
-
-| Model Type      | Update Frequency    | Monitoring Focus    | Deployment Pattern  |
-|-----------------|---------------------|---------------------|---------------------|
-| LLMs            | Infrequent (months) | Quality, safety     | A/B, staged rollout |
-| Recommendation  | Frequent (daily)    | Engagement metrics  | Shadow, interleaving|
-| Vision          | Moderate (weeks)    | Accuracy, latency   | Canary deployment   |
-| Real-time       | Continuous          | Drift detection     | Online learning     |
-
-REQUIRED COVERAGE FOR THIS CHAPTER:
-
-MULTI-MODEL MANAGEMENT:
-
-- Single model: Simpler ops (vision, many NLP)
-- Model ensemble: Complex dependencies (recommendation)
-- Model cascade: Sequential models with fallbacks
-- Include: Why RecSys ops is fundamentally about ensembles
-
-CI/CD FOR ML:
-
-- Training pipelines: Different for different model types
-- Model validation: Metrics differ by application domain
-- Deployment strategies: A/B vs interleaving vs shadow
-- Include: Why recommendation systems use interleaving experiments
-
-MONITORING:
-
-- Model quality: Accuracy, latency, throughput
-- Data quality: Drift, schema changes, freshness
-- Business metrics: Engagement, conversion, retention
-- Include: Different monitoring priorities for different model types
-
-PLATFORM ENGINEERING:
-
-- Self-service for data scientists
-- Infrastructure abstraction by workload type
-- Include: How platforms handle heterogeneous model types
-
-CASE STUDIES TO INCLUDE:
-
-- Meta ML platform (multi-model, recommendation-heavy)
-- Uber Michelangelo (diverse ML workloads)
-- Netflix ML infrastructure (recommendation + content analysis)
-- Google Vertex AI (general-purpose platform)
-
-ORGANIZATIONAL PATTERNS:
-
-- Centralized ML platform teams
-- Embedded ML engineers
-- Include: How org structure varies by model portfolio
-
-ANTI-PATTERNS TO AVOID:
-
-- Assuming all MLOps is single-model operations
-- Ignoring ensemble complexity in recommendation
-- One-size-fits-all monitoring dashboards
-- Treating all model updates as equivalent risk
-
-================================================================================
--->
-
 # ML Operations at Scale {#sec-ops-scale}
 
 ::: {layout-narrow}
@@ -1942,18 +1843,76 @@ Without controls, one team's demanding workload can degrade performance for othe
 *Priority classes*: Ensure critical workloads receive resources even under contention
 *Burst budgets*: Allow temporary resource overages while maintaining long-term fairness
 
-### Cost Allocation and Chargeback
+### FinOps for ML Platforms {#sec-ops-scale-finops}
 
-Platform costs must be attributed to consuming teams for accountability and planning.
+ML workloads present unique cost management challenges that traditional IT FinOps practices do not address. GPU compute costs dominate ML budgets, with a single training run potentially costing tens of thousands of dollars. Serving infrastructure scales with traffic, creating variable costs that fluctuate dramatically. The experimental nature of ML development means many training runs produce no production value. Effective FinOps for ML requires specialized practices that account for these realities.
+
+::: {.callout-definition title="FinOps for ML"}
+**FinOps (Financial Operations) for ML** is the practice of bringing financial accountability to ML infrastructure spending through visibility, optimization, and governance, enabling teams to make cost-aware decisions without sacrificing model quality or development velocity.
+:::
 
 **Cost Components**
 
-ML platform costs include:
+ML platform costs span multiple categories with different optimization strategies:
 
-- Compute: GPU and CPU time for training and serving
-- Storage: Dataset storage, model artifacts, feature store
-- Network: Data transfer between services and regions
-- Platform overhead: Platform team salaries, development costs, tools
+| Cost Category | Typical Share | Primary Drivers | Optimization Lever |
+|--------------|---------------|-----------------|-------------------|
+| Training compute | 40-60% | GPU hours, experiment volume | Spot instances, early stopping |
+| Serving compute | 20-40% | Traffic volume, latency SLOs | Autoscaling, model optimization |
+| Storage | 10-20% | Dataset size, checkpoint frequency | Tiered storage, retention policies |
+| Network | 5-15% | Multi-region, data transfer | Caching, compression |
+| Platform overhead | 5-10% | Team size, tooling | Automation, self-service |
+
+: ML platform cost breakdown {#tbl-ops-scale-cost-breakdown}
+
+### Cost Optimization Strategies {#sec-ops-scale-cost-optimization}
+
+ML platforms offer multiple levers for cost reduction, each with different tradeoffs.
+
+**Spot and Preemptible Instances**
+
+Cloud providers offer significant discounts (60-90%) for interruptible compute capacity. ML training workloads are well suited for spot instances because checkpointing enables recovery from interruptions, training jobs tolerate delays better than serving, and large batch jobs amortize instance acquisition overhead.
+
+Effective spot usage requires:
+
+1. **Checkpoint frequency tuning**: Balance checkpoint overhead against potential lost work. For a job costing \$10/hour on spot instances, hourly checkpoints losing at most one hour of work (\$10) far outweigh checkpoint storage costs.
+
+2. **Instance diversification**: Request capacity across multiple instance types and availability zones to reduce interruption probability.
+
+3. **Fallback strategies**: Automatically fall back to on-demand instances for time-sensitive jobs or when spot availability is low.
+
+```text
+Training Cost Comparison (100 GPU-hours):
+├── On-demand:     100 × $3.00 = $300
+├── Spot (70% discount): 100 × $0.90 = $90 (+ potential reruns)
+├── Reserved (40% discount): 100 × $1.80 = $180 (requires commitment)
+└── Actual spot with interruptions: ~$110 (accounting for 20% rerun overhead)
+```
+
+**Autoscaling for Serving**
+
+Serving costs scale with traffic, making autoscaling essential. However, ML serving autoscaling differs from traditional web applications:
+
+*Model loading latency*: Loading large models takes seconds to minutes, requiring predictive scaling rather than reactive scaling. Scale up before anticipated traffic increases.
+
+*GPU memory constraints*: Unlike CPU applications, GPU serving cannot easily add fractional capacity. Scaling often involves discrete jumps (0, 1, 2, 4 GPUs).
+
+*Batch accumulation tradeoff*: Higher utilization through request batching increases latency. Autoscaling policies must balance cost against latency SLOs.
+
+**Right-Sizing and Instance Selection**
+
+ML workloads have distinct compute profiles requiring careful instance matching:
+
+- *Memory-bound training* (large embedding tables): Prioritize GPU memory over compute
+- *Compute-bound training* (dense models): Maximize FLOPS per dollar
+- *Latency-sensitive serving*: Minimize cold start, prioritize single-request performance
+- *Throughput-oriented serving*: Maximize requests per dollar through batching
+
+Instance selection should be data-driven. Run benchmarks comparing cost-per-training-step or cost-per-inference across instance types rather than assuming newer or larger instances are always better.
+
+### Cost Visibility and Attribution {#sec-ops-scale-cost-attribution}
+
+Cost optimization requires granular visibility into spending. Platform teams must attribute costs to consuming teams, projects, and individual models.
 
 **Attribution Models**
 
@@ -1965,6 +1924,21 @@ Several attribution approaches exist:
 
 *Hybrid*: Base charge for allocation plus variable charge for excess usage. Balances predictability with efficiency incentives.
 
+**Cost Per Inference Analysis**
+
+For serving workloads, cost per inference provides the key unit economic metric:
+
+$$\text{Cost per inference} = \frac{\text{Total serving cost}}{\text{Total inferences served}}$$ {#eq-cost-per-inference}
+
+This metric enables:
+
+- Comparing model versions (does the accuracy gain justify 2x inference cost?)
+- Evaluating optimization investments (quantization reduced cost per inference by 40%)
+- Capacity planning (at projected traffic, monthly serving cost will be X)
+- Business decisions (can we offer this feature profitably at the expected price point?)
+
+Track cost per inference by model, customer segment, and request type to identify optimization opportunities.
+
 **Chargeback Implementation**
 
 Effective chargeback requires:
@@ -1974,6 +1948,45 @@ Effective chargeback requires:
 3. Reporting dashboards showing cost by team, project, model
 4. Forecasting tools to help teams plan budgets
 5. Anomaly detection for unexpected cost increases
+
+### Budget-Aware Development {#sec-ops-scale-budget-aware}
+
+FinOps extends beyond infrastructure optimization to influence ML development practices.
+
+**Experiment Budgets**
+
+Unconstrained experimentation leads to runaway costs. Effective controls include:
+
+- *Per-experiment limits*: Cap individual training runs at a cost threshold
+- *Team budgets*: Allocate monthly compute budgets to teams with visibility into consumption
+- *Approval workflows*: Require approval for experiments exceeding cost thresholds
+
+These controls should inform rather than block. The goal is cost awareness, not prevention of valuable experiments.
+
+**Cost-Quality Tradeoffs**
+
+Model selection should explicitly consider cost alongside accuracy:
+
+| Model | Accuracy | Training Cost | Serving Cost/1K | Value Judgment |
+|-------|----------|---------------|-----------------|----------------|
+| Small | 92% | \$500 | \$0.10 | Baseline |
+| Medium | 95% | \$5,000 | \$0.50 | 3% accuracy for 10x cost |
+| Large | 96% | \$50,000 | \$2.00 | Additional 1% for 10x more |
+
+: Cost-quality tradeoff analysis {#tbl-ops-scale-cost-quality}
+
+For many applications, the marginal accuracy gain does not justify the cost increase. Making these tradeoffs explicit prevents defaulting to the largest available model.
+
+**Efficiency Metrics**
+
+Track efficiency metrics alongside model quality:
+
+- *Cost per accuracy point*: Total cost divided by accuracy percentage
+- *Experiments per production model*: Ratio indicates development efficiency
+- *GPU utilization*: Low utilization suggests over-provisioning or inefficient code
+- *Spot utilization rate*: Fraction of eligible workloads using spot instances
+
+Regular review of these metrics identifies systemic inefficiencies and guides platform improvements
 
 ## Feature Store Operations {#sec-ops-scale-feature-store}
 
