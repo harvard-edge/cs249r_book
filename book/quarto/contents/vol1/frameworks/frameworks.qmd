@@ -95,77 +95,11 @@ This principle has profound implications for framework design. Consider the comp
 
 **Large matrix multiplications are often compute-bound, while many other common operations are memory-bound**. Element-wise operations like ReLU perform only one operation per 8 bytes transferred, achieving very low utilization of peak compute. Even attention mechanisms, despite their quadratic computational complexity in sequence length, can remain memory-bound for practical sequence lengths because they require materializing large intermediate tensors.
 
-### The Roofline Model {#sec-ai-frameworks-roofline}
-
-The *roofline model* formalizes the relationship between arithmetic intensity and achievable performance:
-
-$$\text{Attainable Performance} = \min(\text{Peak Compute}, \text{Peak Bandwidth} \times \text{Arithmetic Intensity})$$
-
-@fig-frameworks-roofline illustrates this relationship. Operations with low arithmetic intensity hit the "memory roof" and cannot achieve peak compute regardless of hardware capability. Only operations with intensity exceeding the ridge point can approach peak computational throughput.
-
-```{python}
-#| label: fig-frameworks-roofline
-#| fig-cap: "**Roofline Model for ML Operations**: The attainable performance of an operation is limited by either peak compute (horizontal roof) or memory bandwidth (sloped roof). Most neural network operations fall in the memory-bound region, explaining why frameworks prioritize memory optimization."
-#| code-fold: true
-
-import numpy as np
-import matplotlib.pyplot as plt
-
-# Hardware parameters (representative of modern GPU)
-peak_compute = 312  # TFLOPS
-peak_bandwidth = 2.0  # TB/s
-ridge_point = peak_compute / peak_bandwidth  # ~156 FLOPS/byte
-
-# Arithmetic intensity range
-ai = np.logspace(-1, 3, 1000)
-
-# Roofline
-performance = np.minimum(peak_compute, peak_bandwidth * ai)
-
-plt.figure(figsize=(10, 6))
-plt.loglog(ai, performance, 'b-', linewidth=2, label='Roofline')
-plt.axhline(y=peak_compute, color='gray', linestyle='--', alpha=0.5)
-plt.axvline(x=ridge_point, color='gray', linestyle='--', alpha=0.5)
-
-# Plot common operations
-operations = {
-    'ReLU': (0.125, 0.25),
-    'Softmax': (0.625, 1.25),
-    'LayerNorm': (0.625, 1.25),
-    'Small MatMul\n(256×256)': (42, 84),
-    'Large MatMul\n(4096×4096)': (682, 312),
-    'Attention\n(S=512)': (8, 16),
-}
-
-colors = ['red', 'orange', 'yellow', 'green', 'blue', 'purple']
-for (name, (ai_val, perf)), color in zip(operations.items(), colors):
-    plt.scatter(ai_val, min(perf, peak_compute), s=100, c=color, zorder=5)
-    plt.annotate(name, (ai_val, min(perf, peak_compute)),
-                textcoords="offset points", xytext=(10, 5), fontsize=9)
-
-plt.fill_between(ai[ai < ridge_point], 0.1, peak_bandwidth * ai[ai < ridge_point],
-                 alpha=0.2, color='red', label='Memory-Bound Region')
-plt.fill_between(ai[ai >= ridge_point], 0.1, peak_compute,
-                 alpha=0.2, color='green', label='Compute-Bound Region')
-
-plt.xlabel('Arithmetic Intensity (FLOPs/Byte)', fontsize=12)
-plt.ylabel('Attainable Performance (TFLOPS)', fontsize=12)
-plt.title('Roofline Model: Memory vs Compute Bounds', fontsize=14)
-plt.legend(loc='lower right')
-plt.xlim(0.1, 1000)
-plt.ylim(0.1, 500)
-plt.grid(True, alpha=0.3)
-plt.tight_layout()
-plt.show()
-```
-
-The roofline model explains why framework optimizations focus heavily on reducing memory traffic rather than raw computational efficiency. When an operation is memory-bound, the only path to higher performance is reducing bytes transferred, not adding more compute capability. For detailed methodology on constructing roofline analyses for specific hardware and workloads, see @sec-benchmarking-ai.
-
 ### Kernel Fusion: The Primary Optimization {#sec-ai-frameworks-kernel-fusion-principle}
 
 The memory-bound nature of most operations leads directly to the most important framework optimization: *kernel fusion*. When operations execute separately, each reads its inputs from memory and writes its outputs back. Fusing operations eliminates intermediate memory traffic.
 
-Consider a typical transformer block that applies: `output = dropout(softmax(QK^T/√d) @ V)`. Without fusion, this requires:
+Consider a typical transformer block that applies: $\text{output} = \text{dropout}\left(\text{softmax}\left(\frac{QK^T}{\sqrt{d}}\right) \cdot V\right)$. Without fusion, this requires:
 
 1. Compute QK^T, write S² values to memory
 2. Read S² values, apply scaling, write S² values
@@ -314,21 +248,11 @@ The trend continued with [SciPy](https://scipy.org/), which built upon NumPy's f
 
 ### Early Machine Learning Platform Development {#sec-ai-frameworks-early-machine-learning-platform-development-3873}
 
-The next evolutionary phase represented a conceptual leap from general numerical computing to domain-specific machine learning tools. The transition from numerical libraries to dedicated machine learning frameworks marked an important evolution in abstraction. While the underlying computations remained rooted in matrix operations, frameworks began to encapsulate these operations into higher-level machine learning primitives. The University of Waikato introduced Weka in 1993 [@witten2002data], one of the earliest ML frameworks, which abstracted matrix operations into data mining tasks, though it was limited by its Java implementation and focus on smaller-scale computations.
+The transition from numerical libraries to dedicated machine learning frameworks marked a shift in abstraction level. Early tools like Theano (2007) were not just libraries; they were the first attempts to solve the **Automatic Differentiation (Autodiff) Abstraction Gap**.
 
-This paradigm shift became evident with [Scikit-learn](https://scikit-learn.org/stable/), started as a Google Summer of Code project in 2007 and first publicly released in 2010, representing a significant advancement in machine learning abstraction. Building upon the NumPy and SciPy foundation, it transformed basic matrix operations into intuitive ML algorithms. For example, what amounts to a series of matrix multiplications and gradient computations became a simple `fit()` method call in a logistic regression model. This abstraction pattern, hiding complex matrix operations behind clean APIs, would become a defining characteristic of modern ML frameworks.
+Before frameworks, implementing a new model required manually deriving gradients—a slow, error-prone process that coupled modeling logic with mathematical implementation. Theano introduced the concept of the **computational graph**, where users defined the *forward* pass, and the system automatically generated the *backward* pass.
 
-[Theano](https://github.com/Theano/Theano)[^fn-theano], developed at the Montreal Institute for Learning Algorithms (MILA) and appearing in 2007, was a major advancement that introduced two revolutionary concepts: computational graphs[^fn-comp-graphs] and GPU acceleration [@al2016theano]. Computational graphs represented mathematical operations as directed graphs, with matrix operations as nodes and data flowing between them. This graph-based approach allowed for automatic differentiation and optimization of the underlying matrix operations. More importantly, it enabled the framework to automatically route these operations to GPU hardware, dramatically accelerating matrix computations.
-
-[^fn-theano]: **Theano**: Pioneering ML framework from Yoshua Bengio's Montreal lab (2007-2017), introducing symbolic computation graphs and automatic differentiation in Python. Named after Greek mathematician Theano of Croton. Its computational graph paradigm directly influenced TensorFlow, while PyTorch adopted Theano's successor Torch. Development ceased in 2017 but its abstractions persist in every modern framework.
-
-[^fn-comp-graphs]: **Computational Graphs**: DAG representations of mathematical operations enabling automatic differentiation, formalized by Wengert in 1964. Nodes represent operations; edges represent data flow. Modern frameworks (TensorFlow, PyTorch) trace graphs with millions of nodes, enabling compiler optimizations like operator fusion and memory planning that achieve 2-10× speedups over naive execution.
-
-A parallel development track emerged with [Torch7](http://torch.ch/) (the Lua-based predecessor to PyTorch), created at NYU in 2002, which took a different approach to handling matrix operations. It emphasized immediate execution of operations (eager execution[^fn-eager-execution]) and provided an adaptable interface for neural network implementations.
-
-[^fn-eager-execution]: **Eager Execution**: An execution model where operations are evaluated immediately as they are called, similar to standard Python execution. Pioneered by Torch in 2002, this approach prioritizes developer productivity and debugging ease over performance optimization, becoming the default mode in modern frameworks like PyTorch and TensorFlow 2.x.
-
-Torch's design philosophy of prioritizing developer experience while maintaining high performance established design patterns that would later influence frameworks like PyTorch. Its architecture demonstrated how to balance high-level abstractions with efficient low-level matrix operations, introducing concepts that would prove important as deep learning complexity increased.
+This architectural decision—separating model definition from gradient computation—is the direct ancestor of modern graphs in TensorFlow and PyTorch. It demonstrated that for ML development to scale, the system must handle the complexity of the chain rule, freeing the engineer to focus on architecture. This evolution from manual gradients to static graphs (Theano/TF1) to dynamic graphs (PyTorch) tracks the industry's search for the optimal balance between performance and developer velocity.
 
 ### Deep Learning Computational Platform Innovation {#sec-ai-frameworks-deep-learning-computational-platform-innovation-d3db}
 
