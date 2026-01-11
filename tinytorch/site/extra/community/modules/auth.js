@@ -244,6 +244,22 @@ export async function handleAuth(e) {
                     localStorage.setItem("tinytorch_user", JSON.stringify(data.user));
                     updateNavState();
 
+                    // Check Profile Completeness immediately
+                    const { data: profile } = await supabase
+                        .from('profiles')
+                        .select('display_name, institution, location')
+                        .eq('id', data.user.id)
+                        .single();
+
+                    const hasName = profile && profile.display_name;
+                    const hasInst = profile && profile.institution && (Array.isArray(profile.institution) ? profile.institution.length > 0 : !!profile.institution);
+                    const hasLoc = profile && profile.location;
+
+                    if (!hasName || !hasInst || !hasLoc) {
+                        window.location.href = basePath + '/profile_setup.html';
+                        return;
+                    }
+
                     const params = new URLSearchParams(window.location.search);
                     if (params.get('action') === 'profile') {
                         closeModal();
