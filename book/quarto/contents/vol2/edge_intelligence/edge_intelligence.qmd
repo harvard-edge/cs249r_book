@@ -9,7 +9,7 @@ glossary: edge_intelligence_glossary.json
 
 ::: {layout-narrow}
 ::: {.column-margin}
-_DALL·E 3 Prompt: Drawing of a smartphone with its internal components exposed, revealing diverse miniature engineers of different genders and skin tones actively working on the ML model. The engineers, including men, women, and non-binary individuals, are tuning parameters, repairing connections, and enhancing the network on the fly. Data flows into the ML model, being processed in real-time, and generating output inferences._
+_Gemini Pro 3 Prompt: Drawing of a smartphone with its internal components exposed, revealing diverse miniature engineers of different genders and skin tones actively working on the ML model. The engineers, including men, women, and non-binary individuals, are tuning parameters, repairing connections, and enhancing the network on the fly. Data flows into the ML model, being processed in real-time, and generating output inferences. Rendered in the style of Nanobanana. High resolution, rectangular image with golden ratio dimensions._
 :::
 
 \noindent
@@ -428,12 +428,38 @@ The transition from inference-only deployment to on-device training creates mult
 
 Standard efficiency constraints apply to both inference and training. These constraints include quantization, pruning, and knowledge distillation. However, training amplifies each constraint dimension by 3 to 10 times. @tbl-training-amplification quantifies how training workloads intensify the challenges of model efficiency, optimization techniques, and hardware acceleration.
 
-::: {.callout-note title="Figure Placeholder: Memory Amplification" collapse="true"}
+::: {.callout-note title="Figure: Training Memory Amplification" collapse="false"}
 ```{.tikz}
-% TODO: Bar chart comparing memory usage: Inference (Weights+Activations) vs Training (Weights+Activations+Gradients+Optimizer)
-\node[draw, align=center] {Memory Amplification\nInference vs Training};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, xscale=1.2]
+  \definecolor{WeightColor}{RGB}{200,220,255}
+  \definecolor{ActColor}{RGB}{255,220,200}
+  \definecolor{GradColor}{RGB}{220,255,200}
+  \definecolor{OptColor}{RGB}{255,200,200}
+
+  \tikzset{
+    bar/.style={draw=black!70, thick, minimum width=1.5cm}
+  }
+
+  % Inference Bar
+  \node[anchor=south] at (0, 4.5) {\textbf{Inference}};
+  \draw[bar, fill=WeightColor] (-0.75, 0) rectangle (0.75, 1.0) node[midway] {Weights};
+  \draw[bar, fill=ActColor] (-0.75, 1.0) rectangle (0.75, 1.2) node[midway, font=\tiny] {Act};
+  \node[below, font=\scriptsize] at (0,-0.2) {Total: 1.2x};
+
+  % Training Bar
+  \node[anchor=south] at (3, 4.5) {\textbf{Training}};
+  \draw[bar, fill=WeightColor] (2.25, 0) rectangle (3.75, 1.0) node[midway] {Weights};
+  \draw[bar, fill=ActColor] (2.25, 1.0) rectangle (3.75, 2.5) node[midway] {Activations};
+  \draw[bar, fill=GradColor] (2.25, 2.5) rectangle (3.75, 3.5) node[midway] {Gradients};
+  \draw[bar, fill=OptColor] (2.25, 3.5) rectangle (3.75, 4.2) node[midway, font=\tiny] {Optimizer};
+  \node[below, font=\scriptsize] at (3,-0.2) {Total: 4.2x (3.5x Amplification)};
+
+  % Arrow indicating amplification
+  \draw[->, ultra thick, gray!60] (0.8, 1.2) to[bend left] node[midway, above, text=black] {+Backprop State} (2.2, 3.5);
+
+\end{tikzpicture}
 ```
-**Training Memory Amplification**. Visualizing the explosion of memory requirements when moving from inference to training. Inference requires only weights and a single activation map. Training requires weights, *all* activation maps (for backprop), gradients, and optimizer state. This 3-5x increase creates the primary bottleneck for on-device learning.
+**Training Memory Amplification**. Inference requires only the model weights and a single layer's activations. Training requires storing *all* intermediate activations (for gradient computation), the gradients themselves, and the optimizer state (momentum/variance). This 3–5$\times$ increase in memory footprint is the primary bottleneck for on-device learning.
 :::
 
 **Peak Memory Usage**
@@ -704,6 +730,16 @@ Beyond raw computational capacity, the architectural implications of these hardw
 
 [^fn-near-memory-compute]: **Near-Memory Computing**: Places processing units directly adjacent to or within memory arrays, dramatically reducing data movement costs. Traditional von Neumann architectures spend 100-1000$\times$ more energy moving data than computing on it. Near-memory designs can perform matrix operations with 10-100$\times$ better energy efficiency by eliminating costly memory bus transfers. Critical for edge training where gradient computations require intensive memory access patterns that overwhelm traditional cache hierarchies.
 
+#### The Mobile Memory Wall
+
+While mobile NPUs deliver impressive TOPS, the "Memory Wall" established in @sec-infrastructure becomes an impassable barrier for large-scale models on edge devices. Recent analysis [@ma2024challenges] highlights that autoregressive "Decode" operations are strictly bandwidth-bound.
+
+The quantitative disparity is stark:
+- **Datacenter (H100)**: HBM3 provides 3,350 GB/s bandwidth.
+- **Flagship Mobile (A17/Snapdragon 8 Gen 3)**: LPDDR5X provides 64–100 GB/s bandwidth.
+
+This 30–50$\times$ bandwidth gap means that even if a model fits in mobile RAM, it will generate tokens 30–50$\times$ slower than a datacenter GPU. Consequently, on-device LLM serving requires aggressive quantization (INT4 or even INT2) not merely for capacity, but as a **bandwidth survival strategy**. By reducing model size by $8\times$, we effectively increase the relative bandwidth, making interactive generation speeds possible on mobile hardware.
+
 ### Edge Hardware Integration Challenges {#sec-edge-intelligence-edge-hardware-integration-challenges-a240}
 
 Beyond the individual constraints of models, data, and computation, on-device learning systems must navigate the complex interactions between these elements and the underlying physics of mobile computing: power dissipation, thermal limits, and energy budgets. These physical constraints are not mere engineering details; they are fundamental design drivers that determine the entire feasible space of on-device learning algorithms. Understanding these quantitative constraints enables informed design decisions that balance learning capabilities with long-term system sustainability and user acceptance.
@@ -713,6 +749,20 @@ Beyond the individual constraints of models, data, and computation, on-device le
 Energy and thermal management represent perhaps the most challenging aspect of on-device learning system design, as they directly impact user experience and device longevity. Mobile devices operate under strict power budgets that fundamentally determine feasible model complexity and training schedules. The thermal design power (TDP) of mobile processors creates hard constraints that shape every aspect of on-device learning strategies. Modern smartphones typically maintain sustained processing at 2-3&nbsp;W for ML workloads to prevent thermal discomfort, but can burst to 5-10&nbsp;W for brief periods before thermal throttling dramatically reduces performance by 50% or more. This thermal cycling behavior forces training algorithms to operate in carefully managed burst modes, utilizing peak performance for only 10-30 seconds before backing off to sustainable power levels, a constraint that fundamentally changes how training algorithms must be designed.
 
 The mobile power budget hierarchy reveals the tight constraints under which on-device learning must operate. Smartphone sustained processing is limited to 2-3&nbsp;W to prevent user-noticeable heating and maintain acceptable battery life throughout the day. Peak training burst mode can reach 10&nbsp;W, but this power level is sustainable for only 10-30 seconds before thermal throttling kicks in to protect the hardware. Dedicated neural processing units consume 0.5-2&nbsp;W for AI workloads, offering optimized power efficiency compared to general-purpose processors. CPU-based AI processing requires 3-5&nbsp;W and demands aggressive thermal management with duty cycling to prevent overheating, making it the least power-efficient option for sustained on-device learning.
+
+::: {.callout-example title="Engineering Metric: The Energy Hierarchy"}
+**The Trade-off**: Should you process data locally or send it to the cloud? The physics of energy consumption provides a clear answer.
+
+**Energy Cost per Operation (Approximate):**
+*   **32-bit Integer Add**: 0.1 pJ
+*   **32-bit Float Mult**: 4.0 pJ
+*   **32-bit DRAM Read**: 640 pJ
+*   **Wireless Transmit (1 bit)**: 100,000 - 500,000 pJ (Bluetooth/WiFi)
+
+**Ratio**: Transmitting a single bit of data costs roughly the same energy as performing **100,000 to 500,000** compute operations.
+
+**Conclusion**: If you can extract insight from data using fewer than ~100k operations per bit, **local processing is strictly more energy efficient** than cloud offloading. This ratio drives the architecture of Federated Learning: compute is cheap; radio transmission is expensive.
+:::
 
 The power consumption characteristics of training workloads create additional layers of constraint that extend beyond simple computational capacity. Power consumption scales superlinearly with model size and training complexity, with training operations consuming 10-50$\times$ more power than equivalent inference workloads due to the substantial computational overhead of gradient computation (consuming 40-70% of training power), weight updates (20-30%), and dramatically increased data movement between memory hierarchies (10-30%). To maintain acceptable user experience, mobile devices typically budget only 500-1000&nbsp;mW for sustained ML training, effectively limiting practical training sessions to 10-100 minutes daily under normal usage patterns. This severe power constraint fundamentally shifts the design priority from maximizing computational throughput to optimizing power efficiency, requiring careful co-optimization of algorithms and hardware utilization patterns.
 
@@ -1965,16 +2015,45 @@ Here, $n_k$ is the number of local training examples at client $k$, and $n_{\mat
 
 However, communication-efficient updates can introduce tradeoffs. Compression may degrade gradient fidelity, selective updates can limit model capacity, and split architectures may complicate coordination. As a result, effective federated learning requires careful balancing of bandwidth constraints, privacy concerns, and convergence dynamics—a balance that depends heavily on the capabilities and variability of the client population.
 
-::: {.callout-note title="Figure Placeholder: Gradient Compression Techniques" collapse="true"}
+::: {.callout-note title="Figure: Gradient Compression Techniques" collapse="false"}
 ```{.tikz}
-% TODO: Create a 3-part comparison diagram showing standard vs. compressed updates
-% Part 1: Standard Update (Full dense gradient vector, e.g., [0.5, -0.2, 0.01, 0.8])
-% Part 2: Quantization (Map values to low-precision buckets, e.g., FP32 -> INT8 bins)
-% Part 3: Sparsification (Top-k selection, only sending indices and values of magnitudes > threshold)
-% Visual style: "Data packets" moving from Phone to Server with size reduction emphasized.
-\node[draw, align=center] {Gradient Compression Visualizer};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.8]
+  \definecolor{FullColor}{RGB}{200,220,255}
+  \definecolor{QuantColor}{RGB}{255,220,200}
+  \definecolor{SparseColor}{RGB}{220,255,200}
+
+  \tikzset{
+    box/.style={draw=black!70, thick, minimum width=0.6cm, minimum height=0.6cm, font=\tiny}
+  }
+
+  % Standard
+  \node[anchor=south] at (0, 1.5) {\textbf{(a) Standard}};
+  \foreach \x/\val in {0/0.5, 1/-0.2, 2/0.01, 3/0.8} {
+    \node[box, fill=FullColor] at (\x*0.6, 0.5) {\val};
+  }
+  \node[below, font=\tiny] at (0.9, 0.2) {FP32: 128 bits};
+
+  % Quantization
+  \node[anchor=south] at (4.5, 1.5) {\textbf{(b) Quantization}};
+  \foreach \x/\val in {0/+1, 1/0, 2/0, 3/+2} {
+    \node[box, fill=QuantColor] at (3.5 + \x*0.6, 0.5) {\val};
+  }
+  \node[below, font=\tiny] at (4.4, 0.2) {INT8: 32 bits ($4\times$)};
+
+  % Sparsification
+  \node[anchor=south] at (9, 1.5) {\textbf{(c) Sparsification}};
+  \foreach \x/\val in {0/0.5, 1/-, 2/-, 3/0.8} {
+    \node[box, fill=SparseColor] at (8 + \x*0.6, 0.5) {\val};
+  }
+  \node[below, font=\tiny] at (8.9, 0.2) {Top-K: 16 bits ($8\times$)};
+
+  % Transfer arrow
+  \draw[->, ultra thick, gray!40] (1.5, -0.5) -- (1.5, -1.5) node[midway, right, text=black] {Network Transfer};
+  \node[draw, dashed, rounded corners=2pt] at (5, -2) {Federated Aggregator (Server)};
+
+\end{tikzpicture}
 ```
-**Gradient Compression Techniques**. Strategies to reduce communication overhead in federated learning. **(a)** Standard full-precision updates transmit all gradient values. **(b)** Quantization maps values to lower-precision discrete buckets (e.g., INT8), reducing bit-width. **(c)** Sparsification (Top-$k$) transmits only the most significant gradients, capitalizing on the observation that many updates are near-zero and redundant.
+**Gradient Compression Techniques**. **(a) Standard** updates transmit full-precision values. **(b) Quantization** maps values to low-precision buckets (e.g., FP32 to INT8), reducing bandwidth. **(c) Sparsification** transmits only the most significant (Top-$k$) gradients, exploiting the fact that many updates are near-zero.
 :::
 
 #### Federated Personalization {#sec-edge-intelligence-federated-personalization-3c73}
@@ -2162,17 +2241,39 @@ Federated A/B testing enables validation of new adaptation strategies or model a
 
 These operational transformations necessitate new tooling and infrastructure that systematically extends traditional MLOps practices. The CI/CD pipelines, monitoring dashboards, A/B testing frameworks, and incident response procedures established for centralized deployments form the foundation for on-device learning operations. The federated learning protocols (@sec-edge-intelligence-federated-learning-6e7e) provide coordination mechanisms for distributed training, while monitoring challenges (@sec-edge-intelligence-distributed-system-observability-2270) address observability gaps created by decentralized adaptation.
 
-::: {.callout-note title="Figure Placeholder: Shadow Model Drift Detection" collapse="true"}
+::: {.callout-note title="Figure: Shadow Mode Validation" collapse="false"}
 ```{.tikz}
-% TODO: Architecture diagram for On-Device Validation with Shadow Modes
-% Component 1: Input Data Stream (User interaction)
-% Component 2: Shadow Model (Frozen Baseline, Version N) - processes input
-% Component 3: Active Model (Locally Adapted, Version N+1) - processes input
-% Component 4: Comparator/Arbiter - compares confidence/output. Sits between models and UI.
-% Logic: If Active Model confidence < Shadow Model - Margin => Rollback or Warning.
-\node[draw, align=center] {Shadow Mode Validation};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=1.2cm]
+  \definecolor{InputColor}{RGB}{240,240,240}
+  \definecolor{ShadowColor}{RGB}{200,220,255}
+  \definecolor{ActiveColor}{RGB}{255,220,200}
+  \definecolor{ArbiterColor}{RGB}{220,255,200}
+
+  \tikzset{
+    block/.style={draw=black!70, thick, rounded corners=2pt, align=center, minimum width=2.5cm, minimum height=1cm}
+  }
+
+  % Blocks
+  \node[block, fill=InputColor] (Input) {User Data Stream\\(Sensor/Input)};
+  
+  \node[block, fill=ShadowColor, below left=of Input] (Shadow) {\textbf{Shadow Model}\\Frozen Baseline (v1)};
+  \node[block, fill=ActiveColor, below right=of Input] (Active) {\textbf{Active Model}\\Locally Adapted (v1.1)};
+  
+  \node[block, fill=ArbiterColor, below=2.5cm of Input] (Arbiter) {\textbf{Arbiter / Comparator}\\Drift Detection};
+
+  % Flows
+  \draw[->, thick] (Input) -| (Shadow);
+  \draw[->, thick] (Input) -| (Active);
+  
+  \draw[->, thick] (Shadow) |- node[pos=0.3, left, font=\tiny] {Confidence $C_{base}$} (Arbiter);
+  \draw[->, thick] (Active) |- node[pos=0.3, right, font=\tiny] {Confidence $C_{local}$} (Arbiter);
+  
+  \node[right=of Arbiter, align=left, font=\tiny] (Logic) {If $C_{local} < C_{base} - \epsilon$\\$\implies$ ROLLBACK};
+  \draw[dashed, ->] (Arbiter) -- (Logic);
+
+\end{tikzpicture}
 ```
-**On-Device Shadow Validation**. To detect model drift without ground truth labels, a reliable "Shadow Model" (the frozen, known-good base version) runs in parallel with the "Active Model" (the locally adapted version). An on-device arbiter compares their predictions and confidence scores on the same live data. If the adapted model consistently diverges or shows lower confidence than the baseline, the system detects "Personalization Drift" and can trigger a rollback to the safe shadow version.
+**On-Device Shadow Validation**. To detect model drift without labels, a known-good "Shadow Model" runs in parallel with the "Active Model". An on-device arbiter compares their predictions and confidence scores. If the locally adapted model consistently shows lower confidence than the frozen baseline, the system detects personalization drift and can trigger an automatic rollback.
 :::
 
 Successful on-device learning deployments build upon proven MLOps methodologies while adapting them to the unique challenges of distributed, heterogeneous learning environments. This evolutionary approach ensures operational reliability while enabling the benefits of edge learning.
@@ -2310,16 +2411,34 @@ Effective systems integration requires adherence to key engineering principles t
 
 This integrated approach transforms on-device learning from a collection of techniques into a coherent systems capability that provides robust personalization within real-world deployment constraints.
 
-::: {.callout-note title="Figure Placeholder: Tiered On-Device Adaptation" collapse="true"}
+::: {.callout-note title="Figure: Tiered Adaptation Strategy" collapse="false"}
 ```{.tikz}
-% TODO: A layered pyramid or device-tiering diagram showing the strategy from the Voice Assistant case study.
-% Top Tier (Flagship Phones): "LoRA Rank-32 Adapters" + "Full Replay Buffer"
-% Middle Tier (Mid-range): "LoRA Rank-16 Adapters" + "Compact Replay"
-% Bottom Tier (IoT/Budget): "Bias-Only Updates" + "No/Tiny Buffer"
-% Context: Uniform Base Model -> Device-Specific Adaptation Strategy
-\node[draw, align=center] {Tiered Adaptation Strategy};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{TopColor}{RGB}{200,220,255}
+  \definecolor{MidColor}{RGB}{220,240,255}
+  \definecolor{BotColor}{RGB}{240,250,255}
+
+  % Pyramid tiers
+  \draw[thick, fill=TopColor] (-1, 3) -- (1, 3) -- (1.5, 2) -- (-1.5, 2) -- cycle;
+  \draw[thick, fill=MidColor] (-1.5, 2) -- (1.5, 2) -- (2.5, 1) -- (-2.5, 1) -- cycle;
+  \draw[thick, fill=BotColor] (-2.5, 1) -- (2.5, 1) -- (3.5, 0) -- (-3.5, 0) -- cycle;
+
+  % Labels
+  \node at (0, 2.5) {\textbf{Flagship Devices}};
+  \node[font=\scriptsize] at (0, 2.2) {LoRA Rank-32 + Full Replay};
+  
+  \node at (0, 1.5) {\textbf{Mid-Range Devices}};
+  \node[font=\scriptsize] at (0, 1.2) {LoRA Rank-8 + Feature Replay};
+
+  \node at (0, 0.5) {\textbf{Budget / IoT Devices}};
+  \node[font=\scriptsize] at (0, 0.2) {Bias-Only Updates};
+
+  % Resource Arrow
+  \draw[->, ultra thick, gray!60] (-4, 0) -- (-4, 3) node[midway, sloped, above, text=black] {Available Memory / Compute};
+
+\end{tikzpicture}
 ```
-**Tiered Adaptation Hierarchy**. A production strategy for managing device heterogeneity. Instead of a single training configuration, the system assigns adaptation strategies based on device capabilities. Flagship devices support high-rank adapters and large replay buffers for maximum personalization. Mid-range devices use efficient low-rank adapters. Budget/IoT devices are restricted to lightweight bias-only updates, ensuring every class of device improves without exceeding its specific hardware constraints.
+**Tiered Adaptation Hierarchy**. A production strategy for managing device heterogeneity. The system assigns adaptation strategies based on device capabilities rather than using a single configuration. High-end devices support expressive adapters and large replay buffers, while low-end devices are restricted to lightweight updates to ensure system stability.
 :::
 
 ## Persistent Technical and Operational Challenges {#sec-edge-intelligence-persistent-technical-operational-challenges-8c12}
@@ -2512,21 +2631,18 @@ Many teams focus on individual device optimization without considering the syste
 
 ## Summary {#sec-edge-intelligence-summary-0af9}
 
-On-device learning represents a fundamental shift from static, centralized training to dynamic, local adaptation directly on deployment devices. This paradigm enables machine learning systems to personalize experiences while preserving privacy, reduce network dependencies, and respond rapidly to changing local conditions. Success requires integrating optimization principles, understanding hardware constraints, and applying sound operational practices. The transition from traditional cloud-based training to edge-based learning requires overcoming severe computational, memory, and energy constraints that fundamentally reshape how models are designed and adapted.
+Edge Intelligence represents the "physics-limited frontier" of the Machine Learning Fleet. Throughout this volume, we have transitioned from logical algorithms (Part I) to datacenter-scale machines (Part II) and global cloud services (@sec-inference-at-scale). This chapter has explored what happens when those same principles are pushed to their extreme physical limits: sensors with microwatt power budgets, microcontrollers with kilobyte memory, and smartphones facing the uncompromising "Mobile Memory Wall."
 
-The technical strategies that enable practical on-device learning span multiple dimensions of system design. Adaptation techniques range from lightweight bias-only updates to selective parameter tuning, each offering different tradeoffs between expressivity and resource efficiency. Data efficiency becomes paramount when learning from limited local examples, driving innovations in few-shot learning[^fn-few-shot-learning], streaming adaptation, and memory-based replay mechanisms[^fn-catastrophic-forgetting].
-
-[^fn-few-shot-learning]: **Few-Shot Learning**: Machine learning paradigm that learns new concepts from only a few (typically 1-10) labeled examples. Originally inspired by human learning capabilities—humans can recognize new objects from just one or two examples. In ML, few-shot learning leverages pre-trained representations and meta-learning to quickly adapt to new tasks. Critical for on-device scenarios where collecting large labeled datasets is impractical. Techniques include prototypical networks, model-agnostic meta-learning (MAML), and metric learning approaches that achieve 80-90% accuracy with just 5 examples per class. Federated learning emerges as a crucial coordination mechanism, allowing devices to collaborate while maintaining data locality and privacy guarantees.
-
-[^fn-catastrophic-forgetting]: **Catastrophic Forgetting**: When neural networks learn new tasks, they tend to "forget" previously learned information as new gradients overwrite old weights. This is a fundamental challenge for on-device learning where models must continuously adapt without losing prior knowledge. Solutions include elastic weight consolidation (EWC), gradient episodic memory (GEM), and replay buffers that store representative samples. In resource-constrained devices, rehearsal strategies must balance memory overhead (storing old examples) with computational cost (retraining on mixed data), directly impacting system design decisions.
+We established a three-pillar framework for navigating these constraints: **Model Adaptation** (reducing the update footprint via TinyTL or LoRA), **Data Efficiency** (learning from minimal local samples via few-shot or streaming methods), and **Federated Coordination** (sharing insights without sharing raw data). Success at the edge requires more than algorithmic cleverness; it demands a deep co-design between the software's mathematical requirements and the hardware's thermal, energy, and bandwidth realities.
 
 ::: {.callout-important title="Key Takeaways"}
-* On-device learning shifts machine learning from static deployment to dynamic local adaptation, enabling personalization while preserving privacy
-* Resource constraints drive specialized techniques: bias-only updates, adapter modules, sparse parameter updates, and compressed data representations
-* Federated learning coordinates distributed training across heterogeneous devices while maintaining privacy and handling non-IID data distributions
-* Success requires co-designing algorithms with hardware constraints, balancing adaptation capability against memory, energy, and computational limitations
+* **The Mobile Memory Wall**: While NPUs provide raw compute (TOPS), on-device LLMs are strictly bandwidth-bound. The 30–50$\times$ gap between mobile RAM and datacenter HBM makes quantization a mandatory "bandwidth survival strategy" for interactive decode speeds.
+* **Training is Not Inference**: On-device learning amplifies resource needs by 3–10$\times$ compared to inference-only deployment, due to activation caching, gradient storage, and bidirectional memory traffic.
+* **The Three Pillars**: Resource-constrained learning depends on Model Adaptation (bias-only/sparse updates), Data Efficiency (few-shot/experience replay), and Federated Coordination (privacy-preserving aggregation).
+* **Heterogeneity is the Default**: Unlike uniform datacenter racks, the edge is a fragmented ecosystem of microcontrollers and SoCs. Federated learning must account for "stragglers" and participation bias generated by these physical disparities.
+* **Privacy by Design**: On-device learning transforms data locality from a limitation into a core privacy feature, enabling personalization that complies with strict global regulations (GDPR/HIPAA).
 :::
 
-Real-world applications demonstrate both the potential and challenges of on-device learning, from keyword spotting systems that adapt to user voices to recommendation engines that personalize without transmitting user data. As machine learning expands into mobile, embedded, and wearable environments, the ability to learn locally while maintaining efficiency and reliability becomes essential for intelligent systems that operate seamlessly across diverse deployment contexts.
+Part III has now examined deployment at scale across the full spectrum: from centralized inference systems serving millions of requests per second (@sec-inference-at-scale) to the distributed edge deployments explored here. However, deploying models—whether to a GPU cluster or a fleet of smartphones—is only the beginning.
 
-Part III has examined deployment at scale across the full spectrum: from centralized inference systems serving millions of requests per second (@sec-inference-at-scale) to the distributed edge deployments explored in this chapter. Deploying systems, however, is only the beginning. Scaling inference, whether in datacenters or at the edge, creates operational complexity that compounds with every deployment decision. Model versions proliferate across environments. Device fleets require coordinated updates. Performance regressions must be detected before users notice. The next chapter, @sec-ops-scale, addresses how organizations manage this complexity through systematic operational practices: continuous integration pipelines, monitoring infrastructure, and incident response frameworks that keep distributed ML systems healthy at scale. The deployment architectures established in Part III provide the foundation; ML Operations provides the discipline that sustains them.
+Scaling these services creates operational complexity that grows exponentially with every model version, device type, and deployment region. How do we ensure a model update doesn't silently fail on 10% of budget Android phones? How do we monitor drift across a million private, local datasets? The next chapter, @sec-ops-scale, addresses the **Management Layer**: the MLOps practices, CI/CD pipelines, and observability frameworks required to sustain the Machine Learning Fleet across both Cloud and Edge.

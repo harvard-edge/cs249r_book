@@ -6,7 +6,7 @@ bibliography: storage.bib
 
 ::: {layout-narrow}
 ::: {.column-margin}
-_DALL·E 3 Prompt: A layered visualization of ML storage architecture showing data flowing from raw sources to model consumption. The scene depicts a hierarchical storage system: at the base, vast data lakes represented as expansive pools of structured and unstructured data; in the middle layer, feature stores shown as organized crystalline structures with versioned features; at the top, model registries depicted as curated libraries of trained artifacts. Data pipelines flow upward through ETL processes visualized as transformation gates. Visual elements include petabyte-scale metrics, I/O throughput gauges showing streaming rates, and version control branches for datasets and models. Distributed storage nodes span across the background connected by replication streams. The color palette uses deep ocean blues for data lakes, amber for processed features, and silver for model artifacts. Clean architectural diagram style suitable for a data systems textbook._
+_Gemini Pro 3 Prompt: A layered visualization of ML storage architecture showing data flowing from raw sources to model consumption. The scene depicts a hierarchical storage system: at the base, vast data lakes represented as expansive pools of structured and unstructured data; in the middle layer, feature stores shown as organized crystalline structures with versioned features; at the top, model registries depicted as curated libraries of trained artifacts. Data pipelines flow upward through ETL processes visualized as transformation gates. Visual elements include petabyte-scale metrics, I/O throughput gauges showing streaming rates, and version control branches for datasets and models. Distributed storage nodes span across the background connected by replication streams. The color palette uses deep ocean blues for data lakes, amber for processed features, and silver for model artifacts. Clean architectural diagram style suitable for a data systems textbook. Rendered in the style of Nanobanana._
 :::
 
 \noindent
@@ -56,7 +56,7 @@ Computer architecture courses teach the memory hierarchy as a fundamental organi
 
 ML systems extend this hierarchy with two critical additions: GPU High Bandwidth Memory (HBM)[^fn-hbm] and distributed storage spanning multiple tiers. The extended hierarchy (@tbl-storage-hierarchy) reveals the extreme bandwidth disparities that ML systems must navigate.
 
-[^fn-hbm]: **High Bandwidth Memory (HBM)**: Building on the GPU architecture discussion in @sec-infrastructure, HBM is a 3D-stacked memory technology that places DRAM dies vertically atop the processor using through-silicon vias (TSVs), achieving bandwidth impossible with traditional off-package memory. The H100 GPU uses HBM3 delivering 3.35 TB/s across a 5120-bit interface, compared to 200 GB/s for DDR5. This 17x bandwidth advantage is essential for ML workloads where model weights, activations, and gradients must flow continuously through the processor. The tradeoff is capacity: HBM costs approximately $15/GB versus $3/GB for standard DRAM, limiting GPUs to 80-192 GB while CPUs access terabytes of DDR memory.
+[^fn-hbm]: **High Bandwidth Memory (HBM)**: As established in @sec-infrastructure, HBM is a 3D-stacked memory technology that places DRAM dies vertically atop the processor. In the storage hierarchy, HBM serves as the 'Level 0' tier where weights and activations must reside for active computation. While delivering TB/s of bandwidth, its high cost ($15/GB) limits capacity, necessitating the multi-tier storage architecture examined in this chapter.
 
 +--------------------------+----------------------+--------------------+------------------+-----------------+
 | **Storage Tier**         | **Typical Capacity** | **Bandwidth**      | **Latency**      | **Cost ($/GB)** |
@@ -72,6 +72,12 @@ ML systems extend this hierarchy with two critical additions: GPU High Bandwidth
 : Extended memory hierarchy for ML systems. Bandwidth figures represent practical throughput; latency represents typical access times. {#tbl-storage-hierarchy}
 
 The bandwidth column in @tbl-storage-hierarchy deserves particular attention. GPU HBM delivers 3.35 TB/s, roughly 17x faster than host DRAM and 130x faster than the fastest local NVMe drives. This disparity creates the central challenge of ML storage systems: keeping accelerators fed with data at rates that prevent them from idling.
+
+### High Bandwidth Flash (HBF): Blurring Storage and Memory
+
+Recent research [@ma2024challenges] challenges the rigid separation between storage and memory for inference workloads. As models grow to trillions of parameters, storing all weights in HBM becomes prohibitively expensive ($100/GB vs $0.10/GB for Flash). **High Bandwidth Flash (HBF)** proposes using specialized flash controllers to achieve 50-100 GB/s read throughput directly into accelerator memory.
+
+This architecture treats Flash not as persistent storage, but as a "cold memory" tier. For autoregressive generation where the *entire* model is read once per token but arithmetic intensity is low, HBF allows serving massive models from a single node, replacing racks of GPUs with a single flash-augmented server. While latency is higher than HBM, cost-per-token drops by orders of magnitude for batch-insensitive workloads.
 
 ::: {.callout-note title="Figure Placeholder: Storage Hierarchy" collapse="true"}
 ```{.tikz}
@@ -625,6 +631,24 @@ Each stage has different compute and bandwidth characteristics as summarized in 
 
 The key to hiding latency is pipelining: while the GPU processes batch $N$, the CPU prepares batch $N+1$, and storage fetches data for batch $N+2$. This requires maintaining multiple batches in flight simultaneously.
 
+::: {.callout-example title="Engineering Metric: Data Stall Ratio"}
+**The Problem**: Your GPU utilization is stuck at 80%. Is it a kernel issue or a storage issue?
+
+**Formula**:
+$$ T_{step} = \max(T_{compute}, T_{io}) $$
+$$ \text{Data Stall \%} = \frac{T_{step} - T_{compute}}{T_{step}} \times 100 $$
+
+**Scenario**: ResNet-50 training.
+*   **GPU Compute Time ($T_{compute}$)**: 200 ms per batch.
+*   **I/O Load Time ($T_{io}$)**: 250 ms (due to slow HDD or network).
+
+**Calculation**:
+$$ T_{step} = \max(200, 250) = 250 \text{ ms} $$
+$$ \text{Data Stall \%} = \frac{250 - 200}{250} = \mathbf{20\%} $$
+
+**Conclusion**: Your expensive GPU is idle 20% of the time waiting for data. **Solution**: Increase prefetch buffer depth (`num_workers`), switch to local NVMe caching, or use a compressed data format (WebDataset) to reduce $T_{io}$.
+:::
+
 The prefetch buffer size determines how much latency can be hidden:
 
 $$T_{hidden} = N_{prefetch} \times T_{batch}$$
@@ -1020,7 +1044,13 @@ Checkpoint strategies vary significantly by model architecture as summarized in 
 
 Checkpoint storage ensures that training can recover from failures, preserving weeks of computational progress in durable, recoverable form. But training is only half the ML lifecycle: once models are trained, serving them at production scale requires different storage infrastructure entirely. Where checkpoints optimize for write bursts and strong consistency, serving infrastructure must optimize for continuous low-latency reads across millions of concurrent requests.
 
-Feature stores address this serving-time challenge, transforming raw data into ML-ready signals with strict latency guarantees. For recommendation systems, the dominant ML workload in production, feature stores are essential infrastructure: every user request triggers hundreds of feature lookups that must complete in milliseconds. Production systems at companies like Meta, Google, and Netflix depend critically on feature stores to bridge the gap between offline training pipelines and real-time serving requirements.
+Feature stores address this serving-time challenge, transforming raw data into ML-ready signals with strict latency guarantees. For recommendation systems, the dominant ML workload in production, feature stores are essential infrastructure: every user request triggers hundreds of feature lookups that must complete in milliseconds.
+
+::: {.callout-definition title="Feature Store"}
+***Feature Store*** is a centralized system that manages the transformation, storage, and serving of machine learning features. It unifies the offline training pipeline (batch features) with the online inference service (real-time features) to ensure **point-in-time correctness** and consistency between training and production environments.
+:::
+
+Production systems at companies like Meta, Google, and Netflix depend critically on feature stores to bridge the gap between offline training pipelines and real-time serving requirements.
 
 This section develops the architecture and design principles of feature stores, with particular attention to why they matter enormously for recommendation systems while playing a smaller role for LLMs and vision models.
 
@@ -1719,4 +1749,8 @@ Model registries provide versioning, lineage tracking, and governance for model 
 * Checkpoint storage strategy must balance recovery granularity against overhead: frequent checkpoints minimize lost work but consume I/O bandwidth, requiring tiered approaches with local NVMe for speed and distributed storage for durability
 :::
 
-The storage architectures developed in this chapter enable the distributed training systems examined in @sec-distributed-training. Understanding checkpoint storage is prerequisite to understanding how distributed training maintains progress across failures. The Young-Daly checkpoint interval formula established here will inform the fault tolerance strategies developed in @sec-fault-tolerance, where we shift focus from storage optimization to recovery reliability. Training data pipelines must integrate with parallelism strategies: data parallel training requires different data sharding than model parallel training. Feature stores connect to the inference systems covered in @sec-inference-at-scale, where serving latency budgets constrain feature lookup time. Model registries interface with deployment pipelines and the operational concerns addressed in @sec-ops-scale.
+The storage architectures developed in this chapter complete our construction of the data substrate for the Machine Learning Fleet. We have now defined the compute nodes (@sec-infrastructure) and the data systems (@sec-storage) required to support distributed training.
+
+However, isolated nodes are of limited use; they must communicate to synchronize learning. The next chapter (@sec-communication) examines the high-speed communication patterns and collective operations that bind these individual nodes into a single coherent training engine.
+
+With the physical machine built and the data pipelines flowing, we turn our attention to the service layer. **Part III: Deployment at Scale** begins with @sec-inference-at-scale, examining how we transform trained models into low-latency global services.

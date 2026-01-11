@@ -2,11 +2,11 @@
 bibliography: infrastructure.bib
 ---
 
-# Large-Scale ML Infrastructure {#sec-infrastructure}
+# Compute Infrastructure {#sec-infrastructure}
 
 ::: {layout-narrow}
 ::: {.column-margin}
-_DALL·E 3 Prompt: A sweeping architectural visualization of a modern AI datacenter infrastructure. The scene reveals a massive facility with rows of GPU clusters arranged in pods, connected by high-bandwidth networking fabric depicted as glowing fiber optic pathways. Cooling systems appear as flowing blue currents between server racks. The visualization includes multiple layers: physical infrastructure at the bottom with power and cooling, compute infrastructure in the middle with thousands of interconnected accelerators, and orchestration software at the top represented as an abstract control plane. Visual elements include resource managers allocating workloads, capacity graphs showing utilization, and geographic connections to other datacenters. The color scheme uses industrial grays and silvers with accent colors of electric blue for networking and amber for active computation. Photorealistic technical illustration style suitable for infrastructure engineering documentation._
+_Gemini Pro 3 Prompt: A sweeping architectural visualization of a modern AI datacenter infrastructure. The scene reveals a massive facility with rows of GPU clusters arranged in pods, connected by high-bandwidth networking fabric depicted as glowing fiber optic pathways. Cooling systems appear as flowing blue currents between server racks. The visualization includes multiple layers: physical infrastructure at the bottom with power and cooling, compute infrastructure in the middle with thousands of interconnected accelerators, and orchestration software at the top represented as an abstract control plane. Visual elements include resource managers allocating workloads, capacity graphs showing utilization, and geographic connections to other datacenters. The color scheme uses industrial grays and silvers with accent colors of electric blue for networking and amber for active computation. Photorealistic technical illustration style suitable for infrastructure engineering documentation. Rendered in the style of Nanobanana._
 :::
 
 \noindent
@@ -24,23 +24,21 @@ _Why does the ability to build and manage computational infrastructure determine
 
 - Evaluate cooling architectures for high-density GPU clusters using thermal capacity constraints
 
-- Compare network topologies using bisection bandwidth and latency trade-offs
-
 - Apply the roofline model to identify compute-bound versus memory-bound workloads
 
 - Analyze accelerator selection by matching workload characteristics to hardware capabilities
 
 - Compute total cost of ownership by combining amortized CapEx and OpEx
 
-- Design resource allocation policies for multi-tenant GPU clusters
+- Evaluate the trade-offs between GPU, TPU, and custom ASIC architectures for specific workloads
 
 :::
 
 ## Datacenter Architecture for ML Workloads {#sec-datacenter-architecture}
 
-In Part I, we established the algorithmic necessity of distributed training. We analyzed how strategies like Data, Tensor, and Pipeline parallelism allow us to split massive models across thousands of devices. However, these algorithms impose severe physical demands: microsecond-latency synchronization, massive memory bandwidth, and power consumption densities that melt traditional racks.
+In Part I, we established the algorithmic necessity of distributed training. We analyzed how strategies like Data, Tensor, and Pipeline parallelism allow us to split massive models across thousands of devices. However, these algorithms impose severe physical demands: power consumption densities that melt traditional racks and cooling requirements that challenge facility limits.
 
-This chapter examines the physical machine required to execute those algorithms: the Machine Learning Fleet. We transition from abstract communication graphs to concrete datacenter architecture, analyzing how power, cooling, compute, and networking infrastructure combine to support the distributed workloads defined in Part I. Managing such infrastructure demands expertise in datacenter design, high-bandwidth networking, and distributed systems orchestration. The infrastructure must satisfy competing requirements: computational efficiency alongside fault tolerance, coordination across thousands of machines without prohibitive communication overhead, and dynamic capacity provisioning that controls costs.
+This chapter examines the physical foundation of the Machine Learning Fleet: the compute nodes and the datacenters that house them. We transition from abstract communication graphs to concrete engineering, analyzing how power, cooling, and accelerator hardware combine to support the distributed workloads defined in Part I. Managing such infrastructure demands expertise in datacenter design, thermal management, and hardware selection. The infrastructure must satisfy competing requirements: maximizing compute density while managing extreme heat flux, and selecting accelerators that balance raw FLOPS against memory bandwidth and cost.
 
 ### Physical Infrastructure Fundamentals
 
@@ -73,8 +71,52 @@ A single NVIDIA DGX H100 system consumes 10.2 kW at peak load. A rack containing
 
 ::: {.callout-note title="Figure Placeholder: Power Distribution Hierarchy" collapse="true"}
 ```{.tikz}
-% TODO: Diagram showing power flow from Utility (HV) to Substation to PDU to Server PSU (12V)
-\node[draw, align=center] {Power Hierarchy\nUtility -> Substation -> PDU -> Server};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{GreenLine}{RGB}{34,139,34}
+  \definecolor{GreenL}{RGB}{220,245,220}
+  \definecolor{BlueLine}{RGB}{0,80,180}
+  \definecolor{BlueL}{RGB}{225,240,255}
+  \definecolor{RedLine}{RGB}{200,30,30}
+  \definecolor{RedL}{RGB}{255,235,235}
+  \definecolor{VioletLine}{RGB}{138,43,226}
+  \definecolor{VioletL2}{RGB}{240,230,255}
+
+  \tikzset{
+    Box/.style={
+      draw=GreenLine,
+      fill=GreenL,
+      line width=0.75pt,
+      rounded corners=2pt,
+      align=center,
+      minimum width=3.5cm,
+      minimum height=1.0cm,
+      inner sep=4pt
+    },
+    BoxBlue/.style={Box, draw=BlueLine, fill=BlueL},
+    BoxRed/.style={Box, draw=RedLine, fill=RedL},
+    Arrow/.style={->, >=stealth, thick, color=black!70},
+    Label/.style={font=\footnotesize\sffamily, color=black!70}
+  }
+
+  % Nodes
+  \node[Box] (utility) {\textbf{Utility Feed}\\High Voltage (13.8kV)};
+  \node[Box, below=1.0cm of utility] (substation) {\textbf{Substation}\\Step-down to 480V};
+  \node[BoxBlue, below=1.0cm of substation] (pdu) {\textbf{PDU}\\Rack Dist. (208V)};
+  \node[BoxRed, below=1.0cm of pdu] (psu) {\textbf{Server PSU}\\Component (12V DC)};
+
+  % Edges
+  \draw[Arrow] (utility) -- node[right, font=\footnotesize, xshift=2mm] {Grid Input} (substation);
+  \draw[Arrow] (substation) -- node[right, font=\footnotesize, xshift=2mm] {Building Power} (pdu);
+  \draw[Arrow] (pdu) -- node[right, font=\footnotesize, xshift=2mm] {Rack Power} (psu);
+
+  % Annotations
+  \node[right=2cm of utility, align=left, font=\footnotesize] (gen) {Backup Generator\\(Diesel/Gas)};
+  \draw[dashed, ->] (gen) -- (utility);
+  
+  \node[right=2cm of pdu, align=left, font=\footnotesize] (ups) {UPS Battery\\Backup};
+  \draw[dashed, ->] (ups) -- (pdu);
+
+\end{tikzpicture}
 ```
 **Datacenter Power Distribution**. A hierarchical view of power delivery, illustrating voltage step-downs from utility feeds (high voltage) to server components (12V DC). Redundancy is typically implemented at the UPS and PDU levels (2N) to ensure continuous operation during grid failures.
 :::
@@ -99,8 +141,77 @@ Heat dissipation represents the primary constraint on ML cluster density. An H10
 
 ::: {.callout-note title="Figure Placeholder: Cooling Topology" collapse="true"}
 ```{.tikz}
-% TODO: Diagram showing hot/cold aisle airflow vs liquid cooling loops
-\node[draw, align=center] {Datacenter Cooling\nAir vs Liquid};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{BlueLine}{RGB}{0,80,180}
+  \definecolor{BlueL}{RGB}{225,240,255}
+  \definecolor{RedLine}{RGB}{200,30,30}
+  \definecolor{RedL}{RGB}{255,235,235}
+  
+  \tikzset{
+    rack/.style={draw=black!60, thick, fill=gray!5, minimum width=2cm, minimum height=3.5cm},
+    server/.style={draw=black!40, fill=white, minimum width=1.8cm, minimum height=0.3cm},
+    arrowCold/.style={->, >=stealth, thick, text=BlueLine, color=BlueLine},
+    arrowHot/.style={->, >=stealth, thick, text=RedLine, color=RedLine}
+  }
+
+  % Left Panel: Air Cooling (Hot/Cold Aisle)
+  \begin{scope}[local bounding box=Air]
+    \node[anchor=south] at (0,4) {\textbf{A. Air Cooling (Hot/Cold Aisle)}};
+    
+    % Racks
+    \node[rack] (r1) at (-1.5, 2) {};
+    \node[rack] (r2) at (1.5, 2) {};
+    
+    % Servers inside
+    \foreach \y in {0.5, 1.0, ..., 3.0} {
+        \node[server] at (-1.5, \y) {};
+        \node[server] at (1.5, \y) {};
+    }
+    
+    % Cold Aisle (Middle)
+    \node[text=BlueLine, font=\footnotesize] at (0, 0.5) {Cold Aisle};
+    \draw[arrowCold] (0, 3.5) -- (0, 1.5); 
+    \draw[arrowCold] (0, 1.5) -- (-1, 1.5);
+    \draw[arrowCold] (0, 1.5) -- (1, 1.5);
+    
+    % Hot Aisles (Sides)
+    \draw[arrowHot] (-2, 1.5) -- (-3, 1.5);
+    \draw[arrowHot] (2, 1.5) -- (3, 1.5);
+    \node[text=RedLine, font=\footnotesize, rotate=90] at (-3.2, 2) {Hot Exhaust};
+    \node[text=RedLine, font=\footnotesize, rotate=90] at (3.2, 2) {Hot Exhaust};
+    
+    % CRAC Unit Symbol
+    \node[draw=black, fill=BlueL, minimum width=4cm, minimum height=0.5cm] at (0, -0.5) {CRAC / CRAH Unit};
+  \end{scope}
+
+  % Right Panel: Liquid Cooling
+  \begin{scope}[shift={(6.5,0)}, local bounding box=Liquid]
+    \node[anchor=south] at (0,4) {\textbf{B. Direct-to-Chip Liquid Cooling}};
+    
+    % Board
+    \node[draw=black!50, fill=green!5, minimum width=4cm, minimum height=3cm] (board) at (0,2) {};
+    \node[anchor=north] at (0, 3.4) {Server Blade / GPU Tray};
+    
+    % Chips
+    \node[draw=black, fill=gray!30, minimum size=1cm] (c1) at (-1, 2) {GPU};
+    \node[draw=black, fill=gray!30, minimum size=1cm] (c2) at (1, 2) {GPU};
+    
+    % Cold Plates (on top)
+    \node[draw=BlueLine, fill=BlueL!50, minimum size=0.6cm, circle] (p1) at (-1, 2) {};
+    \node[draw=BlueLine, fill=BlueL!50, minimum size=0.6cm, circle] (p2) at (1, 2) {};
+    
+    % Piping
+    \draw[ultra thick, BlueLine, ->] (-2.5, 1.5) -- (-1.3, 1.8) node[midway, below, font=\scriptsize] {Cool In};
+    \draw[ultra thick, BlueLine] (-1.3, 1.8) -- (p1);
+    \draw[ultra thick, BlueLine] (p1) -- (p2);
+    \draw[ultra thick, RedLine, ->] (p2) -- (2.5, 1.8) node[midway, below, font=\scriptsize] {Warm Out};
+    
+    % CDU
+    \node[draw=black, fill=gray!20, minimum width=3cm, minimum height=0.8cm] at (0, -0.5) {Coolant Dist. Unit (CDU)};
+    \draw[dashed, thick, black!50] (0, 0) -- (0, 1.5);
+  \end{scope}
+  
+\end{tikzpicture}
 ```
 **Datacenter Cooling Architectures**: Comparison of traditional hot-aisle/cold-aisle air cooling versus modern direct-to-chip liquid cooling. The air cooling diagram shows airflow management separating intake and exhaust streams, while the liquid cooling diagram illustrates coolant loops directly contacting high-power components to manage extreme heat density.
 :::
@@ -156,8 +267,73 @@ This integrated design simplifies deployment but limits flexibility. Each DGX H1
 
 ::: {.callout-note title="Figure Placeholder: Interconnect Topology" collapse="true"}
 ```{.tikz}
-% TODO: Diagram contrasting PCIe tree vs NVLink mesh topology
-\node[draw, align=center] {Interconnect Topology\nPCIe Tree vs NVLink Mesh};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{GreenLine}{RGB}{34,139,34}
+  \definecolor{GreenL}{RGB}{230,250,230}
+  \definecolor{VioletLine}{RGB}{138,43,226}
+  \definecolor{VioletL}{RGB}{240,230,255}
+
+  \tikzset{
+    component/.style={draw=black!60, fill=white, rounded corners=1pt, minimum width=1.0cm, minimum height=0.6cm, font=\scriptsize},
+    root/.style={component, fill=GreenL, draw=GreenLine, font=\footnotesize\bfseries},
+    gpu/.style={component, fill=VioletL, draw=VioletLine, font=\scriptsize\bfseries}
+  }
+
+  % Left: PCIe Tree
+  \begin{scope}
+    \node[anchor=south] at (0,3.5) {\textbf{A. PCIe Tree (Host-Centric)}};
+    
+    \node[root] (cpu) at (0, 3) {CPU / Root};
+    
+    \node[component] (sw1) at (-1.5, 2) {PCIe Sw};
+    \node[component] (sw2) at (1.5, 2) {PCIe Sw};
+    
+    \node[gpu] (g1) at (-2.2, 0.5) {GPU 0};
+    \node[gpu] (g2) at (-0.8, 0.5) {GPU 1};
+    \node[gpu] (g3) at (0.8, 0.5) {GPU 2};
+    \node[gpu] (g4) at (2.2, 0.5) {GPU 3};
+    
+    \draw[thick] (cpu) -- (sw1);
+    \draw[thick] (cpu) -- (sw2);
+    \draw[thick] (sw1) -- (g1);
+    \draw[thick] (sw1) -- (g2);
+    \draw[thick] (sw2) -- (g3);
+    \draw[thick] (sw2) -- (g4);
+    
+    % Communication bottleneck annotation
+    \draw[<->, dashed, red] (g1) to[bend right=20] node[below, font=\tiny] {Long Path} (g3);
+  \end{scope}
+
+  % Right: NVLink Mesh
+  \begin{scope}[shift={(6,0)}]
+    \node[anchor=south] at (0,3.5) {\textbf{B. NVLink Mesh (Peer-to-Peer)}};
+    
+    % GPU Ring/Mesh
+    \node[gpu] (ng1) at (-1.5, 2) {GPU 0};
+    \node[gpu] (ng2) at (1.5, 2) {GPU 1};
+    \node[gpu] (ng3) at (1.5, 0.5) {GPU 2};
+    \node[gpu] (ng4) at (-1.5, 0.5) {GPU 3};
+    
+    \node[root, anchor=center] (ncpu) at (0, 1.25) {CPU};
+    
+    % PCIe Links (thinner)
+    \draw[thin, gray] (ncpu) -- (ng1);
+    \draw[thin, gray] (ncpu) -- (ng2);
+    \draw[thin, gray] (ncpu) -- (ng3);
+    \draw[thin, gray] (ncpu) -- (ng4);
+    
+    % NVLink Links (thicker, colored)
+    \draw[ultra thick, VioletLine, <->] (ng1) -- (ng2);
+    \draw[ultra thick, VioletLine, <->] (ng2) -- (ng3);
+    \draw[ultra thick, VioletLine, <->] (ng3) -- (ng4);
+    \draw[ultra thick, VioletLine, <->] (ng4) -- (ng1);
+    \draw[ultra thick, VioletLine, <->] (ng1) -- (ng3);
+    \draw[ultra thick, VioletLine, <->] (ng2) -- (ng4);
+    
+    \node[text=VioletLine, font=\scriptsize, align=center] at (0, 2.5) {High BW Die-to-Die};
+  \end{scope}
+
+\end{tikzpicture}
 ```
 **Node Interconnect Topologies**: Contrast between PCIe-based commodity servers and NVLink-based dense nodes. The PCIe topology shows CPU-centric communication with higher latency and shared bandwidth bottlenecks, while the NVLink topology demonstrates a high-bandwidth mesh allowing direct peer-to-peer GPU communication essential for tensor parallelism.
 :::
@@ -272,7 +448,9 @@ This design drastically reduces energy consumption. In a standard architecture, 
 
 The ML accelerator landscape continues to diversify as organizations optimize for specific workloads.
 
-**Inference-Optimized Accelerators.** Training and inference present different requirements. Training needs high-precision arithmetic, large memory for activations and optimizer state, and high interconnect bandwidth. Inference prioritizes low latency, high throughput, and power efficiency. Accelerators like Google's TPU Inference chips and AWS Inferentia optimize for inference characteristics, achieving 2-4x better performance per watt than training-focused hardware for appropriate workloads.
+**Inference-Optimized Accelerators.** Training and inference present different requirements. Training needs high-precision arithmetic, large memory for activations and optimizer state, and high interconnect bandwidth. Inference prioritizes low latency, high throughput, and power efficiency.
+Recent analysis by Ma and Patterson [@ma2024challenges] further refines this distinction by separating the *prefill* phase (compute-bound processing of input tokens) from the *decode* phase (memory-bandwidth-bound generation of output tokens). The decode phase, being autoregressive, requires reading the entire model weight set for every token generated, making memory bandwidth—not FLOPS—the primary determinant of performance. This "memory wall" drives the design of inference-specialized chips that sacrifice raw compute density for massive memory bandwidth and capacity, optimizing for the unique token-by-token access pattern of large language models.
+Accelerators like Google's TPU Inference chips and AWS Inferentia optimize for these characteristics, achieving 2-4x better performance per watt than training-focused hardware for appropriate workloads.
 
 **Emerging Architectures.** Several companies offer alternative approaches. Cerebras WSE uses wafer-scale integration[^fn-wafer-scale] to place an entire ML accelerator on a single silicon wafer, eliminating chip-to-chip communication for models that fit on-chip. Graphcore IPU employs a Bulk Synchronous Parallel[^fn-bsp] execution model with distributed on-chip memory targeting sparse and dynamic workloads. SambaNova provides reconfigurable dataflow architecture for enterprise AI applications.
 
@@ -308,10 +486,61 @@ The PCIe variant's higher efficiency reflects reduced interconnect power, accept
 
 **The Roofline Model.** The roofline model[^fn-roofline] [@williams2009roofline] provides a systematic framework for understanding whether workloads are compute-bound or memory-bound. Achievable performance is limited by the minimum of peak compute and memory bandwidth:
 
+::: {.callout-definition title="Arithmetic Intensity"}
+**Arithmetic Intensity** is the ratio of floating-point operations (FLOPs) performed to bytes of memory accessed (Bytes) during a computation. It determines whether a workload is _compute-bound_ (limited by processor speed) or _memory-bound_ (limited by bandwidth).
+:::
+
+::: {.callout-definition title="Domain-Specific Architecture (DSA)"}
+***Domain-Specific Architecture (DSA)*** is a class of processors tailored to a specific domain of workloads (like deep learning) rather than general-purpose computation. DSAs (such as TPUs) trade flexibility for performance per watt by optimizing memory hierarchies and arithmetic units specifically for the domain's dominant operations (e.g., matrix multiplication).
+:::
+
 ::: {.callout-note title="Figure Placeholder: Roofline Model" collapse="true"}
 ```{.tikz}
-% TODO: Log-log plot of FLOPS vs Arithmetic Intensity
-\node[draw, align=center] {Roofline Model\nMemory vs Compute Bound};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, every node/.style={transform shape}]
+    % Define standard colors locally for now
+    \definecolor{BlueLine}{RGB}{0,80,180}
+    \definecolor{RedLine}{RGB}{200,30,30}
+    
+    % Axes
+    \draw[->, thick] (0,0) -- (7,0) node[below, midway, yshift=-0.3cm] {Arithmetic Intensity (FLOP/Byte)};
+    \draw[->, thick] (0,0) -- (0,5.0) node[above, rotate=90, midway, yshift=0.3cm] {Performance (OPS)};
+
+    % Ticks
+    \node[below] at (0,0) {$10^{-1}$};
+    \node[below] at (2,0) {$10^{1}$};
+    \node[below] at (4,0) {$10^{2}$};
+    \node[below] at (6,0) {$10^{3}$}; % Log scale approximation
+
+    \node[left] at (0,1) {$10^{12}$};
+    \node[left] at (0,3) {$10^{14}$};
+    \node[left] at (0,4.5) {$10^{15}$};
+
+    % Coordinates for Roofline
+    \coordinate (ridge) at (4.0, 4.0);
+    \coordinate (start) at (0,0);
+    \coordinate (end) at (7.0, 4.0);
+
+    % Regions
+    \fill[BlueLine!10] (start) -- (ridge) -- (4.0, 0) -- cycle;
+    \node[BlueLine, rotate=45, font=\bfseries] at (2.5, 1.5) {Memory Bound};
+    
+    \fill[RedLine!10] (4.0, 0) -- (ridge) -- (end) -- (7.0, 0) -- cycle;
+    \node[RedLine, font=\bfseries] at (5.5, 2.0) {Compute Bound};
+
+    % Roofline Plot
+    \draw[ultra thick, BlueLine] (start) -- (ridge) node[midway, above, rotate=45] {Bandwidth Limited};
+    \draw[ultra thick, RedLine] (ridge) -- (end) node[midway, above] {Compute Limited};
+    
+    % Ridge Point
+    \fill[black] (ridge) circle (2pt);
+    \node[above right] at (ridge) {Ridge Point};
+    \draw[dashed, thin] (ridge) -- (4.0, 0);
+
+    % Workload dots
+    \node[circle, fill=orange, inner sep=2pt, label={right:LLM (Attention)}] at (2.5, 2.5) {};
+    \node[circle, fill=green!60!black, inner sep=2pt, label={below:ConvNet}] at (5.5, 3.5) {};
+
+\end{tikzpicture}
 ```
 **Roofline Performance Model**: A visual representation of performance limits plotting achievable FLOPS against arithmetic intensity (FLOPS/Byte). The slanted "roof" represents the memory-bound region where bandwidth constrains performance, while the flat "roof" represents the compute-bound region limited by peak processor throughput. Operational points for LLMs typically fall under the slanted roof, indicating memory bandwidth dependence.
 :::
@@ -338,6 +567,30 @@ Arithmetic intensity measures FLOPS per byte of memory traffic. The "ridge point
 Most LLM training operates at 50 to 100 FLOP/byte arithmetic intensity, well below the ridge point, making these workloads memory-bound. At 75 FLOP/byte on H100, achievable performance is $3.4 \times 75 = 255$ TF, only 26 percent of peak compute. This explains why production training achieves 30 to 50 percent of theoretical FLOPS. The bottleneck is memory bandwidth, not compute capacity.
 
 CNN training with large batch sizes operates near 200 FLOP/byte, approaching the ridge point where both resources limit performance. Recommendation inference with random embedding lookups operates at extremely low arithmetic intensity of 1 to 10 FLOP/byte, fundamentally memory-bound regardless of accelerator choice.
+
+::: {.callout-example title="Engineering Metric: Model FLOPs Utilization (MFU)"}
+**The Problem**: You buy an H100 GPU advertised at 990 TFLOPS (FP16). Your training logs show it's only processing data at a rate equivalent to 350 TFLOPS. Where did the performance go?
+
+**Definition**:
+$$ \text{MFU} = \frac{\text{Achieved FLOPS}}{\text{Peak Theoretical FLOPS}} $$
+
+**Calculation for Transformer Training**:
+For a model with $P$ parameters trained on $D$ tokens in $T$ seconds:
+$$ \text{Achieved FLOPS} \approx \frac{6 \cdot P \cdot D}{T} $$
+*(Factor of 6 accounts for forward + backward pass operations per parameter)*.
+
+**Worked Example**:
+*   **Model**: 70B parameters ($70 \times 10^9$)
+*   **Data**: 100B tokens
+*   **Time**: 14 days ($1.2 \times 10^6$ seconds) on 512 H100s.
+
+1.  **Total FLOPs Required**: $6 \cdot (70 \times 10^9) \cdot (100 \times 10^9) = 4.2 \times 10^{22}$ FLOPs.
+2.  **Achieved System Throughput**: $\frac{4.2 \times 10^{22}}{1.2 \times 10^6} = 3.5 \times 10^{16}$ FLOPS ($35$ PFLOPS).
+3.  **Per-GPU Throughput**: $35 \text{ PFLOPS} / 512 = 68 \text{ TFLOPS}$.
+4.  **MFU**: $68 / 990 \approx \mathbf{6.8\%}$.
+
+**Conclusion**: This low MFU indicates severe bottlenecks—likely memory bandwidth (waiting for weights) or communication overhead (waiting for AllReduce). Good MFU for LLMs is 40-50%.
+:::
 
 **Cost per PFLOP.** Infrastructure economics depend on utilization and workload fit:
 
@@ -387,8 +640,47 @@ InfiniBand[^fn-infiniband] has emerged as the dominant interconnect for ML train
 
 ::: {.callout-note title="Figure Placeholder: InfiniBand vs RoCE Stack" collapse="true"}
 ```{.tikz}
-% TODO: Side-by-side stack comparison. InfiniBand (Physical -> Link -> Network -> Transport -> Verbs) vs RoCE (Ethernet -> IP -> UDP -> IB Transport -> Verbs)
-\node[draw, align=center] {Protocol Stacks\nInfiniBand vs RoCE};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{Orchid}{RGB}{218,112,214}
+  \definecolor{Slate}{RGB}{112,128,144}
+  \definecolor{OrangeLine}{RGB}{255,140,0}
+
+  \tikzset{
+    layer/.style={draw=black!70, fill=white, minimum width=3cm, minimum height=0.7cm, font=\sffamily\footnotesize},
+    header/.style={font=\bfseries\sffamily, align=center}
+  }
+
+  % InfiniBand Stack
+  \begin{scope}[local bounding box=IB]
+    \node[header] at (0, 5) {InfiniBand};
+    \node[layer, fill=Orchid!20] (ib_verbs) at (0, 4) {Verbs API};
+    \node[layer, fill=Orchid!10] (ib_trans) at (0, 3) {IB Transport};
+    \node[layer, fill=Orchid!10] (ib_net) at (0, 2) {IB Network};
+    \node[layer, fill=Orchid!10] (ib_link) at (0, 1) {IB Link};
+    \node[layer, fill=Orchid!10] (ib_phy) at (0, 0) {IB Physical};
+    
+    % RDMA bypass arrow
+    \draw[->, thick, OrangeLine] (-1.8, 4.3) -- (-1.8, 0.5) node[midway, left, align=center, font=\scriptsize] {Kernel\\Bypass};
+  \end{scope}
+
+  % RoCE Stack
+  \begin{scope}[shift={(5,0)}, local bounding box=RoCE]
+    \node[header] at (0, 5) {RoCEv2};
+    \node[layer, fill=Orchid!20] (roce_verbs) at (0, 4) {Verbs API};
+    \node[layer, fill=Orchid!10] (roce_trans) at (0, 3) {IB Transport};
+    \node[layer, fill=Slate!10] (roce_udp) at (0, 2) {UDP / IP};
+    \node[layer, fill=Slate!10] (roce_eth) at (0, 1) {Ethernet Link (PFC)};
+    \node[layer, fill=Slate!10] (roce_phy) at (0, 0) {Ethernet Physical};
+    
+    % RDMA bypass arrow
+    \draw[->, thick, OrangeLine] (1.8, 4.3) -- (1.8, 0.5) node[midway, right, align=center, font=\scriptsize] {Kernel\\Bypass};
+  \end{scope}
+
+  % Connectors
+  \draw[dashed, gray] (ib_verbs) -- (roce_verbs);
+  \draw[dashed, gray] (ib_trans) -- (roce_trans);
+
+\end{tikzpicture}
 ```
 **High-Performance Networking Stacks**. Comparison of InfiniBand and RoCE protocol stacks. InfiniBand uses a native lossless fabric, while RoCE encapsulates RDMA traffic within UDP/IP packets over Ethernet. Both expose the same Verbs API to applications, but RoCE relies on Priority Flow Control (PFC) in the Ethernet layer to approximate InfiniBand's lossless guarantees.
 :::
@@ -439,8 +731,87 @@ Rail-optimized topologies offer an alternative for workloads dominated by tensor
 
 ::: {.callout-note title="Figure Placeholder: Network Topologies" collapse="true"}
 ```{.tikz}
-% TODO: Visual diagrams of Fat-Tree (hierarchical), Ring/Torus (mesh), and Rail-Optimized (dedicated groups)
-\node[draw, align=center] {Topology Comparison\nFat-Tree vs Rail-Optimized vs Torus};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
+  \definecolor{NodeColor}{RGB}{200,200,200}
+  \definecolor{SwitchColor}{RGB}{100,150,200}
+
+  \tikzset{
+    switch/.style={circle, fill=SwitchColor, draw=black!50, inner sep=2pt, minimum size=0.4cm},
+    node/.style={rectangle, fill=NodeColor, draw=black!50, inner sep=2pt, minimum size=0.4cm}
+  }
+
+  % Fat Tree
+  \begin{scope}
+    \node[anchor=south] at (2, 3.5) {\textbf{A. Leaf-Spine (Fat-Tree)}};
+    % Spine
+    \foreach \x in {0.5, 1.5, 2.5, 3.5} \node[switch] (s\x) at (\x, 3) {};
+    % Leaf
+    \foreach \x in {0, 1, 3, 4} \node[switch] (l\x) at (\x, 1.5) {};
+    % Nodes
+    \foreach \x in {0, 0.5, 1, 1.5} \node[node] (n\x) at (\x-0.25, 0) {};
+    \foreach \x in {3, 3.5, 4, 4.5} \node[node] (nm\x) at (\x-0.25, 0) {};
+    
+    % Connections
+    \foreach \s in {0.5, 1.5, 2.5, 3.5} {
+        \draw[gray, thin] (s\s) -- (l0);
+        \draw[gray, thin] (s\s) -- (l1);
+        \draw[gray, thin] (s\s) -- (l3);
+        \draw[gray, thin] (s\s) -- (l4);
+    }
+    \draw[gray] (l0) -- (n0); \draw[gray] (l0) -- (n0.5);
+    \draw[gray] (l1) -- (n1); \draw[gray] (l1) -- (n1.5);
+  \end{scope}
+
+  % Torus
+  \begin{scope}[shift={(6,0)}]
+    \node[anchor=south] at (1.5, 3.5) {\textbf{B. 2D Torus / Mesh}};
+    \foreach \x in {0, 1, 2, 3} {
+        \foreach \y in {0, 1, 2, 3} {
+            \node[node] (t\x\y) at (\x, \y) {};
+        }
+    }
+    % Grid links
+    \foreach \x in {0, 1, 2} {
+        \foreach \y in {0, 1, 2, 3} {
+             \draw[thick] (t\x\y) -- (t\the\numexpr\x+1\relax\y);
+        }
+    }
+    \foreach \x in {0, 1, 2, 3} {
+        \foreach \y in {0, 1, 2} {
+             \draw[thick] (t\x\y) -- (t\x\the\numexpr\y+1\relax);
+        }
+    }
+    % Torus wrap (dashed)
+    \draw[dashed] (t30) to[bend right] (t00);
+    \draw[dashed] (t03) to[bend left] (t00);
+  \end{scope}
+  
+  % Rail Optimized
+  \begin{scope}[shift={(11,0)}]
+    \node[anchor=south] at (1.5, 3.5) {\textbf{C. Rail-Optimized}};
+    
+    % Rail Switches
+    \foreach \x in {0, 1, 2, 3} \node[switch, fill=orange!50] (rs\x) at (\x, 3) {R\x};
+    
+    % Nodes (with multiple GPUs)
+    \node[draw, fit={(0,-0.5) (3, 0.5)}, inner sep=4pt] (host1) {};
+    \node[anchor=west] at (host1.west) {Node 1};
+    
+    \node[draw, fit={(0,-2.0) (3, -1.0)}, inner sep=4pt] (host2) {};
+    \node[anchor=west] at (host2.west) {Node 2};
+
+    % GPUs
+    \foreach \x in {0, 1, 2, 3} {
+        \node[node, fill=violet!30] (g1\x) at (\x, 0) {};
+        \node[node, fill=violet!30] (g2\x) at (\x, -1.5) {};
+        
+        \draw[thick, orange] (g1\x) -- (rs\x);
+        \draw[thick, orange] (g2\x) -- (rs\x);
+    }
+    
+  \end{scope}
+
+\end{tikzpicture}
 ```
 **Network Topologies for ML**. Visualizing three common interconnect architectures. (A) Fat-Tree provides full bisection bandwidth for general-purpose communication. (B) Torus (used in TPUs) connects neighbors in a grid/mesh, optimizing for local patterns. (C) Rail-Optimized designs prioritize dedicated paths between corresponding GPUs across nodes, minimizing switch hops for tensor parallelism.
 :::
@@ -573,8 +944,39 @@ The datacenter infrastructure and high-speed networks discussed in @sec-datacent
 
 ::: {.callout-note title="Figure Placeholder: Cluster Scheduling Architecture" collapse="true"}
 ```{.tikz}
-% TODO: Architecture diagram showing User Job -> Scheduler (Queue policy) -> Resource Manager -> Node Agents -> GPUs
-\node[draw, align=center] {Scheduling Architecture\nJob Queue -> Scheduler -> Cluster Nodes};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=1.5cm]
+  \definecolor{ProcColor}{RGB}{255,250,240}
+  \definecolor{DataColor}{RGB}{240,248,255}
+
+  \tikzset{
+    process/.style={draw=black, thick, fill=ProcColor, rounded corners=2pt, minimum width=2.5cm, minimum height=1cm, align=center},
+    database/.style={draw=black, cylinder, shape border rotate=90, aspect=0.25, fill=DataColor, minimum width=2cm, minimum height=1.5cm, align=center},
+    arrow/.style={->, >=stealth, thick}
+  }
+
+  % Components
+  \node[process] (user) {User / Client\\(Job Submision)};
+  \node[database, right=of user] (queue) {Job Queue\\(Priority/FIFO)};
+  \node[process, right=of queue, fill=orange!10] (scheduler) {Scheduler Core\\(Bin Packing)};
+  \node[process, below=of scheduler] (resman) {Resource Manager\\(State Tracking)};
+  
+  \node[process, below=of user, xshift=-1cm] (node1) {Agent 1\\(GPU Node)};
+  \node[process, right=0.5cm of node1] (node2) {Agent 2\\(GPU Node)};
+  \node[process, right=0.5cm of node2] (node3) {Agent N\\(GPU Node)};
+  
+  % Flows
+  \draw[arrow] (user) -- (queue);
+  \draw[arrow] (queue) -- (scheduler);
+  \draw[arrow] (scheduler) -- node[right, font=\footnotesize] {Allocation} (resman);
+  \draw[arrow] (resman) -- node[right, font=\footnotesize] {Launch} (node2);
+  \draw[arrow] (node1) -- (resman);
+  \draw[arrow] (node2) -- (resman);
+  \draw[arrow] (node3) -- (resman);
+  
+  % Policies
+  \node[above=0.2cm of scheduler, font=\footnotesize\bfseries] {Policies: Fair Share, Gang};
+
+\end{tikzpicture}
 ```
 **Cluster Resource Management Architecture**. A high-level view of a distributed scheduler. Jobs enter a prioritized queue. The scheduler matches resource requests (GPUs, Memory) against available nodes, enforcing fairness and locality constraints. Node agents (like Kubelet or Slurmd) launch containers and monitor health, reporting status back to the control plane.
 :::
@@ -915,8 +1317,62 @@ where $r$ is the discount rate reflecting cost of capital. For a 256-GPU cluster
 
 ::: {.callout-note title="Figure Placeholder: TCO Breakdown" collapse="true"}
 ```{.tikz}
-% TODO: Pie chart or stacked bar showing cost components over 4 years. Hardware vs Power vs Ops.
-\node[draw, align=center] {TCO Components\nCapEx vs Power vs Ops};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{CapExColor}{RGB}{70,130,180}
+  \definecolor{OpExColor}{RGB}{205,92,92}
+  \definecolor{OpExColor2}{RGB}{240,128,128}
+
+  % Axes
+  \draw[->, thick, black!70] (0,0) -- (6.5,0) node[right, font=\footnotesize] {Year};
+  \draw[->, thick, black!70] (0,0) -- (0,5.5) node[above, font=\footnotesize, rotate=90, anchor=south, xshift=-0.5cm] {Cumulative Cost (\$M)};
+  
+  % Ticks
+  \foreach \y in {1,2,3,4,5} \draw[gray!30] (0,\y) -- (6,\y);
+  \node[left, font=\scriptsize] at (0,1) {2M};
+  \node[left, font=\scriptsize] at (0,2) {4M};
+  \node[left, font=\scriptsize] at (0,3) {6M};
+  \node[left, font=\scriptsize] at (0,4) {8M};
+  \node[left, font=\scriptsize] at (0,5) {10M};
+
+  % Stacked Bar Data
+  % Y1: HW(4M/2=2.0) + Power(0)
+  % Y2: + Power(1.0)
+  % Y3: + Power(1.0)
+  % Y4: + Power(1.0)
+  % Wait, CapEx is typically upfront.
+  % Let's visualize cumulative.
+  
+  % Bar 1 (Year 1)
+  \draw[fill=CapExColor] (1,0) rectangle (1.8, 2.0); % 4M HW
+  \node[below, font=\scriptsize] at (1.4,0) {Y1};
+  
+  % Bar 2 (Year 2)
+  \draw[fill=CapExColor] (2.5,0) rectangle (3.3, 2.0);
+  \draw[fill=OpExColor] (2.5, 2.0) rectangle (3.3, 2.6); % +1.2M Power/Ops
+  \node[below, font=\scriptsize] at (2.9,0) {Y2};
+  
+  % Bar 3
+  \draw[fill=CapExColor] (4.0,0) rectangle (4.8, 2.0);
+  \draw[fill=OpExColor] (4.0, 2.0) rectangle (4.8, 2.6);
+  \draw[fill=OpExColor2] (4.0, 2.6) rectangle (4.8, 3.2); % + 1.2M more
+  \node[below, font=\scriptsize] at (4.4,0) {Y3};
+  
+  % Bar 4
+  \draw[fill=CapExColor] (5.5,0) rectangle (6.3, 2.0);
+  \draw[fill=OpExColor] (5.5, 2.0) rectangle (6.3, 2.6);
+  \draw[fill=OpExColor2] (5.5, 2.6) rectangle (6.3, 3.2);
+  \draw[fill=OpExColor!80!black] (5.5, 3.2) rectangle (6.3, 3.8); % + 1.2M more
+  \node[below, font=\scriptsize] at (5.9,0) {Y4};
+  
+  % Legend
+  \node[anchor=west, font=\scriptsize] at (7, 4) {\textbf{Legend}};
+  \node[fill=CapExColor, minimum size=0.2cm, label={right:\scriptsize Hardware (CapEx)}] at (7.1, 3.5) {};
+  \node[fill=OpExColor, minimum size=0.2cm, label={right:\scriptsize Power \& Ops (Accum.)}] at (7.1, 3.0) {};
+  
+  % Annotation
+  \draw[<-, thick, black!80] (6.4, 3.5) to[bend left] (8.5, 4.5) node[right, align=left, font=\scriptsize, text width=2.5cm] {OpEx eventually\\exceeds CapEx};
+
+\end{tikzpicture}
 ```
 **Total Cost of Ownership Breakdown**. Analysis of infrastructure costs over a 4-year lifecycle. While hardware CapEx is the largest initial outlay, operational costs (Power and Staffing) accumulate to exceed hardware costs over the system's life. High utilization is key to amortizing these fixed and ongoing costs.
 :::
@@ -1089,28 +1545,22 @@ Software overhead adds latency that theoretical bandwidth calculations ignore. N
 
 ## Summary
 
-Large-scale ML infrastructure represents the physical foundation upon which all distributed training and serving systems operate. The constraints examined in this chapter, from power delivery and cooling capacity to network topology and accelerator selection, ultimately determine what scale of ML systems an organization can build and operate effectively.
+Compute infrastructure represents the physical foundation upon which all distributed training and serving systems operate. The constraints examined in this chapter, from power delivery and cooling capacity to accelerator selection, ultimately determine what scale of ML systems an organization can build and operate effectively.
 
-Infrastructure design must match workload characteristics. LLM training demands GPU-dense configurations with high-bandwidth NVLink and InfiniBand connectivity, while recommendation systems require hybrid CPU-GPU architectures optimized for embedding table access. Vision workloads fall between these extremes, benefiting from GPU acceleration but tolerating moderate network bandwidth. Attempting to serve all workload types from homogeneous infrastructure wastes resources and constrains performance.
+We examined how power density and cooling represent hard physical limits that constrain cluster design independent of budget. The transition from air-cooled 10kW racks to liquid-cooled 100kW racks is not just an upgrade but a fundamental architectural shift required by modern accelerators.
 
-Training and serving have fundamentally different infrastructure requirements. Training workloads tolerate batch scheduling, require sustained high bandwidth for collective operations, and can checkpoint through failures. Serving workloads demand low-latency networking, consistent response times, and immediate failover capabilities. Organizations that attempt to share infrastructure between training and serving often compromise both workloads.
+We analyzed the trade-offs between different accelerator architectures—GPUs, TPUs, and custom ASICs—and how they map to specific workloads. The distinction between training-optimized (high precision, bandwidth) and inference-optimized (low latency, efficiency) hardware is driving specialized fleet designs.
 
-Total cost of ownership extends far beyond hardware acquisition. Power consumption for a 1000-GPU cluster can exceed $2 million annually at typical datacenter rates. Cooling infrastructure may cost more than the GPUs it supports. Operational overhead including monitoring, maintenance, and administration adds 20-30% to hardware costs over a three-year depreciation cycle. Cloud versus on-premises decisions depend critically on utilization rates, with break-even typically occurring around 40% sustained utilization.
-
-Network topology choices determine distributed training efficiency. The decision between fat-tree and rail-optimized topologies, InfiniBand and RoCE, 2-tier and 3-tier switching architectures shapes what parallelism strategies perform well on the resulting infrastructure. Topology decisions made during datacenter construction constrain training architectures for years afterward.
-
-Different model types require different infrastructure patterns. The SuperPOD architecture optimized for LLM training differs fundamentally from Meta's recommendation serving infrastructure or Tesla's Dojo system optimized for video processing. No single infrastructure design serves all ML workloads optimally, and organizations must either specialize their infrastructure or accept efficiency losses from generalization.
+Finally, we established that Total Cost of Ownership extends far beyond hardware acquisition. Power consumption, cooling infrastructure, and operational overhead often exceed the initial cost of GPUs over a three-year lifecycle.
 
 ::: {.callout-important title="Key Takeaways"}
 
 * Power density and cooling capacity represent hard physical limits that constrain cluster design independent of budget
-* Network topology determines training efficiency, with fat-tree providing flexibility while rail-optimized reduces latency for structured communication patterns
 * Hybrid CPU-GPU architectures outperform GPU-only configurations for recommendation systems and other embedding-heavy workloads
-* Communication overhead limits scaling efficiency, with Amdahl's Law applying to gradient synchronization and collective operations
 * Total cost of ownership must include power, cooling, operations, and realistic utilization rates rather than theoretical peak performance
+* Accelerator selection requires matching hardware characteristics (memory bandwidth vs. FLOPS) to workload bottlenecks (decode vs. prefill)
 
 :::
 
-Yet infrastructure alone cannot serve ML workloads. The accelerators, networks, and cooling systems examined here require data: petabytes of training examples that must flow efficiently from persistent storage to GPU memory. The next chapter (@sec-storage) examines storage systems for large-scale ML, addressing how distributed file systems, object stores, checkpoint mechanisms, and feature stores provide the data infrastructure upon which training and serving depend. Storage bandwidth, not capacity, typically limits ML training throughput, making storage architecture decisions as consequential as accelerator selection.
+With the compute nodes defined—powered, cooled, and racked—we must now address the data they consume. A massive compute fleet is useless without a storage system capable of feeding it. The next chapter (@sec-storage) examines the high-performance storage architectures required to keep these accelerators fed with data.
 
-The infrastructure foundations established here enable the distributed training strategies in @sec-distributed-training, which examines how parallelism approaches map onto physical hardware. The communication patterns and collective operations detailed in @sec-communication depend directly on the network topologies and bandwidth characteristics discussed in this chapter. For production deployments, @sec-fault-tolerance addresses the reliability requirements that infrastructure must satisfy to support multi-week training runs across thousands of accelerators.

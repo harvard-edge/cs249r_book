@@ -6,7 +6,7 @@ bibliography: distributed_training.bib
 
 ::: {layout-narrow}
 ::: {.column-margin}
-_DALL·E 3 Prompt: A technical illustration showing multiple interconnected GPU clusters working in coordination to train a massive neural network. The scene depicts hundreds of GPU nodes arranged in a circular pattern, connected by luminous data streams representing gradient synchronization. At the center, a giant neural network model spans across all nodes, with each node responsible for a different portion. Visual elements include ring allreduce patterns showing data flowing between nodes, pipeline stages depicted as sequential processing units, and synchronization barriers represented as glowing checkpoints. The color palette uses deep blues and electric purples for computation, with bright orange and gold for communication paths. The style is technical and precise, suitable for an advanced distributed systems textbook._
+_Gemini Pro 3 Prompt: A technical illustration of distributed training with multiple interconnected GPU clusters working in coordination to train a massive neural network. The scene depicts hundreds of GPU nodes arranged in a circular pattern, connected by luminous data streams representing gradient synchronization. At the center, a giant neural network model spans across all nodes, with each node responsible for a different portion. Visual elements include ring allreduce patterns showing data flowing between nodes, pipeline stages depicted as sequential processing units, and synchronization barriers represented as glowing checkpoints. The color palette uses deep blues and electric purples for computation, with bright orange and gold for communication paths. The style is technical and precise, suitable for an advanced distributed systems textbook. Rendered in the style of Nanobanana._
 :::
 
 \noindent
@@ -46,7 +46,13 @@ The transition from single-machine to distributed training represents a major sh
 
 ### Multi-Machine Training Requirements {#sec-distributed-training-multimachine-training-requirements}
 
-Three concrete signals indicate when distributed training becomes necessary rather than merely beneficial. First, **memory exhaustion** occurs when model parameters, optimizer states, and activation storage exceed single-device capacity. It is critical to distinguish between static memory, which includes parameters and optimizer states and remains constant per batch, and dynamic memory for activations, which scales with batch size and sequence length. For long-context LLMs, activation memory often dominates. Techniques like **gradient checkpointing**[^fn-gradient-checkpointing] address this by discarding intermediate activations during the forward pass and recomputing them during the backward pass, trading 30% more compute for O(sqrt(n)) memory reduction. Even with these optimizations, models beyond 10-20 billion parameters typically exceed the 40-80GB HBM capacity of modern GPUs.
+Three concrete signals indicate when distributed training becomes necessary rather than merely beneficial. First, **memory exhaustion** occurs when model parameters, optimizer states, and activation storage exceed single-device capacity. It is critical to distinguish between static memory, which includes parameters and optimizer states and remains constant per batch, and dynamic memory for activations, which scales with batch size and sequence length.
+
+::: {.callout-definition title="Scaling Laws"}
+**Scaling Laws** describe the predictable, power-law relationship between a model's performance (loss) and the scale of its compute, dataset size, and parameter count. These empirical laws provide the "physics" of deep learning, allowing engineers to extrapolate the resources required to achieve a target performance level before training begins.
+:::
+
+For long-context LLMs, activation memory often dominates. Techniques like **gradient checkpointing**[^fn-gradient-checkpointing] address this by discarding intermediate activations during the forward pass and recomputing them during the backward pass, trading 30% more compute for O(sqrt(n)) memory reduction. Even with these optimizations, models beyond 10-20 billion parameters typically exceed the 40-80GB HBM capacity of modern GPUs.
 
 [^fn-gradient-checkpointing]: Gradient checkpointing trades approximately 30% additional compute for reduced activation memory, from O(n) to O(sqrt(n)) for n layers.
 
@@ -68,6 +74,26 @@ The systematic optimization methodology established for single-machine training 
 \node[draw, align=center] {3D Parallelism\nData x Tensor x Pipeline};
 ```
 **The 3D Parallelism Cube**. A conceptual visualization of the three orthogonal scaling axes: Data Parallelism (replicating the model), Tensor Parallelism (splitting layers), and Pipeline Parallelism (splitting depth). Production training for models like GPT-4 occupies a specific point $(d, t, p)$ within this cube to balance memory usage, compute efficiency, and communication overhead.
+:::
+
+### Engineering Trade-offs: Selecting a Parallelism Strategy {#sec-distributed-training-engineering-tradeoffs}
+
+Choosing the right parallelism strategy is not a matter of preference; it is a constraint satisfaction problem governed by model size ($M$), batch size ($B$), and interconnect bandwidth.
+
++--------------------------+------------------------------+-------------------------------+----------------------------------+
+| **Strategy**             | **Communication Pattern**    | **Comm. Volume**              | **Hardware Constraint**          |
++:=========================+:=============================+:==============================+:=================================+
+| **Data Parallel (DP)**   | AllReduce Gradients          | $\propto M$ (Model Size)      | Requires high bisection BW       |
++--------------------------+------------------------------+-------------------------------+----------------------------------+
+| **Tensor Parallel (TP)** | AllReduce Activations        | $\propto B \times L$ (Layers) | **Critical**: Needs NVLink/NVSwitch |
++--------------------------+------------------------------+-------------------------------+----------------------------------+
+| **Pipeline Parallel (PP)**| Point-to-Point (P2P)        | $\propto B \times H$ (Hidden) | Low BW (Ethernet is sufficient)  |
++--------------------------+------------------------------+-------------------------------+----------------------------------+
+
+: **Parallelism Communication Costs**: Tensor Parallelism has the highest communication frequency (per layer), confining it to intra-node (NVLink) usage. Pipeline Parallelism has the lowest communication volume (boundary activations only), making it suitable for inter-node (Ethernet/InfiniBand) scaling. Data Parallelism sits in the middle but scales poorly as $M$ grows, necessitating ZeRO optimizations. {#tbl-parallelism-tradeoffs}
+
+::: {.callout-important title="The Jeff Dean Test: Bandwidth Physics"}
+If you attempt **Tensor Parallelism** across server racks connected by standard Ethernet, your training will stall. The communication volume ($\propto$ Batch $\times$ Layers) requires the 600-900 GB/s bandwidth of NVLink. For cross-rack scaling, you *must* switch to **Pipeline** or **Data** parallelism to respect the physics of the network.
 :::
 
 ## Distributed Training Fundamentals {#sec-distributed-training-fundamentals}
@@ -362,7 +388,13 @@ These efficiency metrics directly influence the choice of parallelism strategy. 
 
 ## Data Parallelism {#sec-distributed-training-data-parallelism}
 
-Building on the efficiency characteristics outlined above, data parallelism represents the most straightforward distributed approach and proves particularly effective in the linear scaling regime where communication overhead remains manageable. This method distributes the training process across multiple devices by splitting the dataset into smaller subsets. Each device trains a complete copy of the model using its assigned subset of the data. When training an image classification model on 1 million images using 4 GPUs, each GPU processes 250,000 images while maintaining an identical copy of the model architecture.
+Building on the efficiency characteristics outlined above, data parallelism represents the most straightforward distributed approach and proves particularly effective in the linear scaling regime where communication overhead remains manageable.
+
+::: {.callout-definition title="Data Parallelism"}
+**Data Parallelism** is a distributed training strategy where the _model is replicated_ across every worker, but the _dataset is sharded_. Each worker computes gradients on a unique slice of data (micro-batch), and these gradients are averaged across all workers (via AllReduce) to update the shared model parameters synchronously.
+:::
+
+This method distributes the training process across multiple devices by splitting the dataset into smaller subsets. Each device trains a complete copy of the model using its assigned subset of the data. When training an image classification model on 1 million images using 4 GPUs, each GPU processes 250,000 images while maintaining an identical copy of the model architecture.
 
 Data parallelism proves particularly effective when the dataset size is large but the model size remains manageable, since each device must store a full copy of the model in memory. This method finds wide use in image classification and natural language processing, where the dataset can be processed in parallel without dependencies between data samples. When training a ResNet model [@he2016resnet] on ImageNet, each GPU can independently process its portion of images because the classification of one image does not depend on the results of another.
 
@@ -681,12 +713,54 @@ For a 7B parameter model with Adam optimizer, each GPU requires: $7B \times (4 +
 
 ZeRO addresses this redundancy through progressive sharding:
 
-::: {.callout-note title="Figure Placeholder: ZeRO Memory Usage" collapse="true"}
+::: {.callout-note title="Figure: ZeRO Memory Partitioning" collapse="false"}
 ```{.tikz}
-% TODO: Bar chart showing memory usage of DDP vs ZeRO-1/2/3
-\node[draw, align=center] {ZeRO Memory Partitioning\nOptimizer | Gradients | Parameters};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, xscale=1.5]
+  \definecolor{ParamColor}{RGB}{200,220,255}
+  \definecolor{GradColor}{RGB}{255,220,200}
+  \definecolor{OptColor}{RGB}{220,255,200}
+
+  \tikzset{
+    bar/.style={draw=black!70, thick, minimum width=1.2cm},
+    label/.style={font=\scriptsize, text=black!80}
+  }
+
+  % DDP (Replicated)
+  \node[anchor=south] at (0, 3.2) {DDP};
+  \draw[fill=ParamColor] (-0.4, 0) rectangle (0.4, 0.5) node[midway, label] {P};
+  \draw[fill=GradColor] (-0.4, 0.5) rectangle (0.4, 1.0) node[midway, label] {G};
+  \draw[fill=OptColor] (-0.4, 1.0) rectangle (0.4, 3.0) node[midway, label] {OS};
+  \node[below, font=\tiny] at (0,0) {Replicated};
+
+  % ZeRO-1
+  \node[anchor=south] at (1, 3.2) {ZeRO-1};
+  \draw[fill=ParamColor] (0.6, 0) rectangle (1.4, 0.5) node[midway, label] {P};
+  \draw[fill=GradColor] (0.6, 0.5) rectangle (1.4, 1.0) node[midway, label] {G};
+  \draw[fill=OptColor] (0.6, 1.0) rectangle (1.4, 1.25) node[midway, label] {OS/N};
+  \node[below, font=\tiny] at (1,0) {Shard OS};
+
+  % ZeRO-2
+  \node[anchor=south] at (2, 3.2) {ZeRO-2};
+  \draw[fill=ParamColor] (1.6, 0) rectangle (2.4, 0.5) node[midway, label] {P};
+  \draw[fill=GradColor] (1.6, 0.5) rectangle (2.4, 0.6) node[midway, label] {G/N};
+  \draw[fill=OptColor] (1.6, 0.6) rectangle (2.4, 0.85) node[midway, label] {OS/N};
+  \node[below, font=\tiny] at (2,0) {+Shard G};
+
+  % ZeRO-3
+  \node[anchor=south] at (3, 3.2) {ZeRO-3};
+  \draw[fill=ParamColor] (2.6, 0) rectangle (3.4, 0.1) node[midway, label] {};
+  \draw[fill=GradColor] (2.6, 0.1) rectangle (3.4, 0.2) node[midway, label] {};
+  \draw[fill=OptColor] (2.6, 0.2) rectangle (3.4, 0.45) node[midway, label] {};
+  \node[anchor=west, font=\tiny] at (2.6, 0.2) {All/N};
+  \node[below, font=\tiny] at (3,0) {+Shard P};
+
+  \node[anchor=north west, font=\tiny, text=gray] at (3.5, 3) {P: Parameters};
+  \node[anchor=north west, font=\tiny, text=gray] at (3.5, 2.7) {G: Gradients};
+  \node[anchor=north west, font=\tiny, text=gray] at (3.5, 2.4) {OS: Optimizer States};
+
+\end{tikzpicture}
 ```
-**ZeRO Memory Partitioning**. Visual comparison of memory usage between standard Data Parallelism (DDP) and ZeRO Stages 1, 2, and 3. In DDP, every GPU stores a full copy of parameters, gradients, and optimizer states. ZeRO progressively partitions these states across GPUs, eliminating redundancy. ZeRO-3 achieves linear memory scaling with GPU count, enabling training of trillion-parameter models on limited hardware.
+**ZeRO Memory Reduction**. Standard Data Parallelism (DDP) replicates all model states across every GPU. ZeRO progressively partitions these states: ZeRO-1 shards optimizer states, ZeRO-2 adds gradient sharding, and ZeRO-3 shards the parameters themselves. ZeRO-3 achieves linear memory scaling, enabling models with 100B+ parameters to fit on commodity hardware.
 :::
 
 +-------------------+-----------------------+--------------------------+----------------------------------+
@@ -898,7 +972,13 @@ This sequential processing introduces device idle time, as each device must wait
 
 #### Pipeline Parallelism {#sec-distributed-training-pipeline-parallelism}
 
-Pipeline parallelism extends layer-wise partitioning by introducing microbatching to minimize device idle time, as illustrated in @fig-pipline-parallelism. Instead of waiting for an entire batch to sequentially pass through all devices, the computation is divided into smaller segments called microbatches. GPipe[^fn-gpipe] [@gpipe2019] introduced synchronous pipeline parallelism with micro-batch accumulation, while PipeDream [@harlap2018pipedream] developed asynchronous approaches with weight stashing.
+Pipeline parallelism extends layer-wise partitioning by introducing microbatching to minimize device idle time, as illustrated in @fig-pipline-parallelism. Instead of waiting for an entire batch to sequentially pass through all devices, the computation is divided into smaller segments called microbatches.
+
+::: {.callout-definition title="Pipeline Parallelism"}
+**Pipeline Parallelism** is a model parallelism technique where layers are partitioned into _sequential stages_ assigned to different devices. To mitigate the "bubble" of idle time caused by sequential dependencies, input batches are split into _micro-batches_ that pipeline through the stages, keeping all devices active simultaneously.
+:::
+
+GPipe[^fn-gpipe] [@gpipe2019] introduced synchronous pipeline parallelism with micro-batch accumulation, while PipeDream [@harlap2018pipedream] developed asynchronous approaches with weight stashing.
 
 [^fn-gpipe]: **GPipe**: Developed by Google in 2018, GPipe pioneered synchronous pipeline parallelism for training neural networks too large for single devices. By splitting models across accelerators and using micro-batches to keep all stages busy, GPipe achieved near-linear scaling for training an AmoebaNet model with 557 million parameters across 8 TPUs. This approach influenced subsequent systems including Megatron-LM and DeepSpeed.
 
@@ -983,7 +1063,13 @@ The transfer of hidden states between devices occurs continuously rather than in
 
 Pipeline parallelism, examined above, addresses device idle time by overlapping microbatch processing across stages. Each device holds complete layers and processes them sequentially, with communication only at stage boundaries when activations transfer between devices. This approach tolerates moderate interconnect bandwidth because communication occurs infrequently, once per layer boundary per microbatch. However, pipeline parallelism cannot help when individual layers themselves exceed device memory, or when the communication pattern within layers benefits from a different granularity than layer boundaries.
 
-Tensor parallelism takes a fundamentally different approach: instead of assigning complete layers to devices, it splits the weight matrices within each layer. This operator-level parallelism (also called intra-layer parallelism) enables finer-grained distribution but requires high-bandwidth interconnects for the frequent intra-layer communication it introduces. The distinction is critical for hardware planning: tensor parallelism demands NVLink-class bandwidth, while pipeline parallelism tolerates InfiniBand between stages.
+Tensor parallelism takes a fundamentally different approach: instead of assigning complete layers to devices, it splits the weight matrices within each layer. This operator-level parallelism (also called intra-layer parallelism) enables finer-grained distribution but requires high-bandwidth interconnects for the frequent intra-layer communication it introduces.
+
+::: {.callout-definition title="Tensor Parallelism"}
+**Tensor Parallelism** is a model parallelism technique where individual _operations_ (like matrix multiplications) are split across devices. By partitioning weight matrices (e.g., column-wise or row-wise), computation is distributed at the granularity of the _tensor operation itself_, necessitating high-bandwidth intra-layer communication (typically NVLink) to aggregate partial results.
+:::
+
+The distinction is critical for hardware planning: tensor parallelism demands NVLink-class bandwidth, while pipeline parallelism tolerates InfiniBand between stages.
 
 ::: {.callout-note title="Terminology: Tensor Parallelism vs. Pipeline Parallelism"}
 Modern literature distinguishes two forms of model parallelism:
@@ -1037,6 +1123,19 @@ Tensor parallelism scaling degrades rapidly beyond 8-way parallelism because:
 
 Production systems (GPT-4, LLaMA, Gemini) use 8-way tensor parallelism within nodes, combined with pipeline parallelism across nodes, achieving the best balance of memory distribution and communication efficiency.
 
+### Expert Parallelism (Mixture of Experts) {#sec-distributed-training-expert-parallelism}
+
+While tensor parallelism splits dense layers across devices, **Expert Parallelism** enables scaling model capacity (parameters) without increasing compute cost (FLOPs) by using conditional computation. In a Mixture-of-Experts (MoE) architecture [@shazeer2017outrageously], the feed-forward network (FFN) of each transformer block is replaced by a set of $N$ "experts" (independent FFNs). For each token, a gating network selects a small subset (typically top-1 or top-2) of experts to process it.
+
+In a distributed setting, experts are partitioned across workers. If we have 8 GPUs and 8 experts, each GPU hosts one expert. The training process introduces a distinct communication pattern:
+
+1.  **Gating**: Each token determines its destination expert.
+2.  **All-to-All Dispatch**: Tokens are routed across the network to the device hosting their selected expert.
+3.  **Computation**: Experts process their assigned tokens.
+4.  **All-to-All Combine**: Processed tokens are routed back to their original device to resume the sequence.
+
+The primary advantage is decoupling model size from compute budget. A trillion-parameter MoE model might use only 10B parameters per token, enabling training on feasible hardware budgets. The constraint is the **All-to-All** communication, which is bandwidth-intensive and sensitive to load imbalance (if all tokens route to one expert, that device becomes a straggler). Advanced load balancing losses and capacity factors are required to ensure uniform expert utilization.
+
 ### Model Parallelism Advantages {#sec-distributed-training-model-parallelism-advantages}
 
 The tensor parallelism analysis above demonstrated that 8-way parallelism reduces per-GPU memory requirements proportionally while incurring 2 AllReduce operations per transformer layer. This trade-off proves favorable in practice, enabling training of architectures that would otherwise be impossible on current hardware.
@@ -1069,12 +1168,66 @@ $$
 
 In an 8-stage pipeline with $P=8$ and 32 microbatches with $M=32$, the bubble overhead is $(8-1)/32 \approx 22\%$. Increasing $M$ reduces this overhead but increases the memory required to store activations for the pending backward passes. This trade-off between throughput with high $M$ and memory with low $M$ is the central optimization constraint in pipeline parallelism.
 
-::: {.callout-note title="Figure Placeholder: Pipeline Bubble" collapse="true"}
+::: {.callout-note title="Figure: Pipeline Bubble Analysis" collapse="false"}
 ```{.tikz}
-% TODO: Space-time diagram of pipeline schedule showing idle bubbles
-\node[draw, align=center] {Pipeline Schedule\nIdle Bubbles vs Active Compute};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.8]
+  \definecolor{ForwardColor}{RGB}{200,220,255}
+  \definecolor{BackwardColor}{RGB}{255,220,200}
+  \definecolor{BubbleColor}{RGB}{240,240,240}
+
+  \tikzset{
+    box/.style={draw=black!70, thick, minimum width=1.2cm, minimum height=0.8cm, align=center, font=\scriptsize},
+    fwd/.style={box, fill=ForwardColor},
+    bwd/.style={box, fill=BackwardColor},
+    bubble/.style={box, fill=BubbleColor, text=gray}
+  }
+
+  % Headers
+  \node at (-1, 3) {GPU 3};
+  \node at (-1, 2) {GPU 2};
+  \node at (-1, 1) {GPU 1};
+  \node at (-1, 0) {GPU 0};
+  
+  \node at (0.6, 4) {T1}; \node at (1.8, 4) {T2}; \node at (3.0, 4) {T3}; \node at (4.2, 4) {T4};
+  \node at (5.4, 4) {T5}; \node at (6.6, 4) {T6}; \node at (7.8, 4) {T7}; \node at (9.0, 4) {T8};
+
+  % GPU 0
+  \node[fwd] at (0.6, 0) {$F_{0,0}$};
+  \node[fwd] at (1.8, 0) {$F_{0,1}$};
+  \node[bubble] at (3.0, 0) {...};
+  \node[bubble] at (4.2, 0) {...};
+  \node[bubble] at (5.4, 0) {...};
+  \node[bwd] at (6.6, 0) {$B_{0,0}$};
+  \node[bwd] at (7.8, 0) {$B_{0,1}$};
+
+  % GPU 1
+  \node[bubble] at (0.6, 1) {};
+  \node[fwd] at (1.8, 1) {$F_{1,0}$};
+  \node[fwd] at (3.0, 1) {$F_{1,1}$};
+  \node[bubble] at (4.2, 1) {...};
+  \node[bubble] at (5.4, 1) {...};
+  \node[bwd] at (6.6, 1) {$B_{1,0}$};
+  \node[bubble] at (7.8, 1) {};
+
+  % GPU 2
+  \node[bubble] at (0.6, 2) {}; \node[bubble] at (1.8, 2) {};
+  \node[fwd] at (3.0, 2) {$F_{2,0}$};
+  \node[fwd] at (4.2, 2) {$F_{2,1}$};
+  \node[bubble] at (5.4, 2) {...};
+  \node[bwd] at (6.6, 2) {$B_{2,0}$};
+
+  % GPU 3
+  \node[bubble] at (0.6, 3) {}; \node[bubble] at (1.8, 3) {}; \node[bubble] at (3.0, 3) {};
+  \node[fwd] at (4.2, 3) {$F_{3,0}$};
+  \node[bwd] at (5.4, 3) {$B_{3,0}$};
+  
+  % Bubble Braces
+  \draw[decorate, decoration={brace, amplitude=5pt}, thick] (0,-0.6) -- (3.6,-0.6) node[midway, below, yshift=-5pt] {Pipeline Fill (Bubble)};
+  \draw[decorate, decoration={brace, amplitude=5pt}, thick] (6,-0.6) -- (9.6,-0.6) node[midway, below, yshift=-5pt] {Pipeline Drain};
+
+\end{tikzpicture}
 ```
-**Pipeline Bubble Analysis**. A space-time diagram comparing naive pipeline execution versus 1F1B (One-Forward-One-Backward) scheduling. The "bubble" represents idle time (gray) where accelerators wait for data dependencies. Minimizing this bubble through micro-batching and efficient scheduling is the primary optimization goal in pipeline parallelism.
+**Pipeline Bubble Analysis**. A space-time diagram showing the "Fill" and "Drain" phases of a pipeline. Gray areas represent idle time (bubbles) where GPUs wait for dependencies. Synchronous pipeline parallelism (GPipe) results in a bubble overhead of $(P-1)/M$, where $P$ is the number of stages and $M$ is the number of microbatches.
 :::
 
 Finally, model parallelism may be less effective for certain architectures, such as models with highly interdependent operations. In these cases, splitting the model may lead to excessive communication overhead, outweighing the benefits of parallel computation. For such models, alternative strategies like data parallelism or hybrid approaches might be more suitable.
@@ -1349,149 +1502,17 @@ These APIs translate directly to the NCCL collective operations that implement t
 
 The framework abstractions enable practitioners to focus on model architecture and training dynamics while leveraging sophisticated distributed systems optimizations. This separation of concerns, where mathematical foundations are handled by the framework while model design remains under practitioner control, exemplifies how modern ML systems balance accessibility with performance. Yet these abstractions cannot hide the fundamental constraints of the underlying hardware. The efficiency of distributed training ultimately depends on physical interconnect bandwidth, memory capacity, and synchronization latency, constraints that determine what the framework abstractions can actually achieve.
 
-## Hardware Infrastructure for Scale {#sec-distributed-training-hardware-infrastructure}
+## Hardware Constraints on Parallelism {#sec-distributed-training-hardware-constraints}
 
-While framework abstractions successfully hide implementation complexity, the physical hardware determines what these abstractions can achieve in practice. The parallelism strategies examined in previous sections, from data parallelism's gradient synchronization to hybrid parallelism's multi-dimensional coordination, all depend critically on the underlying hardware. Data parallelism requires high-bandwidth gradient synchronization, where the 10-40% communication overhead established in our efficiency analysis translates to terabytes of gradient traffic per training step at scale. Model parallelism demands low-latency point-to-point links for activation transfers between pipeline stages. Tensor parallelism pushes interconnect requirements even further, requiring NVLink-class bandwidth for the 2 AllReduce operations per transformer layer. This section examines the hardware architectures that enable these communication patterns, analyzing how multi-chip systems introduce qualitatively different constraints around communication overhead, memory coherence, and fault tolerance.
+While this chapter focuses on algorithmic strategies, the physical reality of hardware interconnects dictates which strategies are feasible. The bandwidth hierarchy of a cluster creates natural boundaries for different parallelism types.
 
-### Multi-Chip AI Acceleration {#sec-distributed-training-multichip-acceleration}
+**Intra-Node Bandwidth**: Modern GPU nodes provide extremely high bandwidth (600-900 GB/s) between devices via NVLink. This supports **Tensor Parallelism**, which requires frequent, high-volume communication (2 AllReduce operations per layer).
 
-The transition from single-chip to multi-chip architectures represents more than simple replication. It requires rethinking how computations distribute across processors, how data flows between chips, and how systems maintain coherence at scale. Where single-chip optimization focuses on maximizing utilization within fixed resources, multi-chip systems must balance computational distribution against communication overhead, memory coherence costs, and synchronization complexity. These challenges fundamentally transform the optimization landscape, requiring new abstractions and techniques beyond those developed for individual accelerators.
+**Inter-Node Bandwidth**: Connectivity between nodes (InfiniBand/Ethernet) typically offers 25-100 GB/s, an order of magnitude slower than intra-node links. This constrains cross-node strategies to **Data Parallelism** (synchronizing gradients once per step) or **Pipeline Parallelism** (sending small activation tensors at stage boundaries).
 
-The scaling of AI systems follows a natural progression: integration within a single package through chiplet architectures, multi-GPU configurations within a server, distributed accelerator pods, and wafer-scale integration. Each approach presents unique trade-offs between computational density, communication overhead, and system complexity. Chiplet architectures maintain high-speed interconnects within a package, while distributed systems sacrifice communication latency for massive parallelism.
+**Memory Capacity**: The physical memory per device (40-80 GB) sets the hard limit for model shards.
 
-#### Chiplet-Based Architectures {#sec-distributed-training-chiplet-architectures}
-
-Chiplet architectures achieve scaling by partitioning large designs into smaller, modular dies that are interconnected within a single package. Small, specialized semiconductor dies connect together within a single package to create larger, more complex processors. AMD's EPYC processors use up to 8 chiplets connected via Infinity Fabric, achieving yields above 80% versus 20% for equivalent monolithic designs. This modular approach reduces manufacturing costs and enables mixing different technologies, with compute chiplets in 7 nm paired with I/O chiplets in 14 nm, optimizing each function independently.
-
-Modern AI accelerators partition large designs into smaller chiplets and connect them via high-bandwidth interconnects, enabling scalability beyond monolithic die limitations and improving manufacturing yields. HBM (High Bandwidth Memory)[^fn-hbm] stacks provide fast access to data, crucial for the memory-intensive workloads common in machine learning.
-
-[^fn-hbm]: **High Bandwidth Memory (HBM)**: A 3D-stacked DRAM technology that places memory dies directly on top of or beside the processor die, connected via thousands of through-silicon vias. HBM3 provides up to 819 GB/s bandwidth per stack, while the newer HBM3e variant reaches 1.2 TB/s, roughly 10x that of GDDR6. The H100 GPU uses 80 GB of HBM3, enabling it to hold large model weights close to compute. HBM's proximity to the processor dramatically reduces memory access latency and energy compared to traditional off-chip memory.
-
-AMD's Instinct MI300 exemplifies this approach by integrating multiple compute chiplets alongside memory chiplets, linked by high-speed die-to-die interconnects. This modular design allows manufacturers to bypass the manufacturing limits of monolithic chips while still achieving high-density compute.
-
-However, even within a single package, scaling is not without challenges. Inter-chiplet communication latency, memory coherence, and thermal management become critical factors as more chiplets are integrated. Memory coherence presents particular complexity: ensuring all processors in a system see the same consistent view of shared memory when multiple cores or chips access the same data. Traditional cache coherence protocols like MESI add 10-50 ns latency for multi-core CPUs. For AI accelerators with thousands of cores, coherence becomes prohibitively expensive, so most ML hardware instead uses explicit memory management where programmers control data placement and synchronization manually.
-
-#### Multi-GPU Systems {#sec-distributed-training-multi-gpu-systems}
-
-Beyond chiplet-based designs, AI workloads often require multiple discrete GPUs working together. In multi-GPU systems, each accelerator has its own dedicated memory and compute resources, but they must efficiently share data and synchronize execution.
-
-A common example is NVIDIA DGX systems, which integrate multiple GPUs connected via NVLink or PCIe. This architecture enables workloads to be split across GPUs, typically using data parallelism (where each GPU processes a different batch of data) or model parallelism (where different GPUs handle different parts of a neural network).
-
-NVSwitch interconnects enable high-speed communication between GPUs, reducing bottlenecks in distributed training. However, scaling up the number of GPUs introduces fundamental distributed coordination challenges that become the dominant performance constraint. The arithmetic intensity of transformer training (0.5-2 FLOPS/byte) forces frequent gradient synchronization across GPUs, where AllReduce operations must aggregate 175 billion parameters in GPT-3 scale models. NVSwitch provides 600 GB/s bidirectional bandwidth, but even this substantial interconnect becomes bandwidth-bound when 8 H100 GPUs simultaneously exchange gradients, creating a 4.8 TB/s aggregate demand that exceeds available capacity.
-
-The coordination complexity compounds exponentially. While two GPUs require a single communication channel, eight GPUs need 28 interconnect paths, and fault tolerance requirements mandate redundant communication patterns. Memory consistency protocols further complicate coordination as different GPUs may observe weight updates at different times, requiring sophisticated synchronization primitives that can add 10-50 microseconds latency per training step. These seemingly small delays aggregate to hours of training time across million-iteration runs.
-
-#### Communication Overhead and Amdahl's Law {#sec-distributed-training-amdahl-analysis}
-
-The fundamental limitation of distributed AI training stems from Amdahl's Law[^fn-amdahl], which quantifies how communication overhead constrains parallel speedup regardless of available compute power.
-
-[^fn-amdahl]: **Amdahl's Law**: Named after computer architect Gene Amdahl, who formulated it in 1967 to argue against massively parallel architectures. The law states that speedup from parallelization is limited by the sequential portion of a program. If 10% of a program must run sequentially, maximum speedup is 10x regardless of processor count. In distributed training, gradient synchronization represents this sequential bottleneck, explaining why 1000 GPUs never achieve 1000x speedup.
-
-For distributed neural network training, communication overhead during gradient synchronization creates a sequential bottleneck that limits scalability even with infinite parallelism.
-
-The maximum speedup achievable with distributed training is bound by Amdahl's Law:
-$$
-\text{Speedup} = \frac{1}{(1-P) + \frac{P}{N}}
-$$
-where $P$ is the fraction of work that can be parallelized and $N$ is the number of processors. For AI training, the correct formulation accounts for communication time that does not decrease with more workers:
-$$
-\text{Speedup} = \frac{T_{compute}}{T_{compute}/N + T_{comm}}
-$$
-where $T_{comm}$ is largely independent of $N$ for ring AllReduce (or grows as $\log N$ for tree-based approaches). This can be rewritten as:
-$$
-\text{Speedup} = \frac{N}{1 + N \cdot (T_{comm}/T_{compute})}
-$$
-
-Consider training a 175 B parameter model with 1000 H100 GPUs as a concrete example:
-
-- **Computation time per iteration**: 100 ms of forward/backward passes per GPU
-- **Gradient size**: 175 B parameters × 4 bytes = 700 GB in FP32
-- **Ring AllReduce time**: For ring AllReduce, each GPU sends/receives $2 \times (N-1)/N \times 700\text{GB} \approx 1.4\text{TB}$
-
-With ring AllReduce across 1000 GPUs connected via 600 GB/s links:
-
-- **Intra-node (8 GPUs via NVLink)**: $1.4\text{TB} / 600\text{GB/s} \approx 2.3$ seconds
-- **Inter-node adds latency**: $1000 \times \alpha$ where $\alpha \approx 1\mu s$ per hop
-
-The resulting scaling efficiency is:
-$$
-\text{Efficiency} = \frac{T_{compute}}{T_{compute} + T_{comm}} = \frac{100\text{ms}}{100\text{ms} + 2300\text{ms}} \approx 4\%
-$$
-
-This is why real systems use mixed precision (FP16 = 350 GB, halving communication), gradient compression, and pipeline parallelism. With FP16 and 4-way pipeline parallelism reducing synchronization to 1/4 of parameters per stage, efficiency improves dramatically:
-$$
-\text{Efficiency} = \frac{100\text{ms}}{100\text{ms} + 290\text{ms}} \approx 26\%
-$$
-
-This demonstrates why pure data parallelism fails at scale and why hybrid strategies are essential.
-
-Communication requirements scale superlinearly with model size and linearly with the number of parameters. Modern transformer models require gradient synchronization across all parameters during each training step:
-
-- **GPT-3 (175 B parameters)**: 700 GB gradient exchange per step
-- **GPT-4 (estimated 1.8 T parameters)**: approximately 7 TB gradient exchange per step
-- **Future 10 T parameter models**: approximately 40 TB gradient exchange per step
-
-Even with advanced interconnects like NVLink 4.0 (1.8 TB/s), gradient synchronization for 10 T parameter models would require 22+ seconds per training step, making distributed training impractical without algorithmic innovations like gradient compression or asynchronous updates.
-
-#### TPU Pods {#sec-distributed-training-tpu-pods}
-
-With gradient synchronization demanding terabytes of bandwidth per training step, purpose-built accelerator clusters become essential for training at scale. Google's TPU Pods[^fn-tpu-pod] represent a pioneering approach to this challenge, interconnecting hundreds of TPUs to function as a unified system [@jouppi2017tpu].
-
-[^fn-tpu-pod]: **TPU Pod**: A tightly integrated cluster of Google Tensor Processing Units connected via custom high-bandwidth interconnects. The TPU v4 Pod contains 4,096 TPU chips providing over 1 exaflop of peak compute. Unlike loosely coupled GPU clusters, TPU Pods are designed from the ground up for collective operations, using a 3D torus network topology that provides deterministic, low-latency communication for distributed training workloads.
-
-The architectural design of TPU Pods differs fundamentally from traditional multi-GPU systems. While multi-GPU configurations typically rely on NVLink or PCIe connections within a single machine, TPU Pods employ high-bandwidth optical links to interconnect accelerators at data center scale. TPU v4 implements a 3D torus interconnect topology, enabling efficient data exchange between accelerators while minimizing communication bottlenecks as workloads scale across nodes.
-
-The effectiveness of this architecture is demonstrated in its performance scaling capabilities. TPU Pod performance exhibits near-linear scaling when running ResNet-50, from quarter-pod to full-pod configurations. The system achieves a remarkable 33.0x speedup when scaled to 1024 chips compared to a 16-TPU baseline.
-
-However, distributing AI workloads across an entire data center introduces distributed coordination challenges that fundamentally differ from single-node systems. Even the 3D torus interconnect, while providing high bisection bandwidth, creates communication bottlenecks when training large transformer models that require AllReduce operations across all 4,096 TPUs. Each parameter gradient must traverse multiple hops through the torus network, with worst-case communication requiring dozens of hops between distant TPUs, creating latency penalties that compound with model size.
-
-The energy cost of coordination also scales dramatically: moving data across the pod's optical interconnect consumes 1000x more energy than on-chip communication within individual TPUs, transforming distributed training into a careful balance between computation parallelism and communication efficiency where AllReduce bandwidth, not compute capacity, determines overall training throughput.
-
-#### Wafer-Scale AI {#sec-distributed-training-wafer-scale}
-
-At the frontier of AI scaling, wafer-scale integration represents a paradigm shift that abandons traditional multi-chip architectures in favor of a single, massive AI processor. Rather than partitioning computation across discrete chips, this approach treats an entire silicon wafer as a unified compute fabric, eliminating the inefficiencies of inter-chip communication.
-
-Wafer-scale integration[^fn-wafer-scale] uses an entire 300 mm silicon wafer as a single processor instead of cutting it into individual chips. Cerebras WSE-3 contains 4 trillion transistors across 850,000 cores, 125x more than the largest GPUs.
-
-[^fn-wafer-scale]: **Wafer-Scale Integration**: The radical approach of fabricating an entire processor on a single silicon wafer rather than dicing it into individual chips. Cerebras pioneered this for AI with their WSE (Wafer Scale Engine), which eliminates inter-chip communication bottlenecks by keeping all cores on a single die. The engineering challenges include managing defects (solved with redundant cores), distributing power across 56,000 mm² of silicon, and cooling 23 kW of heat.
-
-Manufacturing challenges include 100% yield requirements (solved with redundant cores) and cooling 23 kW of power. This approach eliminates inter-chip communication delays but costs $2-3 million per wafer versus $40,000 for equivalent GPU clusters.
-
-The primary advantage of wafer-scale AI is its ultra-fast on-die communication. Unlike chiplets, GPUs, or TPU Pods, where data must traverse physical boundaries between separate devices, wafer-scale AI enables near-instantaneous data transfer across its vast compute array. This architecture drastically reduces communication latency, achieving performance levels that remain out of reach for conventional multi-chip systems.
-
-Achieving this level of integration introduces substantial engineering challenges. Thermal dissipation, fault tolerance, and manufacturing yield become major constraints when fabricating a processor of this scale. Unlike distributed TPU systems, which mitigate failures by dynamically re-routing workloads, wafer-scale AI must incorporate built-in redundancy mechanisms to tolerate localized defects in the silicon.
-
-### Hardware Scaling Trade-offs {#sec-distributed-training-scaling-tradeoffs}
-
-The progressive scaling of AI acceleration introduces new challenges at each step, from single-chip processors to increasingly complex architectures. @tbl-distributed-scaling-trajectory summarizes these trade-offs across different scaling approaches.
-
-+----------------------+-------------------------------------+-----------------------------------------------------+
-| **Scaling Approach** | **Key Feature**                     | **Challenges**                                      |
-+:=====================+:====================================+:====================================================+
-| **Chiplets**         | Modular scaling within a package    | Inter-chiplet latency, memory coherence             |
-+----------------------+-------------------------------------+-----------------------------------------------------+
-| **Multi-GPU**        | External GPU interconnects (NVLink) | Synchronization overhead, communication bottlenecks |
-+----------------------+-------------------------------------+-----------------------------------------------------+
-| **TPU Pods**         | Distributed accelerator clusters    | Interconnect congestion, workload partitioning      |
-+----------------------+-------------------------------------+-----------------------------------------------------+
-| **Wafer-Scale AI**   | Entire wafer as a single processor  | Thermal dissipation, fault tolerance                |
-+----------------------+-------------------------------------+-----------------------------------------------------+
-
-: **AI Acceleration Scaling Trade-offs**: Each approach introduces unique trade-offs between modularity, latency, and complexity, demanding careful consideration of interconnect efficiency and workload distribution. {#tbl-distributed-scaling-trajectory}
-
-While chiplets enable modular scaling within a package, they introduce latency and memory coherence issues. Multi-GPU systems rely on high-speed interconnects like NVLink but face synchronization and communication bottlenecks. TPU Pods push scalability further by distributing workloads across clusters, yet they must contend with interconnect congestion and workload partitioning. At the extreme end, wafer-scale AI integrates an entire wafer into a single computational unit, presenting unique challenges in thermal management and fault tolerance.
-
-### Multi-Chip Execution Strategies {#sec-distributed-training-execution-strategies}
-
-As AI systems scale from single-chip accelerators to multi-chip architectures, the fundamental challenges in computation and memory evolve. Computation must now be distributed across multiple accelerators, and memory access patterns become constrained by interconnect bandwidth and communication overhead.
-
-Execution mapping in multi-chip systems requires computation placement that considers workload partitioning across multiple accelerators, with explicit coordination of execution order and dependencies. Computation scheduling must be interconnect-aware to manage communication delays effectively. Load balancing across accelerators is vital, as uneven task distribution results in some accelerators remaining underutilized while others operate at full capacity.
-
-Distributed memory allocation requires each accelerator to manage its own local memory, necessitating explicit allocation of model parameters, activations, and intermediate data across devices. Unlike single-chip execution where data is fetched once and reused, multi-chip setups require deliberate strategies to minimize redundant data transfers.
-
-Data movement optimization addresses inter-chip data transfer, which becomes the primary bottleneck rather than memory hierarchy latency. Techniques include overlapping computation and communication so accelerators process data while simultaneously sending and receiving, and locality-aware scheduling that places computations on accelerators already holding required data.
-
-Compiler and runtime adaptations extend single-chip execution models to handle dynamic workload distribution across accelerators. Interconnect-aware workload partitioning enables compilers to distribute computations strategically based on communication cost. In TPU Pods, the runtime schedules computations across multiple TPU cores to minimize communication bottlenecks. In multi-GPU frameworks like PyTorch and TensorFlow, runtime execution synchronizes operations across GPUs while maintaining execution order.
+A detailed analysis of these physical systems—including TPU Pods, SuperPODs, and wafer-scale integration—is provided in **Part II: Building the Machine Learning Fleet**. For the algorithm designer, the key takeaway is to match communication-heavy strategies (Tensor Parallelism) to high-bandwidth domains (Intra-node) and communication-light strategies (Pipeline/Data Parallelism) to lower-bandwidth domains (Inter-node).
 
 ## Fallacies and Pitfalls {#sec-distributed-training-fallacies-pitfalls}
 
@@ -1565,6 +1586,41 @@ The efficiency metrics governing distributed training—communication overhead, 
 * Framework APIs abstract distributed complexity while preserving the performance characteristics essential for production training
 :::
 
-The parallelism strategies examined here determine what data must move between devices. Data parallelism synchronizes gradients through AllReduce operations. Model parallelism exchanges activations through point-to-point communication. Pipeline parallelism coordinates microbatch handoffs across stages. The next chapter (@sec-communication) examines these communication patterns in depth: the collective operations that enable distributed training, the algorithms that implement them efficiently, and the optimizations that hide communication latency behind computation. Understanding communication is essential because at scale, network bandwidth and latency, not compute throughput, typically determine training efficiency.
+::: {.callout-note title="Figure: The 3D Parallelism Cube" collapse="false"}
+```{.tikz}
+\begin{tikzpicture}[scale=1.2, font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{DataColor}{RGB}{200,220,255}
+  \definecolor{TensorColor}{RGB}{255,220,200}
+  \definecolor{PipeColor}{RGB}{220,255,200}
+
+  % Draw the cube
+  % Back faces
+  \fill[gray!5] (0,2,0) -- (2,2,0) -- (2,2,2) -- (0,2,2) -- cycle;
+  \fill[gray!10] (2,0,0) -- (2,2,0) -- (2,2,2) -- (2,0,2) -- cycle;
+
+  % Axes
+  \draw[->, thick] (0,0,0) -- (3,0,0) node[right] {Data Parallel ($d$)};
+  \draw[->, thick] (0,0,0) -- (0,3,0) node[above] {Pipeline Parallel ($p$)};
+  \draw[->, thick] (0,0,0) -- (0,0,3) node[below left] {Tensor Parallel ($t$)};
+
+  % The 3D Box
+  \draw[thick, fill=DataColor!30, opacity=0.7] (0,0,2) -- (2,0,2) -- (2,2,2) -- (0,2,2) -- cycle;
+  \draw[thick, fill=TensorColor!30, opacity=0.7] (2,0,0) -- (2,0,2) -- (2,2,2) -- (2,2,0) -- cycle;
+  \draw[thick, fill=PipeColor!30, opacity=0.7] (0,2,0) -- (2,2,0) -- (2,2,2) -- (0,2,2) -- cycle;
+
+  % Labels on the box
+  \node at (1,1,2) {Model Replicas};
+  \node[rotate=90] at (2.2,1,1) {Intra-layer};
+  \node at (1,2.2,1) {Inter-layer};
+
+  \node[anchor=west, font=\scriptsize, text=black!60] at (3, 2.5) {Total GPUs $N = d \times t \times p$};
+\end{tikzpicture}
+```
+**The 3D Parallelism Space**. Distributed training for frontier models combines three orthogonal scaling axes. Data Parallelism ($d$) replicates the model to scale throughput. Tensor Parallelism ($t$) splits layers within a node to fit memory. Pipeline Parallelism ($p$) splits layers across nodes to reduce communication frequency.
+:::
+
+... (later in summary) ...
+
+The parallelism strategies examined here determine how we coordinate learning across the Machine Learning Fleet. However, as we scale to thousands of devices, the probability of any single component failing becomes a statistical certainty. A system that halts entirely when one GPU fails cannot sustain weeks of training. The next chapter (@sec-fault-tolerance) examines how to build resilient systems that treat failure as a routine event rather than a catastrophic exception.
 
 The principles established in this chapter provide the foundation for understanding fault tolerance mechanisms (@sec-fault-tolerance), which become increasingly critical as distributed training scales to thousands of devices where failures become statistically inevitable.

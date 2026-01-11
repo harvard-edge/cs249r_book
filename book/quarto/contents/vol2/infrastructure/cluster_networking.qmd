@@ -1,0 +1,584 @@
+---
+bibliography: infrastructure.bib
+---
+
+# Cluster Networking and Orchestration {#sec-cluster-networking}
+
+::: {layout-narrow}
+:::.column-margin
+_DALL·E 3 Prompt: A visualization of a high-speed optical network connecting thousands of GPU nodes. The image focuses on the interconnect fabric, showing layers of switches in a fat-tree topology with glowing data packets moving between racks. Above the physical network, a digital control plane represents the scheduler, optimizing traffic flow and job placement. The style is technical and schematic, emphasizing connectivity and coordination._
+:::
+
+\noindent
+![](images/png/cover_networking.png)
+
+:::
+
+## Purpose {.unnumbered}
+
+_How do we connect thousands of accelerators into a unified supercomputer and orchestrate workloads to utilize them efficiently?_
+
+::: {.callout-tip title="Learning Objectives"}
+
+- Compare network topologies (Fat-Tree, Torus, Rail-Optimized) in terms of bisection bandwidth and latency trade-offs
+- Analyze the impact of tail latency on distributed training synchronization
+- Design resource allocation policies for multi-tenant GPU clusters using Slurm and Kubernetes
+- Evaluate the trade-offs between gang scheduling and elastic scaling for training workloads
+- Explain how congestion control algorithms like DCQCN prevent packet loss in high-speed Ethernet fabrics
+
+:::
+
+## Networking for Large-Scale ML {#sec-networking-ml}
+
+The Introduction established that communication becomes dominant at scale. The networking fabric connecting accelerators determines whether that communication enables near-linear scaling or collapses the system into communication-bound inefficiency. While @sec-infrastructure examined intra-node connectivity through NVLink and NVSwitch, this chapter extends to the datacenter-scale networks that enable training across hundreds or thousands of accelerators. The transition from intra-node to inter-node communication introduces fundamentally different constraints: where NVLink provides 900 GB/s between GPUs on a single baseboard, inter-node networks must traverse switches, cables, and protocol stacks that introduce both bandwidth limitations and latency penalties.
+
+### Training Network Requirements
+
+Large-scale training workloads impose unique demands on network infrastructure. Unlike traditional datacenter traffic patterns dominated by short flows and request-response interactions, distributed training generates sustained, synchronized bulk transfers. A single AllReduce operation across 1024 GPUs may move terabytes of gradient data, with all participants blocked until the collective completes. This pattern demands networks optimized for bandwidth rather than connection establishment latency.
+
+#### High-Bandwidth Interconnects
+
+InfiniBand[^fn-infiniband] has emerged as the dominant interconnect for ML training clusters due to its RDMA (Remote Direct Memory Access)[^fn-rdma] capabilities and consistent low latency [@infiniband2000spec]. The technology enables direct memory-to-memory transfers without CPU involvement, reducing both latency and processor overhead.
+
+[^fn-infiniband]: **InfiniBand**: A high-speed interconnect standard originally developed for HPC, now dominant in ML clusters. Unlike Ethernet, InfiniBand provides guaranteed delivery with hardware-based reliability, eliminating software retransmission overhead. Current NDR (Next Data Rate) generation provides 400 Gb/s per port, with XDR (800 Gb/s) emerging.
+
+[^fn-rdma]: **Remote Direct Memory Access (RDMA)**: A network capability that allows one machine to read from or write to another machine's memory without involving either CPU. RDMA bypasses the kernel network stack, reducing latency from tens of microseconds to sub-microsecond. For ML, RDMA enables GPUs to exchange gradient data with minimal CPU intervention, critical for overlapping communication with computation.
+
++-----------------------+---------------+-------------+-----------------------+
+| **Generation**        | **Bandwidth** | **Latency** | **Common Deployment** |
++======================:+==============:+============:+:======================+
+| **HDR (200 Gb/s)**    | 25 GB/s       | 0.6 μs      | Legacy clusters       |
++-----------------------+---------------+-------------+-----------------------+
+| **HDR100 (100 Gb/s)** | 12.5 GB/s     | 0.6 μs      | Cost-optimized        |
++-----------------------+---------------+-------------+-----------------------+
+| **NDR (400 Gb/s)**    | 50 GB/s       | 0.5 μs      | Current standard      |
++-----------------------+---------------+-------------+-----------------------+
+| **NDR200 (200 Gb/s)** | 25 GB/s       | 0.5 μs      | Disaggregated         |
++-----------------------+---------------+-------------+-----------------------+
+| **XDR (800 Gb/s)**    | 100 GB/s      | &lt; 0.5 μs | Emerging              |
++-----------------------+---------------+-------------+-----------------------+
+
+::: {.callout-note title="Figure Placeholder: InfiniBand vs RoCE Stack" collapse="true"}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{Orchid}{RGB}{218,112,214}
+  \definecolor{Slate}{RGB}{112,128,144}
+  \definecolor{OrangeLine}{RGB}{255,140,0}
+
+  \tikzset{
+    layer/.style={draw=black!70, fill=white, minimum width=3cm, minimum height=0.7cm, font=\sffamily\footnotesize},
+    header/.style={font=\bfseries\sffamily, align=center}
+  }
+
+  % InfiniBand Stack
+  \begin{scope}[local bounding box=IB]
+    \node[header] at (0, 5) {InfiniBand};
+    \node[layer, fill=Orchid!20] (ib_verbs) at (0, 4) {Verbs API};
+    \node[layer, fill=Orchid!10] (ib_trans) at (0, 3) {IB Transport};
+    \node[layer, fill=Orchid!10] (ib_net) at (0, 2) {IB Network};
+    \node[layer, fill=Orchid!10] (ib_link) at (0, 1) {IB Link};
+    \node[layer, fill=Orchid!10] (ib_phy) at (0, 0) {IB Physical};
+    
+    % RDMA bypass arrow
+    \draw[->, thick, OrangeLine] (-1.8, 4.3) -- (-1.8, 0.5) node[midway, left, align=center, font=\scriptsize] {Kernel\\Bypass};
+  \end{scope}
+
+  % RoCE Stack
+  \begin{scope}[shift={(5,0)}, local bounding box=RoCE]
+    \node[header] at (0, 5) {RoCEv2};
+    \node[layer, fill=Orchid!20] (roce_verbs) at (0, 4) {Verbs API};
+    \node[layer, fill=Orchid!10] (roce_trans) at (0, 3) {IB Transport};
+    \node[layer, fill=Slate!10] (roce_udp) at (0, 2) {UDP / IP};
+    \node[layer, fill=Slate!10] (roce_eth) at (0, 1) {Ethernet Link (PFC)};
+    \node[layer, fill=Slate!10] (roce_phy) at (0, 0) {Ethernet Physical};
+    
+    % RDMA bypass arrow
+    \draw[->, thick, OrangeLine] (1.8, 4.3) -- (1.8, 0.5) node[midway, right, align=center, font=\scriptsize] {Kernel\\Bypass};
+  \end{scope}
+
+  % Connectors
+  \draw[dashed, gray] (ib_verbs) -- (roce_verbs);
+  \draw[dashed, gray] (ib_trans) -- (roce_trans);
+
+\end{tikzpicture}
+```
+**High-Performance Networking Stacks**. Comparison of InfiniBand and RoCE protocol stacks. InfiniBand uses a native lossless fabric, while RoCE encapsulates RDMA traffic within UDP/IP packets over Ethernet. Both expose the same Verbs API to applications, but RoCE relies on Priority Flow Control (PFC) in the Ethernet layer to approximate InfiniBand's lossless guarantees.
+:::
+
+RDMA over Converged Ethernet[^fn-roce] provides an alternative that leverages existing Ethernet infrastructure. RoCEv2 operates over UDP/IP, enabling RDMA semantics across routed networks. While RoCE offers lower capital costs and operational familiarity, it requires careful configuration of Priority Flow Control and Explicit Congestion Notification to prevent packet loss. In ML workloads, even small packet loss rates cause significant performance degradation because collective operations must wait for retransmissions.
+
+[^fn-roce]: **RoCE (RDMA over Converged Ethernet)**: A protocol that implements RDMA semantics over Ethernet networks. RoCEv2 uses UDP encapsulation for routability across L3 networks. RoCE reduces infrastructure costs by using commodity Ethernet switches but requires lossless Ethernet configuration (PFC/ECN) to achieve RDMA performance. Cloud providers typically offer RoCE-based networking (AWS EFA, Azure NDR) as a lower-cost alternative to InfiniBand.
+
+The choice between InfiniBand and RoCE involves trade-offs beyond raw performance:
+
+$$ 
+\text{Effective Bandwidth} = \text{Link Rate} \times (1 - \text{Loss Rate}) \times \text{Protocol Efficiency} 
+$$ 
+
+InfiniBand achieves protocol efficiencies above 95 percent, while RoCE typically operates at 85 to 92 percent depending on network congestion and flow control configuration. For a 400 Gb/s link, this difference translates to 47.5 GB/s versus 42.5 GB/s effective throughput, a gap that compounds across thousands of collective operations per training step.
+
+Network interface cards for ML workloads increasingly integrate compute capabilities. NVIDIA's ConnectX-7 adapters include programmable engines for in-network aggregation, enabling switch-based gradient reduction that reduces traffic volumes. These SmartNICs offload collective operations from the GPU, overlapping communication with computation more effectively than software-only approaches.
+
+#### Network Topology Design
+
+The physical arrangement of switches and links fundamentally constrains distributed training performance. Fat-tree topologies[^fn-fat-tree] [@leiserson1985fattrees], derived from Clos network theory, provide full bisection bandwidth[^fn-bisection-bw]: any partition of the network can communicate at full link rate with the other half. For AllReduce operations that require all-to-all communication patterns, this property ensures no bottlenecks regardless of job placement.
+
+[^fn-fat-tree]: **Fat-tree topology**: A hierarchical network structure where bandwidth increases toward the root, resembling a tree with thicker branches near the top. Unlike traditional trees where aggregation creates bottlenecks, fat-trees use multiple uplinks per switch to maintain bandwidth at each tier. The name comes from Charles Leiserson'1985 paper that applied this concept to parallel computing.
+
+[^fn-bisection-bw]: **Bisection bandwidth**: The minimum bandwidth available when a network is divided into two equal halves. If bisection bandwidth equals the sum of all edge bandwidths, the network is non-blocking, meaning any communication pattern can proceed at full speed. This metric predicts worst-case performance for collective operations like AllReduce that involve all-to-all communication.
+
+A three-tier fat-tree with radix-64 switches supports 65,536 endpoints while maintaining non-blocking connectivity. The bandwidth at each tier equals
+
+$$ 
+B_{\text{tier}} = \frac{k}{2} \times B_{\text{link}} \times N_{\text{switches}} 
+$$ 
+
+where $k$ represents the switch radix and $N_{\text{switches}}$ represents the number of switches at that tier. For NDR InfiniBand with 64-port switches, each spine switch contributes 1.6 TB/s of bisection bandwidth.
+
+Rail-optimized topologies offer an alternative for workloads dominated by tensor parallelism. In these designs, GPUs at the same position across multiple nodes connect through dedicated "rails" with minimal switch hops. An 8-rail design connects GPU 0 from each of 32 nodes through a single leaf switch, enabling efficient pipeline parallelism where activations flow between corresponding GPUs across nodes. This approach sacrifices the flexibility of fat-tree networks for reduced latency on structured communication patterns.
+
++-----------------------+------------------+--------------------+-------------------+
+| **Topology**          | **Bisection BW** | **Latency (hops)** | **Best Workload** |
++:======================+:=================+===================:+:==================+
+| **Fat-tree (3-tier)** | Full             | 4-6                | General/AllReduce |
++-----------------------+------------------+--------------------+-------------------+
+| **Rail-optimized**    | Rail-limited     | 2                  | Tensor parallel   |
++-----------------------+------------------+--------------------+-------------------+
+| **Dragonfly**         | Variable         | 3-5                | Large scale       |
++-----------------------+------------------+--------------------+-------------------+
+| **Torus (TPU)**       | Dimension-based  | O(√N)              | Structured comms  |
++-----------------------+------------------+--------------------+-------------------+
+
+::: {.callout-note title="Figure Placeholder: Network Topologies" collapse="true"}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
+  \definecolor{NodeColor}{RGB}{200,200,200}
+  \definecolor{SwitchColor}{RGB}{100,150,200}
+
+  \tikzset{
+    switch/.style={circle, fill=SwitchColor, draw=black!50, inner sep=2pt, minimum size=0.4cm},
+    node/.style={rectangle, fill=NodeColor, draw=black!50, inner sep=2pt, minimum size=0.4cm}
+  }
+
+  % Fat Tree
+  \begin{scope}
+    \node[anchor=south] at (2, 3.5) {\textbf{A. Leaf-Spine (Fat-Tree)}};
+    % Spine
+    \foreach \x in {0.5, 1.5, 2.5, 3.5} \node[switch] (s\x) at (\x, 3) {};
+    % Leaf
+    \foreach \x in {0, 1, 3, 4} \node[switch] (l\x) at (\x, 1.5) {};
+    % Nodes
+    \foreach \x in {0, 0.5, 1, 1.5} \node[node] (n\x) at (\x-0.25, 0) {};
+    \foreach \x in {3, 3.5, 4, 4.5} \node[node] (nm\x) at (\x-0.25, 0) {};
+    
+    % Connections
+    \foreach \s in {0.5, 1.5, 2.5, 3.5} {
+        \draw[gray, thin] (s\s) -- (l0);
+        \draw[gray, thin] (s\s) -- (l1);
+        \draw[gray, thin] (s\s) -- (l3);
+        \draw[gray, thin] (s\s) -- (l4);
+    }
+    \draw[gray] (l0) -- (n0); \draw[gray] (l0) -- (n0.5);
+    \draw[gray] (l1) -- (n1); \draw[gray] (l1) -- (n1.5);
+  \end{scope}
+
+  % Torus
+  \begin{scope}[shift={(6,0)}]
+    \node[anchor=south] at (1.5, 3.5) {\textbf{B. 2D Torus / Mesh}};
+    \foreach \x in {0, 1, 2, 3} {
+        \foreach \y in {0, 1, 2, 3} {
+            \node[node] (t\x\y) at (\x, \y) {};
+        }
+    }
+    % Grid links
+    \foreach \x in {0, 1, 2} {
+        \foreach \y in {0, 1, 2, 3} {
+             \draw[thick] (t\x\y) -- (t\the\numexpr\x+1\relax\y);
+        }
+    }
+    \foreach \x in {0, 1, 2, 3} {
+        \foreach \y in {0, 1, 2} {
+             \draw[thick] (t\x\y) -- (t\x\the\numexpr\y+1\relax);
+        }
+    }
+    % Torus wrap (dashed)
+    \draw[dashed] (t30) to[bend right] (t00);
+    \draw[dashed] (t03) to[bend left] (t00);
+  \end{scope}
+  
+  % Rail Optimized
+  \begin{scope}[shift={(11,0)}]
+    \node[anchor=south] at (1.5, 3.5) {\textbf{C. Rail-Optimized}};
+    
+    % Rail Switches
+    \foreach \x in {0, 1, 2, 3} \node[switch, fill=orange!50] (rs\x) at (\x, 3) {R\x};
+    
+    % Nodes (with multiple GPUs)
+    \node[draw, fit={(0,-0.5) (3, 0.5)}, inner sep=4pt] (host1) {};
+    \node[anchor=west] at (host1.west) {Node 1};
+    
+    \node[draw, fit={(0,-2.0) (3, -1.0)}, inner sep=4pt] (host2) {};
+    \node[anchor=west] at (host2.west) {Node 2};
+
+    % GPUs
+    \foreach \x in {0, 1, 2, 3} {
+        \node[node, fill=violet!30] (g1\x) at (\x, 0) {};
+        \node[node, fill=violet!30] (g2\x) at (\x, -1.5) {};
+        
+        \draw[thick, orange] (g1\x) -- (rs\x);
+        \draw[thick, orange] (g2\x) -- (rs\x);
+    }
+    
+  \end{scope}
+
+\end{tikzpicture}
+```
+**Network Topologies for ML**. Visualizing three common interconnect architectures. (A) Fat-Tree provides full bisection bandwidth for general-purpose communication. (B) Torus (used in TPUs) connects neighbors in a grid/mesh, optimizing for local patterns. (C) Rail-Optimized designs prioritize dedicated paths between corresponding GPUs across nodes, minimizing switch hops for tensor parallelism.
+:::
+
+The distinction between non-blocking and oversubscribed networks carries significant implications for ML workloads. A 2-to-1 oversubscription ratio halves the effective bisection bandwidth, potentially doubling AllReduce time for large collectives. While oversubscription reduces infrastructure costs, the impact on training throughput often negates the savings. Most production ML clusters deploy non-blocking networks for training, reserving oversubscribed designs for serving traffic where request-response patterns tolerate contention.
+
+#### Multi-Rack and Multi-Datacenter Training
+
+Scaling beyond a single rack introduces inter-rack connectivity as a potential bottleneck. Even with non-blocking leaf-spine architectures, cable lengths increase from meters to tens of meters, adding propagation delay. More significantly, the spine layer becomes a shared resource across all training jobs, requiring careful traffic engineering to prevent interference.
+
+Cross-datacenter training enables access to geographically distributed GPU resources but faces fundamental latency constraints. A 100 km fiber link introduces approximately 0.5 ms round-trip latency from propagation alone, before considering switch processing or protocol overhead. For synchronous training with tight AllReduce coupling, this latency directly extends iteration time:
+
+$$ 
+T_{\text{iteration}} = T_{\text{compute}} + T_{\text{comm}} + T_{\text{latency}} \times N_{\text{rounds}} 
+$$ 
+
+Asynchronous methods like Local SGD reduce communication frequency but introduce staleness that affects convergence. Practical cross-datacenter training typically employs hierarchical aggregation. Workers synchronize within each datacenter, then datacenters exchange aggregated gradients at lower frequency.
+
+Network partitions present a more severe challenge than performance degradation. When connectivity between datacenters fails, training jobs must either pause, wasting expensive GPU time, or continue with partial gradients, risking divergence. Partition-tolerant training algorithms remain an active research area, with approaches ranging from elastic data parallelism to speculative gradient accumulation. We examine fault tolerance mechanisms in detail in @sec-fault-tolerance.
+
+### Serving Network Requirements
+
+Inference serving demands different network characteristics than training. Where training optimizes for bulk throughput, serving prioritizes latency consistency across diverse request patterns. A recommendation model serving millions of queries per second cannot tolerate the tail latency variance acceptable in batch training.
+
+#### Load Balancer Architectures
+
+ML serving deployments require load balancers that understand model-specific traffic patterns. Layer 4 load balancers operate on TCP/UDP flows, distributing connections based on IP addresses and ports. They offer high throughput with minimal latency overhead but cannot inspect request content for intelligent routing.
+
+Layer 7 load balancers parse application protocols, enabling routing decisions based on request characteristics. For ML serving, this enables routing requests to model versions, directing traffic based on input features, or implementing request coalescing for batch inference. The cost is increased latency, typically 0.5 to 2 ms per hop for TLS termination and HTTP parsing.
+
+Consistent hashing provides session affinity for stateful inference scenarios. When serving autoregressive language models, subsequent tokens in a generation session should route to the same replica to reuse KV cache state. The hash function maps session identifiers to replicas:
+
+$$ 
+\text{replica} = \text{hash}(\text{session\_id}) \mod N_{\text{replicas}} 
+$$ 
+
+Virtual nodes improve load distribution when replicas have heterogeneous capacity. Each physical replica appears multiple times in the hash ring proportional to its capacity, naturally directing more traffic to more capable instances.
+
+Geographic load distribution becomes essential for global ML services. DNS-based global load balancing directs users to nearby deployments, reducing round-trip latency. However, model updates must propagate across all regions consistently, requiring coordination between deployment systems and traffic management.
+
+#### Service Mesh for ML
+
+Service mesh architectures insert proxy sidecars alongside ML services, enabling consistent observability and traffic management without application changes. For ML deployments, sidecars capture request latencies, model versions, and input characteristics that feed monitoring and debugging systems.
+
+Traffic routing through service mesh enables sophisticated A/B testing beyond simple traffic splitting. Requests can route based on user segments, input features, or model confidence scores. A recommendation system might route uncertain predictions to an ensemble while serving confident predictions from a faster single model.
+
+Circuit breaker patterns prevent cascade failures when model replicas become unhealthy. When error rates exceed thresholds, the circuit opens and redirects traffic to healthy replicas or fallback models. For ML serving, circuit breakers must account for model-specific health indicators. High latency might indicate GPU memory pressure rather than failure, warranting throttling rather than failover.
+
+### Network Performance Analysis
+
+Quantitative understanding of network performance enables informed decisions about infrastructure investment and training configurations. The interplay between model architecture, parallelism strategy, and network capability determines overall system efficiency.
+
+#### Bandwidth Utilization Patterns
+
+AllReduce[^fn-allreduce] bandwidth requirements scale with model size and parallelism configuration. For data parallelism with $N$ workers and model parameters $P$, each worker must send and receive approximately $2P$ bytes per iteration (assuming ring AllReduce [@patarasuk2009bandwidth]). The required bandwidth to hide communication behind computation is:
+
+[^fn-allreduce]: **AllReduce**: A collective communication operation that synchronizes gradients across all workers in distributed training. The Introduction established AllReduce as a key synchronization primitive; @sec-communication examines the algorithms and their efficiency characteristics in detail.
+
+$$ 
+B_{\text{required}} = \frac{2P}{T_{\text{compute}}} 
+$$ 
+
+For a 175B parameter model with FP16 gradients of 350 GB, achieving 50 percent compute utilization on hardware with 1 second compute time requires 700 GB/s aggregate bandwidth, far exceeding single-link capacity and motivating sophisticated parallelism strategies.
+
+::: {.callout-warning}
+## Practical AllReduce Efficiency
+
+Theoretical bandwidth calculations assume ideal conditions. Production AllReduce operations achieve 60 to 80 percent of theoretical bandwidth due to multiple overheads. Each ring stage incurs 5 to 20 microseconds of fixed startup latency per chunk. CPU-GPU and GPU-NIC memory transfers add latency. The NCCL and Gloo software stack processing introduces protocol overhead. Shared fabric with concurrent jobs reduces effective bandwidth through network contention.
+
+Well-tuned systems on dedicated InfiniBand fabric achieve 75 to 85 percent efficiency. Many deployments, particularly those using RoCE or shared networks, achieve only 40 to 60 percent. Always benchmark actual collective performance rather than relying on theoretical link rates.
+:::
+
+NCCL is the standard communication library for NVIDIA GPU clusters.[^fn-nccl]
+
+[^fn-nccl]: **NCCL (NVIDIA Collective Communications Library)**: NVIDIA's optimized library for multi-GPU and multi-node collective operations. NCCL automatically selects algorithms based on topology (ring, tree, or hybrid) and handles GPU-to-GPU communication via NVLink, PCIe, or network. It achieves 85-95% of theoretical bandwidth on well-configured systems, making it the default communication backend for PyTorch and TensorFlow distributed training.
+
+Gradient compression techniques, including sparsification and quantization, can reduce bandwidth requirements by 10 to 100 times for some models, trading computation and potential accuracy impact for reduced network utilization. These compression algorithms are examined in detail in @sec-communication.
+
+Pipeline parallelism communication patterns differ fundamentally from data parallelism. Rather than bulk AllReduce, pipeline stages exchange activation tensors between adjacent stages. The communication volume depends on activation size rather than parameter count, favoring models with small intermediate representations.
+
+#### Latency Analysis
+
+Network latency accumulates from multiple sources, each contributing to collective operation time:
+
++-----------------------+---------------------+-----------------------------------+
+| **Source**            | **Typical Latency** | **Mitigation**                    |
++:======================+====================:+:==================================+
+| **Switch hop**        | 100-400 ns          | Topology optimization             |
++-----------------------+---------------------+-----------------------------------+
+| **Cable propagation** | 5 ns/m              | Compact layout                    |
++-----------------------+---------------------+-----------------------------------+
+| **NIC processing**    | 1-2 μs              | Hardware offload                  |
++-----------------------+---------------------+-----------------------------------+
+| **NCCL software**     | 5-20 μs             | Kernel fusion, persistent kernels |
++-----------------------+---------------------+-----------------------------------+
+| **Memory copy**       | Variable            | Zero-copy RDMA                    |
++-----------------------+---------------------+-----------------------------------+
+
+For small messages, latency dominates over bandwidth. The crossover point where bandwidth becomes the limiting factor occurs at:
+
+$$ 
+M_{\text{crossover}} = \text{Latency} \times \text{Bandwidth} 
+$$ 
+
+For a system with 5 microseconds latency and 50 GB/s bandwidth, messages smaller than 250 KB are latency-bound. This motivates message aggregation in collective implementations, batching small gradient tensors to amortize latency overhead.
+
+Congestion control algorithms significantly impact performance under contention. Traditional TCP congestion control, designed for fairness across independent flows, performs poorly for synchronized ML traffic where all flows compete simultaneously. DCQCN (Data Center Quantized Congestion Notification)[^fn-dcqcn] [@zhu2015dcqcn] for RoCE and hardware-based credit flow control for InfiniBand provide faster response to congestion, reducing tail latency. NCCL implements topology-aware algorithms that schedule transfers to minimize contention, exploiting knowledge of collective patterns that general-purpose congestion control lacks. We examine these collective operation implementations in detail in @sec-communication.
+
+[^fn-dcqcn]: **DCQCN (Data Center Quantized Congestion Notification)**: A congestion control algorithm designed for RoCE networks. DCQCN uses ECN (Explicit Congestion Notification) marks from switches to throttle senders before packet loss occurs. Unlike TCP's reactive approach, DCQCN responds in microseconds, critical for the synchronized traffic patterns in distributed training where a single slow flow can delay all workers.
+
+## Resource Management and Scheduling
+
+The datacenter infrastructure and high-speed networks discussed in the previous chapters provide the physical foundation for large-scale ML. However, translating these resources into productive workloads requires sophisticated scheduling systems that balance utilization, fairness, and job completion time. This section examines the scheduling challenges unique to ML workloads and the systems designed to address them.
+
+::: {.callout-note title="Figure Placeholder: Cluster Scheduling Architecture" collapse="true"}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=1.5cm]
+  \definecolor{ProcColor}{RGB}{255,250,240}
+  \definecolor{DataColor}{RGB}{240,248,255}
+
+  \tikzset{
+    process/.style={draw=black, thick, fill=ProcColor, rounded corners=2pt, minimum width=2.5cm, minimum height=1cm, align=center},
+    database/.style={draw=black, cylinder, shape border rotate=90, aspect=0.25, fill=DataColor, minimum width=2cm, minimum height=1.5cm, align=center},
+    arrow/.style={->, >=stealth, thick}
+  }
+
+  % Components
+  \node[process] (user) {User / Client\\(Job Submision)};
+  \node[database, right=of user] (queue) {Job Queue\\(Priority/FIFO)};
+  \node[process, right=of queue, fill=orange!10] (scheduler) {Scheduler Core\\(Bin Packing)};
+  \node[process, below=of scheduler] (resman) {Resource Manager\\(State Tracking)};
+  
+  \node[process, below=of user, xshift=-1cm] (node1) {Agent 1\\(GPU Node)};
+  \node[process, right=0.5cm of node1] (node2) {Agent 2\\(GPU Node)};
+  \node[process, right=0.5cm of node2] (node3) {Agent N\\(GPU Node)};
+  
+  % Flows
+  \draw[arrow] (user) -- (queue);
+  \draw[arrow] (queue) -- (scheduler);
+  \draw[arrow] (scheduler) -- node[right, font=\footnotesize] {Allocation} (resman);
+  \draw[arrow] (resman) -- node[right, font=\footnotesize] {Launch} (node2);
+  \draw[arrow] (node1) -- (resman);
+  \draw[arrow] (node2) -- (resman);
+  \draw[arrow] (node3) -- (resman);
+  
+  % Policies
+  \node[above=0.2cm of scheduler, font=\footnotesize\bfseries] {Policies: Fair Share, Gang};
+
+\end{tikzpicture}
+```
+**Cluster Resource Management Architecture**. A high-level view of a distributed scheduler. Jobs enter a prioritized queue. The scheduler matches resource requests (GPUs, Memory) against available nodes, enforcing fairness and locality constraints. Node agents (like Kubelet or Slurmd) launch containers and monitor health, reporting status back to the control plane.
+:::
+
+ML workloads present scheduling challenges distinct from traditional computing. Training jobs require coordinated access to multiple GPUs, often spanning nodes connected via the InfiniBand fabric discussed in the previous section. Inference workloads demand consistent latency while handling unpredictable traffic patterns. Both compete for the same accelerator resources, creating tension between throughput-oriented batch processing and latency-sensitive serving.
+
+### Why Distributed Scheduling is Hard
+
+Before examining specific schedulers, understanding why cluster scheduling differs fundamentally from single-machine scheduling clarifies the design constraints these systems face.
+
+**Distributed Systems Challenges.** Cluster scheduling is not merely "putting jobs on machines" at larger scale. Several fundamental distributed systems problems make it intrinsically harder.
+
+Partial failures pose the first challenge. A node can fail between allocation and job start. The scheduler may successfully allocate 32 GPUs across 4 nodes, only to have one node fail before the job launches. The remaining 24 GPUs sit idle while the scheduler detects the failure and re-allocates.
+
+Network partitions create a second problem. The scheduler may lose connectivity to a subset of nodes while those nodes continue operating. From the scheduler's perspective, the nodes appear failed. From the nodes' perspective, jobs may still be running.
+
+State inconsistency emerges as a third challenge. Resource state may differ between the scheduler's view and reality on individual nodes. A GPU the scheduler believes is free may still be cleaning up from a previous job.
+
+Ordering without global time presents the fourth fundamental issue. Without a global clock, determining whether allocation A happened before allocation B across different nodes requires careful protocol design. Two jobs may both believe they "own" the same GPU if the system is not carefully designed.
+
+**CAP Theorem Implications.** The CAP theorem[^fn-cap] applies directly to cluster scheduling: a scheduler cannot simultaneously provide perfect consistency (every allocation reflects true cluster state), availability (every request gets a response), and partition tolerance (system operates despite network failures).
+
+[^fn-cap]: **CAP theorem**: As introduced in @sec-vol2-introduction, a fundamental distributed systems result proving that no system can simultaneously guarantee Consistency (all nodes see the same data), Availability (every request receives a response), and Partition tolerance (the system operates despite network failures). First conjectured by Eric Brewer in 2000 and formally proven by Gilbert and Lynch in 2002 [@gilbert2002brewer], CAP forces designers to choose which property to sacrifice when partitions occur. Most modern systems choose availability over strict consistency, using eventual consistency models.
+
+Production schedulers make different trade-offs. Slurm prioritizes consistency, blocking allocations during uncertainty. Kubernetes prioritizes availability, using eventual consistency with reconciliation loops. Custom ML schedulers often accept bounded inconsistency for performance.
+
+**Failure Rates at Scale.** At scale, failure is normal operation, not exceptional. With 99.9% annual GPU reliability (typical for datacenter hardware), a 4096-GPU cluster experiences:
+
+$$ 
+\text{Expected failures per day} = 4096 \times \frac{0.001}{365} \approx 0.01 \text{ GPU failures/day} 
+$$ 
+
+More realistically, including software failures, driver issues, and thermal events, production clusters see 1 to 4 failures per day per 1000 GPUs. A multi-week training run on 4096 GPUs will experience multiple failures. Infrastructure and scheduling systems must anticipate this reality.
+
+### Batch Scheduling for Training
+
+Training large models requires allocating substantial GPU resources for extended periods. A 175B parameter model may require 1024 GPUs for weeks, while smaller experiments need only a few GPUs for hours. Scheduling systems must efficiently pack these diverse workloads while respecting resource constraints and fairness policies.
+
+#### Slurm for HPC-Style ML
+
+Slurm[^fn-slurm] (Simple Linux Utility for Resource Management) [@yoo2003slurm] dominates HPC environments and extends naturally to GPU-intensive ML training. Its partition-based architecture maps well to heterogeneous accelerator pools.
+
+[^fn-slurm]: **Slurm**: An open-source job scheduler originating from Lawrence Livermore National Laboratory (2002) that manages compute resources across thousands of nodes. Slurm's design prioritizes predictability and fairness for long-running scientific workloads. Unlike Kubernetes' declarative model, Slurm uses imperative job submission with explicit resource requests, making it easier to reason about allocation guarantees but less flexible for dynamic workloads.
+
+A typical ML cluster configuration defines partitions by accelerator type and interconnect:
+
++---------------+---------------+------------------+--------------------+
+| **Partition** | **GPUs/Node** | **Interconnect** | **Typical Use**    |
++:==============+==============:+:=================+:===================+
+| **dgx-a100**  | 8 x A100      | NVLink + IB NDR  | Large LLM training |
++---------------+---------------+------------------+--------------------+
+| **a100-pcie** | 4 x A100      | PCIe + IB HDR    | Medium training    |
++---------------+---------------+------------------+--------------------+
+| **inference** | 2 x A10G      | Ethernet         | Model serving      |
++---------------+---------------+------------------+--------------------+
+| **debug**     | 1 x V100      | Ethernet         | Development        |
++---------------+---------------+------------------+--------------------+
+
+GPU allocation strategies significantly impact utilization. The `--gres=gpu:N`[^fn-gres] flag requests N GPUs, but naive allocation can fragment nodes. Consider a 64-node cluster with 8 GPUs each, totaling 512 GPUs. If jobs request 6 GPUs, each job wastes 2 GPUs per node, reducing effective capacity to 75 percent. Slurm's `SelectTypeParameters=CR_GPU` enables GPU-level scheduling, while `--gpus-per-node` ensures jobs receive full nodes when beneficial for NVLink communication.
+
+[^fn-gres]: **GRES (Generic Resource Scheduling)**: Slurm's mechanism for scheduling non-CPU resources like GPUs, FPGAs, or specialized accelerators. GRES tracks resource availability per node and enforces exclusive allocation. The gres.conf file defines available resources, while jobs request them via `--gres=resource_type:count`. This abstraction allows Slurm to manage diverse accelerator types without code changes.
+
+Fair-share scheduling prevents any single user or project from monopolizing resources. The classic fair-share formula computes effective priority as:
+
+$$P_{effective} = P_{base} \times \frac{F_{target}}{F_{actual} + \epsilon}$$
+
+where $F_{target}$ represents the user's allocated share and $F_{actual}$ their recent usage. This naturally deprioritizes heavy users while allowing burst access when resources are idle.
+
+Preemption policies enable high-priority jobs to reclaim resources from running workloads. For ML training, this requires checkpoint-aware preemption. Jobs receive SIGTERM with configurable grace periods, typically 60 to 300 seconds, to save checkpoints before SIGKILL. The `PreemptMode=REQUEUE` setting automatically restarts preempted jobs, while `GraceTime` controls the checkpoint window.
+
+#### Kubernetes for ML Workloads
+
+Kubernetes has become the standard platform for ML infrastructure, particularly for organizations requiring unified management of training and serving workloads. Native Kubernetes lacks ML-aware scheduling, but extensions address this gap.
+
+GPU scheduling relies on device plugins that expose accelerators as extended resources. The NVIDIA device plugin registers GPUs with the kubelet, enabling pod specifications as shown in @lst-k8s-gpu-alloc.
+
+::: {#lst-k8s-gpu-alloc lst-cap="**Kubernetes GPU Allocation**: Pod resource specification requesting GPUs through the NVIDIA device plugin. The `nvidia.com/gpu` resource name follows Kubernetes extended resource conventions, where the domain prefix identifies the device plugin vendor. This declarative syntax enables portable GPU workload definitions across any Kubernetes cluster with the NVIDIA device plugin installed."}
+```{.yaml}
+# Kubernetes pod resource specification for GPU allocation
+resources:
+  limits:
+    nvidia.com/gpu: 4  # Request exactly 4 GPUs for this pod
+```
+:::
+
+However, this binary allocation model wastes resources when workloads need less than a full GPU. Multi-Instance GPU[^fn-mig] technology addresses this by partitioning A100 and H100 GPUs into isolated instances. An A100-80GB can be divided into configurations ranging from 7 small instances of 10GB each to 2 large instances of 40GB each. The device plugin exposes MIG instances as separate resources:
+
++-----------------+----------------+--------------+----------------------+
+| **MIG Profile** | **GPU Memory** | **SM Count** | **Typical Workload** |
++=================+===============:+=============:+:=====================+
+| **1g.10gb**     | 10 GB          | 14 SMs       | Small inference      |
++-----------------+----------------+--------------+----------------------+
+| **2g.20gb**     | 20 GB          | 28 SMs       | Medium inference     |
++-----------------+----------------+--------------+----------------------+
+| **3g.40gb**     | 40 GB          | 42 SMs       | Large inference      |
++-----------------+----------------+--------------+----------------------+
+| **7g.80gb**     | 80 GB          | 98 SMs       | Training             |
++-----------------+----------------+--------------+----------------------+
+
+[^fn-mig]: **Multi-Instance GPU (MIG)**: NVIDIA hardware feature (A100 and later) that partitions a single GPU into up to 7 isolated instances, each with dedicated memory, cache, and compute resources. Unlike software-based GPU sharing, MIG provides hardware isolation that prevents memory access between instances. This enables secure multi-tenant GPU sharing but requires workloads to fit within instance memory limits.
+
+Gang scheduling[^fn-gang] ensures distributed training jobs receive all requested resources simultaneously. Without gang scheduling, a job requesting 32 GPUs might receive 24 immediately while waiting indefinitely for the remaining 8, wasting the already-allocated resources. The Volcano batch scheduler and scheduler plugins like Coscheduling implement gang semantics through PodGroup abstractions. Jobs specify minimum member counts, and the scheduler delays placement until all pods can be scheduled together.
+
+[^fn-gang]: **Gang scheduling**: A scheduling policy that allocates resources for multi-component jobs atomically, ensuring all components start simultaneously or none do. First developed for parallel computing in the 1980s, gang scheduling prevents deadlock scenarios where jobs partially acquire resources and block each other. For ML training, gang scheduling ensures all workers are ready before training begins, avoiding wasted GPU cycles.
+
+Priority classes control preemption behavior. A typical hierarchy assigns training workloads medium priority, inference high priority, and development jobs low priority. The `preemptionPolicy: PreemptLowerPriority` setting enables inference pods to reclaim resources from training when latency SLOs are threatened, though organizations must balance this against training job completion times.
+
+#### Custom ML Schedulers
+
+Research schedulers have demonstrated significant improvements over general-purpose systems by exploiting ML-specific characteristics.
+
+**Tiresias** [@gu2019tiresias] observes that ML training jobs have predictable resource requirements after initial epochs. Rather than requiring users to estimate job duration, often inaccurate by 2 to 5 times, Tiresias uses a two-dimensional attained service[^fn-attained-service] scheduler. Jobs accumulate "service" based on GPU-time consumed, with priority decreasing as service increases. A discretized version groups jobs into service bins, promoting short jobs without requiring duration estimates. Experiments show 40 to 60 percent reduction in average job completion time compared to FIFO scheduling.
+
+[^fn-attained-service]: **Attained service scheduling**: A scheduling discipline where job priority decreases with cumulative resource usage. Originally developed for processor sharing, attained service naturally prioritizes short jobs without requiring duration estimates. For ML workloads where job length correlates with model complexity, this approach provides near-optimal average completion times while remaining robust to inaccurate user estimates.
+
+**Gandiva** [@xiao2018gandiva] exploits the iterative nature of deep learning. Training alternates between GPU-intensive forward and backward passes and CPU-intensive data loading. Gandiva time-slices GPU access at iteration boundaries, enabling higher utilization through oversubscription. A cluster with 100 GPUs might support 120 concurrent jobs if each spends 20 percent of time waiting for data. Gandiva also implements grow-shrink elasticity, automatically adjusting data parallelism degree based on resource availability.
+
+**Themis** [@mahajan2020themis] addresses fairness in long-running ML workloads. Traditional fair-share treats all GPU-seconds equally, but ML jobs have diminishing returns as training progresses. Themis defines a finish-time fairness metric, allocating resources to minimize the maximum slowdown any job experiences relative to exclusive access. This approach benefits shorter jobs without excessive penalty to longer ones.
+
+Locality-aware scheduling recognizes that communication topology matters for distributed training. A 64-GPU job performs better on 8 nodes of 8 GPUs each than 16 nodes of 4 GPUs, due to higher NVLink bandwidth within nodes. Advanced schedulers consider the fat-tree topology discussed in @sec-networking-ml, preferring allocations that share fewer switch hops. Experiments show 15 to 30 percent training throughput improvement from topology-aware placement.
+
+### Online Serving Resource Management
+
+Inference workloads require different scheduling strategies than training. Latency matters more than throughput, traffic fluctuates unpredictably, and resource requirements vary by model size and request characteristics.
+
+#### Autoscaling for Inference
+
+Horizontal Pod Autoscaling (HPA) adjusts replica counts based on metrics. Default CPU utilization targets, often 50 to 70 percent, poorly reflect GPU inference workloads. Effective ML autoscaling uses custom metrics:
+
++-------------------------+------------------+----------------------------------+
+| **Metric**              | **Target Range** | **Considerations**               |
++:========================+=================:+:=================================+
+| **GPU utilization**     | 60-80%           | Varies by model batch efficiency |
++-------------------------+------------------+----------------------------------+
+| **Request queue depth** | 10-50 requests   | Prevents latency spikes          |
++-------------------------+------------------+----------------------------------+
+| **P99 latency**         | &lt; SLO target  | Reactive, lags demand changes    |
++-------------------------+------------------+----------------------------------+
+| **Pending tokens**      | Model-specific   | LLM-specific, accounts for KV    |
++-------------------------+------------------+----------------------------------+
+
+Vertical Pod Autoscaling (VPA) adjusts resource requests and limits for individual pods. For inference, VPA can right-size memory allocations based on observed usage. However, GPU resources cannot be vertically scaled without pod restart, limiting VPA's utility for accelerated workloads.
+
+LLM inference requires specialized scaling due to the key-value cache[^fn-kv-cache]. A 70B parameter model serving long-context requests may require 80GB+ of GPU memory for KV cache alone, even with PagedAttention optimizations. Scaling decisions must account for both request rate and context length distribution.
+
+[^fn-kv-cache]: **Key-Value (KV) cache**: Memory that stores computed attention key and value tensors from previous tokens during autoregressive generation. Without caching, each new token would require recomputing attention over the entire sequence. KV cache grows linearly with sequence length and batch size; for a 70B model with 128K context, the cache can exceed model weights in memory usage. PagedAttention (vLLM) manages this memory more efficiently through virtual memory techniques.
+
+#### Resource Isolation
+
+Noisy neighbor problems occur when colocated workloads interfere with each other. On GPUs, interference manifests through shared memory bandwidth, L2 cache contention, and PCIe bottlenecks. MIG provides hardware isolation but at the cost of flexibility. Software approaches include careful placement policies and time-based resource contracts.
+
+GPU memory isolation prevents one model from consuming memory needed by another. Without explicit limits, a memory leak or unexpectedly large batch can crash colocated workloads. Container runtimes can enforce memory limits through CUDA Multi-Process Service[^fn-mps], though this adds latency overhead of approximately 5 to 10 microseconds per kernel launch.
+
+[^fn-mps]: **CUDA MPS (Multi-Process Service)**: A CUDA feature that enables multiple processes to share a GPU with reduced context switching overhead. Unlike time-slicing where only one process accesses the GPU at a time, MPS allows concurrent kernel execution from different processes. MPS improves utilization for small workloads but provides limited isolation compared to MIG; a memory-intensive process can still impact colocated workloads through shared cache pressure.
+
+CPU pinning assigns specific cores to inference pods, preventing scheduler migration that causes cache invalidation. For latency-sensitive workloads, isolating cores using `isolcpus` kernel parameters and `taskset` affinity removes OS scheduling jitter. Combined with NUMA-aware[^fn-numa] placement, this reduces P99 latency by 10 to 30 percent for sub-millisecond inference tasks.
+
+[^fn-numa]: **NUMA (Non-Uniform Memory Access)**: A memory architecture where access time depends on memory location relative to the processor. Modern multi-socket servers have distinct memory controllers per CPU socket; accessing local memory takes approximately 100ns, while accessing remote memory via the interconnect takes 150-200ns. For ML inference, placing GPU workloads on CPU cores closest to the GPU's PCIe connection minimizes data transfer latency.
+
+### Multi-Tenancy Considerations
+
+Production ML platforms serve multiple teams with competing priorities. Quota systems balance guaranteed access against overall utilization, while security isolation protects sensitive models and data.
+
+#### Quota Management
+
+GPU quota allocation typically operates at the namespace or project level. A simple approach allocates fixed GPU counts, but this leads to underutilization when teams have variable workloads. Hierarchical quotas enable departmental limits with sub-team flexibility:
+
+$$Q_{effective} = \min(Q_{team}, Q_{department} - \sum_{other\ teams} U_{allocated})$$
+
+Fair-share across teams extends the single-user formula to organizational hierarchies. When aggregate demand exceeds capacity, each team receives resources proportional to their share allocation. Unused capacity borrows down the hierarchy, maximizing utilization while respecting priorities.
+
+Burst capacity handling enables teams to temporarily exceed quotas when resources are available. Overcommitment ratios of 1.2 to 1.5 times are common, with admission controllers tracking actual versus requested resources. When contention occurs, jobs using burst capacity face preemption first.
+
+#### Security Isolation
+
+Namespace separation provides the fundamental isolation boundary in Kubernetes. Each team operates within dedicated namespaces with role-based access control (RBAC) limiting visibility to their own resources. Network policies extend isolation to the network layer, preventing cross-namespace communication except through explicitly permitted services.
+
+Network policies for ML workloads must balance isolation with distributed training requirements. A policy might allow all-to-all communication within a namespace (for ring-AllReduce) while blocking ingress from other namespaces. Egress policies prevent training jobs from accessing external networks, reducing data exfiltration risk.
+
+GPU virtualization options range from time-slicing with low isolation and high flexibility, to MIG with hardware isolation and fixed partitions, to full device passthrough with complete isolation and lowest utilization. The choice depends on workload sensitivity and trust boundaries. Multi-tenant inference platforms typically use MIG for isolation between tenants, while single-tenant training clusters favor device passthrough for maximum performance.
+
+The scheduling and resource management infrastructure discussed here enables efficient use of the datacenter resources and networks from previous sections. Effective schedulers achieve 70 to 85 percent GPU utilization in production clusters, compared to 30 to 50 percent with naive approaches. This efficiency translates directly to cost. A 1000-GPU cluster at 80 percent utilization delivers the equivalent capacity of 1600 GPUs at 50 percent utilization. As organizations scale ML infrastructure, scheduling sophistication becomes a primary determinant of both cost efficiency and researcher productivity. These resource management capabilities also provide the foundation for the fault-tolerant systems discussed in @sec-fault-tolerance and the operational practices covered in @sec-ops-scale.
+
+## Summary
+
+The high-bandwidth networks and resource managers examined here are the nervous system of the machine learning fleet. They determine whether thousands of isolated GPUs function as a single coherent supercomputer or as a fragmented collection of servers.
+
+We explored how InfiniBand and RoCE fabrics enable memory-to-memory transfer at 400+ Gbps, bypassing CPU bottlenecks to keep pace with accelerator throughput. We saw how topology optimization—fat-trees for general workloads, rail-optimized networks for large models, and torus meshes for TPUs—physically shapes the communication patterns available to distributed algorithms.
+
+We then examined the schedulers that orchestrate this hardware. Slurm and Kubernetes face fundamental distributed systems challenges—partial failures, network partitions, state inconsistency—that require distinct design trade-offs. We analyzed how specialized policies like gang scheduling, topology-aware placement, and multi-instance GPU partitioning (MIG) improve utilization from the dismal 30-50% typical of naive clusters to the 70-85% required for economic viability.
+
+::: {.callout-important title="Key Takeaways"}
+
+* **Network as Computer**: At scale, the interconnect is not just plumbing but a primary component of the compute engine. Bandwidth and topology determine training speed as much as GPU FLOPS.
+* **Latency Matters**: For inference and small-message training, tail latency and protocol overhead dominate raw bandwidth.
+* **Scheduling is Allocation**: Effective resource management requires matching workload shapes (batch vs. service) to hardware partitions, using policies like gang scheduling to prevent resource fragmentation.
+* **Utilization is King**: The high cost of ML infrastructure makes scheduling efficiency a first-order economic driver. Improving utilization from 40% to 80% effectively halves hardware costs.
+
+:::
+
+With the fleet built—compute nodes defined, networks connected, and schedulers running—one critical component remains. This massive engine requires fuel. The next chapter (@sec-storage) examines storage systems for large-scale ML, ensuring that our massive compute capacity is not starved by I/O bottlenecks.
