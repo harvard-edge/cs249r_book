@@ -380,6 +380,25 @@ The bandwidth requirements for efficient distributed training are substantial, p
 
 Synchronization frequency presents a trade-off between communication efficiency and convergence behavior. Gradient accumulation reduces synchronization frequency but increases memory requirements and may impact convergence. Synchronizing every 4 steps reduces communication overhead by 60% while increasing memory usage by 3x for gradient storage. Asynchronous methods eliminate synchronization costs entirely but introduce staleness that degrades convergence by 15-30% for large learning rates.
 
+### The Physics of Scaling: Amdahl's Law with Communication
+
+Just as the Iron Law of Processor Performance governs single-thread execution, distributed training is governed by an extended version of Amdahl's Law that explicitly accounts for communication overhead. The time to complete one training step on $N$ devices is not simply $T_{single} / N$, but is constrained by the sequential nature of synchronization.
+
+We can formalize the **Distributed Step Time** equation:
+
+$$ T_{step}(N) = \frac{T_{compute}}{N} + T_{comm}(N) - T_{overlap} $$
+
+Where:
+*   $T_{compute}$ is the total computation required for the batch (ideally perfectly parallelizable).
+*   $T_{comm}(N)$ is the communication overhead, which typically grows with $N$ (e.g., $2(N-1)/N \times M/B$ for Ring AllReduce).
+*   $T_{overlap}$ is the portion of communication that can be hidden behind computation.
+
+This leads to the **Scaling Efficiency** metric:
+
+$$ \text{Efficiency}(N) = \frac{T_{compute}}{N \times T_{step}(N)} = \frac{1}{1 + \frac{N(T_{comm}(N) - T_{overlap})}{T_{compute}}} $$
+
+This equation reveals the **Scaling Wall**: as $N$ increases, the compute term ($T_{compute}/N$) shrinks, but the communication term ($T_{comm}$) remains constant or grows. Eventually, the denominator is dominated by communication, driving efficiency toward zero. This physics dictates the transition points between parallelism strategies: when Data Parallelism hits this wall (high $T_{comm}$ due to full gradient sync), we must switch to Model or Pipeline Parallelism to change the variables in the equation.
+
 Scaling efficiency follows predictable patterns across different GPU counts. In the linear scaling regime of 2-32 GPUs, systems typically achieve 85-95% parallel efficiency because communication overhead remains minimal. The communication bound regime emerges at 64-256 GPUs, where efficiency drops to 60-80% even with optimal interconnects. Beyond 512 GPUs, coordination overhead becomes dominant and limits efficiency to 40-60% due to collective operation latency.
 
 Hardware selection critically impacts these scaling characteristics. NVIDIA DGX systems with NVLink achieve 600 GB/s bisection bandwidth, enabling 90% parallel efficiency up to 8 GPUs per node. Multi-node scaling requires InfiniBand networks, where EDR at 100 Gbps supports efficient training up to 64 nodes, while HDR at 200 Gbps enables scaling to 256+ nodes with greater than 70% efficiency.
