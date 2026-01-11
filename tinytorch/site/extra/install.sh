@@ -65,7 +65,7 @@ set -e  # Exit on any error
 REPO_URL="https://github.com/harvard-edge/cs249r_book.git"
 REPO_SHORT="harvard-edge/cs249r_book"
 BRANCH="dev"
-INSTALL_DIR="tinytorch"
+INSTALL_DIR=$(echo "tinytorch")
 SPARSE_PATH="tinytorch"
 TINYTORCH_VERSION="0.1.0"
 
@@ -167,6 +167,19 @@ get_python_cmd() {
     echo ""
 }
 
+# Find the system platform (linux, macos,windows)
+get_platform() {
+    local uname_out
+    uname_out=$(uname -s)
+    case "${uname_out}" in
+        Linux*)     echo "linux";;
+        Darwin*)    echo "macos";;
+        CYGWIN*|MINGW*|MSYS*) echo "windows";;
+        *)          echo "unknown";;
+    esac
+}
+
+
 # ============================================================================
 # Pre-flight Checks
 # These run before any installation to catch problems early
@@ -213,6 +226,7 @@ check_prerequisites() {
 
     # Check for Python 3.10+
     PYTHON_CMD=$(get_python_cmd)
+    PLATFORM=$(get_platform)
     if [ -n "$PYTHON_CMD" ]; then
         # We know it's good because get_python_cmd validates it, but we run check again to get the version string
         PY_VERSION=$(check_python_version "$PYTHON_CMD")
@@ -392,12 +406,20 @@ do_install() {
     # -------------------------------------------------------------------------
     # Step 2: Create Python virtual environment
     # -------------------------------------------------------------------------
+    # Check platform to handle Windows differently
+    VENV_ACTIVATE_SCRIPT=$(echo ".venv/bin/activate")
+    if [ "$PLATFORM" = "windows" ]; then
+        print_warning "Windows detected - ensure you run this script in Git Bash or WSL for best results."
+        VENV_ACTIVATE_SCRIPT=$(echo ".venv/Scripts/activate")
+
+    fi
     echo -e "${BLUE}[2/4]${NC} Creating Python environment..."
     cd "$INSTALL_DIR"
+    echo -e $INSTALL_DIR
     
     # Use the detected 3.10+ command explicitly
     $PYTHON_CMD -m venv .venv
-    source .venv/bin/activate
+    source "$VENV_ACTIVATE_SCRIPT"
     print_success "Created virtual environment using $PYTHON_CMD"
 
     # -------------------------------------------------------------------------
@@ -406,22 +428,27 @@ do_install() {
     echo -e "${BLUE}[3/4]${NC} Installing dependencies..."
 
     # Upgrade pip first
-    pip install --upgrade pip -q 2>/dev/null &
+    $PYTHON_CMD -m pip install --upgrade pip -q 2>/dev/null &
     local pip_pid=$!
     spin $pip_pid "Upgrading pip..."
     wait $pip_pid
 
+    REQ_PATH=$(echo "$PWD/requirements.txt")
+    echo -e "This will install dependencies into the virtual environment from this file here:"
+    echo -e " ${BOLD}$REQ_PATH${NC}"
+    echo ""
+
     # Install from requirements.txt
-    if [ -f "requirements.txt" ]; then
-        total_pkgs=$(grep -c -E "^[^#]" requirements.txt 2>/dev/null || echo "?")
-        pip install -r requirements.txt -q 2>/dev/null &
+    if [ -f "$REQ_PATH" ]; then
+        total_pkgs=$(grep -c -E "^[^#]" "$REQ_PATH" 2>/dev/null || echo "?")
+        $PYTHON_CMD -m pip install -r "$REQ_PATH" -q 2>/dev/null &
         local req_pid=$!
         spin $req_pid "Installing $total_pkgs packages..."
         wait $req_pid
     fi
 
     # Install TinyTorch package in editable mode (includes tito CLI)
-    pip install -e . -q 2>/dev/null &
+    $PYTHON_CMD -m pip install -e . -q 2>/dev/null &
     local tt_pid=$!
     spin $tt_pid "Installing TinyTorch..."
     wait $tt_pid
@@ -449,7 +476,7 @@ print_success_message() {
     echo -e "${BOLD}Next steps:${NC}"
     echo ""
     echo -e "  ${CYAN}cd $install_path${NC}"
-    echo -e "  ${CYAN}source .venv/bin/activate${NC}"
+    echo -e "  ${CYAN}source ${VENV_ACTIVATE_SCRIPT}${NC}"
     echo -e "  ${CYAN}tito setup${NC}"
     echo ""
     echo -e "${BOLD}Then start building:${NC}"
