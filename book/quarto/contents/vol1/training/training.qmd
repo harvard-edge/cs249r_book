@@ -198,7 +198,7 @@ High-performance computing (HPC) systems [@thornton1965cdc] specialized for scie
 
 HPC systems implemented specific architectural features for scientific workloads: high-bandwidth memory systems for array operations, vector processing units for mathematical computations, and specialized interconnects for collective communication patterns. Scientific computing demanded emphasis on numerical precision and stability, with processors and memory systems designed for regular, predictable access patterns. The interconnects supported tightly synchronized parallel execution, enabling efficient collective operations across computing nodes.
 
-As the demand for internet-scale processing grew, warehouse-scale computing marked the next evolutionary step. Google's data center implementations[^fn-google-datacenter] [@barroso2003web] introduced new optimizations for internet-scale data processing. Unlike HPC systems focused on tightly coupled scientific calculations, warehouse computing handled loosely coupled tasks with irregular data access patterns.
+As the demand for internet-scale processing grew, warehouse-scale computing marked the next evolutionary step. Google's data center implementations[^fn-google-datacenter] [@barroso2007energy] introduced new optimizations for internet-scale data processing. Unlike HPC systems focused on tightly coupled scientific calculations, warehouse computing handled loosely coupled tasks with irregular data access patterns.
 
 [^fn-google-datacenter]: **Google Data Centers**: Starting in 1998 with commodity PCs, Google pioneered warehouse-scale computing by 2003, managing over 100,000 servers across multiple facilities. By 2020, Google operated over 20 data centers consuming 12 TWh annually, equivalent to entire countries, while achieving industry-leading PUE (Power Usage Effectiveness) of 1.10 through innovative cooling.
 
@@ -339,7 +339,7 @@ $$
 - With 48 layers in GPT-2: ~9.8 trillion FLOPS per training step
 - At 50K training steps: ~490 petaFLOPS total training computation
 
-**System Implication:** A V100 GPU (125 TFLOPS peak FP16 with Tensor Cores, 28 TFLOPS without) would require 79 seconds just for the attention computations per step at 100% utilization. Actual training steps take 180 to 220ms, requiring 8 to 32 GPUs to achieve this throughput.
+**System Implication:** A V100 GPU (125 TFLOPS peak FP16 with Tensor Cores, 28 TFLOPS without) would require 79 seconds just for the attention computations per step at 100% utilization (theoretical peak; practical throughput would be lower). Actual training steps take 180 to 220ms, requiring 8 to 32 GPUs to achieve this throughput depending on utilization and interconnect efficiency.
 
 :::
 
@@ -724,7 +724,7 @@ Momentum methods introduce additional memory requirements by storing velocity te
 
 RMSprop adapts learning rates per parameter by tracking squared gradient statistics. Its memory overhead matches momentum methods, but its computation patterns become more irregular. The algorithm requires additional arithmetic operations for maintaining running averages and computing adaptive learning rates, increasing computational intensity from 3 to 4 operations per parameter.
 
-Adam combines the benefits of momentum and adaptive learning rates, but at the highest system resource cost. @tbl-optimizer-properties reveals that it maintains both velocity terms and squared gradient statistics, tripling the memory requirements compared to SGD. The algorithm's computational patterns involve 5 operations per parameter update, though these operations often utilize hardware more effectively due to their regular structure and potential for parallelization.
+Adam combines the benefits of momentum and adaptive learning rates, but at the highest system resource cost. Variants like AdamW [@loshchilov2019adamw] decouple weight decay from the gradient update, improving generalization performance. @tbl-optimizer-properties reveals that it maintains both velocity terms and squared gradient statistics, tripling the memory requirements compared to SGD. The algorithm's computational patterns involve 5 operations per parameter update, though these operations often utilize hardware more effectively due to their regular structure and potential for parallelization.
 
 Training system designers must balance these trade-offs when selecting optimization strategies. Modern hardware architectures influence these decisions. GPUs excel at the parallel computations required by adaptive methods, while memory-constrained systems might favor simpler optimizers. The choice of optimizer affects not only training dynamics but also maximum feasible model size, achievable batch size, hardware utilization efficiency, and overall training time to convergence. Beyond optimizer selection, learning rate scheduling strategies, including cosine annealing, linear warmup, and cyclical schedules, further influence convergence behavior and final model performance, with large-batch training requiring careful scaling adjustments as detailed in distributed training discussions.
 
@@ -991,9 +991,13 @@ Arithmetic Intensity of Training Operations is summarized in @tbl-training-arith
 
 **Hardware Ridge Points**: Modern GPUs have characteristic ridge points where operations transition from memory-bound to compute-bound. The A100 with 312 TFLOPS FP16 and 2.0 TB/s bandwidth has a ridge point of 156 FLOP/byte. The H100 with 990 TFLOPS and 3.4 TB/s bandwidth has a ridge point of 291 FLOP/byte. Operations below the ridge point are memory-bound; above are compute-bound.
 
+::: {.callout-note title="Systems Perspective: Peak FLOPS vs. Sustained Performance"}
+**The Intensity Gap**: Hardware vendors often market "Peak TFLOPS," but for a systems engineer, this number is often a theoretical limit that is rarely reached. Most neural network operations—especially in the backward pass—have arithmetic intensities well below the hardware's ridge point. When an operation is memory-bound (like LayerNorm or Softmax), doubling the hardware's peak TFLOPS does *nothing* for performance. This is why **Mixed-Precision (FP16/BF16)** is so effective: it doesn't just enable faster arithmetic; it halves the bytes moved per operation, effectively doubling the "Data Supply Rate" and allowing the system to reach a much higher percentage of its peak computational capability. Successful optimization is the art of increasing arithmetic intensity through kernel fusion and reducing data movement through precision management.
+:::
+
 **Batch Size Effects**: Batch size directly influences arithmetic intensity. With batch=1, many operations fall below the ridge point and become memory-bound. With batch=32 or higher, most matrix operations exceed the ridge point and become compute-bound. This explains why larger batches improve hardware utilization: they shift operations into the compute-bound regime where GPUs excel.
 
-**Optimization Implications**: This analysis guides optimization strategy selection. For memory-bound operations, reducing data movement through operator fusion, reduced precision, or algorithmic improvements like FlashAttention provides the largest gains. For compute-bound operations, increasing throughput through Tensor Cores, parallelism, or quantization matters more. FlashAttention succeeds precisely because it moves attention computation from memory-bound to compute-bound through algorithmic tiling that reduces memory traffic. See @sec-ai-acceleration for detailed roofline model analysis and hardware-specific optimization strategies.
+**Optimization Implications**: This analysis guides optimization strategy selection. For memory-bound operations, reducing data movement through operator fusion, reduced precision, or algorithmic improvements like FlashAttention provides the largest gains. For compute-bound operations, increasing throughput through Tensor Cores, parallelism, or quantization matters more. FlashAttention succeeds precisely because it moves attention computation from memory-bound to compute-bound through algorithmic tiling that reduces memory traffic. FlashAttention-2 further optimizes this by reducing non-matrix-multiply operations and improving parallelism. See @sec-ai-acceleration for detailed roofline model analysis and hardware-specific optimization strategies.
 
 ## Pipeline Architecture {#sec-ai-training-pipeline-architecture-622a}
 
@@ -1617,7 +1621,7 @@ Determining the optimal batch size involves balancing these factors within hardw
 
 ## Pipeline Optimizations {#sec-ai-training-pipeline-optimizations-3397}
 
-Even well-designed pipeline architectures rarely achieve optimal performance without targeted optimization. The gap between theoretical hardware capability and realized training throughput often reaches 50-70%: GPUs advertised at 300 TFLOPS may deliver only 90-150 TFLOPS for training workloads, and distributed systems with aggregate 1000 TFLOPS capacity frequently achieve under 500 TFLOPS effective throughput [@wang2019superneurons]. This efficiency gap stems from systematic bottlenecks that optimization techniques can address.
+Even well-designed pipeline architectures rarely achieve optimal performance without targeted optimization. The serving considerations for these optimized models are detailed in @sec-serving. The gap between theoretical hardware capability and realized training throughput often reaches 50-70%: GPUs advertised at 300 TFLOPS may deliver only 90-150 TFLOPS for training workloads, and distributed systems with aggregate 1000 TFLOPS capacity frequently achieve under 500 TFLOPS effective throughput [@wang2019superneurons]. This efficiency gap stems from systematic bottlenecks that optimization techniques can address.
 
 The following table provides a roadmap for matching optimization techniques to the bottlenecks they solve, serving as a practical guide for systematic performance improvement:
 
@@ -1995,7 +1999,7 @@ Despite these challenges, prefetching and overlapping remain essential tools for
 
 ### Mixed-Precision Training {#sec-ai-training-mixedprecision-training-77ad}
 
-While prefetching optimizes data movement, mixed-precision training addresses both computational throughput limitations and memory capacity constraints by strategically using reduced precision arithmetic where possible while maintaining numerical stability. This technique proves most effective when profiling reveals that training is constrained by GPU memory capacity or when computational units are not fully utilized due to memory bandwidth limitations.
+Mixed-precision training complements the quantization techniques discussed in @sec-model-optimizations. While prefetching optimizes data movement, mixed-precision training addresses both computational throughput limitations and memory capacity constraints by strategically using reduced precision arithmetic where possible while maintaining numerical stability. This technique proves most effective when profiling reveals that training is constrained by GPU memory capacity or when computational units are not fully utilized due to memory bandwidth limitations.
 
 Mixed-precision training combines different numerical precisions during model training to optimize computational efficiency. This approach uses combinations of FP32, 16-bit floating-point (FP16), and brain floating-point (bfloat16) formats to reduce memory usage and speed up computation while preserving model accuracy [@micikevicius2017mixed; @wang_bfloat16_2019].
 
@@ -2521,7 +2525,7 @@ The technique demonstrates that algorithmic innovation at the systems level, exp
 
 ### Gradient Accumulation and Checkpointing {#sec-ai-training-gradient-accumulation-checkpointing-26ab}
 
-Complementing mixed-precision's approach to memory optimization, gradient accumulation and checkpointing techniques address memory capacity constraints by trading computational time for reduced memory usage. These techniques prove most effective when profiling reveals that training is limited by available memory rather than computational throughput, enabling larger models or batch sizes on memory-constrained hardware.
+These techniques leverage the efficiency principles explored in @sec-efficient-ai. Gradient accumulation and checkpointing address memory capacity constraints by trading computation for memory.
 
 Training large machine learning models often requires significant memory resources, particularly for storing three key components: activations (intermediate layer outputs), gradients (parameter updates), and model parameters (weights and biases) during forward and backward passes. However, memory constraints on GPUs can limit the batch size or the complexity of models that can be trained on a given device.
 
@@ -2598,7 +2602,7 @@ fit=(Z)](BB3){};
 \draw[-latex,Line] (D3)-|(Z.225);
 \end{tikzpicture}
 ```
-**Gradient Accumulation**: Effective batch size increases without increasing per-step memory requirements by accumulating gradients from multiple micro-batches before updating model parameters, simulating training with a larger batch. This technique enables training with large models or datasets when memory is limited, improving training stability and potentially generalization performance.
+**Gradient Accumulation**: Effective batch size increases without increasing per-step memory requirements by accumulating gradients from multiple micro-batches before updating model parameters, simulating training with a larger batch. Note that gradient accumulation can affect Batch Normalization behavior since statistics are computed on micro-batches rather than the full effective batch. This technique enables training with large models or datasets when memory is limited, improving training stability and potentially generalization performance.
 :::
 
 This process allows models to achieve the benefits of training with larger batch sizes, such as improved gradient estimates and convergence stability, without requiring the memory to store an entire batch at once. For instance, in PyTorch, this can be implemented by adjusting the learning rate proportionally to the number of accumulated micro-batches and calling `optimizer.step()` only after processing the entire effective batch.
@@ -3014,6 +3018,12 @@ Scaling techniques aim to extend the capabilities of training systems to handle 
 One common scaling technique is batch size scaling. Increasing the batch size can reduce the number of synchronization steps required during training, as fewer updates are needed to process the same amount of data. This approach contrasts with the dynamic batching strategies used in inference serving, where the goal is optimizing throughput for variable-length requests rather than training convergence. However, larger batch sizes may introduce challenges, such as slower convergence or reduced generalization. Techniques like learning rate scaling and warmup schedules[^fn-lr-schedules] can help mitigate these issues, ensuring stable and effective training even with large batches.
 
 [^fn-lr-schedules]: **Learning Rate Schedules**: Critical for training stability and convergence. Cosine annealing (introduced in 2016) and linear warmup (from BERT 2018) became standard after showing 2-5% accuracy improvements. Large batch training requires linear scaling rule: multiply learning rate by batch size ratio (batch 512 → LR 0.1, batch 4096 → LR 0.8), discovered through extensive experimentation by Facebook and Google teams.
+
+::: {.callout-definition title="Transfer Learning"}
+
+**Transfer Learning** refers to the technique of adapting models _pretrained_ on large-scale datasets to new tasks, dramatically reducing _training time_ and _data requirements_ by leveraging learned representations.
+
+:::
 
 Layer-freezing strategies provide another method for scaling training systems efficiently. In many scenarios, particularly in transfer learning, the lower layers of a model capture general features and do not need frequent updates. By freezing these layers and allowing only the upper layers to train, memory and computational resources can be conserved, enabling the system to focus its efforts on fine-tuning the most critical parts of the model.
 

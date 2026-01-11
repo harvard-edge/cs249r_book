@@ -399,7 +399,7 @@ In the MNIST example, each output neuron requires 784 multiply-accumulate operat
 
 [^fn-dnn-blas]: **Basic Linear Algebra Subprograms (BLAS)**: Developed in the 1970s as a standard for basic vector and matrix operations, BLAS became the foundation for virtually all scientific computing. Modern implementations like Intel MKL and OpenBLAS can achieve 80-95% of theoretical peak performance on well-optimized workloads, making them necessary for neural network efficiency.
 
-[^fn-mac]: **Multiply-Accumulate (MAC)**: The atomic operation in neural networks: multiply two values and add to a running sum. Modern accelerators measure performance in MACs per second: datacenter class accelerators can sustain on the order of \(10^{14}\) to \(10^{15}\) MAC/s on dense kernels, while mobile class chips are often on the order of \(10^{12}\) to \(10^{13}\) MAC/s. At the hardware level, the energy cost of the arithmetic itself is typically in the picojoule range per MAC, while moving data to and from off chip memory can cost orders of magnitude more, which is why data movement is often the dominant systems concern.
+[^fn-mac]: **Multiply-Accumulate (MAC)**: The atomic operation in neural networks: multiply two values and add to a running sum. Modern accelerators measure performance in MACs per second: datacenter class accelerators can sustain on the order of \(10^{14}\) to \(10^{15}\) MAC/s on dense kernels (e.g., NVIDIA H100 at ~1 PFLOPS), while mobile class chips are often on the order of \(10^{12}\) to \(10^{13}\) MAC/s. At the hardware level, the energy cost of the arithmetic itself is typically in the picojoule range per MAC, while moving data to and from off chip memory can cost orders of magnitude more, which is why data movement is often the dominant systems concern.
 
 [^fn-tensor-cores]: **Tensor Cores**: Specialized matrix units in NVIDIA GPUs (Volta+) accelerating mixed-precision GEMM operations. A100 Tensor Cores deliver 312 TFLOPS for FP16 vs. 19.5 TFLOPS for FP32 on CUDA cores—16× faster. Require specific matrix dimensions (multiples of 8/16) and data layouts; frameworks like cuBLAS automatically tile operations to maximize Tensor Core utilization.
 
@@ -908,9 +908,13 @@ Modern networks accept these deviations as necessary trade-offs for computationa
 
 The choice of where to introduce invariance (via pooling, global averaging) vs. maintaining equivariance reflects task requirements and directly impacts architectural decisions.
 
-The choice of convolution reflects deeper principles about inductive bias[^fn-inductive-bias] in neural architecture design. By restricting connectivity to local neighborhoods and sharing parameters across spatial positions, CNNs encode prior knowledge about the structure of visual data: that important features are local and translation-invariant. This architectural constraint reduces the hypothesis space[^fn-hypothesis-space] that the network must search, enabling more efficient learning from limited data compared to fully connected networks.
+The choice of convolution reflects deeper principles about inductive bias in neural architecture design. By restricting connectivity to local neighborhoods and sharing parameters across spatial positions, CNNs encode prior knowledge about the structure of visual data: that important features are local and translation-invariant. This architectural constraint reduces the hypothesis space[^fn-hypothesis-space] that the network must search, enabling more efficient learning from limited data compared to fully connected networks.
 
-[^fn-inductive-bias]: **Inductive Bias**: Prior assumptions built into model architecture about the structure of data. CNNs assume spatial locality and translation equivariance, which can yield translation-invariant predictions when combined with pooling or other aggregation. This constraint reduces the space of functions they can learn compared to MLPs and often enables better generalization with fewer parameters.
+::: {.callout-definition title="Inductive Bias"}
+
+**Inductive Bias** refers to the set of _assumptions_ built into a learning algorithm or model architecture that allows it to predict outputs for inputs it has not encountered. In neural networks, architectural choices like _convolution_ (assuming spatial locality) or _recurrence_ (assuming temporal sequentiality) impose constraints that reduce the search space and improve sample efficiency.
+
+:::
 
 [^fn-hypothesis-space]: **Hypothesis Space**: The set of all possible functions a model can represent given its architecture and parameters. MLPs have a larger hypothesis space than CNNs for images, but CNNs' constrained space contains better solutions for visual tasks, demonstrating that architectural constraints often improve rather than limit performance. Recent work has extended these principles to other symmetry groups, developing Group-Equivariant CNNs that handle rotations and reflections [@cohen2016group].
 
@@ -1113,7 +1117,7 @@ Recurrent Neural Networks address this architectural limitation [@elman1990findi
 :::
 
 ::: {.callout-note title="Coverage Note"}
-This section covers of RNNs, emphasizing their core contributions to sequential processing and the architectural principles that influenced modern attention mechanisms. While RNNs introduced critical concepts—memory states, temporal dependencies, and sequential computation—contemporary practice increasingly favors attention-based architectures for sequence modeling. We focus on foundational principles rather than extensive implementation variants, dedicating significant depth to the attention mechanisms and Transformers (@sec-dnn-architectures-attention-mechanisms-dynamic-pattern-processing-566d) that have largely superseded RNNs in production systems while building directly on the insights gained from recurrent architectures.
+This section covers RNNs to introduce sequential processing principles. While attention-based architectures have largely superseded RNNs, the concepts of memory states and temporal dependencies remain foundational. We focus on these principles here, dedicating significant depth to Transformers in @sec-dnn-architectures-attention-mechanisms-dynamic-pattern-processing-566d.
 :::
 
 ### Pattern Processing Needs {#sec-dnn-architectures-pattern-processing-needs-c18e}
@@ -1748,6 +1752,10 @@ Attention mechanisms exhibit distinctive system-level patterns that differ from 
 
 In terms of memory requirements, attention mechanisms necessitate storage for attention weights, key-query-value projections, and intermediate feature representations. For a sequence length $N$ and dimension d, each attention layer must store an $N\times N$ attention weight matrix for each sequence in the batch, three sets of projection matrices for queries, keys, and values (each sized $d\times d$), and input and output feature maps of size $N\times d$. The dynamic generation of attention weights for every input creates a memory access pattern where intermediate attention weights become a significant factor in memory usage.
 
+::: {.callout-note title="Systems Perspective: The Quadratic Bottleneck and the Memory Wall"}
+**Scaling Limits**: The $N^2$ scaling of the attention matrix represents one of the most severe bottlenecks in modern systems. Doubling the sequence length quadruples the memory required for the attention weights. For a sequence of 100,000 tokens (common in modern LLMs), the attention matrix for a single layer would require roughly 40GB of memory at half-precision—exceeding the entire capacity of many GPUs. This "Quadratic Bottleneck" hits the **Memory Wall** hard, as the system spends more time moving these massive intermediate matrices between HBM and the processor than doing the actual math. This drives the need for specialized kernels like **FlashAttention**, which reorder computations to avoid materializing the full $N^2$ matrix in main memory, effectively "tiling" the attention operation to stay within the faster L1/L2 caches.
+:::
+
 ##### Computation Needs {#sec-dnn-architectures-computation-needs-a41e}
 
 Computation needs in attention mechanisms center around two main phases: generating attention weights and applying them to values. For each attention layer, the system performs many multiply-accumulate operations across multiple computational stages. The query-key interactions alone require $N\times N\times d$ multiply-accumulates, with an equal number needed for applying attention weights to values. Additional computations are required for the projection matrices and softmax operations. This computational pattern differs from previous architectures due to its quadratic scaling with sequence length and the need to perform fresh computations for each input.
@@ -2147,7 +2155,7 @@ Training identical 50-layer networks on CIFAR-10 with and without residual conne
 - Architecture: 50 layers organized in residual blocks
 - Training loss (epoch 1): 2.3
 - Training loss (epoch 50): 0.05 (near perfect training fit)
-- Test accuracy: 93%
+- Test accuracy: 93% (on CIFAR-10)
 - Gradient norm (layer 1): $0.01$ (four orders of magnitude larger than plain network)
 - Gradient norm (layer 50): $0.1$
 - Observation: All layers train effectively, achieving high accuracy
