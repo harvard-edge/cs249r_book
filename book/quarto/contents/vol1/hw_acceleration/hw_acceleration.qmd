@@ -569,17 +569,24 @@ Vector processing units achieve this transformation by operating on multiple dat
 
 ::: {#lst-riscv_vector_mac lst-cap="**Vectorized Multiply-Accumulate Loop**: This loop showcases how RISC-V vector instructions enable efficient batch processing by performing 8 multiply-add operations simultaneously, reducing computational latency in neural network training. [@riscv_manual]"}
 ```{.c}
-vsetvli t0, a0, e32   # Process 8 elements at once
+vsetvli t0, a0, e32   # <1>
 loop_batch:
     loop_neuron:
-        vxor.vv v0, v0, v0    # Clear 8 accumulators
+        vxor.vv v0, v0, v0    # <2>
         loop_feature:
-            vle32.v v1, (in_ptr)    # Load 8 inputs together
-            vle32.v v2, (wt_ptr)    # Load 8 weights together
-            vfmacc.vv v0, v1, v2    # 8 multiply-adds at once
-            add in_ptr, in_ptr, 32  # Move to next 8 inputs
-            add wt_ptr, wt_ptr, 32  # Move to next 8 weights
+            vle32.v v1, (in_ptr)    # <3>
+            vle32.v v2, (wt_ptr)    # <3>
+            vfmacc.vv v0, v1, v2    # <4>
+            add in_ptr, in_ptr, 32  # <5>
+            add wt_ptr, wt_ptr, 32  # <5>
             bnez feature_cnt, loop_feature
+```
+
+1. **Vector Length Configuration**: Configures the vector units to process 32-bit elements, automatically determining how many operations happen in parallel based on hardware width (VLEN).
+2. **Vector Initialization**: Clears the accumulator vector `v0` (containing e.g., 8 parallel sums) using an exclusive-OR operation, which is more efficient than a load immediate.
+3.  **Vector Loads**: Loads continuous 32-bit input and weight values from memory into vector registers `v1` and `v2` in a single instruction, maximizing memory bandwidth utilization.
+4.  **Fused Multiply-Accumulate**: Performs parallel multiply-add operations ($v_0 = v_0 + v_1 \times v_2$). This is the core computational primitive, doubling throughput compared to separate multiply and add instructions.
+5.  **Pointer Arithmetic**: Updates memory pointers by the vector byte length to prepare for the next data chunk.
 ```
 :::
 
@@ -1296,7 +1303,8 @@ The roofline visualization shows performance (TFLOPS) on the vertical axis and a
 
 : **Operations on the Roofline**: Neural network layers span a wide range of arithmetic intensities, with compute-intensive operations like matrix multiplication operating near the compute-bound ceiling while memory-intensive operations like activations and normalization are memory-bound. {#tbl-roofline-operations}
 
-**Worked Example: Transformer Layer Analysis**
+::: {.callout-notebook}
+## Worked Example: Transformer Layer Analysis
 
 For a transformer with hidden_dim=768, batch=32, seq=512:
 
@@ -1313,6 +1321,7 @@ For a transformer with hidden_dim=768, batch=32, seq=512:
 - AI $= 300M / 402M = 0.75$ FLOP/byte, which is **memory-bound**
 
 This analysis explains why FlashAttention focuses on reducing memory traffic in attention rather than reducing FLOPs.
+:::
 
 **Optimization Implications**:
 
@@ -1326,7 +1335,8 @@ $$\text{Required Bandwidth} = \frac{P}{\text{AI}} \text{ bytes/sec}$$
 When Required Bandwidth exceeds Peak Bandwidth, performance is capped at:
 $$P_{\text{attainable}} = \text{Peak Bandwidth} \times \text{AI}$$
 
-**Worked Example: Convolutional Layer Analysis**
+::: {.callout-notebook}
+## Worked Example: Convolutional Layer Analysis
 
 Consider a Conv2D layer with input shape (batch=32, channels=128, height=56, width=56), output channels=256, kernel size 3×3 on an A100 GPU:
 
@@ -1347,8 +1357,10 @@ Consider a Conv2D layer with input shape (batch=32, channels=128, height=56, wid
 $$\text{AI} = \frac{59.2 \text{ GFLOPs}}{78.3 \text{ MB}} = 756 \text{ FLOP/byte}$$
 
 This is **well above** A100's ridge point of 156 FLOP/byte, making this operation **compute-bound**. The layer will achieve near-peak performance of ~312 TFLOPS (FP16 with Tensor Cores).
+:::
 
-**Worked Example: Dense Layer Analysis**
+::: {.callout-notebook}
+## Worked Example: Dense Layer Analysis
 
 Consider a fully connected layer: input (batch=32, features=2048) → output (batch=32, features=2048) on the same A100:
 
@@ -1371,8 +1383,10 @@ This is **below** A100's ridge point of 156 FLOP/byte, making this operation **m
 $$P_{\text{attainable}} = 2000 \text{ GB/s} \times 31.5 \text{ FLOP/byte} = 63 \text{ TFLOPS}$$
 
 This is only 20% of peak compute capability, demonstrating the memory wall effect for small batch sizes.
+:::
 
-**Worked Example: LayerNorm Analysis**
+::: {.callout-notebook}
+## Worked Example: LayerNorm Analysis
 
 LayerNorm with input shape (batch=32, seq=512, hidden=768):
 
@@ -1396,6 +1410,7 @@ This is **severely memory-bound** (156× below ridge point). Performance is limi
 $$P_{\text{attainable}} = 2000 \text{ GB/s} \times 1.5 \text{ FLOP/byte} = 3 \text{ TFLOPS}$$
 
 This represents less than 1% of A100's compute capacity, explaining why normalization layers contribute negligible compute time but significant latency.
+:::
 
 **Optimization Strategy Selection by Arithmetic Intensity**:
 
@@ -1421,7 +1436,8 @@ The roofline analysis directly informs optimization priorities:
    - Techniques: Mandatory fusion with adjacent operations, in-place computation where possible
    - Impact: Can achieve 10× speedup through fusion (e.g., LayerNorm + GELU → single fused kernel)
 
-**Batch Size Impact on Arithmetic Intensity**:
+::: {.callout-notebook}
+## Batch Size Impact on Arithmetic Intensity
 
 Increasing batch size improves AI for matrix operations by amortizing weight loading:
 
@@ -1434,6 +1450,7 @@ Example: Dense layer with M=N=2048
 - Batch=256: AI = 186 FLOP/byte (compute-bound on A100)
 
 This explains the 10-100× throughput improvement from batching in production serving systems, as discussed in @sec-serving.
+:::
 
 #### Irregular Memory Access {#sec-ai-acceleration-irregular-memory-access-c6ec}
 
