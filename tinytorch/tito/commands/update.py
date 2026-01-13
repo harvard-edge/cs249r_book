@@ -5,11 +5,14 @@ Check for updates using GitHub API (fast) and download via curl.
 Uses tinytorch-v* tags to determine latest version.
 """
 
+from __future__ import annotations
+
 import subprocess
 import urllib.request
 import json
 import os
 from argparse import ArgumentParser, Namespace
+from typing import Optional, Tuple
 
 from .base import BaseCommand
 
@@ -51,7 +54,7 @@ class UpdateCommand(BaseCommand):
         except ImportError:
             return "unknown"
 
-    def _get_latest_version(self) -> tuple[str | None, str | None]:
+    def _get_latest_version(self) -> Tuple[Optional[str], Optional[str]]:
         """
         Fetch the latest tinytorch-v* tag from GitHub API.
         Returns (version_string, tag_name) or (None, None) on error.
@@ -88,7 +91,7 @@ class UpdateCommand(BaseCommand):
             self.console.print(f"[dim]Error checking updates: {e}[/dim]")
             return None, None
 
-    def _get_latest_version_urllib(self) -> tuple[str | None, str | None]:
+    def _get_latest_version_urllib(self) -> Tuple[Optional[str], Optional[str]]:
         """Fallback using urllib if curl is not available."""
         try:
             import ssl
