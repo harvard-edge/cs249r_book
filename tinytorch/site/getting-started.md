@@ -48,11 +48,21 @@ tito setup
 ```
 
 **What this does:**
-- Checks your system (Python 3.8+, git)
+- Checks your system (Python 3.10+, git)
 - Downloads TinyTorch to a `tinytorch/` folder
 - Creates an isolated virtual environment
 - Installs all dependencies
 - Verifies installation
+
+**Check your version:**
+```bash
+tito --version
+```
+
+**Update TinyTorch:**
+```bash
+tito update
+```
 
 ## Step 2: Your First Module (15 Minutes)
 
