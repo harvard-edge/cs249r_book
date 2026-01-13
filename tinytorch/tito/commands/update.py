@@ -20,7 +20,7 @@ class UpdateCommand(BaseCommand):
     REPO = "harvard-edge/cs249r_book"
     TAGS_API = f"https://api.github.com/repos/{REPO}/tags"
     TAG_PREFIX = "tinytorch-v"
-    INSTALL_URL = "https://raw.githubusercontent.com/harvard-edge/cs249r_book/dev/tinytorch/install.sh"
+    INSTALL_URL = "https://mlsysbook.ai/tinytorch/install.sh"
 
     @property
     def name(self) -> str:
