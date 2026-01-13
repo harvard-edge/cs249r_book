@@ -1,15 +1,18 @@
 """
 TinyTorch Update Command
 
-Check for updates and download the latest version from GitHub.
-Works with both git-based installs and standalone installs (no .git folder).
+Check for updates using GitHub API (fast) and download via curl.
+Uses tinytorch-v* tags to determine latest version.
 """
 
+from __future__ import annotations
+
 import subprocess
-import shutil
-import tempfile
+import urllib.request
+import json
+import os
 from argparse import ArgumentParser, Namespace
-from pathlib import Path
+from typing import Optional, Tuple
 
 from .base import BaseCommand
 
@@ -17,9 +20,10 @@ from .base import BaseCommand
 class UpdateCommand(BaseCommand):
     """Check for and install TinyTorch updates."""
 
-    REPO_URL = "https://github.com/harvard-edge/cs249r_book.git"
-    SPARSE_PATH = "tinytorch"
-    BRANCH = "main"
+    REPO = "harvard-edge/cs249r_book"
+    TAGS_API = f"https://api.github.com/repos/{REPO}/tags"
+    TAG_PREFIX = "tinytorch-v"
+    INSTALL_URL = "https://mlsysbook.ai/tinytorch/install.sh"
 
     @property
     def name(self) -> str:
@@ -37,169 +41,126 @@ class UpdateCommand(BaseCommand):
             help='Only check for updates, do not install'
         )
         parser.add_argument(
-            '--force',
+            '--yes', '-y',
             action='store_true',
-            help='Force update even if there are local changes'
+            help='Skip confirmation prompt'
         )
 
-    def _has_git(self) -> bool:
-        """Check if we're in a git repository."""
-        git_dir = self.config.project_root / '.git'
-        return git_dir.exists()
-
-    def _get_current_version(self) -> str | None:
-        """Get current version from pyproject.toml or version file."""
+    def _get_current_version(self) -> str:
+        """Get current version from tinytorch package."""
         try:
-            pyproject = self.config.project_root / 'pyproject.toml'
-            if pyproject.exists():
-                content = pyproject.read_text()
-                for line in content.split('\n'):
-                    if line.strip().startswith('version'):
-                        # Extract version from: version = "0.1.0"
-                        return line.split('=')[1].strip().strip('"\'')
-        except Exception:
-            pass
-        return None
+            from tinytorch import __version__
+            return __version__
+        except ImportError:
+            return "unknown"
 
-    def _get_remote_version(self) -> str | None:
-        """Fetch the latest version from GitHub."""
+    def _get_latest_version(self) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Fetch the latest tinytorch-v* tag from GitHub API.
+        Returns (version_string, tag_name) or (None, None) on error.
+        Uses curl for reliability across platforms (avoids SSL issues).
+        """
         try:
-            # Create temp dir and do minimal fetch to get pyproject.toml
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Clone just enough to get version
-                result = subprocess.run(
-                    [
-                        'git', 'clone', '--depth', '1', '--filter=blob:none',
-                        '--sparse', '--branch', self.BRANCH,
-                        self.REPO_URL, temp_dir
-                    ],
-                    capture_output=True,
-                    text=True
-                )
-                if result.returncode != 0:
-                    return None
-
-                # Set sparse checkout to only get pyproject.toml
-                subprocess.run(
-                    ['git', 'sparse-checkout', 'set', f'{self.SPARSE_PATH}/pyproject.toml'],
-                    capture_output=True,
-                    cwd=temp_dir
-                )
-
-                # Read version
-                pyproject = Path(temp_dir) / self.SPARSE_PATH / 'pyproject.toml'
-                if pyproject.exists():
-                    content = pyproject.read_text()
-                    for line in content.split('\n'):
-                        if line.strip().startswith('version'):
-                            return line.split('=')[1].strip().strip('"\'')
-        except Exception:
-            pass
-        return None
-
-    def _download_update(self) -> Path | None:
-        """Download latest TinyTorch to a temp directory."""
-        try:
-            temp_dir = tempfile.mkdtemp(prefix='tinytorch_update_')
-
-            self.console.print("[dim]  Downloading from GitHub...[/dim]")
-
-            # Clone with sparse checkout
+            # Use curl for reliability (handles SSL better than urllib on macOS)
             result = subprocess.run(
-                [
-                    'git', 'clone', '--depth', '1', '--filter=blob:none',
-                    '--sparse', '--branch', self.BRANCH,
-                    self.REPO_URL, f'{temp_dir}/repo'
-                ],
+                ['curl', '-fsSL', '--max-time', '10', self.TAGS_API],
                 capture_output=True,
                 text=True
             )
-
+            
             if result.returncode != 0:
-                self.console.print(f"[red]  Failed to download: {result.stderr}[/red]")
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                return None
-
-            # Set sparse checkout to tinytorch folder
-            subprocess.run(
-                ['git', 'sparse-checkout', 'set', self.SPARSE_PATH],
-                capture_output=True,
-                cwd=f'{temp_dir}/repo'
-            )
-
-            return Path(temp_dir) / 'repo' / self.SPARSE_PATH
-
+                return None, None
+            
+            tags = json.loads(result.stdout)
+            
+            # Find latest tinytorch-v* tag
+            for tag in tags:
+                tag_name = tag.get('name', '')
+                if tag_name.startswith(self.TAG_PREFIX):
+                    version = tag_name[len(self.TAG_PREFIX):]
+                    return version, tag_name
+            
+            return None, None
+            
+        except json.JSONDecodeError:
+            return None, None
+        except FileNotFoundError:
+            # curl not found, fall back to urllib
+            return self._get_latest_version_urllib()
         except Exception as e:
-            self.console.print(f"[red]  Download error: {e}[/red]")
-            return None
+            self.console.print(f"[dim]Error checking updates: {e}[/dim]")
+            return None, None
 
-    def _apply_update(self, new_source: Path, force: bool = False) -> bool:
-        """Apply update by replacing files, preserving modules/ folder."""
+    def _get_latest_version_urllib(self) -> Tuple[Optional[str], Optional[str]]:
+        """Fallback using urllib if curl is not available."""
         try:
-            project_root = self.config.project_root
-
-            # Folders to preserve (student work)
-            preserve = ['modules', '.venv', '.tito', '.tinytorch']
-
-            # Backup preserved folders
-            self.console.print("[dim]  Backing up your work...[/dim]")
-            backups = {}
-            for folder in preserve:
-                src = project_root / folder
-                if src.exists():
-                    backup_path = Path(tempfile.mkdtemp()) / folder
-                    if src.is_dir():
-                        shutil.copytree(src, backup_path)
-                    else:
-                        shutil.copy2(src, backup_path)
-                    backups[folder] = backup_path
-
-            # Remove old files (except preserved)
-            self.console.print("[dim]  Updating files...[/dim]")
-            for item in project_root.iterdir():
-                if item.name not in preserve and item.name != '.git':
-                    if item.is_dir():
-                        shutil.rmtree(item)
-                    else:
-                        item.unlink()
-
-            # Copy new files
-            for item in new_source.iterdir():
-                if item.name not in preserve:
-                    dest = project_root / item.name
-                    if item.is_dir():
-                        shutil.copytree(item, dest)
-                    else:
-                        shutil.copy2(item, dest)
-
-            # Restore preserved folders
-            self.console.print("[dim]  Restoring your work...[/dim]")
-            for folder, backup_path in backups.items():
-                dest = project_root / folder
-                if dest.exists():
-                    if dest.is_dir():
-                        shutil.rmtree(dest)
-                    else:
-                        dest.unlink()
-                if backup_path.is_dir():
-                    shutil.copytree(backup_path, dest)
-                else:
-                    shutil.copy2(backup_path, dest)
-                # Clean up backup
-                shutil.rmtree(backup_path.parent, ignore_errors=True)
-
-            # Reinstall package
-            self.console.print("[dim]  Reinstalling dependencies...[/dim]")
-            subprocess.run(
-                ['pip', 'install', '-e', '.', '-q'],
-                cwd=project_root,
-                capture_output=True
+            import ssl
+            # Create unverified context for macOS compatibility
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            req = urllib.request.Request(
+                self.TAGS_API,
+                headers={'User-Agent': 'TinyTorch-CLI'}
             )
+            
+            with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
+                tags = json.loads(response.read().decode('utf-8'))
+            
+            for tag in tags:
+                tag_name = tag.get('name', '')
+                if tag_name.startswith(self.TAG_PREFIX):
+                    version = tag_name[len(self.TAG_PREFIX):]
+                    return version, tag_name
+            
+            return None, None
+        except Exception:
+            return None, None
 
-            return True
+    def _compare_versions(self, current: str, latest: str) -> int:
+        """
+        Compare version strings.
+        Returns: -1 if current < latest, 0 if equal, 1 if current > latest
+        """
+        try:
+            def parse_version(v: str) -> tuple:
+                # Handle versions like "0.1.1" or "unknown"
+                parts = v.split('.')
+                return tuple(int(p) for p in parts if p.isdigit())
+            
+            current_parts = parse_version(current)
+            latest_parts = parse_version(latest)
+            
+            if current_parts < latest_parts:
+                return -1
+            elif current_parts > latest_parts:
+                return 1
+            return 0
+        except (ValueError, AttributeError):
+            # If parsing fails, assume update needed if versions differ
+            return -1 if current != latest else 0
 
+    def _run_install(self) -> bool:
+        """Run the install script to update TinyTorch."""
+        try:
+            self.console.print()
+            self.console.print("[dim]Downloading and running installer...[/dim]")
+            
+            # Run curl | bash
+            result = subprocess.run(
+                ['bash', '-c', f'curl -fsSL {self.INSTALL_URL} | bash'],
+                capture_output=False,  # Show output to user
+                text=True
+            )
+            
+            return result.returncode == 0
+            
+        except FileNotFoundError:
+            self.console.print("[red]Error: bash or curl not found[/red]")
+            return False
         except Exception as e:
-            self.console.print(f"[red]  Update error: {e}[/red]")
+            self.console.print(f"[red]Install error: {e}[/red]")
             return False
 
     def run(self, args: Namespace) -> int:
@@ -210,68 +171,80 @@ class UpdateCommand(BaseCommand):
         self.console.print("[bold]🔄 Tiny🔥Torch Update[/bold]")
         self.console.print()
 
-        # Get versions
-        self.console.print("[dim]Checking for updates...[/dim]")
+        # Get current version
         current_version = self._get_current_version()
-        remote_version = self._get_remote_version()
+        self.console.print(f"[dim]Current version: v{current_version}[/dim]")
 
-        if not remote_version:
-            self.console.print("[red]❌ Could not check for updates.[/red]")
+        # Check for updates
+        self.console.print("[dim]Checking for updates...[/dim]")
+        latest_version, tag_name = self._get_latest_version()
+
+        if not latest_version:
+            self.console.print()
+            self.console.print("[red]❌ Could not check for updates[/red]")
             self.console.print("[dim]Check your internet connection and try again.[/dim]")
             return 1
 
         # Compare versions
-        if current_version == remote_version:
+        comparison = self._compare_versions(current_version, latest_version)
+
+        if comparison >= 0:
+            # Up to date or ahead
             self.console.print()
             self.console.print(Panel(
-                f"[green]✓ TinyTorch is up to date![/green]\n\n"
-                f"Version: [cyan]{current_version or 'unknown'}[/cyan]",
+                f"[green]✅ You're on the latest version[/green]\n\n"
+                f"Version: [cyan]v{current_version}[/cyan]",
                 border_style="green"
             ))
             return 0
 
-        # Show available update
+        # Update available
         self.console.print()
         self.console.print(Panel(
-            f"[yellow]⬆ Update available![/yellow]\n\n"
-            f"Current: [dim]{current_version or 'unknown'}[/dim]\n"
-            f"Latest:  [green]{remote_version}[/green]",
+            f"[yellow]⬆️  Update available[/yellow]\n\n"
+            f"Current: [dim]v{current_version}[/dim]\n"
+            f"Latest:  [green]v{latest_version}[/green]",
             border_style="yellow"
         ))
 
-        # If check-only mode, stop here
+        # If check-only mode, show install command and exit
         if args.check:
             self.console.print()
-            self.console.print("[dim]Run 'tito update' to install the update.[/dim]")
+            self.console.print("To update, run:")
+            self.console.print(f"  [cyan]tito update[/cyan]")
+            self.console.print()
+            self.console.print("Or manually:")
+            self.console.print(f"  [dim]curl -fsSL {self.INSTALL_URL} | bash[/dim]")
             return 0
 
-        # Confirm update
-        self.console.print()
-        self.console.print("[dim]Your work in modules/ will be preserved.[/dim]")
-        self.console.print()
+        # Confirm update (unless --yes)
+        if not args.yes:
+            self.console.print()
+            self.console.print("[dim]Your work in modules/ will be preserved.[/dim]")
+            self.console.print()
+            try:
+                response = input("Install update? [y/N] ").strip().lower()
+                if response not in ('y', 'yes'):
+                    self.console.print("[dim]Update cancelled.[/dim]")
+                    return 0
+            except (EOFError, KeyboardInterrupt):
+                self.console.print()
+                self.console.print("[dim]Update cancelled.[/dim]")
+                return 0
 
-        # Download and apply update
-        self.console.print("[bold]Installing update...[/bold]")
-
-        new_source = self._download_update()
-        if not new_source:
-            self.console.print("[red]❌ Download failed.[/red]")
-            return 1
-
-        if self._apply_update(new_source, force=args.force):
-            # Clean up download
-            shutil.rmtree(new_source.parent.parent, ignore_errors=True)
-
+        # Run update
+        if self._run_install():
             self.console.print()
             self.console.print(Panel(
-                f"[green]✓ TinyTorch updated successfully![/green]\n\n"
-                f"Now at version: [cyan]{remote_version}[/cyan]\n\n"
-                f"[dim]Your modules/ folder was preserved.[/dim]",
+                f"[green]✅ TinyTorch updated successfully[/green]\n\n"
+                f"Now at version: [cyan]v{latest_version}[/cyan]\n\n"
+                f"[dim]Run 'tito --version' to verify.[/dim]",
                 border_style="green"
             ))
             return 0
         else:
             self.console.print()
-            self.console.print("[red]❌ Update failed.[/red]")
-            self.console.print("[dim]Your original files should still be intact.[/dim]")
+            self.console.print("[red]❌ Update failed[/red]")
+            self.console.print("[dim]Try running manually:[/dim]")
+            self.console.print(f"  curl -fsSL {self.INSTALL_URL} | bash")
             return 1

@@ -54,6 +54,16 @@ tito setup
 - Installs all dependencies
 - Verifies installation
 
+**Check your version:**
+```bash
+tito --version
+```
+
+**Update TinyTorch:**
+```bash
+tito update
+```
+
 ## Step 2: Your First Module (15 Minutes)
 
 Let's build Module 01 (Tensor)—the foundation of all neural networks.

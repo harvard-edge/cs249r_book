@@ -226,6 +226,7 @@ function populateProfileForm(data) {
     const profileLocationInput = document.getElementById('profileLocation');
     const profileInstitutionInput = document.getElementById('profileInstitution');
     const profileWebsitesInput = document.getElementById('profileWebsites');
+    const profileMailingList = document.getElementById('profileMailingList');
     const profileLatitude = document.getElementById('profileLatitude');
     const profileLongitude = document.getElementById('profileLongitude');
 
@@ -241,6 +242,10 @@ function populateProfileForm(data) {
 
     const sites = data.website || data.websites;
     profileWebsitesInput.value = Array.isArray(sites) ? sites.join(', ') : (sites || '');
+
+    if (profileMailingList && data.mailing_list !== undefined && data.mailing_list !== null) {
+        profileMailingList.checked = data.mailing_list;
+    }
 }
 
 export async function handleProfileUpdate(e) {
@@ -258,6 +263,7 @@ export async function handleProfileUpdate(e) {
     const profileLocationInput = document.getElementById('profileLocation');
     const profileInstitutionInput = document.getElementById('profileInstitution');
     const profileWebsitesInput = document.getElementById('profileWebsites');
+    const profileMailingList = document.getElementById('profileMailingList');
     const profileLatitude = document.getElementById('profileLatitude');
     const profileLongitude = document.getElementById('profileLongitude');
 
@@ -268,6 +274,7 @@ export async function handleProfileUpdate(e) {
         location: profileLocationInput.value,
         institution: profileInstitutionInput.value.split(',').map(s => s.trim()).filter(s => s),
         website: profileWebsitesInput.value.split(',').map(s => s.trim()).filter(s => s),
+        mailing_list: profileMailingList ? profileMailingList.checked : true,
         latitude: profileLatitude && profileLatitude.value ? parseFloat(profileLatitude.value) : null,
         longitude: profileLongitude && profileLongitude.value ? parseFloat(profileLongitude.value) : null,
     };
