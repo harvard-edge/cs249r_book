@@ -83,11 +83,6 @@
         // Insert at the very top of the page
         const body = document.body;
         body.insertBefore(bar, body.firstChild);
-        
-        // Trigger animation
-        requestAnimationFrame(() => {
-            bar.classList.add('visible');
-        });
     }
 
     // Initialize when DOM is ready
