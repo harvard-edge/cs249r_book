@@ -33,6 +33,24 @@ import { getBasePath } from './modules/config.js';
     }
 
     // 2.6 Check for Supabase Session & Verify
+    const checkProfile = async (session) => {
+        if (!session || window.location.pathname.includes('profile_setup')) return;
+        
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('display_name, institution, location')
+            .eq('id', session.user.id)
+            .single();
+
+        const hasName = profile && profile.display_name;
+        const hasInst = profile && profile.institution && (Array.isArray(profile.institution) ? profile.institution.length > 0 : !!profile.institution);
+        const hasLoc = profile && profile.location;
+
+        if (!hasName || !hasInst || !hasLoc) {
+            window.location.href = getBasePath() + '/profile_setup.html';
+        }
+    };
+
     supabase.auth.getSession().then(({ data: { session } }) => {
         if (session) {
              localStorage.setItem("tinytorch_token", session.access_token);
@@ -45,12 +63,27 @@ import { getBasePath } from './modules/config.js';
              }
              
              updateNavState();
+             checkProfile(session);
         }
         // 3. Verify Session (Async)
         verifySession();
         
         // 3.5 Check and Auto-update Location (Async, non-blocking)
         checkAndAutoUpdateLocation();
+    });
+
+    // 2.7 Listen for Auth Changes (Fixes OAuth redirect lag)
+    supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_IN' && session) {
+            localStorage.setItem("tinytorch_token", session.access_token);
+            if (session.refresh_token) localStorage.setItem("tinytorch_refresh_token", session.refresh_token);
+            if (session.user) localStorage.setItem("tinytorch_user", JSON.stringify(session.user));
+            updateNavState();
+            checkProfile(session);
+        } else if (event === 'SIGNED_OUT') {
+            localStorage.removeItem("tinytorch_token");
+            updateNavState();
+        }
     });
 
     // 4. Add Event Listeners

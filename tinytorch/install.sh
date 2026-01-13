@@ -67,7 +67,7 @@ REPO_SHORT="harvard-edge/cs249r_book"
 BRANCH="dev"
 INSTALL_DIR="tinytorch"
 SPARSE_PATH="tinytorch"
-TINYTORCH_VERSION="0.1.0"
+TINYTORCH_VERSION="0.1.1"
 
 # ============================================================================
 # ANSI Color Codes (for terminal output)
@@ -129,7 +129,7 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Check if Python version is 3.10+
+# Check if Python version is 3.8+
 check_python_version() {
     local python_cmd="$1"
     local version major minor
@@ -137,8 +137,8 @@ check_python_version() {
     major=$($python_cmd -c "import sys; print(sys.version_info.major)" 2>/dev/null)
     minor=$($python_cmd -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
 
-    # Check for Python 3.10+ (Required for modern type hints)
-    if [ "$major" -eq 3 ] && [ "$minor" -ge 10 ]; then
+    # Check for Python 3.8+ (Required for TinyTorch)
+    if [ "$major" -eq 3 ] && [ "$minor" -ge 8 ]; then
         echo "$version"
         return 0
     elif [ "$major" -gt 3 ]; then
@@ -152,8 +152,8 @@ check_python_version() {
 
 # Find the best Python command (prioritize newer versions)
 get_python_cmd() {
-    # Check specific versions first to avoid system default (often 3.9 on Mac)
-    local candidates=("python3.13" "python3.12" "python3.11" "python3.10" "python3" "python")
+    # Check specific versions first, prioritizing newer versions
+    local candidates=("python3.13" "python3.12" "python3.11" "python3.10" "python3.9" "python3.8" "python3" "python")
     
     for cmd in "${candidates[@]}"; do
         if command_exists "$cmd"; then
@@ -221,12 +221,11 @@ check_prerequisites() {
         # Diagnostic: Check if they have ANY python, just too old
         if command_exists python3; then
              CURRENT_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
-             print_error "Found Python $CURRENT_VER, but 3.10+ is required"
-             echo "  (TinyTorch uses modern type hints like 'str | None')"
+             print_error "Found Python $CURRENT_VER, but 3.8+ is required"
         else
-             print_error "Python 3.10+ not found"
+             print_error "Python 3.8+ not found"
         fi
-        echo "  Install: https://python.org/downloads or 'brew install python@3.11'"
+        echo "  Install: https://python.org/downloads or 'brew install python'"
         errors=$((errors + 1))
     fi
 

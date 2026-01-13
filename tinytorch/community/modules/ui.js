@@ -162,6 +162,11 @@ export function renderLayout() {
                         <input type="text" class="profile-input" id="profileWebsites" placeholder="https://site1.com, https://site2.com">
                     </div>
 
+                    <div class="profile-form-group" style="display: flex; align-items: center; gap: 10px;">
+                        <input type="checkbox" id="profileMailingList" checked style="width: auto;">
+                        <label for="profileMailingList" class="profile-label" style="margin: 0; font-weight: normal;">Subscribe to our mailing list</label>
+                    </div>
+
 
                     <button type="submit" class="profile-submit" id="profileSubmit">Update Profile</button>
                     <button type="button" class="profile-logout-btn" id="profileLogoutBtn">Logout</button>
