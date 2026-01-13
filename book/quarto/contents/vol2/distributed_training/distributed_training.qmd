@@ -68,10 +68,45 @@ Distributed training introduces three primary complexity dimensions absent from 
 
 The systematic optimization methodology established for single-machine training extends to distributed environments with important adaptations. Profiling must now capture inter-device communication patterns and synchronization overhead in addition to computation and memory metrics. Tools like NVIDIA Nsight Systems and PyTorch's distributed profiler reveal whether training is communication-bound or computation-bound, guiding the choice between parallelization strategies. The solution space expands from single-machine techniques to include data parallelism for distributing training examples, model parallelism for distributing model parameters, pipeline parallelism for distributing model layers, and hybrid approaches that combine multiple strategies. The principles remain consistent in identifying bottlenecks, selecting appropriate techniques, and composing solutions, but the implementation complexity increases substantially.
 
-::: {.callout-note title="Figure Placeholder: 3D Parallelism Cube" collapse="true"}
+::: {#fig-3d-parallelism-cube fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: 3D Cube showing Data, Tensor, and Pipeline axes
-\node[draw, align=center] {3D Parallelism\nData x Tensor x Pipeline};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, z={(0.6,0.5)}, x={(1,0)}, y={(0,1)}, scale=1.3]
+  \definecolor{DataColor}{RGB}{70,130,180} % SteelBlue
+  \definecolor{PipeColor}{RGB}{205,92,92}  % IndianRed
+  \definecolor{TensorColor}{RGB}{60,179,113}% MediumSeaGreen
+
+  % Origin
+  \coordinate (O) at (0,0,0);
+
+  % Axes Arrows
+  \draw[->, ultra thick, DataColor] (O) -- (4.5,0,0) node[anchor=north east, align=center, font=\bfseries] {Data Parallelism\\(Replica Count $d$)};
+  \draw[->, ultra thick, PipeColor] (O) -- (0,3.5,0) node[anchor=east, align=right, font=\bfseries] {Pipeline Parallelism\\(Depth/Stages $p$)};
+  \draw[->, ultra thick, TensorColor] (O) -- (0,0,3.5) node[anchor=south west, align=left, font=\bfseries] {Tensor Parallelism\\(Layer Width $t$)};
+
+  % The "Cube" of a specific training configuration
+  % Let's show a config of (d=2, p=2, t=2)
+  \draw[thick, gray!50, dashed] (2,0,0) -- (2,2,0) -- (0,2,0);
+  \draw[thick, gray!50, dashed] (2,0,0) -- (2,0,2) -- (0,0,2);
+  \draw[thick, gray!50, dashed] (0,2,0) -- (0,2,2) -- (0,0,2);
+  \draw[thick, gray!50, dashed] (2,2,0) -- (2,2,2) -- (0,2,2); % Front corner
+  \draw[thick, gray!50, dashed] (2,0,2) -- (2,2,2);
+  \draw[thick, gray!50, dashed] (0,2,2) -- (2,2,2);
+
+  % Highlight the volume
+  \fill[gray!10, opacity=0.5] (O) -- (2,0,0) -- (2,0,2) -- (0,0,2) -- cycle; % Bottom
+  \fill[gray!10, opacity=0.5] (O) -- (0,2,0) -- (0,2,2) -- (0,0,2) -- cycle; % Side
+  \fill[gray!10, opacity=0.5] (O) -- (2,0,0) -- (2,2,0) -- (0,2,0) -- cycle; % Back
+
+  % Label the point
+  \fill[black] (2,2,2) circle (1.5pt) node[anchor=west, xshift=2mm, font=\bfseries] {Training Config $(d, p, t)$};
+  \node[anchor=north west, gray, font=\footnotesize] at (2,2,2) {Total Accelerators = $d \times p \times t$};
+
+  % Contextual Constraints
+  \node[align=center, font=\footnotesize, text=DataColor] at (2.5, -0.5, 0) {constraint: Global Batch Size};
+  \node[align=center, font=\footnotesize, text=PipeColor] at (-0.5, 2.5, 0) {constraint: Latency/Bubbles};
+  \node[align=center, font=\footnotesize, text=TensorColor] at (-0.5, 0, 2.5) {constraint: Memory/NVLink};
+
+\end{tikzpicture}
 ```
 **The 3D Parallelism Cube**. A conceptual visualization of the three orthogonal scaling axes: Data Parallelism (replicating the model), Tensor Parallelism (splitting layers), and Pipeline Parallelism (splitting depth). Production training for models like GPT-4 occupies a specific point $(d, t, p)$ within this cube to balance memory usage, compute efficiency, and communication overhead.
 :::
@@ -555,12 +590,76 @@ To maintain consistency across the distributed system, the gradients computed by
 
 With 8 GPUs sharing gradients for a 100 MB model, ring all-reduce requires only 7 communication steps instead of the 56 steps needed for naive all-to-all synchronization. The ring topology creates bottlenecks where the slowest link in the ring determines the overall synchronization time, and network partitions can halt the entire training process. Alternative algorithms like tree-reduce achieve O(log n) latency at the cost of increased bandwidth requirements on root nodes. Modern systems often implement hierarchical topologies using high-speed links within nodes and lower-bandwidth connections between nodes to optimize these trade-offs.
 
-::: {.callout-note title="Figure Placeholder: Collective Communication Patterns" collapse="true"}
+::: {#fig-coll-comm fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Compare Ring AllReduce (circular) vs Tree AllReduce (hierarchical) vs Parameter Server (star)
-\node[draw, align=center] {Communication Patterns\nRing vs Tree vs Star};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
+  \definecolor{NodeColor}{RGB}{230,230,230}
+  \definecolor{PSColor}{RGB}{176,196,222} % LightSteelBlue
+  \definecolor{ArrowColor}{RGB}{80,80,80}
+
+  \tikzset{
+     node_style/.style={circle, draw=black!50, fill=NodeColor, minimum size=0.9cm, font=\bfseries},
+     ps_style/.style={circle, draw=black!50, fill=PSColor, minimum size=1.1cm, font=\bfseries},
+     arrow_style/.style={->, >=stealth, thick, color=ArrowColor}
+  }
+
+  % A. Parameter Server
+  \begin{scope}
+    \node[anchor=south] at (0, 3.5) {\textbf{A. Parameter Server}};
+    \node[ps_style] (ps) at (0, 1.8) {PS};
+    
+    % Workers arranged in semi-circle below
+    \node[node_style] (w1) at (-2, -0.5) {W1};
+    \node[node_style] (w2) at (-0.7, -0.5) {W2};
+    \node[node_style] (w3) at (0.7, -0.5) {W3};
+    \node[node_style] (w4) at (2, -0.5) {W4};
+    
+    \draw[arrow_style, <->] (ps) -- (w1);
+    \draw[arrow_style, <->] (ps) -- (w2);
+    \draw[arrow_style, <->] (ps) -- (w3);
+    \draw[arrow_style, <->] (ps) -- (w4);
+    
+    \node[align=center, font=\footnotesize, below=0.8cm of ps] {Bottleneck at Central Node};
+  \end{scope}
+
+  % B. Ring AllReduce
+  \begin{scope}[shift={(6,0)}]
+    \node[anchor=south] at (0, 3.5) {\textbf{B. Ring AllReduce}};
+    \foreach \i/\angle in {1/90, 2/0, 3/270, 4/180} {
+        \node[node_style] (r\i) at (\angle:1.6) {G\i};
+    }
+    \draw[arrow_style] (r1) to[bend left=20] (r2);
+    \draw[arrow_style] (r2) to[bend left=20] (r3);
+    \draw[arrow_style] (r3) to[bend left=20] (r4);
+    \draw[arrow_style] (r4) to[bend left=20] (r1);
+    
+    \node[align=center, font=\footnotesize] at (0,0) {Bandwidth\\Optimal};
+  \end{scope}
+
+  % C. Tree AllReduce
+  \begin{scope}[shift={(12,0)}]
+    \node[anchor=south] at (0, 3.5) {\textbf{C. Tree AllReduce}};
+    \node[node_style] (root) at (0, 2.5) {R};
+    \node[node_style] (l1) at (-1.5, 1) {L1};
+    \node[node_style] (l2) at (1.5, 1) {L2};
+    \node[node_style] (ll1) at (-2.2, -0.5) {1};
+    \node[node_style] (ll2) at (-0.8, -0.5) {2};
+    \node[node_style] (lr1) at (0.8, -0.5) {3};
+    \node[node_style] (lr2) at (2.2, -0.5) {4};
+
+    \draw[arrow_style] (root) -- (l1);
+    \draw[arrow_style] (root) -- (l2);
+    \draw[arrow_style] (l1) -- (ll1);
+    \draw[arrow_style] (l1) -- (ll2);
+    \draw[arrow_style] (l2) -- (lr1);
+    \draw[arrow_style] (l2) -- (lr2);
+    
+    \node[align=center, font=\footnotesize] at (3.5, 1) {Low Latency\\$O(\log N)$};
+  \end{scope}
+
+\end{tikzpicture}
 ```
-**Gradient Synchronization Topologies**. Visual comparison of communication patterns. (A) Parameter Server uses a central node, creating bottlenecks. (B) Ring AllReduce distributes bandwidth evenly but has O(N) latency. (C) Tree AllReduce reduces latency to O(log N) but may congest root links. (D) Hierarchical AllReduce combines intra-node NVLink and inter-node InfiniBand.
+**Gradient Synchronization Topologies**. Visual comparison of communication patterns. (A) **Parameter Server** uses a central node, creating bandwidth bottlenecks at the server. (B) **Ring AllReduce** distributes bandwidth evenly across all links but has linear latency scaling. (C) **Tree AllReduce** reduces latency to logarithmic time but may congest links near the root.
 :::
 
 #### Synchronization Models {#sec-distributed-training-sync-models}
@@ -722,13 +821,31 @@ The memory constraints of data parallelism motivate a family of techniques that 
 
 [^fn-zero]: **ZeRO (Zero Redundancy Optimizer)**: Developed by Microsoft Research for DeepSpeed, ZeRO eliminates memory redundancy in data parallel training by partitioning optimizer states, gradients, and parameters across workers instead of replicating them. ZeRO enabled training of models with over 100 billion parameters on hardware previously limited to much smaller models, fundamentally changing the economics of large-scale training.
 
-In standard data parallelism, each GPU maintains a complete copy of:
+::: {.callout-notebook title="Engineering Calculation: ZeRO Memory Savings" collapse="true"}
+**Scenario**: Training a 7B parameter Llama 2 model using Mixed Precision (FP16).
 
-- **Model parameters**: 4 bytes/param (FP32) or 2 bytes/param (FP16/BF16)
-- **Gradients**: Same size as parameters
-- **Optimizer states**: For Adam, 8 bytes/param (momentum + variance in FP32)
+**Baseline: Standard DDP (Replicated State)**
+Per-Parameter Memory Cost:
+- **Weights (FP16)**: 2 bytes
+- **Gradients (FP16)**: 2 bytes
+- **Optimizer State (FP32)**: 12 bytes (4 master weight + 4 momentum + 4 variance)
+- **Total**: 16 bytes/parameter
 
-For a 7B parameter model with Adam optimizer, each GPU requires: $7B \times (4 + 4 + 8) = 112$ GB, exceeding A100-80GB capacity even before accounting for activations.
+Total Memory for 7B Model:
+$$ M_{\text{total}} = 7 \times 10^9 \times 16 \text{ bytes} \approx \mathbf{112 \text{ GB}} $$
+*Result*: **OOM** on A100-80GB.
+
+**Optimization: ZeRO-3 (Fully Sharded)**
+With $N=64$ GPUs, state is partitioned:
+- **Weights**: $2/64$ bytes
+- **Gradients**: $2/64$ bytes
+- **Optimizer**: $12/64$ bytes
+- **Total**: $16/64 = 0.25$ bytes/parameter effective storage!
+
+Per-GPU Memory:
+$$ M_{\text{ZeRO3}} = \frac{112 \text{ GB}}{64} \approx \mathbf{1.75 \text{ GB}} $$
+*Result*: Fits easily, leaving ~78GB for activations (batch size).
+:::
 
 ZeRO addresses this redundancy through progressive sharding:
 
@@ -1108,12 +1225,70 @@ Column-parallel linear layers split weights along columns. For input $X$ and wei
 $$Y = XW = X[W_1 | W_2] = [XW_1 | XW_2]$$
 Each GPU computes its partition independently. Outputs are concatenated (no communication needed if followed by row-parallel layer).
 
-::: {.callout-note title="Figure Placeholder: Tensor Parallelism Matrix Split" collapse="true"}
+::: {#fig-tensor-parallel-split fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Visual showing Matrix A split by columns, B split by rows.
-\node[draw, align=center] {Megatron-LM Partitioning\nColumn Split vs Row Split};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{MatrixColor}{RGB}{200,220,255}
+  \definecolor{SplitColor}{RGB}{100,149,237} % CornflowerBlue
+
+  \tikzset{
+    matrix_box/.style={draw=black!70, fill=MatrixColor, thick, minimum width=2cm, minimum height=2cm},
+    split_v/.style={draw=black!70, fill=SplitColor, minimum width=1cm, minimum height=2cm},
+    split_h/.style={draw=black!70, fill=SplitColor, minimum width=2cm, minimum height=1cm},
+    arrow/.style={->, >=stealth, thick}
+  }
+
+  % Column Parallel (Layer 1)
+  \begin{scope}[xshift=0cm]
+    \node[anchor=south] at (1, 2.5) {\textbf{Column Parallel (e.g., QKV)}};
+    \node[anchor=south] at (1, 2.2) {$W_A = [W_{A1} | W_{A2}]$};
+    
+    % Input X
+    \node[draw, fill=gray!10, minimum width=2cm, minimum height=0.5cm] (X) at (1, -1) {$X$};
+
+    % Split Matrix
+    \node[split_v] (W1) at (0.5, 1) {$W_{A1}$};
+    \node[split_v, right=0cm of W1, fill=MatrixColor] (W2) at (1.5, 1) {$W_{A2}$};
+
+    % GPUs
+    \node[below=0.2cm of X] (GPU) {GPUs compute $Y_i = X W_{Ai}$};
+    
+    \draw[arrow] (X) -- (W1.south);
+    \draw[arrow] (X) -- (W2.south);
+  \end{scope}
+
+  % Symbol
+  \node at (3.5, 1) {\Huge $\rightarrow$};
+  \node[align=center, font=\footnotesize] at (3.5, 0.5) {Activation\\Pass};
+
+  % Row Parallel (Layer 2)
+  \begin{scope}[xshift=5cm]
+    \node[anchor=south] at (1, 2.5) {\textbf{Row Parallel (e.g., Output)}};
+    \node[anchor=south] at (1, 2.2) {$W_B = [W_{B1} ; W_{B2}]$};
+
+    % Inputs
+    \node[draw, fill=SplitColor, minimum width=1cm, minimum height=0.5cm] (Y1) at (0.5, -1) {$Y_1$};
+    \node[draw, fill=MatrixColor, minimum width=1cm, minimum height=0.5cm] (Y2) at (1.5, -1) {$Y_2$};
+
+    % Split Matrix
+    \node[split_h] (WB1) at (1, 1.5) {$W_{B1}$};
+    \node[split_h, below=0cm of WB1, fill=MatrixColor] (WB2) at (1, 0.5) {$W_{B2}$};
+
+    % Output
+    \node[draw, minimum width=2cm, minimum height=0.5cm] (Z) at (1, 3.5) {$Z = Y_1 W_{B1} + Y_2 W_{B2}$};
+    
+    \draw[arrow] (Y1) -- (WB1.west |- WB1.south);
+    \draw[arrow] (Y2) -- (WB2.east |- WB2.south);
+    
+    \draw[arrow] (WB1) -- (Z);
+    \draw[arrow] (WB2) -- (Z);
+    
+    \node[right=0.2cm of Z, font=\bfseries, text=red] {AllReduce needed here};
+  \end{scope}
+
+\end{tikzpicture}
 ```
-**Tensor Parallelism - Matrix Partitioning**. Illustration of Megatron-LM style tensor parallelism. The first linear layer (e.g., QKV) is split column-wise $[W_1 | W_2]$. The second layer (e.g., Output) is split row-wise $[W_1 ; W_2]$. This arrangement allows the output of the first layer to flow directly into the second without synchronization, requiring only one AllReduce after the second layer.
+**Tensor Parallelism - Matrix Partitioning**. Illustration of Megatron-LM style tensor parallelism. The first linear layer (e.g., QKV) is split column-wise $[W_1 | W_2]$. The second layer (e.g., Output) is split row-wise $[W_1 ; W_2]$. This arrangement allows the output of the first layer to flow directly into the second without synchronization, requiring using only one AllReduce after the second layer to sum the partial results.
 :::
 
 Row-parallel linear layers split weights along rows. For $W = \begin{bmatrix} W_1 \\ W_2 \end{bmatrix}$:
@@ -1179,13 +1354,26 @@ Another challenge is data dependency between devices. During the forward pass, a
 
 Model parallelism also increases the complexity of implementation and debugging. Partitioning the model, ensuring proper data flow, and synchronizing gradients across devices require detailed coordination. Errors in any of these steps can lead to incorrect gradient updates or even model divergence. Debugging such errors is often more difficult in distributed systems, as issues may arise only under specific conditions or workloads.
 
-A further challenge is pipeline bubbles in pipeline parallelism. With $P$ pipeline stages and $M$ microbatches per training step, the pipeline experiences idle time at the start (fill) and end (drain) of the schedule. The fraction of time spent in the bubble is given by:
+A further challenge is pipeline bubbles in pipeline parallelism. With $P$ pipeline stages and $M$ microbatches per training step, the pipeline experiences idle time at the start (fill) and end (drain) of the schedule.
 
-$$
-\text{Bubble Fraction} = \frac{P - 1}{M}
-$$
+::: {.callout-notebook title="Engineering Calculation: Pipeline Efficiency" collapse="true"}
+**Scenario**: 8-stage pipeline ($P=8$), choosing micro-batch count ($M$).
 
-In an 8-stage pipeline with $P=8$ and 32 microbatches with $M=32$, the bubble overhead is $(8-1)/32 \approx 22\%$. Increasing $M$ reduces this overhead but increases the memory required to store activations for the pending backward passes. This trade-off between throughput with high $M$ and memory with low $M$ is the central optimization constraint in pipeline parallelism.
+**Formula (Bubble Fraction)**:
+$$ \text{Overhead} = \frac{P - 1}{M} $$
+
+**Case A: Low Latency ($M=4$)**
+$$ \text{Overhead} = \frac{7}{4} = 175\% \text{ (Wait time > Compute time)} $$
+$$ \text{Efficiency} = \frac{1}{1 + 1.75} \approx \mathbf{36\%} $$
+
+**Case B: High Throughput ($M=32$)**
+$$ \text{Overhead} = \frac{7}{32} \approx 22\% $$
+$$ \text{Efficiency} = \frac{1}{1 + 0.22} \approx \mathbf{82\%} $$
+
+**Trade-off**: Case B achieves high efficiency but requires storing activations for $32$ micro-batches, increasing memory usage by $8\times$ compared to Case A.
+:::
+
+Increasing $M$ reduces this overhead but increases the memory required to store activations for the pending backward passes. This trade-off between throughput with high $M$ and memory with low $M$ is the central optimization constraint in pipeline parallelism.
 
 ::: {.callout-note title="Figure: Pipeline Bubble Analysis" collapse="false"}
 ```{.tikz}
@@ -1323,12 +1511,45 @@ Hardware utilization improves substantially over single-strategy approaches. Pur
 
 Communication overhead reduces through hierarchical structuring. Tensor parallelism restricts high-frequency communication to NVLink-connected GPUs within nodes (600 GB/s bandwidth). Pipeline parallelism limits cross-node communication to activation transfers at stage boundaries (requires 100-200 GB/s per stage). Data parallelism performs AllReduce across replica groups using InfiniBand (200 GB/s aggregate). This hierarchy matches communication patterns to available bandwidth at each level, avoiding the scenario where all communication competes for the slowest interconnect.
 
-::: {.callout-note title="Figure Placeholder: Hybrid Parallelism Physical Mapping" collapse="true"}
+::: {#fig-hybrid-mapping fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Diagram showing a cluster of nodes. Tensor Parallel within Node (NVLink). Pipeline Parallel across groups of Nodes. Data Parallel across replicas.
-\node[draw, align=center] {Hybrid Parallelism Mapping\nTP(Intra) -> PP(Inter) -> DP(Replicas)};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{NodeColor}{RGB}{245,245,245}
+  \definecolor{TPColor}{RGB}{176,196,222} % LightSteelBlue
+  \definecolor{PPColor}{RGB}{255,182,193} % LightPink
+
+  % Node 1
+  \node[draw, fill=NodeColor, rounded corners=4pt, minimum width=4cm, minimum height=2.5cm, label={north:Node 1 (PP Stage 1)}] (N1) at (0,0) {};
+  \node[draw, fill=TPColor, circle, label={below:G1}] (G11) at (-1.5, -0.5) {};
+  \node[draw, fill=TPColor, circle, label={below:G2}] (G12) at (-0.5, -0.5) {};
+  \node[draw, fill=TPColor, circle, label={below:G3}] (G13) at (0.5, -0.5) {};
+  \node[draw, fill=TPColor, circle, label={below:G4}] (G14) at (1.5, -0.5) {};
+  \draw[thick, <->, blue] (G11) -- (G12) -- (G13) -- (G14);
+  \node[blue, font=\scriptsize] at (0, 0.2) {Tensor Parallel (NVLink)};
+
+  % Node 2
+  \node[draw, fill=NodeColor, rounded corners=4pt, minimum width=4cm, minimum height=2.5cm, label={north:Node 2 (PP Stage 2)}] (N2) at (6,0) {};
+  \node[draw, fill=TPColor, circle, label={below:G1}] (G21) at (4.5, -0.5) {};
+  \node[draw, fill=TPColor, circle, label={below:G2}] (G22) at (5.5, -0.5) {};
+  \node[draw, fill=TPColor, circle, label={below:G3}] (G23) at (6.5, -0.5) {};
+  \node[draw, fill=TPColor, circle, label={below:G4}] (G24) at (7.5, -0.5) {};
+  \draw[thick, <->, blue] (G21) -- (G22) -- (G23) -- (G24);
+
+  % Pipeline Arrow
+  \draw[ultra thick, ->, orange] (N1) -- node[above, font=\bfseries] {Pipeline Parallel (InfiniBand)} (N2);
+
+  % Replica Group (Data Parallel)
+  \node[draw, dashed, inner sep=10pt, label={above:Replica 1}] (R1) at (3, 0) [minimum width=11cm, minimum height=3.5cm] {};
+  
+  \node[align=left, font=\footnotesize, anchor=west] at (-2, -3) {
+    \textbf{Mapping Strategy:}\\
+    1. \textcolor{blue}{Tensor Parallel}: Inside single Node (Highest BW)\\
+    2. \textcolor{orange}{Pipeline Parallel}: Between adjacent Nodes (High BW)\\
+    3. \textbf{Data Parallel}: Replicates this entire structure
+  };
+\end{tikzpicture}
 ```
-**3D Parallelism Physical Mapping**. How Hybrid Parallelism maps to hardware topology. Tensor Parallelism uses high-bandwidth NVLink within a node. Pipeline Parallelism connects adjacent nodes via high-speed InfiniBand. Data Parallelism replicas can be placed anywhere, synchronizing gradients via the inter-node network.
+**3D Parallelism Physical Mapping**. How Hybrid Parallelism maps to hardware topology. **Tensor Parallelism** uses high-bandwidth NVLink within a node to split layers. **Pipeline Parallelism** connects adjacent nodes via high-speed InfiniBand to form the model depth. **Data Parallelism** replicates this entire pipeline structure, synchronizing gradients via the inter-node network.
 :::
 
 Hybrid parallelism enables training at scales that would otherwise be impossible. GPT-4 training required an estimated 10,000+ H100 GPUs for months. Without hybrid approaches, memory constraints would limit training to smaller models, throughput constraints would extend training time beyond practical limits, and communication overhead would waste the majority of available compute. The combination of tensor, pipeline, and data parallelism transforms these theoretical capabilities into practical training systems.

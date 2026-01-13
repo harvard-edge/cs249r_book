@@ -55,10 +55,10 @@ The fundamental tool for analyzing collective algorithms is the $\alpha$-$\beta$
 The time to send a message of size $n$ is:
 $$T(n) = \alpha + \frac{n}{\beta}$$
 
-::: {.callout-example title="Engineering Calculation: Back-of-the-Napkin AllReduce Time"}
+::: {.callout-notebook title="Engineering Calculation: AllReduce Latency vs. Bandwidth" collapse="true"}
 **The Problem**: You are training a 7B parameter model ($M \approx 14$ GB gradients in FP16) on a 64-GPU cluster. How long does one gradient synchronization step take?
 
-**Formula (Ring AllReduce)**:
+**Formula (Ring AllReduce)**
 $$ T \approx \frac{2M}{B} + 2(N-1)L $$
 *(Using simplified bandwidth term $2M/B$ as $N \to \infty$)*
 
@@ -300,6 +300,28 @@ $$v_t = \text{compress}(g_t + e_t)$$
 $$e_{t+1} = (g_t + e_t) - v_t$$
 
 By carrying over the "compression error" $e_t$ to the next iteration, the system ensures that every gradient component eventually contributes to the model update. This mechanism is the "secret sauce" that enables 100x compression (sparsification) or 1-bit quantization without destroying model convergence.
+
+::: {.callout-notebook title="Worked Example: Error Feedback Mechanism" collapse="true"}
+**Scenario**: Compressing gradients to 1-bit {-1, +1} integers.
+**Threshold**: Round to nearest integer (>=0.5 $\to$ 1, <0.5 $\to$ 0, etc).
+
+**Step 1**
+- **Raw Gradient ($g_1$)**: 0.4
+- **Accumulated Error ($e_1$)**: 0.0 (Initial)
+- **Target ($g_1 + e_1$)**: 0.4
+- **Compressed ($v_1$)**: 0 (Round 0.4 $\to$ 0)
+- **New Error ($e_2$)**: $0.4 - 0 = \mathbf{0.4}$
+- **Transmitted**: 0. *Information delayed, not lost.*
+
+**Step 2**
+- **Raw Gradient ($g_2$)**: 0.3
+- **Target ($g_2 + e_2$)**: $0.3 + 0.4 = 0.7$
+- **Compressed ($v_2$)**: 1 (Round 0.7 $\to$ 1)
+- **New Error ($e_3$)**: $0.7 - 1 = \mathbf{-0.3}$
+- **Transmitted**: 1. *The accumulated 0.4 from step 1 triggered the update here.*
+
+**Result**: The sum of transmitted values (1) approximates sum of gradients (0.7) better than instantaneous rounding would ($0+0=0$).
+:::
 
 ## Mapping Collectives to Topology {#sec-collective-mapping}
 

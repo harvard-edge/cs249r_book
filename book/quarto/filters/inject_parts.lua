@@ -159,10 +159,14 @@ local function read_summaries(path)
       in_description = true
     elseif in_description and current_key then
       local desc_content = line:match('%s%s%s*(.+)')
-      if desc_content then
+      if desc_content and not desc_content:match('^#') then
+        -- Valid description content (not a YAML comment)
         table.insert(description_lines, desc_content)
       elseif line:match('^%s*$') then
         -- Empty line, continue
+      elseif line:match('^%s*#') then
+        -- YAML comment line - end description
+        in_description = false
       else
         -- End of description
         in_description = false

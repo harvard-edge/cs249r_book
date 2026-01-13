@@ -129,32 +129,28 @@ $$C_{total} = C_{training} + C_{serving} \times T_{deployment} \times Q_{rate}$$
 
 where $C_{training}$ is the one-time cost to train the model, $C_{serving}$ is the cost per query served, $T_{deployment}$ is the deployment duration in appropriate time units, and $Q_{rate}$ is the query rate.
 
-::: {.callout-note title="Worked Example: Cost Dominance Analysis"}
+::: {.callout-notebook title="Engineering Calculation: The Serving Cost Multiplier" collapse="true"}
+**Scenario**: Recommend-system model (DLRM).
 
-Consider a recommendation model with the following characteristics:
+**Training Cost ($C_{train}$)**
+- Hardware: 1,000 GPU-hours @ $3/hr = $3,000
+- Engineering Overhead (Data/Exp): 3x Hardware = $9,000
+- **Total Training**: $12,000
 
-**Training costs**:
+**Serving Cost ($C_{serve}$)**
+- Deployment: 2 years (constant updates, amortized)
+- Traffic: 10,000 Queries Per Second (QPS)
+- Efficiency: $10^{-5}$ dollars per query ($10 per million)
 
-- 1,000 GPU-hours on H100 GPUs at $3/GPU-hour = $3,000
-- Data preparation and experimentation overhead (3x): $9,000
-- **Total training cost**: $12,000
+**Lifetime Volume ($Q_{total}$)**
+$$ Q_{total} = 10^4 \text{/s} \times 86,400 \text{ s/day} \times 730 \text{ days} \approx \mathbf{6.31 \times 10^{11} \text{ queries}} $$
 
-**Serving costs**:
+**Total Serving Cost**
+$$ C_{serve\_total} = 6.31 \times 10^{11} \times \$10^{-5} = \mathbf{\$6,310,000} $$
 
-- Deployment duration: 2 years
-- Query rate: 10,000 QPS average
-- Cost per query: $0.00001 (on optimized infrastructure)
-
-**Total queries over lifetime**:
-$$Q_{total} = 10,000 \text{ QPS} \times 86,400 \text{ s/day} \times 730 \text{ days} = 631 \text{ billion queries}$$
-
-**Total serving cost**:
-$$C_{serving} = 631 \times 10^9 \times \$0.00001 = \$6,310,000$$
-
-**Ratio**: Serving cost is **526x** the training cost.
-
-Even reducing serving cost by 10% saves $631,000, far exceeding the entire training budget. This analysis explains why production ML teams often dedicate more engineering resources to serving optimization than training optimization.
-
+**Conclusion**:
+$$ \text{Ratio} = \frac{\$6,310,000}{\$12,000} \approx \mathbf{526\times} $$
+Serving optimization leverage is 500x higher than training optimization. A 1% serving efficiency gain saves \$63k—5x the entire training budget.
 :::
 
 The cost dominance ratio varies by application (@tbl-cost-ratios):
@@ -875,6 +871,30 @@ This relationship reveals the **Batching Efficiency Curve**:
 
 The engineering goal is to find the maximum $B$ such that $L(B) \le \text{SLO}$. This formulation explains why vision models (high $T_{variable}$) saturate at smaller batches than LLMs (high $T_{fixed}$ due to weight loading), requiring different tuning strategies.
 
+::: {.callout-notebook title="Engineering Calculation: Little's Law for Inference" collapse="true"}
+**Concept**: In any stable queuing system, the average number of requests in the system ($L$) equals the arrival rate ($\lambda$) multiplied by the average time a request spends in the system ($W$).
+
+$$ L = \lambda \times W $$
+
+**Application: Concurrency Planning**
+- **Target Throughput ($\lambda$)**: 1,000 requests/sec
+- **Latency SLO ($W$)**: 100 ms (0.1 s)
+
+**Required Concurrency ($L$)**:
+$$ L = 1000 \times 0.1 = \mathbf{100 \text{ concurrent requests}} $$
+
+**Capacity Planning**:
+If a single GPU replica handles batch size 8 with 80ms latency:
+1. Replica Throughput = $8 / 0.08 = 100 \text{ req/s}$
+2. Replicas Needed = $1000 / 100 = 10 \text{ replicas}$
+
+**Verification**:
+Total system concurrency = $10 \text{ replicas} \times 8 \text{ batch} = 80$.
+Wait! We needed 100.
+*Correction*: We must account for queue depth. With 10 replicas active processing 80 reqs, 20 reqs are in queues. 
+Queue wait time added to latency must not violate SLO.
+:::
+
 +-------------------+-----------------------+------------------------+--------------------+------------------------+
 | **Model Type**    | **Batching Strategy** | **Typical Batch Size** | **Key Constraint** | **Throughput Scaling** |
 +:==================+:======================+=======================:+:===================+:=======================+
@@ -1238,10 +1258,42 @@ The system automatically increases batch size to maintain throughput as traffic 
 
 The choice of batching strategy depends on model characteristics, traffic patterns, and latency requirements. The following decision framework guides selection:
 
-::: {.callout-note title="Figure Placeholder: Inference Request Lifecycle" collapse="true"}
+::: {#fig-inference-lifecycle fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Flowchart: Request -> LB -> Queue -> Batcher -> GPU -> Response
-\node[draw, align=center] {Inference Pipeline\nRequest Lifecycle};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=1.5cm]
+  \definecolor{ProcessColor}{RGB}{240,248,255}
+  \definecolor{NetworkColor}{RGB}{255,245,238}
+  \definecolor{QueueColor}{RGB}{245,245,245}
+
+  \tikzset{
+    process/.style={draw=black!70, thick, fill=ProcessColor, rounded corners=2pt, minimum width=2.5cm, minimum height=1.0cm, align=center},
+    queue/.style={draw=black!70, thick, fill=QueueColor, shape=cylinder, shape border rotate=90, aspect=0.25, minimum width=1.5cm, minimum height=1.2cm, align=center},
+    arrow/.style={->, >=stealth, thick, color=black!80}
+  }
+
+  % Nodes
+  \node[process, fill=white] (client) {Client\\Application};
+  \node[process, fill=NetworkColor, right=of client] (lb) {Load\\Balancer};
+  \node[queue, right=of lb] (queue) {Request\\Queue};
+  \node[process, right=of queue] (batcher) {Dynamic\\Batcher};
+  \node[process, right=of batcher, fill=ProcessColor!80!blue] (gpu) {Model\\Execution (GPU)};
+
+  % Edges
+  \draw[arrow] (client) -- node[above, font=\scriptsize] {Network} (lb);
+  \draw[arrow] (lb) -- node[above, font=\scriptsize] {Routing} (queue);
+  \draw[arrow] (queue) -- node[above, font=\scriptsize] {Wait} (batcher);
+  \draw[arrow] (batcher) -- node[above, font=\scriptsize] {Bus} (gpu);
+  
+  % Return path
+  \draw[arrow, dashed] (gpu.south) -- +(0,-0.5) -| node[near start, below, font=\scriptsize] {Response Path} (client.south);
+
+  % Latency Sources
+  \node[below=0.8cm of lb, font=\scriptsize, align=center, color=red!70!black] {Parsing \&\\Routing Latency};
+  \node[below=0.8cm of queue, font=\scriptsize, align=center, color=red!70!black] {Queuing\\Delay};
+  \node[below=0.8cm of batcher, font=\scriptsize, align=center, color=red!70!black] {Batch\\Sync Time};
+  \node[below=0.8cm of gpu, font=\scriptsize, align=center, color=red!70!black] {Compute\\Latency};
+
+\end{tikzpicture}
 ```
 **End-to-End Inference Pipeline**. A high-level view of the request lifecycle: Client -> Load Balancer -> Request Queue -> Batch Scheduler -> Model Execution -> Response. This visualization highlights the critical "Serving Tax" components (serialization, routing, coordination) that consume latency budget outside of the actual GPU compute time.
 :::
@@ -1321,10 +1373,59 @@ After computing local attention, an AllReduce operation (covered in @sec-communi
 
 The communication pattern for tensor-parallel inference follows:
 
-::: {.callout-note title="Figure Placeholder: Tensor Parallelism Inference Flow" collapse="true"}
+::: {#fig-tensor-parallel-flow fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Diagram showing column-row partitioning and AllReduce synchronization
-\node[draw, align=center] {Tensor Parallelism\\Attention Heads Split -> AllReduce\\FFN Split (Column/Row) -> AllReduce};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
+  \definecolor{GPUColor}{RGB}{230,230,250}
+  \definecolor{OpColor}{RGB}{240,248,255}
+  \definecolor{SyncColor}{RGB}{255,228,225}
+
+  % GPU Columns
+  \draw[fil=GPUColor, draw=none] (-2, -0.5) rectangle (1.5, 6);
+  \node[above, font=\bfseries] at (-0.25, 6) {GPU 0};
+  
+  \draw[fill=GPUColor, draw=none] (2.5, -0.5) rectangle (6, 6);
+  \node[above, font=\bfseries] at (4.25, 6) {GPU 1};
+
+  % Attention Block
+  \node[anchor=center] at (2, 5.5) {\textbf{Attention Layer}};
+  
+  \node[draw, fill=OpColor, minimum width=2.5cm] (att0) at (-0.25, 4.5) {Heads 1..H/2};
+  \node[draw, fill=OpColor, minimum width=2.5cm] (att1) at (4.25, 4.5) {Heads H/2..H};
+  
+  \node[draw, fill=SyncColor, rounded corners, minimum width=6cm] (allreduce1) at (2, 3.5) {\textbf{AllReduce} (Combine Heads)};
+  
+  \draw[->, thick] (att0) -- (allreduce1.north -| att0);
+  \draw[->, thick] (att1) -- (allreduce1.north -| att1);
+
+  % MLP Block
+  \node[anchor=center] at (2, 2.5) {\textbf{Feed-Forward (MLP)}};
+  
+  % Col Split
+  \node[draw, fill=OpColor, minimum width=1.2cm] (mlp1a) at (-0.9, 1.5) {Col};
+  \node[draw, fill=OpColor, minimum width=1.2cm] (mlp1b) at (0.4, 1.5) {Col};
+  \node at (-0.25, 1.5) {...}; % Visualizing big matrix split
+  
+  \node[draw, fill=OpColor, minimum width=1.2cm] (mlp2a) at (3.6, 1.5) {Col};
+  \node[draw, fill=OpColor, minimum width=1.2cm] (mlp2b) at (4.9, 1.5) {Col};
+  \node at (4.25, 1.5) {...};
+
+  % Row Split
+  \node[draw, fill=OpColor, minimum width=2.5cm] (mlp1_out) at (-0.25, 0.5) {Row Split};
+  \node[draw, fill=OpColor, minimum width=2.5cm] (mlp2_out) at (4.25, 0.5) {Row Split};
+
+  \draw[->, thick] (allreduce1.south -| att0) -- (mlp1a.north); % Simplified connection
+  \draw[->, thick] (allreduce1.south -| att1) -- (mlp2a.north);
+
+  \draw[->] (mlp1a.south) -- (mlp1_out.north);
+  \draw[->] (mlp2a.south) -- (mlp2_out.north);
+
+  \node[draw, fill=SyncColor, rounded corners, minimum width=6cm] (allreduce2) at (2, -0.5) {\textbf{AllReduce} (Sum Outputs)};
+  
+  \draw[->, thick] (mlp1_out.south) -- (allreduce2.north -| mlp1_out);
+  \draw[->, thick] (mlp2_out.south) -- (allreduce2.north -| mlp2_out);
+
+\end{tikzpicture}
 ```
 **Tensor Parallelism for Inference**. Computation is distributed across devices by splitting tensor operations. Attention heads are partitioned across GPUs, requiring an AllReduce operation to synchronize results. Feed-forward networks use a column-row splitting strategy that requires only one AllReduce synchronization per block. This approach reduces latency for large models but introduces communication overhead that demands high-bandwidth interconnects like NVLink.
 :::
@@ -1386,10 +1487,71 @@ Pipeline parallelism distributes layers across devices sequentially, with each d
 
 For inference, pipeline parallelism creates bubbles differently than in training:
 
-::: {.callout-note title="Figure Placeholder: Pipeline Parallelism Bubbles" collapse="true"}
+::: {#fig-pipeline-bubbles fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Diagram comparing single-request latency (sequential) vs pipelined throughput
-\node[draw, align=center] {Pipeline Parallelism\\Sequential processing of single request (High Latency)\\Pipelined processing of multiple requests (High Throughput)};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{Stage1}{RGB}{173,216,230}
+  \definecolor{Stage2}{RGB}{144,238,144}
+  \definecolor{Stage3}{RGB}{255,255,224}
+  \definecolor{Bubble}{RGB}{240,240,240}
+
+  \tikzset{
+    block/.style={draw=black!50, minimum height=0.6cm, minimum width=1.4cm, font=\scriptsize},
+    label/.style={font=\footnotesize\bfseries}
+  }
+
+  % Scenario A: Single Request (Sequential)
+  \node[label, anchor=west] at (0, 3.5) {A. Single Request (Latency Bound)};
+  
+  % Dev 0
+  \node[anchor=east] at (0, 2.8) {GPU 0};
+  \node[block, fill=Stage1] at (0.8, 2.8) {Req1};
+  \node[block, fill=Bubble, minimum width=2.8cm] at (3.0, 2.8) {Idle};
+  
+  % Dev 1
+  \node[anchor=east] at (0, 2.0) {GPU 1};
+  \node[block, fill=Bubble, minimum width=1.4cm] at (0.8, 2.0) {Idle};
+  \node[block, fill=Stage2] at (2.3, 2.0) {Req1};
+  \node[block, fill=Bubble, minimum width=1.4cm] at (3.7, 2.0) {Idle};
+  
+  % Dev 2
+  \node[anchor=east] at (0, 1.2) {GPU 2};
+  \node[block, fill=Bubble, minimum width=2.8cm] at (1.5, 1.2) {Idle};
+  \node[block, fill=Stage3] at (3.7, 1.2) {Req1};
+  
+  % Total Time Arrow
+  \draw[<->] (0.1, 0.8) -- (4.4, 0.8) node[midway, below, font=\scriptsize] {Total Latency = Sum of Stages};
+
+
+  % Scenario B: Pipelined (Throughput)
+  \node[label, anchor=west] at (0, -0.5) {B. Pipelined Batch (Throughput)};
+  
+  % Shift x origin for alignment
+  \begin{scope}[shift={(0, -3)}]
+      % Dev 0
+      \node[anchor=east] at (0, 2.0) {GPU 0};
+      \node[block, fill=Stage1] at (0.8, 2.0) {Req1};
+      \node[block, fill=Stage1] at (2.3, 2.0) {Req2};
+      \node[block, fill=Stage1] at (3.8, 2.0) {Req3};
+      
+      % Dev 1
+      \node[anchor=east] at (0, 1.2) {GPU 1};
+      \node[block, fill=Bubble] at (0.8, 1.2) {Idle};
+      \node[block, fill=Stage2] at (2.3, 1.2) {Req1};
+      \node[block, fill=Stage2] at (3.8, 1.2) {Req2};
+      \node[block, fill=Stage2] at (5.3, 1.2) {Req3};
+      
+      % Dev 2
+      \node[anchor=east] at (0, 0.4) {GPU 2};
+      \node[block, fill=Bubble, minimum width=2.8cm] at (1.5, 0.4) {Idle};
+      \node[block, fill=Stage3] at (3.8, 0.4) {Req1};
+      \node[block, fill=Stage3] at (5.3, 0.4) {Req2};
+      
+      % Note
+      \node[anchor=west, font=\scriptsize, align=left] at (6.5, 1.2) {High Throughput\\after fill};
+  \end{scope}
+
+\end{tikzpicture}
 ```
 **Pipeline Parallelism Bubbles**. For a single inference request, pipeline parallelism offers no latency benefit as the request must traverse all stages sequentially (top). However, when processing multiple concurrent requests, pipeline bubble utilization improves significantly (bottom), allowing throughput to scale with the number of stages. This makes pipeline parallelism ideal for high-throughput batch processing but less suitable for latency-critical interactive serving.
 :::
@@ -1440,10 +1602,42 @@ $$\text{Output} = \sum_{i \in \text{top-}k} g_i \cdot \text{Expert}_i(\text{inpu
 
 **Expert parallelism** distributes experts across devices, with each device hosting $E/P$ experts:
 
-::: {.callout-note title="Figure Placeholder: Mixture-of-Experts Routing" collapse="true"}
+::: {#fig-moe-routing fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Network diagram showing token routing to experts and AllToAll communication
-\node[draw, align=center] {MoE Routing\\Token -> Gating -> AllToAll Dispatch -> Experts -> AllToAll Gather};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
+  \definecolor{GateColor}{RGB}{255,215,0}
+  \definecolor{ExpColor}{RGB}{144,238,144}
+  \definecolor{CommColor}{RGB}{255,160,122}
+
+  % Input Token
+  \node[draw, fill=white] (token) at (0, 3) {Input Token};
+  
+  % Host Device
+  \node[draw, fill=GateColor!30, minimum height=1cm, minimum width=2cm] (gating) at (0, 1.5) {Gating\\(Top-2)};
+  \draw[->, thick] (token) -- (gating);
+  
+  % Interconnect
+  \node[text=CommColor!80!black, font=\bfseries] at (2.5, 1.5) {All-to-All Dispatch};
+  \draw[->, dashed, thick, CommColor] (gating) -- (4, 3);
+  \draw[->, dashed, thick, CommColor] (gating) -- (4, 0);
+
+  % Expert Devices
+  \node[draw, fill=ExpColor, minimum width=2cm] (exp1) at (5, 3) {Device 1\\Expert A};
+  \node[draw, fill=ExpColor, minimum width=2cm] (exp2) at (5, 0) {Device 2\\Expert B};
+  \node[draw, fill=gray!20, minimum width=2cm] (exp3) at (5, 1.5) {Device X\\Expert C (Idle)};
+
+  % Gather
+  \node[draw, fill=white, rounded corners] (agg) at (8, 1.5) {Weighted\\Sum};
+  
+  \node[text=CommColor!80!black, font=\bfseries] at (6.5, 2.5) {All-to-All Gather};
+  \draw[->, dashed, thick, CommColor] (exp1) -- (agg);
+  \draw[->, dashed, thick, CommColor] (exp2) -- (agg);
+  
+  % Output
+  \node[right=0.5cm of agg] {Output};
+  \draw[->, thick] (agg) -- +(1,0);
+
+\end{tikzpicture}
 ```
 **Mixture-of-Experts (MoE) Routing**. Expert parallelism distributes "experts" across different devices. For each token, a gating mechanism selects the top-k experts. An AllToAll communication step dispatches tokens to the devices hosting their selected experts (1). Experts process the tokens in parallel (2). A second AllToAll step gathers the results back to the original device (3). This pattern enables massive model capacity but introduces all-to-all communication overhead.
 :::
@@ -1523,10 +1717,65 @@ The choice of embedding sharding strategy depends on lookup patterns and communi
 
 : **Embedding Sharding Strategies**: Different strategies trade off lookup locality against load balance. {#tbl-embedding-sharding}
 
-::: {.callout-note title="Figure Placeholder: Embedding Sharding Strategies" collapse="true"}
+::: {#fig-embedding-sharding fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Visual comparison of Row-wise, Column-wise, and Hybrid sharding
-\node[draw, align=center] {Embedding Sharding\\Row-wise: By User ID (Network Gather)\\Column-wise: By Vector Dim (AllGather)\\Hybrid: Hot/Cold Split};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
+  \definecolor{TableColor}{RGB}{240,248,255}
+  \definecolor{ShardColor}{RGB}{176,196,222}
+
+  % A. Row-Wise
+  \node[anchor=west, font=\bfseries] at (0, 4.5) {A. Row-Wise Sharding};
+  
+  \draw[fill=TableColor] (0, 2.5) rectangle (1, 4);
+  \node[rotate=90] at (-0.3, 3.25) {Users 0..N};
+  
+  \draw[->, thick] (1.2, 3.25) -- (2.2, 3.25);
+  
+  % Server 1
+  \draw[fill=ShardColor] (2.5, 3.5) rectangle (3.5, 4.0);
+  \node[right, font=\scriptsize] at (3.5, 3.75) {Svr 1: Users 0..K};
+  
+  % Server 2
+  \draw[fill=ShardColor] (2.5, 2.5) rectangle (3.5, 3.0);
+  \node[right, font=\scriptsize] at (3.5, 2.75) {Svr 2: Users K..N};
+  
+  \node[font=\scriptsize, align=center] at (1.7, 2.0) {Partition by ID\\(Network Gather)};
+
+
+  % B. Column-Wise
+  \node[anchor=west, font=\bfseries] at (6, 4.5) {B. Column-Wise Sharding};
+  
+  \draw[fill=TableColor] (6, 2.5) rectangle (7, 4);
+  \node[rotate=90] at (5.7, 3.25) {Dims 0..D};
+  
+  \draw[->, thick] (7.2, 3.25) -- (8.2, 3.25);
+  
+  % Server 1 (Col split)
+  \draw[fill=ShardColor] (8.5, 2.5) rectangle (9.0, 4.0);
+  \node[above, font=\scriptsize] at (8.75, 4.0) {Svr 1};
+  
+  % Server 2
+  \draw[fill=ShardColor] (9.1, 2.5) rectangle (9.6, 4.0);
+  \node[above, font=\scriptsize] at (9.35, 4.0) {Svr 2};
+
+  \node[font=\scriptsize, align=center] at (7.7, 2.0) {Partition Vector\\(AllGather)};
+
+
+  % C. Hybrid
+  \node[anchor=west, font=\bfseries] at (0, 0.5) {C. Hybrid Sharding};
+  
+  \draw[fill=red!10] (0, -1.0) rectangle (1.5, 0);
+  \node[font=\scriptsize] at (0.75, -0.5) {Hot (Top 1\%)};
+  
+  \draw[fill=blue!10] (0, -2.5) rectangle (1.5, -1.1);
+  \node[font=\scriptsize] at (0.75, -1.8) {Cold (Tail)};
+  
+  \draw[->, thick] (1.7, -1.25) -- (2.7, -1.25);
+  
+  \node[draw, fill=red!10, font=\scriptsize] at (4, -0.5) {Replicated / Col-wise};
+  \node[draw, fill=blue!10, font=\scriptsize] at (4, -1.8) {Row-wise Sharded};
+
+\end{tikzpicture}
 ```
 **Embedding Sharding Strategies**. **Row-wise sharding** places complete embedding vectors on specific servers based on entity ID, requiring a network gather for lookup. **Column-wise sharding** splits each vector across all servers, allowing parallel local lookups followed by an AllGather, which is efficient for popular "hot" embeddings. **Hybrid sharding** combines these approaches, using column sharding for hot items and row sharding for the "cold" long tail to balance load and memory.
 :::
@@ -2335,10 +2584,64 @@ Many LLM workloads share common prefixes across requests. System prompts like "Y
 
 **Prefix caching** shares KV cache entries across requests with common prefixes:
 
-::: {.callout-note title="Figure Placeholder: Prefix Caching with Shared Blocks" collapse="true"}
+::: {#fig-prefix-caching fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Tree or Block diagram showing multiple requests pointing to the same System Prompt blocks
-\node[draw, align=center] {Prefix Caching\\System Prompt Blocks [0-5] (Shared)\\Request A [6-8] (Unique)\\Request B [6-9] (Unique)};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
+  \definecolor{SharedColor}{RGB}{144,238,144}
+  \definecolor{UniqueColorA}{RGB}{173,216,230}
+  \definecolor{UniqueColorB}{RGB}{255,182,193}
+  \definecolor{BlockColor}{RGB}{240,240,240}
+
+  \tikzset{
+    block/.style={draw=black!60, fill=BlockColor, minimum width=0.8cm, minimum height=0.6cm, font=\scriptsize},
+    ptr/.style={->, >=stealth, thick}
+  }
+
+  % Physical Memory Blocks (Central)
+  \node[anchor=north] at (4, 4) {\textbf{Physical Blocks (GPU)}};
+  
+  % Shared Blocks 0-5
+  \foreach \x in {0,1,2,3,4,5} {
+      \node[block, fill=SharedColor] (pb\x) at (\x*0.9 + 1, 3) {B\x};
+  }
+  \node[right, font=\scriptsize] at (6.5, 3) {(System Prompt)};
+  
+  % Unique Blocks for A
+  \node[block, fill=UniqueColorA] (pb10) at (1, 2) {B10};
+  \node[block, fill=UniqueColorA] (pb11) at (1.9, 2) {B11};
+  
+  % Unique Blocks for B
+  \node[block, fill=UniqueColorB] (pb12) at (4, 2) {B12};
+  \node[block, fill=UniqueColorB] (pb13) at (4.9, 2) {B13};
+  \node[block, fill=UniqueColorB] (pb14) at (5.8, 2) {B14};
+
+
+  % Logical View - Request A
+  \node[anchor=east] at (-1, 1) {\textbf{Request A}};
+  \node[block, fill=SharedColor] (la0) at (0, 1) {P0};
+  \node[block, fill=SharedColor] (la1) at (0.9, 1) {P1};
+  \node[font=\scriptsize] at (1.8, 1) {...};
+  \node[block, fill=UniqueColorA] (la6) at (2.7, 1) {P6};
+  
+  \draw[ptr, SharedColor!70!black] (la0) -- (pb0);
+  \draw[ptr, SharedColor!70!black] (la1) -- (pb1);
+  \draw[ptr, UniqueColorA!70!black] (la6) -- (pb10);
+
+  % Logical View - Request B
+  \node[anchor=east] at (-1, 0) {\textbf{Request B}};
+  \node[block, fill=SharedColor] (lb0) at (0, 0) {P0};
+  \node[block, fill=SharedColor] (lb1) at (0.9, 0) {P1};
+  \node[font=\scriptsize] at (1.8, 0) {...};
+  \node[block, fill=UniqueColorB] (lb6) at (2.7, 0) {P6};
+  
+  \draw[ptr, SharedColor!70!black] (lb0) to[in=220, out=45] (pb0);
+  \draw[ptr, SharedColor!70!black] (lb1) to[in=220, out=45] (pb1);
+  \draw[ptr, UniqueColorB!70!black] (lb6) -- (pb12);
+
+  % Annotations
+  \node[align=left, font=\scriptsize, anchor=west] at (7, 1) {Both requests point\\to same physical blocks\\for blocks 0-5};
+
+\end{tikzpicture}
 ```
 **Prefix Caching via Block Sharing**. PagedAttention enables efficient prefix caching by allowing multiple sequences' block tables to point to the same physical blocks for shared content. In this example, the System Prompt is stored in blocks 0-5. Request A and Request B maps their first 6 logical pages to these same physical blocks, storing only their unique suffixes in new blocks. This dramatically reduces memory usage and prefill computation for workloads with shared context.
 :::
@@ -2457,10 +2760,55 @@ Autoregressive generation is inherently sequential: each token depends on previo
 
 **Scenario**: Generating "The quick brown fox jumps"
 
-::: {.callout-note title="Figure Placeholder: Speculative Decoding Timeline" collapse="true"}
+::: {#fig-speculative-decoding fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Sequence/Timeline diagram of Draft generation followed by Parallel Verification
-\node[draw, align=center] {Speculative Decoding\\Draft Model: Gen 4 tokens (Fast)\\Target Model: Verify 4 tokens (Parallel)\\Accept/Reject: Rollback to first error};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
+  \definecolor{DraftColor}{RGB}{255,228,196}
+  \definecolor{VerifyColor}{RGB}{176,224,230}
+  \definecolor{AcceptColor}{RGB}{144,238,144}
+  \definecolor{RejectColor}{RGB}{255,182,193}
+
+  \tikzset{
+     step/.style={draw=black!50, rounded corners=2pt, minimum height=0.7cm, font=\scriptsize, align=center}
+  }
+
+  % Baseline
+  \node[anchor=west] at (0, 4) {\textbf{Standard Decoding} (Sequential)};
+  \draw[->] (0, 3.5) -- (8, 3.5) node[right] {Time};
+  
+  \node[step, fill=VerifyColor, minimum width=1.5cm] at (1, 3.7) {Gen T1};
+  \node[step, fill=VerifyColor, minimum width=1.5cm] at (2.6, 3.7) {Gen T2};
+  \node[step, fill=VerifyColor, minimum width=1.5cm] at (4.2, 3.7) {Gen T3};
+  \node[step, fill=VerifyColor, minimum width=1.5cm] at (5.8, 3.7) {Gen T4};
+
+  % Speculative
+  \node[anchor=west] at (0, 2) {\textbf{Speculative Decoding}};
+  \draw[->] (0, 1.5) -- (8, 1.5) node[right] {Time};
+  
+  % Draft Step
+  \node[step, fill=DraftColor, minimum width=2.0cm] (draft) at (1.2, 1.0) {Draft Model\\Gen [T1..T4]};
+  \node[below, font=\tiny] at (draft.south) {Fast, Low latency};
+  
+  % Verify Step
+  \node[step, fill=VerifyColor, minimum width=2.0cm] (verify) at (3.5, 1.0) {Target Model\\Verify [T1..T4]};
+  \node[below, font=\tiny] at (verify.south) {Parallel Forward Pass};
+  
+  % Outcome
+  \node[step, fill=AcceptColor, minimum width=0.5cm] at (5.0, 1.8) {T1};
+  \node[step, fill=AcceptColor, minimum width=0.5cm] at (5.6, 1.8) {T2};
+  \node[step, fill=AcceptColor, minimum width=0.5cm] at (6.2, 1.8) {T3};
+  \node[step, fill=RejectColor, minimum width=0.5cm] at (6.8, 1.8) {T4};
+  
+  \draw[->, thick, gray] (draft) -- (verify);
+  \draw[->, thick, gray] (verify) -- (5.0, 1.5);
+  
+  \node[right, font=\scriptsize, align=left] at (7, 1.8) {Accept 3\\Reject 1};
+  
+  % Speedup annotation
+  \draw[decorate, decoration={brace, amplitude=5pt}] (0.2, 3.2) -- (6.6, 3.2) node[midway, below=0.2cm, font=\scriptsize] {Standard Time};
+  \draw[decorate, decoration={brace, amplitude=5pt}] (0.2, 0.5) -- (4.8, 0.5) node[midway, below=0.2cm, font=\scriptsize] {Speculative Time};
+
+\end{tikzpicture}
 ```
 **Speculative Decoding Process**. Instead of generating tokens sequentially with the large target model (slow), a small draft model quickly proposes a sequence of $K$ tokens. The target model then verifies all $K$ tokens in a single parallel forward pass (similar to prefill). If the draft tokens match the target's output, they are accepted, effectively generating multiple tokens per target model step. If a mismatch occurs, the sequence is rolled back to the first error.
 :::
@@ -3141,10 +3489,44 @@ The bulkhead pattern[^fn-bulkhead] [@nygard2007releaseit] physically isolates te
 
 **Deployment-level bulkheads**: Dedicate replicas to specific tenants or tenant groups.
 
-::: {.callout-note title="Figure Placeholder: Bulkhead Isolation Patterns" collapse="true"}
+::: {#fig-bulkhead-patterns fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Block diagram contrasting Shared Pool vs Directed/Dedicated Pools
-\node[draw, align=center] {Bulkhead Pattern\\Gold Tier -> Dedicated Replicas\\Standard Tier -> Shared Replicas w/ Quotas\\Failure in Shared Pool does not affect Gold Tier};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
+  \definecolor{GoldColor}{RGB}{255,215,0}
+  \definecolor{StdColor}{RGB}{220,220,220}
+  \definecolor{FailColor}{RGB}{255,99,71}
+
+  % Gold Tier System
+  \node[anchor=west] at (0, 4) {\textbf{Gold Tier} (Dedicated)};
+  \node[draw, fill=white, rounded corners] (gold_lb) at (1, 3) {Gold LB};
+  
+  \node[draw, fill=GoldColor!30] (r1) at (3.5, 3.5) {Replica 1};
+  \node[draw, fill=GoldColor!30] (r2) at (3.5, 2.5) {Replica 2};
+  
+  \draw[->, thick] (gold_lb) -- (r1);
+  \draw[->, thick] (gold_lb) -- (r2);
+
+  % Standard Tier System
+  \node[anchor=west] at (0, 1) {\textbf{Standard Tier} (Shared Pool)};
+  \node[draw, fill=white, rounded corners] (std_lb) at (1, 0) {Std LB};
+  
+  \node[draw, fill=StdColor] (r3) at (3.5, 1.0) {Replica 3};
+  \node[draw, fill=FailColor] (r4) at (3.5, 0.0) {Replica 4\\(Failure)};
+  \node[draw, fill=StdColor] (r5) at (3.5, -1.0) {Replica 5};
+  
+  \draw[->, thick] (std_lb) -- (r3);
+  \draw[->, thick] (std_lb) -- (r4);
+  \draw[->, thick] (std_lb) -- (r5);
+
+  % Isolation Barrier
+  \draw[dashed, ultra thick, black!50] (-0.5, 1.8) -- (5.5, 1.8);
+  \node[fill=white, inner sep=2pt, font=\scriptsize, align=center] at (2.5, 1.8) {\textbf{Complete Isolation}\\No Shared Resources};
+  
+  % Impact Annotation
+  \node[align=left, font=\scriptsize, color=FailColor!80!black] at (5, 0) {Failure constrained\\to Shared Pool};
+  \node[align=left, font=\scriptsize, color=GoldColor!50!black] at (5, 3) {Gold Tier\\unaffected};
+
+\end{tikzpicture}
 ```
 **Bulkhead Isolation Patterns**. To prevent cascading failures in multi-tenant systems, bulkheads isolate resources. **Deployment-level bulkheads** (shown) assign dedicated physical replicas to high-priority tenants, ensuring complete isolation. **Request-level bulkheads** enforce strict concurrency limits within shared processes. Like ship compartments, these boundaries ensure that a failure or resource exhaustion in one segment cannot sink the entire platform.
 :::
@@ -3390,10 +3772,41 @@ Bringing up a new replica for Llama-70B on H100:
 
 :::
 
-::: {.callout-note title="Figure Placeholder: Cold Start Latency Breakdown" collapse="true"}
+::: {#fig-cold-start-breakdown fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Horizontal stacked bar chart showing time components of cold start
-\node[draw, align=center] {Cold Start Timeline\\Provisioning (60s) | Download (180s) | Load (45s) | Warmup (15s)\\Total: >5 mins};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, xscale=0.025, yscale=0.8] 
+  % xscale: 1cm = 40 seconds. Total 320s = 8cm
+  \definecolor{ProvColor}{RGB}{240,230,140}
+  \definecolor{DownColor}{RGB}{135,206,235}
+  \definecolor{LoadColor}{RGB}{144,238,144}
+  \definecolor{WarmColor}{RGB}{255,160,122}
+
+  % Axis
+  \draw[->] (0, 0) -- (330, 0) node[right] {Seconds};
+  \foreach \x/\label in {0/0s, 60/1m, 120/2m, 180/3m, 240/4m, 300/5m} {
+      \draw (\x, 0.1) -- (\x, -0.1) node[below, font=\scriptsize] {\label};
+  }
+
+  % Bar Stack
+  \draw[fill=ProvColor] (0, 1) rectangle (65, 2);
+  \node[font=\tiny] at (32, 1.5) {Provision};
+  
+  \draw[fill=DownColor] (65, 1) rectangle (245, 2);
+  \node[font=\tiny] at (155, 1.5) {Model Download (Big!)};
+  
+  \draw[fill=LoadColor] (245, 1) rectangle (290, 2);
+  \node[font=\tiny] at (267, 1.5) {Load};
+  
+  \draw[fill=WarmColor] (290, 1) rectangle (315, 2);
+  \node[font=\tiny] at (302, 1.5) {Warm};
+
+  % Connect total
+  \draw[decorate, decoration={brace, amplitude=5pt, raise=5pt}] (0, 2) -- (315, 2) node[midway, above=10pt, font=\bfseries] {Total Cold Start: > 5 Minutes};
+  
+  % Legend
+  \node[anchor=west, font=\scriptsize] at (0, 3.5) {\textbf{Breakdown for 70B Model}};
+  
+\end{tikzpicture}
 ```
 **Anatomy of a Cold Start**. Bringing up a new GPU inference replica is a multi-step process taking minutes. While container startup is fast, provisioning the specialized instance and downloading massive model weights (100GB+) dominate the timeline. CUDA context initialization and "warmup" inference passes add further delay. This 5+ minute lag makes purely reactive scaling dangerous for handling sudden traffic spikes.
 :::

@@ -582,7 +582,24 @@ With this framework understanding established, we can apply our problem definiti
 
 2. **Setting Clear Objectives**: The objectives for a KWS system must balance multiple competing requirements. Performance targets include achieving high accuracy rates (98% accuracy in keyword detection) while ensuring low latency (keyword detection and response within 200 milliseconds). Resource constraints demand minimizing power consumption to extend battery life on embedded devices and ensuring the model size is optimized for available memory on the device.
 
-3. **Benchmarks for Success**: Establish clear metrics to measure the success of the KWS system. Key performance indicators include true positive rate (the percentage of correctly identified keywords relative to all spoken keywords) and false positive rate (the percentage of non-keywords including silence, background noise, and out-of-vocabulary words incorrectly identified as keywords). Detection/error tradeoff curves evaluate KWS on streaming audio representative of real-world deployment scenarios by comparing false accepts per hour (false positives over total evaluation audio duration) against false rejection rate (missed keywords relative to spoken keywords in evaluation audio), as demonstrated by @nayak2022improving. Operational metrics track response time (keyword utterance to system response) and power consumption (average power used during keyword detection).
+3. **Benchmarks for Success**: Establish clear metrics to measure the success of the KWS system. Key performance indicators include true positive rate (the percentage of correctly identified keywords relative to all spoken keywords) and false positive rate (the percentage of non-keywords including silence, background noise, and out-of-vocabulary words incorrectly identified as keywords). Detection/error tradeoff curves evaluate KWS on streaming audio representative of real-world deployment scenarios by comparing false accepts per hour (false positives over total evaluation audio duration) against false rejection rate (missed keywords relative to spoken keywords in evaluation audio), as demonstrated by @nayak2022improving.
+
+::: {.callout-notebook title="Engineering Calculation: False Positive Targets" collapse="true"}
+**Constraint**: User tolerance is max 1 false wake-up per month.
+
+**Operational Parameters**
+- **Duty Cycle**: Always-on (24 hours/day).
+- **Window Size**: 1 second classification windows.
+- **Windows per Month**: $60 \times 60 \times 24 \times 30 = 2,592,000$ windows.
+
+**Required Accuracy**
+- **False Positive Rate (FPR)**: $\frac{1}{2,592,000} \approx 3.8 \times 10^{-7}$
+- **Precision Requirement**: 99.99996% rejection of non-keywords.
+
+**Implication**: Standard accuracy metrics (e.g., "99% accuracy") are meaningless here. We must evaluate specifically on **False Accepts per Hour (FA/Hr)**.
+:::
+
+Operational metrics track response time (keyword utterance to system response) and power consumption (average power used during keyword detection).
 
 4. **Stakeholder Engagement and Understanding**: Engage with stakeholders, which include device manufacturers, hardware and software developers, and end-users. Understand their needs, capabilities, and constraints. Different stakeholders bring competing priorities: device manufacturers might prioritize low power consumption, software developers might emphasize ease of integration, and end-users would prioritize accuracy and responsiveness. Balancing these competing requirements shapes system architecture decisions throughout development.
 
@@ -777,6 +794,23 @@ These monitoring dimensions become particularly important when considering end-t
 [^fn-95th-percentile]: **95th percentile**: A statistical measure indicating that 95% of values fall below this threshold, commonly used in performance monitoring to capture typical worst-case behavior while excluding outliers. For latency monitoring, the 95th percentile provides more stable insights than maximum values (which may be anomalies) while revealing performance degradation that averages would hide.
 
 Quality monitoring extends beyond simple schema validation to statistical properties that capture whether serving data resembles training data. Rather than just checking that values fall within valid ranges, production systems track rolling statistics over 24-hour windows. For numerical features like transaction_amount or session_duration, the system computes means and standard deviations continuously, then applies statistical tests like the Kolmogorov-Smirnov test[^fn-ks-test] to compare serving distributions against training distributions.
+
+::: {.callout-notebook title="Worked Example: Detecting Drift with K-S Test" collapse="true"}
+**Scenario**: Monitoring `session_duration` distribution stability between training ($P$) and serving ($Q$).
+
+**Methodology**
+1.  **Compute CDFs**: Calculate Cumulative Distribution Functions for both datasets.
+2.  **Calculate Statistic ($D_{KS}$)**: Find the maximum absolute difference between the CDFs.
+    $$ D_{KS} = \max_x | F_P(x) - F_Q(x) | $$
+3.  **Determine Significance**: Compare $D_{KS}$ to critical value $D_{crit}$ based on sample size ($n$) and confidence level ($\alpha=0.05$).
+    $$ D_{crit} \approx \frac{1.36}{\sqrt{n}} $$
+
+**Example Calculation**
+- Sample size $n=1000$.
+- Critical value $D_{crit} \approx 1.36 / \sqrt{1000} \approx 0.043$.
+- If observed max difference $D_{KS} = 0.08$:
+- **Result**: $0.08 > 0.043$ $\rightarrow$ **Reject Null Hypothesis**. Significant drift detected. Trigger retraining or investigation.
+:::
 
 [^fn-ks-test]: **Kolmogorov-Smirnov test**: A non-parametric statistical test that quantifies whether two datasets come from the same distribution by measuring the maximum distance between their cumulative distribution functions. In ML systems, K-S tests detect data drift by comparing serving data against training baselines, producing p-values where values below 0.05 indicate statistically significant distribution shifts requiring investigation. When the test produces p-values below 0.05, it signals that serving and training data have diverged significantly—perhaps because user behavior has changed, or because an upstream system modification altered how features are computed.
 

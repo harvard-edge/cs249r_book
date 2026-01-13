@@ -79,10 +79,51 @@ Recent research [@ma2024challenges] challenges the rigid separation between stor
 
 This architecture treats Flash not as persistent storage, but as a "cold memory" tier. For autoregressive generation where the *entire* model is read once per token but arithmetic intensity is low, HBF allows serving massive models from a single node, replacing racks of GPUs with a single flash-augmented server. While latency is higher than HBM, cost-per-token drops by orders of magnitude for batch-insensitive workloads.
 
-::: {.callout-note title="Figure Placeholder: Storage Hierarchy" collapse="true"}
+::: {#fig-storage-hierarchy fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Pyramid diagram showing HBM -> DRAM -> NVMe -> DFS -> Object Store
-\node[draw, align=center] {Storage Hierarchy\nBandwidth vs Capacity};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{L1Color}{RGB}{255,100,100}
+  \definecolor{L2Color}{RGB}{255,180,100}
+  \definecolor{L3Color}{RGB}{255,255,150}
+  \definecolor{L4Color}{RGB}{150,255,150}
+  \definecolor{L5Color}{RGB}{150,200,255}
+
+  % Pyramid Layers
+  \coordinate (T) at (0, 5);
+  \coordinate (BL) at (-4, 0);
+  \coordinate (BR) at (4, 0);
+
+  % HBM
+  \filldraw[fill=L1Color, draw=black] (0,5) -- (-0.8,4) -- (0.8,4) -- cycle;
+  \node at (0, 4.3) {\textbf{GPU HBM}};
+  
+  % DRAM
+  \filldraw[fill=L2Color, draw=black] (-0.8,4) -- (-1.6,3) -- (1.6,3) -- (0.8,4) -- cycle;
+  \node at (0, 3.5) {Host DRAM};
+
+  % NVMe
+  \filldraw[fill=L3Color, draw=black] (-1.6,3) -- (-2.4,2) -- (2.4,2) -- (1.6,3) -- cycle;
+  \node at (0, 2.5) {Local NVMe SSD};
+
+  % DFS
+  \filldraw[fill=L4Color, draw=black] (-2.4,2) -- (-3.2,1) -- (3.2,1) -- (2.4,2) -- cycle;
+  \node at (0, 1.5) {Parallel File System (Lustre/GPFS)};
+
+  % Object
+  \filldraw[fill=L5Color, draw=black] (-3.2,1) -- (-4,0) -- (4,0) -- (3.2,1) -- cycle;
+  \node at (0, 0.5) {Object Storage (S3/GCS)};
+
+  % Annotations Left (Bandwidth)
+  \draw[->, ultra thick] (-4.5, 0.5) -- (-4.5, 4.5) node[midway, left, rotate=90] {Bandwidth (Log Scale)};
+  \node[left, font=\footnotesize] at (-4.5, 4.5) {3.3 TB/s};
+  \node[left, font=\footnotesize] at (-4.5, 0.5) {100 GB/s};
+
+  % Annotations Right (Capacity)
+  \draw[->, ultra thick] (4.5, 4.5) -- (4.5, 0.5) node[midway, right, rotate=90] {Capacity (Log Scale)};
+  \node[right, font=\footnotesize] at (4.5, 4.5) {80 GB};
+  \node[right, font=\footnotesize] at (4.5, 0.5) {Exabytes};
+
+\end{tikzpicture}
 ```
 **ML Storage Hierarchy**. A pyramid visualization extending the classic memory hierarchy. The peak shows GPU HBM (3+ TB/s, small capacity), descending through Host DRAM, Local NVMe, and Distributed File Systems, to the base of Object Storage (100+ GB/s aggregate, unlimited capacity). The bandwidth gap between HBM and storage tiers drives the need for sophisticated caching and prefetching.
 :::
@@ -125,12 +166,50 @@ Traditional storage system design optimizes for workloads with specific characte
 
 Understanding access patterns (@tbl-access-patterns) quantitatively enables storage system selection and capacity planning. ML workloads exhibit distinct patterns across different phases and model types.
 
-::: {.callout-note title="Figure Placeholder: Access Patterns" collapse="true"}
+::: {#fig-access-patterns fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Plots of I/O over time for Training (streaming), Checkpoint (burst), Serving (random)
-\node[draw, align=center] {Access Patterns\nStreaming vs Bursty vs Random};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \begin{axis}[
+    width=10cm, height=6cm,
+    xlabel={I/O Request Size},
+    ylabel={Throughput (GB/s)},
+    xmode=log,
+    log basis x=2,
+    xtick={4, 16, 64, 256, 1024},
+    xticklabels={4KB, 16KB, 64KB, 256KB, 1MB},
+    ymin=0, ymax=12,
+    grid=major,
+    legend pos=north west,
+    legend style={draw=none, fill=none}
+  ]
+    % Sequential (High throughput)
+    \addplot[color=blue, ultra thick, mark=square] coordinates {
+      (4, 2)
+      (16, 6)
+      (64, 10)
+      (256, 10.5)
+      (1024, 10.8)
+    };
+    \addlegendentry{Sequential Read (ML Training)}
+    
+    % Random (Low throughput)
+    \addplot[color=red, ultra thick, mark=triangle] coordinates {
+      (4, 0.2)
+      (16, 0.5)
+      (64, 1.2)
+      (256, 2.8)
+      (1024, 4.5)
+    };
+    \addlegendentry{Random Read (Database)}
+
+    \node[anchor=west] at (axis cs: 64, 6) {The "I/O Wall"};
+    \draw[->, thick] (axis cs: 64, 5.8) -- (axis cs: 64, 1.5);
+  \end{axis}
+  
+  \node[align=center, font=\footnotesize, anchor=north] at (5, -1.2) {Larger block sizes amortize overhead, favored by ML sequential scans.};
+\end{tikzpicture}
 ```
-**Workload Access Patterns**. Visual comparison of I/O behavior across ML phases. Training data access appears as massive sequential streams with global shuffling. Checkpoint access shows infrequent, intense write bursts. Feature store access demonstrates continuous, high-frequency random reads. Understanding these distinct signatures is essential for selecting appropriate storage backends.
+**Access Pattern Throughput Comparison**. High-performance storage delivers dramatically different throughput depending on access patterns. Sequential reads (blue) saturate bandwidth quickly as request size increases. Random reads (red), typical of databases or poorly shuffled datasets, suffer from seek latency and protocol overhead, delivering a fraction of the hardware's potential performance.
 :::
 
 **Training data access** follows a streaming sequential pattern with random shuffling. Each epoch reads the entire dataset once, but the order is randomized to prevent the model from learning ordering artifacts. This creates a pattern that is globally sequential (every sample accessed once) but locally random (no predictable next sample). Storage systems must support high sequential bandwidth while handling the pseudo-random access order that shuffling creates.
@@ -657,10 +736,56 @@ where $N_{prefetch}$ is the number of batches buffered and $T_{batch}$ is the GP
 
 For a 200 ms batch time with 100 ms storage latency, prefetching just 1 batch hides the storage latency. However, variance in storage latency requires larger buffers: if storage latency varies from 50-500 ms, prefetching 3-5 batches ensures GPUs never wait.
 
-::: {.callout-note title="Figure Placeholder: Data Loading Pipeline" collapse="true"}
+::: {#fig-data-pipeline fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Horizontal pipeline diagram showing CPU stages (Read, Decode, Transform) overlapping with GPU Compute.
-\node[draw, align=center] {Data Loading Pipeline\nPrefetch Buffer Hiding Latency};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9]
+  \definecolor{CpuColor}{RGB}{200,220,255}
+  \definecolor{GpuColor}{RGB}{150,255,150}
+  \definecolor{WaitColor}{RGB}{255,200,200}
+
+  \tikzset{
+    block/.style={draw=black!60, thick, minimum height=0.6cm, align=center, font=\footnotesize},
+    cpu_block/.style={block, fill=CpuColor},
+    gpu_block/.style={block, fill=GpuColor},
+    wait_block/.style={block, fill=WaitColor, pattern=north east lines, pattern color=red}
+  }
+
+  % Timeline 1: No Pipelining
+  \node[anchor=west, font=\bfseries] at (0, 3.5) {Sequential (No Prefetch)};
+  % Batch 1
+  \node[cpu_block, minimum width=2cm] (L1) at (1, 2.5) {Load B1};
+  \node[gpu_block, minimum width=1.5cm, right=0cm of L1] (P1) {Train B1};
+  % Batch 2
+  \node[cpu_block, minimum width=2cm, right=0cm of P1] (L2) {Load B2};
+  \node[gpu_block, minimum width=1.5cm, right=0cm of L2] (P2) {Train B2};
+  
+  \node[red, font=\footnotesize, above=0.1cm of P1] {GPU Active};
+  \node[red, font=\footnotesize, above=0.1cm of L2] {GPU Idle};
+
+  % Timeline 2: Pipelined
+  \node[anchor=west, font=\bfseries] at (0, 1) {Pipelined (Prefetch N=2)};
+  
+  % CPU Row
+  \node[anchor=east] at (0, 0.5) {CPU (Load)};
+  \node[cpu_block, minimum width=2cm] (PL1) at (1, 0.5) {Load B1};
+  \node[cpu_block, minimum width=2cm, right=0cm of PL1] (PL2) {Load B2};
+  \node[cpu_block, minimum width=2cm, right=0cm of PL2] (PL3) {Load B3};
+  \node[cpu_block, minimum width=2cm, right=0cm of PL3] (PL4) {Load B4};
+
+  % GPU Row
+  \node[anchor=east] at (0, -0.5) {GPU (Train)};
+  \node[gpu_block, minimum width=1.5cm, below=0.4cm of PL2] (PP1) {Train B1};
+  \node[gpu_block, minimum width=1.5cm, right=0cm of PP1] (PP2) {Train B2};
+  \node[gpu_block, minimum width=1.5cm, right=0cm of PP2] (PP3) {Train B3};
+
+  % Arrows
+  \draw[->, dashed] (PL1.east) -- (PP1.west);
+  \draw[->, dashed] (PL2.east) -- (PP2.west);
+  
+  % Label
+  \node[align=left, font=\footnotesize, anchor=west] at (8, 0) {IO hidden\\behind compute};
+
+\end{tikzpicture}
 ```
 **Hiding Storage Latency with Prefetching**. Without prefetching (top), the GPU sits idle while the CPU loads and transforms the next batch. With pipelining (bottom), the CPU prepares Batch $N+1$ while the GPU processes Batch $N$, ensuring the GPU is never starved of data. The prefetch buffer smooths out I/O latency jitter.
 :::
@@ -826,10 +951,52 @@ Asynchronous checkpointing hides I/O latency but introduces complexity: memory o
 
 For most training runs, asynchronous checkpointing reduces overhead to near zero. The memory overhead (one additional copy of model state) is typically acceptable on systems with sufficient host memory.
 
-::: {.callout-note title="Figure Placeholder: Async vs Sync Checkpointing" collapse="true"}
+::: {#fig-async-checkpoint fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Two timelines comparing Blocking Checkpoint vs Async Checkpoint
-\node[draw, align=center] {Checkpointing Strategies\nStop-the-World vs Async Copy-on-Write};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9]
+  \definecolor{ComputeColor}{RGB}{200,220,255}
+  \definecolor{BlockColor}{RGB}{255,100,100}
+  \definecolor{AsyncColor}{RGB}{150,255,150}
+  \definecolor{DiskColor}{RGB}{240,240,240}
+
+  \tikzset{
+    block/.style={draw=black!60, thick, minimum height=0.8cm, align=center, font=\footnotesize},
+    compute/.style={block, fill=ComputeColor, minimum width=2.5cm},
+    stall/.style={block, fill=BlockColor, minimum width=2cm},
+    snap/.style={block, fill=AsyncColor, minimum width=0.5cm},
+    disk/.style={block, fill=DiskColor, pattern=north east lines, pattern color=gray!50}
+  }
+
+  % Synchronous Timeline
+  \node[anchor=west, font=\bfseries] at (0, 3) {Synchronous Checkpointing};
+  \node[compute] (S1) at (1.5, 2) {Training};
+  \node[stall, right=0cm of S1] (S2) {Write (2m)};
+  \node[compute, right=0cm of S2] (S3) {Training};
+  \node[stall, right=0cm of S3] (S4) {Write (2m)};
+  
+  \draw[decorate, decoration={brace, amplitude=5pt}, red, thick] (S2.south west) -- (S2.south east) node[midway, below=5pt] {GPU Idle};
+
+  % Asynchronous Timeline
+  \node[anchor=west, font=\bfseries] at (0, 0) {Asynchronous Checkpointing};
+  % GPU Line
+  \node[anchor=east] at (0, -1) {GPU/CPU};
+  \node[compute] (A1) at (1.5, -1) {Training};
+  \node[snap, right=0cm of A1] (A2) {Cp};
+  \node[compute, minimum width=4cm, right=0cm of A2] (A3) {Training};
+  \node[snap, right=0cm of A3] (A4) {Cp};
+  \node[compute, right=0cm of A4] (A5) {Training};
+
+  % Storage Line
+  \node[anchor=east] at (0, -2) {Storage};
+  \node[disk, minimum width=2cm, below=0.2cm of A2, xshift=1cm] (D1) {Background Write};
+  \node[disk, minimum width=2cm, below=0.2cm of A4, xshift=1cm] (D2) {Background Write};
+
+  \draw[->, dashed] (A2.south) -- (D1.north west);
+  \draw[->, dashed] (A4.south) -- (D2.north west);
+
+  \node[right=0.2cm of A2, font=\footnotesize, align=left] {RAM Snapshot\\(Seconds)};
+
+\end{tikzpicture}
 ```
 **Zero-Overhead Checkpointing**. (A) Synchronous checkpointing halts training (`Stop-the-World`), wasting valuable accelerator time on I/O. (B) Asynchronous checkpointing captures a snapshot in CPU memory and writes to storage in the background while training resumes immediately. This overlaps the massive write I/O with useful computation.
 :::
@@ -935,10 +1102,42 @@ where $T_{save}$ is the time to save a checkpoint and $MTBF$ is the mean time be
 
 This formula minimizes expected wasted work, accounting for both checkpoint overhead and work lost to failures. The MTBF[^fn-mtbf] for GPU clusters decreases inversely with cluster size, making optimal checkpoint intervals surprisingly short for large-scale training.
 
-::: {.callout-note title="Figure Placeholder: Young-Daly Tradeoff" collapse="true"}
+::: {#fig-young-daly-storage fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: U-shaped cost curve. X-axis: Checkpoint Interval. Y-axis: Total Overhead.
-\node[draw, align=center] {Young-Daly Optimization\nBalancing Overhead vs Risk};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \begin{axis}[
+    width=10cm, height=6cm,
+    xlabel={Checkpoint Interval $\tau$},
+    ylabel={Total Wasted Time (Cost)},
+    xtick=\empty, ytick=\empty,
+    axis lines=left,
+    ymin=0, ymax=10,
+    xmin=0.5, xmax=10,
+    grid=major,
+    legend pos=north east,
+    legend style={draw=none}
+  ]
+    % Overhead Cost (Writing Checkpoints): C / tau
+    \addplot[domain=1:10, samples=50, green!60!black, thick, dashed] {4/x};
+    \addlegendentry{Checkpoint Overhead ($1/\tau$)}
+
+    % Recovery Cost (Rework): M * tau / 2
+    \addplot[domain=1:10, samples=50, red, thick, dashed] {0.2*x};
+    \addlegendentry{Rework Cost ($\propto \tau$)}
+
+    % Total Cost
+    \addplot[domain=1:10, samples=50, blue, ultra thick] {4/x + 0.2*x};
+    \addlegendentry{Total Cost}
+
+    % Optimal Point
+    \draw[dashed, black] (axis cs: 4.47, 0) -- (axis cs: 4.47, 1.79);
+    \node[circle, fill=blue, inner sep=2pt] at (axis cs: 4.47, 1.79) {};
+    \node[anchor=south west, font=\bfseries] at (axis cs: 4.47, 1.8) {Optimal $\tau$};
+    
+  \end{axis}
+  
+  \node[align=center, font=\footnotesize] at (5, -1.2) {Total Cost $ \approx \frac{C}{\tau} + \frac{\tau}{2M} $. Minimum at $\tau = \sqrt{2CM}$.};
+\end{tikzpicture}
 ```
 **The Checkpoint Tradeoff**. Plotting total training time overhead against checkpoint interval. Checkpointing too frequently (left side) incurs high I/O overhead. Checkpointing too rarely (right side) risks losing hours of work when failures occur. The optimal point $T_{opt}$ minimizes the sum of these costs.
 :::
@@ -1070,10 +1269,47 @@ Feature stores solve these problems by providing unified feature computation (wr
 
 A feature store has two primary components: the offline store for training and the online store for serving.
 
-::: {.callout-note title="Figure Placeholder: Feature Store Architecture" collapse="true"}
+::: {#fig-feature-store-architecture fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Diagram showing Offline Store (Training) and Online Store (Serving) paths
-\node[draw, align=center] {Feature Store\nOffline vs Online Paths};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=1.5cm]
+  \definecolor{OfflineColor}{RGB}{200,220,255}
+  \definecolor{OnlineColor}{RGB}{255,220,200}
+  \definecolor{StoreColor}{RGB}{230,230,230}
+
+  \tikzset{
+    proc/.style={draw, rectangle, rounded corners, minimum height=0.8cm, align=center, fill=white},
+    store/.style={draw, cylinder, shape border rotate=90, aspect=0.25, minimum height=1cm, minimum width=1.5cm, align=center, fill=StoreColor},
+    arrow/.style={->, >=stealth, thick}
+  }
+
+  % Offline Path (Top)
+  \node[anchor=west] at (-1, 3) {\textbf{Offline Path (Training)}};
+  \node[proc, fill=OfflineColor] (BatchSource) at (0, 2) {Batch\\Sources};
+  \node[proc] (Transform) at (2.5, 2) {Feature\\Transform};
+  \node[store, fill=OfflineColor!50] (OfflineStore) at (5.5, 2) {Offline Store\\(Data Warehouse)};
+  \node[proc] (Training) at (8.5, 2) {Model\\Training};
+  
+  % Online Path (Bottom)
+  \node[anchor=west] at (-1, -1) {\textbf{Online Path (Inference)}};
+  \node[proc, fill=OnlineColor] (StreamSource) at (0, 0) {Stream\\Sources};
+  \node[proc] (StreamProc) at (2.5, 0) {Stream\\Process};
+  \node[store, fill=OnlineColor!50] (OnlineStore) at (5.5, 0) {Online Store\\(Redis/KV)};
+  \node[proc] (Serving) at (8.5, 0) {Model\\Serving};
+  
+  % Edges
+  \draw[arrow] (BatchSource) -- (Transform);
+  \draw[arrow] (Transform) -- (OfflineStore);
+  \draw[arrow] (OfflineStore) -- node[above, font=\scriptsize] {Historical\nFeatures} (Training);
+  
+  \draw[arrow] (StreamSource) -- (StreamProc);
+  \draw[arrow] (StreamProc) -- (OnlineStore);
+  \draw[arrow] (OnlineStore) -- node[above, font=\scriptsize] {Low Latency\nFeatures} (Serving);
+  
+  % Unified Logic Sync
+  \draw[<->, dashed, thick, blue] (Transform) -- node[right, font=\scriptsize, align=center] {Shared Feature\\Logic} (StreamProc);
+  \draw[->, dashed, thick, gray] (Transform) to[bend right=20] node[left, font=\tiny] {Sync} (OnlineStore);
+
+\end{tikzpicture}
 ```
 **Feature Store System Design**. The dual-path architecture solving the training-serving skew problem. The offline path (top) processes batch data into a data warehouse for training. The online path (bottom) ingests streaming events into a low-latency key-value store for serving. A unified API ensures that features retrieved for training (historical) match those retrieved for inference (current), guaranteeing point-in-time correctness.
 :::
@@ -1124,10 +1360,33 @@ LEFT JOIN features
     AND features.timestamp > labels.event_time - INTERVAL 1 DAY
 ```
 
-::: {.callout-note title="Figure Placeholder: Point-in-Time Correctness" collapse="true"}
+::: {#fig-pit-correctness fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Timeline showing 'Event Time' and 'Feature Time'. Correct join vs Leakage join.
-\node[draw, align=center] {Temporal Joins\nPreventing Data Leakage};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  % Timeline
+  \draw[->, thick] (0, 0) -- (10, 0) node[right] {Time};
+
+  % Feature Updates
+  \foreach \x/\t/\v in {1/10:00/V1, 4/10:05/V2, 7/10:10/V3} {
+    \draw[blue, thick] (\x, 0.2) -- (\x, -0.2);
+    \node[blue, above] at (\x, 0.2) {Feature $\v$};
+    \node[gray, below, font=\scriptsize] at (\x, -0.2) {\t};
+  }
+
+  % Event (Label)
+  \draw[red, ultra thick] (6, 0.5) -- (6, -0.5);
+  \node[red, above, font=\bfseries] at (6, 0.5) {Training Event};
+  \node[red, below, font=\scriptsize] at (6, -0.5) {Click @ 10:08};
+
+  % Correct Join Interval
+  \draw[decorate, decoration={brace, amplitude=5pt}, green!60!black, thick] (4.1, -1) -- (6, -1);
+  \node[green!60!black, below=6pt, align=center, font=\footnotesize] at (5.05, -1) {\textbf{Correct Join}\\(Latest $T < T_{event}$)\\Value: V2};
+  
+  % Leakage Interval
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror}, red, thick] (6.1, -1) -- (7, -1);
+  \node[red, below=6pt, align=center, font=\footnotesize] at (8.5, -1) {\textbf{Data Leakage}\\(Future Info)\\Value: V3};
+
+\end{tikzpicture}
 ```
 **Point-in-Time Correctness**. To prevent data leakage, features for a training example must be joined based on the timestamp of the event. If an ad impression occurred at $T_{event}$, the model must be trained using features as they existed at $T < T_{event}$. Using features from $T > T_{event}$ (e.g., "user clicked") to predict the click introduces future information, rendering the model useless in production.
 :::

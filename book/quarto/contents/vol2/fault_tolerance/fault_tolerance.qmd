@@ -180,12 +180,41 @@ While fail-stop failures are relatively straightforward to handle because the co
 
 Byzantine failures are particularly dangerous in distributed training because the standard assumption that workers compute identical gradients for identical data no longer holds. A single Byzantine worker can corrupt the averaged gradient, potentially causing training to diverge or converge to a poor solution.
 
-::: {.callout-note title="Figure Placeholder: Fail-Stop vs Byzantine" collapse="true"}
+::: {#fig-failure-types fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Visual comparison. Left: Fail-Stop (Node X's silent). Right: Byzantine (Node lies about gradient).
-\node[draw, align=center] {Failure Types\nSilent Death vs Malicious Lies};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{GoodColor}{RGB}{200,255,200}
+  \definecolor{BadColor}{RGB}{255,200,200}
+  
+  \tikzset{
+    node_style/.style={circle, draw, minimum size=1cm, top color=white, bottom color=gray!10},
+    msg/.style={draw, rectangle, rounded corners, font=\scriptsize, fill=white}
+  }
+
+  % Fail-Stop
+  \node[anchor=south] at (2, 2.5) {\textbf{Fail-Stop Failure}};
+  \node[node_style, fill=GoodColor] (C1) at (0, 0) {Coord};
+  \node[node_style, fill=GoodColor] (W1) at (2, 1.5) {W1};
+  \node[node_style, fill=BadColor, label={right:Silent}] (W2) at (4, 0) {W2 (X)};
+  
+  \draw[->, thick, green!60!black] (W1) -- node[msg, above, sloped] {Grad} (C1);
+  \draw[->, thick, dashed, red] (W2) -- node[msg, below, sloped] {Timeout} (C1);
+
+  % Byzantine
+  \begin{scope}[xshift=7cm]
+    \node[anchor=south] at (2, 2.5) {\textbf{Byzantine Failure}};
+    \node[node_style, fill=GoodColor] (C2) at (0, 0) {Coord};
+    \node[node_style, fill=GoodColor] (W3) at (2, 1.5) {W1};
+    \node[node_style, fill=BadColor, label={right:Malicious}] (W4) at (4, 0) {W2 (?!)};
+    
+    \draw[->, thick, green!60!black] (W3) -- node[msg, above, sloped] {Grad: 0.5} (C2);
+    \draw[->, thick, red] (W4) -- node[msg, below, sloped] {Grad: 9.9} (C2);
+    
+    \node[red, font=\bfseries] at (2, -1) {Poisoned Update!};
+  \end{scope}
+\end{tikzpicture}
 ```
-**Fail-Stop vs. Byzantine Failures**. In the fail-stop model (left), a failed worker simply ceases to send messages, which is easily detected by timeouts. In the Byzantine model (right), a failed worker continues to participate but sends incorrect data (e.g., corrupted gradients), which can poison the global model state if not detected by validational redundancy.
+**Fail-Stop vs. Byzantine Failures**. In the fail-stop model (left), a failed worker simply ceases to send messages, which is easily detected by timeouts. In the Byzantine model (right), a failed worker continues to participate but sends incorrect data (e.g., corrupted gradients reported as valid), which can poison the global model state if not detected by validational redundancy.
 :::
 
 Detection of Byzantine failures requires redundant computation. Multiple workers computing gradients for the same data enable comparison of results. Statistical outlier detection can identify workers consistently producing anomalous gradients. These detection mechanisms add computational overhead and may not catch subtle corruption.
@@ -220,10 +249,45 @@ Defending against correlated failures requires understanding failure domains and
 
 : **Failure Domains in ML Infrastructure**: Understanding failure domain boundaries enables placement of redundant components across independent domains, preventing correlated failures from defeating redundancy strategies. {#tbl-failure-domains}
 
-::: {.callout-note title="Figure Placeholder: Failure Domains Hierarchy" collapse="true"}
+::: {#fig-failure-domains fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Nested boxes diagram. Rack contains Nodes. Node contains GPUs. Power Domain spans Racks.
-\node[draw, align=center] {Failure Domains\nScope of Impact};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{RegionColor}{RGB}{240,240,250}
+  \definecolor{ZoneColor}{RGB}{230,230,255}
+  \definecolor{RackColor}{RGB}{220,240,220}
+  \definecolor{NodeColor}{RGB}{250,230,230}
+
+  % Region
+  \draw[fill=RegionColor, thick] (0,0) rectangle (10,6);
+  \node[anchor=north west, font=\bfseries] at (0,6) {Failure Domain: Region (e.g., us-east-1)};
+
+  % Zone A
+  \draw[fill=ZoneColor, thick] (0.5, 0.5) rectangle (4.5, 5);
+  \node[anchor=north west, font=\bfseries] at (0.5, 5) {Zone A};
+  
+  % Rack 1 (Zone A)
+  \draw[fill=RackColor, thick] (1, 1) rectangle (4, 4);
+  \node[anchor=north west, font=\bfseries] at (1, 4) {Rack (Switch/PDU)};
+
+  % Node (Rack 1)
+  \draw[fill=NodeColor, thick] (1.5, 1.5) rectangle (3.5, 3);
+  \node[anchor=north west, font=\bfseries] at (1.5, 3) {Node (OS/PCIe)};
+  
+  % GPU
+  \node[draw, fill=white, minimum width=0.5cm, minimum height=0.5cm] at (2, 2) {GPU};
+  \node[draw, fill=white, minimum width=0.5cm, minimum height=0.5cm] at (3, 2) {GPU};
+
+  % Zone B
+  \draw[fill=ZoneColor, thick] (5.5, 0.5) rectangle (9.5, 5);
+  \node[anchor=north west, font=\bfseries] at (5.5, 5) {Zone B};
+  
+  % Rack 2 (Zone B)
+  \draw[fill=RackColor, thick] (6, 1) rectangle (9, 4);
+  \node[anchor=north west, font=\bfseries] at (6, 4) {Rack};
+  
+   \node[align=left, font=\footnotesize] at (5, -1) {Hierarchical containment means failures propagate downwards.\\A Zone failure implies Rack, Node, and GPU failure.};
+
+\end{tikzpicture}
 ```
 **Hierarchy of Failure Domains**. Failure domains are often nested or overlapping. A GPU failure affects one device. A node failure affects 8 GPUs. A rack switch failure affects 32-64 GPUs. A power distribution unit (PDU) failure may affect multiple racks. Effective fault tolerance requires placing replicas across independent domains (e.g., different racks or rows) to survive correlated failures.
 :::
@@ -244,10 +308,38 @@ The failure taxonomy above classifies failure types and domains, answering WHAT 
 
 The practical implication for ML systems is that fleet-wide failure rates depend on age distribution. A cluster populated entirely with new GPUs will experience elevated failure rates during the first few weeks, followed by a stable period, then increasing failures as the fleet ages. Mixed-age fleets exhibit more consistent aggregate failure rates because different cohorts are in different lifecycle phases.
 
-::: {.callout-note title="Figure Placeholder: Bathtub Curve" collapse="true"}
+::: {#fig-bathtub-curve fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Plot failure rate lambda(t) vs time. High initial, flat middle, rising end.
-\node[draw, align=center] {Bathtub Curve\nFailure Rate vs Component Age};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \begin{axis}[
+    width=10cm, height=6cm,
+    xlabel={Time (Component Age)},
+    ylabel={Failure Rate $\lambda(t)$},
+    xtick=\empty, ytick=\empty,
+    axis lines=left,
+    ymin=0, ymax=1.2,
+    xmin=0, xmax=10,
+    grid=none
+  ]
+    % Infant Mortality
+    \addplot[domain=0.5:2, samples=50, red, ultra thick] {1/(x*2) + 0.2};
+    \node[red, align=center, font=\footnotesize] at (axis cs: 1.2, 0.9) {Infant Mortality\\(Defects)};
+
+    % Useful Life
+    \addplot[domain=2:7, samples=2, blue, ultra thick] {0.2};
+    \node[blue, align=center, font=\footnotesize] at (axis cs: 4.5, 0.35) {Useful Life\\(Random Failures)};
+
+    % Wear Out
+    \addplot[domain=7:9.5, samples=50, orange, ultra thick] {0.2 + 0.05*exp(x-7)};
+    \node[orange, align=center, font=\footnotesize] at (axis cs: 8.5, 0.9) {Wear-Out\\(Aging)};
+    
+    % Burn-in Line
+    \draw[dashed, thick, black!60] (axis cs: 2, 0) -- (axis cs: 2, 1.2);
+    \node[anchor=north west, font=\scriptsize] at (axis cs: 2, 1.2) {Burn-in Period};
+  \end{axis}
+  
+  \node[align=center, font=\footnotesize] at (5, -1.2) {Burn-in testing filters infant mortality.\\Proactive replacement preempts wear-out.};
+\end{tikzpicture}
 ```
 **The Bathtub Curve**. Hardware failure rates $\lambda(t)$ vary over time. (1) **Infant Mortality**: High failure rate initially due to manufacturing defects. (2) **Useful Life**: Constant, low failure rate where random failures dominate. (3) **Wear-Out**: Increasing failure rate as components age. Burn-in testing aims to filter out infant mortality failures before deployment.
 :::
@@ -337,12 +429,12 @@ Let's apply the Young-Daly formula to a real-world scenario.
 **Objective**: Find the optimal checkpoint interval $\tau$ that minimizes wasted time.
 
 **Calculation**:
-$
+$$
 \tau_{opt} = \sqrt{2 \cdot C \cdot M}
-$
-$
+$$
+$$
 \tau_{opt} = \sqrt{2 \cdot (2 \text{ min}) \cdot (180 \text{ min})} = \sqrt{720} \approx \mathbf{26.8 \text{ minutes}}
-$
+$$
 
 **Result**: You should checkpoint roughly every **27 minutes**.
 *   **If you checkpoint every 10 mins**: You waste too much time writing to disk ($17\%$ overhead).
@@ -350,11 +442,42 @@ $
 *   **At 27 mins**: You minimize the combined cost of overhead and recovery ($7\%$ total overhead).
 :::
 
-::: {.callout-note title="Figure Placeholder: Young-Daly Trade-off" collapse="true"}
+::: {#fig-young-daly fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Graph showing Total Waste vs Checkpoint Interval.
-% U-shaped curve. Minimum point is optimal interval.
-\node[draw, align=center] {Young-Daly Cost Curve};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \begin{axis}[
+    width=10cm, height=6cm,
+    xlabel={Checkpoint Interval $\tau$},
+    ylabel={Total Wasted Time (Cost)},
+    xtick=\empty, ytick=\empty,
+    axis lines=left,
+    ymin=0, ymax=10,
+    xmin=0.5, xmax=10,
+    grid=major,
+    legend pos=north east,
+    legend style={draw=none}
+  ]
+    % Overhead Cost (Writing Checkpoints): C / tau
+    \addplot[domain=1:10, samples=50, green!60!black, thick, dashed] {4/x};
+    \addlegendentry{Checkpoint Overhead ($1/\tau$)}
+
+    % Recovery Cost (Rework): M * tau / 2
+    \addplot[domain=1:10, samples=50, red, thick, dashed] {0.2*x};
+    \addlegendentry{Rework Cost ($\propto \tau$)}
+
+    % Total Cost
+    \addplot[domain=1:10, samples=50, blue, ultra thick] {4/x + 0.2*x};
+    \addlegendentry{Total Cost}
+
+    % Optimal Point
+    \draw[dashed, black] (axis cs: 4.47, 0) -- (axis cs: 4.47, 1.79);
+    \node[circle, fill=blue, inner sep=2pt] at (axis cs: 4.47, 1.79) {};
+    \node[anchor=south west, font=\bfseries] at (axis cs: 4.47, 1.8) {Optimal $\tau$};
+    
+  \end{axis}
+  
+  \node[align=center, font=\footnotesize] at (5, -1.2) {Total Cost $ \approx \frac{C}{\tau} + \frac{\tau}{2M} $. Minimum at $\tau = \sqrt{2CM}$.};
+\end{tikzpicture}
 ```
 **Optimal Checkpoint Interval**. The Young-Daly formula identifies the "sweet spot" for checkpoint frequency. The total wasted time (Y-axis) is the sum of checkpoint overhead (linear increase) and rework due to failure (exponential decay). The minimum point represents the optimal interval $\tau$.
 :::
@@ -574,10 +697,30 @@ The challenge is distinguishing stragglers from failures. Stragglers should trig
 
 ### Elastic Training {#sec-elastic-training}
 
-::: {.callout-note title="Figure Placeholder: Elastic Training Flow" collapse="true"}
+::: {#fig-elastic-flow fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Flowchart. Training with N workers -> Failure -> Rescale to N-1 -> Continue.
-\node[draw, align=center] {Elastic Training\nDynamic Resizing Flow};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=1.5cm]
+  \tikzset{
+    proc/.style={draw, rectangle, rounded corners, minimum width=2.5cm, minimum height=1cm, align=center, fill=blue!10},
+    decision/.style={draw, diamond, aspect=2, minimum width=2.5cm, align=center, fill=yellow!10},
+    arrow/.style={->, >=stealth, thick}
+  }
+
+  \node[proc] (Start) {Training (N GPUs)};
+  \node[decision, below=of Start] (Fail) {Monitor Alert:\\Node Failure?};
+  \node[proc, below=of Fail, fill=red!10] (Pause) {Pause Training};
+  \node[proc, below=of Pause] (Rescale) {Rescale Batch/LR\\to N-1 GPUs};
+  \node[proc, below=of Rescale, fill=green!10] (Resume) {Resume Training};
+  
+  \draw[arrow] (Start) -- (Fail);
+  \draw[arrow] (Fail) -- node[right] {Yes} (Pause);
+  \draw[arrow] (Fail.east) -- ++(1,0) |- node[right, near start] {No} (Start);
+  \draw[arrow] (Pause) -- (Rescale);
+  \draw[arrow] (Rescale) -- (Resume);
+  \draw[arrow] (Resume.east) -- ++(1.5,0) |- (Start);
+  
+  \node[right=0.5cm of Rescale, align=left, font=\footnotesize] {Key Step:\\Adjust Global Batch\\or Gradient Accum};
+\end{tikzpicture}
 ```
 **Elastic Training Recovery**. Unlike static training which aborts on failure, elastic training adapts. When a worker fails, the job pauses, redistributes the dataset and model shards across the remaining $N-1$ workers, and resumes training from the last consistent state. This capability transforms hard failures into temporary throughput degradations.
 :::
@@ -753,10 +896,34 @@ Fault tolerance for stateful serving requires multiple mechanisms. Session affin
 
 Redundancy is the foundation of serving fault tolerance. By maintaining multiple copies of serving capability, the system can continue operating when individual copies fail.
 
-::: {.callout-note title="Figure Placeholder: Serving Redundancy" collapse="true"}
+::: {#fig-serving-redundancy fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: Diagram comparing Active-Active vs Active-Passive replication
-\node[draw, align=center] {Serving Redundancy\nActive-Active vs Active-Passive};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{ActiveColor}{RGB}{200,255,200}
+  \definecolor{PassiveColor}{RGB}{240,240,240}
+  
+  % Active-Active
+  \node[anchor=south] at (2.5, 3.5) {\textbf{Active-Active}};
+  \node[draw, fill=gray!10] (LB1) at (2.5, 3) {Load Balancer};
+  \node[draw, fill=ActiveColor] (R1) at (1, 1) {Replica 1};
+  \node[draw, fill=ActiveColor] (R2) at (4, 1) {Replica 2};
+  
+  \draw[->, thick] (LB1) -- node[left, font=\scriptsize] {50\%} (R1);
+  \draw[->, thick] (LB1) -- node[right, font=\scriptsize] {50\%} (R2);
+
+  % Active-Passive
+  \begin{scope}[xshift=7cm]
+    \node[anchor=south] at (2.5, 3.5) {\textbf{Active-Passive}};
+    \node[draw, fill=gray!10] (LB2) at (2.5, 3) {Load Balancer};
+    \node[draw, fill=ActiveColor] (R3) at (1, 1) {Primary};
+    \node[draw, fill=PassiveColor, dashed] (R4) at (4, 1) {Standby};
+    
+    \draw[->, thick] (LB2) -- node[left, font=\scriptsize] {100\%} (R3);
+    \draw[->, thick, dashed, gray] (LB2) -- (R4);
+    
+    \draw[<->, dashed, red] (R3) -- node[below, font=\scriptsize] {Heartbeat / Sync} (R4);
+  \end{scope}
+\end{tikzpicture}
 ```
 **Serving Redundancy Strategies**. Comparison of Active-Active vs. Active-Passive replication. Active-Active (left) distributes load across all replicas, maximizing utilization but requiring capacity headroom. Active-Passive (right) keeps a standby replica idle, simplifying failover logic but wasting resources. Geographic replication (bottom) extends redundancy across regions to survive datacenter-level outages.
 :::
@@ -966,10 +1133,26 @@ Circuit breakers[^fn-circuit-breaker] prevent resource exhaustion by failing fas
 
 Circuit breakers operate in three states. In the closed state, normal operation proceeds and requests pass through. In the open state, downstream is failing and requests fail immediately without attempting downstream call. In the half-open state, the breaker tests recovery by allowing limited requests through to test if downstream recovered.
 
-::: {.callout-note title="Figure Placeholder: Circuit Breaker State Machine" collapse="true"}
+::: {#fig-circuit-breaker fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-% TODO: State machine diagram. Closed -(failure threshold)-> Open -(timeout)-> Half-Open -> (success/fail) -> Closed/Open.
-\node[draw, align=center] {Circuit Breaker\nState Transition Diagram};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=2.5cm]
+  \tikzset{
+    state/.style={circle, draw, minimum size=2cm, align=center, thick},
+    arrow/.style={->, >=stealth, thick, bend left=45}
+  }
+
+  % States
+  \node[state, fill=green!20] (Closed) {CLOSED\\(Normal)};
+  \node[state, fill=red!20, right=of Closed] (Open) {OPEN\\(Fail Fast)};
+  \node[state, fill=yellow!20, below=of Open] (Half) {HALF-OPEN\\(Probing)};
+
+  % Transitions
+  \draw[arrow] (Closed) edge node[above] {Errors > Threshold} (Open);
+  \draw[arrow] (Open) edge node[right] {Timeout Expiry} (Half);
+  \draw[arrow] (Half) edge node[below left] {Success} (Closed);
+  \draw[arrow] (Half) edge node[left] {Failure} (Open);
+  
+\end{tikzpicture}
 ```
 **Circuit Breaker States**. The circuit breaker protects the system from cascading failure. **Closed**: Normal operation. **Open**: Error threshold exceeded; all requests fail fast to prevent resource exhaustion. **Half-Open**: After a timeout, a limited number of requests are allowed through to probe the dependency's health. Success resets to Closed; failure returns to Open.
 :::
