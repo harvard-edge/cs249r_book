@@ -41,6 +41,12 @@ from .commands.dev import DevCommand
 from .commands.olympics import OlympicsCommand
 from .commands.update import UpdateCommand
 
+# Import version from tinytorch package
+try:
+    from tinytorch import __version__
+except ImportError:
+    __version__ = "unknown"
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -180,7 +186,7 @@ class TinyTorchCLI:
         parser.add_argument(
             '--version',
             action='version',
-            version='Tiny🔥Torch CLI 0.1.0'
+            version=f'Tiny🔥Torch v{__version__}'
         )
         parser.add_argument(
             '--verbose', '-v',
