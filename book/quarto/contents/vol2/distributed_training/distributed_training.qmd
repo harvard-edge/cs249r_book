@@ -117,15 +117,11 @@ The systematic optimization methodology established for single-machine training 
 
 Choosing the right parallelism strategy is not a matter of preference; it is a constraint satisfaction problem governed by model size ($M$), batch size ($B$), and interconnect bandwidth (see @tbl-parallelism-tradeoffs).
 
-+--------------------------+------------------------------+-------------------------------+----------------------------------+
-| **Strategy**             | **Communication Pattern**    | **Comm. Volume**              | **Hardware Constraint**          |
-+:=========================+:=============================+:==============================+:=================================+
-| **Data Parallel (DP)**   | AllReduce Gradients          | $\propto M$ (Model Size)      | Requires high bisection BW       |
-+--------------------------+------------------------------+-------------------------------+----------------------------------+
-| **Tensor Parallel (TP)** | AllReduce Activations        | $\propto B \times L$ (Layers) | **Critical**: Needs NVLink/NVSwitch |
-+--------------------------+------------------------------+-------------------------------+----------------------------------+
-| **Pipeline Parallel (PP)**| Point-to-Point (P2P)        | $\propto B \times H$ (Hidden) | Low BW (Ethernet is sufficient)  |
-+--------------------------+------------------------------+-------------------------------+----------------------------------+
+| **Strategy**               | **Communication Pattern**    | **Comm. Volume**              | **Hardware Constraint**           |
+|:---------------------------|:-----------------------------|:------------------------------|:-----------------------------------|
+| **Data Parallel (DP)**     | AllReduce Gradients          | $\propto M$ (Model Size)      | Requires high bisection BW        |
+| **Tensor Parallel (TP)**   | AllReduce Activations        | $\propto B \times L$ (Layers) | **Critical**: Needs NVLink        |
+| **Pipeline Parallel (PP)** | Point-to-Point (P2P)        | $\propto B \times H$ (Hidden) | Low BW (Ethernet is sufficient)   |
 
 : **Parallelism Communication Costs**: Tensor Parallelism has the highest communication frequency (per layer), confining it to intra-node (NVLink) usage. Pipeline Parallelism has the lowest communication volume (boundary activations only), making it suitable for inter-node (Ethernet/InfiniBand) scaling. Data Parallelism sits in the middle but scales poorly as $M$ grows, necessitating ZeRO optimizations. {#tbl-parallelism-tradeoffs}
 
@@ -588,7 +584,7 @@ Following the forward pass, each device computes the gradients of the loss with 
 
 #### Gradient Synchronization {#sec-distributed-training-gradient-synchronization}
 
-To maintain consistency across the distributed system, the gradients computed by each device must be synchronized. This coordination represents a distributed systems challenge in achieving global consensus while minimizing communication complexity. The ring all-reduce algorithm exemplifies this trade-off by organizing devices in a logical ring where each GPU communicates only with its neighbors. The algorithm complexity is O(n) in communication rounds but requires sequential dependencies that can limit parallelism.
+To maintain consistency across the distributed system, the gradients computed by each device must be synchronized. This coordination represents a distributed systems challenge in achieving global consensus while minimizing communication complexity. The ring all-reduce algorithm exemplifies this trade-off by organizing devices in a logical ring where each GPU communicates only with its neighbors (see @fig-coll-comm). The algorithm complexity is O(n) in communication rounds but requires sequential dependencies that can limit parallelism.
 
 With 8 GPUs sharing gradients for a 100 MB model, ring all-reduce requires only 7 communication steps instead of the 56 steps needed for naive all-to-all synchronization. The ring topology creates bottlenecks where the slowest link in the ring determines the overall synchronization time, and network partitions can halt the entire training process. Alternative algorithms like tree-reduce achieve O(log n) latency at the cost of increased bandwidth requirements on root nodes. Modern systems often implement hierarchical topologies using high-speed links within nodes and lower-bandwidth connections between nodes to optimize these trade-offs.
 
@@ -1221,7 +1217,7 @@ Modern literature distinguishes two forms of model parallelism:
 The Megatron-LM framework popularized this distinction, using tensor parallelism within nodes (8 GPUs on NVLink) and pipeline parallelism across nodes (InfiniBand).
 :::
 
-Megatron-style tensor parallelism[^fn-megatron] [@shoeybi2019megatron] partitions matrix multiplications in two ways.
+Megatron-style tensor parallelism[^fn-megatron] [@shoeybi2019megatron] partitions matrix multiplications in two ways (see @fig-tensor-parallel-split).
 
 [^fn-megatron]: **Megatron-LM**: NVIDIA's framework for training large transformer models, first published in 2019. Megatron introduced efficient tensor parallelism strategies specifically designed for transformers, strategically placing AllReduce operations to minimize communication while splitting attention heads and feed-forward layers across GPUs. Megatron-LM enabled training of models with 8.3 billion parameters and established patterns now used across the industry for multi-GPU transformer training.
 
@@ -1511,7 +1507,7 @@ The quantitative analysis of preceding sections demonstrates why hybrid parallel
 
 The primary advantage lies in simultaneous scaling across model size and dataset throughput. A 3D parallel configuration for GPT-3 training distributes the 175B parameters across 8 tensor parallel GPUs within each node, reducing per-GPU memory from 700 GB to 87.5 GB. Pipeline parallelism across 8 stages further enables processing of long sequences without activation memory overflow. Data parallelism across 16 replica groups then scales throughput, achieving effective batch sizes of 1536 while maintaining gradient quality. This orthogonal decomposition addresses memory, throughput, and convergence constraints simultaneously.
 
-Hardware utilization improves substantially over single-strategy approaches. Pure model parallelism leaves devices idle during pipeline bubbles (20-30% of training time). Pure data parallelism leaves devices waiting during gradient synchronization (10-40% of training time). Hybrid approaches overlap these operations: while one pipeline stage computes, another synchronizes gradients within its data parallel group. Megatron-LM demonstrates approximately 50-55% MFU (Model FLOPS Utilization) on 1024 A100 GPUs using 3D parallelism [@narayanan_pipeline_parallelism_2021], compared to 30-40% MFU for pure data parallelism at similar scale. These efficiency gains stem from the hierarchical communication structure that matches bandwidth availability at each level.
+Hardware utilization improves substantially over single-strategy approaches. Pure model parallelism leaves devices idle during pipeline bubbles (20-30% of training time). Pure data parallelism leaves devices waiting during gradient synchronization (10-40% of training time). Hybrid approaches overlap these operations: while one pipeline stage computes, another synchronizes gradients within its data parallel group. Megatron-LM demonstrates approximately 50-55% MFU (Model FLOPS Utilization) on 1024 A100 GPUs using 3D parallelism [@narayanan_pipeline_parallelism_2021], compared to 30-40% MFU for pure data parallelism at similar scale. These efficiency gains stem from the hierarchical communication structure that matches bandwidth availability at each level (as visualized in @fig-hybrid-mapping).
 
 Communication overhead reduces through hierarchical structuring. Tensor parallelism restricts high-frequency communication to NVLink-connected GPUs within nodes (600 GB/s bandwidth). Pipeline parallelism limits cross-node communication to activation transfers at stage boundaries (requires 100-200 GB/s per stage). Data parallelism performs AllReduce across replica groups using InfiniBand (200 GB/s aggregate). This hierarchy matches communication patterns to available bandwidth at each level, avoiding the scenario where all communication competes for the slowest interconnect.
 
