@@ -13,6 +13,7 @@ from rich.panel import Panel
 
 from ..base import BaseCommand
 from .preflight import PreflightCommand
+from .export import DevExportCommand
 
 
 class DevCommand(BaseCommand):
@@ -41,6 +42,14 @@ class DevCommand(BaseCommand):
         preflight_cmd = PreflightCommand(self.config)
         preflight_cmd.add_arguments(preflight_parser)
 
+        # Export subcommand (rebuild curriculum from src/)
+        export_parser = subparsers.add_parser(
+            'export',
+            help='Rebuild curriculum: src/*.py → modules/*.ipynb → tinytorch/core/*.py'
+        )
+        export_cmd = DevExportCommand(self.config)
+        export_cmd.add_arguments(export_parser)
+
     def run(self, args: Namespace) -> int:
         console = self.console
 
@@ -49,7 +58,13 @@ class DevCommand(BaseCommand):
                 "[bold cyan]Developer Commands[/bold cyan]\n\n"
                 "[bold]For developers and instructors - not for students.[/bold]\n\n"
                 "Available subcommands:\n"
+                "  • [bold]export[/bold]     - Rebuild curriculum from src/*.py files\n"
                 "  • [bold]preflight[/bold]  - Run verification checks before commit/release\n\n"
+                "[bold cyan]Export (Rebuild Curriculum):[/bold cyan]\n"
+                "  [dim]tito dev export 01[/dim]           Export specific module\n"
+                "  [dim]tito dev export 01 02 03[/dim]     Export multiple modules\n"
+                "  [dim]tito dev export --all[/dim]        Export all modules\n"
+                "  [bold red]⚠️  This OVERWRITES student notebooks![/bold red]\n\n"
                 "[bold cyan]Preflight Levels:[/bold cyan]\n"
                 "  [dim]tito dev preflight[/dim]           Standard checks (~30s)\n"
                 "  [dim]tito dev preflight --quick[/dim]   Quick checks only (~10s)\n"
@@ -57,8 +72,7 @@ class DevCommand(BaseCommand):
                 "  [dim]tito dev preflight --release[/dim] Release validation (~10-30min)\n\n"
                 "[bold cyan]CI/CD Integration:[/bold cyan]\n"
                 "  [dim]tito dev preflight --ci[/dim]      Non-interactive, exit codes\n"
-                "  [dim]tito dev preflight --json[/dim]    JSON output for automation\n\n"
-                "[dim]Example: tito dev preflight --full[/dim]",
+                "  [dim]tito dev preflight --json[/dim]    JSON output for automation",
                 title="🛠️ Developer Tools",
                 border_style="bright_cyan"
             ))
@@ -68,6 +82,9 @@ class DevCommand(BaseCommand):
         if args.dev_command == 'preflight':
             cmd = PreflightCommand(self.config)
             return cmd.execute(args)
+        elif args.dev_command == 'export':
+            cmd = DevExportCommand(self.config)
+            return cmd.run(args)
         else:
             console.print(Panel(
                 f"[red]Unknown dev subcommand: {args.dev_command}[/red]",

@@ -26,20 +26,16 @@ from .core.exceptions import TinyTorchCLIError
 from .core.theme import Theme
 from rich.panel import Panel
 from .commands.base import BaseCommand
-from .commands.src import SrcCommand
 from .commands.system import SystemCommand
 from .commands.module import ModuleWorkflowCommand
 from .commands.package import PackageCommand
 from .commands.nbgrader import NBGraderCommand
-from .commands.grade import GradeCommand
-from .commands.logo import LogoCommand
 from .commands.milestone import MilestoneCommand
 from .commands.setup import SetupCommand
 from .commands.benchmark import BenchmarkCommand
 from .commands.community import CommunityCommand
 from .commands.dev import DevCommand
 from .commands.olympics import OlympicsCommand
-from .commands.update import UpdateCommand
 
 # Import version from tinytorch package
 try:
@@ -66,6 +62,7 @@ class TinyTorchCLI:
         """Initialize the CLI application."""
         self.config = CLIConfig.from_project_root()
         self.console = get_console()
+        self._tito_dir = self.config.project_root / '.tito'
         # SINGLE SOURCE OF TRUTH: All valid commands registered here
         self.commands: Dict[str, Type[BaseCommand]] = {
             # Essential
@@ -75,7 +72,6 @@ class TinyTorchCLI:
             'module': ModuleWorkflowCommand,
             # Developer tools
             'dev': DevCommand,
-            'src': SrcCommand,
             'package': PackageCommand,
             'nbgrader': NBGraderCommand,
             # Progress tracking
@@ -84,10 +80,6 @@ class TinyTorchCLI:
             'community': CommunityCommand,
             'benchmark': BenchmarkCommand,
             'olympics': OlympicsCommand,
-            # Utilities
-            'update': UpdateCommand,
-            'grade': GradeCommand,
-            'logo': LogoCommand,
         }
 
         # Command categorization for help display
@@ -140,6 +132,46 @@ class TinyTorchCLI:
             lines.append(f"  {cmd:<38} {desc}")
 
         return "\n".join(lines)
+
+    def _is_first_run(self) -> bool:
+        """Check if this is the first time running tito."""
+        return not self._tito_dir.exists()
+
+    def _mark_welcome_shown(self) -> None:
+        """Mark that the welcome message has been shown by creating .tito/ folder."""
+        self._tito_dir.mkdir(parents=True, exist_ok=True)
+
+    def _show_first_run_welcome(self) -> None:
+        """Show a one-time welcome message for new users."""
+        if not self._is_first_run():
+            return
+
+        from rich import box
+
+        welcome_text = f"""[{Theme.EMPHASIS}]🎓 LEARNING APPROACH[/{Theme.EMPHASIS}]
+
+Solutions are included in the notebooks. [bold]This is intentional![/bold]
+
+The best way to learn:
+  [{Theme.SUCCESS}]1.[/{Theme.SUCCESS}] Read the module and run the code
+  [{Theme.SUCCESS}]2.[/{Theme.SUCCESS}] Study how the solutions work
+  [{Theme.SUCCESS}]3.[/{Theme.SUCCESS}] Try implementing from scratch
+     [{Theme.DIM}](reset with: tito module reset)[/{Theme.DIM}]
+
+[{Theme.WARNING}]🐛 PRE-RELEASE:[/{Theme.WARNING}] We're looking for bugs and feedback!
+   Found something? → [{Theme.INFO}]github.com/harvard-edge/cs249r_book/discussions[/{Theme.INFO}]"""
+
+        self.console.print()
+        self.console.print(Panel(
+            welcome_text,
+            title="[bold]Welcome to TinyTorch (Pre-release)[/bold]",
+            border_style=Theme.BORDER_WELCOME,
+            box=box.ROUNDED
+        ))
+        self.console.print()
+
+        # Mark as shown so it only appears once
+        self._mark_welcome_shown()
 
     def _generate_epilog(self) -> str:
         """Generate dynamic epilog from registered commands."""
@@ -290,7 +322,7 @@ class TinyTorchCLI:
                 self.config.no_color = True
 
             # Guard against running outside a virtual environment unless explicitly allowed
-            if parsed_args.command not in ['setup', 'logo', None]:
+            if parsed_args.command not in ['setup', None]:
                 # Check both sys.prefix (traditional activation) and VIRTUAL_ENV (direnv/PATH-based)
                 in_venv = sys.prefix != sys.base_prefix or os.environ.get("VIRTUAL_ENV") is not None
                 allow_system = os.environ.get("TITO_ALLOW_SYSTEM") == "1"
@@ -303,14 +335,14 @@ class TinyTorchCLI:
                     )
                     return 1
 
-            # Show banner for interactive commands (except logo which has its own display)
             # Skip banner for dev command with --json flag (CI/CD output)
             skip_banner = (
-                parsed_args.command == 'logo' or
-                (parsed_args.command == 'dev' and hasattr(parsed_args, 'json') and parsed_args.json)
+                parsed_args.command == 'dev' and hasattr(parsed_args, 'json') and parsed_args.json
             )
             if parsed_args.command and not self.config.no_color and not skip_banner:
                 print_banner()
+                # Show first-run welcome (only once, ever)
+                self._show_first_run_welcome()
 
             # Validate environment for most commands (skip for health)
             skip_validation = (
@@ -327,6 +359,9 @@ class TinyTorchCLI:
             if not parsed_args.command:
                 # Show ASCII logo first
                 print_ascii_logo()
+
+                # Show first-run welcome (only once, ever)
+                self._show_first_run_welcome()
 
                 # Generate dynamic welcome message
                 self.console.print(Panel(

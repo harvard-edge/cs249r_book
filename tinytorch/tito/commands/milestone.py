@@ -1056,13 +1056,11 @@ class MilestoneCommand(BaseCommand):
 
             # Check module completion status using module workflow
             from .module.workflow import ModuleWorkflowCommand
-            from .src import SrcCommand
             from .test import TestCommand
 
             module_workflow = ModuleWorkflowCommand(self.config)
             progress_data = module_workflow.get_progress_data()
 
-            source_cmd = SrcCommand(self.config)
             test_cmd = TestCommand(self.config)
 
             # Determine required modules based on what we're running

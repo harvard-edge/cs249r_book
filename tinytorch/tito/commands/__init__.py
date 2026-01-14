@@ -10,7 +10,6 @@ from .base import BaseCommand
 # Individual commands
 from .test import TestCommand
 from .export import ExportCommand
-from .src import SrcCommand
 from .nbgrader import NBGraderCommand
 from .benchmark import BenchmarkCommand
 from .community import CommunityCommand
@@ -25,7 +24,6 @@ __all__ = [
     # Individual commands
     'TestCommand',
     'ExportCommand',
-    'SrcCommand',
     'NBGraderCommand',
     'BenchmarkCommand',
     'CommunityCommand',

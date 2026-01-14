@@ -80,8 +80,8 @@ test_command "tito module status" \
     "source activate.sh && tito module status" \
     "Module"
 
-test_command "tito logo" \
-    "source activate.sh && tito logo" \
+test_command "tito system logo" \
+    "source activate.sh && tito system logo" \
     "TinyTorch"
 
 echo ""
