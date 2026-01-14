@@ -14,11 +14,11 @@
 
 ### Why TinyTalks?
 
-✅ **Fast Training** - Trains in 3-5 minutes on a laptop  
-✅ **Verifiable Learning** - Clear success metrics (correct vs. incorrect answers)  
-✅ **Progressive Difficulty** - 5 levels from greetings to reasoning  
-✅ **Educational Focus** - Designed for "aha!" moments, not benchmarks  
-✅ **Zero Dependencies** - Ships with TinyTorch, no downloads needed  
+✅ **Fast Training** - Trains in 3-5 minutes on a laptop
+✅ **Verifiable Learning** - Clear success metrics (correct vs. incorrect answers)
+✅ **Progressive Difficulty** - 5 levels from greetings to reasoning
+✅ **Educational Focus** - Designed for "aha!" moments, not benchmarks
+✅ **Zero Dependencies** - Ships with TinyTorch, no downloads needed
 ✅ **Reproducible** - Deterministic generation, versioned releases
 
 ---
@@ -177,7 +177,7 @@ Q: [Next question]
 A: [Next answer]
 ```
 
-**Rationale:** 
+**Rationale:**
 - Character-level tokenization (no special tokenizers needed)
 - Easy to inspect and validate
 - Works with any text processing pipeline
@@ -291,7 +291,7 @@ If you use TinyTalks in your work, please cite:
 }
 ```
 
-**Text citation:**  
+**Text citation:**
 TinyTorch Contributors. (2025). TinyTalks: A Conversational Q&A Dataset for Educational Transformers (Version 1.0.0). https://github.com/VJ/TinyTorch
 
 ---
@@ -379,4 +379,3 @@ Just like TinyTorch makes deep learning accessible, TinyTalks makes conversation
 *Built with ❤️ by the TinyTorch community*
 
 *"The best way to understand transformers is to see them learn."*
-
