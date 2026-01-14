@@ -949,19 +949,55 @@ class ModuleWorkflowCommand(BaseCommand):
         return "Test failed (see output for details)"
 
     def export_module(self, module_name: str) -> int:
-        """Export module to the TinyTorch package."""
+        """Export student's notebook to the TinyTorch package.
+        
+        This only runs nbdev_export on the existing notebook.
+        It does NOT convert from src/*.py (that would overwrite student work).
+        
+        Developers who want to rebuild from src/ should use: tito dev export
+        """
+        import subprocess
+        from pathlib import Path
+        from ..export_utils import get_export_target, ensure_writable_target
+        
         try:
-            # Use the new source command for exporting
-            from ..src import SrcCommand
-
-            fake_args = Namespace()
-            fake_args.src_command = 'export'  # Subcommand
-            fake_args.modules = [module_name]     # List of modules to export
-            fake_args.test_checkpoint = False
-
-            src_command = SrcCommand(self.config)
-            return src_command.run(fake_args)
-
+            # Find the notebook in modules/
+            short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+            notebook_path = Path("modules") / module_name / f"{short_name}.ipynb"
+            
+            if not notebook_path.exists():
+                self.console.print(f"[red]❌ Notebook not found: {notebook_path}[/red]")
+                self.console.print("[dim]Make sure you're in the TinyTorch project root.[/dim]")
+                return 1
+            
+            # Ensure target file is writable
+            module_path = notebook_path.parent
+            export_target = get_export_target(module_path)
+            if export_target != "unknown":
+                ensure_writable_target(export_target)
+            
+            # Run nbdev_export directly on the student's notebook
+            self.console.print(f"[dim]📦 Exporting {notebook_path.name} → tinytorch/core/...[/dim]")
+            
+            result = subprocess.run(
+                ["nbdev_export", "--path", str(notebook_path)],
+                capture_output=True,
+                text=True,
+                cwd=Path.cwd()
+            )
+            
+            if result.returncode == 0:
+                self.console.print(f"[dim]✅ Your code is now part of the tinytorch package![/dim]")
+                return 0
+            else:
+                self.console.print(f"[red]❌ Export failed[/red]")
+                if result.stderr.strip():
+                    self.console.print(f"[dim]Error: {result.stderr.strip()}[/dim]")
+                return 1
+                
+        except FileNotFoundError:
+            self.console.print("[red]❌ nbdev not found. Is your environment set up?[/red]")
+            return 1
         except Exception as e:
             self.console.print(f"[red]Error exporting module: {e}[/red]")
             return 1

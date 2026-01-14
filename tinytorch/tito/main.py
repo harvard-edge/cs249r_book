@@ -26,7 +26,6 @@ from .core.exceptions import TinyTorchCLIError
 from .core.theme import Theme
 from rich.panel import Panel
 from .commands.base import BaseCommand
-from .commands.src import SrcCommand
 from .commands.system import SystemCommand
 from .commands.module import ModuleWorkflowCommand
 from .commands.package import PackageCommand
@@ -75,7 +74,6 @@ class TinyTorchCLI:
             'module': ModuleWorkflowCommand,
             # Developer tools
             'dev': DevCommand,
-            'src': SrcCommand,
             'package': PackageCommand,
             'nbgrader': NBGraderCommand,
             # Progress tracking
