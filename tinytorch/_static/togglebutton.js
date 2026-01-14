@@ -10,39 +10,56 @@ let toggleChevron = `
 
 var initToggleItems = () => {
   var itemsToToggle = document.querySelectorAll(togglebuttonSelector);
-  console.log(`[togglebutton]: Adding toggle buttons to ${itemsToToggle.length} items`)
+  console.log(
+    `[togglebutton]: Adding toggle buttons to ${itemsToToggle.length} items`
+  );
   // Add the button to each admonition and hook up a callback to toggle visibility
   itemsToToggle.forEach((item, index) => {
     if (item.classList.contains("admonition")) {
       // If it's an admonition block, then we'll add a button inside
-      // Generate unique IDs for this item
-      var toggleID = `toggle-${index}`;
+      // Generate unique IDs for this item,
+      // IF AND ONLY IF THE ITEM DOESN'T ALREADY HAVE AN ID
+      if (!item.id) {
+        var toggleID = `toggle-${index}`;
+      } else {
+        var toggleID = item.id;
+      }
       var buttonID = `button-${toggleID}`;
 
-      item.setAttribute('id', toggleID);
-      if (!item.classList.contains("toggle")){
+      item.setAttribute("id", toggleID);
+      if (!item.classList.contains("toggle")) {
         item.classList.add("toggle");
       }
       // This is the button that will be added to each item to trigger the toggle
       var collapseButton = `
-        <button type="button" id="${buttonID}" class="toggle-button" data-target="${toggleID}" data-button="${buttonID}" data-toggle-hint="${toggleHintShow}" aria-label="Toggle hidden content">
+        <button type="button"
+                id="${buttonID}"
+                class="toggle-button"
+                data-target="${toggleID}"
+                data-button="${buttonID}"
+                data-toggle-hint="${toggleHintShow}"
+                aria-label="Toggle hidden content"
+                aria-expanded="false"
+            >
             ${toggleChevron}
         </button>`;
 
-      title = item.querySelector(".admonition-title")
+      title = item.querySelector(".admonition-title");
       title.insertAdjacentHTML("beforeend", collapseButton);
       thisButton = document.getElementById(buttonID);
 
       // Add click handlers for the button + admonition title (if admonition)
-      admonitionTitle = document.querySelector(`#${toggleID} > .admonition-title`)
+      admonitionTitle = document.querySelector(
+        `#${toggleID} > .admonition-title`
+      );
       if (admonitionTitle) {
         // If an admonition, then make the whole title block clickable
-        admonitionTitle.addEventListener('click', toggleClickHandler);
-        admonitionTitle.dataset.target = toggleID
-        admonitionTitle.dataset.button = buttonID
+        admonitionTitle.addEventListener("click", toggleClickHandler);
+        admonitionTitle.dataset.target = toggleID;
+        admonitionTitle.dataset.button = buttonID;
       } else {
         // If not an admonition then we'll listen for the button click
-        thisButton.addEventListener('click', toggleClickHandler);
+        thisButton.addEventListener("click", toggleClickHandler);
       }
 
       // Now hide the item for this toggle button unless explicitly noted to show
@@ -62,12 +79,12 @@ var initToggleItems = () => {
       item.insertAdjacentHTML("beforebegin", detailsBlock);
 
       // Now move the toggle-able content inside of the details block
-      details = item.previousElementSibling
-      details.appendChild(item)
-      item.classList.add("toggle-details__container")
+      details = item.previousElementSibling;
+      details.appendChild(item);
+      item.classList.add("toggle-details__container");
 
       // Set up a click trigger to change the text as needed
-      details.addEventListener('click', (click) => {
+      details.addEventListener("click", (click) => {
         let parent = click.target.parentElement;
         if (parent.tagName.toLowerCase() == "details") {
           summary = parent.querySelector("summary");
@@ -78,11 +95,12 @@ var initToggleItems = () => {
         }
         // Update the inner text for the proper hint
         if (details.open) {
-          summary.querySelector("span.toggle-details__summary-text").innerText = toggleHintShow;
+          summary.querySelector("span.toggle-details__summary-text").innerText =
+            toggleHintShow;
         } else {
-          summary.querySelector("span.toggle-details__summary-text").innerText = toggleHintHide;
+          summary.querySelector("span.toggle-details__summary-text").innerText =
+            toggleHintHide;
         }
-        
       });
 
       // If we have a toggle-shown class, open details block should be open
@@ -90,21 +108,44 @@ var initToggleItems = () => {
         details.click();
       }
     }
-  })
+  });
 };
 
 // This should simply add / remove the collapsed class and change the button text
 var toggleHidden = (button) => {
-  target = button.dataset['target']
+  target = button.dataset["target"];
   var itemToToggle = document.getElementById(target);
   if (itemToToggle.classList.contains("toggle-hidden")) {
     itemToToggle.classList.remove("toggle-hidden");
     button.classList.remove("toggle-button-hidden");
+    button.dataset.toggleHint = toggleHintHide;
+    button.setAttribute("aria-expanded", true);
   } else {
     itemToToggle.classList.add("toggle-hidden");
     button.classList.add("toggle-button-hidden");
+    button.dataset.toggleHint = toggleHintShow;
+    button.setAttribute("aria-expanded", false);
   }
-}
+};
+
+// Function to synchronize the data-toggle-hint with the current state
+var syncToggleHint = (button) => {
+  const target = button.dataset["target"];
+  const itemToToggle = document.getElementById(target);
+  
+  if (itemToToggle && itemToToggle.classList.contains("toggle-hidden")) {
+    button.dataset.toggleHint = toggleHintShow;
+    button.setAttribute("aria-expanded", false);
+  } else if (itemToToggle) {
+    button.dataset.toggleHint = toggleHintHide;
+    button.setAttribute("aria-expanded", true);
+  }
+};
+
+// Function to sync all toggle buttons - can be called by external extensions
+var syncAllToggleHints = () => {
+  document.querySelectorAll('.toggle-button').forEach(syncToggleHint);
+};
 
 var toggleClickHandler = (click) => {
   // Be cause the admonition title is clickable and extends to the whole admonition
@@ -122,11 +163,11 @@ var toggleClickHandler = (click) => {
     // We've clicked the button itself and so don't need to do anything
     button = click.target;
   } else {
-    console.log(`[togglebutton]: Couldn't find button for ${click.target}`)
+    console.log(`[togglebutton]: Couldn't find button for ${click.target}`);
   }
-  target = document.getElementById(button.dataset['button']);
+  target = document.getElementById(button.dataset["button"]);
   toggleHidden(target);
-}
+};
 
 // If we want to blanket-add toggle classes to certain cells
 var addToggleToSelector = () => {
@@ -134,24 +175,51 @@ var addToggleToSelector = () => {
   if (selector.length > 0) {
     document.querySelectorAll(selector).forEach((item) => {
       item.classList.add("toggle");
-    })
+    });
   }
-}
+};
 
 // Helper function to run when the DOM is finished
-const sphinxToggleRunWhenDOMLoaded = cb => {
-  if (document.readyState != 'loading') {
-    cb()
+const sphinxToggleRunWhenDOMLoaded = (cb) => {
+  if (document.readyState != "loading") {
+    cb();
   } else if (document.addEventListener) {
-    document.addEventListener('DOMContentLoaded', cb)
+    document.addEventListener("DOMContentLoaded", cb);
   } else {
-    document.attachEvent('onreadystatechange', function() {
-      if (document.readyState == 'complete') cb()
-    })
+    document.attachEvent("onreadystatechange", function () {
+      if (document.readyState == "complete") cb();
+    });
   }
-}
-sphinxToggleRunWhenDOMLoaded(addToggleToSelector)
-sphinxToggleRunWhenDOMLoaded(initToggleItems)
+};
+sphinxToggleRunWhenDOMLoaded(addToggleToSelector);
+sphinxToggleRunWhenDOMLoaded(initToggleItems);
+
+// Set up MutationObserver to watch for external changes to toggle states
+sphinxToggleRunWhenDOMLoaded(() => {
+  const observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+        const target = mutation.target;
+        // Check if this is a toggle item that had its class changed
+        if (target.classList.contains('toggle')) {
+          // Find the associated toggle button and sync its hint
+          const button = target.querySelector('.toggle-button');
+          if (button) {
+            syncToggleHint(button);
+          }
+        }
+      }
+    });
+  });
+
+  // Start observing class changes on all toggle elements
+  document.querySelectorAll('.toggle').forEach((toggleElement) => {
+    observer.observe(toggleElement, {
+      attributes: true,
+      attributeFilter: ['class']
+    });
+  });
+});
 
 /** Toggle details blocks to be open when printing */
 if (toggleOpenOnPrint == "true") {
@@ -161,13 +229,15 @@ if (toggleOpenOnPrint == "true") {
       el.dataset["togglestatus"] = el.open;
       el.open = true;
     });
-  
+
     // Open the admonitions
-    document.querySelectorAll(".admonition.toggle.toggle-hidden").forEach((el) => {
-      console.log(el);
-      el.querySelector("button.toggle-button").click();
-      el.dataset["toggle_after_print"] = "true";
-    });
+    document
+      .querySelectorAll(".admonition.toggle.toggle-hidden")
+      .forEach((el) => {
+        console.log(el);
+        el.querySelector("button.toggle-button").click();
+        el.dataset["toggle_after_print"] = "true";
+      });
   });
   window.addEventListener("afterprint", () => {
     // Re-close the details that were closed
@@ -175,7 +245,7 @@ if (toggleOpenOnPrint == "true") {
       el.open = el.dataset["togglestatus"] == "true";
       delete el.dataset["togglestatus"];
     });
-  
+
     // Re-close the admonition toggle buttons
     document.querySelectorAll(".admonition.toggle").forEach((el) => {
       if (el.dataset["toggle_after_print"] == "true") {

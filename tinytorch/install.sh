@@ -64,10 +64,10 @@ set -e  # Exit on any error
 # ============================================================================
 REPO_URL="https://github.com/harvard-edge/cs249r_book.git"
 REPO_SHORT="harvard-edge/cs249r_book"
-BRANCH="dev"
+BRANCH="main"
 INSTALL_DIR="tinytorch"
 SPARSE_PATH="tinytorch"
-TINYTORCH_VERSION="0.1.1"
+TINYTORCH_VERSION="0.1.2"
 
 # ============================================================================
 # ANSI Color Codes (for terminal output)
