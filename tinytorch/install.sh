@@ -67,7 +67,7 @@ REPO_SHORT="harvard-edge/cs249r_book"
 BRANCH="main"
 INSTALL_DIR="tinytorch"
 SPARSE_PATH="tinytorch"
-TINYTORCH_VERSION="0.1.3"
+TINYTORCH_VERSION="0.1.2"
 
 # ============================================================================
 # ANSI Color Codes (for terminal output)
