@@ -8,7 +8,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     // Try to get version from meta tag first (set during build)
     const versionMeta = document.querySelector('meta[name="tinytorch-version"]');
-    const version = versionMeta ? versionMeta.content : '0.1.1';
+    const version = versionMeta ? versionMeta.content : '0.1.2';
     
     // Find the footer
     const footer = document.querySelector('.footer');
