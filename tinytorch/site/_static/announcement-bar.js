@@ -13,7 +13,7 @@
 (function() {
     'use strict';
 
-    const CONFIG_PATH = '/_static/announcement.json';
+    const CONFIG_PATH = '_static/announcement.json';
     const STORAGE_PREFIX = 'tinytorch-announcement-dismissed-';
 
     async function loadConfig() {
