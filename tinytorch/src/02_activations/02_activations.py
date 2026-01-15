@@ -269,10 +269,6 @@ class Sigmoid:
         """Allows the activation to be called like a function."""
         return self.forward(x)
 
-    def backward(self, grad: Tensor) -> Tensor:
-        """Compute gradient (implemented in Module 06)."""
-        pass  # Will implement backward pass in Module 06
-
 # %% [markdown]
 """
 ### 🔬 Unit Test: Sigmoid
@@ -387,10 +383,6 @@ class ReLU:
     def __call__(self, x: Tensor) -> Tensor:
         """Allows the activation to be called like a function."""
         return self.forward(x)
-
-    def backward(self, grad: Tensor) -> Tensor:
-        """Compute gradient (implemented in Module 06)."""
-        pass  # Will implement backward pass in Module 06
 
 # %% [markdown]
 """
@@ -509,10 +501,6 @@ class Tanh:
     def __call__(self, x: Tensor) -> Tensor:
         """Allows the activation to be called like a function."""
         return self.forward(x)
-
-    def backward(self, grad: Tensor) -> Tensor:
-        """Compute gradient (implemented in Module 06)."""
-        pass  # Will implement backward pass in Module 06
 
 # %% [markdown]
 """
@@ -641,10 +629,6 @@ class GELU:
     def __call__(self, x: Tensor) -> Tensor:
         """Allows the activation to be called like a function."""
         return self.forward(x)
-
-    def backward(self, grad: Tensor) -> Tensor:
-        """Compute gradient (implemented in Module 06)."""
-        pass  # Will implement backward pass in Module 06
 
 # %% [markdown]
 """
