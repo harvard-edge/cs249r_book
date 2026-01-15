@@ -360,29 +360,9 @@ These techniques become essential at scale when fan-out amplification makes indi
 
 ## Training-Serving Skew {#sec-serving-skew}
 
-The queuing theory and latency analysis from previous sections assume the model produces correct predictions. However, a critical problem in production ML systems threatens this assumption: training-serving skew, the phenomenon where a model behaves differently in production than during training, despite using identical weights [@sculley2015hidden]. The model has not changed, but something in the preprocessing pipeline produces different inputs in production than during training, causing silent accuracy degradation that may go undetected for weeks or months.
+The queuing theory and latency analysis from previous sections assume the model produces correct predictions. However, a critical problem in production ML systems threatens this assumption: **training-serving skew**, where a model behaves differently in production than during training despite using identical weights [@sculley2015hidden].
 
-::: {.callout-definition title="Training-Serving Skew"}
-
-***Training-Serving Skew*** occurs when the _preprocessing logic_ or _data characteristics_ differ between training and serving environments, causing models to receive inputs that do not match their training distribution and resulting in degraded prediction quality.
-
-:::
-
-This problem is particularly dangerous because traditional software testing often fails to catch it. The serving system returns predictions, the model runs without errors, and all health checks pass. Only careful monitoring of prediction quality reveals that something is wrong.
-
-### Sources of Skew {#sec-serving-skew-sources}
-
-Understanding the common causes of training-serving skew helps practitioners design systems that avoid these pitfalls.
-
-**Numerical precision differences** arise from different implementations of the same mathematical operations. Training uses float64 mean normalization while serving uses float32, producing different normalized values. A model achieving 0.87 AUC in validation may drop to 0.78 in production purely from these inconsistencies.
-
-**Library version mismatches** introduce subtle behavioral differences. Training uses NumPy 1.24 while serving uses TensorFlow ops with different rounding behavior. Image resizing with different interpolation defaults produces subtly different pixel values that accumulate through the network.
-
-**Missing value handling** diverges when training and serving encounter null values differently. Training fills nulls with column means computed over the training set while serving uses zeros or different defaults. Features present in training become missing in production due to upstream service failures.
-
-**Time and ordering effects** cause misalignment in temporal features. Training uses UTC timestamps while serving uses local time, causing off-by-one-day errors in date features. Tokenizers trained on specific vocabulary versions encounter unknown tokens differently than during training.
-
-**Environment differences** create systemic discrepancies [@polyzotis2017data]. Training runs in analytical environments (notebooks, data lakes) while serving runs in production microservices. Re-implementing feature engineering in different frameworks (Spark for training, pandas for serving) creates two codebases that must produce identical outputs.
+While @sec-ml-operations provides a comprehensive analysis of skew diagnosis and prevention, serving systems must specifically guard against *preprocessing divergence*. This occurs when the real-time inference pipeline processes raw data differently than the batch training pipeline—a common failure mode when training uses Python/Pandas while serving uses C++/Java or optimized inference servers.
 
 ::: {.callout-note title="ResNet-50: Image Preprocessing Skew"}
 
@@ -397,35 +377,6 @@ For ResNet-50 serving, common sources of skew include:
 **Prevention**: The safest approach is to export the exact preprocessing code used during training and run it identically in serving, or use a framework like NVIDIA DALI that can help standardize preprocessing across training and serving environments.
 
 :::
-
-### Prevention Strategies {#sec-serving-skew-prevention}
-
-The fundamental solution is using identical preprocessing code for training and serving. This sounds obvious but proves difficult in practice. Training pipelines optimize for batch processing while serving pipelines optimize for single-request latency. Feature stores address this by centralizing feature computation, ensuring both training and serving retrieve features from the same source [@orr2021managing].
-
-When identical code is impractical, rigorous testing catches skew before deployment. Statistical comparison between training feature distributions and serving feature distributions reveals discrepancies. Shadow deployment runs the candidate model on live traffic alongside the baseline, surfacing skew that synthetic tests miss.
-
-Monitoring in production detects skew that emerges over time. Feature drift detection compares serving distributions to training baselines using statistical distance measures [@breck2019data]. When drift exceeds thresholds, alerts trigger investigation before accuracy degrades noticeably. @tbl-skew-prevention organizes these strategies along a spectrum from prevention to detection, each with distinct operational tradeoffs.
-
-+-------------------------------+----------------------------------+---------------------------------+
-| **Strategy**                  | **Approach**                     | **Tradeoffs**                   |
-+:==============================+:=================================+:================================+
-| **Shared preprocessing code** | Use identical code for training  | May require runtime translation |
-|                               | and serving                      | (e.g., Python to C++)           |
-+-------------------------------+----------------------------------+---------------------------------+
-| **Feature stores**            | Centralize feature computation   | Adds infrastructure complexity  |
-|                               | for both environments            |                                 |
-+-------------------------------+----------------------------------+---------------------------------+
-| **Statistical validation**    | Compare feature distributions    | Catches drift but not all skew  |
-|                               | between training and serving     | types                           |
-+-------------------------------+----------------------------------+---------------------------------+
-| **Shadow deployment**         | Run new model alongside baseline | Doubles serving cost during     |
-|                               | on live traffic                  | validation                      |
-+-------------------------------+----------------------------------+---------------------------------+
-| **Continuous monitoring**     | Track prediction distributions   | Reactive rather than preventive |
-|                               | and accuracy metrics             |                                 |
-+-------------------------------+----------------------------------+---------------------------------+
-
-: **Training-Serving Skew Prevention**: Strategies range from prevention (shared code, feature stores) to detection (statistical validation, monitoring), each with distinct operational tradeoffs. {#tbl-skew-prevention}
 
 ## Model Loading and Initialization {#sec-serving-model-loading}
 
