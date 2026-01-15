@@ -1805,3 +1805,8 @@ Export with: `tito module complete 13`
 
 **Next**: Module 14 will add profiling and optimization techniques to make your transformers production-ready!
 """
+
+# %%
+#| export
+# Alias for backward compatibility with tests
+TinyGPT = GPT
