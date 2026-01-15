@@ -103,7 +103,7 @@ from rich import box
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.optimizers import Adam
 from tinytorch.core.losses import CrossEntropyLoss
-from tinytorch.core.transformer import GPT
+from tinytorch.core.transformers import GPT
 from tinytorch.core.tokenization import CharTokenizer
 
 console = Console()

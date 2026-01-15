@@ -82,7 +82,7 @@ from rich.layout import Layout
 from rich.text import Text
 from rich import box
 
-from tinytorch.core.transformer import GPT
+from tinytorch.core.transformers import GPT
 from tinytorch.core.tokenization import CharTokenizer
 from tinytorch.core.tensor import Tensor
 from tinytorch.perf.profiling import Profiler

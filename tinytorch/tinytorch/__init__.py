@@ -91,9 +91,16 @@ try:
 except ImportError:
     MultiHeadAttention = scaled_dot_product_attention = None
 
+# Module 11: Embeddings
+try:
+    from .core.embeddings import Embedding, PositionalEncoding
+except ImportError:
+    Embedding = PositionalEncoding = None
+
+
 # Module 13: Transformers
 try:
-    from .core.transformer import LayerNorm, MLP, TransformerBlock, GPT, create_causal_mask
+    from .core.transformers import LayerNorm, MLP, TransformerBlock, GPT, TinyGPT, create_causal_mask
 except ImportError:
     LayerNorm = MLP = TransformerBlock = GPT = create_causal_mask = None
 

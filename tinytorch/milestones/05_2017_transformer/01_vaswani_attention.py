@@ -115,7 +115,7 @@ from tinytorch.core.optimizers import Adam
 from tinytorch.core.dataloader import Dataset, DataLoader  # Module 05: YOUR DataLoader!
 from tinytorch.core.embeddings import Embedding, PositionalEncoding
 from tinytorch.core.attention import MultiHeadAttention
-from tinytorch.core.transformer import LayerNorm
+from tinytorch.core.transformers import LayerNorm
 
 # Rich for beautiful output
 from rich.console import Console

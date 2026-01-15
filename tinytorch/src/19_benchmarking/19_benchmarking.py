@@ -454,6 +454,7 @@ This pattern ensures timing starts/stops correctly even if exceptions occur.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "timer-context", "solution": true}
+#| export
 @contextmanager
 def precise_timer():
     """
@@ -687,7 +688,7 @@ class Benchmark:
                         base_accuracy = 0.85 + i * 0.05  # Different models have different base accuracies
                         accuracy = base_accuracy + np.random.normal(0, 0.02)  # Add noise
                         accuracy = max(0.0, min(1.0, accuracy))  # Clamp to [0, 1]
-                except:
+                except:\ Exception:
                     # Fallback simulation
                     accuracy = 0.80 + np.random.normal(0, 0.05)
                     accuracy = max(0.0, min(1.0, accuracy))
@@ -1427,7 +1428,7 @@ class TinyMLPerf:
                         output = np.random.rand(2) if benchmark_name in ['keyword_spotting', 'visual_wake_words'] else np.random.rand(10)
 
                     predictions.append(output)
-                except:
+                except:\ Exception:
                     # Fallback simulation
                     predictions.append(np.random.rand(2))
 

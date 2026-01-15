@@ -1247,7 +1247,7 @@ def test_module():
 
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
-    print("Run: tito module complete 07")
+    print("Run: tito module complete 08")
 
 if __name__ == "__main__":
     test_module()
@@ -1369,7 +1369,7 @@ Your training infrastructure mirrors production ML systems:
 ### Ready for Next Steps
 Your training implementation enables sophisticated model training with proper scheduling, stability controls, and state management.
 
-**Export with:** `tito module complete 07`
+**Export with:** `tito module complete 08`
 
 **Next**: Module 09 (Convolutions) will add spatial neural network operations, enabling CNN architectures for computer vision!
 

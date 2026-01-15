@@ -26,7 +26,7 @@ from tinytorch import Tensor, Linear, ReLU, Sigmoid, SGD, BinaryCrossEntropyLoss
 from tinytorch.core.spatial import Conv2d, MaxPool2d
 from tinytorch.text.embeddings import Embedding, PositionalEncoding
 from tinytorch.core.attention import MultiHeadAttention
-from tinytorch.core.transformer import LayerNorm
+from tinytorch.core.transformers import LayerNorm
 from tinytorch.data.loader import TensorDataset, DataLoader
 
 # Rich for beautiful output
