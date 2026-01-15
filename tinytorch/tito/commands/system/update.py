@@ -220,7 +220,12 @@ class UpdateCommand(BaseCommand):
         # Confirm update (unless --yes)
         if not args.yes:
             self.console.print()
-            self.console.print("[dim]Your work in modules/ will be preserved.[/dim]")
+            self.console.print(Panel(
+                "[bold]This update reruns the installer and overwrites TinyTorch installation files.[/bold]\n"
+                "[green]Your work in modules will be preserved.[/green]",
+                title="Warning",
+                border_style="yellow"
+            ))
             self.console.print()
             try:
                 response = input("Install update? [y/N] ").strip().lower()

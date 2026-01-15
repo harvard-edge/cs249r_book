@@ -266,8 +266,14 @@ class Optimizer:
         if not isinstance(params, list):
             params = list(params)
 
-        # Store parameters - gradient tracking is handled by autograd module
+        # Store parameters
         self.params = params
+
+        # Ensure parameters participate in autograd once it is enabled
+        for param in self.params:
+            if isinstance(param, Tensor):
+                param.requires_grad = True
+                param.grad = None
         self.step_count = 0  # For algorithms that need step counting
         ### END SOLUTION
 

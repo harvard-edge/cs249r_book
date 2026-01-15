@@ -278,7 +278,6 @@ class Tensor:
         3. Set self.shape from the array's shape
         4. Set self.size from the array's size
         5. Set self.dtype from the array's dtype
-
         EXAMPLE:
         >>> t = Tensor([1, 2, 3])
         >>> print(t.shape)
