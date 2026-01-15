@@ -1462,7 +1462,7 @@ These case studies demonstrate the principles developed throughout this chapter 
 
 ## Fallacies and Pitfalls {#sec-fault-tolerance-fallacies-pitfalls}
 
-Fault tolerance involves subtle trade-offs that generate persistent misconceptions. These fallacies and pitfalls capture errors that compromise system reliability.
+Fault tolerance for distributed ML systems involves counterintuitive mathematics and subtle trade-offs. The scale of modern clusters guarantees frequent failures, yet engineers accustomed to smaller systems often underestimate failure rates and misapply intuition when setting checkpoint intervals or planning recovery strategies. As @sec-mathematics-inevitable-failure demonstrates, a 10,000-GPU cluster with per-GPU MTBF of 10,000 hours will experience failures every few hours. These fallacies and pitfalls capture common errors that lead to wasted compute, extended training times, and production incidents when fault tolerance mechanisms fail under real conditions.
 
 **Fallacy: Hardware failures are the main concern.**
 
@@ -1480,15 +1480,11 @@ Investing heavily in hardware redundancy while neglecting software robustness (i
 
 **Pitfall: Setting checkpoint interval by intuition.**
 
-Organizations commonly set checkpoint intervals based on "feels right": "every hour seems reasonable" or "every 1000 steps." The Young-Daly formula reveals these intuitions are often wrong.
-
-For a 1000-GPU cluster with MTBF of 4 hours and checkpoint time of 5 minutes:
+Organizations commonly set checkpoint intervals based on "feels right": "every hour seems reasonable" or "every 1000 steps." As @sec-checkpoint-fundamentals explains, the Young-Daly formula reveals these intuitions are often wrong. For a 1000-GPU cluster with MTBF of 4 hours and checkpoint time of 5 minutes:
 
 $$T_{opt} = \sqrt{2 \times 5 \times 240} = \sqrt{2400} \approx 49 \text{ minutes}$$
 
-The intuitive "every hour" is close but suboptimal. More critically, if checkpoint time increases to 15 minutes (larger model, slower storage), the optimal interval becomes 85 minutes, not the "every 15 minutes" that some teams adopt to "stay safe." Too-frequent checkpointing wastes more compute than it saves.
-
-The quantitative approach reveals that intuition-based intervals often deviate 2-3x from optimal in either direction.
+The intuitive "every hour" is close but suboptimal. More critically, if checkpoint time increases to 15 minutes (larger model, slower storage), the optimal interval becomes 85 minutes, not the "every 15 minutes" that some teams adopt to "stay safe." Too-frequent checkpointing wastes more compute than it saves. The quantitative approach reveals that intuition-based intervals often deviate 2-3x from optimal in either direction.
 
 **Fallacy: MTBF assumes independent failures.**
 
@@ -1516,26 +1512,7 @@ Total restart time can be 3-5x checkpoint save time. A 5-minute checkpoint save 
 
 **Pitfall: Treating all failures as "restarts".**
 
-Engineers often treat all failures as "node crashed, restart from checkpoint." This oversimplification leads to inefficient recovery strategies. Different failures require different responses:
-
-*   **Transient Failures (Network Blips, Thermal Throttling)**:
-    *   *Cause*: Congestion, temporary heat spikes.
-    *   *Impact*: Training stalls or slows down.
-    *   *Response*: **Retry/Pause**, not Restart. Checkpointing is not needed; the state is still in memory.
-*   **Permanent Failures (GPU Death, Node Crash)**:
-    *   *Cause*: Hardware aging, manufacturing defects.
-    *   *Impact*: State in VRAM/RAM is lost.
-    *   *Response*: **Restart from Checkpoint**. Requires migration to a new node.
-*   **Silent Corruption (Bit Flips, ECC Errors)**:
-    *   *Cause*: Cosmic rays, voltage instability.
-    *   *Impact*: Checkpoint is valid *format* but contains poisoned weights.
-    *   *Response*: **Rollback to Previous Checkpoint**. Requires maintaining *history* of checkpoints, not just the latest one.
-*   **OOM / Resource Exhaustion**:
-    *   *Cause*: Memory fragmentation, activation spikes.
-    *   *Impact*: Process termination.
-    *   *Response*: **Reconfiguration**. Restarting on the same config will just crash again. Requires offloading or model parallelism adjustments.
-
-Treating a silent corruption like a transient failure (ignoring it) poisons the model. Treating a transient network blip like a permanent failure (restarting) wastes hours of re-initialization time.
+Engineers often treat all failures as "node crashed, restart from checkpoint," but different failure modes require different responses. Transient failures (network congestion, thermal throttling) should trigger retry/pause, not restart, since state remains in memory. Permanent failures (GPU death, node crash) require checkpoint-restart with migration to new hardware. Silent corruption (bit flips, ECC errors) demands rollback to a previous checkpoint, not just the latest one, requiring checkpoint history retention. Resource exhaustion (OOM, memory fragmentation) needs reconfiguration before restart; otherwise the job crashes again immediately. As @sec-failure-taxonomy details, misdiagnosing failure type wastes compute: treating transient network blips as permanent failures wastes hours re-initializing, while ignoring silent corruption poisons model weights undetected.
 
 **Fallacy: Checkpoints are automatically consistent.**
 
@@ -1562,42 +1539,11 @@ The cost of regular fault injection (some failed experiments, some minor outages
 
 **Fallacy: Elastic training eliminates the need for checkpointing.**
 
-Elastic training adjusts parallelism degree when workers fail, continuing training with reduced capacity. This appears to eliminate checkpoint-restart overhead. However:
-
-1. **State consistency**: Reducing from N to N-1 workers requires redistributing model shards, optimizer states, and data assignments. This redistribution must be consistent.
-
-2. **Minimum viable size**: Below some threshold, training is infeasible (model does not fit, batch size too small). Failures beyond this threshold still require checkpoint-restart.
-
-3. **Efficiency degradation**: Each removed worker reduces throughput. Accumulated failures progressively degrade training speed until checkpoint-restart becomes preferable.
-
-4. **Bug propagation**: If a failure was caused by a software bug triggered by specific data, the bug persists in the remaining workers and may strike again.
-
-Elastic training is complementary to checkpointing, not a replacement. The reduced checkpoint frequency enabled by elasticity still requires occasional checkpoints for catastrophic failures and training completion.
+Elastic training (@sec-elastic-training) adjusts parallelism degree when workers fail, continuing with reduced capacity, which appears to eliminate checkpoint-restart overhead. However, state consistency challenges remain: reducing from N to N-1 workers requires redistributing model shards, optimizer states, and data assignments consistently. Below some minimum viable size, training becomes infeasible (model does not fit, batch size too small), requiring checkpoint-restart regardless. Each removed worker reduces throughput; accumulated failures progressively degrade training speed until checkpoint-restart becomes preferable to continued degradation. If a failure was caused by a software bug triggered by specific data, the bug persists in remaining workers. Elastic training is complementary to checkpointing, not a replacement; the reduced checkpoint frequency still requires occasional checkpoints for catastrophic failures and training completion.
 
 **Fallacy: Silent data corruption is rare in modern hardware.**
 
-Modern GPUs, interconnects, and memory systems include extensive error correction: ECC memory, CRC verification, and parity checks. This creates an intuition that silent data corruption (undetected bit flips affecting computation) is negligible. Studies from large-scale deployments reveal otherwise.
-
-At planetary scale, silent data corruption rates are measurable [@dixit2021silent; @sridharan2015memory]:
-
-- **GPU SRAM corruption**: 0.01-0.1% of GPUs per year exhibit silent corruption not caught by ECC
-- **Memory corruption**: Cosmic ray-induced bit flips occur at approximately 1 bit flip per GB per month [@sridharan2015memory]
-- **Interconnect corruption**: Rare CRC collisions produce undetected errors at approximately 1 per 10^18 bits
-
-For a 10,000-GPU cluster running continuously:
-
-- Expect 1-10 silent GPU corruption events per year
-- Expect hundreds of memory bit flips per month
-
-**Training impact**: Silent corruption causes mysterious training anomalies. Loss spikes attributed to "bad batches" may be corruption. Gradient NaN events blamed on learning rates may be hardware. Models that fail to converge despite correct hyperparameters may have corrupted weights.
-
-Detection strategies combat silent corruption. Redundant computation periodically computes a batch on multiple workers and compares results. Gradient checksums verify AllReduce produces identical gradients across replicas. Statistical monitoring tracks gradient and activation statistics for anomalies. Hardware rotation cycles through GPUs to identify misbehaving units.
-
-::: {.callout-note title="Cross-Reference: Handling Corruption"}
-This chapter focuses on **detecting** silent corruption to trigger system recovery (restarting the job). @sec-robust-ai provides a deep dive into **algorithmic resilience**, examining how to design models that are naturally robust to noise and bit errors without crashing.
-:::
-
-Silent data corruption is particularly insidious because it does not trigger errors. The training "succeeds" but produces a subtly broken model. Robust fault tolerance must include detection mechanisms alongside recovery mechanisms.
+Modern GPUs and memory systems include extensive error correction (ECC, CRC, parity), creating the intuition that silent data corruption is negligible. Large-scale studies reveal otherwise [@dixit2021silent; @sridharan2015memory]: 0.01-0.1% of GPUs per year exhibit silent corruption not caught by ECC, and cosmic ray-induced bit flips occur at approximately 1 per GB-month. For a 10,000-GPU cluster, this means 1-10 silent GPU corruption events per year and hundreds of memory bit flips monthly. Silent corruption causes mysterious training anomalies: loss spikes attributed to "bad batches" may be hardware errors, gradient NaNs blamed on learning rates may be bit flips, and models failing to converge despite correct hyperparameters may have corrupted weights. Detection strategies include redundant computation (computing batches on multiple workers and comparing), gradient checksums (verifying AllReduce consistency), and statistical monitoring of gradient/activation distributions. Unlike detectable failures, silent corruption does not trigger errors; training "succeeds" but produces subtly broken models, requiring detection mechanisms as discussed in @sec-ml-specific-debugging.
 
 ## Summary {#sec-fault-tolerance-summary}
 
