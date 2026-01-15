@@ -58,7 +58,7 @@ This mismatch between traditional storage design and ML requirements creates cha
 
 Computer architecture courses teach the memory hierarchy as a fundamental organizing abstraction: registers at nanosecond latencies, caches at microseconds, DRAM at hundreds of nanoseconds, and storage devices at milliseconds. This hierarchy exists because faster memory is more expensive per bit, so systems use smaller amounts of fast memory as caches for larger amounts of slower memory. The principle of locality, both temporal (recently accessed data will likely be accessed again) and spatial (nearby data will likely be accessed soon), makes caching effective for most workloads.
 
-ML systems extend this hierarchy with two critical additions: GPU High Bandwidth Memory (HBM)[^fn-hbm] and distributed storage spanning multiple tiers. The extended hierarchy (@tbl-storage-hierarchy) reveals the extreme bandwidth disparities that ML systems must navigate.
+ML systems extend this hierarchy with two critical additions: GPU High Bandwidth Memory (HBM)[^fn-hbm] and distributed storage spanning multiple tiers. @tbl-storage-hierarchy reveals the extreme bandwidth disparities that ML systems must navigate.
 
 [^fn-hbm]: **High Bandwidth Memory (HBM)**: As established in @sec-infrastructure, HBM is a 3D-stacked memory technology that places DRAM dies vertically atop the processor. In the storage hierarchy, HBM serves as the 'Level 0' tier where weights and activations must reside for active computation. While delivering TB/s of bandwidth, its high cost ($15/GB) limits capacity, necessitating the multi-tier storage architecture examined in this chapter.
 
@@ -73,15 +73,15 @@ ML systems extend this hierarchy with two critical additions: GPU High Bandwidth
 | **Archive/Cold Storage** | Unlimited            | 1 GB/s             | Minutes to hours | ~0.004          |
 +--------------------------+----------------------+--------------------+------------------+-----------------+
 
-: Extended memory hierarchy for ML systems. Bandwidth figures represent practical throughput; latency represents typical access times. {#tbl-storage-hierarchy}
+: **Extended Memory Hierarchy for ML Systems**: GPU HBM delivers 3.35 TB/s at ~10 ns latency but costs $15/GB, while object storage offers unlimited capacity at $0.02/GB with 50 ms latency. This 300,000x bandwidth gap between HBM and storage drives the need for sophisticated prefetching and caching strategies. {#tbl-storage-hierarchy}
 
-The bandwidth column in @tbl-storage-hierarchy deserves particular attention. GPU HBM delivers 3.35 TB/s, roughly 17x faster than host DRAM and 130x faster than the fastest local NVMe drives. This disparity creates the central challenge of ML storage systems: keeping accelerators fed with data at rates that prevent them from idling.
+Looking at the bandwidth column, GPU HBM delivers 3.35 TB/s, roughly 17x faster than host DRAM and 130x faster than the fastest local NVMe drives. This disparity creates the central challenge of ML storage systems: keeping accelerators fed with data at rates that prevent them from idling.
 
 ### High Bandwidth Flash (HBF): Blurring Storage and Memory
 
 Recent research [@ma2024challenges] challenges the rigid separation between storage and memory for inference workloads. As models grow to trillions of parameters, storing all weights in HBM becomes prohibitively expensive ($100/GB vs $0.10/GB for Flash). **High Bandwidth Flash (HBF)** proposes using specialized flash controllers to achieve 50-100 GB/s read throughput directly into accelerator memory.
 
-This architecture treats Flash not as persistent storage, but as a "cold memory" tier (see @fig-storage-hierarchy). For autoregressive generation where the *entire* model is read once per token but arithmetic intensity is low, HBF allows serving massive models from a single node, replacing racks of GPUs with a single flash-augmented server. While latency is higher than HBM, cost-per-token drops by orders of magnitude for batch-insensitive workloads.
+This architecture treats Flash not as persistent storage, but as a "cold memory" tier. @fig-storage-hierarchy visualizes this expanded hierarchy where Flash occupies a middle ground between traditional DRAM and distributed storage. For autoregressive generation where the *entire* model is read once per token but arithmetic intensity is low, HBF allows serving massive models from a single node, replacing racks of GPUs with a single flash-augmented server. While latency is higher than HBM, cost-per-token drops by orders of magnitude for batch-insensitive workloads.
 
 ::: {#fig-storage-hierarchy fig-env="figure" fig-pos="htb"}
 ```{.tikz}
@@ -142,7 +142,7 @@ At 1,979 TFLOPS, this computation completes in approximately 1.4 seconds, during
 
 ### How ML Workloads Invert Traditional Assumptions {#sec-storage-inverted-assumptions}
 
-Traditional storage system design optimizes for workloads with specific characteristics: random access patterns, working sets that fit in cache, and write-heavy transactional loads. ML workloads systematically violate each of these assumptions (@tbl-storage-assumptions), requiring fundamentally different storage architectures.
+Traditional storage system design optimizes for workloads with specific characteristics: random access patterns, working sets that fit in cache, and write-heavy transactional loads. ML workloads systematically violate each of these assumptions, requiring fundamentally different storage architectures.
 
 **Sequential streaming dominates.** Database workloads exhibit random access patterns as queries retrieve specific records from large tables. ML training, by contrast, performs massive sequential scans through datasets. A training epoch reads every sample once, in whatever order the shuffling algorithm produces, before repeating. This access pattern resembles video streaming more than database queries. Storage systems optimized for random IOPS[^fn-iops] (input/output operations per second) waste their capabilities on ML workloads, while systems optimized for sequential throughput excel.
 
@@ -152,7 +152,7 @@ Traditional storage system design optimizes for workloads with specific characte
 
 **Write patterns are bursty rather than continuous.** Transactional systems generate continuous streams of small writes as users update records. ML systems generate occasional massive writes when saving checkpoints. A 175 billion parameter model checkpoint [@brown2020gpt3] occupies approximately 700 GB; saving it every 10 minutes generates 70 GB/minute average throughput but concentrated into bursts that saturate storage bandwidth for 1-2 minutes followed by idle periods. This bursty pattern requires storage systems that can absorb high-bandwidth writes without blocking ongoing reads.
 
-**Read/write ratios vary dramatically by phase.** Training reads vastly exceed writes: a typical training run reads the dataset dozens of times (one per epoch) while writing only periodic checkpoints. The read-to-write ratio can exceed 100:1. Inference, conversely, is almost entirely read-only, loading model weights once and then serving requests without writes. Feature stores for recommendation systems present yet another pattern: continuous reads for serving interleaved with batch writes from offline feature computation. No single storage configuration optimizes all three patterns.
+**Read/write ratios vary dramatically by phase.** Training reads vastly exceed writes: a typical training run reads the dataset dozens of times (one per epoch) while writing only periodic checkpoints. The read-to-write ratio can exceed 100:1. Inference, conversely, is almost entirely read-only, loading model weights once and then serving requests without writes. Feature stores for recommendation systems present yet another pattern: continuous reads for serving interleaved with batch writes from offline feature computation. No single storage configuration optimizes all three patterns. @tbl-storage-assumptions captures these fundamental mismatches, revealing why enterprise storage systems designed for transactional workloads underperform for ML.
 
 +----------------------+----------------------------+--------------------------------+
 | **Workload Pattern** | **Traditional Assumption** | **ML Reality**                 |
@@ -164,11 +164,11 @@ Traditional storage system design optimizes for workloads with specific characte
 | **Locality**         | Strong temporal locality   | No locality (uniform sampling) |
 +----------------------+----------------------------+--------------------------------+
 
-: Contrast between traditional storage assumptions and ML workload characteristics. {#tbl-storage-assumptions}
+: **ML Workloads Invert Traditional Storage Assumptions**: Where databases optimize for random IOPS with cacheable working sets, ML training streams sequentially through datasets that exceed all cache levels. This fundamental mismatch explains why enterprise storage systems underperform for ML by 10x or more. {#tbl-storage-assumptions}
 
 ### Access Pattern Analysis {#sec-storage-access-patterns}
 
-Understanding access patterns (@tbl-access-patterns) quantitatively enables storage system selection and capacity planning. ML workloads exhibit distinct patterns across different phases and model types (see @fig-access-patterns).
+Understanding access patterns quantitatively enables storage system selection and capacity planning. ML workloads exhibit distinct patterns across different phases and model types. @fig-access-patterns compares throughput for sequential versus random access, showing how storage performance degrades dramatically when workloads deviate from sequential streaming. @tbl-access-patterns breaks down these patterns by model architecture.
 
 ::: {#fig-access-patterns fig-env="figure" fig-pos="htb"}
 ```{.tikz}
@@ -244,7 +244,7 @@ The checkpoint write burst must complete before the next training step can safel
 | **Scientific** | Irregular, domain-specific     | Regular or continuous         | Domain-specific           | Varies by application    |
 +----------------+--------------------------------+-------------------------------+---------------------------+--------------------------+
 
-: Access patterns vary significantly by model type and system phase. {#tbl-access-patterns}
+: **Access Patterns by Model Type and Phase**: LLMs stream TB-scale data with infrequent 100GB-1TB checkpoint bursts; RecSys requires continuous random embedding lookups from multi-TB tables. These divergent patterns require fundamentally different storage architectures. {#tbl-access-patterns}
 
 ### Data Pipeline Throughput Requirements {#sec-storage-throughput-requirements}
 
@@ -340,7 +340,7 @@ This 201 GB/s requirement exceeds even large parallel file systems. Recommendati
 
 ### Consistency Models for ML Storage {#sec-storage-consistency}
 
-The CAP theorem, which @sec-vol2-introduction introduced in the context of distributed system tradeoffs, directly shapes storage architecture decisions. As established there, during network partitions a distributed system must choose between consistency (all readers see the same data) and availability (requests succeed even during failures). The formal statement[^fn-cap-theorem] [@brewer2000towards; @gilbert2002brewer] is that distributed systems can provide at most two of these three guarantees: consistency, availability, and partition tolerance.
+The CAP theorem, introduced in @sec-vol2-introduction as the fundamental constraint governing distributed system tradeoffs, directly shapes storage architecture decisions. As established there, during network partitions a distributed system must choose between consistency (all readers see the same data) and availability (requests succeed even during failures). The formal statement[^fn-cap-theorem] [@brewer2000towards; @gilbert2002brewer] is that distributed systems can provide at most two of these three guarantees: consistency, availability, and partition tolerance.
 
 [^fn-cap-theorem]: **CAP Theorem**: Proven by Eric Brewer in 2000 and formalized by Gilbert and Lynch in 2002, the CAP theorem states that during a network partition, a distributed system must choose between consistency (all nodes see the same data) and availability (every request receives a response). Since partitions are inevitable in distributed systems, the practical choice is between CP (consistent but may reject requests during partitions) and AP (available but may return stale data). For ML storage, training data and checkpoints favor CP (correctness over availability), while feature stores often accept AP (fresh-enough features are better than failed requests).
 
@@ -386,9 +386,9 @@ Object storage systems like S3 and GCS are suitable for training data. Since Dec
 | **Model weights**    | Read-after-write                  | Model updates must be immediately visible                       | Consistent object storage       |
 +----------------------+-----------------------------------+-----------------------------------------------------------------+---------------------------------+
 
-: Consistency requirements vary by storage tier and access pattern. {#tbl-consistency-requirements}
+: **Consistency Requirements by Storage Tier**: Training data tolerates eventual consistency because samples are immutable and shuffled; checkpoints demand strong consistency because partial writes corrupt model state. This consistency spectrum enables cost-effective architecture by avoiding over-specification. {#tbl-consistency-requirements}
 
-As @tbl-consistency-requirements shows, each storage tier has distinct consistency requirements based on its access patterns and failure mode consequences.
+@tbl-consistency-requirements maps each storage tier to its appropriate consistency model: training data tolerates eventual consistency because samples are immutable and shuffled anyway, while checkpoints demand linearizability because partial writes cause catastrophic recovery failures.
 
 ::: {.callout-note title="CAP Theorem Implications for ML Storage"}
 
@@ -497,7 +497,7 @@ These limitations become acute for ML workloads with many small files (e.g., ind
 
 Lustre[^fn-lustre] [@schwan2003lustre], developed for high-performance computing (HPC), takes a different architectural approach optimized for parallel access from thousands of compute nodes simultaneously. Where GFS and HDFS prioritize simplicity and fault tolerance, Lustre prioritizes raw throughput.
 
-[^fn-lustre]: **Lustre**: A parallel distributed file system developed by Cluster File Systems starting in 1999 and now maintained as open source. The name combines "Linux" and "cluster." Lustre powers seven of the top ten supercomputers globally and is the dominant storage solution for scientific computing. Its design prioritizes aggregate bandwidth over fault tolerance: Lustre achieves 1+ TB/s throughput by striping files across hundreds of storage servers, achieving performance characteristics summarized in @tbl-lustre-performance, but requires careful administration and can be less forgiving of hardware failures than cloud-native solutions. For ML training on HPC clusters, Lustre's bandwidth often exceeds cloud object storage by 10-100x.
+[^fn-lustre]: **Lustre**: A parallel distributed file system developed by Cluster File Systems starting in 1999 and now maintained as open source. The name combines "Linux" and "cluster." Lustre powers seven of the top ten supercomputers globally and is the dominant storage solution for scientific computing. Its design prioritizes aggregate bandwidth over fault tolerance: as @tbl-lustre-performance quantifies, Lustre achieves 1+ TB/s throughput by striping files across hundreds of storage servers, but requires careful administration and can be less forgiving of hardware failures than cloud-native solutions. For ML training on HPC clusters, Lustre's bandwidth often exceeds cloud object storage by 10-100x.
 
 **Lustre architecture** separates metadata from data more aggressively. Metadata Servers (MDS) handle file system namespace operations (create, open, stat), Object Storage Servers (OSS) store actual file data, and Object Storage Targets (OST) represent individual storage devices attached to OSSs.
 
@@ -513,7 +513,7 @@ Files are striped across multiple OSTs, enabling parallel access that aggregates
 | **Large cluster (1000+ OSTs)** | 1+ TB/s                 | Exascale HPC, large LLM training |
 +--------------------------------+-------------------------+----------------------------------+
 
-: Lustre scales linearly with storage server count. {#tbl-lustre-performance}
+: **Lustre Performance Scaling**: Aggregate bandwidth scales linearly with Object Storage Target (OST) count, from 10-20 GB/s with 10 OSTs to 1+ TB/s with 1000+ OSTs. This linear scaling enables Lustre to feed the largest GPU clusters for LLM training. {#tbl-lustre-performance}
 
 For ML training, Lustre excels when training data is stored as large files that can be striped across many OSTs, multiple training jobs read the same data concurrently (shared datasets), or checkpoint writes require high bandwidth to minimize training interruption.
 
@@ -521,7 +521,7 @@ Lustre's disadvantage is operational complexity: tuning stripe sizes, managing q
 
 #### Comparative Analysis {#sec-dfs-comparison}
 
-The choice between distributed file systems depends on workload characteristics, operational expertise, and existing infrastructure as compared in @tbl-dfs-comparison.
+The choice between distributed file systems depends on workload characteristics, operational expertise, and existing infrastructure. @tbl-dfs-comparison guides selection based on each system's strengths and ideal deployment contexts.
 
 +--------------------------------------------+---------------------------------------------+-------------------------------+-----------------------------+
 | **System**                                 | **Strengths**                               | **Weaknesses**                | **Best For**                |
@@ -533,7 +533,7 @@ The choice between distributed file systems depends on workload characteristics,
 | **BeeGFS**                                 | Ease of deployment, good performance        | Smaller community             | Academic/research clusters  |
 +--------------------------------------------+---------------------------------------------+-------------------------------+-----------------------------+
 
-: Distributed file system comparison for ML workloads. {#tbl-dfs-comparison}
+: **Distributed File System Selection Guide**: HDFS excels for Spark-based data processing despite single-NameNode limitations; Lustre delivers raw throughput for HPC clusters but demands operational expertise. The choice hinges on workload characteristics and team capabilities. {#tbl-dfs-comparison}
 
 The architectural principles pioneered by GFS found their way into the broader ecosystem through open-source implementations like HDFS and parallel file systems like Lustre. Each system makes different tradeoffs between throughput, operational complexity, and integration with existing infrastructure. For many organizations, however, the operational burden of running distributed file systems has driven adoption of a simpler alternative: object storage.
 
@@ -569,7 +569,7 @@ The request rate limit is significant for ML: a dataset organized as `s3://bucke
 
 **GCS performance** is similar, providing single object throughput of 100+ MB/s per connection, strong consistency (both GCS and S3 since December 2020 provide read-after-write consistency), and composite objects (multiple objects can be composed into one without re-upload).
 
-Practical throughput depends heavily on access patterns as detailed in @tbl-object-storage-throughput:
+Practical throughput depends heavily on access patterns. @tbl-object-storage-throughput reveals how sequential large-object reads can achieve 100x the throughput of small random lookups:
 
 +-------------------------------+-------------------------+---------------------------------------------+
 | **Access Pattern**            | **Typical Throughput**  | **Optimization**                            |
@@ -580,7 +580,7 @@ Practical throughput depends heavily on access patterns as detailed in @tbl-obje
 | **Listing operations**        | 1000 objects/s          | Use flat namespaces, avoid deep hierarchies |
 +-------------------------------+-------------------------+---------------------------------------------+
 
-: Object storage throughput varies dramatically by access pattern. {#tbl-object-storage-throughput}
+: **Object Storage Throughput by Access Pattern**: Sequential multi-object reads with parallel connections achieve 10-100 GB/s, while small object reads are limited by request rate (5,500 GET/s per prefix). Batching small samples into large files converts the latter into the former. {#tbl-object-storage-throughput}
 
 #### Object Storage for ML Training {#sec-object-storage-ml}
 
@@ -683,9 +683,9 @@ sample0002.cls
 | **Multimodal** | WebDataset                | Different modalities (image, text, audio) naturally grouped         |
 +----------------+---------------------------+---------------------------------------------------------------------+
 
-: Format selection guidelines matched to model type and access characteristics. {#tbl-format-selection}
+: **Data Format Selection by Model Type**: LLMs benefit from TFRecord's sequential streaming; RecSys exploits Parquet's column pruning for sparse features; vision models use WebDataset for efficient image packaging. Format selection impacts throughput by 2-10x. {#tbl-format-selection}
 
-@tbl-format-selection provides guidance for matching storage formats to model types, taking into account the specific access patterns and data characteristics of each workload.
+@tbl-format-selection guides the matching of storage formats to model types, which requires considering access patterns and data characteristics. For LLMs processing tokenized sequences, TFRecord or custom binary formats minimize overhead; for vision models with images, WebDataset efficiently packages JPEG files; for structured features, Parquet's columnar layout enables selective reading.
 
 ### Data Loading Pipelines {#sec-data-loading-pipelines}
 
@@ -695,7 +695,7 @@ The data loading pipeline connects storage to accelerators, transforming raw dat
 
 A typical data loading pipeline includes data reading (fetch bytes from storage such as disk, network, or object store), decompression (decompress compressed formats like GZIP, ZSTD, or JPEG), deserialization (parse structured data such as protobuf or JSON), transformation (apply augmentations like resize, crop, or normalize), batching (collate samples into batches), and transfer (move batches to accelerator memory).
 
-Each stage has different compute and bandwidth characteristics as summarized in @tbl-pipeline-stages:
+Each stage has different compute and bandwidth characteristics. @tbl-pipeline-stages identifies which operations can be parallelized and where bottlenecks typically emerge:
 
 +---------------------+-------------------+----------------------------+----------------------+
 | **Stage**           | **Bound By**      | **Parallelizable**         | **Typical Duration** |
@@ -708,7 +708,7 @@ Each stage has different compute and bandwidth characteristics as summarized in 
 | **Transfer**        | PCIe bandwidth    | Limited (few DMA channels) | 0.1-10 ms            |
 +---------------------+-------------------+----------------------------+----------------------+
 
-: Pipeline stages have different performance characteristics. {#tbl-pipeline-stages}
+: **Data Loading Pipeline Stages**: Reading and transformation dominate latency (1-100ms and 0.1-50ms respectively), while batching and transfer are fast (< 10ms). Parallelizing reading and transformation through worker processes is essential to saturate storage bandwidth. {#tbl-pipeline-stages}
 
 #### Prefetching and Pipelining {#sec-prefetching}
 
@@ -738,7 +738,7 @@ $$T_{hidden} = N_{prefetch} \times T_{batch}$$
 
 where $N_{prefetch}$ is the number of batches buffered and $T_{batch}$ is the GPU batch processing time.
 
-For a 200 ms batch time with 100 ms storage latency, prefetching just 1 batch hides the storage latency. However, variance in storage latency requires larger buffers: if storage latency varies from 50-500 ms, prefetching 3-5 batches ensures GPUs never wait.
+For a 200 ms batch time with 100 ms storage latency, prefetching just 1 batch hides the storage latency. However, variance in storage latency requires larger buffers: if storage latency varies from 50-500 ms, prefetching 3-5 batches ensures GPUs never wait. @fig-data-pipeline-vol2 visualizes this coordination between storage, CPU preprocessing, and GPU training:
 
 ::: {#fig-data-pipeline-vol2 fig-env="figure" fig-pos="htb"}
 ```{.tikz}
@@ -895,7 +895,7 @@ Locality provides 100x throughput improvement for this workload.
 
 ### Model-Type Diversity in Training Data {#sec-training-data-diversity}
 
-Training data requirements vary dramatically across model types as shown in @tbl-training-data-diversity, affecting storage architecture, data format selection, and pipeline design.
+Training data requirements vary dramatically across model types, affecting storage architecture, data format selection, and pipeline design. LLMs demand massive text corpora with sophisticated deduplication; vision models require high-bandwidth image pipelines; recommendation systems process continuous streams of user logs that can reach petabyte scale.
 
 +------------------+--------------------------+--------------------+----------------------------------------------+
 | **Model Type**   | **Data Format**          | **Typical Volume** | **Key Storage Challenge**                    |
@@ -907,9 +907,9 @@ Training data requirements vary dramatically across model types as shown in @tbl
 | **Speech/Audio** | Waveforms, spectrograms  | 10-100 TB          | Variable length sequences                    |
 +------------------+--------------------------+--------------------+----------------------------------------------+
 
-: Training data characteristics vary significantly by model type. {#tbl-training-data-diversity}
+: **Training Data Diversity by Model Type**: LLMs require 10-100 TB of deduplicated text; RecSys processes 1+ PB of user interaction logs with real-time freshness requirements; vision models need high-throughput augmentation pipelines for 100 TB - 10 PB image datasets. {#tbl-training-data-diversity}
 
-**LLM training data** presents unique challenges at the preprocessing stage rather than during training. Raw web crawls contain duplicate content, low-quality text, and potentially harmful material. Deduplication alone can reduce dataset size by 30-50% [@wenzek2020ccnet]. The storage challenge is running these preprocessing pipelines at scale: processing Common Crawl (petabytes of raw HTML) requires distributed processing frameworks like Spark or Dataflow, with intermediate results stored in distributed file systems.
+@tbl-training-data-diversity captures how training data characteristics diverge across model types, from LLMs requiring 10-100 TB of deduplicated text to RecSys processing 1+ PB of streaming user logs. **LLM training data** presents unique challenges at the preprocessing stage rather than during training. Raw web crawls contain duplicate content, low-quality text, and potentially harmful material. Deduplication alone can reduce dataset size by 30-50% [@wenzek2020ccnet]. The storage challenge is running these preprocessing pipelines at scale: processing Common Crawl (petabytes of raw HTML) requires distributed processing frameworks like Spark or Dataflow, with intermediate results stored in distributed file systems.
 
 **Vision training data** is bandwidth-intensive during training due to real-time augmentation. Each image must be decoded, randomly augmented (crop, flip, color jitter), and normalized before being batched. The augmentation pipeline runs on CPU and can become the bottleneck for large vision models. Storing pre-augmented images is impractical (each image would need hundreds of augmented variants), so augmentation must happen during training.
 
@@ -953,7 +953,7 @@ $$\text{Overhead} = \frac{T_{checkpoint}}{T_{interval}} = \frac{20 \text{ s}}{60
 
 Asynchronous checkpointing hides I/O latency but introduces complexity: memory overhead (must maintain a copy of model state for checkpointing while training modifies the live copy), consistency (must snapshot state at a consistent point between optimizer steps), and backpressure (if checkpoint I/O is slower than training, memory fills with pending checkpoints).
 
-For most training runs, asynchronous checkpointing reduces overhead to near zero (as shown in @fig-async-checkpoint). The memory overhead (one additional copy of model state) is typically acceptable on systems with sufficient host memory.
+For most training runs, asynchronous checkpointing reduces overhead to near zero. @fig-async-checkpoint contrasts synchronous checkpointing (where training stalls during writes) with asynchronous approaches that overlap I/O with computation. The memory overhead (one additional copy of model state) is typically acceptable on systems with sufficient host memory.
 
 ::: {#fig-async-checkpoint fig-env="figure" fig-pos="htb"}
 ```{.tikz}
@@ -1104,7 +1104,7 @@ where $T_{save}$ is the time to save a checkpoint and $MTBF$ is the mean time be
 
 :::
 
-This formula minimizes expected wasted work, accounting for both checkpoint overhead and work lost to failures (as visualized in @fig-young-daly-storage). The MTBF[^fn-mtbf] for GPU clusters decreases inversely with cluster size, making optimal checkpoint intervals surprisingly short for large-scale training.
+This formula minimizes expected wasted work, accounting for both checkpoint overhead and work lost to failures. @fig-young-daly-storage plots the tradeoff: frequent checkpoints waste time on I/O; infrequent checkpoints lose more work during failures. The MTBF[^fn-mtbf] for GPU clusters decreases inversely with cluster size, making optimal checkpoint intervals surprisingly short for large-scale training.
 
 ::: {#fig-young-daly-storage fig-env="figure" fig-pos="htb"}
 ```{.tikz}
@@ -1191,7 +1191,7 @@ For dense models where all parameters update every step, incremental checkpointi
 
 **Delta compression** compresses the difference between consecutive checkpoints rather than the absolute values. If parameters change by small amounts each step, the delta is highly compressible. Techniques include XOR encoding (store the XOR of current and previous parameter values), floating-point prediction (predict next value from previous and store residual), and lossy compression (accept small errors in checkpoint for large compression ratios).
 
-Practical compression ratios depend on model type and training dynamics as shown in @tbl-delta-checkpoint:
+Practical compression ratios depend on model type and training dynamics. Sparse embedding updates in recommendation systems achieve 20-100x compression; dense LLM training typically sees 10-20x reduction.
 
 +---------------------------------------+---------------------+----------------+-----------------------+
 | **Model Type**                        | **Full Checkpoint** | **Delta Size** | **Compression Ratio** |
@@ -1201,7 +1201,9 @@ Practical compression ratios depend on model type and training dynamics as shown
 | **Vision (fine-tuning)**              | 10 GB               | 100 MB         | 100x                  |
 +---------------------------------------+---------------------+----------------+-----------------------+
 
-: Delta checkpointing effectiveness varies by model type and training phase. {#tbl-delta-checkpoint}
+: **Delta Checkpoint Compression by Model Type**: Sparse RecSys embedding updates achieve 20-100x compression; dense LLM updates achieve 10-20x; fine-tuning frozen models achieves 100x by saving only adapter weights. {#tbl-delta-checkpoint}
+
+@tbl-delta-checkpoint quantifies delta checkpointing effectiveness across model types: sparse embedding updates in recommendation systems achieve 20-100x compression, while dense LLM training typically sees 10-20x reduction.
 
 ### Checkpoint Storage Architecture {#sec-checkpoint-storage-architecture-storage}
 
@@ -1217,7 +1219,7 @@ This architecture provides both performance (fast writes) and durability (object
 
 ### Model-Type Checkpoint Considerations {#sec-checkpoint-model-types}
 
-Checkpoint strategies vary significantly by model architecture as summarized in @tbl-checkpoint-strategies:
+Checkpoint strategies vary significantly by model architecture. LLMs demand high-bandwidth distributed checkpointing for multi-hundred-GB models; vision models with smaller parameter counts can checkpoint to local storage; recommendation systems benefit from incremental updates that save only modified embeddings.
 
 +------------------------------+---------------------+------------------------+-----------------------------------+
 | **Model Type**               | **Checkpoint Size** | **Typical Frequency**  | **Recommended Strategy**          |
@@ -1229,9 +1231,9 @@ Checkpoint strategies vary significantly by model architecture as summarized in 
 | **Vision (ViT-22B)**         | 88-175 GB           | Every 15-30 min        | Distributed, parallel FS          |
 +------------------------------+---------------------+------------------------+-----------------------------------+
 
-: Checkpoint strategies should be tailored to model size and training dynamics. {#tbl-checkpoint-strategies}
+: **Checkpoint Strategies by Model Type**: 175B-parameter LLMs require distributed async checkpointing with tiered storage for 700 GB-1 TB checkpoints; RecSys with 10 TB embedding tables benefit from incremental delta compression; small vision models can use simple synchronous checkpointing. {#tbl-checkpoint-strategies}
 
-**Large Language Models** checkpoint infrequently (relative to iteration count) because checkpoint size dominates. A 1 TB checkpoint at 100 GB/s still takes 10 seconds, during which thousands of dollars of GPU time is consumed. Asynchronous checkpointing and high-bandwidth storage are essential.
+@tbl-checkpoint-strategies demonstrates how checkpoint strategies should be tailored to model size and training dynamics. **Large Language Models** checkpoint infrequently (relative to iteration count) because checkpoint size dominates. A 1 TB checkpoint at 100 GB/s still takes 10 seconds, during which thousands of dollars of GPU time is consumed. Asynchronous checkpointing and high-bandwidth storage are essential.
 
 **Recommendation Systems** present unique challenges due to massive embedding tables. A DLRM-style model[^fn-dlrm] [@naumov2019dlrm] might have 10 TB of embedding parameters but only 1 GB of dense MLP parameters. Incremental checkpointing of modified embeddings (which may be a small fraction of the table) provides order-of-magnitude savings over full checkpoints.
 
@@ -1271,7 +1273,7 @@ Feature stores solve these problems by providing unified feature computation (wr
 
 ### Feature Store Architecture {#sec-feature-store-architecture}
 
-A feature store has two primary components: the offline store for training and the online store for serving (see @fig-feature-store-architecture).
+A feature store has two primary components: the offline store for training and the online store for serving. @fig-feature-store-architecture illustrates how features flow through batch pipelines for historical training data and through streaming pipelines for real-time inference.
 
 ::: {#fig-feature-store-architecture fig-env="figure" fig-pos="htb"}
 ```{.tikz}
@@ -1503,7 +1505,7 @@ With 30ms budget and 200 features to retrieve, each feature lookup must complete
 
 ### Embedding Table Storage {#sec-embedding-tables}
 
-Recommendation systems present a unique storage challenge: embedding tables containing vectors for millions or billions of entities. These tables can reach terabytes in size as shown in @tbl-embedding-sizes while requiring single-digit millisecond lookup latency.
+Recommendation systems present a unique storage challenge: embedding tables containing vectors for millions or billions of entities. These tables can reach terabytes in size while requiring single-digit millisecond lookup latency. User embeddings for a billion users at 128 dimensions consume 512 GB; sparse ID features for 100 billion entities can reach 25 TB.
 
 **Scale of embedding tables:**
 
@@ -1516,9 +1518,9 @@ Recommendation systems present a unique storage challenge: embedding tables cont
 | **Sparse ID embeddings** | 100 billion  | 64                | 25 TB          |
 +--------------------------+--------------+-------------------+----------------+
 
-: Embedding table sizes for production recommendation systems. {#tbl-embedding-sizes}
+: **Embedding Table Sizes at Production Scale**: User embeddings for 1 billion users at 128 dimensions consume 512 GB; sparse ID embeddings for 100 billion entities reach 25 TB. These scales exceed single-machine memory, requiring distributed sharding strategies. {#tbl-embedding-sizes}
 
-Tables of this scale cannot fit in memory on a single machine, requiring distributed storage strategies that balance latency, cost, and capacity.
+@tbl-embedding-sizes reveals the scale challenge: user embeddings for a billion users at 128 dimensions consume 512 GB, while sparse ID features for 100 billion entities can reach 25 TB. These embedding tables cannot fit in memory on a single machine, requiring distributed storage strategies that balance latency, cost, and capacity.
 
 **Storage strategies:**
 
@@ -1536,7 +1538,7 @@ Each shard stores 1/N of the embeddings. Lookup requires determining the correct
 
 ### Model-Type Feature Store Requirements {#sec-feature-store-model-types}
 
-Feature store importance varies dramatically by model type as shown in @tbl-feature-store-criticality:
+Feature store importance varies dramatically by model type. Recommendation systems, fraud detection, and ad ranking require feature stores as critical infrastructure (millions of lookups per second with user, item, and contextual features). LLMs and vision models need them far less, primarily consuming prompts or images as direct inputs.
 
 +---------------------+-------------------------------+----------------------------------------------------------+
 | **Model Type**      | **Feature Store Criticality** | **Rationale**                                            |
@@ -1550,9 +1552,9 @@ Feature store importance varies dramatically by model type as shown in @tbl-feat
 | **Speech**          | Low                           | Audio input, minimal runtime features                    |
 +---------------------+-------------------------------+----------------------------------------------------------+
 
-: Feature store criticality varies by ML application. {#tbl-feature-store-criticality}
+: **Feature Store Criticality by Application**: RecSys, fraud detection, and ad ranking require feature stores as critical infrastructure (millions of lookups/second); LLMs and vision models need them minimally since prompts and images serve as direct inputs. {#tbl-feature-store-criticality}
 
-**Why feature stores are critical for RecSys but not LLMs:**
+@tbl-feature-store-criticality reveals why feature stores matter enormously for recommendation systems while playing minimal roles for LLMs. **Why feature stores are critical for RecSys but not LLMs:**
 
 Recommendation systems make predictions about user-item interactions, requiring features about both the user and items. At serving time, the system must retrieve:
 
@@ -1567,7 +1569,7 @@ LLMs, by contrast, receive their input as a prompt. The prompt contains all info
 
 ### Feature Store Platforms {#sec-feature-store-platforms}
 
-Several platforms provide feature store functionality, each with different tradeoffs as summarized in @tbl-feature-store-buildbuy:
+Several platforms provide feature store functionality, each with different tradeoffs:
 
 **Open source:**
 
@@ -1597,9 +1599,9 @@ Several platforms provide feature store functionality, each with different trade
 | **Integration**      | Custom to stack         | May require adaptation |
 +----------------------+-------------------------+------------------------+
 
-: Feature store build vs buy tradeoffs. {#tbl-feature-store-buildbuy}
+: **Feature Store Build vs. Buy Tradeoffs**: Building in-house provides full customization at high development cost; platforms offer lower initial cost with managed operations but limited flexibility. Most organizations start with open-source (Feast) or cloud-managed services. {#tbl-feature-store-buildbuy}
 
-For most organizations, starting with an open-source solution (Feast) or cloud-managed service provides faster time-to-value than building custom infrastructure. Custom feature stores become worthwhile at massive scale (billions of features, millions of QPS) where platform limitations become constraints.
+@tbl-feature-store-buildbuy weighs the costs and benefits of building versus adopting an existing platform. For most organizations, starting with an open-source solution (Feast) or cloud-managed service provides faster time-to-value than building custom infrastructure. Custom feature stores become worthwhile at massive scale (billions of features, millions of QPS) where platform limitations become constraints.
 
 ## Model Registries and Artifact Management {#sec-model-registries}
 
@@ -1735,7 +1737,7 @@ Model artifacts range from megabytes (small classifiers) to terabytes (large fou
 
 **Large models (> 100 GB)**: Distributed storage with parallel download. Sharded across multiple files for parallel access. May require local NVMe for serving latency requirements.
 
-**Storage cost optimization strategies for model artifacts are detailed in @tbl-artifact-storage:**
+Storage cost optimization strategies for model artifacts balance size reduction against access complexity. Compression achieves 2-5x size reduction at the cost of CPU overhead during loading; tiered storage moves old versions to cold storage but increases retrieval latency:
 
 +--------------------------+-------------------------------+-----------------------------------+
 | **Strategy**             | **Benefit**                   | **Tradeoff**                      |
@@ -1746,11 +1748,13 @@ Model artifacts range from megabytes (small classifiers) to terabytes (large fou
 | **Differential storage** | Store only changed weights    | Requires base model + diffs       |
 +--------------------------+-------------------------------+-----------------------------------+
 
-: Artifact storage optimization strategies. {#tbl-artifact-storage}
+: **Model Artifact Storage Optimization**: Compression achieves 2-5x size reduction at the cost of CPU load time; deduplication stores shared layers once across model variants; tiered storage moves old versions to cold storage while maintaining retrieval capability. {#tbl-artifact-storage}
+
+@tbl-artifact-storage summarizes these optimization strategies, from compression achieving 2-5x size reduction to tiered storage that moves old versions to cold storage at the cost of retrieval latency.
 
 ### Model Registry Platforms {#sec-registry-platforms}
 
-Several platforms provide model registry functionality as compared in @tbl-registry-platforms:
+Several platforms provide model registry functionality with varying levels of integration and enterprise features:
 
 **MLflow Model Registry**[^fn-mlflow] [@zaharia2018mlflow]: Open source, widely adopted. Integrates with MLflow tracking. Supports model stages, versioning, and deployment integration. Backed by file system or database storage.
 
@@ -1764,7 +1768,7 @@ Several platforms provide model registry functionality as compared in @tbl-regis
 
 **Azure ML Model Registry**: Part of Azure ML. Model versioning, deployment, monitoring integration.
 
-**Comparison:**
+@tbl-registry-platforms compares platforms across key dimensions. MLflow offers the widest adoption and open-source flexibility; cloud-managed options provide tighter integration with their respective ecosystems:
 
 +---------------+-----------------+----------------------------+-------------+------------------------+
 | **Platform**  | **Open Source** | **Deployment Integration** | **Lineage** | **Approval Workflows** |
@@ -1776,7 +1780,7 @@ Several platforms provide model registry functionality as compared in @tbl-regis
 | **Azure ML**  | No              | Native Azure               | Good        | Yes                    |
 +---------------+-----------------+----------------------------+-------------+------------------------+
 
-: Model registry platform comparison. {#tbl-registry-platforms}
+: **Model Registry Platform Comparison**: MLflow offers open-source flexibility with the widest adoption; cloud-managed options (Vertex AI, SageMaker, Azure ML) provide native deployment integration and approval workflows but limit portability. {#tbl-registry-platforms}
 
 ### Registry Design Patterns {#sec-registry-patterns}
 
@@ -1987,7 +1991,7 @@ A recommendation model inference might take 2ms. With 100 features requiring 50t
 
 Training a recommendation model on features that include the label (e.g., using "user clicked on item X" as a feature when predicting "will user click on item X?") creates models that work perfectly during training and fail catastrophically in production.
 
-Point-in-time correctness requires that features used during training reflect only information available before the prediction event. This constraint (@fig-pit-correctness) is easy to state and deceptively difficult to enforce. Feature pipelines that aggregate over time windows, join multiple data sources, or depend on asynchronous updates can all violate point-in-time correctness in subtle ways.
+Point-in-time correctness requires that features used during training reflect only information available before the prediction event. This constraint is easy to state and deceptively difficult to enforce. Feature pipelines that aggregate over time windows, join multiple data sources, or depend on asynchronous updates can all violate point-in-time correctness in subtle ways. As @fig-pit-correctness demonstrates, joining training labels with features requires careful timestamp filtering to prevent future information from contaminating training data.
 
 The failure mode is insidious: models train well, validate well, and then underperform in production without clear explanation. Engineering teams often chase phantom bugs for weeks before identifying temporal leakage.
 
@@ -2006,7 +2010,7 @@ Feature stores bridge training and serving for models requiring runtime features
 Model registries provide versioning, lineage tracking, and governance for model artifacts. They enable reproducibility by connecting trained models to the data, code, and environment that produced them.
 
 ::: {.callout-important title="Key Takeaways"}
-* Storage bandwidth, not capacity, typically limits ML training throughput: systems must be designed to saturate accelerator memory bandwidth with training data (as shown in @fig-data-pipeline-vol2), requiring careful attention to prefetching, data format optimization, and parallel I/O
+* Storage bandwidth, not capacity, typically limits ML training throughput: systems must be designed to saturate accelerator memory bandwidth with training data, requiring careful attention to prefetching, data format optimization, and parallel I/O
 * Storage requirements differ dramatically by model type: LLMs need massive text corpora and terabyte-scale checkpoints, recommendation systems require real-time feature stores with sub-millisecond latency, and vision models demand efficient image pipeline formats
 * Feature stores are critical infrastructure for recommendation systems where feature lookup latency directly impacts serving time, but less relevant for LLMs where training data pipelines dominate
 * Checkpoint storage strategy must balance recovery granularity against overhead: frequent checkpoints minimize lost work but consume I/O bandwidth, requiring tiered approaches with local NVMe for speed and distributed storage for durability

@@ -45,9 +45,9 @@ Training and serving are fundamentally different computational paradigms requiri
 
 Parts I through III built a complete foundation for creating optimized ML models. You understand where systems deploy (@sec-ml-systems), how data flows through pipelines (@sec-data-engineering), what neural networks compute (@sec-dl-primer, @sec-dnn-architectures), how frameworks enable implementation (@sec-ai-frameworks), and how training produces learned models (@sec-ai-training). Part III then addressed making those models efficient: the conceptual framework for efficiency (@sec-efficient-ai), specific optimization techniques (@sec-model-optimizations), hardware acceleration strategies (@sec-ai-acceleration), and measurement methodologies for validating improvements (@sec-benchmarking-ai). The result is an optimized model ready for deployment. Part IV addresses what happens next: delivering predictions to users in production.
 
-Serving introduces a fundamental inversion that transforms everything established in prior chapters. Training optimizes for samples processed per hour over days of computation. Serving must deliver predictions within milliseconds under unpredictable load. The benchmarking techniques from @sec-benchmarking-ai measured throughput and accuracy under controlled conditions. Production serving faces traffic patterns that no benchmark could anticipate. The quantization methods from @sec-model-optimizations reduced model size. Serving must validate that those optimizations preserve accuracy under real traffic distributions. This inversion from throughput to latency, from controlled to unpredictable, from offline to real time defines the serving challenge.
+Serving introduces a fundamental inversion that transforms everything established in prior chapters. Training optimizes for samples processed per hour over days of computation. Serving must deliver predictions within milliseconds under unpredictable load. @sec-benchmarking-ai established techniques for measuring throughput and accuracy under controlled conditions; production serving faces traffic patterns that no benchmark could anticipate. @sec-model-optimizations provided quantization methods that reduced model size; serving must validate that those optimizations preserve accuracy under real traffic distributions. This inversion from throughput to latency, from controlled to unpredictable, from offline to real time defines the serving challenge.
 
-These consequences manifest concretely in how we measure and optimize. The benchmarking techniques from @sec-benchmarking-ai now target percentile latencies rather than aggregate throughput. The quantization methods from @sec-model-optimizations must be validated not just for accuracy preservation but for calibration with production traffic, since quantization error that averages out over training batches may concentrate in specific request types. The hardware acceleration from @sec-ai-acceleration must be configured for single-request responsiveness rather than batch throughput, often leaving compute capacity idle to ensure low latency. Understanding these connections enables practitioners to apply earlier optimizations correctly in the serving context.
+These consequences manifest concretely in how we measure and optimize. The benchmarking methodology from @sec-benchmarking-ai now targets percentile latencies rather than aggregate throughput. The quantization techniques from @sec-model-optimizations require validation not just for accuracy preservation but for calibration with production traffic, since quantization error that averages out over training batches may concentrate in specific request types. @sec-ai-acceleration's hardware acceleration strategies must be configured for single-request responsiveness rather than batch throughput, often leaving compute capacity idle to ensure low latency. Understanding these connections enables practitioners to apply earlier optimizations correctly in the serving context.
 
 Single-machine deployment serves as the focus here, establishing the foundational principles that govern all inference systems. This scope encompasses systems from a single GPU workstation to a multi-GPU server with 1 to 8 GPUs, where all resources share memory and can be orchestrated by a single process. These foundations prepare practitioners for understanding when and why scaling to distributed multi-machine systems becomes necessary.
 
@@ -123,7 +123,7 @@ Production serving systems place load balancers between clients and model server
 
 **Health Monitoring** continuously verifies that replicas are ready to serve, routing traffic away from unhealthy instances. For ML systems, health checks must verify not just process liveness but model readiness, confirming that weights are loaded and warmup is complete.
 
-**Deployment Support** enables safe model updates by gradually shifting traffic between versions. Deployment strategies including canary testing and blue-green deployments are examined in @sec-ml-operations.
+**Deployment Support** enables safe model updates by gradually shifting traffic between versions. @sec-ml-operations examines deployment strategies including canary testing, blue-green deployments, and shadow mode validation.
 
 For single-machine serving with multiple model instances, such as running several ONNX Runtime sessions, the framework and operating system handle request queuing. The full complexity of load balancing becomes essential when scaling to distributed inference systems, where multiple machines serve the same model. The implementation details of request distribution algorithms and multi-replica architectures belong to that distributed context.
 
@@ -189,13 +189,13 @@ The latency budget framework provides a systematic approach to optimization. Fir
 
 ### Resolution and Input Size Tradeoffs {#sec-serving-resolution}
 
-Input resolution dramatically affects both preprocessing and inference latency, but the relationship differs depending on whether the system is compute-bound or memory-bound. Understanding this distinction (covered in depth in @sec-ai-acceleration) is essential for making informed resolution decisions.
+Input resolution dramatically affects both preprocessing and inference latency, but the relationship differs depending on whether the system is compute-bound or memory-bound. @sec-ai-acceleration covers this distinction in depth through roofline model analysis; understanding it is essential for making informed resolution decisions.
 
-For compute-bound models, throughput scales inversely with resolution squared, as shown in @eq-resolution-throughput:
+For compute-bound models, @eq-resolution-throughput formalizes how throughput scales inversely with resolution squared:
 
 $$\frac{T(r_2)}{T(r_1)} = \left(\frac{r_1}{r_2}\right)^2$$ {#eq-resolution-throughput}
 
-Doubling resolution from 224 to 448 theoretically yields 4× slowdown (measured: 3.6× due to fixed overhead amortization). However, at high resolutions, models transition from compute-bound to memory-bound as activation tensors exceed cache capacity. @tbl-resolution-bottleneck illustrates this transition for ResNet-50:
+Doubling resolution from 224 to 448 theoretically yields 4x slowdown (measured: 3.6x due to fixed overhead amortization). However, at high resolutions, models transition from compute-bound to memory-bound as activation tensors exceed cache capacity. @tbl-resolution-bottleneck quantifies this transition for ResNet-50, showing how arithmetic intensity decreases with resolution:
 
 +----------------+---------------------+----------------------+----------------+
 | **Resolution** | **Activation Size** | **Arith. Intensity** | **Bottleneck** |
@@ -222,7 +222,7 @@ The latency budget framework explains where time goes within a single request, b
 
 ### Little's Law {#sec-serving-littles-law}
 
-The most fundamental result in queuing theory is Little's Law (@eq-littles-law), which relates three quantities in any stable system:
+The most fundamental result in queuing theory is Little's Law, which @eq-littles-law expresses as a simple relationship between three quantities in any stable system:
 
 $$L = \lambda \cdot W$$ {#eq-littles-law}
 
@@ -250,9 +250,9 @@ This equation reveals why serving systems exhibit nonlinear behavior. At 50% uti
 | 95%                      | 20.0×                  | 100ms                     |
 +--------------------------+------------------------+---------------------------+
 
-: **Utilization-Latency Relationship**: Average wait time as a multiple of service time for an M/M/1 queue. The nonlinear relationship explains why systems that perform well at moderate load can suddenly violate SLOs when traffic increases. {#tbl-utilization-latency}
+: **Utilization-Latency Relationship**: Average wait time as a multiple of service time for an M/M/1 queue. At 50% utilization, wait time is 2x service time; at 90%, it reaches 10x. This nonlinear growth explains why systems that perform well at moderate load suddenly violate SLOs when traffic increases: moving from 80% to 90% utilization doubles wait time. {#tbl-utilization-latency}
 
-The M/M/1 model assumes exponentially distributed service times, but ML inference typically has near-constant service time for fixed batch sizes, making the M/D/1 (deterministic service) model more accurate in practice. We use M/M/1 here because it yields closed-form solutions and produces conservative estimates. As @tbl-utilization-latency illustrates, average wait time grows rapidly as utilization approaches 100%. For M/D/1 queues, average wait time is approximately half of M/M/1 at the same utilization, which matters for capacity planning: M/M/1 analysis will slightly over-provision, erring on the side of meeting SLOs rather than violating them.[^fn-queuing-models]
+The M/M/1 model assumes exponentially distributed service times, but ML inference typically has near-constant service time for fixed batch sizes, making the M/D/1 (deterministic service) model more accurate in practice. We use M/M/1 here because it yields closed-form solutions and produces conservative estimates. @tbl-utilization-latency reveals how average wait time grows rapidly as utilization approaches 100%. For M/D/1 queues, average wait time is approximately half of M/M/1 at the same utilization, which matters for capacity planning: M/M/1 analysis will slightly over-provision, erring on the side of meeting SLOs rather than violating them.[^fn-queuing-models]
 
 [^fn-queuing-models]: **Queuing Model Assumptions**: The M/M/1 model assumes Poisson arrivals and exponential service times. ML inference typically has near-constant service time for fixed batch sizes, making M/D/1 (deterministic service) more accurate. We use M/M/1 because it produces conservative estimates and closed-form solutions, erring on the side of meeting SLOs. For deeper treatment including multi-server models, see Harchol-Balter's *Performance Modeling and Design of Computer Systems* [@harchol2013performance].
 
@@ -290,7 +290,7 @@ Consider designing a ResNet-50 serving system with these requirements:
 
 **Step 1: Find safe utilization**
 
-Using @eq-p99-latency, we need $W_{p99} \leq 50$ms with 5ms service time. Solving for $\rho$:
+Applying @eq-p99-latency to constrain $W_{p99} \leq 50$ms with 5ms service time and solving for $\rho$:
 
 $$5\text{ms} \cdot \left(1 + \frac{\ln(100 \cdot \rho)}{1 - \rho}\right) \leq 50\text{ms}$$
 
@@ -324,7 +324,7 @@ This remains well below the 72% safe utilization threshold, confirming N+1 redun
 
 :::
 
-The queuing analysis explains the capacity planning approach mentioned in @sec-serving-capacity-planning and connects to the MLPerf Server scenario from @sec-benchmarking-ai, which measures throughput only for requests meeting the latency SLO. A system achieving 10,000 QPS but violating the SLO on 5% of requests reports only 9,500 valid QPS.
+The queuing analysis explains the capacity planning approach detailed in @sec-serving-capacity-planning and connects directly to the MLPerf Server scenario. @sec-benchmarking-ai explains how MLPerf measures throughput only for requests meeting the latency SLO: a system achieving 10,000 QPS but violating the SLO on 5% of requests reports only 9,500 valid QPS.
 
 ### Tail-Tolerant Techniques {#sec-serving-tail-tolerant}
 
@@ -404,9 +404,7 @@ The fundamental solution is using identical preprocessing code for training and 
 
 When identical code is impractical, rigorous testing catches skew before deployment. Statistical comparison between training feature distributions and serving feature distributions reveals discrepancies. Shadow deployment runs the candidate model on live traffic alongside the baseline, surfacing skew that synthetic tests miss.
 
-Monitoring in production detects skew that emerges over time. Feature drift detection compares serving distributions to training baselines using statistical distance measures [@breck2019data]. When drift exceeds thresholds, alerts trigger investigation before accuracy degrades noticeably.
-
-@tbl-skew-prevention summarizes strategies for preventing and detecting training-serving skew.
+Monitoring in production detects skew that emerges over time. Feature drift detection compares serving distributions to training baselines using statistical distance measures [@breck2019data]. When drift exceeds thresholds, alerts trigger investigation before accuracy degrades noticeably. @tbl-skew-prevention organizes these strategies along a spectrum from prevention to detection, each with distinct operational tradeoffs.
 
 +-------------------------------+----------------------------------+---------------------------------+
 | **Strategy**                  | **Approach**                     | **Tradeoffs**                   |
@@ -521,7 +519,7 @@ The throughput-latency tradeoff for ResNet-50 on a V100 GPU illustrates the powe
 | 32             | 25.0ms              | 0.8ms                 | 1,280 img/s    | 95%           |
 +----------------+---------------------+-----------------------+----------------+---------------+
 
-*Times shown are pure inference time, excluding queue wait. User-perceived latency includes batching window wait (see @sec-serving-traffic-patterns).
+*Times shown are pure inference time, excluding queue wait. @sec-serving-traffic-patterns analyzes how user-perceived latency includes batching window wait.
 
 **Key insight**: Batch size 32 achieves 6.4× higher throughput than batch size 1. However, user-perceived latency includes both queue wait and inference time. With a 10ms batching window and 25ms inference, total latency reaches 35ms versus 5ms at batch size 1.
 
@@ -539,7 +537,7 @@ Typical configurations use windows of 5-50ms with maximum batch sizes of 8-32 fo
 
 ### Dynamic Batching Latency-Throughput Trade-offs {#sec-serving-batching-tradeoffs}
 
-Dynamic batching introduces a fundamental tension between throughput optimization and latency constraints. Understanding this tradeoff quantitatively enables principled configuration decisions rather than trial-and-error tuning. The total user-perceived latency for a batched request decomposes into two components as shown in @eq-batching-latency:
+Dynamic batching introduces a fundamental tension between throughput optimization and latency constraints. Understanding this tradeoff quantitatively enables principled configuration decisions rather than trial-and-error tuning. @eq-batching-latency decomposes the total user-perceived latency for a batched request into two components:
 
 $$L_{\text{total}} = L_{\text{wait}} + L_{\text{compute}}(b)$$ {#eq-batching-latency}
 
@@ -547,7 +545,7 @@ where $L_{\text{wait}}$ is the time spent waiting in the batching queue and $L_{
 
 **Queue Waiting Time Analysis**
 
-For Poisson arrivals with rate $\lambda$ and batching window $T$, requests arrive uniformly within the window. A request arriving at time $t$ within the window waits $T - t$ for the batch to close. The average wait time, shown in @eq-avg-wait, is half the window:
+For Poisson arrivals with rate $\lambda$ and batching window $T$, requests arrive uniformly within the window. A request arriving at time $t$ within the window waits $T - t$ for the batch to close. @eq-avg-wait shows that the average wait time is simply half the window:
 
 $$E[L_{\text{wait}}] = \frac{T}{2}$$ {#eq-avg-wait}
 
@@ -555,11 +553,11 @@ This simple relationship has profound implications. A 20ms batching window adds 
 
 **Batch Size Distribution**
 
-The number of requests collected during window $T$ follows a Poisson distribution with mean $\lambda T$, as expressed in @eq-batch-distribution:
+The number of requests collected during window $T$ follows a Poisson distribution with mean $\lambda T$. @eq-batch-distribution formalizes this relationship:
 
 $$P(\text{batch size} = k) = \frac{(\lambda T)^k e^{-\lambda T}}{k!}$$ {#eq-batch-distribution}
 
-This distribution reveals batch size variability. @tbl-batch-variability shows how batch size fluctuates for different traffic levels with a fixed 10ms window:
+@tbl-batch-variability quantifies this variability, showing how batch size fluctuates for different traffic levels with a fixed 10ms window:
 
 +------------------+----------------+-------------+----------------+---------------------+
 | **Arrival Rate** | **Mean Batch** | **Std Dev** | **P(batch=0)** | **P(batch≥2×mean)** |
@@ -592,7 +590,7 @@ For ResNet-50 on a V100 GPU, service time scales as $S(b) = 5\text{ms} + 0.6b$ (
 | 32             | 24.2ms           | 34.2ms            | 935 img/s      | Maximum        |
 +----------------+------------------+-------------------+----------------+----------------+
 
-: **Batching Throughput Analysis**: Throughput increases with batch size but total latency grows. The optimal configuration depends on whether the latency SLO or throughput target is the binding constraint. {#tbl-batching-throughput}
+: **Batching Throughput Analysis**: ResNet-50 throughput on V100 with 10ms batching window. Throughput increases 14.6x from batch size 1 to 32 (64 to 935 img/s), but total latency more than doubles (15.6ms to 34.2ms). The optimal configuration depends on whether the latency SLO or throughput target is the binding constraint. {#tbl-batching-throughput}
 
 **Latency-Constrained Optimization**
 
@@ -614,7 +612,7 @@ Consider a 50ms p95 latency SLO for ResNet-50 serving:
 - Maximum batch size: 48
 - Achieved throughput: ~1,280 img/s (batch=48)
 
-The aggressive window achieves only 12% higher throughput but increases average latency by 10ms and p99 latency by 25ms. @tbl-batching-throughput summarizes these trade-offs across different batch sizes. For latency-sensitive applications, the conservative window provides better user experience at modest throughput cost.
+The aggressive window achieves only 12% higher throughput but increases average latency by 10ms and p99 latency by 25ms. Examine @tbl-batching-throughput: for latency-sensitive applications, the conservative window provides better user experience at modest throughput cost.
 
 **SLO Violation Analysis**
 
@@ -633,7 +631,7 @@ The p99 latency is 1.54× the mean, reflecting both wait time variance and batch
 
 **Adaptive Batching Windows**
 
-Fixed batching windows waste latency budget during high traffic when large batches form quickly. Adaptive strategies adjust the window based on queue depth, as shown in @lst-adaptive-batching.
+Fixed batching windows waste latency budget during high traffic when large batches form quickly. @lst-adaptive-batching demonstrates how adaptive strategies adjust the window based on queue depth.
 
 ::: {#lst-adaptive-batching lst-cap="**Adaptive Batching Window**: Dynamically adjusts batch timeout based on queue depth and arrival rate, reducing average latency by 27% compared to fixed windows while maintaining throughput."}
 ```{.python}
@@ -669,7 +667,7 @@ This approach reduces average wait time during high traffic while maintaining ba
 
 **Throughput-Latency Pareto Frontier**
 
-The batching configuration space forms a Pareto frontier where improving throughput requires accepting higher latency. @tbl-pareto-batching shows this trade-off for different window configurations:
+The batching configuration space forms a Pareto frontier where improving throughput requires accepting higher latency. @tbl-pareto-batching traces this frontier across five representative configurations:
 
 +-----------------+---------------+-----------------+-----------------+----------------+----------------------+
 | **Window (ms)** | **Max Batch** | **Avg Latency** | **p99 Latency** | **Throughput** | **Configuration**    |
@@ -737,21 +735,21 @@ The tension with batching is clear since strict affinity constrains which reques
 
 ### Traffic Patterns and Batching Strategy {#sec-serving-traffic-patterns}
 
-The optimal batching strategy depends critically on how requests arrive. Different deployment contexts exhibit fundamentally different arrival patterns, each requiring distinct batching approaches. The MLPerf inference benchmark codifies these patterns into four scenarios that directly map to real-world deployments (see @sec-benchmarking-ai for MLPerf details).
+The optimal batching strategy depends critically on how requests arrive. Different deployment contexts exhibit fundamentally different arrival patterns, each requiring distinct batching approaches. The MLPerf inference benchmark codifies these patterns into four scenarios that directly map to real-world deployments, as @sec-benchmarking-ai explains in detail.
 
 **Server Traffic (Poisson Arrivals)**
 
-Cloud APIs and web services typically receive requests following a Poisson process, where arrivals are independent and uniformly distributed over time. For Poisson arrivals with rate $\lambda$ and batching window $T$, the expected batch size follows @eq-poisson-batch:
+Cloud APIs and web services typically receive requests following a Poisson process, where arrivals are independent and uniformly distributed over time. @eq-poisson-batch expresses the expected batch size for Poisson arrivals with rate $\lambda$ and batching window $T$:
 
 $$E[\text{batch size}] = \lambda \cdot T$$ {#eq-poisson-batch}
 
 The variance equals the mean (a property of Poisson distributions), so batch sizes fluctuate significantly at moderate traffic. With $\lambda = 200$ requests/second and $T = 10$ms, expected batch size is 2, but 16% of windows will have zero requests (wasted compute cycles) while others may have 4 or more.
 
-The optimal batching window balances waiting cost against throughput benefit. As shown in @eq-optimal-window:
+The optimal batching window balances waiting cost against throughput benefit. @eq-optimal-window defines this optimum:
 
 $$T_{\text{optimal}} = \min\left(L - S, \sqrt{\frac{S}{\lambda}}\right)$$ {#eq-optimal-window}
 
-where $L$ is the latency SLO and $S$ is the service time. A counterintuitive result emerges from this equation: as traffic increases, the optimal window decreases while achieved batch sizes still grow. @tbl-traffic-adaptive demonstrates this relationship across traffic levels.
+where $L$ is the latency SLO and $S$ is the service time. A counterintuitive result emerges from this equation: as traffic increases, the optimal window decreases while achieved batch sizes still grow. @tbl-traffic-adaptive demonstrates this phenomenon across four traffic levels.
 
 +------------------+--------------------+--------------------+-----------------+
 | **Arrival Rate** | **Optimal Window** | **Avg Batch Size** | **p99 Latency** |
@@ -820,7 +818,7 @@ Mobile serving optimization focuses on preprocessing efficiency and power manage
 
 :::
 
-@tbl-traffic-patterns-summary maps MLPerf scenarios to deployment contexts and appropriate batching strategies.
+@tbl-traffic-patterns-summary maps the four MLPerf scenarios to their deployment contexts and optimal batching strategies, providing a decision framework for serving system design.
 
 +------------------+---------------------+------------------+---------------------------+
 | **MLPerf**       | **Deployment**      | **Batch**        | **Optimization**          |
@@ -839,7 +837,7 @@ Mobile serving optimization focuses on preprocessing efficiency and power manage
 |                  | data pipelines      | size             | hardware utilization      |
 +------------------+---------------------+------------------+---------------------------+
 
-: **Traffic Patterns and Batching Strategies**: The MLPerf inference scenarios map to distinct deployment contexts, each requiring different batching approaches and optimization priorities. {#tbl-traffic-patterns-summary}
+: **Traffic Patterns and Batching Strategies**: The four MLPerf inference scenarios map to distinct deployment contexts. Server traffic (cloud APIs) uses dynamic batching with timeout; MultiStream (autonomous driving) uses synchronized sensor fusion; SingleStream (mobile) processes requests individually; Offline (batch processing) maximizes batch size for throughput. {#tbl-traffic-patterns-summary}
 
 ## Postprocessing {#sec-serving-postprocessing}
 
@@ -954,11 +952,11 @@ Numerical precision directly trades accuracy for throughput, connecting to the q
 
 **Precision-Throughput Relationship**
 
-For memory-bandwidth-bound operations, reducing precision proportionally increases throughput by reducing data movement. The theoretical maximum speedup from precision reduction follows @eq-precision-throughput:
+For memory-bandwidth-bound operations, reducing precision proportionally increases throughput by reducing data movement. @eq-precision-throughput quantifies the theoretical maximum speedup from precision reduction:
 
 $$\frac{\text{Throughput}_{\text{INT8}}}{\text{Throughput}_{\text{FP32}}} = \frac{32}{8} = 4\times \text{ (theoretical maximum)}$$ {#eq-precision-throughput}
 
-In practice, GPU compute pipelines and Tensor Core alignment requirements limit achieved speedup to 2.5-3.5× for INT8 versus FP32. Tensor Cores require specific alignment: INT8 operations need tensor dimensions divisible by 16, while FP16 requires divisibility by 8 (see @sec-ai-acceleration for Tensor Core architecture details).
+In practice, GPU compute pipelines and Tensor Core alignment requirements limit achieved speedup to 2.5-3.5x for INT8 versus FP32. Tensor Cores require specific alignment: INT8 operations need tensor dimensions divisible by 16, while FP16 requires divisibility by 8. @sec-ai-acceleration provides the detailed Tensor Core architecture that explains these alignment constraints.
 
 ::: {.callout-note title="ResNet-50: Precision Tradeoffs on V100"}
 
@@ -981,7 +979,7 @@ In practice, GPU compute pipelines and Tensor Core alignment requirements limit 
 
 **Layer Sensitivity**
 
-Not all layers tolerate reduced precision equally. Quantization error for a layer scales with weight magnitude and gradient sensitivity, as captured by @eq-quant-error:
+Not all layers tolerate reduced precision equally. @eq-quant-error captures how quantization error for a layer scales with weight magnitude and gradient sensitivity:
 
 $$\epsilon_{\text{quant}} \propto \alpha \cdot \|W\|_2 \cdot 2^{-b}$$ {#eq-quant-error}
 
@@ -1045,19 +1043,19 @@ The principles established throughout this chapter provide a systematic framewor
 
 **Fallacy:** _Faster model inference automatically means faster end-to-end serving._
 
-This misconception leads teams to focus optimization efforts exclusively on model inference while ignoring preprocessing and postprocessing overhead. As demonstrated in @sec-serving-latency-budget, preprocessing often consumes 45 to 70 percent of total latency when inference runs on optimized accelerators. A team that reduces inference time from 5ms to 2ms through quantization achieves only 15 percent improvement in total latency if preprocessing remains at 8ms. Effective optimization requires profiling the complete request path and allocating engineering effort proportionally to where time is actually spent.
+This misconception leads teams to focus optimization efforts exclusively on model inference while ignoring preprocessing and postprocessing overhead. @sec-serving-latency-budget demonstrates that preprocessing often consumes 45 to 70 percent of total latency when inference runs on optimized accelerators. A team that reduces inference time from 5ms to 2ms through quantization achieves only 15 percent improvement in total latency if preprocessing remains at 8ms. Effective optimization requires profiling the complete request path and allocating engineering effort proportionally to where time is actually spent.
 
 **Pitfall:** _Running serving infrastructure at high utilization to maximize cost efficiency._
 
-The nonlinear relationship between utilization and latency as shown in @eq-mm1-wait makes high utilization dangerous for latency-sensitive systems. At 90 percent utilization, average wait time reaches ten times service time, and p99 latency becomes unacceptable for most SLOs. Teams that provision for average load rather than peak load find their systems violate latency SLOs precisely when traffic increases, the moment when reliable performance matters most. Production systems typically target 60 to 70 percent utilization at peak load to maintain latency headroom.
+@eq-mm1-wait reveals the nonlinear relationship between utilization and latency that makes high utilization dangerous for latency-sensitive systems. At 90 percent utilization, average wait time reaches ten times service time, and p99 latency becomes unacceptable for most SLOs. Teams that provision for average load rather than peak load find their systems violate latency SLOs precisely when traffic increases, the moment when reliable performance matters most. Production systems typically target 60 to 70 percent utilization at peak load to maintain latency headroom.
 
 **Fallacy:** _Training accuracy guarantees serving accuracy._
 
-Training-serving skew as discussed in @sec-serving-skew causes models to behave differently in production despite using identical weights. Differences in preprocessing libraries, numerical precision, feature computation timing, or input distribution silently degrade accuracy without triggering obvious errors. A model achieving 95 percent accuracy in training evaluation might drop to 90 percent in production due to subtle preprocessing differences that shift inputs outside the training distribution. Prevention requires either identical preprocessing code paths or rigorous statistical monitoring of input distributions.
+@sec-serving-skew examines how training-serving skew causes models to behave differently in production despite using identical weights. Differences in preprocessing libraries, numerical precision, feature computation timing, or input distribution silently degrade accuracy without triggering obvious errors. A model achieving 95 percent accuracy in training evaluation might drop to 90 percent in production due to subtle preprocessing differences that shift inputs outside the training distribution. Prevention requires either identical preprocessing code paths or rigorous statistical monitoring of input distributions.
 
 **Pitfall:** _Using average latency to evaluate serving system performance._
 
-Average latency hides the experience of the slowest requests, which often determine user satisfaction and SLO compliance. A system with 10ms average latency might have 200ms p99 latency, meaning 1 percent of users experience twenty times worse performance. At scale with fan-out amplification as discussed in @sec-serving-tail-latency, even rare slow responses become visible to most users. Production SLOs specify percentile targets such as p95 and p99 precisely because averages mask unacceptable tail behavior.
+Average latency hides the experience of the slowest requests, which often determine user satisfaction and SLO compliance. A system with 10ms average latency might have 200ms p99 latency, meaning 1 percent of users experience twenty times worse performance. @sec-serving-tail-latency analyzes how fan-out amplification at scale makes even rare slow responses visible to most users. Production SLOs specify percentile targets such as p95 and p99 precisely because averages mask unacceptable tail behavior.
 
 **Fallacy:** _Larger batch sizes always improve throughput._
 
@@ -1088,7 +1086,7 @@ The traffic pattern analysis reveals how deployment context fundamentally shapes
 * Training-serving skew silently degrades accuracy and requires identical preprocessing code or rigorous monitoring to prevent
 :::
 
-The serving foundations established here provide the infrastructure for the operational deployment strategies explored in @sec-ml-operations. Production environments introduce additional complexities of monitoring, versioning, and continuous validation that characterize real-world ML system deployment.
+The serving foundations established here provide the infrastructure for operational deployment. @sec-ml-operations builds on these foundations to address monitoring, versioning, and continuous validation, the operational complexities that characterize real-world ML system deployment.
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->
 ::: { .quiz-end }
