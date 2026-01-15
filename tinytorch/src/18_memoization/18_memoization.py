@@ -1626,7 +1626,7 @@ This optimization is THE technique that transformed language models from researc
 Your KV caching implementation demonstrates the principle: "spend memory to save time"!
 Export with: `tito module complete 18`
 
-**Next**: Module 16 (Quantization) will use the opposite trade-off: "sacrifice precision to save memory"!
+**Next**: Module 19 (Benchmarking) will teach you how to measure and compare these optimizations quantitatively!
 
 ### What You Just Built Powers
 - **ChatGPT, Claude, GPT-4**: All production LLMs use KV caching

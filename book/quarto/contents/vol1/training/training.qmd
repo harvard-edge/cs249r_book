@@ -55,14 +55,6 @@ Systems engineering foundations for scalable training infrastructure translate m
 
 This chapter uses **training GPT-2 (1.5 billion parameters)** as a consistent reference point to ground abstract concepts in concrete reality. GPT-2 represents an ideal teaching example because it spans the scale spectrum (large enough to require serious optimization, small enough to train without massive infrastructure), has well-documented architecture (48 transformer layers, 1280 hidden dimensions, 20 attention heads), exhibits all key training challenges (memory pressure, computational intensity, data pipeline complexity), and represents modern ML systems dominated by transformer architectures.
 
-**Transformer Architecture Primer:**
-
-GPT-2 uses a transformer architecture (detailed in @sec-dnn-architectures) that processes text through self-attention mechanisms. Understanding these key computational patterns provides essential context for the training examples throughout this chapter.
-
-Self-attention computes relationships between all words in a sequence through matrix operations (Query × Key^T), producing attention scores that weight how much each word should influence others. Multi-head attention parallelizes this computation across multiple heads (GPT-2 uses 20), each learning different relationship patterns. Transformer layers stack attention with feed-forward networks (GPT-2 has 48 layers), enabling hierarchical feature learning. Large matrix multiplications dominate the computational pattern (attention score calculation, feed-forward networks) and benefit from GPU parallelization.
-
-This architecture's heavy reliance on matrix multiplication and sequential dependencies creates the specific training system challenges we explore: massive activation memory requirements, communication bottlenecks in distributed training, and opportunities for mixed-precision optimization.
-
 **Key GPT-2 Specifications:**
 
 The model contains 1.5 billion parameters and trains on OpenWebText (approximately 40 GB text, 9 billion tokens). Batch configuration often involves tens to hundreds of sequences per update, depending on parallelism strategy and memory budget. A useful rule of thumb for memory footprint is that weights alone require parameters × bytes per parameter. For example, 1 billion parameters in FP16 requires approximately 2 GB. Training adds optimizer state and activations, which can multiply this footprint depending on batch size and sequence length. Training time ranges from days to weeks depending on hardware, software stack, and training budget.
@@ -90,154 +82,6 @@ Designing effective training architectures requires recognizing that machine lea
 Training workloads exhibit three characteristics that distinguish them from traditional computing: extreme computational intensity from iterative gradient computations across massive models, substantial memory pressure from storing parameters, activations, and optimizer states simultaneously, and complex data dependencies requiring synchronized parameter updates across distributed resources. Large language model training can require on the order of \(10^{23}\) floating-point operations [@brown2020language], memory footprints reaching terabytes when including activation storage, and coordination across many devices. General-purpose systems were not designed to handle these demands.
 
 Contemporary training systems evolved their current architectures as computing systems adapted to increasingly demanding workloads. While training focuses on iterative optimization for learning, inference systems (detailed throughout this book) optimize for low-latency prediction serving. These represent two complementary but distinct computational paradigms. The architectural progression from general-purpose computing to specialized training systems reveals systems principles that inform modern training infrastructure design. Training systems exhibit specific characteristics that distinguish them from traditional high-performance computing workloads and influence their design and implementation.
-
-### Computing Architecture Evolution for ML Training {#sec-ai-training-computing-architecture-evolution-ml-training-34ff}
-
-@fig-evolution-systems traces computing system evolution through distinct generations, each building upon previous advances while introducing specialized optimizations for emerging application requirements. This evolution parallels the development of ML frameworks and software stacks detailed in @sec-ai-frameworks, which have co-evolved with hardware to enable efficient utilization of these computational resources. This progression demonstrates how hardware adaptation to application needs shapes modern machine learning systems.
-
-::: {#fig-evolution-systems fig-env="figure" fig-pos="htb" fig-cap="**Computing System Evolution**: Hardware advancements continuously adapt to the increasing demands of machine learning workloads, transitioning from centralized mainframes to specialized architectures like gpus and AI hypercomputing systems optimized for parallel processing and massive datasets. This progression reflects a shift toward accelerating model training and inference through increased computational power and memory bandwidth."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\sf,node distance=0pt,xscale=2]
-\tikzset{
-  Box/.style={inner xsep=2pt,
-    draw=black!80, line width=0.75pt,
-    fill=black!10,
-    anchor=south,
- rounded corners=2pt,
-    font=\sf\footnotesize,
-    %text width=27mm,
-    align=center,
-    %minimum width=27mm,
-    minimum height=5mm
-  },
-}
-
-\definecolor{col1}{RGB}{240,240,255}
-\definecolor{col2}{RGB}{255, 255, 205}
-
-\def\du{190mm}
-\def\vi{15mm}
-
-\node[fill=green!10,draw=none,minimum width=\du,
-name path=G4,
-anchor=south west, minimum height=\vi](B1)at(-19.0mm,3mm){};
-
-\node[right=2mm of B1.west,anchor=west,align=left]{AI Hypercomputing\\ Era};
-
-\node[fill=col2,draw=none,minimum width=\du,
-name path=G3,
-anchor=south west, minimum height=\vi](Z)at(B1.north west){};
-\node[right=2mm of Z.west,anchor=west,align=left]{Warehouse Scale\\ Computing};
-
-\node[fill=red!10,draw=none,minimum width=\du,
-anchor=south west, minimum height=\vi](B2)at (Z.north west){};
-\node[right=2mm of B2.west,anchor=west,align=left]{High-Performance\\ Computing};
-
-\node[fill=col1,draw=none,minimum width=\du,
-name path=G1,
-anchor=south west, minimum height=\vi](V)at(B2.north west){};
-\node[right=2mm of V.west,anchor=west,align=left]{Mainframe};
-
-\def\hi{6.75}
-\draw[thick,name path=V1](0mm,0)node[below]{1950}--++(90:\hi);
-\draw[thick,name path=V2](10mm,0)node[below]{1960}--++(90:\hi);
-\draw[thick,name path=V3](20mm,0)node[below]{1970}--++(90:\hi);
-\draw[thick,name path=V4](30mm,0)node[below]{1980}--++(90:\hi);
-\draw[thick,name path=V5](40mm,0)node[below]{1990}--++(90:\hi);
-\draw[thick,name path=V6](50mm,0)node[below]{2000}--++(90:\hi);
-\draw[thick,name path=V7](60mm,0)node[below]{2010}--++(90:\hi);
-\draw[thick,name path=V8](70mm,0)node[below]{2020}--++(90:\hi);
-
-\def\fa{2}
-\path [name intersections={of=V1 and G1,by={A,B}}];
-\node[Box, minimum width=20mm,  anchor=south west,
-xshift=-\fa*5mm]at([yshift=1pt]B){ENIAC};
-
-\path [name intersections={of=V3 and G1,by={C,D}}];
-\node[Box, minimum width=20mm,  anchor=north west,
-xshift=-\fa*6mm]at([yshift=-1pt]C){IBM\\ System/360};
-\node[Box, minimum width=40mm,  anchor=north west,
-xshift=-\fa*6mm]at([yshift=-1pt]D){CDC 6600};
-%%%%
-\path [name intersections={of=V4 and G3,by={E,F}}];
-\node[Box, minimum width=30mm,  anchor=south west,
-xshift=-\fa*4mm]at([yshift=1pt]E){Cray-1};
-
-\path [name intersections={of=V6 and G3,by={G,H}}];
-\node[Box, minimum width=20mm,  anchor=north west,
-xshift=0mm]at([yshift=-1pt]G){Google Data\\ Centers};
-
-\path [name intersections={of=V7 and G3,by={I,J}}];
-\node[Box, minimum width=22mm,  anchor=south west,
-xshift=-\fa*5mm]at([yshift=1pt]J){AWS};
-
-\path [name intersections={of=V8 and G4,by={K,L}}];
-\node[Box, minimum width=20mm,  anchor=north west,
-xshift=-\fa*5mm]at([yshift=-1pt]K){NVIDIA GPU};
-
-\node[Box,minimum width=2mm,  anchor=south,
-xshift=-\fa*0mm]at([yshift=1pt]L){};
-\node[minimum width=20mm,  anchor=south west,
-xshift=-\fa*5mm]at([yshift=1pt]L){Google TPUs};
-\end{tikzpicture}
-```
-:::
-
-Electronic computation began with the mainframe era. ENIAC[^fn-eniac] (1945) established the viability of electronic computation at scale, while the IBM System/360[^fn-system360] (1964) introduced architectural principles of standardized instruction sets and memory hierarchies. These basic concepts provided the foundation for all subsequent computing systems.
-
-[^fn-eniac]: **ENIAC (Electronic Numerical Integrator and Computer)**: Completed in 1946 at the University of Pennsylvania, ENIAC weighed 30 tons, consumed 150kW of power, and performed 5,000 operations per second. Its 17,468 vacuum tubes required constant maintenance, but it demonstrated electronic computation could be 1,000x faster than mechanical calculators.
-
-[^fn-system360]: **IBM System/360**: Launched in 1964 as a $5 billion gamble (equivalent to $40 billion today), System/360 introduced the revolutionary concept of backward compatibility across different computer models. Its standardized instruction set architecture became the foundation for modern computing, enabling software portability that drives today's cloud computing.
-
-High-performance computing (HPC) systems [@thornton1965cdc] specialized for scientific computation based on these foundational computing principles. The CDC 6600[^fn-cdc6600] and later systems like the CM-5[^fn-cm5] [@thinking_machines_cm5] optimized for dense matrix operations and floating-point calculations.
-
-[^fn-cdc6600]: **CDC 6600**: Designed by Seymour Cray and released in 1964, the CDC 6600 achieved 3 MFLOPS (million floating-point operations per second) using innovative parallel processing with 10 peripheral processors. Costing $8 million ($65 million today), it was the world's fastest computer until 1969 and established supercomputing as a field.
-
-[^fn-cm5]: **Connection Machine CM-5**: Released by Thinking Machines in 1991, the CM-5 featured up to 16,384 processors connected by a fat-tree network, delivering over 100 GFLOPS. Its $10-50 million price tag and specialized parallel architecture made it a favorite for scientific computing but ultimately commercially unsuccessful as commodity clusters emerged.
-
-HPC systems implemented specific architectural features for scientific workloads: high-bandwidth memory systems for array operations, vector processing units for mathematical computations, and specialized interconnects for collective communication patterns. Scientific computing demanded emphasis on numerical precision and stability, with processors and memory systems designed for regular, predictable access patterns. The interconnects supported tightly synchronized parallel execution, enabling efficient collective operations across computing nodes.
-
-As the demand for internet-scale processing grew, warehouse-scale computing marked the next evolutionary step. Google's data center implementations[^fn-google-datacenter] [@barroso2007energy] introduced new optimizations for internet-scale data processing. Unlike HPC systems focused on tightly coupled scientific calculations, warehouse computing handled loosely coupled tasks with irregular data access patterns.
-
-[^fn-google-datacenter]: **Google Data Centers**: Starting in 1998 with commodity PCs, Google pioneered warehouse-scale computing by 2003, managing over 100,000 servers across multiple facilities. By 2020, Google operated over 20 data centers consuming 12 TWh annually, equivalent to entire countries, while achieving industry-leading PUE (Power Usage Effectiveness) of 1.10 through innovative cooling.
-
-WSC systems introduced architectural changes to support high throughput for independent tasks, with comprehensive fault tolerance and recovery mechanisms. The storage and memory systems adapted to handle sparse data structures efficiently, moving away from the dense array optimizations of HPC. Resource management systems evolved to support multiple applications sharing the computing infrastructure, contrasting with HPC's dedicated application execution model.
-
-Neither HPC nor warehouse-scale systems fully addressed the unique demands of machine learning training. Each computing era optimized for distinct workload characteristics that only partially matched AI training requirements.
-
-**High-Performance Computing** optimized for dense, floating-point heavy, tightly-coupled simulations. HPC established the foundation for high-bandwidth interconnects and parallel numerical computation essential for AI training, but focused on regular, predictable access patterns unsuited to the dynamic memory requirements of neural network training.
-
-**Warehouse-Scale Computing** optimized for sparse, integer-heavy, loosely-coupled data processing. WSC demonstrated fault tolerance and massive scale essential for production AI systems, but emphasized independent parallel tasks that contrasted with the synchronized gradient updates required in distributed training.
-
-**AI Training** presents the unique challenge of requiring both dense FP16/FP32 computation (like HPC) and massive data scale (like WSC), while adding the complexity of iterative, synchronized gradient updates. This unique combination of intensive parameter updates, complex memory access patterns, and coordinated distributed computation drove the development of today's specialized AI hypercomputing systems.
-
-AlexNet's[^fn-training-alexnet] [@krizhevsky2012imagenet] success in 2012 demonstrated that existing systems could not efficiently handle this convergence of requirements. Neural network training demanded new approaches to memory management and inter-device communication that neither HPC's tightly-coupled scientific focus nor warehouse computing's loosely-coupled data processing had addressed.
-
-[^fn-training-alexnet]: **AlexNet**: Developed by Alex Krizhevsky, Ilya Sutskever, and Geoffrey Hinton, AlexNet won ImageNet 2012 with 15.3% error rate (vs. 26.2% for second place), using two GTX 580 GPUs for 5-6 days of training. This breakthrough launched the deep learning revolution and demonstrated that GPUs could accelerate neural network training by 10--50$\times$ over CPUs.
-
-This need for specialization led to the AI hypercomputing era beginning in 2015, the latest step in this evolutionary chain. NVIDIA GPUs[^fn-nvidia-gpus] and Google TPUs[^fn-google-tpus] introduced hardware designs specifically optimized for neural network computations, moving beyond adaptations of existing architectures. These systems implemented new approaches to parallel processing, memory access, and device communication to handle the distinct patterns of model training. The resulting architectures balanced the numerical precision needs of scientific computing with the scale requirements of warehouse systems, while adding specialized support for the iterative nature of neural network optimization. @sec-ai-acceleration explores the comprehensive design principles, architectural details, and optimization strategies for these specialized training accelerators in detail, while this chapter focuses on training system orchestration and pipeline optimization.
-
-[^fn-nvidia-gpus]: **NVIDIA AI GPUs**: NVIDIA GPUs have increased AI-relevant throughput substantially over the past decade through architectural changes (e.g., tensor cores) and higher memory bandwidth. A useful scale anchor is that reduced-precision dense throughput has grown from roughly single-digit TFLOPS in early GPU deep learning to on the order of hundreds of TFLOPS on modern datacenter accelerators, with memory bandwidth reaching the TB/s regime. Exact TFLOPS figures vary by precision mode, sparsity assumptions, and workload; treat headline numbers and pricing as time- and configuration-dependent.
-
-[^fn-google-tpus]: **Google TPUs**: First deployed internally in 2015, TPUs deliver 15--30$\times$ better price-performance than GPUs for specific AI workloads. The TPU v4 (2021) achieves 275 TFLOPS (bfloat16) with 32 GB memory per chip, while TPU pods can scale to 1 exaFLOP. Google's $billions investment in custom silicon has enabled training models like PaLM (540B parameters) cost-effectively.
-
-This architectural progression illuminates why traditional computing systems proved insufficient for neural network training. @tbl-computing-eras contrasts these computing paradigms: HPC systems provided the foundation for parallel numerical computation and warehouse-scale systems demonstrated distributed processing at scale, yet neither addressed the unique combination of dense computation, massive memory requirements, and synchronized gradient updates that characterize model training. Modern neural networks combine intensive parameter updates, complex memory access patterns, and coordinated distributed computation in ways that demanded new architectural approaches.
-
-Understanding these distinct characteristics and their evolution from previous computing eras explains why modern AI training systems require dedicated hardware features and optimized system designs. This historical context provides the foundation for examining machine learning training system architectures in detail.
-
-+-----------------------+-----------------------------+-------------------------------+------------------------------+--------------------------------------------+
-| **Era**               | **Primary Workload**        | **Memory Patterns**           | **Processing Model**         | **System Focus**                           |
-+:======================+:============================+:==============================+:=============================+:===========================================+
-| **Mainframe**         | Sequential batch processing | Simple memory hierarchy       | Single instruction stream    | General-purpose computation                |
-+-----------------------+-----------------------------+-------------------------------+------------------------------+--------------------------------------------+
-| **HPC**               | Scientific simulation       | Regular array access          | Synchronized parallel        | Numerical precision, collective operations |
-+-----------------------+-----------------------------+-------------------------------+------------------------------+--------------------------------------------+
-| **Warehouse-scale**   | Internet services           | Sparse, irregular access      | Independent parallel tasks   | Throughput, fault tolerance                |
-+-----------------------+-----------------------------+-------------------------------+------------------------------+--------------------------------------------+
-| **AI Hypercomputing** | Neural network training     | Parameter-heavy, mixed access | Hybrid parallel, distributed | Training optimization, model scale         |
-+-----------------------+-----------------------------+-------------------------------+------------------------------+--------------------------------------------+
-
-: **Computing Era Evolution**: System architectures progressively adapted to meet the demands of evolving workloads, transitioning from general-purpose computation to specialized designs optimized for neural network training. High-performance computing (HPC) established parallel processing foundations, while warehouse-scale systems enabled distributed computation; however, modern neural networks require architectures that balance intensive parameter updates, complex memory access, and coordinated distributed computation. {#tbl-computing-eras}
 
 ### Training Systems in the ML Development Lifecycle {#sec-ai-training-training-systems-ml-development-lifecycle-6222}
 
@@ -362,17 +206,13 @@ When GPT-2 examples later show why V100 GPUs achieve 2.4× speedup with mixed pr
 
 #### Activation Functions {#sec-ai-training-activation-functions-e5aa}
 
-In @sec-dl-primer, we established that activation functions—sigmoid, tanh, ReLU, and softmax—provide the nonlinearity essential for neural networks to learn complex patterns. We examined their mathematical properties: sigmoid's $(0,1)$ bounded output, tanh's zero-centered $(-1,1)$ range, ReLU's gradient flow advantages, and softmax's probability distributions. Recall from @fig-activation-functions how each function transforms inputs differently, with distinct implications for gradient behavior and learning dynamics.
+In @sec-dl-primer, we established the mathematical properties of activation functions like sigmoid, tanh, ReLU, and softmax. While their role is to introduce nonlinearity, their implementation characteristics significantly impact training system performance. From a systems perspective, the choice of activation function determines computational cost, hardware utilization, and memory access patterns during backpropagation.
 
-While activation functions are applied element-wise and contribute only 5--10% of total computation time compared to matrix operations, their implementation characteristics significantly impact training system performance. The question facing ML systems engineers is not *what* activation functions do mathematically—that foundation is established—but rather *how* to implement them efficiently at scale. Why does ReLU train 3$\times$ faster than sigmoid on CPUs but show different relative performance on GPUs? How do hardware accelerators optimize these operations? What memory access patterns do different activation functions create during backpropagation?
-
-This section examines activation functions from a systems perspective, analyzing computational costs, hardware implementation strategies, and performance trade-offs that determine real-world training efficiency. Understanding these practical constraints enables informed architectural decisions when designing training systems for specific hardware environments.
+The critical question for ML systems engineers is not *what* these functions do mathematically, but rather *how* to implement them efficiently at scale. This section analyzes the computational trade-offs that determine real-world training efficiency.
 
 ##### Benchmarking Activation Functions {#sec-ai-training-benchmarking-activation-functions-052e}
 
-Activation functions in neural networks significantly impact both mathematical properties and system-level performance. The selection of an activation function directly influences training time, model scalability, and hardware efficiency through three primary factors: computational cost, gradient behavior, and memory usage.
-
-@fig-activation-perf quantifies these performance differences through CPU benchmarks on Apple M2 hardware, revealing that Tanh executes in 0.61 seconds compared to Sigmoid's 1.10 seconds, a 1.8x speedup that makes certain activation functions particularly suitable for real-time applications and large-scale systems.
+The selection of an activation function directly influences training throughput and hardware efficiency. @fig-activation-perf quantifies these performance differences through CPU benchmarks on Apple M2 hardware, revealing that Tanh executes in 0.61 seconds compared to Sigmoid's 1.10 seconds, a 1.8$\times$ speedup.
 
 ::: {#fig-activation-perf fig-env="figure" fig-pos="htb" fig-cap="**Activation Function Performance**: CPU execution time varies significantly across common activation functions, with tanh and relu offering substantial speed advantages over sigmoid on this architecture. These differences impact system-level considerations such as training time and real-time inference capabilities, guiding activation function selection for performance-critical applications."}
 ```{.tikz}
@@ -415,58 +255,36 @@ Activation functions in neural networks significantly impact both mathematical p
 ```
 :::
 
-While these benchmark results provide valuable insights, they represent CPU-only performance without hardware acceleration. In production environments, modern hardware accelerators like GPUs can substantially alter the relative performance characteristics of activation functions. System architects must therefore consider their specific hardware environment and deployment context when evaluating computational efficiency.
+In production environments, modern hardware accelerators like GPUs alter these relative performance characteristics through specialized hardware units. System architects must consider three primary implementation factors:
 
-Recall from @sec-dl-primer that each activation function exhibits different gradient behavior, sparsity characteristics, and computational complexity. The question now is: how do these mathematical properties translate into hardware constraints and system performance? The following subsections examine each function's implementation characteristics, focusing on software versus hardware trade-offs that determine real-world training efficiency:
+**1. Computational Complexity (Arithmetic Intensity)**
 
-###### Sigmoid {#sec-ai-training-sigmoid-da85}
-
-Sigmoid's smooth $(0,1)$ bounded output makes it useful for probabilistic interpretation, but its vanishing gradient problem and non-zero-centered outputs present optimization challenges. From a systems perspective, the exponential function computation becomes the critical bottleneck. In software, this computation is expensive and inefficient[^fn-sigmoid-cost], particularly for deep networks or large datasets where millions of sigmoid evaluations occur per forward pass.
+Functions requiring transcendental operations (exponential, logarithmic) are significantly more expensive than simple thresholding. In software, `exp()` takes 10--20 clock cycles compared to 1 cycle for basic arithmetic[^fn-sigmoid-cost]. Modern GPUs and TPUs mitigate this through lookup tables (LUTs) or piece-wise linear approximations, but even optimized hardware-based sigmoid/tanh remains 3--4$\times$ slower than ReLU.
 
 [^fn-sigmoid-cost]: **Sigmoid Computational Cost**: Computing sigmoid requires expensive exponential operations. On CPU, `exp()` takes 10--20 clock cycles vs. 1 cycle for basic arithmetic. GPU implementations use 32-entry lookup tables with linear interpolation, reducing cost to 3--4 cycles but still 3$\times$ slower than ReLU. This overhead compounds in deep networks with millions of activations per forward pass.
 
-These computational challenges are addressed differently in hardware. Modern accelerators like GPUs and TPUs typically avoid direct computation of the exponential function, instead using lookup tables (LUTs) or piece-wise linear approximations to balance accuracy with speed. While these hardware optimizations help, the multiple memory lookups and interpolation calculations still make sigmoid more resource-intensive than simpler functions like ReLU, even on highly parallel architectures.
+**2. Hardware Implementation and Branching**
 
-###### Tanh {#sec-ai-training-tanh-50b7}
-
-While tanh improves upon sigmoid with its $(-1,1)$ zero-centered outputs, it shares sigmoid's computational burden. The exponential computations required for tanh create similar performance bottlenecks in both software and hardware implementations. In software, this computational overhead can slow training, particularly when working with large datasets or deep models.
-
-In hardware, tanh uses its mathematical relationship with sigmoid (a scaled and shifted version) to optimize implementation. Modern hardware often implements tanh using a hybrid approach: lookup tables for common input ranges combined with piece-wise approximations for edge cases. This approach helps balance accuracy with computational efficiency, though tanh remains more resource-intensive than simpler functions. Despite these challenges, tanh remains common in RNNs and LSTMs[^fn-rnns-lstms] where balanced gradients are necessary.
-
-###### ReLU {#sec-ai-training-relu-e11a}
-
-ReLU represents a shift in activation function design. Its mathematical simplicity—$\max(0,x)$—avoids vanishing gradients and introduces beneficial sparsity, though it can suffer from dying neurons. This straightforward form has profound implications for system performance. In software, ReLU's simple thresholding operation results in dramatically faster computation compared to sigmoid or tanh, requiring only a single comparison rather than exponential calculations.
-
-The hardware implementation of ReLU showcases why it has become the dominant activation function in modern neural networks. Its simple $\max(0,x)$ operation requires just a single comparison and conditional set, translating to minimal circuit complexity[^fn-relu-hardware]. Modern GPUs and TPUs can implement ReLU using a simple multiplexer that checks the input's sign bit, allowing for extremely efficient parallel processing. This hardware efficiency, combined with the sparsity it introduces, results in both reduced computation time and lower memory bandwidth requirements.
+ReLU represents a shift toward hardware-optimized design. Its $\max(0,x)$ operation requires only a single comparison and conditional set, which translates to minimal circuit complexity[^fn-relu-hardware]. GPUs can implement ReLU using a simple multiplexer that checks the sign bit of the input. This simplicity enables extremely high parallel throughput, allowing ReLU to operate at near-peak FLOPs while complex functions achieve only 30--40% hardware utilization.
 
 [^fn-relu-hardware]: **ReLU Hardware Efficiency**: ReLU requires just 1 instruction (`max(0,x)`) vs. sigmoid's 10+ operations including exponentials. On NVIDIA GPUs, ReLU runs at 95% of peak FLOPS while sigmoid achieves only 30--40%. ReLU's sparsity (typically 50% zeros) enables additional optimizations: sparse matrix operations, reduced memory bandwidth, and compressed gradients during backpropagation.
 
-###### Softmax {#sec-ai-training-softmax-7945}
+**3. Memory Access and Sparsity**
 
-Softmax differs from the element-wise functions above. Rather than processing inputs independently, softmax converts logits into probability distributions through global normalization, creating unique computational challenges. Its computation involves exponentiating each input value and normalizing by their sum, a process that becomes increasingly complex with larger output spaces. In software, this creates significant computational overhead for tasks like natural language processing, where vocabulary sizes can reach hundreds of thousands of terms. The function also requires keeping all values in memory during computation, as each output probability depends on the entire input vector.
+The memory footprint of activations is proportional to the batch size and network depth. ReLU's characteristic of producing many zeros (typically 50% sparsity) enables system-level optimizations that other functions cannot exploit. Sparse matrix operations and gradient compression techniques can reduce memory bandwidth requirements, which is the primary bottleneck in large-scale training. In contrast, global normalization functions like **Softmax** create unique challenges; they require access to the entire input vector simultaneously to compute the denominator, preventing the independent element-wise parallelization possible with Sigmoid or ReLU.
 
-At the hardware level, softmax faces unique challenges because it can't process each value independently like other activation functions. Unlike ReLU's simple threshold or even sigmoid's per-value computation, softmax needs access to all values to perform normalization. This becomes particularly demanding in modern transformer architectures[^fn-transformer-attention], where softmax computations in attention mechanisms process thousands of values simultaneously. To manage these demands, hardware implementations often use approximation techniques or simplified versions of softmax, especially when dealing with large vocabularies or attention mechanisms.
+@tbl-compare-activations synthesizes these system-level trade-offs, showing how mathematical behavior translates into operational constraints.
 
-@tbl-compare-activations synthesizes these trade-offs across the four primary activation functions, revealing how each balances computational cost, gradient behavior, and hardware utilization.
+| **Function** | **Key Advantages** | **Key Disadvantages** | **System Implications** |
+| :--- | :--- | :--- | :--- |
+| **Sigmoid** | Smooth gradients; bounded output in $(0, 1)$. | Vanishing gradients; non-zero-centered output. | Exponential computation adds overhead; LUT-based hardware implementation is required for efficiency. |
+| **Tanh** | Zero-centered output in $(-1, 1)$. | Vanishing gradients at extremes. | Better convergence than sigmoid; similar computational cost due to exponential terms. |
+| **ReLU** | Extremely efficient computation; avoids vanishing gradients for positive inputs. | Can suffer from "dying ReLU" (inactive neurons). | Single-instruction hardware implementation; enables sparsity-based optimizations. |
+| **Softmax** | Outputs probability distribution over classes. | High computational cost; non-local dependencies. | Requires global normalization; memory-intensive due to dependencies across the entire input vector. |
 
-+--------------+--------------------------------------------------+----------------------------------------------+--------------------------------------------------------------------------------------------------------+
-| **Function** | **Key Advantages**                               | **Key Disadvantages**                        | **System Implications**                                                                                |
-+:=============+:=================================================+:=============================================+:=======================================================================================================+
-| **Sigmoid**  | Smooth gradients; bounded output in $(0, 1)$.    | Vanishing gradients; non-zero-centered       | Exponential computation adds overhead; limited scalability for deep networks on modern accelerators.   |
-|              |                                                  | output.                                      |                                                                                                        |
-+--------------+--------------------------------------------------+----------------------------------------------+--------------------------------------------------------------------------------------------------------+
-| **Tanh**     | Zero-centered output in $(-1, 1)$; stabilizes    | Vanishing gradients for large inputs.        | More expensive than ReLU; still commonly used in RNNs/LSTMs but less common in CNNs and Transformers.  |
-|              | gradients.                                       |                                              |                                                                                                        |
-+--------------+--------------------------------------------------+----------------------------------------------+--------------------------------------------------------------------------------------------------------+
-| **ReLU**     | Computationally efficient; avoids vanishing      | Dying neurons; unbounded output.             | Simple operations optimize well on GPUs/TPUs; sparse activations reduce memory and computation needs.  |
-|              | gradients; introduces sparsity.                  |                                              |                                                                                                        |
-+--------------+--------------------------------------------------+----------------------------------------------+--------------------------------------------------------------------------------------------------------+
-| **Softmax**  | Converts logits into probabilities; sums to $1$. | Computationally expensive for large outputs. | High cost for large vocabularies; hierarchical or sampled softmax needed for scalability in NLP tasks. |
-+--------------+--------------------------------------------------+----------------------------------------------+--------------------------------------------------------------------------------------------------------+
+: **Activation Function Systems Comparison**: While activation functions contribute only a fraction of total training time, their implementation characteristics (computational complexity, hardware utilization, and memory patterns) significantly impact the efficiency of modern learning pipelines. {#tbl-compare-activations}
 
-: **Activation Function Trade-Offs**: Comparing activation functions exposes inherent advantages and disadvantages impacting system performance; for example, softmax's normalization requirement poses hardware challenges in large-scale transformer models, while relu offers computational efficiency but can suffer from dying neurons. This table clarifies how activation function choices influence both model behavior and the practical constraints of machine learning system design. {#tbl-compare-activations}
-
-The choice of activation function should balance computational considerations with their mathematical properties, such as handling vanishing gradients or introducing sparsity in neural activations. This data emphasizes the importance of evaluating both theoretical and practical performance when designing neural networks. For large-scale networks or real-time applications, ReLU is often the best choice due to its efficiency and scalability. However, for tasks requiring probabilistic outputs, such as classification, softmax remains indispensable despite its computational cost. Ultimately, the ideal activation function depends on the specific task, network architecture, and hardware environment.
+The choice of activation function should balance computational considerations with their mathematical properties. This data emphasizes the importance of evaluating both theoretical and practical performance when designing neural networks. For large-scale networks or real-time applications, ReLU is often the best choice due to its efficiency and scalability. However, for tasks requiring probabilistic outputs, such as classification, softmax remains indispensable despite its computational cost. Ultimately, the ideal activation function depends on the specific task, network architecture, and hardware environment.
 
 ::: {.callout-tip title="GPT-2 GELU Activation Function" collapse="true"}
 
@@ -3062,10 +2880,6 @@ The training optimizations explored throughout this chapter provide the foundati
 [^fn-transformers]: **Transformer Architectures**: Revolutionary attention-based models introduced by @vaswani2017attention, processing sequences in parallel rather than sequentially like RNNs. Self-attention computes relationships between all token pairs in O(N²) complexity, enabling GPT-4's 128K context windows. Detailed architecture coverage in @sec-dnn-architectures, including positional encodings and multi-head attention implementations.
 
 [^fn-transformer-training]: **Transformer Training**: Large-scale transformer training requires specialized techniques including gradient checkpointing (saving memory by recomputing activations), mixed-precision training (FP16 forward/backward with FP32 accumulation), and sequence parallelism distributing long contexts across devices. GPT-3 training used 1024 V100s for months, detailed in @sec-dnn-architectures.
-
-[^fn-rnns-lstms]: **RNNs and LSTMs**: Long Short-Term Memory networks [@hochreiter1997long] introduced gating mechanisms solving RNNs' vanishing gradient problem. LSTM cells maintain cell state through forget/input/output gates, enabling 100-1000 step dependencies vs. vanilla RNNs' ~10 steps. Architecture details in @sec-dnn-architectures, including bidirectional and stacked variants.
-
-[^fn-transformer-attention]: **Transformer Attention**: Self-attention computes query-key-value projections to weight relationships between all sequence positions simultaneously, with O(N²) complexity for N tokens. Multi-head attention (typically 8-96 heads) enables parallel learning of different relationship types. Flash Attention [@dao2022flashattention] reduces memory from O(N²) to O(N), covered in @sec-dnn-architectures.
 
 [^fn-convolution]: **Convolutional Operations**: Sliding kernel operations applying learned filters across spatial dimensions to detect hierarchical features. A 3$\times$ 3 convolution requires $9K^2$ multiplications for K-channel inputs; depthwise-separable variants (MobileNet) reduce this by 8--9$\times$. GPU implementations achieve >90% theoretical throughput through im2col matrix transformations, detailed in @sec-dnn-architectures.
 
