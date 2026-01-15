@@ -1717,7 +1717,7 @@ def test_module():
 
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
-    print("Run: tito module complete 08")
+    print("Run: tito module complete 05")
 
 # %% [markdown]
 """

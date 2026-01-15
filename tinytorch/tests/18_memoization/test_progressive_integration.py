@@ -760,7 +760,7 @@ class TestRegressionPrevention:
 
         # Transformer level (if available)
         try:
-            from tinytorch.core.transformer import TransformerBlock
+            from tinytorch.core.transformers import TransformerBlock
 
             # Transformer block should work
             block = TransformerBlock(embed_dim=32, num_heads=4)

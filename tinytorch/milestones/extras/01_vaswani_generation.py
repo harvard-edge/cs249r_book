@@ -289,7 +289,7 @@ class TinyGPT:
         """
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.embeddings import Embedding, PositionalEncoding
-        from tinytorch.core.transformer import LayerNorm, TransformerBlock
+        from tinytorch.core.transformers import LayerNorm, TransformerBlock
         from tinytorch.core.layers import Linear
 
         self.vocab_size = vocab_size

@@ -41,7 +41,7 @@ Let's get started!
 """
 
 # %%
-#| default_exp core.transformer
+#| default_exp core.transformers
 
 # %%
 #| export
@@ -84,7 +84,7 @@ def create_causal_mask(seq_len: int) -> Tensor:
          [1, 1, 1, 1]]
 
     Usage:
-        >>> from tinytorch.core.transformer import create_causal_mask
+        >>> from tinytorch.core.transformers import create_causal_mask
         >>> mask = create_causal_mask(seq_len=10)
         >>> output = attention(x, mask=mask)
     """
@@ -102,7 +102,7 @@ def create_causal_mask(seq_len: int) -> Tensor:
 
 ```python
 # How to use this module:
-from tinytorch.core.transformer import TransformerBlock, GPT, LayerNorm, MLP
+from tinytorch.core.transformers import TransformerBlock, GPT, LayerNorm, MLP
 ```
 
 **Why this matters:**

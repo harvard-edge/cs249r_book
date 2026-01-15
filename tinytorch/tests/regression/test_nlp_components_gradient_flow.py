@@ -291,7 +291,7 @@ def test_layernorm_gradient_flow():
     """
     print("Testing Module 13: LayerNorm gradient flow...")
 
-    from tinytorch.core.transformer import LayerNorm
+    from tinytorch.core.transformers import LayerNorm
 
     normalized_shape = 8
     batch_size = 2
@@ -341,7 +341,7 @@ def test_mlp_gradient_flow():
     """
     print("Testing Module 13: MLP gradient flow...")
 
-    from tinytorch.core.transformer import MLP
+    from tinytorch.core.transformers import MLP
 
     embed_dim = 16
     hidden_dim = 64
@@ -391,7 +391,7 @@ def test_transformer_block_gradient_flow():
     """
     print("Testing Module 13: TransformerBlock gradient flow...")
 
-    from tinytorch.core.transformer import TransformerBlock
+    from tinytorch.core.transformers import TransformerBlock
 
     embed_dim = 16
     num_heads = 4
@@ -454,7 +454,7 @@ def test_full_gpt_model_gradient_flow():
     """
     print("Testing Full GPT Model: End-to-end gradient flow...")
 
-    from tinytorch.core.transformer import GPT
+    from tinytorch.core.transformers import GPT
 
     vocab_size = 20
     embed_dim = 16

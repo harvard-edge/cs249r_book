@@ -85,11 +85,6 @@ from tinytorch.core.tokenization import Tokenizer, CharTokenizer, BPETokenizer
 
 # %%
 #| export
-import numpy as np
-from typing import List, Dict, Tuple, Optional, Set
-import json
-import re
-from collections import defaultdict, Counter
 # Import from TinyTorch package (Module 01 must be completed before Module 10)
 # Note: Tokenization primarily works with Python lists, but Tensor is available for advanced features
 from tinytorch.core.tensor import Tensor
