@@ -1,5 +1,5 @@
 # VHS Tape: 🔥 The TinyTorch Story - Philosophy & Vision
-# Purpose: Show the beautiful story behind TinyTorch with tito logo
+# Purpose: Show the beautiful story behind TinyTorch with tito system logo
 # Duration: 45-50 seconds
 
 Output "gifs/05-logo.gif"
@@ -53,7 +53,7 @@ Sleep 500ms
 # SHOW THE LOGO: Display the complete philosophy
 # ==============================================================================
 
-Type "tito logo"
+Type "tito system logo"
 Sleep 400ms
 Enter
 Sleep 3s  # Let the output complete

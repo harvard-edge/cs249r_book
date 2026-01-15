@@ -76,7 +76,7 @@ Sleep 2s
 # STEP 6: READ THE STORY - Understand the TinyTorch philosophy
 # ==============================================================================
 
-Type "tito logo"
+Type "tito system logo"
 Sleep 400ms
 Enter
 Wait+Line@10ms /profvjreddi/

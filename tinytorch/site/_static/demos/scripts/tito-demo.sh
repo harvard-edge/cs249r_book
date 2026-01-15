@@ -211,8 +211,8 @@ validate() {
         "$collect_timing" \
         "true"
 
-    test_command "tito logo" \
-        "source activate.sh && tito logo" \
+    test_command "tito system logo" \
+        "source activate.sh && tito system logo" \
         "TinyTorch" \
         "$collect_timing" \
         "true"

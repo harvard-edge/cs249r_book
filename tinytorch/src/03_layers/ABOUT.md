@@ -152,8 +152,8 @@ Linear (fully connected) layer implementing `y = xW + b`.
 - `bias`: Whether to include bias term (default: True)
 
 **Attributes:**
-- `weight`: Tensor of shape `(in_features, out_features)` with `requires_grad=True`
-- `bias`: Tensor of shape `(out_features,)` with `requires_grad=True` (or None)
+- `weight`: Tensor of shape `(in_features, out_features)` (gradient tracking enabled in Module 06)
+- `bias`: Tensor of shape `(out_features,)` or None (gradient tracking enabled in Module 06)
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
@@ -235,17 +235,17 @@ def __init__(self, in_features, out_features, bias=True):
     # Xavier/Glorot initialization for stable gradients
     scale = np.sqrt(XAVIER_SCALE_FACTOR / in_features)
     weight_data = np.random.randn(in_features, out_features) * scale
-    self.weight = Tensor(weight_data, requires_grad=True)
+    self.weight = Tensor(weight_data)
 
     # Initialize bias to zeros or None
     if bias:
         bias_data = np.zeros(out_features)
-        self.bias = Tensor(bias_data, requires_grad=True)
+        self.bias = Tensor(bias_data)
     else:
         self.bias = None
 ```
 
-The `requires_grad=True` flag marks these tensors for gradient computation in Module 06. Even though you haven't built autograd yet, your layers are already prepared for it. Bias starts at zero because the weight initialization already handles the scale, and zero is a neutral starting point for per-class adjustments.
+Weights and biases are created as plain Tensors. In Module 06 (Autograd), you'll learn to enable gradient tracking via `enable_autograd()`, which monkey patches the Tensor class to support `requires_grad`. At that point, you can set `layer.weight.requires_grad = True` for parameters that need gradients. Bias starts at zero because the weight initialization already handles the scale, and zero is a neutral starting point for per-class adjustments.
 
 For Linear(1000, 10), the scale is `sqrt(1/1000) ≈ 0.032`. For Linear(10, 1000), the scale is `sqrt(1/10) ≈ 0.316`. Layers with more inputs get smaller initial weights because each input contributes to the output, and you want their combined effect to remain stable.
 

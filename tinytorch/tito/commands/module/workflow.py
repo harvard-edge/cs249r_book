@@ -533,7 +533,7 @@ class ModuleWorkflowCommand(BaseCommand):
 
         # Header
         self.console.print(Panel(
-            f"Running tests, exporting code, tracking progress...",
+            f"Unit tests → Export → Integration tests → Progress tracking",
             title=f"🎯 Completing Module {normalized}: {module_name}",
             border_style="bright_cyan",
             box=box.ROUNDED
@@ -541,32 +541,33 @@ class ModuleWorkflowCommand(BaseCommand):
         self.console.print()
 
         success = True
-        test_count = 0
+        unit_test_count = 0
+        integration_test_count = 0
 
-        # Step 1: Run integration tests
+        # Step 1: Run UNIT tests (test source files, don't need exported package)
         if not skip_tests:
             self.console.print("[bold]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold]")
             self.console.print()
-            self.console.print("[bold cyan] Step 1/3: Running Tests[/bold cyan]")
+            self.console.print("[bold cyan] Step 1/4: Running Unit Tests[/bold cyan]")
             self.console.print()
 
-            test_result = self.run_module_tests(module_name)
-            if test_result != 0:
+            unit_result = self._run_inline_unit_tests(module_name, verbose=True)
+            unit_test_count = unit_result['passed']
+
+            if unit_result['failed'] > 0:
                 self.console.print()
-                self.console.print(f"[red]   ❌ Tests failed for {module_name}[/red]")
+                self.console.print(f"[red]   ❌ Unit tests failed for {module_name}[/red]")
                 self.console.print("   💡 Fix the issues and try again")
                 return 1
 
-            # Show test results (simplified - actual tests would provide details)
-            test_count = 5  # TODO: Get actual test count
-            self.console.print(f"   ✅ All {test_count} tests passed in 0.42s")
+            self.console.print(f"   ✅ Unit tests: {unit_result['passed']}/{unit_result['passed']} passed")
 
-        # Step 2: Export to package
+        # Step 2: Export to package (BEFORE integration tests, since they need the export)
         if not skip_export:
             self.console.print()
             self.console.print("[bold]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold]")
             self.console.print()
-            self.console.print("[bold cyan] Step 2/3: Exporting to TinyTorch Package[/bold cyan]")
+            self.console.print("[bold cyan] Step 2/4: Exporting to TinyTorch Package[/bold cyan]")
             self.console.print()
 
             export_result = self.export_module(module_name)
@@ -581,11 +582,33 @@ class ModuleWorkflowCommand(BaseCommand):
                 self.console.print()
                 self.console.print(f"   [dim]Your {module_name.split('_')[1].title()} class is now part of the framework![/dim]")
 
-        # Step 3: Update progress tracking
+        # Step 3: Run INTEGRATION tests (AFTER export, since they import from tinytorch.core.*)
+        if not skip_tests and success:
+            self.console.print()
+            self.console.print("[bold]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold]")
+            self.console.print()
+            self.console.print("[bold cyan] Step 3/4: Running Integration Tests[/bold cyan]")
+            self.console.print()
+
+            integration_result = self._run_integration_tests(module_name, verbose=True)
+            integration_test_count = integration_result['passed']
+
+            if integration_result['failed'] > 0:
+                self.console.print()
+                self.console.print(f"[red]   ❌ Integration tests failed for {module_name}[/red]")
+                self.console.print("   💡 Fix the issues and try again")
+                return 1
+
+            if integration_result['passed'] > 0:
+                self.console.print(f"   ✅ Integration tests: {integration_result['passed']}/{integration_result['passed']} passed")
+            else:
+                self.console.print(f"   [dim]No integration tests for this module[/dim]")
+
+        # Step 4: Update progress tracking
         self.console.print()
         self.console.print("[bold]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold]")
         self.console.print()
-        self.console.print("[bold cyan] Step 3/3: Tracking Progress[/bold cyan]")
+        self.console.print("[bold cyan] Step 4/4: Tracking Progress[/bold cyan]")
         self.console.print()
 
         progress = self.get_progress_data()
@@ -926,19 +949,55 @@ class ModuleWorkflowCommand(BaseCommand):
         return "Test failed (see output for details)"
 
     def export_module(self, module_name: str) -> int:
-        """Export module to the TinyTorch package."""
+        """Export student's notebook to the TinyTorch package.
+        
+        This only runs nbdev_export on the existing notebook.
+        It does NOT convert from src/*.py (that would overwrite student work).
+        
+        Developers who want to rebuild from src/ should use: tito dev export
+        """
+        import subprocess
+        from pathlib import Path
+        from ..export_utils import get_export_target, ensure_writable_target
+        
         try:
-            # Use the new source command for exporting
-            from ..src import SrcCommand
-
-            fake_args = Namespace()
-            fake_args.src_command = 'export'  # Subcommand
-            fake_args.modules = [module_name]     # List of modules to export
-            fake_args.test_checkpoint = False
-
-            src_command = SrcCommand(self.config)
-            return src_command.run(fake_args)
-
+            # Find the notebook in modules/
+            short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+            notebook_path = Path("modules") / module_name / f"{short_name}.ipynb"
+            
+            if not notebook_path.exists():
+                self.console.print(f"[red]❌ Notebook not found: {notebook_path}[/red]")
+                self.console.print("[dim]Make sure you're in the TinyTorch project root.[/dim]")
+                return 1
+            
+            # Ensure target file is writable
+            module_path = notebook_path.parent
+            export_target = get_export_target(module_path)
+            if export_target != "unknown":
+                ensure_writable_target(export_target)
+            
+            # Run nbdev_export directly on the student's notebook
+            self.console.print(f"[dim]📦 Exporting {notebook_path.name} → tinytorch/core/...[/dim]")
+            
+            result = subprocess.run(
+                ["nbdev_export", "--path", str(notebook_path)],
+                capture_output=True,
+                text=True,
+                cwd=Path.cwd()
+            )
+            
+            if result.returncode == 0:
+                self.console.print(f"[dim]✅ Your code is now part of the tinytorch package![/dim]")
+                return 0
+            else:
+                self.console.print(f"[red]❌ Export failed[/red]")
+                if result.stderr.strip():
+                    self.console.print(f"[dim]Error: {result.stderr.strip()}[/dim]")
+                return 1
+                
+        except FileNotFoundError:
+            self.console.print("[red]❌ nbdev not found. Is your environment set up?[/red]")
+            return 1
         except Exception as e:
             self.console.print(f"[red]Error exporting module: {e}[/red]")
             return 1

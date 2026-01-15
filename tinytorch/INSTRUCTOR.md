@@ -23,7 +23,7 @@ pip install -r requirements.txt
 pip install nbgrader
 
 # Setup grading infrastructure
-tito grade setup
+tito nbgrader init
 ```
 
 ### **2. Verify Installation**
@@ -31,24 +31,27 @@ tito grade setup
 tito system health
 # Should show all green checkmarks
 
-tito grade
-# Should show available grade commands
+tito nbgrader
+# Should show available NBGrader commands
 ```
 
 ## 📝 Assignment Workflow
 
-### **Simplified with Tito CLI**
-We've wrapped NBGrader behind simple `tito grade` commands so you don't need to learn NBGrader's complex interface.
+### **⚠️ Experimental Feature**
+The NBGrader integration is under active development. Use for testing only.
+
+### **Using NBGrader via Tito**
+We provide `tito nbgrader` commands for grading workflows.
 
 ### **1. Prepare Assignments**
 ```bash
 # Generate instructor version (with solutions)
-tito grade generate 01_tensor
+tito nbgrader generate 01_tensor
 
 # Create student version (solutions removed)
-tito grade release 01_tensor
+tito nbgrader release 01_tensor
 
-# Student version will be in: release/tinytorch/01_tensor/
+# Student version will be in: assignments/release/01_tensor/
 ```
 
 ### **2. Distribute to Students**
@@ -65,45 +68,44 @@ tito grade release 01_tensor
 ### **3. Collect Submissions**
 ```bash
 # Collect all students
-tito grade collect 01_tensor
+tito nbgrader collect 01_tensor
 
 # Or specific student
-tito grade collect 01_tensor --student student_id
+tito nbgrader collect 01_tensor --student student_id
 ```
 
 ### **4. Auto-Grade**
 ```bash
 # Grade all submissions
-tito grade autograde 01_tensor
+tito nbgrader autograde 01_tensor
 
 # Grade specific student
-tito grade autograde 01_tensor --student student_id
+tito nbgrader autograde 01_tensor --student student_id
 ```
 
 ### **5. Manual Review**
 ```bash
-# Open grading interface (browser-based)
-tito grade manual 01_tensor
-
+# Use NBGrader's formgrader for manual review
 # This launches a web interface for:
 # - Reviewing ML Systems question responses
 # - Adding feedback comments
 # - Adjusting auto-grades
+nbgrader formgrader
 ```
 
 ### **6. Generate Feedback**
 ```bash
 # Create feedback files for students
-tito grade feedback 01_tensor
+tito nbgrader feedback 01_tensor
 ```
 
 ### **7. Export Grades**
 ```bash
-# Export all grades to CSV
-tito grade export
+# Export grades report
+tito nbgrader report
 
 # Or specific module
-tito grade export --module 01_tensor --output grades_module01.csv
+tito nbgrader report --module 01_tensor
 ```
 
 ## 📊 Grading Components
@@ -527,7 +529,7 @@ tito module test MODULE --verbose
 ```bash
 # Clear NBGrader database
 rm gradebook.db
-tito grade setup
+tito nbgrader init
 ```
 
 **Missing Submissions**

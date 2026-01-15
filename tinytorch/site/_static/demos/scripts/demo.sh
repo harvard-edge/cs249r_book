@@ -109,7 +109,7 @@ EOF
     source .venv/bin/activate 2>/dev/null || source activate.sh
 
     MODULE_STATUS_TIME=$(time_command "tito_module_status" "tito module status")
-    LOGO_TIME=$(time_command "tito_logo" "tito logo")
+    LOGO_TIME=$(time_command "tito_logo" "tito system logo")
 
     # Add system info
     if command -v jq &> /dev/null; then
@@ -131,7 +131,7 @@ EOF
     printf "%-30s %10s\n" "git clone" "$(echo "scale=2; $GIT_CLONE_TIME / 1000" | bc)"
     printf "%-30s %10s\n" "./setup-environment.sh" "$(echo "scale=2; $SETUP_TIME / 1000" | bc)"
     printf "%-30s %10s\n" "tito module status" "$(echo "scale=2; $MODULE_STATUS_TIME / 1000" | bc)"
-    printf "%-30s %10s\n" "tito logo" "$(echo "scale=2; $LOGO_TIME / 1000" | bc)"
+    printf "%-30s %10s\n" "tito system logo" "$(echo "scale=2; $LOGO_TIME / 1000" | bc)"
     echo ""
 
     # Recommendations
