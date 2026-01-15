@@ -215,6 +215,37 @@ Different deployment contexts have fundamentally different resolution requiremen
 
 Production systems can select resolution dynamically based on content. One approach runs a lightweight classifier at 128×128 to categorize content type, then selects task-appropriate resolution with documents at 512×512, landscapes at 224×224, and faces at 384×384. This achieves 1.4× throughput improvement with 99.2 percent accuracy retention versus fixed high resolution. This pattern trades preprocessing cost from running the lightweight classifier for inference savings on the main model.
 
+## Interface Protocols and Serialization {#sec-serving-protocols}
+
+The mechanism used to transport data between client and server significantly impacts the latency budget. While model inference is often highly optimized, the cost of moving data into the model—serialization and network protocol overhead—can become the dominant bottleneck, especially for lightweight models where inference time is small. This "serialization tax" is a primary contributor to the "killer microseconds" problem identified in the previous section.
+
+### The Serialization Bottleneck {#sec-serving-serialization}
+
+Text-based formats like JSON are ubiquitous but computationally expensive. Parsing a JSON object requires reading every byte, validating syntax, and converting text representations into machine-native types. For high-throughput systems, this consumes CPU cycles that could otherwise be used for request handling or preprocessing.
+
+Binary formats like Protocol Buffers (Protobuf) or FlatBuffers reduce this overhead by designing the wire format to map directly to in-memory data structures. This enables "zero-copy" deserialization in optimal cases, where the network buffer can be used directly without allocating new memory.
+
+### REST vs gRPC {#sec-serving-rest-grpc}
+
+Two dominant paradigms define modern serving interfaces, each with distinct system characteristics:
+
+**REST (Representational State Transfer)** typically uses HTTP/1.1 and JSON. It is universally supported, human-readable, and stateless, making it the default choice for public-facing APIs. However, standard HTTP/1.1 requires a new TCP handshake for each request (unless keep-alive is carefully tuned), and JSON serialization adds significant latency for numerical data like tensors.
+
+**gRPC (gRPC Remote Procedure Call)** uses HTTP/2 and Protobuf. HTTP/2 enables multiplexing multiple requests over a single persistent TCP connection, eliminating handshake latency and allowing efficient binary streaming. Protobuf provides strict type safety and efficient binary serialization, making it the standard for internal service-to-service communication where latency is critical.
+
+::: {.callout-note title="Benchmarks: JSON vs Protobuf Serialization"}
+
+Consider a request payload containing 1,000 floating point numbers (e.g., an embedding vector).
+
+*   **JSON**: Uses ~9 KB on the wire. Requires ~50$\mu$s to parse.
+*   **Protobuf**: Uses ~4 KB on the wire. Requires ~5$\mu$s to parse.
+
+For a system processing 10,000 requests per second, switching to Protobuf saves nearly half a core of CPU time just in serialization overhead. This 10$\times$ efficiency gain makes gRPC essential for high-throughput internal microservices.
+
+:::
+
+**System Choice**: Use REST for public APIs to maximize developer accessibility. Use gRPC for high-performance internal communication to minimize the serialization tax.
+
 ## Queuing Fundamentals {#sec-serving-queuing}
 
 The latency budget framework explains where time goes within a single request, but production systems must handle many concurrent requests competing for finite resources. Understanding why latency degrades under load requires queuing theory, the mathematical framework that explains how requests wait for service in any system with finite capacity. These principles apply universally, from web servers to ML inference, and explain the counterintuitive behavior that causes well-provisioned systems to suddenly violate latency SLOs when load increases modestly.
@@ -440,6 +471,15 @@ Strategies for multi-model serving include time-multiplexing that loads one mode
 When multiple models or multiple instances of the same model must run concurrently on a single GPU, the hardware must partition resources between them. NVIDIA's Multi-Instance GPU technology enables hardware-level isolation, dividing an A100 into up to 7 independent GPU instances, each with dedicated memory and compute resources. MIG is available on A100, A30, H100, and newer data center GPUs. For older GPUs such as V100 or T4, CUDA stream scheduling provides time-multiplexed sharing without hardware isolation.
 
 MIG provides stronger isolation guarantees but reduces flexibility since once partitioned, GPU slices cannot be dynamically resized. CUDA streams offer flexibility but no performance isolation. The choice depends on whether consistent latency with MIG or maximum utilization with shared streams is the priority.
+
+**Model Swapping and Host Memory**
+
+When the aggregate size of all models exceeds GPU memory capacity, the serving system must swap models between host memory (DRAM) and device memory (VRAM) on demand. This introduces a new latency component determined by the PCIe bus bandwidth.
+
+For a 10 GB model on PCIe Gen4 x16 (32 GB/s theoretical bandwidth), loading takes at least:
+$$ T_{\text{load}} = \frac{10 \text{ GB}}{32 \text{ GB/s}} \approx 312 \text{ ms} $$
+
+To mitigate this, systems use **Pinned Memory** (page-locked host memory). Pinning prevents the OS from paging out model weights, enabling the GPU's DMA engine to transfer data at maximum physical bandwidth without CPU involvement, often improving transfer speeds by 2-3$\times$ compared to pageable memory.
 
 ## Batching for Serving {#sec-serving-batching}
 
@@ -789,6 +829,39 @@ Mobile serving optimization focuses on preprocessing efficiency and power manage
 
 : **Traffic Patterns and Batching Strategies**: The four MLPerf inference scenarios map to distinct deployment contexts. Server traffic (cloud APIs) uses dynamic batching with timeout; MultiStream (autonomous driving) uses synchronized sensor fusion; SingleStream (mobile) processes requests individually; Offline (batch processing) maximizes batch size for throughput. {#tbl-traffic-patterns-summary}
 
+## Generative Inference and Memory Management {#sec-serving-generative-memory}
+
+Serving generative models (LLMs) introduces a unique systems challenge: **state management**. Unlike discriminative models (ResNet) where each request is independent and stateless, autoregressive generation requires maintaining context across a sequence of decoding steps. This state, known as the KV Cache, fundamentally changes the memory characteristics of the serving system.
+
+### The KV Cache Bottleneck {#sec-serving-kv-cache}
+
+In autoregressive generation, the model predicts the next token based on all previous tokens. Naively recomputing the attention mechanism for the entire sequence at every step would be prohibitively expensive ($O(N^2)$ compute).
+
+To optimize this, inference systems cache the Key (K) and Value (V) tensors for all previous tokens. This reduces compute to $O(N)$ per step but shifts the bottleneck from **compute** to **memory capacity and bandwidth**.
+
+::: {.callout-note title="Quantifying the KV Cache"}
+
+For a Llama-3-7B model (32 layers, 4096 dim) serving a batch of 64 requests with sequence length 2048:
+
+$$\text{Memory} = 2 \times \text{Layers} \times \text{Dim} \times \text{SeqLen} \times \text{Batch} \times \text{Precision}$$
+
+$$\text{Memory} = 2 \times 32 \times 4096 \times 2048 \times 64 \times 2 \text{ bytes (FP16)} \approx 64 \text{ GB}$$
+
+This 64 GB cache competes with model weights (14 GB) for GPU memory. The KV cache grows linearly with sequence length, making memory capacity the hard limit on batch size and throughput.
+
+:::
+
+### Memory Fragmentation and PagedAttention {#sec-serving-paged-attention}
+
+Standard deep learning frameworks require tensors to be stored in contiguous memory blocks. However, the length of a generated sequence is unknown ahead of time. Systems traditionally reserved maximum-length buffers (e.g., 4096 tokens) for every request, leading to massive internal fragmentation—often wasting 20% to 40% of GPU memory on empty reservation slots.
+
+**PagedAttention** (introduced by vLLM) solves this by applying operating system principles to ML serving. It treats the KV cache as "virtual memory" and GPU VRAM as "physical memory," partitioning the cache into fixed-size blocks (pages) that can be stored non-contiguously.
+
+*   **Virtual Memory**: The model views the KV cache as a contiguous tensor.
+*   **Physical Memory**: The block manager allocates physical pages on demand, only when new tokens are generated.
+
+This architectural innovation allows serving systems to process requests with near-zero memory waste, enabling 2-4$\times$ higher batch sizes and throughput compared to contiguous allocation systems.
+
 ## Postprocessing {#sec-serving-postprocessing}
 
 Batching optimizes how requests traverse the inference phase, but even optimally batched inference produces only raw tensors. These floating-point arrays carry no inherent meaning to applications or users. The final phase of the serving pipeline, postprocessing, transforms these tensors into actionable predictions: a 0.95 probability becomes a confident "dog" label, a sequence of token IDs becomes readable text, or a bounding box tensor becomes a highlighted region in an image. While often overlooked in system design, postprocessing significantly impacts both latency and the usefulness of predictions, determining whether raw model capability translates into practical value.
@@ -1025,7 +1098,7 @@ Serving represents the critical transition from model development to production 
 
 Effective serving optimization requires understanding the complete request path rather than focusing exclusively on model inference. Preprocessing often consumes 45 to 70 percent of total latency when inference runs on optimized accelerators, yet engineering effort frequently targets the wrong bottleneck. The microsecond-scale overheads identified by Barroso, Patterson, and colleagues explain why serving latency often exceeds the sum of its measured parts, and why system-level optimization matters as much as model optimization. Training-serving skew represents another dimension of this complexity, silently degrading accuracy when preprocessing logic differs between training and production environments in ways that traditional testing cannot detect.
 
-The traffic pattern analysis reveals how deployment context fundamentally shapes batching strategy and system design. Server workloads with Poisson arrivals optimize dynamic batching windows, autonomous vehicles with streaming sensor data require synchronized batch formation, and mobile applications with single-user patterns eliminate batching entirely. The MLPerf scenarios codify these patterns for standardized benchmarking, connecting the serving principles established here to the measurement frameworks explored in @sec-benchmarking-ai. Precision selection and runtime optimization extend the quantization techniques from @sec-model-optimizations and Tensor Core capabilities from @sec-ai-acceleration into the serving domain, where calibration with representative production traffic becomes essential.
+The traffic pattern analysis reveals how deployment context fundamentally shapes batching strategy and system design. Server workloads with Poisson arrivals optimize dynamic batching windows, autonomous vehicles with streaming sensor data require synchronized batch formation, and mobile applications with single-user patterns eliminate batching entirely. The MLPerf scenarios codify these patterns for standardized benchmarking, connecting the serving principles established here to the measurement frameworks explored in @sec-benchmarking-ai. Precision selection and runtime optimization extend the quantization techniques from @sec-model-optimizations and Tensor Core capabilities from @sec-ai-acceleration into the serving domain, where calibration with representative production traffic becomes essential. For generative models, state management becomes a first-class citizen, where techniques like PagedAttention demonstrate how operating system principles—virtual memory management—enable the throughput required for interactive applications.
 
 ::: {.callout-important title="Key Takeaways"}
 * Serving inverts training priorities: latency per request matters more than aggregate throughput, requiring fundamentally different system design
@@ -1033,6 +1106,7 @@ The traffic pattern analysis reveals how deployment context fundamentally shapes
 * Preprocessing often dominates total latency (45-70%), making pipeline optimization as important as model optimization
 * Traffic patterns (Poisson, streaming, single-user) determine optimal batching strategy, directly mapping to MLPerf inference scenarios
 * Precision selection and resolution tradeoffs connect serving decisions to optimization techniques from earlier chapters
+* Generative inference requires managing the KV Cache bottleneck, using techniques like PagedAttention to optimize memory efficiency
 * Training-serving skew silently degrades accuracy and requires identical preprocessing code or rigorous monitoring to prevent
 :::
 
