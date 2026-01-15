@@ -1,6 +1,7 @@
 # tito/commands/login.py
 import time
 from argparse import ArgumentParser, Namespace
+from rich.panel import Panel
 from rich.prompt import Confirm
 from tito.commands.base import BaseCommand
 from tito.core.auth import AuthReceiver, save_credentials, delete_credentials, ENDPOINTS, is_logged_in
@@ -27,7 +28,14 @@ class LoginCommand(BaseCommand):
         # Check if already logged in (unless force was used)
         if is_logged_in():
             self.console.print("[green]You are already logged in.[/green]")
-            if Confirm.ask("[bold yellow]Do you want to force re-login?[/bold yellow]", default=False):
+            self.console.print()
+            self.console.print(Panel(
+                "[bold yellow]⚠️  This will clear your existing credentials[/bold yellow]",
+                title="Warning",
+                border_style="yellow"
+            ))
+            self.console.print()
+            if Confirm.ask("[yellow]Force re-login?[/yellow]", default=False):
                 delete_credentials()
                 self.console.print("Cleared existing credentials. Proceeding with new login...")
             else:
