@@ -3215,43 +3215,35 @@ Automate aggressively. Every hour of automation development that saves 10 minute
 
 ## Fallacies and Pitfalls {#sec-ops-scale-fallacies}
 
-Understanding common misconceptions helps avoid costly mistakes when building ML operations at scale.
+Operating machine learning systems at scale involves counterintuitive complexity growth that causes common misconceptions. Engineers often assume that operational practices scale linearly with model count, when in reality the interactions between models create combinatorial complexity that demands fundamentally different platform architectures. These fallacies and pitfalls capture errors that waste millions in operational costs, cause cascading production failures across model fleets, and prevent organizations from deploying machine learning effectively beyond initial prototypes.
 
-::: {.callout-warning title="Fallacy"}
-**One monitoring dashboard fits all models.**
+**Fallacy:** _Operational complexity grows linearly with model count._
 
-Reality: Different model types have fundamentally different metrics, failure modes, and operational requirements. A dashboard designed for recommendation engagement metrics provides no value for fraud detection precision/recall tradeoffs. Effective monitoring requires model-type-specific dashboards within a common infrastructure.
-:::
+Teams assume that managing 100 models requires 100 times the effort of managing one model. In production, complexity grows superlinearly due to dependencies between models. As @sec-ops-scale-single-to-platform demonstrates, 100 models introduce dense dependency graphs where Model A depends on features from Pipeline B using embeddings from Model C, making isolated updates impossible. The monitoring burden alone becomes unmanageable: with 100 models having 10 metrics each checked every 5 minutes at 5% false positive rate, the system generates 14,400 false alerts daily, overwhelming any on-call team even with 99% deduplication. The deployment coordination challenge is equally severe—a platform supporting 40 models with per-model operational practices requires 40 × 40 = 1,600 engineer-hours monthly, consuming \$3.6M annually at \$150/hour fully-loaded costs. Organizations that treat multi-model operations as simple multiplication of single-model practices discover that per-model CI/CD, monitoring, and deployment patterns do not compose at scale.
 
-::: {.callout-warning title="Pitfall"}
-**We can scale our single-model CI/CD to 100 models.**
+**Pitfall:** _Applying independent alerting to every model and metric._
 
-Copying per-model CI/CD pipelines 100 times creates an unmanageable proliferation of pipelines, each requiring individual maintenance. Platform-level orchestration with parameterized pipelines is essential. The shift from per-model to platform CI/CD typically requires fundamental rearchitecting, not incremental expansion.
-:::
+Engineers configure alerts on every metric for every model to ensure comprehensive coverage. This guarantee produces alert fatigue through multiple testing. @eq-false-alert-rate establishes that for $N=1000$ independent tests (100 models × 10 metrics) at $\alpha=0.05$ false positive rate, $P(\text{at least one false alert}) = 1 - 0.95^{1000} \approx 1.0$, ensuring continuous false alerts. Operators learn to ignore alerts because 99% are false positives, causing genuine incidents to disappear into noise. The solution requires hierarchical monitoring where business metrics trigger executive attention, portfolio metrics aggregate across related models, and model-specific metrics serve investigation rather than primary alerting. Organizations that deploy naive per-model alerting measure mean-time-to-detect incidents in hours rather than minutes because engineers dismiss alerts reflexively.
 
-::: {.callout-warning title="Fallacy"}
-**ML platform engineering is just DevOps for ML.**
+**Fallacy:** _Platform investment makes sense only after reaching 100+ models._
 
-While ML platforms build on DevOps principles, they address unique challenges: data versioning, feature management, experiment tracking, model-specific validation, and training-serving consistency. Platform engineers need ML domain knowledge, not just infrastructure skills. Organizations that staff ML platforms with pure DevOps engineers often struggle with ML-specific requirements.
-:::
+Teams defer platform engineering, assuming the overhead does not justify until "massive scale." In reality, @eq-platform-roi shows platform ROI becomes positive at 20-50 models, not 100+. Technical debt from fragmented per-model practices compounds over time: configuration debt grows when each of 40 models maintains 847-line YAML files with no validation schema, causing 35% of deployment delays and costing 960 engineer-hours annually. Pipeline glue code debt accumulates when 23 different preprocessing scripts with 62% duplication require 12 engineer-hours weekly debugging pipeline breaks. By the time organizations reach 100 models, the migration cost from fragmented infrastructure to unified platform exceeds the cost of building the platform initially by 3-5×. The economic threshold is clear: with 50 models requiring 40 hours monthly operational work each, platform investment of \$2M saves \$2M annually, paying for itself within 12 months.
 
-::: {.callout-warning title="Pitfall"}
-**We can defer platform investment until we have more models.**
+**Pitfall:** _Treating all deployments with uniform rollout procedures regardless of risk profile._
 
-The cost of fragmentation compounds over time. Each team that builds custom infrastructure creates technical debt that becomes harder to consolidate later. Organizations that wait too long face painful migrations that could have been avoided with earlier platform investment. The threshold for platform investment is typically 10-20 models, not 100+.
-:::
+Engineers apply the same staged rollout process to every model update—whether minor hyperparameter adjustment or complete retraining—believing consistency ensures safety. This approach either over-burdens low-risk changes or under-protects high-risk changes. @tbl-ops-scale-model-types demonstrates that fraud detection requires hourly updates with seconds-fast rollback due to adversarial dynamics, while LLMs require monthly staged rollouts with hours-to-days rollback windows because quality regressions manifest subtly in human evaluation. A fraud model that cannot redeploy within one hour provides fraudsters an exploitable window, costing thousands per incident. An LLM deployed without multi-day shadow testing can produce safety violations across millions of queries before detection. Risk-based deployment policies should match @sec-ops-scale-cicd patterns: instant rollback for adversarial models, canary deployments for high-traffic recommendations, shadow deployments for quality-sensitive LLMs.
 
-::: {.callout-warning title="Fallacy"}
-**All model updates carry equal risk.**
+**Fallacy:** _Monitoring training metrics (loss, accuracy) provides sufficient observability at scale._
 
-A minor parameter adjustment to a vision classifier carries different risk than a major retraining of a fraud detection system. Risk-based deployment policies should match rollout rigor to change risk. Treating all changes identically either over-burdens low-risk changes or under-protects high-risk changes.
-:::
+Engineers assume that tracking model accuracy and training loss captures production health. In multi-model platforms, system-level metrics matter more than individual model performance. A recommendation ensemble invoking 10-50 models in sequence can experience 30% latency degradation when one upstream retrieval model slows by 20ms, even though all accuracy metrics remain nominal. Data dependency graphs create cascades where upstream embedding model drift degrades 12 downstream consumer models simultaneously, a failure mode invisible in per-model accuracy tracking. @sec-ops-scale-monitoring establishes that platform observability requires business metrics (revenue, engagement) at the top, portfolio metrics (recommendation fleet health) for coordination, model metrics for investigation, and infrastructure metrics at the foundation. Organizations monitoring only training accuracy discover production failures through user complaints rather than automated detection because the failure mode—cross-model interaction—exists in the dependency graph, not individual models.
 
-::: {.callout-warning title="Pitfall"}
-**Feature freshness is a nice-to-have.**
+**Pitfall:** _Defaulting to batch feature computation for all features to simplify architecture._
 
-For many ML applications, feature freshness directly impacts model quality. A recommendation system using day-old features may underperform one using real-time features by several percentage points. Organizations should quantify freshness impact and invest accordingly rather than defaulting to batch computation for all features.
-:::
+Teams implement batch pipelines with daily feature updates, assuming the operational simplicity outweighs freshness costs. This ignores the quantitative impact of staleness on model quality. For session-based recommendation, the feature freshness latency formula $L_{freshness} = T_{available} - T_{event}$ shows batch daily processing yields $L_{freshness} \approx 12-24$ hours, meaning user clicks do not affect recommendations until the next day. Streaming pipelines achieve $L_{freshness} \approx 1-5$ seconds, and as @sec-ops-scale-feature-store demonstrates, this freshness improvement delivers 10-20% engagement lift in A/B tests, justifying the infrastructure investment. For fraud detection, day-old features allow adversaries to exploit newly discovered vulnerabilities for 24 hours before the model adapts. The economic calculation is straightforward: a recommendation platform generating \$15M weekly revenue with 10% from ML that improves 15% with real-time features gains \$1.5M × 0.15 = \$225K weekly, or \$11.7M annually, easily covering streaming infrastructure costs.
+
+**Fallacy:** _Technical debt is inevitable at scale and should be addressed only when it blocks critical work._
+
+Teams accept growing deployment times, increasing incident rates, and expanding toil as "the cost of growth." This fundamentally misunderstands technical debt economics. @sec-ops-scale-single-to-platform establishes quantitative debt thresholds: deployment velocity exceeding 2 weeks (healthy: <1 day) indicates configuration complexity, incident rates exceeding 20 per 1000 deployments (healthy: <5) indicate testing debt, toil exceeding 50% of capacity (healthy: <20%) indicates automation debt. Each category has measurable cost: monitoring debt with mean-time-to-detect of 4.2 hours costs \$50K per incident × 15 incidents yearly = \$750K annually. The debt paydown decision follows the priority formula $\frac{\text{Impact} \times \text{Frequency} \times \text{Benefit}}{\text{Resolution Cost}}$, and configuration debt requiring 6 weeks to fix while saving 35% of deployment delays pays back within 2 months. Organizations that treat technical debt as inevitable rather than quantifiable watch toil consume 70-80% of platform engineering capacity, leaving no time for platform improvements and creating a death spiral where teams can only maintain existing systems, not improve them.
 
 ## Summary {#sec-ops-scale-summary}
 
