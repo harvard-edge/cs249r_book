@@ -26,8 +26,9 @@ TinyTorch is an **educational framework** where every contribution should:
 
 2. **Verify installation**:
    ```bash
-   tito system health
-   tito module status
+   tito --version       # Check TinyTorch version
+   tito system health   # Verify environment
+   tito module status   # See module progress
    ```
 
 3. **Read the development guidelines**:
@@ -178,15 +179,17 @@ Every contribution should emphasize:
 
 When reporting bugs, include:
 
-1. **Environment**: OS, Python version, virtual environment status
-2. **Module**: Which module/checkpoint is affected
-3. **Steps to Reproduce**: Exact commands and inputs
-4. **Expected vs Actual**: What should happen vs what happens
-5. **Error Messages**: Full stack traces if applicable
-6. **Testing**: Did you run the module tests?
+1. **Version**: Run `tito --version` to get TinyTorch version
+2. **Environment**: OS, Python version, virtual environment status
+3. **Module**: Which module/checkpoint is affected
+4. **Steps to Reproduce**: Exact commands and inputs
+5. **Expected vs Actual**: What should happen vs what happens
+6. **Error Messages**: Full stack traces if applicable
+7. **Testing**: Did you run the module tests?
 
 ```bash
 # Always include this information
+tito --version
 python --version
 echo $VIRTUAL_ENV
 tito system health
@@ -215,6 +218,41 @@ Contributors who follow these guidelines and make valuable educational improveme
 - Module documentation where appropriate
 - Release notes for significant contributions
 - Course materials when contributions enhance learning
+
+## 🏷️ Releases (Maintainers Only)
+
+TinyTorch follows [semantic versioning](https://semver.org/):
+
+| Release Type | Version Change | When to Use |
+|--------------|----------------|-------------|
+| **patch** | 0.1.0 → 0.1.1 | Bug fixes, typos, small updates |
+| **minor** | 0.1.x → 0.2.0 | New features, module improvements |
+| **major** | 0.x.x → 1.0.0 | Breaking changes, stable API |
+
+### Release Process
+
+Releases are created via the `tinytorch-publish-live.yml` GitHub Actions workflow:
+
+1. Maintainer triggers workflow from GitHub Actions
+2. Select release type (patch/minor/major)
+3. Enter release description
+4. Workflow automatically:
+   - Bumps version in code
+   - Runs tests and preflight checks
+   - Merges dev → main
+   - Deploys to tinytorch.org
+   - Creates git tag (e.g., v0.1.1)
+   - Creates GitHub Release with notes
+   - Publishes to PyPI
+
+### For Contributors
+
+**You don't need to bump versions.** Maintainers handle versioning during the release process. Just focus on:
+- Writing good code
+- Following the contribution guidelines
+- Using conventional commit messages (`fix:`, `feat:`, `docs:`)
+
+Your commits will be included in the next release with appropriate version bump.
 
 ## 📚 Resources
 

@@ -34,7 +34,7 @@ class NBGraderCommand(BaseCommand):
 
     @property
     def description(self) -> str:
-        return "Assignment management and auto-grading commands"
+        return "Assignment management and auto-grading commands (experimental)"
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         subparsers = parser.add_subparsers(
@@ -163,6 +163,16 @@ class NBGraderCommand(BaseCommand):
 
     def run(self, args: Namespace) -> int:
         console = self.console
+
+        # Show experimental warning
+        console.print(Panel(
+            "[bold yellow]⚠️  Experimental Feature[/bold yellow]\n\n"
+            "The nbgrader integration is under active development.\n"
+            "Use for testing only - workflow may change.\n\n"
+            "[dim]Feedback welcome: github.com/harvard-edge/cs249r_book/discussions[/dim]",
+            border_style="yellow"
+        ))
+        console.print()
 
         if not hasattr(args, 'nbgrader_command') or not args.nbgrader_command:
             console.print(Panel(
