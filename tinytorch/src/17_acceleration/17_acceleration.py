@@ -1406,7 +1406,7 @@ def test_module():
 
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
-    print("Run: tito module complete 18")
+    print("Run: tito module complete 17")
 
 # %% nbgrader={"grade": false, "grade_id": "main-execution", "solution": false}
 # Main execution block - single clean entry point
@@ -1501,7 +1501,7 @@ Your acceleration techniques enable:
 Your acceleration implementations provide the foundation for advanced optimization modules.
 The performance analysis skills transfer directly to production optimization workflows.
 
-Export with: `tito module complete 18`
+Export with: `tito module complete 17`
 
 **Next**: Advanced modules will build on these acceleration techniques for specialized optimizations!
 """

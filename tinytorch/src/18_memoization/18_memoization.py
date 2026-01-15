@@ -1451,7 +1451,7 @@ def test_module():
 
     print("=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
-    print("Run: tito module complete 17")
+    print("Run: tito module complete 18")
 
 # %%
 if __name__ == "__main__":
@@ -1624,7 +1624,7 @@ This optimization is THE technique that transformed language models from researc
 
 ### Ready for Next Steps
 Your KV caching implementation demonstrates the principle: "spend memory to save time"!
-Export with: `tito module complete 17`
+Export with: `tito module complete 18`
 
 **Next**: Module 16 (Quantization) will use the opposite trade-off: "sacrifice precision to save memory"!
 

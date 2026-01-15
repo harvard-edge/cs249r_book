@@ -40,7 +40,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/07_optimizers/optimizers_dev.py`
+**Learning Side:** You work in `src/07_optimizers/07_optimizers.py`
 **Building Side:** Code exports to `tinytorch.core.optimizers`
 
 ```python

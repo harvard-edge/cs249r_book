@@ -1510,62 +1510,37 @@ This infrastructure supports auto-labeling workflows where preliminary models id
 
 These case studies demonstrate that production ML infrastructure defies one-size-fits-all solutions. DGX SuperPOD optimizes for flexible general-purpose training with emphasis on GPU density and high-bandwidth networking. TPU pods sacrifice flexibility for vertical integration that excels at transformer workloads. Meta's hybrid architecture addresses the embedding-heavy patterns unique to recommendation systems. Tesla's Dojo pursues custom silicon for domain-specific acceleration where scale justifies development costs. The choice among these approaches depends on workload characteristics, scale requirements, and organizational capabilities rather than any universal optimum. Understanding these trade-offs enables informed infrastructure decisions as models and training requirements continue to evolve. @sec-distributed-training provides the implementation details for the parallelism strategies that leverage these infrastructure platforms, while @sec-communication examines the collective operations and algorithms that govern network-level performance.
 
-## Fallacies and Pitfalls
+## Fallacies and Pitfalls {#sec-infrastructure-fallacies-pitfalls}
 
-The complexity of large-scale ML infrastructure creates numerous opportunities for costly miscalculations. These misconceptions often stem from oversimplified mental models that fail to account for the non-linear interactions between compute, networking, power, and cooling systems. Understanding these fallacies and pitfalls helps practitioners avoid expensive mistakes that can waste millions of dollars in infrastructure investment or months of delayed projects.
+Infrastructure for distributed ML systems involves counterintuitive interactions between compute, networking, power, and cooling that lead to costly miscalculations. These fallacies and pitfalls capture errors that waste millions in infrastructure investment, delay projects by months, or cause production systems to achieve only 30-50% of planned capacity.
 
 **Fallacy:** _More GPUs always means faster training._
 
-This intuition fails catastrophically beyond modest cluster sizes. Distributed training introduces communication overhead, and the relationship between GPU count and training speed is far from linear.
-
-::: {.callout-notebook title="Engineering Calculation: The Bandwidth Tax" collapse="true"}
-**Scenario**: You scale training from 1 GPU to 64 GPUs.
-**Workload**: 175B parameter model (350 GB gradients FP16).
-**Network**: 64 GPUs connected via 400 Gbps (50 GB/s) InfiniBand.
-
-**Communication Time (Ring AllReduce)**:
-$$ T_{\text{comm}} \approx \frac{2M}{B} = \frac{2 \times 350 \text{ GB}}{50 \text{ GB/s}} = \mathbf{14 \text{ seconds per step}} $$
-
-**Compute Time**:
-
-- 1 GPU: 60 seconds (Efficiency = 100%)
-- 64 GPUs: $\approx 1$ second (Ideal speedup)
-
-**Efficiency Calculation**:
-$$ \text{Efficiency} = \frac{T_{\text{compute}}}{T_{\text{compute}} + T_{\text{comm}}} = \frac{1}{1 + 14} \approx \mathbf{6.7\%} $$
-
-**Conclusion**: Adding GPUs reduced compute time to 1s, but communication (14s) now dominates. The cluster is 93% idle waiting for data.
-:::
-
-Many organizations discover that their 512-GPU cluster trains models slower than a well-optimized 128-GPU deployment due to crossing this inflection point. @sec-distributed-training develops the hybrid parallelism strategies that address this limitation by combining tensor, pipeline, and data parallelism to minimize cross-node communication while maximizing compute utilization.
+Engineers assume training time scales linearly with GPU count. In production, communication overhead dominates beyond modest cluster sizes. Amdahl's Law establishes the hard limit: gradient synchronization is inherently sequential since all gradients must be collected before any update proceeds. For a 175B parameter model (350 GB gradients) on 64 GPUs with 400 Gbps InfiniBand, AllReduce requires 14 seconds while compute takes 1 second, yielding 6.7% efficiency. Organizations frequently discover that 512-GPU clusters train slower than optimized 128-GPU deployments. At $30/hour per H100, a 512-GPU cluster achieving 25% efficiency wastes $11,520/hour in idle capacity.
 
 **Fallacy:** _Peak FLOPS determines training throughput._
 
-Vendors advertise peak FLOPS prominently: the H100 delivers 990 TF of FP16 compute. But production training jobs typically achieve 30-50% of peak due to memory bandwidth limitations, communication overhead, and kernel efficiency. For attention-dominated transformer training, memory bandwidth, not compute, is the limiting factor.
-
-The roofline model reveals this clearly: with arithmetic intensity below the ridge point (~290 FLOP/byte for H100), the accelerator is memory-bound. Most LLM training operates at 50-100 FLOP/byte, achieving only 170-340 TF effective throughput on H100, roughly 20-35% of peak. Comparing accelerators by peak FLOPS alone misleads: a lower-FLOPS accelerator with higher memory bandwidth may outperform a higher-FLOPS alternative for memory-bound workloads.
+Procurement teams select accelerators by comparing peak FLOPS: H100 delivers 990 TF of FP16 compute. In production workloads, memory bandwidth limits performance. The roofline model in @sec-datacenter-architecture shows that arithmetic intensity below the ridge point (~290 FLOP/byte for H100) makes accelerators memory-bound. Most LLM training operates at 50-100 FLOP/byte, achieving only 168-335 TF effective throughput—17-34% of peak. Organizations that compare accelerators by peak FLOPS alone make purchasing decisions that cost 1.5-2x more per actual training FLOP delivered. For attention-dominated workloads, lower-FLOPS accelerators with higher memory bandwidth often outperform higher-FLOPS alternatives.
 
 **Fallacy:** _All ML infrastructure should be GPU-based._
 
-The assumption that GPUs represent the optimal accelerator for all ML workloads ignores the fundamental architectural differences between model types. Recommendation systems, which drive the majority of inference cycles at companies like Meta and Google, exhibit a workload profile where embedding table lookups dominate compute time. These lookups are memory-bound operations that GPUs handle poorly since they require random access to terabytes of embedding tables that cannot fit in GPU HBM.
-
-Meta's production recommendation infrastructure uses a hybrid architecture where CPU clusters handle embedding lookups from DRAM-based feature stores while GPU clusters process the dense neural network layers. This split architecture achieves 3x better cost efficiency than GPU-only deployments for their workload. Similarly, preprocessing pipelines for training data, including decompression, tokenization, and augmentation, execute more efficiently on CPUs. A DGX H100 with only 2 Intel Xeon CPUs can become CPU-bottlenecked on data preprocessing, starving the 8 H100 GPUs that represent 95% of the system cost.
+Teams assume GPUs optimize every ML workload. At scale, hybrid architectures deliver superior economics for embedding-heavy workloads. Recommendation systems, which constitute 80-90% of inference volume at Meta and Google, require random access to terabytes of embedding tables that cannot fit in GPU HBM. These memory-bound lookups perform poorly on GPUs optimized for dense compute. Meta's production infrastructure uses CPU clusters for embedding lookups while GPU clusters process dense neural network layers, achieving 3x better cost efficiency than GPU-only deployments. Organizations that deploy GPU-only infrastructure for diverse workloads waste 40-60% of capacity on tasks CPUs handle more efficiently.
 
 **Pitfall:** _Ignoring power and cooling constraints during infrastructure planning._
 
-Power and cooling represent hard physical limits that cannot be resolved through software optimization. A single rack of 4 DGX H100 systems requires over 40 kW of power and generates equivalent thermal load. Many organizations plan GPU purchases based on compute requirements without verifying datacenter capacity, only to discover their facility cannot support the power density.
-
-The consequences compound over time. Current-generation H100 GPUs consume 700W each, but next-generation B100 GPUs maintain similar power envelopes while delivering 2x compute. However, the industry trend toward higher-density deployments means power requirements per rack continue to increase. Organizations that build datacenters for 30 kW per rack today will face costly retrofits within 2-3 years as GPU density increases.
-
-Thermal throttling presents an equally insidious challenge. When cooling systems cannot remove heat fast enough, GPUs reduce clock speeds to prevent damage. A cluster designed for 100% utilization may achieve only 70% sustained throughput due to thermal constraints. At $30 per GPU-hour for H100 instances, this 30% efficiency loss represents $9 per hour per GPU in wasted capacity. For a 1000-GPU cluster operating 24 hours daily, thermal inefficiency costs $9,000 per hour, or approximately $6.5 million annually, a substantial fraction of the infrastructure's total cost of ownership.
+Teams plan GPU purchases based on compute requirements without verifying datacenter capacity. Power and cooling represent hard physical limits that cannot be resolved through software optimization. A single rack of 4 DGX H100 systems requires 40 kW of power and generates equivalent thermal load, compared to 5-10 kW for traditional server racks. Organizations discover their facility cannot support the power density only after hardware arrives. Thermal throttling causes GPUs to reduce clock speeds when cooling is inadequate. A cluster designed for 100% utilization may achieve only 70% sustained throughput due to thermal constraints, costing $9,000/hour in lost productivity for a 1000-GPU cluster at $30/hour per H100.
 
 **Pitfall:** _Underestimating network requirements for distributed training._
 
-Network bandwidth is rarely the only consideration. Latency, topology, and software overhead combine to determine actual training throughput. A cluster with theoretical 400 Gbps InfiniBand connectivity may achieve only 300 Gbps effective throughput due to protocol overhead in NCCL, suboptimal job placement, and contention from concurrent training jobs.
+Operators calculate network bandwidth but ignore latency, topology, and software overhead. As shown in @sec-networking-ml, a cluster with 400 Gbps InfiniBand achieves only 300 Gbps effective throughput due to NCCL protocol overhead, suboptimal job placement, and contention from concurrent jobs. Topology choice critically impacts performance: fat-tree topologies provide full bisection bandwidth at significant switch cost ($800K-$1.2M for 256 GPUs), while rail-optimized topologies reduce hardware cost but constrain job placement. NCCL introduces 5-20 microseconds of software latency per collective operation; for small message sizes common in pipeline parallelism, this overhead dominates transfer time. The crossover where bandwidth dominates latency occurs at approximately 250 KB message size.
 
-Fat-tree topologies provide full bisection bandwidth at significant switch cost, while rail-optimized topologies reduce hardware requirements but constrain job placement flexibility. Choosing the wrong topology for a workload can halve training throughput. For tensor-parallel workloads where adjacent GPUs exchange activations frequently, rail-optimized networks with 2-hop maximum latency outperform fat-tree networks with 4-6 hops. For data-parallel workloads with AllReduce patterns, fat-tree's guaranteed bisection bandwidth prevents congestion-induced slowdowns.
+**Fallacy:** _Cloud computing costs scale linearly with usage._
 
-Software overhead adds latency that theoretical bandwidth calculations ignore. NCCL introduces 5-20 microseconds of software latency per collective operation. For small message sizes common in pipeline parallelism, this overhead dominates transfer time, reducing effective bandwidth by 50% or more. The crossover point where bandwidth dominates latency occurs at approximately 250 KB message size for typical InfiniBand configurations. Operators that fail to aggregate small tensors before collective operations waste substantial network capacity. @sec-communication formalizes these bandwidth-latency trade-offs and develops the message chunking and aggregation strategies that achieve near-optimal network utilization.
+Organizations assume cloud expenses grow proportionally with compute consumption. In production, data egress fees and storage costs create nonlinear scaling. Training a 70B parameter model generates 200-400 GB of checkpoints every few hours; with 5 checkpoint retention, storage reaches 1-2 TB per experiment. Cloud storage at $0.023/GB-month costs $23-46/month per experiment, but egress fees for downloading checkpoints cost $0.09/GB—$18-36 per full checkpoint download. Organizations running 100 concurrent experiments accumulate $2,300-4,600/month in storage costs alone. The break-even point where on-premises infrastructure becomes more economical occurs at 40-60% sustained utilization. Teams that migrate to cloud assuming linear scaling discover total costs 1.5-2.5x higher than projected.
+
+**Pitfall:** _Underestimating operational complexity of distributed schedulers._
+
+Teams deploy Kubernetes or Slurm expecting resource management to be "solved." In production, achieving 60%+ GPU utilization requires continuous tuning of gang scheduling policies, preemption strategies, and job bin-packing algorithms. Naive first-come-first-served scheduling fragments nodes: with 8-GPU nodes and 6-GPU jobs, each job wastes 2 GPUs per node, reducing effective capacity to 75%. The CAP theorem established in @sec-vol2-introduction forces schedulers to trade off consistency versus availability. At 4096 GPUs with 99.9% annual reliability per GPU, clusters experience approximately 4 failures per year, requiring robust fault tolerance mechanisms. Organizations that treat scheduling as solved discover their $50M GPU cluster achieves only 35-45% utilization versus the 65-75% possible with dedicated tuning, wasting $5-9M annually.
 
 ## Summary
 

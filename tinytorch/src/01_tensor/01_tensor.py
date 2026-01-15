@@ -40,7 +40,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/01_tensor/tensor_dev.py
+**Learning Side:** You work in src/01_tensor/01_tensor.py
 **Building Side:** Code exports to tinytorch.core.tensor
 
 ```python
