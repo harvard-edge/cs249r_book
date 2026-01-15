@@ -184,14 +184,34 @@ The [full textbook](https://mlsysbook.ai/book/) combines both volumes for compre
 | **III. Model Optimization** | Making it fast | Efficient AI, Optimizations, HW Acceleration, Benchmarking |
 | **IV. System Operations** | Making it work | MLOps, Responsible Engineering |
 
-#### Volume II: Scale, Distribute, Govern
+### Volume II: Scale, Distribute, Govern
 
-| Part | Focus | Chapters |
-|------|-------|----------|
-| **I. Foundations of Scale** | Infrastructure | Infrastructure, Storage, Communication |
-| **II. Distributed Systems** | Coordination | Distributed Training, Fault Tolerance, Inference, Edge Intelligence |
-| **III. Production Challenges** | Operations | On-device Learning, Privacy & Security, Robust AI, Ops at Scale |
-| **IV. Responsible Deployment** | Trust | Responsible AI, Sustainable AI, AI for Good, Frontiers |
+**Part I: Foundations of Scale**
+1.  **Introduction**: The necessity of scale.
+2.  **Distributed Training**: Data, Tensor, and Pipeline parallelism.
+3.  **Communication**: Collectives and synchronization.
+4.  **Fault Tolerance**: Reliability at scale.
+
+**Part II: Building the Fleet**
+5.  **Compute**: The node architecture.
+6.  **Networking**: The fabric.
+7.  **Storage**: Data persistence.
+8.  **Orchestration**: Cluster management.
+
+**Part III: Deployment at Scale**
+9.  **Inference**: Serving architectures.
+10. **Optimization**: Model compression and acceleration.
+11. **Edge Intelligence**: Distributed and mobile AI.
+12. **MLOps**: Operations at scale.
+
+**Part IV: Production Concerns**
+13. **Privacy & Security**: Adversarial ML and confidential computing.
+14. **Robustness**: Hardware faults and reliability.
+15. **Sustainable AI**: Energy, carbon, and efficiency.
+16. **Frontiers**: AGI systems and future directions.
+
+**Conclusion**
+17. **Conclusion**: Synthesis and outlook.
 
 ---
 
