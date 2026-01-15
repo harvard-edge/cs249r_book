@@ -8,8 +8,6 @@ Commands are organized into logical groups: system, module, and package.
 from .base import BaseCommand
 
 # Individual commands
-from .test import TestCommand
-from .export import ExportCommand
 from .nbgrader import NBGraderCommand
 from .benchmark import BenchmarkCommand
 from .community import CommunityCommand
@@ -22,8 +20,6 @@ from .package import PackageCommand
 __all__ = [
     'BaseCommand',
     # Individual commands
-    'TestCommand',
-    'ExportCommand',
     'NBGraderCommand',
     'BenchmarkCommand',
     'CommunityCommand',
