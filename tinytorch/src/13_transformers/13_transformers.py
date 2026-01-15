@@ -1808,5 +1808,5 @@ Export with: `tito module complete 13`
 
 # %%
 #| export
-# Alias for backward compatibility with tests
-TinyGPT = GPT
+# Backward compatibility alias
+GPT = TinyGPT
