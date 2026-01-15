@@ -70,7 +70,7 @@ Distributed training introduces three primary complexity dimensions absent from 
 
 The systematic optimization methodology established for single-machine training extends to distributed environments with important adaptations. Profiling must now capture inter-device communication patterns and synchronization overhead in addition to computation and memory metrics. Tools like NVIDIA Nsight Systems and PyTorch's distributed profiler reveal whether training is communication-bound or computation-bound, guiding the choice between parallelization strategies. The solution space expands from single-machine techniques to include data parallelism for distributing training examples, model parallelism for distributing model parameters, pipeline parallelism for distributing model layers, and hybrid approaches that combine multiple strategies. The principles remain consistent in identifying bottlenecks, selecting appropriate techniques, and composing solutions, but the implementation complexity increases substantially as we navigate three orthogonal scaling dimensions. @fig-3d-parallelism-cube visualizes this three-dimensional configuration space: data parallelism scales replica count, tensor parallelism partitions layer width, and pipeline parallelism segments model depth.
 
-::: {#fig-3d-parallelism-cube fig-env="figure" fig-pos="htb"}
+::: {#fig-3d-parallelism-cube fig-env="figure" fig-pos="htb" fig-cap="**The 3D Parallelism Cube**. A conceptual visualization of the three orthogonal scaling axes: Data Parallelism (replicating the model), Tensor Parallelism (splitting layers), and Pipeline Parallelism (splitting depth). Production training for models like GPT-4 occupies a specific point $(d, t, p)$ within this cube to balance memory usage, compute efficiency, and communication overhead."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, z={(0.6,0.5)}, x={(1,0)}, y={(0,1)}, scale=1.3]
   \definecolor{DataColor}{RGB}{70,130,180} % SteelBlue
@@ -110,7 +110,6 @@ The systematic optimization methodology established for single-machine training 
 
 \end{tikzpicture}
 ```
-**The 3D Parallelism Cube**. A conceptual visualization of the three orthogonal scaling axes: Data Parallelism (replicating the model), Tensor Parallelism (splitting layers), and Pipeline Parallelism (splitting depth). Production training for models like GPT-4 occupies a specific point $(d, t, p)$ within this cube to balance memory usage, compute efficiency, and communication overhead.
 :::
 
 ### Engineering Trade-offs: Selecting a Parallelism Strategy {#sec-distributed-training-engineering-tradeoffs}
@@ -161,7 +160,7 @@ While frameworks like PyTorch FSDP and DeepSpeed abstract away much of the compl
 
 The distributed training process itself involves splitting the dataset into non-overlapping subsets, assigning each subset to a different GPU, and performing forward and backward passes independently on each device. Once gradients are computed on each GPU, they are synchronized and aggregated before updating the model parameters, ensuring that all devices learn in a consistent manner. The coordinated flow of data splitting, computation, and gradient synchronization (@fig-distributed-training) forms the foundation of distributed training, with each GPU processing its batch independently before synchronization brings all gradients together.
 
-::: {#fig-distributed-training fig-env="figure" fig-pos="htb"}
+::: {#fig-distributed-training fig-env="figure" fig-pos="htb" fig-cap="**Data Parallel Training Flow**. Distributed training partitions datasets across GPUs, computes gradients concurrently on each device's data subset, then aggregates gradients through AllReduce to update shared model parameters. Each GPU maintains an identical model copy and processes its portion of the batch independently, with synchronization occurring only during gradient aggregation. This approach achieves near-linear speedup when communication overhead remains below 30-40% of training time."}
 ```{.tikz}
 \begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
 \tikzset{%
@@ -390,7 +389,6 @@ node[fill=white,pos=0.75]{Chunk}(SC1.south);
 \draw[myline,-latex,shorten <=2mm](D3CL2)-|(CGG.230);
  \end{tikzpicture}
 ```
-**Data Parallel Training Flow**. Distributed training partitions datasets across GPUs, computes gradients concurrently on each device's data subset, then aggregates gradients through AllReduce to update shared model parameters. Each GPU maintains an identical model copy and processes its portion of the batch independently, with synchronization occurring only during gradient aggregation. This approach achieves near-linear speedup when communication overhead remains below 30-40% of training time.
 :::
 
 This coordination introduces several key challenges that distributed training systems must address. A distributed training system must orchestrate multi-machine computation by splitting up the work, managing communication between machines, and maintaining synchronization throughout the training process. The AllReduce operations that aggregate gradients across devices, for example, consume 10-40% of total training time even with optimal implementation, and this overhead compounds as systems scale.
@@ -496,7 +494,7 @@ Having established the mathematical foundation that makes data parallelism theor
 
 The process of data parallelism can be broken into a series of distinct steps, each with its role in ensuring the system operates efficiently. Consider @fig-train-data-parallelism: it traces the complete workflow from dataset splitting through gradient aggregation, showing how each GPU processes its assigned batch before synchronization brings all gradients together for parameter updates.
 
-::: {#fig-train-data-parallelism fig-env="figure" fig-pos="htb"}
+::: {#fig-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data Parallelism Implementation Pipeline**. The five-stage workflow for data parallel training: (1) split input data into non-overlapping subsets, (2) assign batches to GPUs, (3) compute forward and backward passes independently, (4) synchronize gradients via AllReduce, and (5) update parameters uniformly across all devices. This approach contrasts with model parallelism, where the model itself is partitioned rather than replicated."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
 \tikzset{Line/.style={line width=0.75pt,black!50,text=black
@@ -565,7 +563,6 @@ The process of data parallelism can be broken into a series of distinct steps, e
 \draw[Line,-latex](GGB1.east)--++(0:6.8)|-node[Text,pos=0.8,text=black]{Next Mini-Batch}(DB3.east);
 \end{tikzpicture}
 ```
-**Data Parallelism Implementation Pipeline**. The five-stage workflow for data parallel training: (1) split input data into non-overlapping subsets, (2) assign batches to GPUs, (3) compute forward and backward passes independently, (4) synchronize gradients via AllReduce, and (5) update parameters uniformly across all devices. This approach contrasts with model parallelism, where the model itself is partitioned rather than replicated.
 :::
 
 #### Dataset Splitting {#sec-distributed-training-dataset-splitting}
@@ -588,7 +585,7 @@ To maintain consistency across the distributed system, the gradients computed by
 
 With 8 GPUs sharing gradients for a 100 MB model, ring all-reduce requires only 7 communication steps instead of the 56 steps needed for naive all-to-all synchronization. The ring topology creates bottlenecks where the slowest link in the ring determines the overall synchronization time, and network partitions can halt the entire training process. Alternative algorithms like tree-reduce achieve O(log n) latency at the cost of increased bandwidth requirements on root nodes. Modern systems often implement hierarchical topologies using high-speed links within nodes and lower-bandwidth connections between nodes to optimize these trade-offs.
 
-::: {#fig-coll-comm fig-env="figure" fig-pos="htb"}
+::: {#fig-coll-comm fig-env="figure" fig-pos="htb" fig-cap="**Gradient Synchronization Topologies**. Visual comparison of communication patterns. (A) **Parameter Server** uses a central node, creating bandwidth bottlenecks at the server. (B) **Ring AllReduce** distributes bandwidth evenly across all links but has linear latency scaling. (C) **Tree AllReduce** reduces latency to logarithmic time but may congest links near the root."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
   \definecolor{NodeColor}{RGB}{230,230,230}
@@ -657,7 +654,6 @@ With 8 GPUs sharing gradients for a 100 MB model, ring all-reduce requires only 
 
 \end{tikzpicture}
 ```
-**Gradient Synchronization Topologies**. Visual comparison of communication patterns. (A) **Parameter Server** uses a central node, creating bandwidth bottlenecks at the server. (B) **Ring AllReduce** distributes bandwidth evenly across all links but has linear latency scaling. (C) **Tree AllReduce** reduces latency to logarithmic time but may congest links near the root.
 :::
 
 #### Synchronization Models {#sec-distributed-training-sync-models}
@@ -946,7 +942,7 @@ Device coordination follows a specific pattern during training. In the forward p
 
 Model parallelism divides neural networks across multiple computing devices, with each device computing a distinct portion of the model's operations. This division allows training of models whose parameter counts exceed single-device memory capacity. The technique encompasses device coordination, data flow management, and gradient computation across distributed model segments. @fig-model-parallelism captures this bidirectional data flow: input data propagates forward through sequentially assigned model partitions while gradients flow backward to update parameters, with intermediate results transferring across device boundaries at each stage.
 
-::: {#fig-model-parallelism fig-env="figure" fig-pos="htb"}
+::: {#fig-model-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Model Parallelism Data Flow**. Sequential distribution of model partitions across three devices: input data flows forward through each partition in order (top path), while gradients propagate backward during the update phase (bottom path). Each device handles a distinct portion of the model, with intermediate activations and gradients transferring at partition boundaries. This approach enables training of models exceeding single-device memory at the cost of sequential dependencies that reduce hardware utilization."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
 \tikzset{Line/.style={line width=1.0pt,black!50,text=black
@@ -998,7 +994,6 @@ Model parallelism divides neural networks across multiple computing devices, wit
 -|node[Text,pos=0.25]{Backward Pass}(B5.240);
 \end{tikzpicture}
 ```
-**Model Parallelism Data Flow**. Sequential distribution of model partitions across three devices: input data flows forward through each partition in order (top path), while gradients propagate backward during the update phase (bottom path). Each device handles a distinct portion of the model, with intermediate activations and gradients transferring at partition boundaries. This approach enables training of models exceeding single-device memory at the cost of sequential dependencies that reduce hardware utilization.
 :::
 
 #### Model Partitioning {#sec-distributed-training-model-partitioning}
@@ -1033,7 +1028,7 @@ Model parallelism can be implemented through different strategies for dividing t
 
 Layer-wise partitioning assigns distinct model layers to separate computing devices. In transformer architectures, this translates to specific devices managing defined sets of attention and feed-forward blocks. @fig-layers-blocks demonstrates this partitioning for a 24-layer transformer: six consecutive blocks reside on each of four devices, with forward activations flowing left-to-right and backward gradients propagating right-to-left across the device boundaries.
 
-::: {#fig-layers-blocks fig-env="figure" fig-pos="htb"}
+::: {#fig-layers-blocks fig-env="figure" fig-pos="htb" fig-cap="**Layer-Wise Model Parallelism**. A 24-layer transformer distributed across four GPUs, with six consecutive transformer blocks assigned to each device. Forward activations (black arrows) flow left-to-right through device boundaries, while backward gradients (red arrows) propagate right-to-left during parameter updates. This partitioning reduces per-GPU memory from the full model size to 1/4, but introduces sequential dependencies where downstream devices wait for upstream computation to complete."}
 ```{.tikz}
 \begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
 \tikzset{Line/.style={line width=1.0pt,black!50
@@ -1101,7 +1096,6 @@ fit=(B4)(G4)](BB4){};
 }
 \end{tikzpicture}
 ```
-**Layer-Wise Model Parallelism**. A 24-layer transformer distributed across four GPUs, with six consecutive transformer blocks assigned to each device. Forward activations (black arrows) flow left-to-right through device boundaries, while backward gradients (red arrows) propagate right-to-left during parameter updates. This partitioning reduces per-GPU memory from the full model size to 1/4, but introduces sequential dependencies where downstream devices wait for upstream computation to complete.
 :::
 
 This sequential processing introduces device idle time, as each device must wait for the previous device to complete its computation before beginning work. While device 1 processes the initial blocks, devices 2, 3, and 4 remain inactive. Similarly, when device 2 begins its computation, device 1 sits idle. This pattern of waiting and idle time reduces hardware utilization efficiency compared to other parallelization strategies.
@@ -1120,7 +1114,7 @@ GPipe[^fn-gpipe] [@gpipe2019] introduced synchronous pipeline parallelism with m
 
 Each device, as represented by the rows in the drawing, processes its assigned model layers for different microbatches simultaneously. The forward pass involves devices passing activations to the next stage, such as $F_{0,0}$ to $F_{1,0}$. The backward pass transfers gradients back through the pipeline, such as $B_{3,3}$ to $B_{2,3}$. This overlapping computation reduces idle time and increases throughput while maintaining the logical sequence of operations across devices.
 
-::: {#fig-pipline-parallelism}
+::: {#fig-pipline-parallelism fig-cap="**Pipeline Parallelism Schedule**. A 4-stage pipeline processing 4 microbatches, showing forward passes ($F_{i,j}$) and backward passes ($B_{i,j}$) across time. Rows represent pipeline stages (GPUs), columns represent time steps. The staggered execution keeps all devices active: while stage 0 computes $F_{0,1}$, stage 1 processes $F_{1,0}$ from the previous microbatch. After all forward passes complete, backward passes propagate in reverse order. The \"Update\" column shows synchronized parameter updates after gradient accumulation across all microbatches."}
 ```{.tikz}
 \begin{tikzpicture}[
     every node/.style={font=\sffamily, draw, minimum width=1cm, minimum height=0.7cm, align=center, outer sep=0},
@@ -1188,7 +1182,6 @@ Each device, as represented by the rows in the drawing, processes its assigned m
 %\node[draw=none, minimum width=4cm, minimum height=1cm, align=center, right=1cm of F0_3] (Bubble) {Bubble};
 \end{tikzpicture}
 ```
-**Pipeline Parallelism Schedule**. A 4-stage pipeline processing 4 microbatches, showing forward passes ($F_{i,j}$) and backward passes ($B_{i,j}$) across time. Rows represent pipeline stages (GPUs), columns represent time steps. The staggered execution keeps all devices active: while stage 0 computes $F_{0,1}$, stage 1 processes $F_{1,0}$ from the previous microbatch. After all forward passes complete, backward passes propagate in reverse order. The "Update" column shows synchronized parameter updates after gradient accumulation across all microbatches.
 :::
 
 In a transformer model distributed across four devices, device 1 would process blocks 1-6 for microbatch $N+1$ while device 2 computes blocks 7-12 for microbatch $N$. Simultaneously, device 3 executes blocks 13-18 for microbatch $N-1$, and device 4 processes blocks 19-24 for microbatch $N-2$. Each device maintains its assigned transformer blocks but operates on a different microbatch, creating a continuous flow of computation.
@@ -1225,7 +1218,7 @@ Column-parallel linear layers split weights along columns. For input $X$ and wei
 $$Y = XW = X[W_1 | W_2] = [XW_1 | XW_2]$$
 Each GPU computes its partition independently. Outputs are concatenated (no communication needed if followed by row-parallel layer).
 
-::: {#fig-tensor-parallel-split fig-env="figure" fig-pos="htb"}
+::: {#fig-tensor-parallel-split fig-env="figure" fig-pos="htb" fig-cap="**Tensor Parallelism - Matrix Partitioning**. Illustration of Megatron-LM style tensor parallelism. The first linear layer (e.g., QKV) is split column-wise $[W_1 | W_2]$. The second layer (e.g., Output) is split row-wise $[W_1 ; W_2]$. This arrangement allows the output of the first layer to flow directly into the second without synchronization, requiring using only one AllReduce after the second layer to sum the partial results."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
   \definecolor{MatrixColor}{RGB}{200,220,255}
@@ -1288,7 +1281,6 @@ Each GPU computes its partition independently. Outputs are concatenated (no comm
 
 \end{tikzpicture}
 ```
-**Tensor Parallelism - Matrix Partitioning**. Illustration of Megatron-LM style tensor parallelism. The first linear layer (e.g., QKV) is split column-wise $[W_1 | W_2]$. The second layer (e.g., Output) is split row-wise $[W_1 ; W_2]$. This arrangement allows the output of the first layer to flow directly into the second without synchronization, requiring using only one AllReduce after the second layer to sum the partial results.
 :::
 
 Row-parallel linear layers split weights along rows. For $W = \begin{bmatrix} W_1 \\ W_2 \end{bmatrix}$:
@@ -1511,7 +1503,7 @@ Hardware utilization improves substantially over single-strategy approaches. Pur
 
 Communication overhead reduces through hierarchical structuring. Tensor parallelism restricts high-frequency communication to NVLink-connected GPUs within nodes (600 GB/s bandwidth). Pipeline parallelism limits cross-node communication to activation transfers at stage boundaries (requires 100-200 GB/s per stage). Data parallelism performs AllReduce across replica groups using InfiniBand (200 GB/s aggregate). This hierarchy matches communication patterns to available bandwidth at each level, avoiding the scenario where all communication competes for the slowest interconnect.
 
-::: {#fig-hybrid-mapping fig-env="figure" fig-pos="htb"}
+::: {#fig-hybrid-mapping fig-env="figure" fig-pos="htb" fig-cap="**3D Parallelism Physical Mapping**. How Hybrid Parallelism maps to hardware topology. **Tensor Parallelism** uses high-bandwidth NVLink within a node to split layers. **Pipeline Parallelism** connects adjacent nodes via high-speed InfiniBand to form the model depth. **Data Parallelism** replicates this entire pipeline structure, synchronizing gradients via the inter-node network."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
   \definecolor{NodeColor}{RGB}{245,245,245}
@@ -1549,7 +1541,6 @@ Communication overhead reduces through hierarchical structuring. Tensor parallel
   };
 \end{tikzpicture}
 ```
-**3D Parallelism Physical Mapping**. How Hybrid Parallelism maps to hardware topology. **Tensor Parallelism** uses high-bandwidth NVLink within a node to split layers. **Pipeline Parallelism** connects adjacent nodes via high-speed InfiniBand to form the model depth. **Data Parallelism** replicates this entire pipeline structure, synchronizing gradients via the inter-node network.
 :::
 
 Hybrid parallelism enables training at scales that would otherwise be impossible. GPT-4 training required an estimated 10,000+ H100 GPUs for months. Without hybrid approaches, memory constraints would limit training to smaller models, throughput constraints would extend training time beyond practical limits, and communication overhead would waste the majority of available compute. The combination of tensor, pipeline, and data parallelism transforms these theoretical capabilities into practical training systems.
@@ -1604,7 +1595,7 @@ Despite these challenges, hybrid parallelism remains an indispensable strategy f
 
 @fig-parallelism-flowchart provides a decision tree for selecting parallelism strategies based on model size, dataset size, and scaling constraints. While intentionally simplified, real-world scenarios often involve additional complexities such as hardware heterogeneity, communication bandwidth, and workload imbalance that may influence the choice of parallelism techniques. Practitioners should view this as a foundational tool for understanding trade-offs and decision points, adapting it to the specific requirements and constraints of their systems to achieve optimal performance.
 
-::: {#fig-parallelism-flowchart fig-env="figure" fig-pos="htb"}
+::: {#fig-parallelism-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Parallelism Strategy Decision Tree**. A systematic selection guide based on two key questions: Does the model fit in single-device memory? Does the dataset fit on a single device? Models exceeding device memory require model parallelism; large datasets benefit from data parallelism; significant constraints in both dimensions demand hybrid approaches. While simplified, this framework captures the primary decision points before practitioners must consider secondary factors like hardware heterogeneity and workload imbalance."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
 \tikzset{Line/.style={line width=1.0pt,black!50,text=black
@@ -1673,7 +1664,6 @@ above=of $(B2.north)!0.5!(B3.north)$](G1B3){Is scaling the model\\ or data more 
 \node[above=2pt of  BB.204,inner sep=0pt,anchor=south,fill=BackColor]{Parallelism Opportunities};
 \end{tikzpicture}
 ```
-**Parallelism Strategy Decision Tree**. A systematic selection guide based on two key questions: Does the model fit in single-device memory? Does the dataset fit on a single device? Models exceeding device memory require model parallelism; large datasets benefit from data parallelism; significant constraints in both dimensions demand hybrid approaches. While simplified, this framework captures the primary decision points before practitioners must consider secondary factors like hardware heterogeneity and workload imbalance.
 :::
 
 ## Framework Integration {#sec-distributed-training-framework-integration}

@@ -1262,7 +1262,7 @@ The system automatically increases batch size to maintain throughput as traffic 
 
 The choice of batching strategy depends on model characteristics, traffic patterns, and latency requirements. @fig-inference-lifecycle visualizes the end-to-end request path, highlighting latency sources at each stage. The following decision framework guides selection:
 
-::: {#fig-inference-lifecycle fig-env="figure" fig-pos="htb"}
+::: {#fig-inference-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**End-to-End Inference Pipeline**. A high-level view of the request lifecycle: Client -> Load Balancer -> Request Queue -> Batch Scheduler -> Model Execution -> Response. This visualization highlights the critical \"Serving Tax\" components (serialization, routing, coordination) that consume latency budget outside of the actual GPU compute time."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=1.5cm]
   \definecolor{ProcessColor}{RGB}{240,248,255}
@@ -1299,7 +1299,6 @@ The choice of batching strategy depends on model characteristics, traffic patter
 
 \end{tikzpicture}
 ```
-**End-to-End Inference Pipeline**. A high-level view of the request lifecycle: Client -> Load Balancer -> Request Queue -> Batch Scheduler -> Model Execution -> Response. This visualization highlights the critical "Serving Tax" components (serialization, routing, coordination) that consume latency budget outside of the actual GPU compute time.
 :::
 
 ```
@@ -1377,7 +1376,7 @@ After computing local attention, an AllReduce operation (covered in @sec-communi
 
 The communication pattern for tensor-parallel inference follows a two-phase synchronization per layer. @fig-tensor-parallel-flow illustrates this flow:
 
-::: {#fig-tensor-parallel-flow fig-env="figure" fig-pos="htb"}
+::: {#fig-tensor-parallel-flow fig-env="figure" fig-pos="htb" fig-cap="**Tensor Parallelism for Inference**. Computation is distributed across devices by splitting tensor operations. Attention heads are partitioned across GPUs, requiring an AllReduce operation to synchronize results. Feed-forward networks use a column-row splitting strategy that requires only one AllReduce synchronization per block. This approach reduces latency for large models but introduces communication overhead that demands high-bandwidth interconnects like NVLink."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
   \definecolor{GPUColor}{RGB}{230,230,250}
@@ -1431,7 +1430,6 @@ The communication pattern for tensor-parallel inference follows a two-phase sync
 
 \end{tikzpicture}
 ```
-**Tensor Parallelism for Inference**. Computation is distributed across devices by splitting tensor operations. Attention heads are partitioned across GPUs, requiring an AllReduce operation to synchronize results. Feed-forward networks use a column-row splitting strategy that requires only one AllReduce synchronization per block. This approach reduces latency for large models but introduces communication overhead that demands high-bandwidth interconnects like NVLink.
 :::
 
 The inference time with tensor parallelism follows @eq-tensor-parallel-time:
@@ -1491,7 +1489,7 @@ Pipeline parallelism distributes layers across devices sequentially, with each d
 
 For inference, pipeline parallelism creates bubbles differently than in training. @fig-pipeline-bubbles contrasts single-request latency (bubble-dominated) with pipelined throughput (bubble-amortized):
 
-::: {#fig-pipeline-bubbles fig-env="figure" fig-pos="htb"}
+::: {#fig-pipeline-bubbles fig-env="figure" fig-pos="htb" fig-cap="**Pipeline Parallelism Bubbles**. For a single inference request, pipeline parallelism offers no latency benefit as the request must traverse all stages sequentially (top). However, when processing multiple concurrent requests, pipeline bubble utilization improves significantly (bottom), allowing throughput to scale with the number of stages. This makes pipeline parallelism ideal for high-throughput batch processing but less suitable for latency-critical interactive serving."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
   \definecolor{Stage1}{RGB}{173,216,230}
@@ -1557,7 +1555,6 @@ For inference, pipeline parallelism creates bubbles differently than in training
 
 \end{tikzpicture}
 ```
-**Pipeline Parallelism Bubbles**. For a single inference request, pipeline parallelism offers no latency benefit as the request must traverse all stages sequentially (top). However, when processing multiple concurrent requests, pipeline bubble utilization improves significantly (bottom), allowing throughput to scale with the number of stages. This makes pipeline parallelism ideal for high-throughput batch processing but less suitable for latency-critical interactive serving.
 :::
 
 For a single request, pipeline parallelism provides no latency benefit: the request must traverse all stages sequentially. The pipeline fill time equals the sequential execution time.
@@ -1606,7 +1603,7 @@ $$\text{Output} = \sum_{i \in \text{top-}k} g_i \cdot \text{Expert}_i(\text{inpu
 
 **Expert parallelism** distributes experts across devices, with each device hosting $E/P$ experts. @fig-moe-routing traces the routing, dispatch, and gather operations:
 
-::: {#fig-moe-routing fig-env="figure" fig-pos="htb"}
+::: {#fig-moe-routing fig-env="figure" fig-pos="htb" fig-cap="**Mixture-of-Experts (MoE) Routing**. Expert parallelism distributes \"experts\" across different devices. For each token, a gating mechanism selects the top-k experts. An AllToAll communication step dispatches tokens to the devices hosting their selected experts (1). Experts process the tokens in parallel (2). A second AllToAll step gathers the results back to the original device (3). This pattern enables massive model capacity but introduces all-to-all communication overhead."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
   \definecolor{GateColor}{RGB}{255,215,0}
@@ -1643,7 +1640,6 @@ $$\text{Output} = \sum_{i \in \text{top-}k} g_i \cdot \text{Expert}_i(\text{inpu
 
 \end{tikzpicture}
 ```
-**Mixture-of-Experts (MoE) Routing**. Expert parallelism distributes "experts" across different devices. For each token, a gating mechanism selects the top-k experts. An AllToAll communication step dispatches tokens to the devices hosting their selected experts (1). Experts process the tokens in parallel (2). A second AllToAll step gathers the results back to the original device (3). This pattern enables massive model capacity but introduces all-to-all communication overhead.
 :::
 
 The communication pattern differs from tensor parallelism: instead of all-reduce (same data to all devices), expert parallelism uses all-to-all (different data to different devices based on routing).
@@ -1723,7 +1719,7 @@ The choice of embedding sharding strategy depends on lookup patterns and communi
 
 @fig-embedding-sharding visualizes how each strategy distributes embedding lookups across devices:
 
-::: {#fig-embedding-sharding fig-env="figure" fig-pos="htb"}
+::: {#fig-embedding-sharding fig-env="figure" fig-pos="htb" fig-cap="**Embedding Sharding Strategies**. **Row-wise sharding** places complete embedding vectors on specific servers based on entity ID, requiring a network gather for lookup. **Column-wise sharding** splits each vector across all servers, allowing parallel local lookups followed by an AllGather, which is efficient for popular \"hot\" embeddings. **Hybrid sharding** combines these approaches, using column sharding for hot items and row sharding for the \"cold\" long tail to balance load and memory."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
   \definecolor{TableColor}{RGB}{240,248,255}
@@ -1783,7 +1779,6 @@ The choice of embedding sharding strategy depends on lookup patterns and communi
 
 \end{tikzpicture}
 ```
-**Embedding Sharding Strategies**. **Row-wise sharding** places complete embedding vectors on specific servers based on entity ID, requiring a network gather for lookup. **Column-wise sharding** splits each vector across all servers, allowing parallel local lookups followed by an AllGather, which is efficient for popular "hot" embeddings. **Hybrid sharding** combines these approaches, using column sharding for hot items and row sharding for the "cold" long tail to balance load and memory.
 :::
 
 ::: {.callout-note title="Embedding Sharding at Scale: Meta Infrastructure"}
@@ -2590,7 +2585,7 @@ Many LLM workloads share common prefixes across requests. System prompts like "Y
 
 **Prefix caching** shares KV cache entries across requests with common prefixes. @fig-prefix-caching demonstrates how shared system prompts avoid redundant computation:
 
-::: {#fig-prefix-caching fig-env="figure" fig-pos="htb"}
+::: {#fig-prefix-caching fig-env="figure" fig-pos="htb" fig-cap="**Prefix Caching via Block Sharing**. PagedAttention enables efficient prefix caching by allowing multiple sequences' block tables to point to the same physical blocks for shared content. In this example, the System Prompt is stored in blocks 0-5. Request A and Request B maps their first 6 logical pages to these same physical blocks, storing only their unique suffixes in new blocks. This dramatically reduces memory usage and prefill computation for workloads with shared context."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
   \definecolor{SharedColor}{RGB}{144,238,144}
@@ -2649,7 +2644,6 @@ Many LLM workloads share common prefixes across requests. System prompts like "Y
 
 \end{tikzpicture}
 ```
-**Prefix Caching via Block Sharing**. PagedAttention enables efficient prefix caching by allowing multiple sequences' block tables to point to the same physical blocks for shared content. In this example, the System Prompt is stored in blocks 0-5. Request A and Request B maps their first 6 logical pages to these same physical blocks, storing only their unique suffixes in new blocks. This dramatically reduces memory usage and prefill computation for workloads with shared context.
 :::
 
 **Implementation with PagedAttention**:
@@ -2768,7 +2762,7 @@ Speculative decoding accelerates generation by using a small model to draft toke
 
 **Scenario**: Generating "The quick brown fox jumps". @fig-speculative-decoding contrasts sequential baseline decoding with speculative verification:
 
-::: {#fig-speculative-decoding fig-env="figure" fig-pos="htb"}
+::: {#fig-speculative-decoding fig-env="figure" fig-pos="htb" fig-cap="**Speculative Decoding Process**. Instead of generating tokens sequentially with the large target model (slow), a small draft model quickly proposes a sequence of $K$ tokens. The target model then verifies all $K$ tokens in a single parallel forward pass (similar to prefill). If the draft tokens match the target's output, they are accepted, effectively generating multiple tokens per target model step. If a mismatch occurs, the sequence is rolled back to the first error."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
   \definecolor{DraftColor}{RGB}{255,228,196}
@@ -2818,7 +2812,6 @@ Speculative decoding accelerates generation by using a small model to draft toke
 
 \end{tikzpicture}
 ```
-**Speculative Decoding Process**. Instead of generating tokens sequentially with the large target model (slow), a small draft model quickly proposes a sequence of $K$ tokens. The target model then verifies all $K$ tokens in a single parallel forward pass (similar to prefill). If the draft tokens match the target's output, they are accepted, effectively generating multiple tokens per target model step. If a mismatch occurs, the sequence is rolled back to the first error.
 :::
 
 **Effective speedup**: 43/30 = 1.43x
@@ -3497,7 +3490,7 @@ The bulkhead pattern[^fn-bulkhead] [@nygard2007releaseit] physically isolates te
 
 **Deployment-level bulkheads** dedicate replicas to specific tenants or tenant groups. @fig-bulkhead-patterns illustrates complete isolation between gold and standard tiers:
 
-::: {#fig-bulkhead-patterns fig-env="figure" fig-pos="htb"}
+::: {#fig-bulkhead-patterns fig-env="figure" fig-pos="htb" fig-cap="**Bulkhead Isolation Patterns**. To prevent cascading failures in multi-tenant systems, bulkheads isolate resources. **Deployment-level bulkheads** (shown) assign dedicated physical replicas to high-priority tenants, ensuring complete isolation. **Request-level bulkheads** enforce strict concurrency limits within shared processes. Like ship compartments, these boundaries ensure that a failure or resource exhaustion in one segment cannot sink the entire platform."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
   \definecolor{GoldColor}{RGB}{255,215,0}
@@ -3536,7 +3529,6 @@ The bulkhead pattern[^fn-bulkhead] [@nygard2007releaseit] physically isolates te
 
 \end{tikzpicture}
 ```
-**Bulkhead Isolation Patterns**. To prevent cascading failures in multi-tenant systems, bulkheads isolate resources. **Deployment-level bulkheads** (shown) assign dedicated physical replicas to high-priority tenants, ensuring complete isolation. **Request-level bulkheads** enforce strict concurrency limits within shared processes. Like ship compartments, these boundaries ensure that a failure or resource exhaustion in one segment cannot sink the entire platform.
 :::
 
 Deployment-level bulkheads provide complete isolation for premium tenants, ensuring that their performance is never affected by other workloads. The tradeoff is lower overall resource utilization and increased operational overhead from managing dedicated infrastructure.
@@ -3784,7 +3776,7 @@ Bringing up a new replica for Llama-70B on H100:
 
 :::
 
-::: {#fig-cold-start-breakdown fig-env="figure" fig-pos="htb"}
+::: {#fig-cold-start-breakdown fig-env="figure" fig-pos="htb" fig-cap="**Anatomy of a Cold Start**. Bringing up a new GPU inference replica is a multi-step process taking minutes. While container startup is fast, provisioning the specialized instance and downloading massive model weights (100GB+) dominate the timeline. CUDA context initialization and \"warmup\" inference passes add further delay. This 5+ minute lag makes purely reactive scaling dangerous for handling sudden traffic spikes."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, xscale=0.025, yscale=0.8]
   % xscale: 1cm = 40 seconds. Total 320s = 8cm
@@ -3820,7 +3812,6 @@ Bringing up a new replica for Llama-70B on H100:
 
 \end{tikzpicture}
 ```
-**Anatomy of a Cold Start**. Bringing up a new GPU inference replica is a multi-step process taking minutes. While container startup is fast, provisioning the specialized instance and downloading massive model weights (100GB+) dominate the timeline. CUDA context initialization and "warmup" inference passes add further delay. This 5+ minute lag makes purely reactive scaling dangerous for handling sudden traffic spikes.
 :::
 
 ### Reactive Scaling {#sec-inference-reactive-scaling}
