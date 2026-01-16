@@ -1078,7 +1078,7 @@ Common ML Reshapes:
 ┌─────────────────────┬─────────────────────┬─────────────────────┐
 │ Flatten for MLP     │ Unflatten for CNN   │ Batch Dimension     │
 ├─────────────────────┼─────────────────────┼─────────────────────┤
-│ (N,H,W,C) → (N,H×W×C) │ (N,D) → (N,H,W,C)   │ (H,W) → (1,H,W)     │
+│ (N,H,W,C) → (N,H×W×C) │ (N,D) → (N,H,W,C)   │ (H,W) → (1,H,W)   │
 │ Images to vectors   │ Vectors to images   │ Add batch dimension │
 └─────────────────────┴─────────────────────┴─────────────────────┘
 ```
@@ -1212,15 +1212,15 @@ Reduction operations appear throughout neural networks:
 ```
 Common ML Reduction Patterns:
 
-┌─────────────────────┬─────────────────────┬─────────────────────┐
-│ Loss Computation    │ Batch Normalization │ Global Pooling      │
-├─────────────────────┼─────────────────────┼─────────────────────┤
-│ Per-sample losses → │ Batch statistics →  │ Feature maps →      │
-│ Single batch loss   │ Normalization       │ Single features     │
-│                     │                     │                     │
+┌─────────────────────┬─────────────────────┬───────────────────────┐
+│ Loss Computation    │ Batch Normalization │ Global Pooling        │
+├─────────────────────┼─────────────────────┼───────────────────────┤
+│ Per-sample losses → │ Batch statistics →  │ Feature maps →        │
+│ Single batch loss   │ Normalization       │ Single features       │
+│                     │                     │                       │
 │ losses.mean()       │ batch.mean(axis=0)  │ fmaps.mean(axis=(2,3))│
-│ (N,) → scalar       │ (N,D) → (D,)        │ (N,C,H,W) → (N,C)   │
-└─────────────────────┴─────────────────────┴─────────────────────┘
+│ (N,) → scalar       │ (N,D) → (D,)        │ (N,C,H,W) → (N,C)     │
+└─────────────────────┴─────────────────────┴───────────────────────┘
 
 Real Examples:
 • Cross-entropy loss: -log(predictions).mean()  [average over batch]

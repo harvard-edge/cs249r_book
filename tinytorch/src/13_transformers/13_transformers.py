@@ -1513,31 +1513,31 @@ Memory Scaling by Component:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  ATTENTION MEMORY WALL: Why Long Context is Expensive          │
+│  ATTENTION MEMORY WALL: Why Long Context is Expensive           │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  MEMORY USAGE BY SEQUENCE LENGTH (Quadratic Growth):           │
+│  MEMORY USAGE BY SEQUENCE LENGTH (Quadratic Growth):            │
 │                                                                 │
-│  1K tokens:   [▓] 16 MB                ← Manageable            │
-│  2K tokens:   [▓▓▓▓] 64 MB             ← 4× memory (quadratic) │
-│  4K tokens:   [▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓] 256 MB   ← 16× memory        │
-│  8K tokens:   [████████████████████████████████] 1 GB          │
-│  16K tokens:  [████████████████████████████████████████] 4 GB  │
-│  32K tokens:  [████████████████████████████████████████████] → │
-│               ← extends to 16 GB (off the chart!)              │
+│  1K tokens:   [▓] 16 MB                ← Manageable             │
+│  2K tokens:   [▓▓▓▓] 64 MB             ← 4× memory (quadratic)  │
+│  4K tokens:   [▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓] 256 MB   ← 16× memory          │
+│  8K tokens:   [████████████████████████████████] 1 GB           │
+│  16K tokens:  [████████████████████████████████████████] 4 GB   │
+│  32K tokens:  [████████████████████████████████████████████] →  │
+│               ← extends to 16 GB (off the chart!)               │
 │                                                                 │
-│  REAL-WORLD CONTEXT LIMITS:                                    │
-│  ┌───────────────────────────────────────────────────────────┐ │
-│  │ GPT-3:     2K tokens  (limited by memory)                 │ │
-│  │ GPT-4:     8K tokens  (32K with optimizations)            │ │
-│  │ Claude-3:  200K tokens (special techniques required!)     │ │
-│  │ GPT-4o:    128K tokens (efficient attention)              │ │
-│  └───────────────────────────────────────────────────────────┘ │
+│  REAL-WORLD CONTEXT LIMITS:                                     │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │ GPT-3:     2K tokens  (limited by memory)                 │  │
+│  │ GPT-4:     8K tokens  (32K with optimizations)            │  │
+│  │ Claude-3:  200K tokens (special techniques required!)     │  │
+│  │ GPT-4o:    128K tokens (efficient attention)              │  │
+│  └───────────────────────────────────────────────────────────┘  │
 │                                                                 │
-│  MATHEMATICAL SCALING:                                         │
-│  Memory = batch_size × num_heads × seq_len² × 4 bytes          │
-│                                   ↑                            │
-│                          This is the killer!                   │
+│  MATHEMATICAL SCALING:                                          │
+│  Memory = batch_size × num_heads × seq_len² × 4 bytes           │
+│                                   ↑                             │
+│                          This is the killer!                    │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
