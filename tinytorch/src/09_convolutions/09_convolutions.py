@@ -1623,7 +1623,7 @@ Feature Hierarchy Development:
 Layer 1 Features (3→16):     Layer 2 Features (16→32):
 ┌─────┬─────┬─────┬─────┐   ┌─────┬─────┬─────┬─────┐
 │Edge │Edge │Edge │Blob │   │Shape│Corner│Tex-│Pat- │
-│ \\  │  |  │ /   │  ○  │   │ ◇   │  L  │ture│tern │
+│ \\  │  |  │ /   │  ○  │   │ ◇   │  L  │ture│tern  │
 └─────┴─────┴─────┴─────┘   └─────┴─────┴─────┴─────┘
 Simple features             Complex combinations
 
