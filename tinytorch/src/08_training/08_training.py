@@ -447,27 +447,27 @@ Training Loop Structure:
 
 for epoch in range(num_epochs):
     ┌─────────────────── TRAINING PHASE ───────────────────┐
-    │                                                       │
-    │  for batch in dataloader:                             │
-    │      ┌─── Forward Pass ───────┐                       │
-    │      │ 1. input → model       │                       │
-    │      │ 2. predictions         │                       │
-    │      └────────────────────────┘                       │
-    │               ↓                                       │
-    │      ┌─── Loss Computation ───┐                       │
-    │      │ 3. loss = loss_fn()    │                       │
-    │      └────────────────────────┘                       │
-    │               ↓                                       │
-    │      ┌─── Backward Pass ──────┐                       │
-    │      │ 4. loss.backward()     │                       │
-    │      │ 5. gradients           │                       │
-    │      └────────────────────────┘                       │
-    │               ↓                                       │
-    │      ┌─── Parameter Update ───┐                       │
-    │      │ 6. optimizer.step()    │                       │
-    │      │ 7. zero gradients      │                       │
-    │      └────────────────────────┘                       │
-    └───────────────────────────────────────────────────────┘
+    │                                                      │
+    │  for batch in dataloader:                            │
+    │      ┌─── Forward Pass ───────┐                      │
+    │      │ 1. input → model       │                      │
+    │      │ 2. predictions         │                      │
+    │      └────────────────────────┘                      │
+    │               ↓                                      │
+    │      ┌─── Loss Computation ───┐                      │
+    │      │ 3. loss = loss_fn()    │                      │
+    │      └────────────────────────┘                      │
+    │               ↓                                      │
+    │      ┌─── Backward Pass ──────┐                      │
+    │      │ 4. loss.backward()     │                      │
+    │      │ 5. gradients           │                      │
+    │      └────────────────────────┘                      │
+    │               ↓                                      │
+    │      ┌─── Parameter Update ───┐                      │
+    │      │ 6. optimizer.step()    │                      │
+    │      │ 7. zero gradients      │                      │
+    │      └────────────────────────┘                      │
+    └──────────────────────────────────────────────────────┘
              ↓
     ┌─── Learning Rate Update ───┐
     │ 8. scheduler.step()        │
