@@ -13,7 +13,7 @@
 (function() {
     'use strict';
 
-    const CONFIG_PATH = '/_static/announcement.json';
+    const CONFIG_PATH = '_static/announcement.json';
     const STORAGE_PREFIX = 'tinytorch-announcement-dismissed-';
 
     async function loadConfig() {
@@ -70,6 +70,7 @@
         dismissBtn.addEventListener('click', () => {
             setDismissed(config.dismissId);
             bar.classList.add('dismissed');
+            document.body.classList.remove('has-announcement');
             setTimeout(() => bar.remove(), 300);
         });
         bar.appendChild(dismissBtn);
@@ -83,6 +84,9 @@
         // Insert at the very top of the page
         const body = document.body;
         body.insertBefore(bar, body.firstChild);
+        
+        // Add class to body for CSS adjustments
+        body.classList.add('has-announcement');
     }
 
     // Initialize when DOM is ready

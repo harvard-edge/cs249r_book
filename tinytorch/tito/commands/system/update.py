@@ -14,7 +14,7 @@ import os
 from argparse import ArgumentParser, Namespace
 from typing import Optional, Tuple
 
-from .base import BaseCommand
+from ..base import BaseCommand
 
 
 class UpdateCommand(BaseCommand):
@@ -211,7 +211,7 @@ class UpdateCommand(BaseCommand):
         if args.check:
             self.console.print()
             self.console.print("To update, run:")
-            self.console.print(f"  [cyan]tito update[/cyan]")
+            self.console.print(f"  [cyan]tito system update[/cyan]")
             self.console.print()
             self.console.print("Or manually:")
             self.console.print(f"  [dim]curl -fsSL {self.INSTALL_URL} | bash[/dim]")

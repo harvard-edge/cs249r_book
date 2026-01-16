@@ -9,7 +9,7 @@ from rich.text import Text
 from rich.align import Align
 from pathlib import Path
 
-from .base import BaseCommand
+from ..base import BaseCommand
 
 class LogoCommand(BaseCommand):
     @property
@@ -28,7 +28,7 @@ class LogoCommand(BaseCommand):
         console = self.console
 
         # Display the ASCII logo first
-        from ..core.console import print_ascii_logo
+        from ...core.console import print_ascii_logo
         print_ascii_logo()
 
         # Create the explanation text
