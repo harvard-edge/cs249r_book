@@ -57,6 +57,20 @@ For each architectural family, systematic examination of the computational primi
 
 This analytical approach builds upon the neural network foundations in @sec-dl-primer, extending core concepts of forward propagation, backpropagation, and gradient-based optimization by examining how architectural specialization exploits problem-specific structure. Understanding the evolutionary relationships connecting these architectural paradigms and their distinct computational characteristics gives practitioners conceptual tools for principled decision-making regarding architectural selection, resource planning, and system optimization.
 
+### Lighthouse Architectures: Recurring Systems Examples
+
+Throughout this book, we will use five specific model architectures as recurring **Lighthouse Examples**. These serve as consistent reference points to ground abstract concepts in concrete systems reality. We introduce them here as a roster, and will define their architectures in detail within their respective sections.
+
+| Lighthouse Model | Domain | Primary System Constraint | Role in Textbook |
+| :--- | :--- | :--- | :--- |
+| **ResNet-50** | Vision | **Compute Bound** | Explains parallelism, quantization, and batching. |
+| **GPT-2 / Llama** | Language | **Memory Bandwidth** | Explains autoregressive generation and KV caching. |
+| **DLRM** | RecSys | **Memory Capacity** | Explains embedding sharding and sparse access. |
+| **MobileNet** | Edge Vision | **Latency** | Explains depthwise convs and efficient design. |
+| **KWS (DS-CNN)** | Audio | **Power** | Explains extreme quantization and always-on ops. |
+
+By returning to these five archetypes, you will build an intuition for how different system constraints shape architectural decisions.
+
 ## Multi-Layer Perceptrons: Dense Pattern Processing {#sec-dnn-architectures-multilayer-perceptrons-dense-pattern-processing-259f}
 
 Multi-Layer Perceptrons (MLPs) represent the fully-connected architectures introduced in @sec-dl-primer, now examined through the lens of architectural choice and systems trade-offs. MLPs embody an inductive bias: **they assume no prior structure in the data, allowing any input to relate to any output**. This architectural choice enables maximum flexibility by treating all input relationships as equally plausible, making MLPs versatile but computationally intensive compared to specialized alternatives. Their computational power was established theoretically by the Universal Approximation Theorem (UAT)[^fn-uat] [@cybenko1989approximation; @hornik1989multilayer], which we encountered as a footnote in @sec-dl-primer. This theorem states that a sufficiently large MLP with non-linear activation functions can approximate any continuous function on a compact domain, given suitable weights and biases.
@@ -923,6 +937,26 @@ CNNs naturally implement hierarchical representation learning through their laye
 
 Parameter sharing dramatically reduces complexity compared to MLPs by reusing the same filters across spatial locations. This sharing embodies the assumption that useful features (such as edges or textures) can appear anywhere in an image, making the same feature detector valuable across all spatial positions.
 
+::: {.callout-lighthouse title="ResNet-50 (Vision Lighthouse)"}
+**Why it matters:** ResNet-50 is the gold standard benchmark for **compute-bound** vision workloads. Its architecture consists almost entirely of dense convolutional layers, making it highly regular and efficient on GPUs. Unlike MobileNet (latency-bound) or Transformers (memory-bound), ResNet-50's performance is typically limited by raw floating-point throughput (FLOPs), making it the ideal lighthouse for explaining data parallelism, quantization, and batching strategies.
+
+| **Property** | **Value** | **System Implication** |
+| :--- | :--- | :--- |
+| **Constraint** | Compute Bound | Limited by raw FLOPs, not memory bandwidth. |
+| **Bottleneck** | FP Throughput | Benefits maximally from specialized Matrix Units (Tensor Cores). |
+| **Profile** | High Arithmetic Intensity | High ratio of math-to-memory operations (>100 ops/byte). |
+:::
+
+::: {.callout-lighthouse title="MobileNet (Efficiency Lighthouse)"}
+**Why it matters:** MobileNet represents **latency-constrained** edge workloads. By replacing dense convolutions with **Depthwise Separable Convolutions**, it reduces FLOPs by 8-9x with minimal accuracy loss. This architecture is critical for understanding **efficiency trade-offs**: it trades channel mixing capacity for speed, making it the standard baseline for mobile apps, embedded vision, and neural architecture search (NAS).
+
+| **Property** | **Value** | **System Implication** |
+| :--- | :--- | :--- |
+| **Constraint** | Latency Bound | Single-image inference speed is the priority. |
+| **Bottleneck** | Overhead / Serial Ops | Kernel launch overhead often dominates actual compute. |
+| **Profile** | Low Arithmetic Intensity | Memory access and control logic matter more than raw FLOPs. |
+:::
+
 The architectural efficiency of CNNs allows further optimization through specialized techniques like depthwise separable convolutions and pruning, detailed in @sec-model-optimizations. These optimization strategies build on spatial locality principles, with @sec-ai-acceleration detailing how modern processors exploit convolution's inherent data reuse patterns.
 
 @fig-cnn visualizes the core convolution operation: a small filter slides over the input image to generate a feature map[^fn-feature-map], capturing local structures while maintaining translation invariance. For an interactive visual exploration of convolutional networks, the CNN Explainer [@cnn_explainer] project provides an insightful demonstration of how these networks are constructed.
@@ -1098,6 +1132,24 @@ This computational pattern presents different optimization opportunities than ML
 The sliding window pattern of convolutions creates a distinctive data movement profile. Unlike MLPs where each weight is used once per forward pass, CNN filter weights are reused many times as the filter slides across spatial positions. For ImageNet processing, each $3 \times 3$ filter weight is reused 50,176 times (once for each position in the $224 \times 224$ feature map). This creates a different challenge: the system must stream input features through the computation unit while keeping filter weights stable.
 
 The predictable spatial access pattern enables strategic data movement optimizations. Different architectures handle this movement pattern through specialized mechanisms. CPUs maintain frequently used filter weights in cache while streaming through input features. GPUs employ memory architectures optimized for spatial locality and provide hardware support for efficient sliding window operations. Deep learning frameworks orchestrate these movements by organizing computations to maximize filter weight reuse and minimize redundant feature map accesses.
+
+::: {.callout-lighthouse title="MobileNet (Efficiency Lighthouse)"}
+**Why it matters:** MobileNet is the archetype for **latency-constrained** inference on edge devices (phones, tablets). It pioneered **depthwise separable convolutions**, an architectural pattern that factorizes standard convolution into two smaller operations, reducing FLOPs by 8-9x with minimal accuracy loss. This lighthouse guides decisions when deploying models to resource-constrained environments where memory bandwidth and compute are scarce.
+:::
+
+### Efficient Architectures: Keyword Spotting {#sec-dnn-architectures-efficient-kws}
+
+While standard CNNs achieve high accuracy, their computational cost ($O(N \times K^2 \times C_{in} \times C_{out})$) is often prohibitive for always-on edge devices. Keyword Spotting (KWS) applications, such as wake-word detection ("Hey Siri"), must operate on microcontrollers with only kilobytes of memory and milliwatt power budgets.
+
+To bridge this gap, efficient architectures like **Depthwise Separable CNNs (DS-CNN)** decompose the standard convolution into two cheaper operations:
+1.  **Depthwise Convolution:** Filters apply to each input channel independently ($K \times K \times C_{in}$ parameters).
+2.  **Pointwise Convolution:** A $1 \times 1$ convolution projects channels to the output dimension ($1 \times 1 \times C_{in} \times C_{out}$ parameters).
+
+This decomposition reduces parameter count and FLOPs by a factor of roughly $1/K^2$, making real-time audio processing feasible on tiny hardware.
+
+::: {.callout-lighthouse title="Keyword Spotting (KWS) (TinyML Lighthouse)"}
+**Why it matters:** KWS represents **power-constrained** workloads. Unlike cloud models that optimize for throughput, KWS optimizes for **energy per inference**. By using DS-CNNs and extreme quantization (int8 or int4), these models can run continuously on battery power, processing audio streams in real-time without waking the main processor.
+:::
 
 ## RNNs: Sequential Pattern Processing {#sec-dnn-architectures-rnns-sequential-pattern-processing-ea14}
 
@@ -1937,6 +1989,16 @@ def multi_head_attention(X, W_Q, W_K, W_V, W_O, num_heads, d_k):
 
 #### System Implications {#sec-dnn-architectures-system-implications-76dd}
 
+::: {.callout-lighthouse title="GPT-2 / Llama (Language Lighthouse)"}
+**Why it matters:** LLMs like GPT-2 and Llama exemplify **memory-bandwidth-bound** workloads. During the autoregressive generation phase (token-by-token decoding), the system must load all model weights from HBM to compute just one token. Because the ratio of math to data movement is extremely low, the processor remains mostly idle, waiting for data. This lighthouse grounds discussions on **KV caching**, **low-precision weights** (quantization), and the critical role of **memory bandwidth** in LLM performance.
+
+| **Property** | **Value** | **System Implication** |
+| :--- | :--- | :--- |
+| **Constraint** | Memory Bandwidth | Limited by how fast data moves from HBM to chip. |
+| **Bottleneck** | Weight Loading | Parameters are loaded repeatedly for every single token. |
+| **Profile** | Low Arithmetic Intensity | Operations wait for data; Tensor Cores are underutilized. |
+:::
+
 This implementation reveals key computational characteristics that apply to basic attention mechanisms, with Transformer self-attention representing a specific case. First, self-attention enables parallel processing across all positions in the sequence. This is evident in the matrix multiplications that compute `Q`, `K`, and `V` simultaneously for all positions. Unlike recurrent architectures that process inputs sequentially, this parallel nature allows for more efficient computation, especially on modern hardware designed for parallel operations.
 
 Second, the attention score computation results in a matrix of size `(seq_len × seq_len)`, leading to quadratic complexity with respect to sequence length. This quadratic relationship becomes a significant computational bottleneck when processing long sequences, a challenge that has spurred research into more efficient attention mechanisms.
@@ -1952,6 +2014,42 @@ These computational patterns create a unique profile for Transformer self-attent
 This examination of four distinct architectural families reveals both their individual characteristics and their collective evolution. Rather than viewing these architectures in isolation, a deeper understanding emerges when we consider how they relate to each other and build upon shared foundations.
 
 The preceding analysis of Transformers completes our examination of modern attention-based architectures, from the dense connectivity of MLPs through the spatial specialization of CNNs, the sequential processing of RNNs, and finally the dynamic, content-dependent computation of attention mechanisms. Each architecture introduced new ways of organizing computation, yet none emerged from a vacuum. We now step back from implementation details to examine the broader evolutionary picture: how did these diverse architectural approaches emerge, what fundamental building blocks do they share, and what does their progression reveal about the principles underlying effective neural network design?
+
+### Sparse Architectures: Recommendation Systems {#sec-dnn-architectures-sparse-architectures-dlrm}
+
+While CNNs and Transformers dominate media processing (vision, language, audio), a different class of architecture consumes the majority of AI cycles in industrial applications: recommendation systems (RecSys). These systems power content feeds, product suggestions, and ad ranking for billions of users. Unlike media models which are typically **compute-bound** (limited by FLOPs), recommendation models are uniquely **memory-capacity-bound** and **memory-bandwidth-bound** due to their reliance on massive embedding tables.
+
+The core challenge in RecSys is handling high-cardinality categorical features. A model might need to process User IDs (billions of unique users) and Item IDs (millions of videos or products). We cannot input these raw IDs directly into a neural network; instead, we map each ID to a dense vector called an **embedding**.
+
+#### The Deep Learning Recommendation Model (DLRM)
+
+The **DLRM** architecture [@naumov2019deep] standardizes this pattern, combining two distinct computational regimes:
+
+1.  **Dense Features (Bottom MLP):** Continuous features (like user age, time of day) are processed by a standard Multi-Layer Perceptron (MLP). This component is compute-intensive but memory-light.
+2.  **Sparse Features (Embedding Tables):** Categorical features (User ID, Item ID) are looked up in massive embedding tables. A table for 1 billion users with 128-dimensional vectors requires $10^9 \times 128 \times 4$ bytes $\approx 512$ GB of memory. This component is memory-intensive but compute-light (just a memory copy).
+3.  **Interaction Layer:** The dense vectors from the MLP and the sparse vectors from embeddings are combined (typically via dot products) to capture interactions between user and item features.
+4.  **Top MLP:** The combined features are processed by another MLP to produce a final probability (e.g., click-through rate).
+
+::: {.callout-lighthouse title="DLRM (Recommendation Lighthouse)"}
+**Why it matters:** DLRM exemplifies **memory-capacity-bound** workloads. Its massive embedding tables often exceed the memory of a single GPU, forcing **model parallelism** (sharding tables across devices). The interaction layer requires **all-to-all communication**, stressing network bandwidth. This contrasts sharply with CNNs (compute-bound) and Transformers (memory-bandwidth-bound), requiring different hardware optimizations.
+
+| **Property** | **Value** | **System Implication** |
+| :--- | :--- | :--- |
+| **Constraint** | Memory Capacity | Model size > Single GPU Memory (TB+ scale). |
+| **Bottleneck** | Network Bandwidth | "All-to-All" communication required to gather embeddings. |
+| **Profile** | Mixed (Sparse/Dense) | Combines memory-heavy lookups with compute-heavy MLPs. |
+:::
+
+#### System Implications: The Memory Wall
+
+DLRM creates a unique systems challenge: **the model is too big to fit on a single GPU**. While a ResNet-50 (100 MB) or even GPT-3 (350 GB) might fit on a single node, industrial recommendation models can reach terabytes or petabytes in size due to the embedding tables.
+
+This forces a specific parallelization strategy called **Model Parallelism** (specifically, **Embedding Sharding**):
+*   The embedding tables are split (sharded) across hundreds of GPUs.
+*   The dense MLPs are replicated on every GPU (**Data Parallelism**).
+*   During the forward pass, each GPU processes a batch of users. It looks up local embeddings but must request remote embeddings from other GPUs over the network.
+
+This creates an **All-to-All** communication pattern: every GPU must talk to every other GPU to gather the necessary embedding vectors for its batch. Consequently, DLRM performance is often limited not by GPU compute speed (FLOPs), but by **network bandwidth** and **memory bandwidth**. Optimizing these systems requires high-speed interconnects (like NVLink or InfiniBand) and specialized embedding caches, fundamentally different optimizations than those used for CNNs or Transformers.
 
 ## Architectural Building Blocks {#sec-dnn-architectures-architectural-building-blocks-a575}
 
