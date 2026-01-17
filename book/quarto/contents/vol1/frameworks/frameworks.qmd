@@ -66,11 +66,14 @@ Before examining specific framework features, we must understand the physical co
 
 ### The Memory Wall {#sec-ai-frameworks-memory-wall}
 
-Modern ML accelerators achieve extraordinary computational throughput, yet most neural network operations cannot fully utilize this capacity. The reason is the *memory wall*: the gap between processor speed and memory bandwidth that has widened over decades. While computational throughput has increased by orders of magnitude, memory bandwidth has grown far more slowly.
+Framework optimization is fundamentally driven by the **AI Memory Wall**—the gap between processor speed and memory bandwidth detailed in @sec-ai-acceleration. While accelerators can perform operations at petaflop scales, they are often stalled waiting for data.
 
-Consider a modern GPU in the NVIDIA A100 class [@nvidia2020a100]. It offers approximately \(10^2\) TFLOPS of reduced-precision tensor compute and \(10^{12}\) bytes per second (TB/s) of memory bandwidth. The ratio of peak compute to peak bandwidth defines the *ridge point* of the system. For example, \(312\) TFLOPS and \(2\) TB/s implies a ridge point of about \(156\) FLOPS per byte. Operations below this arithmetic intensity cannot fully utilize peak compute; they are *memory-bound* rather than *compute-bound*.
+As established in @sec-ai-acceleration, the *arithmetic intensity* of an operation (FLOPs per byte) determines whether it is compute-bound or memory-bound. Frameworks must optimize differently for these two regimes:
 
-This principle has profound implications for framework design. @tbl-arithmetic-intensity quantifies the computational complexity of common neural network operations, revealing why matrix multiplication dominates framework optimization priorities while element-wise operations remain perpetually memory-bound:
+*   **Compute-bound operations** (e.g., large matrix multiplications) saturate the accelerator's math units. Optimization focuses on tiling and tensor core usage to reach peak FLOPs.
+*   **Memory-bound operations** (e.g., ReLU, LayerNorm, Softmax) saturate memory bandwidth before math units. Optimization focuses on reducing memory traffic, primarily through **Kernel Fusion**.
+
+@tbl-arithmetic-intensity illustrates this dichotomy. Matrix multiplications offer high arithmetic intensity, while element-wise operations like ReLU move significant data for very little computation (0.125 FLOPs/byte), making them inherently memory-bound regardless of GPU speed.
 
 +-----------------------------------+------------+-------------------------+--------------------------------+
 | **Operation**                     | **FLOPs**  | **Memory Traffic**      | **Arithmetic Intensity**       |
@@ -84,25 +87,11 @@ This principle has profound implications for framework design. @tbl-arithmetic-i
 
 : Arithmetic intensity of common neural network operations. Matrix multiplication achieves high intensity at scale, while element-wise operations are inherently memory-bound. {#tbl-arithmetic-intensity}
 
-Large matrix multiplications are often compute-bound, while many other common operations are memory-bound. Element-wise operations like ReLU perform only one operation per 8 bytes transferred, achieving very low utilization of peak compute. Even attention mechanisms, despite their quadratic computational complexity in sequence length, can remain memory-bound for practical sequence lengths because they require materializing large intermediate tensors.
+Large matrix multiplications are often compute-bound, while many other common operations are memory-bound. Element-wise operations like ReLU perform only one operation per 8 bytes transferred, achieving very low utilization of peak compute.
 
-### Kernel Fusion: The Primary Optimization {#sec-ai-frameworks-kernel-fusion-principle}
+Even attention mechanisms, despite their quadratic computational complexity, are often **memory-bound** in practice. As detailed in @sec-dnn-architectures, standard attention materializes large $N \times N$ intermediate matrices for scores and probabilities. Writing these matrices to HBM and reading them back for softmax and dropout operations consumes significantly more time than the arithmetic itself.
 
-The memory-bound nature of most operations leads directly to the most important framework optimization: *kernel fusion*. When operations execute separately, each reads its inputs from memory and writes its outputs back. Fusing operations eliminates intermediate memory traffic.
-
-Consider a typical transformer block that applies: $\text{output} = \text{dropout}\left(\text{softmax}\left(\frac{QK^T}{\sqrt{d}}\right) \cdot V\right)$. Without fusion, this requires:
-
-1. Compute QK^T, write S² values to memory
-2. Read S² values, apply scaling, write S² values
-3. Read S² values, compute softmax, write S² values
-4. Read S² values and V, compute matrix multiply, write Sd values
-5. Read Sd values, apply dropout, write Sd values
-
-With fusion (as in FlashAttention [@dao2022flashattention]), the entire computation occurs in registers and on-chip SRAM, eliminating most memory traffic. The theoretical speedup from fusion is:
-
-$$\text{Speedup}_{\text{fusion}} = \frac{\text{Memory Traffic}_{\text{unfused}}}{\text{Memory Traffic}_{\text{fused}}}$$
-
-For the attention example above, fusion can reduce memory traffic by 10--20$\times$, directly translating to proportional speedups for memory-bound operations.
+This memory-bound nature leads directly to the most important framework optimization: **kernel fusion** {#sec-ai-frameworks-kernel-fusion-principle}. Fusing the sequence of *matmul-softmax-dropout-matmul* into a single kernel (as in **FlashAttention**) keeps intermediate results in fast on-chip SRAM, eliminating the expensive round-trips to HBM. For attention, fusion can reduce memory traffic by 10--20$\times$, directly translating to proportional speedups.
 
 :::{.callout-perspective title="The Memory Wall's Impact on Design"}
 Understanding the memory wall explains why all modern frameworks invest heavily in operation fusion, memory-efficient attention implementations, and compilation pipelines that analyze and optimize memory access patterns. These are not optional enhancements but essential responses to the fundamental physics of computation.
@@ -2933,536 +2922,38 @@ Many modern ML frameworks incorporate JIT compilation to provide developers with
 
 #### Distributed Execution {#sec-ai-frameworks-distributed-execution-8b2b}
 
-As machine learning models continue to grow in size and complexity, training them on a single device is often no longer feasible. Large models require significant computational power and memory, while massive datasets demand efficient processing across multiple machines. To address these challenges, modern AI frameworks provide built-in support for distributed execution, allowing computations to be split across multiple GPUs, TPUs, or distributed clusters. By abstracting the complexities of parallel execution, these frameworks enable practitioners to scale machine learning workloads efficiently while maintaining ease of use.
+As machine learning models grow in size and complexity, training them on a single device becomes infeasible. Modern AI frameworks provide built-in support for distributed execution, abstracting the complexities of communication and synchronization.
 
-At the essence of distributed execution are two primary strategies: data parallelism and model parallelism.
+As detailed in @sec-ai-training, distributed training generally follows two strategies: **Data Parallelism** (replicating the model across devices to process different data batches) and **Model Parallelism** (partitioning the model itself across devices). Frameworks provide high-level APIs to implement these strategies without requiring manual management of communication primitives like AllReduce.
 
-::: {.callout-definition title="Data Parallelism"}
+##### Data Parallelism APIs {#sec-ai-frameworks-data-parallelism-faeb}
 
-**Data Parallelism** refers to a distributed training strategy where the _dataset is partitioned_ across multiple devices, each running an _identical copy of the model_. Gradients are computed independently on each device and synchronized before each parameter update, effectively increasing the training throughput.
+Data parallelism is the standard starting point for scaling. In PyTorch, `DistributedDataParallel (DDP)` is the primary tool. It automatically handles gradient synchronization at the bucket level, overlapping communication with computation to minimize latency.
 
-:::
+```python
+# PyTorch DistributedDataParallel
+model = MyModel().to(device)
+model = torch.nn.parallel.DistributedDataParallel(
+    model, device_ids=[device]
+)
 
-::: {.callout-definition title="Model Parallelism"}
-
-**Model Parallelism** refers to a strategy where the _model architecture itself is partitioned_ across multiple devices. This is essential for models that are too large to fit in the memory of a single accelerator, requiring layers or tensors to be distributed across hardware units with coordinated communication.
-
-:::
-
-Data parallelism allows multiple devices to train the same model on different subsets of data, ensuring faster convergence without increasing memory requirements. Model parallelism, on the other hand, partitions the model itself across multiple devices, allowing the training of architectures too large to fit into a single device’s memory. While model parallelism comes in several variations explored in detail in @sec-ai-training, both techniques are essential for training modern machine learning models efficiently. These distributed execution strategies become increasingly important as models scale to the sizes discussed in @sec-efficient-ai, and their implementation requires the hardware acceleration techniques covered in @sec-ai-acceleration.
-
-##### Data Parallelism {#sec-ai-frameworks-data-parallelism-faeb}
-
-Data parallelism is the most widely used approach for distributed training, enabling machine learning models to scale across multiple devices while maintaining efficiency. In this method, each computing device holds an identical copy of the model but processes a unique subset of the training data, as illustrated in @fig-data-fm-parallelism. Once the computations are complete, the gradients computed on each device are synchronized before updating the model parameters, ensuring consistency across all copies. This approach allows models to learn from larger datasets in parallel without increasing memory requirements per device.
-
-::: {#fig-data-fm-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data Parallelism**: Each device maintains an identical copy of the neural network while processing different subsets of the training data in parallel. The gradients computed on each device are synchronized after each batch, ensuring that all model copies remain consistent while enabling near-linear speedup with additional devices."}
-```{.tikz}
-\begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
-\definecolor{Red}{RGB}{227,48,103}
-\definecolor{Green}{RGB}{102,187,120}
-\tikzset{%
-  mycycleR/.style={circle, draw=none, fill=Red, minimum width=8mm,node distance=1},
-  mycycleB/.style={circle, draw=none, fill=Green, minimum width=8mm,node distance=1},
-  mylineD/.style={line width=0.5pt,draw=black!80,dashed},
-  Line/.style={line width=1.0pt,black!50}
-}
-\begin{scope}[local bounding box = BLUE]
-\begin{scope}[local bounding box = CIRC2]
-\node[mycycleB] (2C1) {};
-\node[mycycleB,right=of 2C1] (2C2) {};
-\node[mycycleB,right=of 2C2] (2C3) {};
-\node[mycycleB,node distance=1.5,right=of 2C3] (2C4) {};
-\node[]at($(2C3)!0.5!(2C4)$){$\bullet$\hspace{3pt} $\bullet$\hspace{3pt} $\bullet$};
-\foreach \x in {1,2,3} {
- \pgfmathtruncatemacro{\newX}{\x + 1} %
- \draw[mylineD](2C\x)--(2C\newX);
-}
-\draw[mylineD](2C1)--++(180:1.3)coordinate(LR2);
-\draw[mylineD](2C4)--++(0:1.3)coordinate(DR2);
-\end{scope}
-
-\begin{scope}[local bounding box = CIRC3,shift={(0,-1.75)}]
-\node[mycycleB] (3C1) {};
-\node[mycycleB,right=of 3C1] (3C2) {};
-\node[mycycleB,right=of 3C2] (3C3) {};
-\node[mycycleB,node distance=1.5,right=of 3C3] (3C4) {};
-\node[]at($(3C3)!0.5!(3C4)$){$\bullet$\hspace{3pt} $\bullet$\hspace{3pt} $\bullet$};
-\foreach \x in {1,2,3} {
- \pgfmathtruncatemacro{\newX}{\x + 1} %
- \draw[mylineD](3C\x)--(3C\newX);
-}
-\draw[mylineD](3C1)--++(180:1.3)coordinate(LR3);
-\draw[mylineD](3C4)--++(0:1.3)coordinate(DR3);
-\end{scope}
-
-\begin{scope}[local bounding box = CIRC4,shift={(0,-3.5)}]
-\node[mycycleB] (4C1) {};
-\node[mycycleB,right=of 4C1] (4C2) {};
-\node[mycycleB,right=of 4C2] (4C3) {};
-\node[mycycleB,node distance=1.5,right=of 4C3] (4C4) {};
-\node[]at($(4C3)!0.5!(4C4)$){$\bullet$\hspace{3pt} $\bullet$\hspace{3pt} $\bullet$};
-\foreach \x in {1,2,3} {
- \pgfmathtruncatemacro{\newX}{\x + 1} %
- \draw[mylineD](4C\x)--(4C\newX);
-}
-\draw[mylineD](4C1)--++(180:1.3)coordinate(LR4);
-\draw[mylineD](4C4)--++(0:1.3)coordinate(DR4);
-\end{scope}
-%below
-\node[mycycleB,below=1.5 of $(4C1)!0.5!(4C2)$] (5C1) {};
-\node[mycycleB,below=1.5 of $(4C2)!0.5!(4C3)$] (5C2) {};
-\node[mycycleB,below=1.5 of $(4C3)!0.5!(4C4)$] (5C3) {};
-\node[]at($(5C2)!0.5!(5C3)$){$\bullet$\hspace{3pt} $\bullet$\hspace{3pt} $\bullet$};
-\path[red](5C1)-|coordinate(LR5)(LR4);
-\path[red](5C3)-|coordinate(DR5)(DR4);
-\scoped[on background layer]
-\draw[mylineD](LR5)--(DR5);
-%%%%%%%%%%%%%%%%%%%%
-%above
-\node[mycycleB,above=1.5 of $(2C1)!0.5!(2C2)$] (1C1) {};
-\node[mycycleB,above=1.5 of $(2C2)!0.5!(2C3)$] (1C2) {};
-\node[mycycleB,above=1.5 of $(2C3)!0.5!(2C4)$] (1C3) {};
-\node[]at($(1C2)!0.5!(1C3)$){$\bullet$\hspace{3pt} $\bullet$\hspace{3pt} $\bullet$};
-\path[red](1C1)-|coordinate(LR1)(LR2);
-\path[red](1C3)-|coordinate(DR1)(DR2);
-\scoped[on background layer]
-\draw[mylineD](LR1)--(DR1);
-%%
-% Defining the number of nodes per layer
-\foreach \i/\num in {1/3, 2/4, 3/4, 4/4, 5/3} {
-   \foreach \j in {1,...,\num} { % It goes through all the nodes in layer \i
-      \ifnum\i<5 % Checks if it is not the last layer
-         \foreach \k in {1,...,4} { % The next layer can have up to 4 nodes
-            \ifnum\i=4 % If it is the penultimate layer, it only connects to 3 nodes
-               \ifnum\k<4
-                  \draw ( \i C\j ) -- ( \the\numexpr\i+1 C\k );
-               \fi
-            \else
-               \draw ( \i C\j ) -- ( \the\numexpr\i+1 C\k );
-            \fi
-         }
-      \fi
-   }
-}
-%right boxes
-\coordinate(DD)at($(DR5)+(0.25,0)$);
-\coordinate(DG)at($(DR1)+(0.25,0)$);
-%
- \def\h{0.8}
-\draw[draw=none,fill=Green,minimum width=92,
-            minimum height=23] (DD) rectangle ($(DG) + (\h,0)$);
-\node[rotate=90] at ($(DG)!0.5!(DD) + (\h/2,0)$)(FD) {GPU 0};
-
-\coordinate(0LD)at($(LR5)+(-1.7,0)$);
-\coordinate(0LG)at($(LR1)+(-1.7,0)$);
-\draw[mylineD](0LD)--node[align=center,fill=white]{Neural\\ Network A}(0LG);
-%%%%%%%%%%%%%%
-%down
-\foreach \x in {1,...,3} {
-\draw[Line,-latex,shorten <=3pt](1C\x)--
-            node[fill=white,text=black](OU\x){Output}++(90:2);
-}
-\foreach \x in {1,...,3} {
-\draw[Line,latex-,shorten <=3pt](5C\x)--
-            node[fill=white,text=black,pos=0.6](IN\x){Input}++(270:2);
-}
-%
-\coordinate(SP1)at($(IN1)+(-1,-0.75)$);
-\coordinate(SP2)at($(IN3)+(1,-0.75)$);
- \def\h{0.8}
-\draw[draw=none,fill=cyan!50] (SP1) rectangle ($(SP2) + (0,-\h)$);
-\node at ($(SP1)!0.5!(SP2) + (0,-\h/2)$)(BS0) {Batch Set 2};
-
-%%
-\foreach \x in {1,...,4} {
-\node[below=0.7 of LR\x](H\x){Hidden layer};
-}
-\path[red](H1)|-coordinate(OL)(OU1);
-\path[red](H4)|-coordinate(HL)(IN1);
-\node[]at(HL){Input layer};
-\node[]at(OL){Output layer};
-\end{scope}
-%%%%%%%%%%%%%%%%%%%%
-%RIGHT
-%%%%%%%%%%%%%%%%%%%%
-
-\begin{scope}[local bounding box = BLUE,shift={(13,0)}]
-\begin{scope}[local bounding box = CIRC2]
-\node[mycycleR] (2C1) {};
-\node[mycycleR,right=of 2C1] (2C2) {};
-\node[mycycleR,right=of 2C2] (2C3) {};
-\node[mycycleR,node distance=1.5,right=of 2C3] (2C4) {};
-\node[]at($(2C3)!0.5!(2C4)$){$\bullet$\hspace{3pt} $\bullet$\hspace{3pt} $\bullet$};
-\foreach \x in {1,2,3} {
- \pgfmathtruncatemacro{\newX}{\x + 1} %
- \draw[mylineD](2C\x)--(2C\newX);
-}
-\draw[mylineD](2C1)--++(180:1.3)coordinate(LR2);
-\draw[mylineD](2C4)--++(0:1.3)coordinate(DR2);
-\end{scope}
-
-\begin{scope}[local bounding box = CIRC3,shift={(0,-1.75)}]
-\node[mycycleR] (3C1) {};
-\node[mycycleR,right=of 3C1] (3C2) {};
-\node[mycycleR,right=of 3C2] (3C3) {};
-\node[mycycleR,node distance=1.5,right=of 3C3] (3C4) {};
-\node[]at($(3C3)!0.5!(3C4)$){$\bullet$\hspace{3pt} $\bullet$\hspace{3pt} $\bullet$};
-\foreach \x in {1,2,3} {
- \pgfmathtruncatemacro{\newX}{\x + 1} %
- \draw[mylineD](3C\x)--(3C\newX);
-}
-\draw[mylineD](3C1)--++(180:1.3)coordinate(LR3);
-\draw[mylineD](3C4)--++(0:1.3)coordinate(DR3);
-\end{scope}
-
-\begin{scope}[local bounding box = CIRC4,shift={(0,-3.5)}]
-\node[mycycleR] (4C1) {};
-\node[mycycleR,right=of 4C1] (4C2) {};
-\node[mycycleR,right=of 4C2] (4C3) {};
-\node[mycycleR,node distance=1.5,right=of 4C3] (4C4) {};
-\node[]at($(4C3)!0.5!(4C4)$){$\bullet$\hspace{3pt} $\bullet$\hspace{3pt} $\bullet$};
-\foreach \x in {1,2,3} {
- \pgfmathtruncatemacro{\newX}{\x + 1} %
- \draw[mylineD](4C\x)--(4C\newX);
-}
-\draw[mylineD](4C1)--++(180:1.3)coordinate(LR4);
-\draw[mylineD](4C4)--++(0:1.3)coordinate(DR4);
-\end{scope}
-%below
-\node[mycycleR,below=1.5 of $(4C1)!0.5!(4C2)$] (5C1) {};
-\node[mycycleR,below=1.5 of $(4C2)!0.5!(4C3)$] (5C2) {};
-\node[mycycleR,below=1.5 of $(4C3)!0.5!(4C4)$] (5C3) {};
-\node[]at($(5C2)!0.5!(5C3)$){$\bullet$\hspace{3pt} $\bullet$\hspace{3pt} $\bullet$};
-\path[red](5C1)-|coordinate(LR5)(LR4);
-\path[red](5C3)-|coordinate(DR5)(DR4);
-\scoped[on background layer]
-\draw[mylineD](LR5)--(DR5);
-%%%%%%%%%%%%%%%%%%%%
-%above
-\node[mycycleR,above=1.5 of $(2C1)!0.5!(2C2)$] (1C1) {};
-\node[mycycleR,above=1.5 of $(2C2)!0.5!(2C3)$] (1C2) {};
-\node[mycycleR,above=1.5 of $(2C3)!0.5!(2C4)$] (1C3) {};
-\node[]at($(1C2)!0.5!(1C3)$){$\bullet$\hspace{3pt} $\bullet$\hspace{3pt} $\bullet$};
-\path[red](1C1)-|coordinate(LR1)(LR2);
-\path[red](1C3)-|coordinate(DR1)(DR2);
-\scoped[on background layer]
-\draw[mylineD](LR1)--(DR1);
-%%
-% Defining the number of nodes per layer
-\foreach \i/\num in {1/3, 2/4, 3/4, 4/4, 5/3} {
-   \foreach \j in {1,...,\num} { % It goes through all the nodes in layer \i
-      \ifnum\i<5 % Checks if it is not the last layer
-         \foreach \k in {1,...,4} { % The next layer can have up to 4 nodes
-            \ifnum\i=4 % If it is the penultimate layer, it only connects to 3 nodes
-               \ifnum\k<4
-                  \draw ( \i C\j ) -- ( \the\numexpr\i+1 C\k );
-               \fi
-            \else
-               \draw ( \i C\j ) -- ( \the\numexpr\i+1 C\k );
-            \fi
-         }
-      \fi
-   }
-}
-%right boxes
-\coordinate(DD)at($(DR5)+(0.25,0)$);
-\coordinate(DG)at($(DR1)+(0.25,0)$);
-%
- \def\h{0.8}
-\draw[draw=none,fill=Red,minimum width=92,
-            minimum height=23] (DD) rectangle ($(DG) + (\h,0)$);
-\node[rotate=90] at ($(DG)!0.5!(DD) + (\h/2,0)$)(FD) {GPU 1};
-
-\coordinate(LD)at($(LR5)+(-1.7,0)$);
-\coordinate(LG)at($(LR1)+(-1.7,0)$);
-\draw[mylineD](LD)--node[align=center,fill=white]{Neural\\ Network A}(LG);
-%%%%%%%%%%%%%%
-%down
-\foreach \x in {1,...,3} {
-\draw[Line,-latex,shorten <=3pt](1C\x)--
-            node[fill=white,text=black](OU\x){Output}++(90:2);
-}
-\foreach \x in {1,...,3} {
-\draw[Line,latex-,shorten <=3pt](5C\x)--
-            node[fill=white,text=black,pos=0.6](IN\x){Input}++(270:2);
-}
-%
-\coordinate(SP1)at($(IN1)+(-1,-0.75)$);
-\coordinate(SP2)at($(IN3)+(1,-0.75)$);
- \def\h{0.8}
-\draw[draw=none,fill=cyan!20] (SP1) rectangle ($(SP2) + (0,-\h)$);
-\node at ($(SP1)!0.5!(SP2) + (0,-\h/2)$)(BS1) {Batch Set 1};
-
-%%
-\foreach \x in {1,...,4} {
-\node[below=0.7 of LR\x](H\x){Hidden layer};
-}
-\path[red](H1)|-coordinate(OL)(OU1);
-\path[red](H4)|-coordinate(HL)(IN1);
-\node[]at(HL){Input layer};
-\node[]at(OL){Output layer};
-\end{scope}
-
-%%%%%%%%%%%%%%%%%%
- \def\h{0.8}
-\coordinate(GG1)at($(DR1)+(0.25,2.75)+(\h,0)$);
-\coordinate(GG2)at($(0LG)+(0,2.75)$);
-\draw[mylineD](GG1)--node[align=center,fill=white]{Data Parallelism}(GG2);
-
- \coordinate(DD1)at($(DR5)+(0.25,-3.6)+(\h,0)$);
-\coordinate(DD2)at($(0LD)+(0,-3.6)$);
-\draw[draw=none,fill=orange!30] (DD1) rectangle ($(DD2) + (0,-\h)$);
-\node at ($(DD1)!0.5!(DD2) + (0,-\h/2)$)(MS) {ML System};
-%
-\scoped[on background layer]
-\draw[mylineD](BS1)--node[align=center,fill=white]{Full Dataset}(BS0);
-%
-\foreach \x in {-0.25, 0.25} { %
-    \draw[Line, -latex, shorten <=5pt]
-        (BS1.south|-MS.north) ++(\x,0) --++ (0,0.75);
-}
-
-\foreach \x in {-0.25, 0.25} { %
-    \draw[Line, -latex, shorten <=5pt]
-        (BS0.south|-MS.north) ++(\x,0) --++ (0,0.75);
-}
-\end{tikzpicture}
-
+# Training loop remains largely unchanged
+output = model(input)
+loss = criterion(output, target)
+loss.backward()  # DDP automatically synchronizes gradients here
+optimizer.step()
 ```
-:::
 
-Data parallelism distributes training data across multiple devices while maintaining identical model copies on each device, enabling significant speedup for large datasets. AI frameworks provide built-in mechanisms to manage the key challenges of data parallel execution, including data distribution, gradient synchronization, and performance optimization. In PyTorch, the `DistributedDataParallel (DDP)` module automates these tasks, ensuring efficient training across multiple GPUs or nodes. TensorFlow offers `tf.distribute.MirroredStrategy`, which enables seamless gradient synchronization for multi-GPU training. Similarly, JAX's `pmap()` function facilitates parallel execution across multiple accelerators, optimizing inter-device communication to reduce overhead. These frameworks abstract the complexity of gradient aggregation, which can require 10--100 Gbps network bandwidth for large models. For instance, synchronizing gradients for a 175B parameter model across 1024 GPUs requires communicating approximately 700GB of data per training step (FP32 precision), necessitating sophisticated algorithms to achieve near-linear scaling efficiency.
+DDP is efficient but requires the entire model to fit on one GPU. For larger models, frameworks provide **Fully Sharded Data Parallel (FSDP)**, which shards model parameters, gradients, and optimizer states across devices, gathering them only when needed for computation. This allows training multi-billion parameter models that would otherwise cause Out-Of-Memory (OOM) errors.
 
-By handling synchronization and communication automatically, these frameworks make distributed training accessible to a wide range of users, from researchers exploring novel architectures to engineers deploying large-scale AI systems. The implementation details vary, but the fundamental goal remains the same: enabling efficient multi-device training without requiring users to manually manage low-level parallelization.
+##### Model Parallelism APIs {#sec-ai-frameworks-model-parallelism-069c}
 
-##### Model Parallelism {#sec-ai-frameworks-model-parallelism-069c}
+For models exceeding the memory capacity of a cluster's aggregate GPU memory (or to reduce latency), frameworks offer Tensor Parallelism and Pipeline Parallelism.
 
-While data parallelism is effective for many machine learning workloads, some models are too large to fit within the memory of a single device. Model parallelism addresses this limitation by partitioning the model itself across multiple devices, allowing each to process a different portion of the computation. Unlike data parallelism, where the entire model is replicated on each device, model parallelism divides layers, tensors, or specific operations among available hardware resources, as shown in @fig-fm-model-parallelism. This approach enables training of large-scale models that would otherwise be constrained by single-device memory limits.
+*   **Tensor Parallelism (TP)**: Splits individual tensors (like large weight matrices) across devices. PyTorch's `DTensor` (Distributed Tensor) allows defining sharding layouts (e.g., splitting a linear layer's weights column-wise) that the framework propagates through operations.
+*   **Pipeline Parallelism (PP)**: Segments the model into stages (e.g., layers 1-4 on GPU 0, 5-8 on GPU 1). Frameworks like `torch.distributed.pipeline` manage the "micro-batching" required to keep all GPUs busy, filling the "bubbles" that occur in naive sequential execution.
 
-::: {#fig-fm-model-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Model Parallelism**: The neural network is partitioned across multiple devices, with each GPU responsible for computing a subset of the layers. This approach enables training of models that exceed single-device memory capacity by distributing the computational graph across available hardware resources."}
-
-```{.tikz}
-\scalebox{0.65}{%
-\begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
-\definecolor{Red}{RGB}{227,48,103}
-\definecolor{Green}{RGB}{102,187,120}
-\tikzset{%
-  mycycleR/.style={circle, draw=none, fill=Red, minimum width=8mm,node distance=1},
-  mycycleB/.style={circle, draw=none, fill=Green, minimum width=8mm,node distance=1},
-  mylineD/.style={line width=0.5pt,draw=black!80,dashed},
-  myline/.style={line width=0.5pt,draw=black!80},
-%
-  Box/.style={
-    inner xsep=2pt,
-    draw=RedLine,
-    line width=0.75pt,
-    fill=RedL!20,
-    text width=22mm,
-    minimum width=22mm, minimum height=8mm
-  },
-  Line/.style={line width=1.0pt,black!50}
-}
-\begin{scope}[local bounding box = CIRC2]
-\node[mycycleR] (2C1) {};
-\node[mycycleR,right=of 2C1] (2C2) {};
-\node[mycycleR,right=of 2C2] (2C3) {};
-\node[mycycleR,node distance=1.5,right=of 2C3] (2C4) {};
-\node[]at($(2C3)!0.5!(2C4)$){$\bullet$\hspace{3pt} $\bullet$\hspace{3pt} $\bullet$};
-\foreach \x in {1,2,3} {
- \pgfmathtruncatemacro{\newX}{\x + 1} %
- \draw[mylineD](2C\x)--(2C\newX);
-}
-\draw[mylineD](2C1)--++(180:1.3)coordinate(LR2);
-\draw[mylineD](2C4)--++(0:1.3)coordinate(DR2);
-\end{scope}
-
-\begin{scope}[local bounding box = CIRC3,shift={(0,-1.75)}]
-\node[mycycleB] (3C1) {};
-\node[mycycleB,right=of 3C1] (3C2) {};
-\node[mycycleB,right=of 3C2] (3C3) {};
-\node[mycycleB,node distance=1.5,right=of 3C3] (3C4) {};
-\node[]at($(3C3)!0.5!(3C4)$){$\bullet$\hspace{3pt} $\bullet$\hspace{3pt} $\bullet$};
-\foreach \x in {1,2,3} {
- \pgfmathtruncatemacro{\newX}{\x + 1} %
- \draw[mylineD](3C\x)--(3C\newX);
-}
-\draw[mylineD](3C1)--++(180:1.3)coordinate(LR3);
-\draw[mylineD](3C4)--++(0:1.3)coordinate(DR3);
-\end{scope}
-
-\begin{scope}[local bounding box = CIRC4,shift={(0,-3.5)}]
-\node[mycycleB] (4C1) {};
-\node[mycycleB,right=of 4C1] (4C2) {};
-\node[mycycleB,right=of 4C2] (4C3) {};
-\node[mycycleB,node distance=1.5,right=of 4C3] (4C4) {};
-\node[]at($(4C3)!0.5!(4C4)$){$\bullet$\hspace{3pt} $\bullet$\hspace{3pt} $\bullet$};
-\foreach \x in {1,2,3} {
- \pgfmathtruncatemacro{\newX}{\x + 1} %
- \draw[mylineD](4C\x)--(4C\newX);
-}
-\draw[mylineD](4C1)--++(180:1.3)coordinate(LR4);
-\draw[mylineD](4C4)--++(0:1.3)coordinate(DR4);
-\end{scope}
-%below
-\node[mycycleB,below=1.5 of $(4C1)!0.5!(4C2)$] (5C1) {};
-\node[mycycleB,below=1.5 of $(4C2)!0.5!(4C3)$] (5C2) {};
-\node[mycycleB,below=1.5 of $(4C3)!0.5!(4C4)$] (5C3) {};
-\node[]at($(5C2)!0.5!(5C3)$){$\bullet$\hspace{3pt} $\bullet$\hspace{3pt} $\bullet$};
-\path[red](5C1)-|coordinate(LR5)(LR4);
-\path[red](5C3)-|coordinate(DR5)(DR4);
-\scoped[on background layer]
-\draw[mylineD](LR5)--(DR5);
-%%%%%%%%%%%%%%%%%%%%
-%above
-\node[mycycleR,above=1.5 of $(2C1)!0.5!(2C2)$] (1C1) {};
-\node[mycycleR,above=1.5 of $(2C2)!0.5!(2C3)$] (1C2) {};
-\node[mycycleR,above=1.5 of $(2C3)!0.5!(2C4)$] (1C3) {};
-\node[]at($(1C2)!0.5!(1C3)$){$\bullet$\hspace{3pt} $\bullet$\hspace{3pt} $\bullet$};
-\path[red](1C1)-|coordinate(LR1)(LR2);
-\path[red](1C3)-|coordinate(DR1)(DR2);
-\scoped[on background layer]
-\draw[mylineD](LR1)--(DR1);
-%%
-% Defining the number of nodes per layer
-\foreach \i/\num in {1/3, 2/4, 3/4, 4/4, 5/3} {
-   \foreach \j in {1,...,\num} { % It goes through all the nodes in layer \i
-      \ifnum\i<5 % Checks if it is not the last layer
-         \foreach \k in {1,...,4} { % The next layer can have up to 4 nodes
-            \ifnum\i=4 % If it is the penultimate layer, it only connects to 3 nodes
-               \ifnum\k<4
-                  \draw ( \i C\j ) -- ( \the\numexpr\i+1 C\k );
-               \fi
-            \else
-               \draw ( \i C\j ) -- ( \the\numexpr\i+1 C\k );
-            \fi
-         }
-      \fi
-   }
-}
-%right boxes
-\coordinate(DD)at($(DR5)+(0.25,0)$);
-\coordinate(DG)at($(DR1)+(0.25,0)$);
-\node[fill=Green,minimum width=113, minimum height=23,
-            anchor=north west,rotate=90](GPU0)at(DD){GPU 0};
-\node[fill=Red,minimum width=92, minimum height=23,
-            anchor=north east,rotate=90](GPU1)at(DG){GPU 1};
- %
-\coordinate(LD)at($(LR5)+(-1.7,0)$);
-\coordinate(LG)at($(LR1)+(-1.7,0)$);
-\draw[mylineD](LD)--node[align=center,fill=white]{Neural\\ Network A}(LG);
-%%%%%%%%%%%%%%
-%down
-\foreach \x in {1,...,3} {
-\draw[Line,-latex,shorten <=3pt](1C\x)--
-            node[fill=white,text=black](OU\x){Output}++(90:2);
-}
-\foreach \x in {1,...,3} {
-\draw[Line,latex-,shorten <=3pt](5C\x)--
-            node[fill=white,text=black,pos=0.6](IN\x){Input}++(270:2);
-}
-%
-\coordinate(SP1)at($(LD)+(0,-2.2)$);
-\coordinate(SP2)at($(DD)+(0,-2.2)$);
-\coordinate(SP3)at($(LD)+(0,-3.7)$);
-\coordinate(SP4)at($(DD)+(0,-3.7)$);
-\def\h{0.8}
-\draw[draw=none,fill=cyan!20] (SP1) rectangle ($(SP2) + (0,-\h)$);
-\node at ($(SP1)!0.5!(SP2) + (0,-\h/2)$)(FD) {Full Dataset};
-\draw[draw=none,fill=orange!30] (SP3) rectangle ($(SP4) + (0,-\h)$);
-\node at ($(SP3)!0.5!(SP4) + (0,-\h/2)$)(MS) {ML System};
-
-\foreach \x in {-0.8,-0.4,0,0.4,0.8} { %
-        \draw[Line,latex-,shorten <=5pt,shorten >=5pt]
-                    ($(FD.south) + (\x,0)$) -- ($(MS.north) + (\x,0)$);
-    }
-\coordinate(GOR1)at($(LG)+(0,2.7)$);
-\coordinate(GOR2)at($(GPU1.north east)+(0,2.7)$);
-
-\draw[mylineD](GOR1)--node[align=center,fill=white]{Model Parallelism}(GOR2);
-%%
-\foreach \x in {1,...,4} {
-\node[below=0.7 of LR\x](H\x){Hidden layer};
-}
-\path[red](H1)|-coordinate(OL)(OU1);
-\path[red](H4)|-coordinate(HL)(IN1);
-\node[]at(HL){Input layer};
-\node[]at(OL){Output layer};
-\end{tikzpicture}}
-
-```
-:::
-
-Model parallelism addresses memory constraints by distributing different parts of the model across multiple devices, enabling training of models too large for a single device. AI frameworks provide structured APIs to simplify model parallel execution, abstracting away much of the complexity associated with workload distribution and communication. PyTorch supports pipeline parallelism through `torch.distributed.pipeline.sync`, enabling different GPUs to process sequential layers of a model while maintaining efficient execution flow. TensorFlow's `TPUStrategy` allows for automatic partitioning of large models across TPU cores, optimizing execution for high-speed interconnects. Frameworks like DeepSpeed and Megatron-LM extend PyTorch by implementing advanced model sharding techniques, including tensor parallelism, which splits model weights across multiple devices to reduce memory overhead. These techniques must manage substantial communication overhead. Tensor parallelism typically requires 100--400 GB/s inter-device bandwidth to maintain efficiency, while pipeline parallelism can operate effectively with lower bandwidth (10--50 Gbps) due to less frequent but larger activation transfers between pipeline stages.
-
-There are multiple variations of model parallelism, each suited to different architectures and hardware configurations. Multiple parallelism strategies exist for different architectures and hardware configurations. The specific trade-offs and applications of these techniques are explored in @sec-ai-training for distributed training strategies, and @fig-tensor-vs-pipeline-parallelism shows some initial intuition in comparing parallelism strategies. Regardless of the exact approach, AI frameworks play an important role in managing workload partitioning, scheduling computations efficiently, and minimizing communication overhead, ensuring that even the largest models can be trained at scale.
-
-::: {#fig-tensor-vs-pipeline-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Parallelism Strategies**: Tensor parallelism shards individual layers across multiple devices, reducing per-device memory requirements, while pipeline parallelism distributes consecutive layers to different devices, increasing throughput by overlapping computation and communication. This figure contrasts these approaches, highlighting how tensor parallelism replicates layer parameters across devices and pipeline parallelism partitions the model’s computational graph."}
-```{.tikz}
-\begin{tikzpicture}[line cap=round,line join=round,font=\small\usefont{T1}{phv}{m}{n}]
-\tikzset{%
-GPU/.style={inner sep=0pt,font=\footnotesize\usefont{T1}{phv}{m}{n}},
-Line/.style={line width=1.0pt,black!50,text=black},
-Box/.style={inner xsep=2pt,
-    node distance=1.3,
-    draw=GreenLine,
-    line width=0.75pt,
-    fill=GreenL,
-    align=flush center,
-    minimum width=20mm, minimum height=9.5mm
-  },
-Box2/.style={Box, minimum width=40mm}
-}
-
-\begin{scope}[local bounding box=MOBILE1,shift={($(0,0)+(0,0)$)}]
-\node[Box](B1){Input \\ 1 $\times$ 4};
-\node[Box2,right=of B1,fill=VioletL2,draw=VioletLine](B2){Linear 4 $\times$ 4};
-\node[Box2,right=of B2,fill=RedL,draw=RedLine](B3){Linear 4 $\times$ 2};
-\node[Box,right=of B3,fill=BlueL,draw=BlueLine](B4){Output \\ 1 $\times$ 2};
-\node[draw=none,inner xsep=4mm,inner ysep=5mm,
-yshift=2.5mm,fill=none,fit=(B1)(B4),line width=0.75pt](BB1){};
-\node[below=4pt of  BB1.north,inner sep=0pt,
-anchor=north]{\textbf{Tensor Parallelism (2 GPUs)}};
-%
-\foreach \i in{1,2,3}{
-\pgfmathtruncatemacro{\newX}{\i + 1} %
-\draw[Line,-latex](B\i)--(B\newX);
-}
-\node[GPU,below=4pt of B2.south west,anchor=north west]{GPU 0};
-\node[GPU,below=4pt of B3.south west,,anchor=north west]{GPU 0};
-\node[GPU,below=4pt of B2.south east,anchor=north east]{GPU 1};
-\node[GPU,below=4pt of B3.south east,anchor=north east]{GPU 1};
-\draw[BrownLine,dashed](B2.north)--(B2.south);
-\draw[BrownLine,dashed](B3.north)--(B3.south);
-\end{scope}
-%below
-\begin{scope}[local bounding box=MOBILE1,shift={($(0,0)+(0,-3.75)$)}]
-\node[Box](B1){Input \\ 1 $\times$ 4};
-\node[Box2,right=of B1,fill=VioletL2,draw=VioletLine](B2){Linear 4 $\times$ 4};
-\node[Box2,right=of B2,fill=RedL,draw=RedLine](B3){Linear 4 $\times$ 2};
-\node[Box,right=of B3,fill=BlueL,draw=BlueLine](B4){Output \\ 1 $\times$ 2};
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=4mm,inner ysep=5mm,
-yshift=2.5mm,fill=BackColor,fit=(B1)(B2),line width=0.75pt](BB2){};
-\node[below=4pt of  BB2.north,inner sep=0pt,anchor=north]{GPU 0};
-
-\scoped[on background layer]
-\node[draw=pink,inner xsep=4mm,inner ysep=5mm,
-yshift=2.5mm,fill=pink!10,fit=(B3)(B4),line width=0.75pt](BB3){};
-\node[below=4pt of  BB3.north,inner sep=0pt,anchor=north]{GPU 1};
-
-\node[draw=none,inner xsep=4mm,inner ysep=5mm,
-yshift=2.5mm,fill=none,fit=(B1)(B4)(BB2),line width=0.75pt](BB1){};
-\node[below=4pt of  BB1.north,inner sep=0pt,
-anchor=north]{\textbf{Pipeline Parallelism (2 GPUs)}};
-%
-\foreach \i in{1,2,3}{
-\pgfmathtruncatemacro{\newX}{\i + 1} %
-\draw[Line,-latex](B\i)--(B\newX);
-}
-\end{scope}
-\end{tikzpicture}
-```
-:::
+DeepSpeed and Megatron-LM extend these native capabilities with specialized kernels for extreme-scale model parallelism, often requiring more complex integration but delivering higher performance for LLM training.
 
 ### Core Operations {#sec-ai-frameworks-core-operations-9f0e}
 
