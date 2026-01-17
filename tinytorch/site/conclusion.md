@@ -33,7 +33,7 @@ Over the course of 20 modules and 6 historical milestones, you built a complete 
 - KV-cache for generation speedup
 - Benchmarking infrastructure
 
-Then you proved it works. You recreated six decades of neural network breakthroughs, from the 1957 Perceptron to 2018 MLPerf optimization, all running on YOUR implementations.
+Then you proved it works. You recreated six decades of neural network breakthroughs, from the 1958 Perceptron to 2018 MLPerf optimization, all running on YOUR implementations.
 
 ## The Mindset Shift
 

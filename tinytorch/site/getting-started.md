@@ -112,7 +112,7 @@ Now for the payoff! After completing the required modules (01-03), run a milesto
 tito milestone run perceptron
 ```
 
-The milestone uses YOUR implementations to recreate Rosenblatt's 1957 Perceptron:
+The milestone uses YOUR implementations to recreate Rosenblatt's 1958 Perceptron:
 
 ```text
 Checking prerequisites for Milestone 01...
@@ -128,7 +128,7 @@ YOUR TinyTorch is ready!
 |  Milestone 01: Perceptron (1957)                                  |
 |  Frank Rosenblatt's First Neural Network                          |
 |                                                                   |
-|  Running: milestones/01_1957_perceptron/01_rosenblatt_forward.py  |
+|  Running: milestones/01_1958_perceptron/01_rosenblatt_forward.py  |
 |  All code uses YOUR TinyTorch implementations!                    |
 +-------------------------------------------------------------------+
 
@@ -159,7 +159,7 @@ As you complete more modules, you unlock more milestones:
 
 | Modules Completed | Milestone Unlocked | What You Recreate |
 |-------------------|-------------------|-------------------|
-| 01-04 | `perceptron` | The 1957 Perceptron |
+| 01-04 | `perceptron` | The 1958 Perceptron |
 | 01-08 | `backprop` | 1986 Backpropagation |
 | 01-09 | `lenet` | 1998 LeNet CNN |
 | 01-13 | `transformer` | 2017 Transformer |

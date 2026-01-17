@@ -37,7 +37,7 @@ class Perceptron:
     A single-layer linear classifier - the foundation of neural networks.
     Architecture: Input → Linear(in_features, num_classes)
 
-    From: Rosenblatt (1957) "The Perceptron: A Probabilistic Model"
+    From: Rosenblatt (1958) "The Perceptron: A Probabilistic Model"
     """
 
     def __init__(self, input_size=64, num_classes=10):

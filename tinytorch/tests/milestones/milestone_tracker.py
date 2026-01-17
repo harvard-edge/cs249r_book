@@ -17,7 +17,7 @@ console = Console()
 # Milestone definitions
 MILESTONES = {
     "perceptron": {
-        "name": "1957 - The Perceptron",
+        "name": "1958 - The Perceptron",
         "requires": ["00_setup", "01_tensor", "02_autograd"],
         "test": "test_perceptron_learning",
         "description": "First learning algorithm with automatic weight updates",

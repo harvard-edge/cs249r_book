@@ -3,7 +3,7 @@
 This document traces the key innovations in neural network history, showing how each breakthrough solved a specific problem left by its predecessor. We're not just listing milestones—we're showing how they connect.
 
 ```
-1957: PERCEPTRON
+1958: PERCEPTRON
 ┌─────────────────┐
 │   Input (x)     │
 │       ↓         │

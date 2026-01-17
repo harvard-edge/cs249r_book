@@ -1037,7 +1037,7 @@ def run_all_learning_tests():
 
     # Test each milestone
     tests = [
-        ("1957 Perceptron", test_perceptron_learning),
+        ("1958 Perceptron", test_perceptron_learning),
         ("1969 XOR (MLP)", test_xor_learning),
         ("1986 MLP Digits", test_mlp_digits_learning),
         ("1998 CNN", test_cnn_learning),

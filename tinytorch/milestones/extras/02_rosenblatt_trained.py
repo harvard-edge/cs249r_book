@@ -4,7 +4,7 @@ The Perceptron (1957) - Frank Rosenblatt [WITH TRAINING]
 =========================================================
 
 📚 HISTORICAL CONTEXT:
-In 1957, Frank Rosenblatt created the Perceptron - the first machine that could
+In 1958, Frank Rosenblatt created the Perceptron - the first machine that could
 LEARN from examples. Before this, all pattern recognition was hand-coded!
 This breakthrough proved machines could improve themselves through training.
 
@@ -222,7 +222,7 @@ def main():
         "[bold cyan]🎯 1957 - The First Neural Network[/bold cyan]\n\n"
         "[dim]Can a machine learn from examples to classify data?[/dim]\n"
         "[dim]Frank Rosenblatt's perceptron attempts to answer this![/dim]",
-        title="🔥 1957 Perceptron Revolution",
+        title="🔥 1958 Perceptron Revolution",
         border_style="cyan",
         box=box.DOUBLE
     ))
@@ -385,7 +385,7 @@ def main():
             "[dim]Milestone 02 shows what happens when data ISN'T\n"
             "linearly separable... the 17-year AI Winter begins![/dim]",
 
-            title="🌟 1957 Perceptron Complete",
+            title="🌟 1958 Perceptron Complete",
             border_style="green",
             box=box.DOUBLE
         ))

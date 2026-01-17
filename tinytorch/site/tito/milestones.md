@@ -13,7 +13,7 @@ The milestone system lets you run famous ML algorithms using YOUR implementation
 
 Milestones are **runnable recreations of historical ML papers** that use YOUR TinyTorch implementations:
 
-- **1957 - Rosenblatt's Perceptron**: The first trainable neural network
+- **1958 - Rosenblatt's Perceptron**: The first trainable neural network
 - **1969 - XOR Solution**: Solving the problem that stalled AI
 - **1986 - Backpropagation**: The MLP revival (Rumelhart, Hinton & Williams)
 - **1998 - LeNet**: Yann LeCun's CNN breakthrough

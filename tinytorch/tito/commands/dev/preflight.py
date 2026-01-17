@@ -615,7 +615,7 @@ class PreflightCommand(BaseCommand):
             return category
 
         milestone_scripts = [
-            ("01_1957_perceptron/02_rosenblatt_trained.py", "Perceptron script"),
+            ("01_1958_perceptron/02_rosenblatt_trained.py", "Perceptron script"),
             ("02_1969_xor/02_xor_solved.py", "XOR script"),
             ("03_1986_mlp/01_rumelhart_tinydigits.py", "MLP script"),
         ]

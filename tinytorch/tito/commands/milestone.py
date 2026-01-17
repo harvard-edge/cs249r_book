@@ -44,10 +44,10 @@ MILESTONE_ALIASES = {
 MILESTONE_SCRIPTS = {
     "01": {
         "id": "01",
-        "name": "Perceptron (1957)",
-        "year": 1957,
+        "name": "Perceptron (1958)",
+        "year": 1958,
         "title": "Frank Rosenblatt's First Neural Network",
-        "script": "milestones/01_1957_perceptron/01_rosenblatt_forward.py",
+        "script": "milestones/01_1958_perceptron/01_rosenblatt_forward.py",
         "required_modules": [1, 2, 3],  # Tensor, Activations, Layers (forward pass only)
         "description": "Build the first neural network (forward pass)",
         "historical_context": "Rosenblatt's perceptron proved machines could learn",

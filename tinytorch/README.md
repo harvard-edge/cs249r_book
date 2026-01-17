@@ -120,7 +120,7 @@ As you progress, unlock recreations of landmark ML achievements:
 
 | Year | Milestone | Your Achievement |
 |------|-----------|------------------|
-| 1957 | Perceptron | Binary classification with gradient descent |
+| 1958 | Perceptron | Binary classification with gradient descent |
 | 1969 | XOR Crisis | Multi-layer networks solve non-linear problems |
 | 1986 | Backpropagation | Multi-layer network training |
 | 1998 | CNN Revolution | **Image classification with convolutions** |
@@ -206,7 +206,7 @@ TinyTorch/
 │   └── modules/                # Module documentation
 │
 ├── milestones/                 # 🏆 Historical ML evolution - prove what you built!
-│   ├── 01_1957_perceptron/     # Rosenblatt's first trainable network
+│   ├── 01_1958_perceptron/     # Rosenblatt's first trainable network
 │   ├── 02_1969_xor/            # Minsky's challenge & multi-layer solution
 │   ├── 03_1986_mlp/            # Backpropagation & MNIST digits
 │   ├── 04_1998_cnn/            # LeCun's CNNs & CIFAR-10

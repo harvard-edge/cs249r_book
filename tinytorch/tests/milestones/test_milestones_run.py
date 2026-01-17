@@ -32,7 +32,7 @@ class TestMilestone01Perceptron:
         WHAT: Verify the perceptron forward pass demo runs.
         WHY: This is the first milestone - it must work to build confidence.
         """
-        script = PROJECT_ROOT / "milestones" / "01_1957_perceptron" / "01_rosenblatt_forward.py"
+        script = PROJECT_ROOT / "milestones" / "01_1958_perceptron" / "01_rosenblatt_forward.py"
         if not script.exists():
             pytest.skip(f"Script not found: {script}")
 
@@ -51,7 +51,7 @@ class TestMilestone01Perceptron:
         WHAT: Verify the trained perceptron demo runs.
         WHY: This proves the full training loop works.
         """
-        script = PROJECT_ROOT / "milestones" / "01_1957_perceptron" / "02_rosenblatt_trained.py"
+        script = PROJECT_ROOT / "milestones" / "01_1958_perceptron" / "02_rosenblatt_trained.py"
         if not script.exists():
             pytest.skip(f"Script not found: {script}")
 
