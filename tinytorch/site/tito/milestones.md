@@ -5,7 +5,7 @@
 <p style="margin: 0; font-size: 1.1rem; opacity: 0.95;">Run the algorithms that changed the world using the TinyTorch you built from scratch</p>
 </div>
 
-**Purpose**: The milestone system lets you run famous ML algorithms (1957-2018) using YOUR implementations. Every milestone validates that your code can recreate a historical breakthrough.
+**Purpose**: The milestone system lets you run famous ML algorithms (1958-2018) using YOUR implementations. Every milestone validates that your code can recreate a historical breakthrough.
 
 The milestone system lets you run famous ML algorithms using YOUR implementations.
 
@@ -141,7 +141,7 @@ See your journey through ML history in a visual tree format.
 
 ## The 6 Milestones
 
-### Milestone 01: Perceptron (1957)
+### Milestone 01: Perceptron (1958)
 
 **What**: Frank Rosenblatt's first trainable neural network
 

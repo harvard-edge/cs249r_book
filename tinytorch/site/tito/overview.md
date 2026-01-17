@@ -153,7 +153,7 @@ tito milestone run 03
 
 | Command | Description | Guide |
 |---------|-------------|-------|
-| `tito milestone list` | Show all 6 historical milestones (1957-2018) | [Milestone System](milestones.md) |
+| `tito milestone list` | Show all 6 historical milestones (1958-2018) | [Milestone System](milestones.md) |
 | `tito milestone run XX` | Run milestone with prerequisite checking | [Milestone System](milestones.md) |
 | `tito milestone info XX` | Get detailed milestone information | [Milestone System](milestones.md) |
 | `tito milestone status` | View milestone progress and achievements | [Milestone System](milestones.md) |
@@ -207,6 +207,9 @@ tito milestone run 03
 | `tito src export <module>` | Export src/ → modules/ → tinytorch/ | After editing source files |
 | `tito src export --all` | Export all modules | After major refactoring |
 | `tito src test <module>` | Run tests on source files | During development |
+| `tito dev preflight` | Run preflight checks before commit | Before committing changes |
+| `tito dev export` | Rebuild full curriculum pipeline | After major refactoring |
+| `tito dev validate` | Full curriculum validation for releases | Before releases |
 
 **Note**: These commands work with `src/XX_name/XX_name.py` files and are for TinyTorch contributors/developers.
 **Students** use `tito module` commands to work with generated notebooks.

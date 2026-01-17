@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The Perceptron (1957) - Frank Rosenblatt [WITH TRAINING]
+The Perceptron (1958) - Frank Rosenblatt [WITH TRAINING]
 =========================================================
 
 📚 HISTORICAL CONTEXT:

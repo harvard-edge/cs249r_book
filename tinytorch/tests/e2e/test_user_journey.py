@@ -112,7 +112,7 @@ class TestQuickVerification:
         code, stdout, stderr = run_tito(["milestones", "list", "--simple"])
         assert code == 0, f"milestones list failed: {stderr}"
         # Should show milestone names
-        assert "Perceptron" in stdout or "1957" in stdout
+        assert "Perceptron" in stdout or "1958" in stdout
 
     @pytest.mark.quick
     def test_modules_directory_exists(self):
@@ -268,7 +268,7 @@ class TestMilestoneFlow:
         """'tito milestones info 01' shows milestone details."""
         code, stdout, stderr = run_tito(["milestones", "info", "01"])
         assert code == 0
-        assert "Perceptron" in stdout or "1957" in stdout
+        assert "Perceptron" in stdout or "1958" in stdout
 
     @pytest.mark.milestone_flow
     def test_milestone_status_works(self):

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The Perceptron (1957) - Frank Rosenblatt [FORWARD PASS ONLY]
+The Perceptron (1958) - Frank Rosenblatt [FORWARD PASS ONLY]
 =============================================================
 
 📚 HISTORICAL CONTEXT:
@@ -243,7 +243,7 @@ def main():
     # Header
     console.print()
     console.print(Panel.fit(
-        "[bold cyan]🎯 MILESTONE 1: The Perceptron (1957)[/bold cyan]\n"
+        "[bold cyan]🎯 MILESTONE 1: The Perceptron (1958)[/bold cyan]\n"
         "[yellow]⚠️  FORWARD PASS ONLY - Random Weights[/yellow]\n\n"
         "[dim]Components: YOUR Tensor + YOUR Linear + YOUR Sigmoid[/dim]",
         border_style="cyan"

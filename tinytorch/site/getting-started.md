@@ -124,8 +124,8 @@ Testing YOUR implementations...
   * Layers import successful
 YOUR TinyTorch is ready!
 
-+----------------------- Milestone 01 (1957) -----------------------+
-|  Milestone 01: Perceptron (1957)                                  |
++----------------------- Milestone 01 (1958) -----------------------+
+|  Milestone 01: Perceptron (1958)                                  |
 |  Frank Rosenblatt's First Neural Network                          |
 |                                                                   |
 |  Running: milestones/01_1958_perceptron/01_rosenblatt_forward.py  |
@@ -141,7 +141,7 @@ Assembling perceptron with YOUR TinyTorch modules...
 +-------------------- Achievement Unlocked --------------------+
 |  MILESTONE ACHIEVED!                                         |
 |                                                              |
-|  You completed Milestone 01: Perceptron (1957)               |
+|  You completed Milestone 01: Perceptron (1958)               |
 |  Frank Rosenblatt's First Neural Network                     |
 |                                                              |
 |  What makes this special:                                    |

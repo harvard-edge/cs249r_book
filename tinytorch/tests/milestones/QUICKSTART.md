@@ -12,7 +12,7 @@ pytest tests/milestones/test_learning_verification.py -v
 
 ## Run Individual Milestones
 
-### 1️⃣ Perceptron (1957)
+### 1️⃣ Perceptron (1958)
 ```bash
 pytest tests/milestones/test_learning_verification.py::test_perceptron_learning -v
 ```

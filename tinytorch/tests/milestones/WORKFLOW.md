@@ -139,7 +139,7 @@ IDs: `perceptron`, `xor`, `mlp_digits`, `cnn`, `transformer`
 
 | Milestone | Requires | Tests |
 |-----------|----------|-------|
-| **Perceptron** (1957) | 00_setup, 01_tensor, 02_autograd | Gradient descent works |
+| **Perceptron** (1958) | 00_setup, 01_tensor, 02_autograd | Gradient descent works |
 | **XOR** (1986) | + 03_nn | Backprop through layers |
 | **MLP Digits** (1989) | + 04_training | Real data classification |
 | **CNN** (1998) | + 07_spatial | Spatial feature learning |

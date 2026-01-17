@@ -7,7 +7,7 @@ WHY: Milestones are the key student checkpoints - they MUST work reliably.
 
 STUDENT LEARNING:
 These tests ensure the 6 historical milestones are always working:
-1. Perceptron (1957) - First neural network
+1. Perceptron (1958) - First neural network
 2. XOR Crisis (1969) - Multi-layer networks
 3. MLP Revival (1986) - Backpropagation
 4. CNN Revolution (1998) - Spatial networks
@@ -25,7 +25,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 
 class TestMilestone01Perceptron:
-    """Test Milestone 01: Perceptron (1957)"""
+    """Test Milestone 01: Perceptron (1958)"""
 
     def test_perceptron_forward_runs(self):
         """
