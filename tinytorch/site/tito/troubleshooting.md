@@ -136,6 +136,177 @@ which pip # Should show TinyTorch/venv/bin/pip
 </div>
 
 
+## System Updates
+
+### Problem: "How do I update TinyTorch?"
+
+<div style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1.5rem 0;">
+
+**Check for updates**:
+```bash
+tito system update --check
+```
+
+**Install updates**:
+```bash
+tito system update
+```
+
+**What gets updated**:
+- ✅ TinyTorch framework code (`tinytorch/` package)
+- ✅ TITO CLI commands and tools
+- ✅ Bug fixes and improvements
+- ✅ New features
+
+**What stays safe**:
+- ✅ Your module implementations (`modules/` folder)
+- ✅ Your progress tracking (`.tito/` folder)
+- ✅ Your exported code
+- ✅ All your work is preserved
+
+**The update process**:
+1. Checks current version
+2. Queries GitHub for latest release
+3. Shows what will be updated
+4. Asks for confirmation
+5. Downloads and installs update
+6. Preserves all your work
+
+**Manual update** (if needed):
+```bash
+curl -fsSL mlsysbook.ai/tinytorch/install.sh | bash
+```
+
+</div>
+
+### Problem: "Will updating delete my code?"
+
+<div style="background: #f0fdf4; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #22c55e; margin: 1.5rem 0;">
+
+**Answer**: No! Your code is completely safe.
+
+**What's protected during updates**:
+- Your implementations in `modules/XX_name/` notebooks
+- Your progress data in `.tito/`
+- Your completion history
+- Any custom modifications you've made
+
+**How updates work**:
+1. Only the TinyTorch framework code gets updated
+2. The installer script preserves your `modules/` directory
+3. Your `.tito/` progress folder stays intact
+4. Student work is never touched
+
+**Best practice**:
+```bash
+# Before updating, verify your work is saved
+tito module status  # Check completion status
+git status          # If using version control
+
+# Then update safely
+tito system update
+```
+
+**If something goes wrong**:
+- Your code is in `modules/` - always safe
+- Framework is in `tinytorch/` - gets replaced
+- Re-export your modules if needed: `tito module complete XX`
+
+</div>
+
+### Problem: "Update failed or interrupted"
+
+<div style="background: #fff5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #e74c3c; margin: 1.5rem 0;">
+
+**Symptom**: Update command failed or was interrupted
+
+**Solution**:
+
+**Step 1: Check environment**:
+```bash
+source activate.sh
+tito system health
+```
+
+**Step 2: Try manual install**:
+```bash
+curl -fsSL mlsysbook.ai/tinytorch/install.sh | bash
+```
+
+**Step 3: Verify installation**:
+```bash
+tito --version
+tito system health
+```
+
+**Step 4: Re-export modules if needed**:
+```bash
+# If imports fail, re-export your completed modules
+tito module complete 01
+tito module complete 02
+# ... etc for each completed module
+```
+
+**Common causes**:
+- Network interruption during download
+- Permission issues
+- Conflicting Python packages
+
+**Prevention**: Ensure stable internet and proper permissions before updating
+
+</div>
+
+### Problem: "After update, imports are broken"
+
+<div style="background: #fff5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #e74c3c; margin: 1.5rem 0;">
+
+**Symptom**:
+```python
+>>> from tinytorch import Tensor
+ImportError: cannot import name 'Tensor'
+```
+
+**Cause**: Update replaced framework files, need to re-export completed modules
+
+**Solution**:
+
+**Step 1: Check what you've completed**:
+```bash
+tito module status
+```
+
+**Step 2: Re-export completed modules**:
+```bash
+# For each module showing as completed
+tito module complete 01
+tito module complete 02
+# etc...
+```
+
+**Step 3: Test imports**:
+```python
+python -c "from tinytorch import Tensor; print('Success!')"
+```
+
+**Why this happens**:
+- Updates may change internal framework structure
+- Your implementations in `modules/` are safe
+- Just need to re-export to `tinytorch/` package
+
+**Quick fix for all modules**:
+```bash
+# Check your progress
+cat .tito/progress.json
+
+# Re-export each completed module
+for i in 01 02 03 04 05; do
+    tito module complete $i
+done
+```
+
+</div>
+
+
 ## Module Issues
 
 ### Problem: "Module export fails"
