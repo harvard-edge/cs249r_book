@@ -2105,19 +2105,13 @@ While mixed-precision training optimizes computational throughput and memory cap
 
 #### The Standard Attention Memory Bottleneck {#sec-ai-training-standard-attention-bottleneck}
 
-Standard self-attention computes relationships between all positions in a sequence through a series of matrix operations that materialize large intermediate tensors. For an input sequence of length $n$ with embedding dimension $d$, the attention mechanism projects inputs into queries $Q$, keys $K$, and values $V$ (each $n \times d$), then computes:
+As detailed in @sec-dnn-architectures, standard self-attention computes relationships between all positions in a sequence. For an input sequence of length $n$, the mechanism computes an $n \times n$ attention matrix:
 
-$$
-\begin{aligned}
-S &= QK^T / \sqrt{d_k} \quad &\text{(attention scores: } n \times n \text{ matrix)} \\
-P &= \text{softmax}(S) \quad &\text{(attention probabilities: } n \times n \text{ matrix)} \\
-O &= PV \quad &\text{(output: } n \times d \text{ matrix)}
-\end{aligned}
-$$
+$$ \text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V $$
 
-The memory bottleneck emerges from storing the $n \times n$ matrices $S$ and $P$. For a sequence length of 4096 tokens with embedding dimension 64 (typical for a single attention head), the attention score matrix $S$ alone requires $4096^2 \times 4 \text{ bytes} = 64 \text{ MB}$ in FP32. With 16 attention heads, this grows to 1 GB just for intermediate attention matrices, not including the keys, queries, values, or output tensors.
+The memory bottleneck emerges from materializing the $n \times n$ intermediate matrices for scores and probabilities. For a sequence length of 4096 tokens with embedding dimension 64 (typical for a single attention head), the attention score matrix alone requires $4096^2 \times 4 \text{ bytes} = 64 \text{ MB}$ in FP32. With 16 attention heads, this grows to 1 GB just for intermediate attention matrices, not including the keys, queries, values, or output tensors.
 
-Modern GPU memory hierarchy exacerbates this bottleneck. HBM (High Bandwidth Memory) provides 40–80 GB capacity with 1–2 TB/s bandwidth, while SRAM (on-chip memory) provides only 20–40 MB capacity but delivers 20+ TB/s bandwidth (10× faster). Standard attention stores $S$ and $P$ in slow HBM and repeatedly loads them during the backward pass. For GPT-2 scale models processing 2048-token sequences, attention operations spend 70-80% of execution time waiting for memory transfers rather than computing, leaving expensive tensor cores underutilized.
+Modern GPU memory hierarchy exacerbates this bottleneck. HBM (High Bandwidth Memory) provides 40–80 GB capacity with 1–2 TB/s bandwidth, while SRAM (on-chip memory) provides only 20–40 MB capacity but delivers 20+ TB/s bandwidth (10× faster). Standard attention stores these large matrices in slow HBM and repeatedly loads them during the backward pass. For GPT-2 scale models processing 2048-token sequences, attention operations spend 70-80% of execution time waiting for memory transfers rather than computing, leaving expensive tensor cores underutilized.
 
 The backward pass compounds this problem. Computing gradients requires storing attention scores from the forward pass:
 
