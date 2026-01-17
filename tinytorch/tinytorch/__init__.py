@@ -8,7 +8,7 @@ Students progressively build this package module by module.
 Imports are optional - only available after completing each module.
 """
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 # ============================================================================
 # Progressive Imports - Available as students complete modules
@@ -91,11 +91,35 @@ try:
 except ImportError:
     MultiHeadAttention = scaled_dot_product_attention = None
 
+# Module 11: Embeddings
+try:
+    from .core.embeddings import Embedding, PositionalEncoding
+except ImportError:
+    Embedding = PositionalEncoding = None
+
 # Module 13: Transformers
 try:
-    from .core.transformer import LayerNorm, MLP, TransformerBlock, GPT, create_causal_mask
+    from .core.transformers import LayerNorm, MLP, TransformerBlock, GPT, TinyGPT, create_causal_mask
 except ImportError:
-    LayerNorm = MLP = TransformerBlock = GPT = create_causal_mask = None
+    LayerNorm = MLP = TransformerBlock = GPT = TinyGPT = create_causal_mask = None
+
+# Module 14: Profiling
+try:
+    from .perf.profiling import Profiler, quick_profile
+except ImportError:
+    Profiler = quick_profile = None
+
+# Module 15: Quantization
+try:
+    from .perf.quantization import Quantizer, quantize_int8, dequantize_int8
+except ImportError:
+    Quantizer = quantize_int8 = dequantize_int8 = None
+
+# Module 17: Acceleration
+try:
+    from .perf.acceleration import vectorized_matmul, fused_gelu, tiled_matmul
+except ImportError:
+    vectorized_matmul = fused_gelu = tiled_matmul = None
 
 # Module 19: Benchmarking
 try:

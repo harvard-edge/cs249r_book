@@ -400,7 +400,7 @@ The following comparison shows equivalent transformer usage in TinyTorch and PyT
 `````{tab-set}
 ````{tab-item} Your TinyTorch
 ```python
-from tinytorch.core.transformer import TransformerBlock, GPT
+from tinytorch.core.transformers import TransformerBlock, GPT
 
 # Create transformer block
 block = TransformerBlock(embed_dim=512, num_heads=8)

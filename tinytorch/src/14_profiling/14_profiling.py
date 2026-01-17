@@ -1842,5 +1842,5 @@ Congratulations! You've built a comprehensive profiling system for ML performanc
 Your profiling implementation enables optimization modules (15-18) to make data-driven optimization decisions.
 Export with: `tito module complete 14`
 
-**Next**: Module 15 (Memoization) will use profiling to discover transformer bottlenecks and fix them!
+**Next**: Module 15 (Quantization) will use profiling data to guide precision reduction for efficient inference!
 """

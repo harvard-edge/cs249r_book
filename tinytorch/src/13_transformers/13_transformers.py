@@ -41,7 +41,7 @@ Let's get started!
 """
 
 # %%
-#| default_exp core.transformer
+#| default_exp core.transformers
 
 # %%
 #| export
@@ -84,7 +84,7 @@ def create_causal_mask(seq_len: int) -> Tensor:
          [1, 1, 1, 1]]
 
     Usage:
-        >>> from tinytorch.core.transformer import create_causal_mask
+        >>> from tinytorch.core.transformers import create_causal_mask
         >>> mask = create_causal_mask(seq_len=10)
         >>> output = attention(x, mask=mask)
     """
@@ -98,11 +98,11 @@ def create_causal_mask(seq_len: int) -> Tensor:
 ## 📦 Where This Code Lives in the Final Package
 
 **Learning Side:** You work in `modules/13_transformers/transformers_dev.py`
-**Building Side:** Code exports to `tinytorch.core.transformer`
+**Building Side:** Code exports to `tinytorch.core.transformers`
 
 ```python
 # How to use this module:
-from tinytorch.core.transformer import TransformerBlock, GPT, LayerNorm, MLP
+from tinytorch.core.transformers import TransformerBlock, TinyGPT, LayerNorm, MLP
 ```
 
 **Why this matters:**
@@ -834,7 +834,7 @@ class TransformerBlock:
     Each block processes the input sequence and passes it to the next block.
     """
 
-    def __init__(self, embed_dim, num_heads, mlp_ratio=4, dropout_prob=0.1):
+    def __init__(self, embed_dim, num_heads, mlp_ratio=4, ff_dim=None, dropout_prob=0.1):
         """
         Initialize a complete transformer block.
 
@@ -843,7 +843,7 @@ class TransformerBlock:
         APPROACH:
         1. Multi-head self-attention for sequence modeling
         2. First layer normalization (pre-norm architecture)
-        3. MLP with specified expansion ratio
+        3. MLP with specified expansion ratio (or explicit ff_dim)
         4. Second layer normalization
 
         TRANSFORMER BLOCK ARCHITECTURE:
@@ -870,7 +870,11 @@ class TransformerBlock:
         self.ln2 = LayerNorm(embed_dim)  # Before MLP
 
         # Feed-forward network
-        hidden_dim = int(embed_dim * mlp_ratio)
+        # Support both mlp_ratio and explicit ff_dim for backward compatibility
+        if ff_dim is not None:
+            hidden_dim = ff_dim
+        else:
+            hidden_dim = int(embed_dim * mlp_ratio)
         self.mlp = MLP(embed_dim, hidden_dim)
         ### END SOLUTION
 
@@ -999,41 +1003,47 @@ Result: "The cat sat on the mat"
 #### Complete GPT Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     GPT ARCHITECTURE            |
-│                                                 |
-│ Input: Token IDs [15496, 1917, ...]             |
-│                    │                            |
-│ ┌──────────────────┴──────────────────┐         |
-│ │          EMBEDDING LAYER            │         |
-│ │  ┌─────────────┐  ┌─────────────────┐│        |
-│ │  │Token Embed  │+│Position Embed   ││         |
-│ │  │vocab→vector ││ │sequence→vector  ││        |
-│ │  └─────────────┘  └─────────────────┘│        |
-│ └──────────────────┬──────────────────┘         |
-│                    │                            |
-│ ┌──────────────────┴──────────────────┐         │
-│ │        TRANSFORMER BLOCK 1          │         │
-│ │ ┌─────────┐  ┌─────────┐  ┌───────┐ │         │
-│ │ │LayerNorm│→│Attention│→│  +x   │ │           │
-│ │ └─────────┘  └─────────┘  └───┬───┘ │         │
-│ │                               │     │         │
-│ │ ┌─────────┐  ┌─────────┐  ┌───▼───┐ │         │
-│ │ │LayerNorm│→│   MLP   │→│  +x   │ │           │
-│ │ └─────────┘  └─────────┘  └───────┘ │         |
-│ └──────────────────┬──────────────────┘         │
-│                    │                            │
-│         ... (more transformer blocks) ...       │
-│                    │                            │
-│ ┌──────────────────┴──────────────────┐         │
-│ │         OUTPUT HEAD                 │         │
-│ │ ┌─────────┐  ┌─────────────────────┐ │        │
-│ │ │LayerNorm│→│Linear(embed→vocab)  │ │         │
-│ │ └─────────┘  └─────────────────────┘ │        │
-│ └──────────────────┬──────────────────┘         │
-│                    │                            │
-│ Output: Vocabulary Logits [0.1, 0.05, 0.8, ...] │
-└─────────────────────────────────────────────────┘
++-------------------------------------------------------------+
+|                      GPT ARCHITECTURE                       |
+|                                                             |
+|  Input: Token IDs [15496, 1917, ...]                        |
+|                       |                                     |
+|                       v                                     |
+|  +--------------------+--------------------+                |
+|  |           EMBEDDING LAYER               |                |
+|  |  +--------------+  +-----------------+  |                |
+|  |  | Token Embed  |  | Position Embed  |  |                |
+|  |  | vocab->vector|  | sequence->vector|  |                |
+|  |  +--------------+  +-----------------+  |                |
+|  |              \          /               |                |
+|  |               +--------+                |                |
+|  +--------------------+--------------------+                |
+|                       |                                     |
+|                       v                                     |
+|  +--------------------+--------------------+                |
+|  |        TRANSFORMER BLOCK 1              |                |
+|  |  +---------+    +---------+    +-----+  |                |
+|  |  |LayerNorm| -> |Attention| -> | +x  |  |                |
+|  |  +---------+    +---------+    +--+--+  |                |
+|  |                                   |     |                |
+|  |  +---------+    +---------+    +--v--+  |                |
+|  |  |LayerNorm| -> |   MLP   | -> | +x  |  |                |
+|  |  +---------+    +---------+    +-----+  |                |
+|  +--------------------+--------------------+                |
+|                       |                                     |
+|          ... (more transformer blocks) ...                  |
+|                       |                                     |
+|                       v                                     |
+|  +--------------------+--------------------+                |
+|  |            OUTPUT HEAD                  |                |
+|  |  +---------+    +--------------------+  |                |
+|  |  |LayerNorm| -> |Linear(embed->vocab)|  |                |
+|  |  +---------+    +--------------------+  |                |
+|  +--------------------+--------------------+                |
+|                       |                                     |
+|                       v                                     |
+|  Output: Vocabulary Logits [0.1, 0.05, 0.8, ...]            |
++-------------------------------------------------------------+
 ```
 
 #### Causal Masking for Autoregressive Training
@@ -1124,7 +1134,7 @@ GPT-4 (estimated):
 
 # %% nbgrader={"grade": false, "grade_id": "gpt", "solution": true}
 #| export
-class GPT:
+class TinyGPT:
     """
     Complete GPT (Generative Pre-trained Transformer) model.
 
@@ -1785,6 +1795,11 @@ if __name__ == "__main__":
     print("\n")
     demo_transformers()
 
+# %%
+#| export
+# Alias for backward compatibility with tests
+TinyGPT = GPT
+
 # %% [markdown]
 """
 ## 🚀 MODULE SUMMARY: Transformers
@@ -1805,3 +1820,8 @@ Export with: `tito module complete 13`
 
 **Next**: Module 14 will add profiling and optimization techniques to make your transformers production-ready!
 """
+
+# %%
+#| export
+# Alias for backward compatibility with tests
+TinyGPT = GPT

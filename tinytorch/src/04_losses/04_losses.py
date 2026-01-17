@@ -1372,7 +1372,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🤔 ML Systems Questions - Testing Your Understanding
+## 🤔 ML Systems Thinking: Loss Function Engineering
 
 Before we finish, let's reflect on what you've learned about loss functions from a systems perspective.
 

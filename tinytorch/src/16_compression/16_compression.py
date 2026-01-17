@@ -25,8 +25,8 @@ Welcome to Module 16! You're about to build model compression techniques that ma
 
 **Connection Map**:
 ```
-Profiling (14) → Quantization (15) → Compression (16) → Acceleration (17) → Memoization (18)
-(measure size)   (reduce precision)  (remove weights)   (speed up compute) (cache compute)
+Profiling (14) → Quantization (15) → Compression (16) → Advanced Optimization
+(measure size)   (reduce precision)  (remove weights)   (next modules)
 ```
 
 ## 🎯 Learning Objectives
@@ -1799,11 +1799,7 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 16")
 
-# %%
-if __name__ == "__main__":
-    print("🚀 Running Compression module...")
-    test_module()
-    print("✅ Module validation complete!")
+# %% [markdown]
 """
 ## ⭐ Aha Moment: Pruning Removes Unimportant Weights
 

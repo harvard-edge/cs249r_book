@@ -1163,35 +1163,6 @@ You're deploying a 3-layer network (784→256→128→10) to a mobile device:
 
 # %% [markdown]
 """
-## 🔧 Main Execution Block
-
-This block runs when the module is executed directly, orchestrating all tests and analyses.
-"""
-
-# %% nbgrader={"grade": false, "grade_id": "main-execution", "solution": true}
-if __name__ == "__main__":
-    print("=" * 70)
-    print("MODULE 03: LAYERS - COMPREHENSIVE VALIDATION")
-    print("=" * 70)
-
-    # Run module integration test
-    test_module()
-
-    print("\n" + "=" * 70)
-    print("SYSTEMS ANALYSIS")
-    print("=" * 70)
-
-    # Run analysis functions
-    analyze_layer_memory()
-    print("\n")
-    analyze_layer_performance()
-
-    print("\n" + "=" * 70)
-    print("✅ MODULE 03 COMPLETE!")
-    print("=" * 70)
-
-# %% [markdown]
-"""
 ## ⭐ Aha Moment: Layers Transform Shapes
 
 **What you built:** Linear layers that transform data from one dimension to another.

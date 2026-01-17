@@ -137,7 +137,7 @@ def test_regression_layernorm_gradient_flow():
     """
     print("Testing regression: LayerNorm gradient flow...")
 
-    from tinytorch.core.transformer import LayerNorm
+    from tinytorch.core.transformers import LayerNorm
 
     ln = LayerNorm(4)
     ln.gamma.requires_grad = True
