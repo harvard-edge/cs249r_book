@@ -116,6 +116,60 @@ class TestTrainingLoop:
             "Check learning rate and gradient computation."
         )
 
+    def test_gradient_accumulation_scales_correctly(self):
+        """
+        WHAT: Verify gradient accumulation scales updates correctly.
+
+        WHY: Accumulation should match the update of a larger batch.
+        If scaling is wrong, updates are too large or too small.
+
+        STUDENT LEARNING: Accumulation trades memory for compute
+        while keeping the same effective learning behavior.
+        """
+        from tinytorch.core.tensor import Tensor
+        from tinytorch.core.layers import Linear
+        from tinytorch.core.losses import MSELoss
+        from tinytorch.core.optimizers import SGD
+        from tinytorch.core.training import Trainer
+        from tinytorch.core.autograd import enable_autograd
+
+        enable_autograd()
+
+        def build_model():
+            layer = Linear(1, 1)
+            layer.weight.data = np.array([[1.0]], dtype=np.float32)
+            layer.bias.data = np.array([0.0], dtype=np.float32)
+            return layer
+
+        x = Tensor([[1.0]])
+        y = Tensor([[2.0]])
+        two_batches = [(x, y), (x, y)]
+        one_batch = [(x, y)]
+
+        model_accum = build_model()
+        trainer_accum = Trainer(
+            model_accum,
+            SGD(model_accum.parameters(), lr=0.1),
+            MSELoss()
+        )
+        trainer_accum.train_epoch(two_batches, accumulation_steps=2)
+
+        model_single = build_model()
+        trainer_single = Trainer(
+            model_single,
+            SGD(model_single.parameters(), lr=0.1),
+            MSELoss()
+        )
+        trainer_single.train_epoch(one_batch, accumulation_steps=1)
+
+        assert np.allclose(model_accum.weight.data, model_single.weight.data), (
+            "Gradient accumulation did not scale updates correctly.\n"
+            "Accumulated update should match a single large batch."
+        )
+        assert np.allclose(model_accum.bias.data, model_single.bias.data), (
+            "Bias update did not match between accumulation and single batch."
+        )
+
 
 class TestTrainingUtilities:
     """Test training helper functions."""
@@ -154,6 +208,58 @@ class TestTrainingUtilities:
                 assert np.allclose(param.grad, 0), (
                     "zero_grad() should clear all gradients to 0"
                 )
+
+    def test_evaluate_handles_generator_dataloader(self):
+        """
+        WHAT: Ensure evaluate works with generator dataloaders.
+
+        WHY: Streaming data sources do not define len().
+        Evaluation should still compute average loss safely.
+
+        STUDENT LEARNING: Training code should handle iterables,
+        not just lists with a known length.
+        """
+        from tinytorch.core.tensor import Tensor
+        from tinytorch.core.training import Trainer
+
+        class DummyOptimizer:
+            def __init__(self):
+                self.lr = 0.1
+
+            def step(self):
+                pass
+
+            def zero_grad(self):
+                pass
+
+        class ConstantModel:
+            def __init__(self, value):
+                self.value = value
+                self.training = True
+
+            def forward(self, inputs):
+                return Tensor([self.value])
+
+            def parameters(self):
+                return []
+
+        class ConstantLoss:
+            def forward(self, predictions, targets):
+                return Tensor(1.0)
+
+        def data_generator():
+            for _ in range(3):
+                yield Tensor([1.0]), Tensor([1.0])
+
+        trainer = Trainer(
+            ConstantModel(1.0),
+            DummyOptimizer(),
+            ConstantLoss()
+        )
+
+        avg_loss, accuracy = trainer.evaluate(data_generator())
+        assert np.allclose(avg_loss, 1.0), "Average loss should be 1.0 for constant loss."
+        assert np.allclose(accuracy, 0.0), "Accuracy should be 0.0 for non class outputs."
 
 
 if __name__ == "__main__":
