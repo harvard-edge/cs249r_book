@@ -47,17 +47,15 @@ We are now at the **Management Layer** of the Systems Sandwich. While Parts I an
 
 @sec-inference-at-scale established the distributed serving architectures that enable individual models to handle massive request volumes through replication, sharding, and geographic distribution. This chapter examines what happens when organizations deploy not one but hundreds of such systems. The transition from managing individual models to operating enterprise-scale ML platforms represents a fundamental shift in operational complexity.
 
-Just as a single developer can compile code manually, a single data scientist can train a model manually. But compiling an operating system requires a build system (Make/Bazel). Similarly, training a fleet of models requires an **ML Build System**—a platform that manages the dependencies, compilation steps (training), and linking (serving) of the entire diverse codebase of "Data." This chapter is about building that Make/Bazel for AI.
-
-[^fn-sculley-debt]: **Hidden Technical Debt in Machine Learning Systems**: This 2015 Google paper became one of the most cited works in ML engineering, revealing that machine learning code often represents only 5% of a production ML system. The remaining 95% consists of configuration, data collection, feature extraction, data verification, monitoring, and serving infrastructure, all of which accumulate technical debt.
+Just as a single developer can compile code manually, a single data scientist can train a model manually. But compiling an operating system requires a build system (Make/Bazel). Similarly, training a fleet of models requires an **ML Build System** that manages dependencies, compilation steps (training), and linking (serving) of the entire codebase. This chapter is about building that Make/Bazel for AI.
 
 Single-model MLOps focuses on continuous integration, deployment pipelines, and monitoring for individual models. This chapter addresses the distinct challenges that emerge when organizations deploy tens, hundreds, or thousands of models across distributed infrastructure. The practices that enable a single team to successfully develop, deploy, and maintain one model become unsustainable when applied at scale, not because they are wrong, but because they fail to account for the interactions, dependencies, and coordination requirements that characterize multi-model environments.
 
 Every organization that successfully deploys machine learning at scale discovers this transition point through experience. The first few models can be managed with spreadsheets, manual deployments, and ad hoc monitoring. Each model team develops its own practices, optimized for their specific requirements. This approach works initially because the models operate independently; what happens to the recommendation system does not affect the fraud detection model.
 
-But this independence proves illusory as model count grows. Models begin sharing data sources, and changes to upstream data pipelines cascade through multiple consumers. Infrastructure becomes contested, where deployment of one model delays deployment of another. Monitoring dashboards multiply until no single team can observe the complete system state. On-call rotations expand from single-model responsibility to cross-model coordination that requires understanding interactions between systems developed by different teams with different assumptions.
+This independence vanishes as model count grows. Models begin sharing data sources, and changes to upstream data pipelines cascade through multiple consumers. Infrastructure becomes contested, where deployment of one model delays deployment of another. Monitoring dashboards multiply until no single team can observe the complete system state. On-call rotations expand from single-model responsibility to cross-model coordination that requires understanding interactions between systems developed by different teams with different assumptions.
 
-Infrastructure efficiency compounds these coordination challenges. Production ML workloads rarely achieve high GPU utilization because training jobs run intermittently and inference loads fluctuate with user traffic. A single model team might accept 20% GPU utilization because optimizing further is not worth the engineering investment. Multiply by 100 models, and that underutilization represents millions of dollars in wasted infrastructure. Similarly, a single model's occasional production incident is manageable, but 100 models with independent failure modes produce a constant stream of alerts that exhaust on-call engineers and mask genuine emergencies beneath noise.
+Infrastructure efficiency compounds these coordination challenges. Production ML workloads rarely achieve high GPU utilization because training jobs run intermittently and inference loads fluctuate with user traffic. A single model team might accept 20% GPU utilization because optimizing further is not worth the engineering investment. Multiply by 100 models, and that underutilization represents millions of dollars in wasted infrastructure. Similarly, a single model's occasional production incident is manageable, but 100 models with independent failure modes produce a constant stream of alerts that exhaust on-call engineers and mask genuine emergencies.
 
 These challenges demand a fundamentally different approach. Platform thinking emerges as the organizational response. Rather than treating each model as an independent system with its own infrastructure, platforms provide shared services that amortize operational costs across the entire model portfolio. Feature stores[^fn-feature-store] eliminate redundant feature computation. Unified deployment pipelines ensure consistent rollout practices. Centralized monitoring aggregates signals across models to detect system-wide issues and enable capacity planning. This chapter examines how to design, implement, and operate these platforms.
 
@@ -67,7 +65,7 @@ These challenges demand a fundamentally different approach. Platform thinking em
 
 Consider a typical technology organization's journey with machine learning. The first model might be a recommendation system for the homepage, followed by a search ranking model, then a fraud detection system, then content moderation, and so on. Each model team initially operates independently, developing bespoke pipelines for data processing, training, validation, and deployment. This approach works well initially because each team can optimize for their specific requirements without coordination overhead.
 
-However, as the number of models grows, several problems emerge that are not simply multiplicative but combinatorial. The challenge is not that 100 models require 100 times the operational effort of one model. Rather, 100 models introduce dependencies and interactions that create superlinear growth in operational complexity. @tbl-ops-scale-complexity quantifies this growth across six operational dimensions, from deployment coordination that becomes critical path at scale to debugging complexity that demands distributed tracing across model boundaries.
+As the number of models grows, several problems emerge that are not simply multiplicative but combinatorial. The challenge is not that 100 models require 100 times the operational effort of one model. Rather, 100 models introduce dependencies and interactions that create superlinear growth in operational complexity. @tbl-ops-scale-complexity quantifies this growth across six operational dimensions, from deployment coordination that becomes critical path at scale to debugging complexity that demands distributed tracing across model boundaries.
 
 +--------------------------------+------------------+------------------+------------------------------+
 | **Operational Aspect**         | **Single Model** | **10 Models**    | **100 Models**               |
@@ -96,10 +94,9 @@ $$ROI_{platform} = \frac{N_{models} \times T_{saved} \times C_{engineer}}{C_{pla
 
 where $N_{models}$ represents the number of models benefiting from the platform, $T_{saved}$ is the engineering time saved per model per period, $C_{engineer}$ is the fully-loaded cost per engineer hour, and $C_{platform}$ is the total platform cost including development, infrastructure, and maintenance.
 
-This equation reveals why platform investments make sense only at sufficient scale. For a small organization with five models, the denominator might exceed the numerator even with significant per-model savings. As model count grows, however, the numerator scales linearly with $N_{models}$ while platform costs grow much more slowly, typically sublinearly due to infrastructure amortization.
+This equation reveals why platform investments make sense only at sufficient scale. For a small organization with five models, the denominator might exceed the numerator even with significant per-model savings. As model count grows, the numerator scales linearly with $N_{models}$ while platform costs grow much more slowly, typically sublinearly due to infrastructure amortization.
 
 **Worked Example: Platform ROI Calculation**
-
 Consider an organization evaluating whether to build a centralized ML platform. Current state:
 
 - 50 production models across 8 teams
@@ -400,7 +397,7 @@ Platform operations provide superlinear returns on investment. As model count gr
 
 The maturity progression from Level 1 to Level 2 hinges on one central challenge: coordinating models that interact through shared data, cascading predictions, and contested infrastructure. The ROI calculations above demonstrated why platform investment pays off; this section examines what makes multi-model coordination so demanding that organizations cannot simply scale their single-model practices.
 
-Managing multiple machine learning models in production introduces coordination challenges absent from single-model operations. When models share features, feed predictions into one another, or compete for shared infrastructure resources, their individual behaviors become interdependent. This section examines the systems and practices required to manage model portfolios effectively, with particular attention to the ensemble architectures that characterize recommendation systems and other multi-model deployments.
+Managing multiple machine learning models in production introduces coordination challenges absent from single-model operations. When models share features, feed predictions into one another, or compete for shared infrastructure resources, their individual behaviors become interdependent. This section examines the systems and practices required to manage model portfolios effectively, with focus on the ensemble architectures that characterize recommendation systems and other multi-model deployments.
 
 ### Model Registries at Scale
 
@@ -904,7 +901,7 @@ Deploying models to production should proceed gradually, with increasing traffic
 
 Blue-green deployment maintains two identical production environments. The current version (blue) serves traffic while the new version (green) is prepared. Once ready, traffic switches instantaneously to green.
 
-Advantages include a simple mental model, instant rollback by switching back to blue, and full testing in production-equivalent environment before exposure.
+Advantages include simple mental model, instant rollback by switching back to blue, and full testing in production-equivalent environment before exposure.
 
 Disadvantages include requiring duplicate infrastructure during transition, no gradual exposure to detect subtle issues, and binary switch that may miss issues emerging only at scale.
 
@@ -958,7 +955,7 @@ Multi-region deployments must address four fundamental challenges:
 
 *Cross-region request routing* complicates version consistency. Users may be routed to different regions based on latency, load balancing, or failover. A user whose requests span multiple regions during a deployment window may receive predictions from different model versions, violating the consistency assumptions underlying A/B test analysis.
 
-*Coordinated rollback* requires global synchronization. Rolling back one region while others continue serving the new version creates the same mixed-version problems that careful deployment coordination was designed to prevent.
+*Coordinated rollback* requires global synchronization. Rolling back one region while others continue serving the new version creates the same mixed-version problems that careful deployment coordination prevents.
 
 **Deployment Strategies**
 
@@ -1435,7 +1432,7 @@ The tradeoff is reduced statistical power. With $k$ clusters, effective sample s
 
 *Switchback experiments* alternate all users between treatment and control over time periods (hours, days). Since all users receive both conditions, there is no cross-user contamination within periods. Analysis compares outcomes across time periods rather than across users. This design is particularly effective for supply-side effects in marketplace platforms.
 
-*Geo-based experiments* leverage geographic boundaries as natural barriers to network effects. For location-dependent services, randomize at the city or region level. Users in different cities rarely interact directly, eliminating most spillover pathways.
+*Geo-based experiments* use geographic boundaries as natural barriers to network effects. For location-dependent services, randomize at the city or region level. Users in different cities rarely interact directly, eliminating most spillover pathways.
 
 **Practical Implementation**
 
@@ -2602,7 +2599,7 @@ The computational overhead of freshness monitoring scales with the number of dis
 
 ## Organizational Patterns {#sec-ops-scale-organizational}
 
-Technical infrastructure alone is insufficient for ML operations at scale. Organizational structure determines how effectively teams can leverage platform capabilities. This section examines organizational patterns for ML platform teams and the tradeoffs each presents.
+Technical infrastructure alone is insufficient for ML operations at scale. Organizational structure determines how effectively teams can use platform capabilities. This section examines organizational patterns for ML platform teams and the tradeoffs each presents.
 
 ### Centralized Platform Team
 

@@ -56,12 +56,9 @@ While @sec-cluster-networking built the physical nervous system of the fleet (In
 *   **Spot Instances**: Utilizing idle capacity for fault-tolerant jobs.
 *   **Priority Classes**: Ensuring inference SLAs kick training jobs off the cluster.
 
-## Summary
-
-Orchestration turns hardware into a service. By solving the logical constraints of job placement and timing, we ensure the physical fleet built in Chapters 5 and 6 delivers maximum value.
 ## Resource Management and Scheduling
 
-The datacenter infrastructure and high-speed networks discussed in the previous chapters provide the physical foundation for large-scale ML. However, translating these resources into productive workloads requires sophisticated scheduling systems that balance utilization, fairness, and job completion time. This section examines the scheduling challenges unique to ML workloads and the systems designed to address them.
+The datacenter infrastructure and high-speed networks discussed in the previous chapters provide the physical foundation for large-scale ML. Translating these resources into productive workloads requires sophisticated scheduling systems that balance utilization, fairness, and job completion time. This section examines the scheduling challenges unique to ML workloads and the systems designed to address them.
 
 ::: {#fig-cluster-scheduling fig-env="figure" fig-pos="htb" fig-cap="**Cluster Resource Management Architecture**. A high-level view of a distributed scheduler. Jobs enter a prioritized queue. The scheduler matches resource requests (see @fig-cluster-scheduling) (GPUs, Memory) against available nodes, enforcing fairness and locality constraints. Node agents (like Kubelet or Slurmd) launch containers and monitor health, reporting status back to the control plane."
 }
@@ -126,7 +123,7 @@ Production schedulers make different trade-offs. Slurm prioritizes consistency, 
 
 **Failure Rates at Scale.** At scale, failure is normal operation, not exceptional. With 99.9% annual GPU reliability (typical for datacenter hardware), a 4096-GPU cluster experiences:
 
-$$ 	ext{Expected failures per day} = 4096 \times \frac{0.001}{365} \approx 0.01 \text{ GPU failures/day} $$
+$$ \text{Expected failures per day} = 4096 \times \frac{0.001}{365} \approx 0.01 \text{ GPU failures/day} $$
 
 More realistically, including software failures, driver issues, and thermal events, production clusters see 1 to 4 failures per day per 1000 GPUs. A multi-week training run on 4096 GPUs will experience multiple failures. Infrastructure and scheduling systems must anticipate this reality.
 
@@ -182,7 +179,7 @@ resources:
 ```
 :::
 
-However, this binary allocation model wastes resources when workloads need less than a full GPU. Multi-Instance GPU[^fn-mig] technology addresses this by partitioning A100 and H100 GPUs into isolated instances. An A100-80GB can be divided into configurations ranging from 7 small instances of 10GB each to 2 large instances of 40GB each. The device plugin exposes MIG instances as separate resources:
+This binary allocation model wastes resources when workloads need less than a full GPU. Multi-Instance GPU[^fn-mig] technology addresses this by partitioning A100 and H100 GPUs into isolated instances. An A100-80GB can be divided into configurations ranging from 7 small instances of 10GB each to 2 large instances of 40GB each. The device plugin exposes MIG instances as separate resources:
 
 +-----------------+----------------+--------------+----------------------+
 | **MIG Profile** | **GPU Memory** | **SM Count** | **Typical Workload** |
@@ -238,7 +235,7 @@ Horizontal Pod Autoscaling (HPA) adjusts replica counts based on metrics. Defaul
 | **Pending tokens**      | Model-specific   | LLM-specific, accounts for KV    |
 +-------------------------+------------------+----------------------------------+
 
-Vertical Pod Autoscaling (VPA) adjusts resource requests and limits for individual pods. For inference, VPA can right-size memory allocations based on observed usage. However, GPU resources cannot be vertically scaled without pod restart, limiting VPA's utility for accelerated workloads.
+Vertical Pod Autoscaling (VPA) adjusts resource requests and limits for individual pods. For inference, VPA can right-size memory allocations based on observed usage. GPU resources cannot be vertically scaled without pod restart, limiting VPA's utility for accelerated workloads.
 
 LLM inference requires specialized scaling due to the key-value cache[^fn-kv-cache]. A 70B parameter model serving long-context requests may require 80GB+ of GPU memory for KV cache alone, even with PagedAttention optimizations. Scaling decisions must account for both request rate and context length distribution.
 
@@ -282,21 +279,19 @@ The scheduling and resource management infrastructure discussed here enables eff
 
 ## Summary
 
-Orchestration turns hardware into a service. By solving the logical constraints of job placement and timing, we ensure the physical fleet built in Chapters 5 and 6 delivers maximum value.
+Orchestration and resource management transform datacenter hardware into productive ML infrastructure. The schedulers examined here determine whether thousands of isolated GPUs function as a single coherent supercomputer or as a fragmented collection of servers.
 
-## Summary
+We explored the fundamental distributed systems challenges that make cluster scheduling intrinsically hard: partial failures, network partitions, state inconsistency, and the CAP theorem trade-offs. Production schedulers make different design choices, with Slurm prioritizing consistency and Kubernetes prioritizing availability through eventual consistency.
 
-The high-bandwidth networks and resource managers examined here are the nervous system of the machine learning fleet. They determine whether thousands of isolated GPUs function as a single coherent supercomputer or as a fragmented collection of servers.
+We examined batch scheduling systems for training workloads. Slurm provides partition-based architecture with fair-share policies and checkpoint-aware preemption. Kubernetes extensions like Volcano and device plugins enable ML-aware scheduling with gang semantics and MIG support. Research schedulers like Tiresias, Gandiva, and Themis demonstrate how exploiting ML-specific characteristics improves job completion times and fairness.
 
-We explored how InfiniBand and RoCE fabrics enable memory-to-memory transfer at 400+ Gbps, bypassing CPU bottlenecks to keep pace with accelerator throughput. We saw how topology optimization—fat-trees for general workloads, rail-optimized networks for large models, and torus meshes for TPUs—physically shapes the communication patterns available to distributed algorithms.
-
-We then examined the schedulers that orchestrate this hardware. Slurm and Kubernetes face fundamental distributed systems challenges—partial failures, network partitions, state inconsistency—that require distinct design trade-offs. We analyzed how specialized policies like gang scheduling, topology-aware placement, and multi-instance GPU partitioning (MIG) improve utilization from the dismal 30-50% typical of naive clusters to the 70-85% required for economic viability.
+For inference workloads, we analyzed autoscaling based on custom metrics, resource isolation through MIG and CPU pinning, and multi-tenancy with hierarchical quotas. These specialized policies improve utilization from the 30-50% typical of naive clusters to the 70-85% required for economic viability.
 
 ::: {.callout-important title="Key Takeaways"}
 
-* **Network as Computer**: At scale, the interconnect is not just plumbing but a primary component of the compute engine. Bandwidth and topology determine training speed as much as GPU FLOPS.
-* **Latency Matters**: For inference and small-message training, tail latency and protocol overhead dominate raw bandwidth.
-* **Scheduling is Allocation**: Effective resource management requires matching workload shapes (batch vs. service) to hardware partitions, using policies like gang scheduling to prevent resource fragmentation.
+* **Distributed Scheduling is Hard**: Cluster scheduling faces fundamental challenges (partial failures, network partitions, state inconsistency) that single-machine schedulers never encounter. The CAP theorem forces trade-offs between consistency and availability.
+* **Gang Scheduling Prevents Deadlock**: Distributed training requires atomic resource allocation. Without gang semantics, jobs partially acquire resources and block each other, wasting already-allocated GPUs.
+* **ML-Specific Policies Matter**: Exploiting ML workload characteristics (predictable resource needs after initial epochs, iterative computation, diminishing returns) enables specialized schedulers to outperform general-purpose systems by 40-60% in job completion time.
 * **Utilization is King**: The high cost of ML infrastructure makes scheduling efficiency a first-order economic driver. Improving utilization from 40% to 80% effectively halves hardware costs.
 
 :::

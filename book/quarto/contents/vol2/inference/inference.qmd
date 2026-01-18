@@ -39,7 +39,7 @@ Training optimizes for throughput over extended periods, tolerating latency vari
 
 ## Scaling Inference Beyond Single Machines {#sec-inference-scaling-beyond}
 
-Single-machine model serving establishes foundational principles that this chapter extends to distributed systems...
+Single-machine model serving establishes foundational principles that this chapter extends to distributed systems. Volume I covered single-machine inference optimization—batching, caching, model optimization, and hardware acceleration (@sec-serving). This chapter addresses when those techniques reach their limits and distributed approaches become necessary.
 
 ::: {.callout-note title="Connection: The Systems Sandwich"}
 Inference is the **Service Layer** of the Systems Sandwich. It sits above the **Operational Layer** (distributed training) and **Physical Layer** (infrastructure). While training builds the model, inference is where the model meets the user. The latency constraints here ($<100$ms) are far stricter than the throughput constraints of training, forcing us to rethink the entire stack—from batching strategies to memory management.
@@ -47,19 +47,19 @@ Inference is the **Service Layer** of the Systems Sandwich. It sits above the **
 
 The transition from single-machine to distributed inference parallels the transition from single-machine to distributed training, but with fundamentally different constraints. Training optimizes throughput over extended periods and tolerates latency variations measured in minutes or hours. Inference at scale must maintain strict latency bounds measured in milliseconds while handling request volumes that fluctuate unpredictably. This inversion of priorities transforms every design decision, from how requests are batched to how failures are handled.
 
-Distributed inference systems must solve problems that simply do not exist at single-machine scale. Load balancing[^fn-load-balancing] becomes critical when requests must be distributed across hundreds of GPU instances while maintaining latency guarantees. Request routing must account for model-specific characteristics. A recommendation system with trillion-parameter embedding tables requires different placement strategies than a large language model that generates responses token by token. Autoscaling must anticipate demand fluctuations that can change request volume by orders of magnitude within minutes while maintaining latency bounds that users expect.
+Distributed inference systems must solve problems that do not exist at single-machine scale. Load balancing[^fn-load-balancing] becomes critical when requests must be distributed across hundreds of GPU instances while maintaining latency guarantees. Request routing must account for model-specific characteristics: recommendation systems with trillion-parameter embedding tables require different placement strategies than large language models that generate responses token by token. Autoscaling must anticipate demand fluctuations that can change request volume by orders of magnitude within minutes while maintaining latency bounds users expect.
 
 [^fn-load-balancing]: **Load balancing** in inference systems differs fundamentally from traditional web load balancing. Web servers typically complete requests in milliseconds with uniform processing time; GPU inference workers handle requests lasting from 10ms to 30+ seconds with high variance. This variance makes techniques like least-connections and queue-depth-aware routing essential, whereas simple round-robin suffices for stateless web workloads.
 
-The economics of inference at scale also differ fundamentally from training economics. Training costs are dominated by compute time and can be amortized over the lifetime of the resulting model. Inference costs, by contrast, are directly tied to user traffic and revenue. An e-commerce recommendation system might serve millions of requests per second during peak shopping periods, with each request contributing directly to potential revenue. The cost of overprovisioning during quiet periods or underprovisioning during peaks translates immediately to business impact, making inference efficiency a first-order concern in ways that training efficiency rarely achieves.
+The economics of inference at scale differ fundamentally from training economics. Training costs are dominated by compute time and can be amortized over the lifetime of the resulting model. Inference costs are directly tied to user traffic and revenue. An e-commerce recommendation system might serve millions of requests per second during peak shopping periods, with each request contributing directly to potential revenue. The cost of overprovisioning during quiet periods or underprovisioning during peaks translates immediately to business impact. Inference efficiency becomes a first-order concern in ways that training efficiency rarely achieves.
 
-This chapter develops the principles and techniques for building inference systems that scale to meet these demands. We examine when distributed inference becomes necessary, how to architect systems that maintain latency bounds under varying load, and how to optimize the economics of inference through efficient resource utilization. The goal is not merely to make inference work at scale, but to make it work efficiently, reliably, and economically.
+This chapter develops the principles and techniques for building inference systems that scale to meet these demands. We examine when distributed inference becomes necessary, how to architect systems that maintain latency bounds under varying load, and how to optimize the economics of inference through efficient resource utilization. The goal is not merely to make inference work at scale but to make it work efficiently, reliably, and economically.
 
 ### When Single-Machine Serving Is Insufficient {#sec-inference-when-insufficient}
 
 Three distinct signals indicate when distributed inference becomes necessary rather than merely optional. @tbl-distribution-triggers categorizes these triggers by constraint type and corresponding strategy.
 
-**Memory exhaustion** occurs when model parameters, key-value caches, or embedding tables exceed single-device capacity. A single NVIDIA H100 GPU provides 80GB of HBM3[^fn-hbm3] memory. GPT-4 class models with hundreds of billions of parameters require 200-400GB just for weights in FP16 precision, forcing distribution across multiple GPUs regardless of throughput requirements. Recommendation systems with trillion-parameter embedding tables face similar constraints: Meta's DLRM[^fn-dlrm] model stores embedding tables that require multiple terabytes of memory.
+**Memory exhaustion** occurs when model parameters, key-value caches, or embedding tables exceed single-device capacity. A single NVIDIA H100 GPU provides 80GB of HBM3[^fn-hbm3] memory. GPT-4 class models with hundreds of billions of parameters require 200–400GB just for weights in FP16 precision, forcing distribution across multiple GPUs regardless of throughput requirements. Recommendation systems with trillion-parameter embedding tables face similar constraints: Meta's DLRM[^fn-dlrm] model stores embedding tables that require multiple terabytes of memory.
 
 [^fn-hbm3]: **High Bandwidth Memory 3 (HBM3)**: A 3D-stacked DRAM technology providing 3.35 TB/s bandwidth on the H100, compared to 1 TB/s for HBM2e on the A100. This 3x bandwidth improvement directly enables larger batch sizes and faster token generation for memory-bandwidth-bound LLM decode operations.
 
@@ -67,7 +67,7 @@ Three distinct signals indicate when distributed inference becomes necessary rat
 
 **Throughput limitations** emerge when request volume exceeds single-machine capacity even with optimal batching. Consider a recommendation system serving 100,000 queries per second with a 10ms latency budget. If single-machine throughput peaks at 10,000 QPS, no amount of optimization on that machine can satisfy demand. Horizontal scaling across multiple replicas becomes mandatory.
 
-**Latency requirements** drive distribution when model execution time exceeds latency budgets even at batch size one. Large language models generating responses token by token face this constraint acutely: a 70-billion parameter model requires approximately 140GB of memory and achieves roughly 30 tokens per second on a single GPU due to memory bandwidth limitations. Sharding the model across multiple GPUs enables parallel computation that reduces time-to-first-token below acceptable thresholds.
+**Latency requirements** drive distribution when model execution time exceeds latency budgets even at batch size one. Large language models generating responses token by token face this constraint acutely. A 70-billion parameter model requires approximately 140GB of memory and achieves roughly 30 tokens per second on a single GPU due to memory bandwidth limitations. Sharding the model across multiple GPUs enables parallel computation that reduces time-to-first-token below acceptable thresholds.
 
 +----------------+--------------------------+----------------------+-----------------------------+
 | **Constraint** | **Single-Machine Limit** | **Example Workload** | **Distribution Strategy**   |
@@ -77,11 +77,11 @@ Three distinct signals indicate when distributed inference becomes necessary rat
 | **Latency**    | Model execution time     | 500ms LLM TTFT       | Model sharding              |
 +----------------+--------------------------+----------------------+-----------------------------+
 
-: **Triggers for Distributed Inference**: Each constraint type indicates different distribution strategies. Memory constraints require model sharding; throughput constraints require replication; latency constraints may require either depending on whether the bottleneck is compute or memory bandwidth. {#tbl-distribution-triggers}
+: **Triggers for Distributed Inference**. Each constraint type indicates different distribution strategies. Memory constraints require model sharding; throughput constraints require replication; latency constraints may require either depending on whether the bottleneck is compute or memory bandwidth. {#tbl-distribution-triggers}
 
 ### The Fundamental Inversion: Training vs Inference {#sec-inference-inversion}
 
-The contrast between training and inference optimization extends beyond the basic throughput versus latency distinction. Training optimizes for samples processed per hour and tolerates latency variations. Inference optimizes for response time and must meet strict latency bounds. At scale, this inversion manifests in system architecture, resource allocation, and operational priorities, as @tbl-training-inference-inversion details across six key system aspects.
+The contrast between training and inference optimization extends beyond the basic throughput-versus-latency distinction. Training optimizes for samples processed per hour and tolerates latency variations. Inference optimizes for response time and must meet strict latency bounds. At scale, this inversion manifests in system architecture, resource allocation, and operational priorities. @tbl-training-inference-inversion details six key system aspects where these differences emerge.
 
 +-------------------------+-------------------------------+------------------------------+
 | **Aspect**              | **Distributed Training**      | **Distributed Inference**    |
@@ -94,7 +94,7 @@ The contrast between training and inference optimization extends beyond the basi
 | **Cost structure**      | Fixed duration, variable rate | Variable duration, fixed SLO |
 +-------------------------+-------------------------------+------------------------------+
 
-: **Training vs Inference System Requirements**: The fundamental inversion from throughput to latency optimization ripples through every aspect of system design. {#tbl-training-inference-inversion}
+: **Training vs Inference System Requirements**. The fundamental inversion from throughput to latency optimization ripples through every aspect of system design. {#tbl-training-inference-inversion}
 
 Training tolerates substantial latency variance because the optimization target is aggregate progress over hours or days. A training iteration that takes 2 seconds instead of the usual 1 second represents acceptable variation. An inference request that takes 2 seconds instead of 100 milliseconds represents catastrophic failure, potentially causing user abandonment or cascading timeouts in dependent services.
 
@@ -106,17 +106,17 @@ Failure handling diverges correspondingly. Training failures trigger checkpoint 
 
 Distributing inference across multiple machines introduces overhead absent from single-machine serving. This "serving tax" must be understood and budgeted within latency constraints.
 
-**Network communication** adds latency for every cross-machine interaction. Within a datacenter, network round-trip times range from 50-500 microseconds depending on topology and congestion. For model sharding that requires synchronization between GPUs on different machines, each synchronization point adds this overhead. A model sharded across 8 machines with 4 synchronization points per inference adds 200 microseconds to 2 milliseconds of network latency.
+**Network communication** adds latency for every cross-machine interaction. Within a datacenter, network round-trip times range from 50–500 microseconds depending on topology and congestion. For model sharding that requires synchronization between GPUs on different machines, each synchronization point adds this overhead. A model sharded across 8 machines with 4 synchronization points per inference adds 200 microseconds to 2 milliseconds of network latency.
 
 **Serialization overhead** converts in-memory tensors to network-transmittable formats. While modern serialization libraries like FlatBuffers and Cap'n Proto[^fn-serialization] minimize this overhead, large activation tensors still require meaningful time to serialize and deserialize. A 1GB activation tensor takes approximately 100 milliseconds to serialize, even with optimized libraries.
 
 [^fn-serialization]: **Zero-copy serialization**: FlatBuffers (Google) and Cap'n Proto enable reading serialized data directly without parsing or unpacking, eliminating the CPU overhead of traditional formats like Protocol Buffers or JSON. For distributed inference, this reduces per-request serialization overhead from milliseconds to microseconds.
 
-**Load balancer latency** adds another layer. Requests must be routed to appropriate replicas, which requires examining request metadata, consulting routing tables, and forwarding to selected backends. Well-optimized load balancers add 100-500 microseconds; poorly configured ones can add milliseconds.
+**Load balancer latency** adds another layer. Requests must be routed to appropriate replicas, which requires examining request metadata, consulting routing tables, and forwarding to selected backends. Well-optimized load balancers add 100–500 microseconds; poorly configured ones can add milliseconds.
 
 **Coordination overhead** emerges when requests require fan-out to multiple services. A recommendation system that queries a user model, item model, and ranking model in parallel must coordinate these queries and aggregate results. The coordination logic itself consumes CPU cycles and introduces latency variation.
 
-The total serving tax often consumes 10-30% of the latency budget in distributed systems (@eq-serving-tax):
+The total serving tax often consumes 10–30% of the latency budget in distributed systems (@eq-serving-tax):
 
 $$L_{total} = L_{compute} + L_{network} + L_{serialization} + L_{coordination} + L_{queuing}$$ {#eq-serving-tax}
 
@@ -160,51 +160,51 @@ Serving optimization leverage is 500x higher than training optimization. A 1% se
 
 The cost dominance ratio varies by application. @tbl-cost-ratios quantifies this disparity:
 
-+-------------------------------+-------------------+-------------------------+-----------+
-| **Application**               | **Training Cost** | **Annual Serving Cost** | **Ratio** |
-+:==============================+==================:+========================:+==========:+
-| **Recommendation (high QPS)** | $10K-100K         | $1M-10M                 | 100-1000x |
-| **Search ranking**            | $100K-1M          | $10M-100M               | 100-1000x |
-| **LLM API**                   | $1M-100M          | $10M-1B                 | 10-100x   |
-| **Internal analytics**        | $1K-10K           | $10K-100K               | 10-100x   |
-+-------------------------------+-------------------+-------------------------+-----------+
++-------------------------------+-------------------+-------------------------+-------------+
+| **Application**               | **Training Cost** | **Annual Serving Cost** | **Ratio**   |
++:==============================+==================:+========================:+:============+
+| **Recommendation (high QPS)** | $10K–100K         | $1M–10M                 | 100–1000x   |
+| **Search ranking**            | $100K–1M          | $10M–100M               | 100–1000x   |
+| **LLM API**                   | $1M–100M          | $10M–1B                 | 10–100x     |
+| **Internal analytics**        | $1K–10K           | $10K–100K               | 10–100x     |
++-------------------------------+-------------------+-------------------------+-------------+
 
-: **Training vs Serving Cost Ratios**: High-QPS applications like recommendation systems show the most extreme cost dominance of serving over training. {#tbl-cost-ratios}
+: **Training vs Serving Cost Ratios**. High-QPS applications like recommendation systems show the most extreme cost dominance of serving over training. {#tbl-cost-ratios}
 
 This cost structure motivates the optimization techniques throughout this chapter. Every percentage point of serving efficiency improvement yields ongoing cost reduction over the model's operational lifetime.
 
 ### The Inference Landscape: Beyond LLMs {#sec-inference-landscape}
 
-A critical misconception in current discourse frames inference at scale as synonymous with LLM serving. While large language models present distinctive challenges and attract significant attention, they represent a small fraction of production inference volume. Understanding the full inference landscape proves essential for appropriate technique selection, as @tbl-inference-landscape reveals through its breakdown of model types, request volumes, and optimization challenges.
+A critical misconception in current discourse frames inference at scale as synonymous with LLM serving. While large language models present distinctive challenges and attract significant attention, they represent a small fraction of production inference volume. Understanding the full inference landscape proves essential for appropriate technique selection. @tbl-inference-landscape breaks down model types, request volumes, and optimization challenges.
 
 ::: {.callout-important title="Production Inference by Request Volume"}
 
 By request count, production ML inference at major technology companies breaks down approximately as:
 
-- **Recommendation and ranking**: 80-90% of requests
-- **Vision and image processing**: 5-10% of requests
-- **NLP/LLM**: 1-5% of requests (but growing rapidly)
-- **Other (fraud detection, ads, etc.)**: 2-5% of requests
+- **Recommendation and ranking**: 80–90% of requests
+- **Vision and image processing**: 5–10% of requests
+- **NLP/LLM**: 1–5% of requests (but growing rapidly)
+- **Other (fraud detection, ads, etc.)**: 2–5% of requests
 
 Source: Industry reports from Meta, Google, and Netflix infrastructure teams.
 
 :::
 
-Recommendation systems dominate because they serve predictions for every user interaction: every page load, scroll, or click triggers inference. A user browsing an e-commerce site might generate 100 recommendation requests in a single session. In contrast, LLM queries typically require explicit user action and occur less frequently.
+Recommendation systems dominate because they serve predictions for every user interaction. Every page load, scroll, or click triggers inference. A user browsing an e-commerce site might generate 100 recommendation requests in a single session. In contrast, LLM queries typically require explicit user action and occur less frequently.
 
 This distribution has important implications. Recommendation systems have driven most production inference innovation. Dynamic batching, embedding sharding, feature store architectures, and low-latency serving were developed primarily for recommendation workloads. LLM-specific techniques like continuous batching and KV cache management are important but address a narrower slice of production inference.
 
-+--------------------+--------------------+--------------------+-------------------+
-| **Model Type**     | **Request Volume** | **Latency Target** | **Key Challenge** |
-+:===================+:===================+:===================+:==================+
-| **Recommendation** | Very high (80-90%) | &lt;10ms P99       | Embedding lookup  |
-| **Vision (CNN)**   | Moderate (5-10%)   | 20-100ms           | Batch efficiency  |
-| **LLM**            | Lower (1-5%)       | 100ms-10s          | Memory bandwidth  |
-| **Speech/Audio**   | Lower              | Real-time          | Sequential decode |
-| **Multimodal**     | Growing            | Varies             | Cross-modal sync  |
-+--------------------+--------------------+--------------------+-------------------+
++--------------------+----------------------+--------------------+-------------------+
+| **Model Type**     | **Request Volume**   | **Latency Target** | **Key Challenge** |
++:===================+:=====================+:===================+:==================+
+| **Recommendation** | Very high (80–90%)   | &lt;10ms P99       | Embedding lookup  |
+| **Vision (CNN)**   | Moderate (5–10%)     | 20–100ms           | Batch efficiency  |
+| **LLM**            | Lower (1–5%)         | 100ms–10s          | Memory bandwidth  |
+| **Speech/Audio**   | Lower                | Real-time          | Sequential decode |
+| **Multimodal**     | Growing              | Varies             | Cross-modal sync  |
++--------------------+----------------------+--------------------+-------------------+
 
-: **Production Inference Landscape**: Different model types have different volume, latency requirements, and optimization challenges. Technique selection must match the specific workload. {#tbl-inference-landscape}
+: **Production Inference Landscape**. Different model types have different volume, latency requirements, and optimization challenges. Technique selection must match the specific workload. {#tbl-inference-landscape}
 
 ### The Serving Hierarchy {#sec-inference-serving-hierarchy}
 
@@ -256,7 +256,7 @@ Each level has distinct optimization levers. @tbl-serving-hierarchy maps these l
 | **Platform** | Resource efficiency     | Multi-tenancy, scheduling, placement   |
 +--------------+-------------------------+----------------------------------------+
 
-: **Serving Hierarchy Optimization Targets**: Each level of the hierarchy addresses different metrics with different techniques. {#tbl-serving-hierarchy}
+: **Serving Hierarchy Optimization Targets**. Each level of the hierarchy addresses different metrics with different techniques. {#tbl-serving-hierarchy}
 
 The remainder of this chapter progresses through these levels: batching and caching (request level), model sharding (replica level), load balancing and autoscaling (service level), and multi-tenancy (platform level).
 
@@ -292,7 +292,7 @@ Serving frameworks fall into distinct categories based on their design philosoph
 
 **General-purpose inference servers** provide broad model support with configurable optimization. Triton Inference Server (NVIDIA) offers multi-framework support (PyTorch, TensorFlow, ONNX, TensorRT), dynamic batching, model ensemble orchestration, and concurrent model execution. TensorFlow Serving provides native TensorFlow support, gRPC/REST APIs, model versioning, and batching scheduler. TorchServe (PyTorch) delivers native PyTorch support, model archiving, metrics, and multi-model serving.
 
-**LLM-specialized servers** optimize specifically for autoregressive generation[^fn-autoregressive]. vLLM provides PagedAttention, continuous batching, tensor parallelism, and OpenAI-compatible API. TensorRT-LLM delivers NVIDIA-optimized kernels, in-flight batching, quantization, and multi-GPU support. Text Generation Inference (TGI) offers Hugging Face integration, flash attention, tensor parallelism, and watermarking.
+**LLM-specialized servers** optimize specifically for autoregressive generation[^fn-autoregressive]. vLLM provides PagedAttention, continuous batching, tensor parallelism, and OpenAI-compatible API. TensorRT-LLM delivers NVIDIA-optimized kernels, in-flight batching, quantization, and multi-GPU support. Text Generation Inference (TGI, Hugging Face) offers model integration, flash attention, tensor parallelism, and watermarking.
 
 [^fn-autoregressive]: **Autoregressive generation**: The process of generating output tokens one at a time, where each new token depends on all previously generated tokens. This sequential dependency creates the memory-bandwidth bottleneck that dominates LLM serving costs, as the entire model must be read from memory for each generated token.
 
@@ -384,10 +384,10 @@ outputs = llm.generate(prompts, sampling_params)
 +-----------------------------+-------------------+-----------------------------------------+
 | **Metric**                  | **Typical Value** | **Notes**                               |
 +:============================+==================:+:========================================+
-| **Throughput vs baseline**  | 2-4x              | Compared to naive HF generation         |
+| **Throughput vs baseline**  | 2–4x              | Compared to naive HF generation         |
 | **Memory efficiency**       | 90%+ utilization  | PagedAttention eliminates fragmentation |
 | **Latency overhead**        | &lt;5ms           | Scheduling and batching overhead        |
-| **Max concurrent requests** | 100s-1000s        | Depends on model size and GPU memory    |
+| **Max concurrent requests** | 100s–1000s        | Depends on model size and GPU memory    |
 +-----------------------------+-------------------+-----------------------------------------+
 
 ### TensorRT-LLM Architecture {#sec-inference-tensorrt-llm}
@@ -431,13 +431,11 @@ trtllm-build \
 | **Quantization options**  | Extensive        | Good     | TensorRT-LLM |
 +---------------------------+------------------+----------+--------------+
 
-TensorRT-LLM typically achieves 20-50% higher throughput than vLLM on NVIDIA hardware but requires more complex deployment pipelines.
+TensorRT-LLM typically achieves 20–50% higher throughput than vLLM on NVIDIA hardware but requires more complex deployment pipelines.
 
 ### Triton Inference Server {#sec-inference-triton}
 
-Triton provides enterprise-grade multi-model serving with sophisticated orchestration capabilities.
-
-Triton provides several key features for production. Multi-framework support allows a single server to host PyTorch, TensorFlow, TensorRT, and ONNX models. Dynamic batching offers configurable batching with latency targets. Model ensembles enable chaining models in inference pipelines. Concurrent execution allows multiple models to share GPU resources. Metrics and monitoring integrate with Prometheus and provide detailed latency breakdown.
+Triton provides enterprise-grade multi-model serving with sophisticated orchestration capabilities and several key features for production. Multi-framework support allows a single server to host PyTorch, TensorFlow, TensorRT, and ONNX models. Dynamic batching offers configurable batching with latency targets. Model ensembles enable chaining models in inference pipelines. Concurrent execution allows multiple models to share GPU resources. Metrics and monitoring integrate with Prometheus and provide detailed latency breakdown.
 
 **Model repository structure**:
 
@@ -475,7 +473,7 @@ instance_group [
 
 **Use cases where Triton excels**:
 
-- Multi-model pipelines (e.g., detection → classification → ranking)
+- Multi-model pipelines (detection → classification → ranking)
 - Mixed workloads on shared GPU clusters
 - Organizations with diverse model frameworks
 - Production systems requiring detailed observability
@@ -570,7 +568,7 @@ The framework selection made here influences all subsequent serving optimization
 
 ### Orchestration Platforms for Production Serving {#sec-inference-orchestration}
 
-Individual inference runtimes (vLLM, TensorRT-LLM, Triton) handle the mechanics of efficient inference on a single node or small cluster. Production systems require an orchestration layer that manages service composition, autoscaling, traffic management, fault tolerance, and multi-tenancy. Choosing an inference runtime without considering the orchestration layer is like choosing a database engine without considering connection pooling, replication, and query routing.
+Individual inference runtimes (vLLM, TensorRT-LLM, Triton) handle the mechanics of efficient inference on a single node or small cluster. Production systems require an orchestration layer that manages service composition, autoscaling, traffic management, fault tolerance, and multi-tenancy.
 
 The orchestration layer handles several key responsibilities. Service composition combines multiple models and components into request pipelines. Autoscaling adjusts replicas based on traffic patterns and resource utilization. Traffic management encompasses load balancing, canary deployments, and A/B testing. Fault tolerance provides replica health monitoring and automatic recovery. Multi-tenancy isolates workloads and manages resource allocation across teams.
 
@@ -648,7 +646,12 @@ This pattern provides automatic scaling from 2 to 16 replicas based on load. It 
 
 Vision models and embedding lookups are typically stateless: any replica can serve any request. LLM serving with KV cache is stateful: the cache accumulated during conversation creates replica-specific state.
 
-Stateful LLM serving has several implications. Sticky routing is required because subsequent requests in a conversation must reach the same replica holding the KV cache. Failure recovery becomes complex because when a stateful replica fails, cached state is lost. Options include regenerating cache from history (high latency), replicating cache to backups (high bandwidth), or accepting session restart (poor experience). Autoscaling must account for sessions because scaling down stateful replicas requires draining active sessions, which can take minutes for long conversations. Memory sizing determines capacity because each active session consumes KV cache memory, limiting concurrent sessions per replica regardless of compute capacity.
+Stateful LLM serving has several implications:
+
+- **Sticky routing**: Subsequent requests in a conversation must reach the same replica holding the KV cache
+- **Failure recovery**: When a stateful replica fails, cached state is lost, requiring either cache regeneration from history (high latency), cache replication to backups (high bandwidth), or accepting session restart (poor experience)
+- **Autoscaling complexity**: Scaling down stateful replicas requires draining active sessions, which can take minutes for long conversations
+- **Memory-bound capacity**: Each active session consumes KV cache memory, limiting concurrent sessions per replica regardless of compute capacity
 
 **Consistency during model updates**:
 
@@ -662,14 +665,18 @@ When updating models across distributed replicas, requests may hit different mod
 | **Rolling update**      | Weak (mixed versions)    | Medium            | Medium                |
 +-------------------------+--------------------------+-------------------+-----------------------+
 
-Applications requiring deterministic outputs (compliance, audit trails, reproducible debugging) should implement several practices. Pin model version by including version identifier in request routing to ensure same model handles related requests. Use temperature=0 to eliminate sampling variance, though beam search still has implementation-dependent tiebreaking. Implement version-aware caching by caching responses with model version tags and invalidating on version change.
+Applications requiring deterministic outputs (compliance, audit trails, reproducible debugging) should implement several practices:
+
+- **Pin model version**: Include version identifier in request routing to ensure the same model handles related requests
+- **Use temperature=0**: Eliminates sampling variance, though beam search still has implementation-dependent tiebreaking
+- **Implement version-aware caching**: Cache responses with model version tags and invalidate on version change
 
 **Failure scenario: Stateful replica crash**
 
 When a stateful LLM replica crashes mid-conversation:
 
 ```
-1. Load balancer detects health check failure (1-10 seconds)
+1. Load balancer detects health check failure (1–10 seconds)
 2. New requests route to healthy replicas
 3. In-flight requests fail; clients must retry
 4. Session state (KV cache) is lost
@@ -679,7 +686,7 @@ When a stateful LLM replica crashes mid-conversation:
    c. Restart: Begin new session (poor user experience)
 ```
 
-Production systems often accept option (a) with optimizations: the regenerated prefill can process the full conversation history in a single batch, taking seconds rather than the minutes the original conversation took.
+Production systems often accept option (a) with optimizations. The regenerated prefill can process the full conversation history in a single batch, taking seconds rather than the minutes the original conversation took.
 
 **Build vs buy: Managed serving services**:
 
@@ -751,13 +758,13 @@ Start
 
 1. **Memory**: Llama-70B requires ~140GB in FP16. With 4-bit quantization (AWQ), this drops to ~35GB, fitting on a single H100 (80GB) with room for KV cache.
 
-2. **Throughput**: At 500 QPS peak with average 100 output tokens, the system must sustain 50,000 tokens/second. A single quantized Llama-70B on H100 achieves ~1,000 tokens/second with continuous batching, so 4 GPUs provide headroom.
+2. **Throughput**: At 500 QPS peak with average 100 output tokens, the system must sustain 50,000 tokens/second. A single quantized Llama-70B on H100 achieves approximately 1,000 tokens/second with continuous batching, so 4 GPUs provide headroom.
 
 3. **Tensor parallelism vs replicas**: Two options exist:
-   - 2 replicas × 2-way TP: Higher availability, lower per-request latency
-   - 4 replicas × 1-way TP: Maximum throughput, simpler scaling
+   - 2 replicas with 2-way TP: Higher availability, lower per-request latency
+   - 4 replicas with 1-way TP: Maximum throughput, simpler scaling
 
-   With AWQ fitting on single GPU, option (b) is preferred for this traffic level.
+   With AWQ fitting on a single GPU, the second option is preferred for this traffic level.
 
 4. **Team size**: 2 ML engineers without SRE experience suggests managed services or simple orchestration.
 
@@ -803,7 +810,7 @@ The core insight of batching is that processing multiple requests together amort
 
 At scale, batching becomes more complex because different model architectures have fundamentally different batching requirements. A strategy optimal for vision models may be catastrophic for LLMs, and techniques developed for recommendation systems may not apply to either.
 
-**Production reality**: Recommendation systems constitute 80-90% of inference requests at major technology companies, with vision models handling most of the remainder, and LLMs currently representing 1-5% of request volume (though growing rapidly). Despite this distribution, we present batching strategies in order of conceptual complexity: vision (straightforward batching), LLMs (continuous batching with KV cache), and recommendation (feature-parallel batching with distributed embedding). This pedagogical ordering builds understanding progressively, even though practitioners will most frequently encounter recommendation workloads first.
+**Production reality**: Recommendation systems constitute 80–90% of inference requests at major technology companies, with vision models handling most of the remainder, and LLMs currently representing 1–5% of request volume (though growing rapidly). Despite this distribution, we present batching strategies in order of conceptual complexity: vision (straightforward batching), LLMs (continuous batching with KV cache), and recommendation (feature-parallel batching with distributed embedding). This pedagogical ordering builds understanding progressively, even though practitioners will most frequently encounter recommendation workloads first.
 
 This section develops a taxonomy of batching strategies matched to model characteristics, providing quantitative analysis of when each approach applies and what performance to expect.
 
@@ -903,14 +910,14 @@ Queue wait time added to latency must not violate SLO.
 +-------------------+-----------------------+------------------------+--------------------+------------------------+
 | **Model Type**    | **Batching Strategy** | **Typical Batch Size** | **Key Constraint** | **Throughput Scaling** |
 +:==================+:======================+=======================:+:===================+:=======================+
-| **Vision (CNN)**  | Static/Dynamic        | 32-256                 | GPU compute        | Near-linear to 64+     |
-| **LLM (prefill)** | Dynamic               | 1-64                   | Memory capacity    | Sub-linear             |
-| **LLM (decode)**  | Continuous            | 100-1000s              | Memory bandwidth   | Log-linear             |
-| **RecSys**        | Feature-parallel      | 1000-10000s            | Embedding lookup   | Depends on sharding    |
+| **Vision (CNN)**  | Static/Dynamic        | 32–256                 | GPU compute        | Near-linear to 64+     |
+| **LLM (prefill)** | Dynamic               | 1–64                   | Memory capacity    | Sub-linear             |
+| **LLM (decode)**  | Continuous            | 100–1000s              | Memory bandwidth   | Log-linear             |
+| **RecSys**        | Feature-parallel      | 1000–10000s            | Embedding lookup   | Depends on sharding    |
 | **Speech**        | Streaming             | 1                      | Real-time          | N/A (latency-bound)    |
 +-------------------+-----------------------+------------------------+--------------------+------------------------+
 
-: **Batching Strategy by Model Type**: Each model type has characteristic batching behavior determined by its computational bottleneck. {#tbl-batching-by-model}
+: **Batching Strategy by Model Type**. Each model type has characteristic batching behavior determined by its computational bottleneck. {#tbl-batching-by-model}
 
 ### Static and Dynamic Batching for Vision Models {#sec-inference-static-dynamic-batching}
 
@@ -1002,7 +1009,7 @@ The throughput improvement from continuous batching depends on sequence length d
 
 $$\text{Throughput gain} \approx 1 + \frac{CV^2}{2}$$ {#eq-continuous-batching-gain}
 
-With typical LLM output lengths having $CV \approx 1.0$, continuous batching achieves approximately 1.5x throughput improvement. For highly variable outputs (conversational vs. code generation), gains can reach 2-4x.
+With typical LLM output lengths having $CV \approx 1.0$, continuous batching achieves approximately 1.5x throughput improvement. For highly variable outputs (conversational vs. code generation), gains can reach 2–4x.
 
 ::: {.callout-note title="Implementation: Continuous Batching in vLLM"}
 
@@ -1041,11 +1048,11 @@ LLM inference consists of two distinct phases with different computational chara
 +-------------+-------------------+-------------------+----------------+-------------------+
 | **Phase**   | **Computation**   | **Memory Access** | **Bottleneck** | **Optimal Batch** |
 +:============+==================:+:==================+:===============+==================:+
-| **Prefill** | O(prompt_length²) | Weight loading    | Compute        | Small (1-8)       |
+| **Prefill** | O(prompt_length²) | Weight loading    | Compute        | Small (1–8)       |
 | **Decode**  | O(1) per token    | Weight loading    | Bandwidth      | Large (100s)      |
 +-------------+-------------------+-------------------+----------------+-------------------+
 
-: **Prefill vs Decode Characteristics**: The two phases have opposite optimization requirements. {#tbl-prefill-decode}
+: **Prefill vs Decode Characteristics**. The two phases have opposite optimization requirements. {#tbl-prefill-decode}
 
 This dichotomy creates a scheduling challenge: prefill operations are long-running and compute-intensive, while decode operations are short and bandwidth-limited. Mixing them in the same batch can cause interference. This creates the **Static Power Waste** problem analyzed in @sec-sustainable-ai, where low-utilization decode steps dominate energy consumption.
 
@@ -1322,7 +1329,7 @@ Is the model autoregressive (LLM, speech)?
 | **Streaming**        | Pipeline depth        | Meet real-time deadline          |
 +----------------------+-----------------------+----------------------------------+
 
-: **Batching Strategy Parameters**: Each strategy has distinct parameters requiring tuning for the specific deployment. {#tbl-batching-parameters}
+: **Batching Strategy Parameters**. Each strategy has distinct parameters requiring tuning for the specific deployment. {#tbl-batching-parameters}
 
 ## Model Sharding for Inference {#sec-inference-sharding}
 
@@ -1356,12 +1363,12 @@ where $P$ is the parallelism degree and $T_{communication}$ is the synchronizati
 | **Sharding Trigger**    | **Model Examples**   | **Minimum Sharding** | **Strategy**       |
 +:========================+=====================:+=====================:+:===================+
 | **Memory (weights)**    | Llama-70B (140GB)    | 2-way                | Tensor or pipeline |
-| **Memory (KV cache)**   | GPT-4 (long context) | 4-8 way              | Tensor (for cache) |
+| **Memory (KV cache)**   | GPT-4 (long context) | 4–8 way              | Tensor (for cache) |
 | **Memory (embeddings)** | DLRM (100TB)         | 1000+ way            | Embedding sharding |
 | **Latency**             | Any large model      | Varies               | Tensor parallelism |
 +-------------------------+----------------------+----------------------+--------------------+
 
-: **Sharding Triggers**: Different constraints lead to different sharding requirements and strategies. {#tbl-sharding-triggers}
+: **Sharding Triggers**. Different constraints lead to different sharding requirements and strategies. {#tbl-sharding-triggers}
 
 ### Tensor Parallelism {#sec-inference-tensor-parallelism}
 
@@ -1590,7 +1597,7 @@ Once the pipeline is full, throughput equals $P$ times single-stage throughput, 
 | **Complexity**             | Higher (requires custom kernels) | Lower (layer-level partitioning)   |
 +----------------------------+----------------------------------+------------------------------------+
 
-: **Pipeline vs Tensor Parallelism**: Each strategy has distinct tradeoffs in latency, throughput, and implementation complexity. {#tbl-pipeline-tensor-comparison}
+: **Pipeline vs Tensor Parallelism**. Each strategy has distinct tradeoffs in latency, throughput, and implementation complexity. {#tbl-pipeline-tensor-comparison}
 
 ### Expert Parallelism for MoE Models {#sec-inference-expert-parallelism}
 
@@ -1716,7 +1723,7 @@ The choice of embedding sharding strategy depends on lookup patterns and communi
 | **Hybrid**            | Varies by embedding      | Mixed             | Production RecSys       |
 +-----------------------+--------------------------+-------------------+-------------------------+
 
-: **Embedding Sharding Strategies**: Different strategies trade off lookup locality against load balance. {#tbl-embedding-sharding}
+: **Embedding Sharding Strategies**. Different strategies trade off lookup locality against load balance. {#tbl-embedding-sharding}
 
 @fig-embedding-sharding visualizes how each strategy distributes embedding lookups across devices:
 
@@ -1916,7 +1923,7 @@ The choice of sharding strategy depends on model architecture and deployment pri
 | **Implementation effort** | High                | Low                   | Moderate            | High                |
 +---------------------------+---------------------+-----------------------+---------------------+---------------------+
 
-: **Sharding Strategy Selection Guide**: Match strategy to deployment priorities and constraints. {#tbl-sharding-selection}
+: **Sharding Strategy Selection Guide**. Match strategy to deployment priorities and constraints. {#tbl-sharding-selection}
 
 ## Load Balancing and Request Routing {#sec-inference-load-balancing}
 
@@ -2306,7 +2313,7 @@ The choice of load balancing algorithm has quantitative impact on system perform
 | **Two-choices + LC**  | 1.2 requests  | 17ms            | 2 probes + state |
 +-----------------------+---------------+-----------------+------------------+
 
-: **Load Balancing Algorithm Comparison**: More sophisticated algorithms reduce queue lengths and latency at the cost of increased overhead. {#tbl-lb-comparison}
+: **Load Balancing Algorithm Comparison**. More sophisticated algorithms reduce queue lengths and latency at the cost of increased overhead. {#tbl-lb-comparison}
 
 The progression shows clear tradeoffs:
 
@@ -2389,7 +2396,7 @@ Consider a scenario where one server becomes slow (thermal throttling):
 
 Inference at scale is the final realization of the Machine Learning Fleet. Throughout Part I, we designed the logical algorithms for scale, and in Part II, we built the physical machines to execute them. This chapter has developed the service layer— the "interface to reality"—that transforms those massive computational resources into low-latency global predictions.
 
-The serving hierarchy provides our organizing framework for these optimizations: from request-level batching and caching, to replica-level GPU memory management, up to service-level load balancing and platform-level multi-tenancy. We established that the fundamental inversion from training (throughput-bound) to inference (latency-bound) necessitates a different engineering mindset, where "the tail" (P99 latency) is the primary determinant of success.
+The serving hierarchy provides our organizing framework for these optimizations, from request-level batching and caching, to replica-level GPU memory management, up to service-level load balancing and platform-level multi-tenancy. We established that the fundamental inversion from training (throughput-bound) to inference (latency-bound) necessitates a different engineering mindset, where "the tail" (P99 latency) is the primary determinant of success.
 
 We analyzed why different model architectures require distinct batching strategies: static/dynamic for vision, feature-parallel for recommendation, and continuous batching for LLMs. We explored how model sharding techniques like tensor and expert parallelism reduce latency for frontier models, provided the underlying networking fabric discussed in @sec-communication can sustain the synchronization overhead. Finally, we examined the critical memory management challenges of autoregressive generation, where techniques like PagedAttention and speculative decoding break the sequential bottlenecks of modern AI.
 
