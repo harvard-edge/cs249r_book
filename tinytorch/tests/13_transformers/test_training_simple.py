@@ -5,20 +5,20 @@ This test validates that a transformer can successfully learn from a tiny datase
 demonstrating that the entire training pipeline (forward, loss, backward, update) works.
 """
 
-import numpy as np
 import sys
 import time
 from pathlib import Path
 
+import numpy as np
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.autograd import enable_autograd
-from tinytorch.core.optimizers import Adam
 from tinytorch.core.losses import CrossEntropyLoss
-from tinytorch.models.transformer import GPT
+from tinytorch.core.optimizers import Adam
+from tinytorch.core.tensor import Tensor
 from tinytorch.core.tokenization import CharTokenizer
+from tinytorch.core.transformers import GPT
 
 
 def test_transformer_memorization():
@@ -127,7 +127,7 @@ def test_transformer_memorization():
     final_loss = np.mean(losses[-100:])
     loss_decrease_pct = ((initial_loss - final_loss) / initial_loss) * 100
 
-    print(f"\n   Results:")
+    print("\n   Results:")
     print(f"   ├─ Initial loss: {initial_loss:.3f}")
     print(f"   ├─ Final loss: {final_loss:.3f}")
     print(f"   ├─ Loss decrease: {loss_decrease_pct:.1f}%")
@@ -141,7 +141,7 @@ def test_transformer_memorization():
     assert final_loss < 1.0, \
         f"Final loss too high: {final_loss:.3f} (expected <1.0 for memorization)"
 
-    print(f"\n✅ Transformer successfully memorized dataset!")
+    print("\n✅ Transformer successfully memorized dataset!")
     print(f"   Loss decreased {loss_decrease_pct:.1f}% in {elapsed:.1f}s")
     return True
 
@@ -191,7 +191,7 @@ def test_transformer_convergence_rate():
     step = 0
     loss_val = float('inf')
 
-    print(f"   Training until loss < 0.1...")
+    print("   Training until loss < 0.1...")
 
     while loss_val > 0.1 and step < 1000:
         tokens = encoded[np.random.randint(len(encoded))]
