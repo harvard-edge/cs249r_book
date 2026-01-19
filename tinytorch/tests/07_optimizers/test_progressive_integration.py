@@ -23,9 +23,10 @@ This is where we enable learning through sophisticated optimization algorithms.
 - Adam uses both momentum (first moment) and RMSprop (second moment)
 """
 
-import numpy as np
 import sys
 from pathlib import Path
+
+import numpy as np
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -43,10 +44,10 @@ class TestFoundationStackStillWorks:
         ✅ TEST: Complete foundation pipeline (01→05) should still work
         """
         try:
-            from tinytorch.core.tensor import Tensor
-            from tinytorch.core.layers import Linear
             from tinytorch.core.activations import ReLU
+            from tinytorch.core.layers import Linear
             from tinytorch.core.losses import MSELoss
+            from tinytorch.core.tensor import Tensor
 
             # Create network
             dense = Linear(10, 5)
@@ -75,9 +76,9 @@ class TestFoundationStackStillWorks:
         ✅ TEST: Gradient computation from Module 06 still works
         """
         try:
-            from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
             from tinytorch.core.losses import MSELoss
+            from tinytorch.core.tensor import Tensor
 
             # Create simple network
             layer = Linear(4, 2)
@@ -88,7 +89,7 @@ class TestFoundationStackStillWorks:
                 x = Tensor(np.random.randn(2, 4), requires_grad=True)
             except TypeError:
                 x = Tensor(np.random.randn(2, 4))
-                
+
             output = layer(x)
             target = Tensor(np.random.randn(2, 2))
             loss = loss_fn(output, target)
@@ -138,10 +139,10 @@ class TestModule06OptimizersCore:
 
             # Create test parameters
             params = [Tensor(np.random.randn(3, 3), requires_grad=True)]
-            params[0].grad = Tensor(np.ones((3, 3)))  # Set gradient
 
             # Create optimizer
             optimizer = SGD(params, lr=0.1)
+            params[0].grad = Tensor(np.ones((3, 3)))  # Set gradient
 
             # Test that optimizer has required methods
             assert hasattr(optimizer, 'step'), "SGD missing step() method"
@@ -176,10 +177,10 @@ class TestModule06OptimizersCore:
 
             # Create test parameter
             param = Tensor(np.array([[1.0, 2.0], [3.0, 4.0]]), requires_grad=True)
-            param.grad = Tensor(np.array([[0.1, 0.1], [0.1, 0.1]]))
 
             # Create SGD with momentum
             optimizer = SGD([param], lr=0.1, momentum=0.9)
+            param.grad = Tensor(np.array([[0.1, 0.1], [0.1, 0.1]]))
 
             # First step
             optimizer.step()
@@ -216,10 +217,10 @@ class TestModule06OptimizersCore:
 
             # Create test parameters
             params = [Tensor(np.random.randn(3, 3), requires_grad=True)]
-            params[0].grad = Tensor(np.ones((3, 3)))
 
             # Create Adam optimizer
             optimizer = Adam(params, lr=0.001)
+            params[0].grad = Tensor(np.ones((3, 3)))
 
             # Test required methods
             assert hasattr(optimizer, 'step'), "Adam missing step() method"
@@ -254,9 +255,9 @@ class TestModule06OptimizersCore:
 
             # Create parameter with gradient
             param = Tensor(np.random.randn(2, 2), requires_grad=True)
-            param.grad = Tensor(np.ones((2, 2)))
 
             optimizer = SGD([param], lr=0.1)
+            param.grad = Tensor(np.ones((2, 2)))
 
             # Verify gradient exists
             assert param.grad is not None, "Gradient should exist before zero_grad()"
@@ -296,10 +297,10 @@ class TestOptimizerIntegration:
         💡 This is the core loop that trains all neural networks
         """
         try:
-            from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
             from tinytorch.core.losses import MSELoss
             from tinytorch.core.optimizers import SGD
+            from tinytorch.core.tensor import Tensor
 
             # Create simple network
             layer = Linear(4, 2)
@@ -349,10 +350,10 @@ class TestOptimizerIntegration:
         - Optimizer methods exist and can be called
         """
         try:
-            from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
             from tinytorch.core.losses import MSELoss
             from tinytorch.core.optimizers import SGD
+            from tinytorch.core.tensor import Tensor
 
             # Create network
             layer = Linear(4, 2)
@@ -371,19 +372,19 @@ class TestOptimizerIntegration:
                 output = layer(x)
                 loss = loss_fn(output, target)
                 losses.append(float(loss.data))
-                
+
                 # Try backward if available
                 if hasattr(loss, 'backward'):
                     try:
                         loss.backward()
                     except (TypeError, AttributeError):
                         pass  # Autograd not fully implemented
-                        
+
                 optimizer.step()
 
             # Verify training loop executed
             assert len(losses) == 5, "Training loop didn't complete"
-            
+
             # If autograd is working, loss should decrease
             # Otherwise, just verify the loop runs
             if losses[-1] < losses[0]:
@@ -426,10 +427,10 @@ class TestRegressionPrevention:
     def test_progressive_compatibility(self):
         """Test that all foundation modules work together."""
         try:
-            from tinytorch.core.tensor import Tensor
             from tinytorch.core.activations import ReLU, Sigmoid
             from tinytorch.core.layers import Linear
             from tinytorch.core.losses import MSELoss
+            from tinytorch.core.tensor import Tensor
 
             # Build and run a complete network
             layer1 = Linear(4, 8)
