@@ -1,4 +1,4 @@
-# Milestone 01: The Perceptron (1957)
+# Milestone 01: The Perceptron (1958)
 
 ```{tip} What You'll Learn
 - Why random weights produce random results (and training fixes this)
@@ -8,7 +8,7 @@
 
 ## Overview
 
-It's 1957. Computers fill entire rooms and can barely add numbers. Then Frank Rosenblatt makes an outrageous claim: he's built a machine that can LEARN. Not through programming - through experience, like a human child.
+It's 1958. Computers fill entire rooms and can barely add numbers. Then Frank Rosenblatt makes an outrageous claim: he's built a machine that can LEARN. Not through programming - through experience, like a human child.
 
 The press goes wild. The Navy funds research expecting machines that will "walk, talk, see, write, reproduce itself and be conscious of its existence." The New York Times runs the headline: *"New Navy Device Learns by Doing."*
 
@@ -43,7 +43,7 @@ tito module status
 ```
 
 ```bash
-cd milestones/01_1957_perceptron
+cd milestones/01_1958_perceptron
 
 # Part 1: See the problem
 python 01_rosenblatt_forward.py

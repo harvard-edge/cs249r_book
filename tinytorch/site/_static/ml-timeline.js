@@ -6,7 +6,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     const timelineData = {
         perceptron: {
-            year: "1957",
+            year: "1958",
             title: "The Perceptron",
             researcher: "Frank Rosenblatt",
             subtitle: "The first trainable neural network proves machines can learn from data",

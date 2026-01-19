@@ -168,10 +168,6 @@ class ActivationName:
     def forward(self, x: Tensor) -> Tensor:
         # Apply mathematical transformation
         # Return new Tensor with result
-
-    def backward(self, grad: Tensor) -> Tensor:
-        # Stub for Module 06 - gradient computation
-        pass
 ```
 """
 
@@ -936,8 +932,8 @@ if __name__ == "__main__":
 ## 🤔 ML Systems Thinking
 
 Now that you've built activation functions, let's think about their systems-level characteristics.
-Understanding computational cost, numerical stability, and gradient behavior helps you make
-informed choices when building neural networks.
+Understanding computational cost and numerical stability helps you make informed choices when
+building neural networks.
 
 ### Computational Cost Analysis
 
@@ -987,45 +983,16 @@ Your implementation: Uses max subtraction in Softmax.forward()
 
 **ReLU dying neurons:**
 ```
-Problem: Large negative gradient → weights become negative → ReLU always outputs 0
+Problem: Neurons with always-negative inputs output 0 permanently
 Solution: Monitor dead neuron percentage, use LeakyReLU variants
-Your implementation: Basic ReLU (watch for this in Module 08 training)
+Your implementation: Basic ReLU (watch for this in later training modules)
 ```
-
-### Gradient Behavior Preview
-
-While you'll implement gradients in Module 06, understanding gradient characteristics helps:
-
-**ReLU gradient: Sharp discontinuity**
-- Gradient = 1 if x > 0, else 0
-- Sharp corner at zero
-- Dead neurons never recover (gradient = 0 forever)
-
-**Sigmoid/Tanh gradient: Vanishing problem**
-- Gradient ≈ 0 for large |x|
-- Deep networks struggle (gradients die in early layers)
-- Why ReLU replaced sigmoid in hidden layers
-
-**GELU gradient: Smooth everywhere**
-- No sharp corners (unlike ReLU)
-- No vanishing at extremes (like sigmoid)
-- Best of both worlds (modern architectures use this)
-
-**Softmax gradient: Coupled across dimension**
-- Changing one input affects all outputs
-- Jacobian matrix (not element-wise)
-- More complex backward pass than others
 
 ### Memory Considerations
 
 **Forward pass memory:**
 - All activations: Same size as input (element-wise operations)
 - Softmax temporary buffers: exp array + sum array (small overhead)
-
-**Backward pass memory (Module 06):**
-- Must cache inputs for gradient computation
-- 2× memory per activation layer (input + gradient)
-- For 1000-layer network: Memory adds up!
 
 ### Key Insights for Module 02
 
@@ -1135,7 +1102,6 @@ Input → Attention → Linear+GELU → Linear+GELU → Output
 **Memory Impact:**
 - All activations: Minimal memory overhead (output same size as input)
 - Softmax: Slightly higher (temporary buffers for exp and sum)
-- For autograd (Module 06): Must cache inputs for backward pass
 
 ### Integration with TinyTorch
 
@@ -1153,15 +1119,6 @@ class Linear:
         if self.activation:
             out = self.activation(out)  # Uses your forward()
         return out
-```
-
-**Module 06 (Autograd)**: Will add gradient computation
-```python
-# Coming in Module 06
-class Sigmoid:
-    def backward(self, grad):
-        # ∂sigmoid/∂x = sigmoid(x) * (1 - sigmoid(x))
-        return grad * self.output * (1 - self.output)
 ```
 """
 

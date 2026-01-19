@@ -81,7 +81,11 @@ class ModuleResetCommand(BaseCommand):
         """Ask user for confirmation."""
         console = self.console
         console.print()
-        console.print(f"[yellow]{message}[/yellow]")
+        console.print(Panel(
+            f"[yellow]{message}[/yellow]",
+            title="Warning",
+            border_style="yellow"
+        ))
         console.print()
 
         try:

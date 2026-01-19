@@ -136,8 +136,9 @@ from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU
 from tinytorch.core.losses import CrossEntropyLoss
 
-print("✅ Capstone modules imported!")
-print("📊 Ready to benchmark and submit results")
+if __name__ == "__main__":
+    print("✅ Capstone modules imported!")
+    print("📊 Ready to benchmark and submit results")
 
 # %% [markdown]
 """
@@ -360,7 +361,24 @@ class SimpleMLP:
     - Configurable sizes: Can scale up for experiments
     """
     def __init__(self, input_size=10, hidden_size=20, output_size=3):
-        """Initialize simple MLP with random weights."""
+        """
+        Initialize simple MLP with random weights.
+
+        TODO: Create a 2-layer MLP with ReLU activation
+
+        APPROACH:
+        1. Create fc1 Linear layer (input_size -> hidden_size)
+        2. Create ReLU activation
+        3. Create fc2 Linear layer (hidden_size -> output_size)
+        4. Initialize weights with small random values (scale 0.01)
+        5. Initialize biases to zeros
+
+        HINTS:
+        - Use Linear(in_features, out_features) for layers
+        - Weight shape is (in_features, out_features)
+        - Small initial weights (0.01 scale) help training stability
+        """
+        ### BEGIN SOLUTION
         self.fc1 = Linear(input_size, hidden_size)
         self.relu = ReLU()
         self.fc2 = Linear(hidden_size, output_size)
@@ -371,13 +389,30 @@ class SimpleMLP:
         self.fc1.bias.data = np.zeros(hidden_size)
         self.fc2.weight.data = np.random.randn(hidden_size, output_size) * 0.01
         self.fc2.bias.data = np.zeros(output_size)
+        ### END SOLUTION
 
     def forward(self, x):
-        """Forward pass through the network."""
+        """
+        Forward pass through the network.
+
+        TODO: Implement forward pass through fc1 -> ReLU -> fc2
+
+        APPROACH:
+        1. Pass input through fc1 (first linear layer)
+        2. Apply ReLU activation
+        3. Pass through fc2 (second linear layer)
+        4. Return output
+
+        HINTS:
+        - Call layer.forward(x) for each layer
+        - Order matters: linear -> activation -> linear
+        """
+        ### BEGIN SOLUTION
         x = self.fc1.forward(x)
         x = self.relu.forward(x)
         x = self.fc2.forward(x)
         return x
+        ### END SOLUTION
 
     def parameters(self):
         """Return model parameters for perf."""
@@ -390,7 +425,8 @@ class SimpleMLP:
             total += param.data.size
         return total
 
-print("✅ SimpleMLP model defined")
+if __name__ == "__main__":
+    print("✅ SimpleMLP model defined")
 
 # %% [markdown]
 """
@@ -532,7 +568,55 @@ class BenchmarkReport:
 
         return self.metrics
 
-print("✅ BenchmarkReport class defined")
+    def measure_latency(self, model, X_sample, num_runs=100):
+        """
+        Measure inference latency over multiple runs.
+
+        TODO: Time single-sample inference over multiple runs
+
+        APPROACH:
+        1. Run inference num_runs times
+        2. Measure each run with time.time()
+        3. Convert to milliseconds
+        4. Return list of latencies
+
+        HINTS:
+        - Use time.time() before and after model.forward()
+        - Multiply by 1000 to convert seconds to milliseconds
+        - Use X_sample[:1] for single-sample timing
+        """
+        ### BEGIN SOLUTION
+        latencies = []
+        for _ in range(num_runs):
+            start = time.time()
+            _ = model.forward(X_sample[:1])
+            latencies.append((time.time() - start) * 1000)
+        return latencies
+        ### END SOLUTION
+
+    def measure_memory(self, model):
+        """
+        Measure model memory footprint.
+
+        TODO: Calculate model size in MB assuming FP32 weights
+
+        APPROACH:
+        1. Count total parameters
+        2. Multiply by 4 bytes (FP32)
+        3. Convert to MB (divide by 1024*1024)
+
+        HINTS:
+        - model.count_parameters() gives total param count
+        - FP32 = 4 bytes per parameter
+        - 1 MB = 1024 * 1024 bytes
+        """
+        ### BEGIN SOLUTION
+        param_count = model.count_parameters()
+        return (param_count * 4) / (1024 * 1024)
+        ### END SOLUTION
+
+if __name__ == "__main__":
+    print("✅ BenchmarkReport class defined")
 
 # %% [markdown]
 """
@@ -700,7 +784,8 @@ def save_submission(submission: Dict[str, Any], filepath: str = "submission.json
     print(f"\n✅ Submission saved to: {filepath}")
     return filepath
 
-print("✅ Submission generation functions defined")
+if __name__ == "__main__":
+    print("✅ Submission generation functions defined")
 
 # %% [markdown]
 """
@@ -890,7 +975,8 @@ def run_example_benchmark():
 
     return submission
 
-print("✅ Example workflow defined")
+if __name__ == "__main__":
+    print("✅ Example workflow defined")
 
 # %% [markdown]
 """
@@ -1044,12 +1130,14 @@ def run_optimization_workflow_example():
     print("STEP 4: Generate Submission with Improvements")
     print("="*70)
 
+    ### BEGIN SOLUTION
     submission = generate_submission(
         baseline_report=baseline_report,
         optimized_report=optimized_report,
         student_name="TinyTorch Optimizer",
         techniques_applied=["model_sizing", "architecture_search"]  # Students list real techniques
     )
+    ### END SOLUTION
 
     # Display improvement summary
     if 'improvements' in submission:
@@ -1080,7 +1168,8 @@ def run_optimization_workflow_example():
 
     return submission
 
-print("✅ Optimization workflow example defined")
+if __name__ == "__main__":
+    print("✅ Optimization workflow example defined")
 
 # %% [markdown]
 """
@@ -1524,7 +1613,8 @@ def test_module():
     print("\nModule 20 validation complete!")
     print("Run: tito module complete 20")
 
-print("✅ Test module defined")
+if __name__ == "__main__":
+    print("✅ Test module defined")
 
 # %% [markdown]
 """

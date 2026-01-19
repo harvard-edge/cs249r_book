@@ -44,7 +44,7 @@ The milestone system is **self-contained** in `tests/milestones/milestone_tracke
 {
     'newly_unlocked': ['perceptron', 'xor'],  # List of milestone IDs
     'messages': [
-        "🔓 MILESTONE UNLOCKED!\n\n1957 - The Perceptron\n...",
+        "🔓 MILESTONE UNLOCKED!\n\n1958 - The Perceptron\n...",
         "🔓 MILESTONE UNLOCKED!\n\n1986 - Backpropagation (XOR)\n..."
     ]
 }
@@ -82,7 +82,7 @@ show_progress()
 ┌────────────────────────────────┬─────────────┬──────────────┐
 │ Milestone                      │   Status    │ Requirements │
 ├────────────────────────────────┼─────────────┼──────────────┤
-│ 1957 - The Perceptron          │ 🔓 Unlocked │ 3/3 modules  │
+│ 1958 - The Perceptron          │ 🔓 Unlocked │ 3/3 modules  │
 │ 1986 - Backpropagation (XOR)   │  🔒 Locked  │ 3/4 modules  │
 ...
 ```
@@ -107,7 +107,7 @@ list_tests()
 ```python
 MILESTONES = {
     "perceptron": {
-        "name": "1957 - The Perceptron",
+        "name": "1958 - The Perceptron",
         "requires": ["00_setup", "01_tensor", "02_autograd"],
         "test": "test_perceptron_learning",
         "description": "First learning algorithm with automatic weight updates",

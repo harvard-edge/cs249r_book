@@ -28,8 +28,8 @@ Welcome to Module 17! You're about to master the art of neural network accelerat
 
 **Connection Map**:
 ```
-Layers (03) → Training (08) → CNNs (09) → Acceleration (17) → Memoization (18)
-(building blocks) (learning)   (spatial)  (speed up)         (KV-cache)
+Layers (03) → Training (08) → CNNs (09) → Acceleration (17)
+(building blocks) (learning)   (spatial)  (speed up)
 ```
 
 **Prerequisites**: Modules 01-15 must be working

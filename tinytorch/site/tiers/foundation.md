@@ -173,14 +173,14 @@ This order isn't arbitrary—it's the minimal dependency chain. You can't build 
 :caption: "**Foundation Tier Milestones.** After completing modules 01-08, you unlock three historical achievements spanning three decades of neural network breakthroughs."
 timeline
     title Historical Achievements Unlocked
-    1957 : Perceptron : Binary classification with gradient descent
+    1958 : Perceptron : Binary classification with gradient descent
     1969 : XOR Crisis Solved : Hidden layers enable non-linear learning
     1986 : MLP Revival : Multi-layer networks achieve 95%+ on MNIST
 ```
 
 After completing the Foundation tier, you'll be able to:
 
-- **Milestone 01 (1957)**: Recreate the Perceptron, the first trainable neural network
+- **Milestone 01 (1958)**: Recreate the Perceptron, the first trainable neural network
 - **Milestone 02 (1969)**: Solve the XOR problem that nearly ended AI research
 - **Milestone 03 (1986)**: Build multi-layer perceptrons that achieve 95%+ accuracy on MNIST
 

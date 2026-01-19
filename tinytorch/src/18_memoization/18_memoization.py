@@ -857,7 +857,7 @@ def enable_kv_cache(model):
         cache: KVCache object for this model
 
     EXAMPLE:
-    >>> from tinytorch.core.transformer import GPT
+    >>> from tinytorch.core.transformers import GPT
     >>> model = GPT(vocab_size=100, embed_dim=128, num_layers=4, num_heads=4)
     >>> cache = enable_kv_cache(model)
     >>> hasattr(model, '_kv_cache')  # True

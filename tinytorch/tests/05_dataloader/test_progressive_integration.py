@@ -2,26 +2,21 @@
 Module 05: Progressive Integration Tests
 Tests that Module 05 (DataLoader) works correctly AND that Foundation tier (01→04) still works.
 
-DEPENDENCY CHAIN: 01_tensor → ... → 04_losses → 05_dataloader
-This is where we enable efficient data loading for training.
+DEPENDENCY CHAIN: 01_tensor → 02_activations → 03_layers → 04_losses → 05_dataloader
 
 🎯 WHAT THIS TESTS:
 - Module 05: Dataset abstraction, batching, shuffling, data pipelines
-- Integration: DataLoader works with Foundation tier modules
-- Regression: Complete ML pipeline still works correctly
-- Preparation: Ready for Autograd (Module 06) and subsequent training infrastructure
+- Integration: DataLoader works with Foundation tier modules (01-04)
+- Regression: All previous modules still work correctly
+
+⚠️ IMPORTANT: This test ONLY uses modules 01-05.
+   Future modules (06_autograd, 09_convolutions, 12_attention, etc.) are NOT tested here.
 
 💡 FOR STUDENTS: If tests fail, check:
-1. Does your Variable class exist in tinytorch.core.autograd?
-2. Does Variable track gradients and build computation graphs?
-3. Does backward() compute gradients correctly?
-4. Do gradients flow through all layer types?
-
-🔧 DEBUGGING HELP:
-- Variable wraps Tensor and tracks operations
-- Forward pass builds computation graph
-- Backward pass computes gradients via chain rule
-- Each operation needs forward() and backward() methods
+1. Does your Dataset base class exist?
+2. Does TensorDataset work correctly?
+3. Does DataLoader iterate and batch properly?
+4. Does shuffling work deterministically with a seed?
 """
 
 import numpy as np
@@ -32,827 +27,443 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
-class TestCompleteMLPipelineStillWorks:
+class TestDataLoaderCore:
     """
-    🔄 REGRESSION CHECK: Verify ML pipeline works with DataLoader.
-
-    💡 If these fail: You may have broken something in the ML pipeline while implementing autograd.
-    🔧 Fix: Check that autograd doesn't interfere with basic forward pass functionality.
+    🆕 NEW FUNCTIONALITY: Test Module 05 (DataLoader) core implementation.
+    
+    Tests the DataLoader infrastructure using ONLY modules 01-05.
     """
 
-    def test_end_to_end_ml_pipeline_stable(self):
+    def test_dataset_abstraction(self):
         """
-        ✅ TEST: Complete ML pipeline (data → model → output) should still work
-
-        📋 FULL PIPELINE COMPONENTS:
-        - Data loading and batching
-        - CNN feature extraction
-        - Dense classification layers
-        - Activation functions
-        - End-to-end predictions
-
-        🚨 IF FAILS: Core ML pipeline broken by autograd development
+        ✅ TEST: Dataset base class exists and is abstract
         """
         try:
-            # Test complete pipeline still works
+            from tinytorch.core.dataloader import Dataset
+            
+            # Dataset should be importable
+            assert Dataset is not None, "Dataset class not found"
+            
+            # Dataset should be abstract (can't instantiate directly)
+            try:
+                ds = Dataset()
+                # If we get here, check if it raises NotImplementedError on methods
+                try:
+                    len(ds)
+                    assert False, "Dataset.__len__ should be abstract"
+                except (NotImplementedError, TypeError):
+                    pass
+            except TypeError:
+                # Good - can't instantiate abstract class
+                pass
+                
+        except ImportError as e:
+            assert False, f"Dataset import failed: {e}"
+
+    def test_tensor_dataset(self):
+        """
+        ✅ TEST: TensorDataset wraps tensors correctly
+        """
+        try:
             from tinytorch.core.tensor import Tensor
-            from tinytorch.core.spatial import Conv2d as Conv2D, MaxPool2d
+            from tinytorch.core.dataloader import TensorDataset
+            
+            # Create test data
+            data = Tensor(np.random.randn(100, 10))
+            targets = Tensor(np.random.randint(0, 5, 100).astype(float))
+            
+            # Create TensorDataset
+            dataset = TensorDataset(data, targets)
+            
+            # Test length
+            assert len(dataset) == 100, f"Expected length 100, got {len(dataset)}"
+            
+            # Test indexing
+            x, y = dataset[0]
+            assert x.shape == (10,), f"Expected shape (10,), got {x.shape}"
+            
+        except ImportError as e:
+            assert False, f"TensorDataset import failed: {e}"
+
+    def test_dataloader_iteration(self):
+        """
+        ✅ TEST: DataLoader iterates and batches correctly
+        """
+        try:
+            from tinytorch.core.tensor import Tensor
+            from tinytorch.core.dataloader import TensorDataset, DataLoader
+            
+            # Create test data
+            data = Tensor(np.random.randn(20, 5))
+            targets = Tensor(np.arange(20).astype(float))
+            
+            dataset = TensorDataset(data, targets)
+            dataloader = DataLoader(dataset, batch_size=4)
+            
+            # Test iteration
+            batch_count = 0
+            for batch_x, batch_y in dataloader:
+                batch_count += 1
+                assert batch_x.shape[0] <= 4, f"Batch size exceeded: {batch_x.shape[0]}"
+                assert batch_x.shape[1] == 5, f"Feature dimension wrong: {batch_x.shape[1]}"
+            
+            # Should have 5 batches (20 / 4)
+            assert batch_count == 5, f"Expected 5 batches, got {batch_count}"
+            
+        except ImportError as e:
+            assert False, f"DataLoader import failed: {e}"
+
+    def test_dataloader_shuffle(self):
+        """
+        ✅ TEST: DataLoader shuffling works
+        """
+        try:
+            from tinytorch.core.tensor import Tensor
+            from tinytorch.core.dataloader import TensorDataset, DataLoader
+            
+            # Create ordered data
+            data = Tensor(np.arange(20).reshape(20, 1).astype(float))
+            targets = Tensor(np.arange(20).astype(float))
+            
+            dataset = TensorDataset(data, targets)
+            
+            # Create shuffled dataloader
+            dl = DataLoader(dataset, batch_size=4, shuffle=True)
+            
+            # Collect all batches
+            all_values = []
+            for batch_x, batch_y in dl:
+                all_values.extend(batch_x.data.flatten().tolist())
+            
+            # Should have all 20 values
+            assert len(all_values) == 20, f"Missing values: got {len(all_values)}"
+            
+            # All original values should be present (even if shuffled)
+            expected = set(range(20))
+            actual = set(int(v) for v in all_values)
+            assert expected == actual, "Shuffling lost some values"
+                
+        except ImportError as e:
+            assert False, f"DataLoader shuffle test failed: {e}"
+
+
+class TestDataLoaderWithLayers:
+    """
+    🔗 INTEGRATION: DataLoader + Layers (Modules 01-05)
+    
+    Tests that DataLoader works with the neural network layers from modules 01-04.
+    """
+
+    def test_dataloader_with_linear_layer(self):
+        """
+        ✅ TEST: DataLoader feeds data to Linear layer correctly
+        """
+        try:
+            from tinytorch.core.tensor import Tensor
+            from tinytorch.core.layers import Linear
+            from tinytorch.core.dataloader import TensorDataset, DataLoader
+            
+            # Create test data
+            data = Tensor(np.random.randn(20, 10))
+            targets = Tensor(np.random.randn(20, 3))
+            
+            dataset = TensorDataset(data, targets)
+            dataloader = DataLoader(dataset, batch_size=4)
+            
+            # Create model
+            layer = Linear(10, 3)
+            
+            # Test forward pass with batches from dataloader
+            for batch_x, batch_y in dataloader:
+                output = layer(batch_x)
+                assert output.shape == (batch_x.shape[0], 3), \
+                    f"Linear output shape wrong: {output.shape}"
+                break  # Test one batch
+                
+        except ImportError as e:
+            assert False, f"DataLoader + Linear integration failed: {e}"
+
+    def test_dataloader_with_activations(self):
+        """
+        ✅ TEST: DataLoader + Linear + Activation pipeline
+        """
+        try:
+            from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
             from tinytorch.core.activations import ReLU, Softmax
-            from tinytorch.core.dataloader import Dataset, DataLoader
-
-            # Create simple dataset
-            class TestDataset(Dataset):
-                def __init__(self):
-                    self.data = np.random.randn(20, 3, 32, 32)
-                    self.targets = np.random.randint(0, 10, 20)
-
-                def __len__(self):
-                    return 20
-
-                def __getitem__(self, idx):
-                    return Tensor(self.data[idx]), self.targets[idx]
-
-            # Create model components
-            conv = Conv2D(3, 16, kernel_size=3, padding=1)
-            pool = MaxPool2d(kernel_size=2)
-            dense = Linear(16 * 16 * 16, 10)  # 4096 -> 10
-            relu = ReLU()
-            softmax = Softmax()
-
-            # Create data loader
-            dataset = TestDataset()
+            from tinytorch.core.dataloader import TensorDataset, DataLoader
+            
+            # Create test data
+            data = Tensor(np.random.randn(20, 10))
+            targets = Tensor(np.random.randn(20, 5))
+            
+            dataset = TensorDataset(data, targets)
             dataloader = DataLoader(dataset, batch_size=4)
-
-            # Test end-to-end pipeline
+            
+            # Create simple model
+            layer1 = Linear(10, 8)
+            relu = ReLU()
+            layer2 = Linear(8, 5)
+            softmax = Softmax()
+            
+            # Test pipeline
             for batch_x, batch_y in dataloader:
-                # CNN feature extraction
-                conv_out = relu(conv(batch_x))      # (4, 16, 32, 32)
-                pooled = pool(conv_out)             # (4, 16, 16, 16)
-
-                # Flatten for dense layer
-                flattened = Tensor(pooled.data.reshape(4, -1))  # (4, 4096)
-
-                # Classification
-                logits = dense(flattened)           # (4, 10)
-                probs = softmax(logits)             # (4, 10)
-
-                # Verify pipeline works
-                assert probs.shape == (4, 10), \
-                    f"❌ ML pipeline shape broken. Expected (4, 10), got {probs.shape}"
-
-                # Verify probabilities
-                prob_sums = np.sum(probs.data, axis=1)
-                assert np.allclose(prob_sums, 1.0), \
-                    f"❌ ML pipeline probabilities broken: {prob_sums}"
-
-                break  # Test one batch
-
+                h = relu(layer1(batch_x))
+                output = softmax(layer2(h))
+                
+                assert output.shape == (batch_x.shape[0], 5), \
+                    f"Pipeline output shape wrong: {output.shape}"
+                
+                # Verify softmax output sums to 1
+                sums = np.sum(output.data, axis=1)
+                assert np.allclose(sums, 1.0), \
+                    f"Softmax outputs don't sum to 1: {sums}"
+                break
+                
         except ImportError as e:
-            assert False, f"""
-            ❌ ML PIPELINE IMPORTS BROKEN!
+            assert False, f"DataLoader + Activation pipeline failed: {e}"
 
-            🔍 IMPORT ERROR: {str(e)}
-
-            🔧 PIPELINE REQUIREMENTS:
-            Modules 01-05 must be working:
-            1. Tensor operations (Module 01)
-            2. Activation functions (Module 02)
-            3. Layer infrastructure (Module 03)
-            4. Losses (Module 04)
-            5. Data loading (Module 05)
-
-            💡 DEBUG STEPS:
-            1. Test each module individually
-            2. Check exports: tito module complete XX_modulename
-            3. Verify no circular imports with autograd
-            4. Test pipeline components separately
-            """
-        except Exception as e:
-            assert False, f"""
-            ❌ ML PIPELINE FUNCTIONALITY BROKEN!
-
-            🔍 ERROR: {str(e)}
-
-            🔧 POSSIBLE CAUSES:
-            1. Autograd interfering with forward pass
-            2. Tensor operations corrupted
-            3. Layer inheritance broken
-            4. Data loading pipeline issues
-            5. Memory or shape problems
-
-            💡 AUTOGRAD SAFETY:
-            Autograd should be ADDITIVE - it adds gradient tracking
-            but doesn't break existing forward pass functionality.
-
-            🧪 DEBUG CHECKLIST:
-            □ Forward pass works without autograd?
-            □ All modules import correctly?
-            □ No circular dependencies?
-            □ Tensor operations unchanged?
-            □ Layer interfaces preserved?
-            """
-
-    def test_attention_and_spatial_integration_stable(self):
+    def test_dataloader_with_loss(self):
         """
-        ✅ TEST: Advanced architectures (attention + CNN) should still work
-
-        📋 ADVANCED INTEGRATION:
-        - Spatial processing (Conv2D, pooling)
-        - Attention mechanisms
-        - Multi-modal architectures
-        - Complex data flows
-
-        🎯 Ensures autograd doesn't break sophisticated models
-        """
-        try:
-            from tinytorch.core.tensor import Tensor
-            from tinytorch.core.spatial import Conv2d as Conv2D
-            from tinytorch.core.attention import MultiHeadAttention
-            from tinytorch.core.layers import Linear
-            from tinytorch.core.activations import ReLU
-
-            # Test sophisticated architecture integration
-            # Vision + attention (like Vision Transformer components)
-
-            # Vision processing
-            cnn = Conv2D(3, 64, kernel_size=3, padding=1)
-            vision_proj = Linear(64 * 32 * 32, 256)  # Project spatial features
-
-            # Attention processing
-            attention = MultiHeadAttention(embed_dim=256, num_heads=8)
-
-            # Activations
-            relu = ReLU()
-
-            # Test multi-modal pipeline
-            # Image input
-            images = Tensor(np.random.randn(2, 3, 32, 32))
-
-            # Vision pathway
-            vision_features = relu(cnn(images))     # (2, 64, 32, 32)
-            vision_flat = Tensor(vision_features.data.reshape(2, -1))  # (2, 65536)
-            vision_embed = vision_proj(vision_flat)  # (2, 256)
-
-            # Attention pathway (treating as sequence)
-            # Reshape for attention: (seq_len, batch, embed_dim)
-            seq_embed = Tensor(vision_embed.data.reshape(1, 2, 256))
-            attention_out = attention(seq_embed)     # (1, 2, 256)
-
-            # Verify advanced integration
-            assert attention_out.shape == (1, 2, 256), \
-                f"❌ Advanced integration broken. Expected (1, 2, 256), got {attention_out.shape}"
-
-            # Verify meaningful processing
-            assert not np.allclose(attention_out.data, 0), \
-                "❌ Advanced integration produces zero outputs"
-
-        except Exception as e:
-            assert False, f"""
-            ❌ ADVANCED ARCHITECTURE INTEGRATION BROKEN!
-
-            🔍 ERROR: {str(e)}
-
-            🔧 ADVANCED REQUIREMENTS:
-            1. CNN spatial processing must work
-            2. Attention mechanisms must work
-            3. Dense projections must work
-            4. Multi-modal data flows must work
-            5. Complex architectures must integrate
-
-            💡 WHAT THIS TESTS:
-            Modern AI architectures combine:
-            - Computer vision (CNNs)
-            - Natural language processing (attention)
-            - Multimodal understanding
-            - Complex data transformations
-
-            🧪 COMPONENT ISOLATION:
-            Test each component separately:
-            1. CNN: conv = Conv2D(3, 16, 3); out = conv(x)
-            2. Attention: attn = MultiHeadAttention(64, 4); out = attn(x)
-            3. Dense: dense = Linear(100, 50); out = dense(x)
-            4. Integration: Combine all components step by step
-            """
-
-
-class TestModule09AutogradCore:
-    """
-    🆕 NEW FUNCTIONALITY: Test Module 06 (Autograd) core implementation.
-
-    💡 What you're implementing: Automatic differentiation for gradient-based learning.
-    🎯 Goal: Enable gradient computation for neural network training.
-
-    NOTE: TinyTorch uses Tensor with requires_grad=True directly (like modern PyTorch),
-    not a separate Variable wrapper class.
-    """
-
-    def test_variable_wrapper_exists(self):
-        """
-        ✅ TEST: Tensor gradient tracking - Tensors that track gradients
-
-        📋 WHAT IS IMPLEMENTED:
-        TinyTorch Tensor supports:
-            - requires_grad=True to enable gradient tracking
-            - .grad attribute to store gradients
-            - ._grad_fn for computation graph tracking
-
-        🚨 IF FAILS: Tensor gradient tracking not working correctly
-        """
-        try:
-            from tinytorch.core.tensor import Tensor
-
-            # Test Tensor with gradient tracking
-            x = Tensor([1.0, 2.0, 3.0], requires_grad=True)
-
-            # Should have data
-            assert hasattr(x, 'data'), \
-                "❌ Tensor missing 'data' attribute"
-
-            # Should track gradient requirements
-            assert hasattr(x, 'requires_grad'), \
-                "❌ Tensor missing 'requires_grad' attribute"
-
-            assert x.requires_grad == True, \
-                "❌ Tensor requires_grad not set correctly"
-
-            # Should have gradient storage
-            assert hasattr(x, 'grad'), \
-                "❌ Tensor missing 'grad' attribute for storing gradients"
-
-            # Gradient should start as None
-            assert x.grad is None, \
-                "❌ Tensor.grad should start as None before backward pass"
-
-            # Computation graph tracking is optional - some implementations use _grad_fn
-            # TinyTorch may or may not have this attribute
-            # assert hasattr(x, '_grad_fn'), "❌ Tensor missing '_grad_fn' for computation graph"
-
-        except ImportError as e:
-            assert False, f"""
-            ❌ TENSOR NOT FOUND!
-
-            🔍 IMPORT ERROR: {str(e)}
-            """
-        except Exception as e:
-            assert False, f"""
-            ❌ TENSOR GRADIENT TRACKING BROKEN!
-
-            🔍 ERROR: {str(e)}
-
-            🔧 TENSOR REQUIREMENTS:
-            1. Store data in .data attribute
-            2. Track requires_grad flag
-            3. Store gradients in .grad attribute
-            4. Support computation graph via _grad_fn
-            5. Enable backward() method for gradient computation
-            """
-
-    def test_gradient_computation(self):
-        """
-        ✅ TEST: Gradient computation - Core of backpropagation
-
-        📋 GRADIENT COMPUTATION:
-        - Forward pass: Compute outputs and build computation graph
-        - Backward pass: Apply chain rule to compute gradients
-        - Gradient accumulation: Handle multiple paths to same variable
-
-        🎯 This is what enables neural network training
-        """
-        try:
-            from tinytorch.core.tensor import Tensor
-
-            # Test simple gradient computation
-            # Create tensor with gradient tracking
-            x = Tensor([2.0], requires_grad=True)
-
-            # Test backward pass - may not work on leaf tensors
-            try:
-                x.backward(Tensor([1.0]))  # Gradient from output
-
-                # Check gradient was computed
-                assert x.grad is not None, \
-                    "❌ Gradient not computed. x.grad should not be None after backward()"
-
-                assert isinstance(x.grad, Tensor), \
-                    f"❌ Gradient should be Tensor, got {type(x.grad)}"
-            except (TypeError, ValueError, AttributeError):
-                # Autograd may not support direct backward on leaf tensors
-                # This is acceptable - some implementations require operations first
-                pass
-
-        except ImportError as e:
-            assert False, f"❌ Tensor import failed: {str(e)}"
-
-    def test_computation_graph_building(self):
-        """
-        ✅ TEST: Computation graph - Track operations for backpropagation
-
-        📋 COMPUTATION GRAPH:
-        - Nodes: Tensors with gradients
-        - Edges: Operations (add, multiply, conv, etc.)
-        - Forward: Build graph while computing
-        - Backward: Traverse graph to compute gradients
-
-        💡 This enables automatic differentiation
-        """
-        try:
-            from tinytorch.core.tensor import Tensor
-
-            # Test computation graph structure
-            x = Tensor([1.0], requires_grad=True)
-            y = Tensor([2.0], requires_grad=True)
-
-            # Leaf tensors should have grad=None initially
-            assert x.grad is None, \
-                "❌ Leaf tensors should have grad=None initially"
-
-            assert y.grad is None, \
-                "❌ Leaf tensors should have grad=None initially"
-
-            # Test operation creates graph connection
-            try:
-                z = x + y  # This should build computation graph
-
-                # Result of operation should support gradient tracking
-                # z.requires_grad should be True if both inputs have requires_grad=True
-                assert z.requires_grad == True, \
-                    "❌ Result of operation should track gradients"
-
-                # Test backward through computation graph
-                z.backward(Tensor([1.0]))
-
-                # Both x and y should receive gradients
-                assert x.grad is not None, \
-                    "❌ Gradient didn't flow to x through computation graph"
-
-                assert y.grad is not None, \
-                    "❌ Gradient didn't flow to y through computation graph"
-            except (TypeError, ValueError):
-                # Tensor addition with autograd may not be fully implemented
-                # This is acceptable for early module development
-                pass
-
-        except ImportError as e:
-            assert False, f"❌ Tensor import failed: {str(e)}"
-
-
-class TestAutogradIntegration:
-    """
-    🔗 INTEGRATION TEST: Autograd + All previous modules working together.
-
-    💡 Test that gradients flow through the complete ML pipeline.
-    🎯 Goal: Enable end-to-end gradient-based training.
-    """
-
-    def test_autograd_with_layers(self):
-        """
-        ✅ TEST: Gradients flow through neural network layers
-
-        📋 LAYER INTEGRATION:
-        - Dense layers with autograd
-        - Activation functions with autograd
-        - Multi-layer networks with gradients
-        - Parameter gradient computation
-
-        💡 Foundation for neural network training
+        ✅ TEST: Complete forward pass: DataLoader → Model → Loss
         """
         try:
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
             from tinytorch.core.activations import ReLU
-
-            # Test gradients through layers
-            # Create Tensor inputs with gradient tracking
-            x = Tensor(np.random.randn(2, 5), requires_grad=True)
-
-            # Create layers
-            dense = Linear(5, 3)
+            from tinytorch.core.losses import MSELoss
+            from tinytorch.core.dataloader import TensorDataset, DataLoader
+            
+            # Create test data
+            data = Tensor(np.random.randn(20, 10))
+            targets = Tensor(np.random.randn(20, 3))
+            
+            dataset = TensorDataset(data, targets)
+            dataloader = DataLoader(dataset, batch_size=4)
+            
+            # Create model and loss
+            layer = Linear(10, 3)
             relu = ReLU()
-
-            # Forward pass through layers
-            if hasattr(dense, '__call__'):
-                try:
-                    h = dense(x)
-                    assert h.shape == (2, 3), \
-                        f"❌ Dense layer shape wrong. Expected (2, 3), got {h.shape}"
-
-                    # Test activation
-                    output = relu(h)
-                    assert output.shape == (2, 3), \
-                        f"❌ ReLU shape wrong. Expected (2, 3), got {output.shape}"
-
-                    # Test backward pass
-                    output.backward(Tensor(np.ones((2, 3))))
-
-                    # Input should have gradient
-                    assert x.grad is not None, \
-                        "❌ Gradient tracking through layers broken"
-
-                except Exception as layer_error:
-                    # Layers might not support autograd yet
-                    assert True, f"Layers not yet autograd-compatible: {layer_error}"
-
-        except Exception as e:
-            assert False, f"""
-            ❌ AUTOGRAD-LAYER INTEGRATION BROKEN!
-
-            🔍 ERROR: {str(e)}
-            """
-
-    def test_autograd_with_spatial_operations(self):
-        """
-        ✅ TEST: Gradients flow through spatial operations (CNNs)
-
-        📋 SPATIAL INTEGRATION:
-        - Convolution with gradients
-        - Pooling with gradients
-        - 4D tensor gradients
-        - CNN training capability
-
-        🎯 Enable training of convolutional neural networks
-        """
-        try:
-            from tinytorch.core.tensor import Tensor
-            from tinytorch.core.spatial import Conv2d as Conv2D, MaxPool2d
-
-            # Test spatial operations with gradient tracking
-            x = Tensor(np.random.randn(1, 3, 8, 8), requires_grad=True)
-
-            # Create spatial layers
-            conv = Conv2D(3, 16, kernel_size=3)
-            pool = MaxPool2d(kernel_size=2)
-
-            # Test forward pass
-            if hasattr(conv, '__call__'):
-                try:
-                    # Forward through spatial operations
-                    conv_out = conv(x)
-                    pooled = pool(conv_out)
-
-                    # Verify spatial processing
-                    assert conv_out.shape == (1, 16, 6, 6), \
-                        f"❌ Conv shape wrong. Expected (1, 16, 6, 6), got {conv_out.shape}"
-
-                    assert pooled.shape == (1, 16, 3, 3), \
-                        f"❌ Pool shape wrong. Expected (1, 16, 3, 3), got {pooled.shape}"
-
-                    # Test backward pass
-                    pooled.backward(Tensor(np.ones(pooled.shape)))
-
-                    # Input should have gradient
-                    assert x.grad is not None, \
-                        "❌ Spatial gradient tracking broken"
-
-                except Exception as spatial_error:
-                    # Spatial ops might not support autograd yet
-                    assert True, f"Spatial ops not yet autograd-compatible: {spatial_error}"
-
-        except Exception as e:
-            assert False, f"""
-            ❌ AUTOGRAD-SPATIAL INTEGRATION BROKEN!
-
-            🔍 ERROR: {str(e)}
-            """
-
-    def test_autograd_with_attention(self):
-        """
-        ✅ TEST: Gradients flow through attention mechanisms
-
-        📋 ATTENTION INTEGRATION:
-        - Multi-head attention with gradients
-        - Sequence processing with gradients
-        - Complex tensor operations
-        - Transformer training capability
-
-        🎯 Enable training of transformer models
-        """
-        try:
-            from tinytorch.core.tensor import Tensor
-            from tinytorch.core.attention import MultiHeadAttention
-
-            # Test attention with gradient tracking
-            seq_len, batch_size, embed_dim = 4, 2, 64
-            x = Tensor(np.random.randn(seq_len, batch_size, embed_dim), requires_grad=True)
-
-            # Create attention layer
-            attention = MultiHeadAttention(embed_dim=64, num_heads=8)
-
-            if hasattr(attention, '__call__'):
-                try:
-                    # Forward through attention
-                    attn_out = attention(x)
-
-                    # Verify attention processing
-                    assert attn_out.shape == (seq_len, batch_size, embed_dim), \
-                        f"❌ Attention shape wrong. Expected {(seq_len, batch_size, embed_dim)}, got {attn_out.shape}"
-
-                    # Test backward pass
-                    attn_out.backward(Tensor(np.ones(attn_out.shape)))
-
-                    assert x.grad is not None, \
-                        "❌ Attention gradient tracking broken"
-
-                except Exception as attention_error:
-                    # Attention might not support autograd yet
-                    assert True, f"Attention not yet autograd-compatible: {attention_error}"
-
-        except Exception as e:
-            assert False, f"""
-            ❌ AUTOGRAD-ATTENTION INTEGRATION BROKEN!
-
-            🔍 ERROR: {str(e)}
-            """
+            loss_fn = MSELoss()
+            
+            # Test complete forward pass
+            total_loss = 0.0
+            batch_count = 0
+            
+            for batch_x, batch_y in dataloader:
+                # Forward pass
+                output = relu(layer(batch_x))
+                
+                # Compute loss
+                loss = loss_fn(output, batch_y)
+                
+                assert loss.data.shape == () or loss.data.shape == (1,), \
+                    f"Loss should be scalar, got shape {loss.data.shape}"
+                
+                total_loss += float(loss.data)
+                batch_count += 1
+            
+            avg_loss = total_loss / batch_count
+            assert avg_loss > 0, "Loss should be positive for random data"
+            
+        except ImportError as e:
+            assert False, f"DataLoader + Loss pipeline failed: {e}"
 
 
-class TestGradientBasedLearningFoundation:
+class TestRegressionPrevention:
     """
-    🧠 LEARNING FOUNDATION: Test autograd enables gradient-based learning.
-
-    💡 Verify the autograd foundation supports actual neural network training.
-    🎯 Goal: Enable optimizers and training loops.
+    🔄 REGRESSION: Verify all previous modules (01-04) still work correctly.
     """
 
-    def test_parameter_gradient_computation(self):
+    def test_tensor_operations_still_work(self):
         """
-        ✅ TEST: Can compute gradients for model parameters
-
-        📋 PARAMETER GRADIENTS:
-        - Weight gradients for updating layers
-        - Bias gradients for fine-tuning
-        - Gradient shapes match parameter shapes
-        - Multiple parameter types supported
-
-        💡 Foundation for optimizers (SGD, Adam, etc.)
+        ✅ TEST: Module 01 (Tensor) operations still work
         """
         try:
             from tinytorch.core.tensor import Tensor
-
-            # Test parameter gradient computation
-            # Simulate model parameters
-
-            # Weight matrix (like Dense layer)
-            weights = Tensor(np.random.randn(5, 3), requires_grad=True)
-            bias = Tensor(np.random.randn(3), requires_grad=True)
-
-            # Input data
-            x = Tensor(np.random.randn(2, 5), requires_grad=False)
-
-            # Forward pass (matrix multiplication)
-            Wx = Tensor(np.dot(x.data, weights.data))  # (2, 3)
-            output = Tensor(Wx.data + bias.data)  # Broadcasting
-
-            # Simulate target and loss
-            target = Tensor(np.random.randn(2, 3))
-            diff = Tensor(output.data - target.data)
-            loss = Tensor(np.sum(diff.data ** 2), requires_grad=True)
-
-            # Simulate gradients (would normally be computed by backward)
-            weight_grad = Tensor(np.random.randn(5, 3))
-            bias_grad = Tensor(np.random.randn(3))
-
-            weights.grad = weight_grad
-            bias.grad = bias_grad
-
-            # Test parameter gradient properties
-            assert weights.grad is not None, \
-                "❌ Weight gradients not computed"
-
-            assert bias.grad is not None, \
-                "❌ Bias gradients not computed"
-
-            assert weights.grad.shape == weights.shape, \
-                f"❌ Weight gradient shape wrong. Expected {weights.shape}, got {weights.grad.shape}"
-
-            assert bias.grad.shape == bias.shape, \
-                f"❌ Bias gradient shape wrong. Expected {bias.shape}, got {bias.grad.shape}"
-
+            
+            # Basic operations
+            a = Tensor([1.0, 2.0, 3.0])
+            b = Tensor([4.0, 5.0, 6.0])
+            
+            # Arithmetic
+            c = a + b
+            assert np.allclose(c.data, [5.0, 7.0, 9.0]), "Tensor addition broken"
+            
+            d = a * b
+            assert np.allclose(d.data, [4.0, 10.0, 18.0]), "Tensor multiplication broken"
+            
+            # Matrix operations
+            m1 = Tensor([[1, 2], [3, 4]])
+            m2 = Tensor([[5, 6], [7, 8]])
+            m3 = m1 @ m2
+            assert m3.shape == (2, 2), "Matrix multiplication broken"
+            
         except Exception as e:
-            assert False, f"""
-            ❌ PARAMETER GRADIENT COMPUTATION BROKEN!
+            assert False, f"Module 01 regression: {e}"
 
-            🔍 ERROR: {str(e)}
-            """
-
-    def test_loss_function_gradients(self):
+    def test_activations_still_work(self):
         """
-        ✅ TEST: Loss functions are differentiable
-
-        📋 LOSS FUNCTION GRADIENTS:
-        - Mean squared error gradients
-        - Cross-entropy gradients
-        - Custom loss function gradients
-        - Reduction operations (mean, sum)
-
-        💡 Loss gradients drive the learning process
+        ✅ TEST: Module 02 (Activations) still work
         """
         try:
             from tinytorch.core.tensor import Tensor
-
-            # Test loss function gradient computation
-
-            # Predictions and targets
-            predictions = Tensor(np.array([0.1, 0.7, 0.2]), requires_grad=True)
-            targets = Tensor(np.array([0.0, 1.0, 0.0]))  # One-hot target
-
-            # Test Mean Squared Error
-            diff = Tensor(predictions.data - targets.data)
-            squared_diff = Tensor(diff.data ** 2)
-            mse_loss = Tensor(np.mean(squared_diff.data), requires_grad=True)
-
-            # Simulate gradient (would normally flow from backward)
-            predictions.grad = Tensor(2 * (predictions.data - targets.data) / len(targets.data))
-
-            assert predictions.grad is not None, \
-                "❌ Loss function didn't produce prediction gradients"
-
-            assert predictions.grad.shape == predictions.shape, \
-                f"❌ Loss gradient shape wrong. Expected {predictions.shape}, got {predictions.grad.shape}"
-
+            from tinytorch.core.activations import ReLU, Sigmoid, Softmax
+            
+            x = Tensor(np.array([-1.0, 0.0, 1.0, 2.0]))
+            
+            # ReLU
+            relu = ReLU()
+            r = relu(x)
+            assert np.allclose(r.data, [0.0, 0.0, 1.0, 2.0]), "ReLU broken"
+            
+            # Sigmoid
+            sigmoid = Sigmoid()
+            s = sigmoid(x)
+            assert s.data[2] > 0.5, "Sigmoid broken"
+            
+            # Softmax
+            softmax = Softmax()
+            sm = softmax(x)
+            assert np.allclose(np.sum(sm.data), 1.0), "Softmax broken"
+            
         except Exception as e:
-            assert False, f"""
-            ❌ LOSS FUNCTION GRADIENTS BROKEN!
+            assert False, f"Module 02 regression: {e}"
 
-            🔍 ERROR: {str(e)}
-            """
-
-    def test_optimization_readiness(self):
+    def test_layers_still_work(self):
         """
-        ✅ TEST: Ready for gradient-based optimization
-
-        📋 OPTIMIZATION READINESS:
-        - Parameter updates via gradients
-        - Gradient descent steps
-        - Learning rate scaling
-        - Multiple parameter groups
-
-        🎯 Foundation for efficient batch training
+        ✅ TEST: Module 03 (Layers) still work
         """
         try:
             from tinytorch.core.tensor import Tensor
-
-            # Test optimization readiness
-            # Simulate simple optimization step
-
-            # Model parameters
-            param1 = Tensor([1.0, 2.0], requires_grad=True)
-            param2 = Tensor([3.0], requires_grad=True)
-
-            # Simulate gradients (from loss.backward())
-            param1.grad = Tensor([-0.1, 0.2])  # Update direction
-            param2.grad = Tensor([0.5])
-
-            # Test gradient descent step
-            learning_rate = 0.1
-
-            # Save original values
-            original_param1 = param1.data.copy()
-            original_param2 = param2.data.copy()
-
-            # Gradient descent: param = param - lr * grad
-            new_param1_data = original_param1 - learning_rate * param1.grad.data
-            new_param2_data = original_param2 - learning_rate * param2.grad.data
-
-            # Update parameters
-            param1.data = new_param1_data
-            param2.data = new_param2_data
-
-            # Verify parameter updates
-            expected_param1 = np.array([1.01, 1.98])  # [1.0, 2.0] - 0.1 * [-0.1, 0.2]
-            expected_param2 = np.array([2.95])        # [3.0] - 0.1 * [0.5]
-
-            assert np.allclose(param1.data, expected_param1), \
-                f"❌ Parameter 1 update wrong. Expected {expected_param1}, got {param1.data}"
-
-            assert np.allclose(param2.data, expected_param2), \
-                f"❌ Parameter 2 update wrong. Expected {expected_param2}, got {param2.data}"
-
-            # Test gradient zeroing (for next iteration)
-            param1.grad = None
-            param2.grad = None
-
-            assert param1.grad is None, "❌ Gradient zeroing broken for param1"
-            assert param2.grad is None, "❌ Gradient zeroing broken for param2"
-
+            from tinytorch.core.layers import Linear
+            
+            layer = Linear(10, 5)
+            x = Tensor(np.random.randn(4, 10))
+            
+            output = layer(x)
+            assert output.shape == (4, 5), f"Linear layer broken: {output.shape}"
+            
         except Exception as e:
-            assert False, f"""
-            ❌ OPTIMIZATION READINESS BROKEN!
+            assert False, f"Module 03 regression: {e}"
 
-            🔍 ERROR: {str(e)}
-            """
+    def test_losses_still_work(self):
+        """
+        ✅ TEST: Module 04 (Losses) still work
+        """
+        try:
+            from tinytorch.core.tensor import Tensor
+            from tinytorch.core.losses import MSELoss, CrossEntropyLoss
+            
+            pred = Tensor([[0.1, 0.9], [0.8, 0.2]])
+            target = Tensor([[0.0, 1.0], [1.0, 0.0]])
+            
+            # MSE Loss
+            mse = MSELoss()
+            loss = mse(pred, target)
+            assert loss.data.size == 1, "MSE loss should be scalar"
+            
+            # Cross Entropy Loss
+            ce = CrossEntropyLoss()
+            logits = Tensor([[1.0, 2.0, 3.0], [3.0, 2.0, 1.0]])
+            labels = Tensor([2, 0])
+            ce_loss = ce(logits, labels)
+            assert ce_loss.data.size == 1, "CrossEntropy loss should be scalar"
+            
+        except Exception as e:
+            assert False, f"Module 04 regression: {e}"
 
 
-class TestModule09Completion:
+class TestModule05Completion:
     """
-    ✅ COMPLETION CHECK: Module 09 ready and foundation set for training.
-
-    🎯 Final validation that autograd works and enables gradient-based learning.
+    ✅ COMPLETION CHECK: Module 05 ready for next module.
     """
 
-    def test_autograd_foundation_complete(self):
+    def test_dataloader_foundation_complete(self):
         """
-        ✅ FINAL TEST: Complete autograd foundation ready for training
-
-        📋 AUTOGRAD FOUNDATION CHECKLIST:
-        □ Tensor gradient tracking
-        □ Computation graph building
-        □ Gradient computation via backpropagation
-        □ Parameter gradient calculation
-        □ Loss function gradients
-        □ Integration with all layer types
-        □ Optimization readiness
-        □ Memory efficient implementation
-
-        🎯 SUCCESS = Ready for Module 07: Optimizers!
+        ✅ FINAL TEST: DataLoader foundation ready for training infrastructure
+        
+        🎯 SUCCESS = Ready for Module 06: Autograd!
         """
-        autograd_capabilities = {
-            "Tensor gradient tracking": False,
-            "Gradient computation works": False,
-            "Computation graph tracking": False,
-            "Parameter gradients computed": False,
-            "Loss function gradients": False,
-            "Layer integration ready": False,
-            "Spatial operation gradients": False,
-            "Optimization foundation ready": False
+        capabilities = {
+            "Dataset abstraction": False,
+            "TensorDataset works": False,
+            "DataLoader iteration": False,
+            "Batching works": False,
+            "Shuffling works": False,
+            "Layer integration": False,
+            "Loss integration": False,
         }
-
+        
         try:
-            # Test 1: Tensor gradient tracking
             from tinytorch.core.tensor import Tensor
-
-            x = Tensor([1.0], requires_grad=True)
-            assert hasattr(x, 'grad') and hasattr(x, 'requires_grad')
-            autograd_capabilities["Tensor gradient tracking"] = True
-
-            # Test 2: Gradient computation (may not work on leaf tensors)
-            try:
-                x.backward(Tensor([1.0]))
-                if x.grad is not None:
-                    autograd_capabilities["Gradient computation works"] = True
-            except (TypeError, ValueError):
-                # Some implementations don't support backward on leaf tensors
-                autograd_capabilities["Gradient computation works"] = True  # Mark as ok
-
-            # Test 3: Computation graph (may not be fully implemented)
-            try:
-                y = Tensor([2.0], requires_grad=True)
-                z = x + y  # Build computation graph
-                autograd_capabilities["Computation graph tracking"] = True
-            except (TypeError, ValueError):
-                autograd_capabilities["Computation graph tracking"] = True  # Mark as ok
-
-            # Test 4: Parameter gradients
-            param = Tensor(np.random.randn(3, 2), requires_grad=True)
-            param.grad = Tensor(np.random.randn(3, 2))
-            assert param.grad.shape == param.shape
-            autograd_capabilities["Parameter gradients computed"] = True
-
-            # Test 5: Loss gradients (may not work on leaf tensors)
-            try:
-                pred = Tensor([0.5, 0.3, 0.2], requires_grad=True)
-                pred.backward(Tensor([1.0, -1.0, 0.5]))  # Simulate loss gradient
-                if pred.grad is not None:
-                    autograd_capabilities["Loss function gradients"] = True
-            except (TypeError, ValueError):
-                autograd_capabilities["Loss function gradients"] = True  # Mark as ok
-
-            # Test 6: Layer integration (basic structure)
+            from tinytorch.core.dataloader import Dataset, TensorDataset, DataLoader
             from tinytorch.core.layers import Linear
-            layer = Linear(5, 3)
-            autograd_capabilities["Layer integration ready"] = True
-
-            # Test 7: Spatial operations (basic structure)
-            from tinytorch.core.spatial import Conv2d as Conv2D
-            conv = Conv2D(3, 16, kernel_size=3)
-            autograd_capabilities["Spatial operation gradients"] = True
-
-            # Test 8: Optimization foundation
-            # Parameter update simulation
-            param.data = param.data - 0.01 * param.grad.data
-            autograd_capabilities["Optimization foundation ready"] = True
-
+            from tinytorch.core.losses import MSELoss
+            
+            # Test 1: Dataset abstraction
+            assert Dataset is not None
+            capabilities["Dataset abstraction"] = True
+            
+            # Test 2: TensorDataset
+            data = Tensor(np.random.randn(20, 5))
+            targets = Tensor(np.random.randn(20, 2))
+            dataset = TensorDataset(data, targets)
+            assert len(dataset) == 20
+            capabilities["TensorDataset works"] = True
+            
+            # Test 3: DataLoader iteration
+            dataloader = DataLoader(dataset, batch_size=4)
+            batch_count = sum(1 for _ in dataloader)
+            assert batch_count == 5
+            capabilities["DataLoader iteration"] = True
+            
+            # Test 4: Batching
+            for batch_x, batch_y in dataloader:
+                assert batch_x.shape[0] <= 4
+                break
+            capabilities["Batching works"] = True
+            
+            # Test 5: Shuffling
+            dl_shuffled = DataLoader(dataset, batch_size=4, shuffle=True)
+            _ = list(dl_shuffled)
+            capabilities["Shuffling works"] = True
+            
+            # Test 6: Layer integration
+            layer = Linear(5, 2)
+            for batch_x, batch_y in dataloader:
+                output = layer(batch_x)
+                assert output.shape == (batch_x.shape[0], 2)
+                break
+            capabilities["Layer integration"] = True
+            
+            # Test 7: Loss integration
+            loss_fn = MSELoss()
+            for batch_x, batch_y in dataloader:
+                output = layer(batch_x)
+                loss = loss_fn(output, batch_y)
+                assert loss.data.size == 1
+                break
+            capabilities["Loss integration"] = True
+            
+            # All passed!
+            assert all(capabilities.values()), \
+                f"Not all capabilities ready: {capabilities}"
+                
         except Exception as e:
-            # Show progress even if not complete
-            completed_count = sum(autograd_capabilities.values())
-            total_count = len(autograd_capabilities)
-
-            progress_report = "\n🔍 AUTOGRAD PROGRESS:\n"
-            for capability, completed in autograd_capabilities.items():
-                status = "✅" if completed else "❌"
-                progress_report += f"  {status} {capability}\n"
-
-            progress_report += f"\n📊 Progress: {completed_count}/{total_count} capabilities ready"
-
+            completed = sum(capabilities.values())
+            total = len(capabilities)
+            
+            progress = "\n".join(
+                f"  {'✅' if v else '❌'} {k}" 
+                for k, v in capabilities.items()
+            )
+            
             assert False, f"""
-            ❌ AUTOGRAD FOUNDATION NOT COMPLETE!
-
-            🔍 ERROR: {str(e)}
-
-            {progress_report}
+            ❌ MODULE 05 NOT COMPLETE!
+            
+            Error: {e}
+            
+            Progress ({completed}/{total}):
+            {progress}
             """
-
-        # If we get here, everything passed!
-        assert True
-
-
-# Note: No separate regression prevention - we test all previous modules above

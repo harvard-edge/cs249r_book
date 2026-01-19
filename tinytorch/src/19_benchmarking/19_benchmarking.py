@@ -688,7 +688,7 @@ class Benchmark:
                         base_accuracy = 0.85 + i * 0.05  # Different models have different base accuracies
                         accuracy = base_accuracy + np.random.normal(0, 0.02)  # Add noise
                         accuracy = max(0.0, min(1.0, accuracy))  # Clamp to [0, 1]
-                except:\ Exception:
+                except Exception:
                     # Fallback simulation
                     accuracy = 0.80 + np.random.normal(0, 0.05)
                     accuracy = max(0.0, min(1.0, accuracy))
@@ -1428,7 +1428,7 @@ class TinyMLPerf:
                         output = np.random.rand(2) if benchmark_name in ['keyword_spotting', 'visual_wake_words'] else np.random.rand(10)
 
                     predictions.append(output)
-                except:\ Exception:
+                except Exception:
                     # Fallback simulation
                     predictions.append(np.random.rand(2))
 
@@ -2098,7 +2098,7 @@ MLPerf (created by MLCommons) is the industry-standard ML benchmarking framework
 3. Measure multiple metrics (accuracy, latency, memory, energy)
 4. Optimize for real deployment constraints
 
-**Module 20 capstone** follows TinyMLPerf-style principles!
+The capstone project follows TinyMLPerf-style principles!
 """
 
 # %% [markdown]

@@ -18,7 +18,7 @@ graph LR
  A[Build Modules] --> B[Complete 01-20]
  B --> C[Export to Package]
  C --> D[Unlock Milestones]
- D --> E[Achieve 1957-2018]
+ D --> E[Achieve 1958-2018]
  E --> F[Track Progress]
 
  style A fill:#e3f2fd
@@ -48,7 +48,7 @@ graph LR
 <h4 style="margin: 0 0 0.5rem 0; color: #7b1fa2;"> Milestone Achievements</h4>
 <p style="margin: 0.5rem 0; font-size: 0.95rem; color: #37474f;">What you ACHIEVE (01-06)</p>
 <ul style="margin: 0.5rem 0 0 0; padding-left: 1.5rem; font-size: 0.9rem; color: #546e7a;">
-<li>Perceptron (1957)</li>
+<li>Perceptron (1958)</li>
 <li>MLP Revival (1986)</li>
 <li>CNN Revolution (1998)</li>
 <li>AlexNet Era (2012)</li>

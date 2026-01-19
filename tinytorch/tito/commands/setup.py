@@ -234,7 +234,15 @@ class SetupCommand(BaseCommand):
                 return True
 
             # Force mode - ask before destroying
-            if not Confirm.ask(f"[yellow]Recreate virtual environment at {venv_path}?[/yellow] This will delete the existing one"):
+            self.console.print()
+            self.console.print(Panel(
+                "[bold yellow]⚠️  This will delete the existing virtual environment[/bold yellow]\n\n"
+                f"[dim]Path: {venv_path}[/dim]",
+                title="Warning",
+                border_style="yellow"
+            ))
+            self.console.print()
+            if not Confirm.ask("[yellow]Recreate virtual environment?[/yellow]"):
                 self.console.print("[green]✅ Keeping existing virtual environment[/green]")
                 return True
 

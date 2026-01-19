@@ -1111,14 +1111,9 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 12")
 
-# %% nbgrader={"grade": false, "grade_id": "main-execution", "solution": false}
-# Run comprehensive module test when executed directly
-if __name__ == "__main__":
-    test_module()
-
 # %% [markdown]
 """
-## 🤔 ML Systems Reflection Questions
+## 🤔 ML Systems Thinking: Attention Mechanisms
 
 These questions help you connect your implementation to production ML systems and real-world trade-offs.
 

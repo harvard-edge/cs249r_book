@@ -4,7 +4,7 @@
 
 ### Build Your Own ML Framework From Scratch
 
-[![Version](https://img.shields.io/badge/version-0.1.1-D4740C?logo=fireship&logoColor=white)](https://github.com/harvard-edge/cs249r_book/releases?q=tinytorch)
+[![Version](https://img.shields.io/badge/version-0.1.4-D4740C?logo=fireship&logoColor=white)](https://github.com/harvard-edge/cs249r_book/releases?q=tinytorch)
 [![Status](https://img.shields.io/badge/status-preview-orange?logo=github)](https://github.com/harvard-edge/cs249r_book/discussions/1076)
 [![Docs](https://img.shields.io/badge/docs-mlsysbook.ai-blue?logo=readthedocs)](https://mlsysbook.ai/tinytorch)
 [![Python](https://img.shields.io/badge/python-3.8+-3776ab?logo=python&logoColor=white)](https://python.org)
@@ -120,7 +120,7 @@ As you progress, unlock recreations of landmark ML achievements:
 
 | Year | Milestone | Your Achievement |
 |------|-----------|------------------|
-| 1957 | Perceptron | Binary classification with gradient descent |
+| 1958 | Perceptron | Binary classification with gradient descent |
 | 1969 | XOR Crisis | Multi-layer networks solve non-linear problems |
 | 1986 | Backpropagation | Multi-layer network training |
 | 1998 | CNN Revolution | **Image classification with convolutions** |
@@ -206,7 +206,7 @@ TinyTorch/
 │   └── modules/                # Module documentation
 │
 ├── milestones/                 # 🏆 Historical ML evolution - prove what you built!
-│   ├── 01_1957_perceptron/     # Rosenblatt's first trainable network
+│   ├── 01_1958_perceptron/     # Rosenblatt's first trainable network
 │   ├── 02_1969_xor/            # Minsky's challenge & multi-layer solution
 │   ├── 03_1986_mlp/            # Backpropagation & MNIST digits
 │   ├── 04_1998_cnn/            # LeCun's CNNs & CIFAR-10

@@ -8,7 +8,7 @@ This test suite validates that TinyTorch correctly implements the fundamental br
 
 ## 🧪 The Five Milestones
 
-### 1️⃣ **1957 - The Perceptron** (Frank Rosenblatt)
+### 1️⃣ **1958 - The Perceptron** (Frank Rosenblatt)
 
 **The Beginning**: The first learning algorithm that could automatically adjust its weights.
 
@@ -317,7 +317,7 @@ for i, param in enumerate(model.parameters()):
 
 ## 📖 Further Reading
 
-- **Perceptron**: Rosenblatt (1957) "The Perceptron: A Probabilistic Model"
+- **Perceptron**: Rosenblatt (1958) "The Perceptron: A Probabilistic Model"
 - **Backpropagation**: Rumelhart et al. (1986) "Learning representations by back-propagating errors"
 - **MLP**: LeCun et al. (1989) "Backpropagation Applied to Handwritten Zip Code Recognition"
 - **CNN**: LeCun et al. (1998) "Gradient-Based Learning Applied to Document Recognition"

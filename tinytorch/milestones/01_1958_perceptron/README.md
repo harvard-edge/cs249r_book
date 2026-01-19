@@ -1,4 +1,4 @@
-# Milestone 01: The Perceptron (1957)
+# Milestone 01: The Perceptron (1958)
 
 ## Historical Context
 
@@ -70,7 +70,7 @@ This is the foundation for understanding all of deep learning!
 ## Running the Milestone
 
 ```bash
-cd milestones/01_1957_perceptron
+cd milestones/01_1958_perceptron
 
 # Step 1: See the problem (run after Module 04)
 python 01_rosenblatt_forward.py
