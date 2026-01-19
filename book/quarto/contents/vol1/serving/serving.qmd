@@ -4,7 +4,7 @@ concepts: serving_concepts.yml
 glossary: serving_glossary.json
 ---
 
-# Serving {#sec-serving}
+# Model Serving Systems {#sec-serving}
 
 ::: {layout-narrow}
 ::: {.column-margin}
@@ -42,9 +42,9 @@ Training and serving are fundamentally different computational paradigms requiri
 
 ## The Serving Paradigm {#sec-serving-paradigm}
 
-Parts I through III built a complete foundation for creating optimized ML models. You understand where systems deploy (@sec-ml-systems), how data flows through pipelines (@sec-data-engineering), what neural networks compute (@sec-dl-primer, @sec-dnn-architectures), how frameworks enable implementation (@sec-ai-frameworks), and how training produces learned models (@sec-ai-training). Part III then addressed making those models efficient: the conceptual framework for efficiency (@sec-efficient-ai), specific optimization techniques (@sec-model-optimizations), hardware acceleration strategies (@sec-ai-acceleration), and measurement methodologies for validating improvements (@sec-benchmarking-ai). The result is an optimized model ready for deployment. Part IV addresses what happens next: delivering predictions to users in production.
+Parts I through III built a complete foundation for creating optimized ML models. You understand where systems deploy (@sec-ml-systems), how data flows through pipelines (@sec-data-engineering), what neural networks compute (@sec-dl-primer, @sec-dnn-architectures), how frameworks enable implementation (@sec-ai-frameworks), and how training produces learned models (@sec-ai-training). Part III then addressed making those models efficient: the conceptual framework for efficiency (@sec-introduction), specific optimization techniques (@sec-model-compression), hardware acceleration strategies (@sec-ai-acceleration), and measurement methodologies for validating improvements (@sec-benchmarking-ai). The result is an optimized model ready for deployment. Part IV addresses what happens next: delivering predictions to users in production.
 
-Serving introduces a fundamental inversion that transforms everything established in prior chapters. Training optimizes for samples processed per hour over days of computation. Serving must deliver predictions within milliseconds under unpredictable load. @sec-benchmarking-ai established techniques for measuring throughput and accuracy under controlled conditions; production serving faces traffic patterns that no benchmark could anticipate. @sec-model-optimizations provided quantization methods that reduced model size; serving must validate that those optimizations preserve accuracy under real traffic distributions. This inversion from throughput to latency, from controlled to unpredictable, from offline to real time defines the serving challenge.
+Serving introduces a fundamental inversion that transforms everything established in prior chapters. Training optimizes for samples processed per hour over days of computation. Serving must deliver predictions within milliseconds under unpredictable load. @sec-benchmarking-ai established techniques for measuring throughput and accuracy under controlled conditions; production serving faces traffic patterns that no benchmark could anticipate. @sec-model-compression provided quantization methods that reduced model size; serving must validate that those optimizations preserve accuracy under real traffic distributions. This inversion from throughput to latency, from controlled to unpredictable, from offline to real time defines the serving challenge.
 
 ::: {.callout-definition title="Model Serving"}
 
@@ -148,7 +148,7 @@ Understanding the internal anatomy of these servers reveals how they bridge the 
 
 Every request traverses a multi-stage pipeline designed to maximize hardware throughput while minimizing latency overhead. @fig-server-anatomy visualizes this internal flow.
 
-::: {#fig-server-anatomy fig-env="figure" fig-pos="htb" fig-cap="**Inference Server Anatomy**: Modern inference servers organize request processing into a decoupled pipeline. The Network Ingress handles high-concurrency protocols (HTTP/gRPC), the Queue buffers bursts of traffic, and the Dynamic Batcher aggregates individual requests into optimized tensors. The Inference Runner manages the low-level execution on the hardware accelerator, ensuring the GPU remains utilized through asynchronous execution."}
+::: {#fig-server-anatomy fig-env="figure" fig-pos="htb" fig-cap="**Inference Server Anatomy**: Modern inference servers organize request processing into a decoupled pipeline. The Network Ingress handles high-concurrency protocols (HTTP/gRPC), the Queue buffers bursts of traffic, and the Dynamic Batcher aggregates individual requests into optimized tensors. The Inference Runner manages the low-level execution on the hardware accelerator, ensuring the GPU remains utilized through asynchronous execution." fig-alt="Flowchart showing 6-stage inference server pipeline: Client to Network Ingress to Request Queue (cylinder) to Dynamic Batcher, then down to Inference Runner to Accelerator. Arrows connect stages sequentially."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=1.2cm]
   \tikzset{
@@ -303,7 +303,7 @@ In a naive, serialized serving system, the hardware sits idle during network I/O
 
 @fig-serving-pipeline-timing contrasts serial execution with pipelined execution. In the serial case (A), each request must complete its entire lifecycle (Network $\rightarrow$ CPU Preprocessing $\rightarrow$ GPU Inference $\rightarrow$ Postprocessing) before the next request begins. Even with a fast GPU, the system throughput is limited by the slowest stage, and the GPU remains idle for more than 50% of the time.
 
-::: {#fig-serving-pipeline-timing fig-env="figure" fig-pos="htb" fig-cap="**Request Pipelining**: Pipelining hides latency by overlapping independent operations across different hardware resources. In pipelined execution (B), the CPU processes the next request's data while the GPU executes the current request's inference. This increases the GPU duty cycle toward 100%, effectively doubling or tripling throughput on the same hardware without changing the model."}
+::: {#fig-serving-pipeline-timing fig-env="figure" fig-pos="htb" fig-cap="**Request Pipelining**: Pipelining hides latency by overlapping independent operations across different hardware resources. In pipelined execution (B), the CPU processes the next request's data while the GPU executes the current request's inference. This increases the GPU duty cycle toward 100%, effectively doubling or tripling throughput on the same hardware without changing the model." fig-alt="Two timing diagrams. A (Serial): alternating CPU preprocessing, GPU inference, and idle blocks in sequence. B (Pipelined): two parallel rows where CPU preprocessing overlaps with GPU inference, eliminating idle time."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.8]
   \definecolor{CPUColor}{RGB}{173,216,230}
@@ -976,42 +976,13 @@ Mobile serving optimization focuses on preprocessing efficiency and power manage
 
 : **Traffic Patterns and Batching Strategies**: The four MLPerf inference scenarios map to distinct deployment contexts. Server traffic (cloud APIs) uses dynamic batching with timeout; MultiStream (autonomous driving) uses synchronized sensor fusion; SingleStream (mobile) processes requests individually; Offline (batch processing) maximizes batch size for throughput. {#tbl-traffic-patterns-summary}
 
-## Generative Inference and Memory Management {#sec-serving-generative-memory}
+## Generative Inference Metrics {#sec-serving-generative-metrics}
 
-Serving generative models (LLMs) introduces a unique systems challenge: **state management**. Unlike discriminative models (ResNet) where each request is independent and stateless, autoregressive generation requires maintaining context across a sequence of decoding steps. This state, known as the KV Cache, fundamentally changes the memory characteristics of the serving system.
-
-### The KV Cache Bottleneck {#sec-serving-kv-cache}
-
-In autoregressive generation, the model predicts the next token based on all previous tokens. Naively recomputing the attention mechanism for the entire sequence at every step would be prohibitively expensive ($O(N^2)$ compute).
-
-To optimize this, inference systems cache the Key (K) and Value (V) tensors for all previous tokens. This reduces compute to $O(N)$ per step but shifts the bottleneck from **compute** to **memory capacity and bandwidth**.
-
-::: {.callout-lighthouse title="Lighthouse Example: Generative Inference (GPT-2 / Llama)"}
-
-For a Llama-3-7B model (32 layers, 4096 dim) serving a batch of 64 requests with sequence length 2048:
-
-$$\text{Memory} = 2 \times \text{Layers} \times \text{Dim} \times \text{SeqLen} \times \text{Batch} \times \text{Precision}$$
-
-$$\text{Memory} = 2 \times 32 \times 4096 \times 2048 \times 64 \times 2 \text{ bytes (FP16)} \approx 64 \text{ GB}$$
-
-This 64 GB cache competes with model weights (14 GB) for GPU memory. The KV cache grows linearly with sequence length, making memory capacity the hard limit on batch size and throughput.
-
-:::
-
-### Memory Fragmentation and PagedAttention {#sec-serving-paged-attention}
-
-Standard deep learning frameworks require tensors to be stored in contiguous memory blocks. However, the length of a generated sequence is unknown ahead of time. Systems traditionally reserved maximum-length buffers (e.g., 4096 tokens) for every request, leading to massive internal fragmentation—often wasting 20% to 40% of GPU memory on empty reservation slots.
-
-**PagedAttention** (introduced by vLLM) solves this by applying operating system principles to ML serving. It treats the KV cache as "virtual memory" and GPU VRAM as "physical memory," partitioning the cache into fixed-size blocks (pages) that can be stored non-contiguously.
-
-*   **Virtual Memory**: The model views the KV cache as a contiguous tensor.
-*   **Physical Memory**: The block manager allocates physical pages on demand, only when new tokens are generated.
-
-This architectural innovation allows serving systems to process requests with near-zero memory waste, enabling 2-4$\times$ higher batch sizes and throughput compared to contiguous allocation systems.
+Generative models (LLMs) introduce unique performance metrics distinct from traditional classification. Unlike discriminative models that produce a single output tensor, generative models produce a stream of tokens, requiring a more nuanced approach to latency measurement.
 
 ### Performance Metrics: TTFT and TPOT {#sec-serving-llm-metrics}
 
-Measuring the performance of a generative model requires a two-part metric system that reflects the internal state transition from "prefill" to "decode."
+Measuring the performance of a generative model requires a two-part metric system that reflects the internal state transition from "prefill" (processing input) to "decode" (generating output).
 
 ::: {.callout-definition title="LLM Performance Metrics"}
 
@@ -1031,18 +1002,14 @@ A production-grade LLM service typically targets the following SLOs:
 
 :::
 
-### Context Management and Prefix Caching {#sec-serving-context-mgmt}
+### Memory Considerations {#sec-serving-memory-considerations}
 
-As conversations grow longer, the KV cache becomes the primary consumer of system memory. Efficient systems use two techniques to manage this state:
+Generative inference requires managing the **KV Cache**, a stateful memory structure that grows with sequence length. Unlike traditional models where memory usage is constant per batch, LLM memory usage is dynamic.
 
-**Prefix Caching**
+*   **State Accumulation**: Each generated token adds to the context window, consuming additional GPU memory.
+*   **Fragmentation**: Variable-length sequences can lead to memory fragmentation if not managed explicitly.
 
-Many LLM prompts share a common "system prompt" or context (e.g., a long document used for RAG). Instead of re-processing these tokens for every request, the server caches the KV states for common prefixes. This eliminates the prefill compute for the cached tokens, reducing TTFT by 50-80% for repeated queries.
-
-**Sliding Window Attention**
-
-For very long conversations, systems may discard the KV cache for early tokens, keeping only a "window" of recent history. This bounds the memory footprint of the state at the cost of the model "forgetting" early details. Advanced implementations, such as **Rolling KV Cache**, manage this window by overwriting old pages in the PagedAttention block table, maintaining constant memory usage regardless of conversation length.
-
+Advanced techniques like **PagedAttention** and **Prefix Caching** are required to solve these challenges at production scale. These architectural optimizations are covered in detail in **Volume II: Optimization at Scale** (@sec-optimization-kv-cache).
 ## Postprocessing {#sec-serving-postprocessing}
 
 Batching optimizes how requests traverse the inference phase, but even optimally batched inference produces only raw tensors. These floating-point arrays carry no inherent meaning to applications or users. The final phase of the serving pipeline, postprocessing, transforms these tensors into actionable predictions: a 0.95 probability becomes a confident "dog" label, a sequence of token IDs becomes readable text, or a bounding box tensor becomes a highlighted region in an image. While often overlooked in system design, postprocessing significantly impacts both latency and the usefulness of predictions, determining whether raw model capability translates into practical value.
@@ -1152,7 +1119,7 @@ Beyond runtime selection, configuration choices impact serving performance inclu
 
 ### Precision Selection for Serving {#sec-serving-precision}
 
-Numerical precision directly trades accuracy for throughput, connecting to the quantization techniques covered in @sec-model-optimizations. While @sec-model-optimizations focuses on training-time quantization, serving introduces additional considerations including calibration requirements, layer sensitivity, and dynamic precision selection.
+Numerical precision directly trades accuracy for throughput, connecting to the quantization techniques covered in @sec-model-compression. While @sec-model-compression focuses on training-time quantization, serving introduces additional considerations including calibration requirements, layer sensitivity, and dynamic precision selection.
 
 **Precision-Throughput Relationship**
 
@@ -1312,7 +1279,7 @@ Engineers maximize batch size assuming GPU saturation improves efficiency. In pr
 
 **Pitfall:** _Calibrating quantized models with training data rather than production traffic._
 
-Teams calibrate with training data because it is readily available and produced validation accuracy. In production, traffic distribution often differs from training data, making calibration scale factors suboptimal. Post-training quantization determines INT8 scale factors by measuring activation ranges on calibration data, but this assumes production inputs match the calibration distribution. When production traffic differs through image sources, lighting conditions, or user demographics, calibration on training data degrades accuracy. One production system experienced 3.2 percent accuracy loss serving wildlife camera images after calibrating with ImageNet validation data. @sec-model-optimizations shows quantization error scales with activation range: miscalibration amplifies errors precisely on the out-of-distribution inputs that matter most. Effective quantization requires calibrating with representative samples of actual serving traffic, capturing the distribution shifts that distinguish production deployment from controlled validation.
+Teams calibrate with training data because it is readily available and produced validation accuracy. In production, traffic distribution often differs from training data, making calibration scale factors suboptimal. Post-training quantization determines INT8 scale factors by measuring activation ranges on calibration data, but this assumes production inputs match the calibration distribution. When production traffic differs through image sources, lighting conditions, or user demographics, calibration on training data degrades accuracy. One production system experienced 3.2 percent accuracy loss serving wildlife camera images after calibrating with ImageNet validation data. @sec-model-compression shows quantization error scales with activation range: miscalibration amplifies errors precisely on the out-of-distribution inputs that matter most. Effective quantization requires calibrating with representative samples of actual serving traffic, capturing the distribution shifts that distinguish production deployment from controlled validation.
 
 **Pitfall:** _Cold start latency only matters for the first request._
 
@@ -1324,7 +1291,7 @@ Serving represents the critical transition from model development to production 
 
 Effective serving optimization requires understanding the complete request path rather than focusing exclusively on model inference. Interface protocols like gRPC and efficient serialization formats minimize the "tax" of data movement, while preprocessing often consumes 45 to 70 percent of total latency when inference runs on optimized accelerators. The microsecond-scale overheads identified by Barroso, Patterson, and colleagues explain why serving latency often exceeds the sum of its measured parts, and why system-level optimization matters as much as model optimization. Training-serving skew represents another dimension of this complexity, silently degrading accuracy when preprocessing logic differs between training and production environments in ways that traditional testing cannot detect.
 
-The traffic pattern analysis reveals how deployment context fundamentally shapes batching strategy and system design. Server workloads with Poisson arrivals optimize dynamic batching windows, autonomous vehicles with streaming sensor data require synchronized batch formation, and mobile applications with single-user patterns eliminate batching entirely. The MLPerf scenarios codify these patterns for standardized benchmarking, connecting the serving principles established here to the measurement frameworks explored in @sec-benchmarking-ai. Precision selection and runtime optimization extend the quantization techniques from @sec-model-optimizations and Tensor Core capabilities from @sec-ai-acceleration into the serving domain. Finally, the translation of these technical metrics into unit economics—exemplified by the Llama-3 case study—demonstrates how engineering decisions regarding batching, precision, and hardware selection directly determine the financial viability of deployment.
+The traffic pattern analysis reveals how deployment context fundamentally shapes batching strategy and system design. Server workloads with Poisson arrivals optimize dynamic batching windows, autonomous vehicles with streaming sensor data require synchronized batch formation, and mobile applications with single-user patterns eliminate batching entirely. The MLPerf scenarios codify these patterns for standardized benchmarking, connecting the serving principles established here to the measurement frameworks explored in @sec-benchmarking-ai. Precision selection and runtime optimization extend the quantization techniques from @sec-model-compression and Tensor Core capabilities from @sec-ai-acceleration into the serving domain. Finally, the translation of these technical metrics into unit economics—exemplified by the Llama-3 case study—demonstrates how engineering decisions regarding batching, precision, and hardware selection directly determine the financial viability of deployment.
 
 ::: {.callout-important title="Key Takeaways"}
 * Serving inverts training priorities: latency per request matters more than aggregate throughput, requiring fundamentally different system design
