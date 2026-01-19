@@ -32,13 +32,60 @@ Machine learning advances have traditionally emphasized algorithmic improvements
 
 Data engineering (@sec-data-engineering) ensures that data is clean, accessible, and correctly formatted. Data efficiency asks a different question: *how much information does each sample contribute to the model's learning per unit of computation?*
 
-In the optimization triad, data efficiency plays the role of **Input Optimization**. While model compression minimizes the math per parameter and hardware acceleration maximizes the math per second, data efficiency minimizes the total math required to reach convergence.
+In the optimization triad (@fig-optimization-triad), data efficiency plays the role of **Input Optimization**. While model compression minimizes the math per parameter and hardware acceleration maximizes the math per second, data efficiency minimizes the total math required to reach convergence.
+
+::: {#fig-optimization-triad fig-cap="**The Optimization Triad**: Machine learning performance relies on three pillars: Algorithms (models), Systems (hardware/software), and Data Efficiency. While algorithms and systems have traditionally received the most attention, optimizing data efficiency (Input Optimization) offers a third, powerful lever for scaling performance." fig-alt="A triangular diagram with three nodes: Algorithms, Systems, and Data Efficiency. Arrows connect all three, forming a cycle. Data Efficiency is highlighted."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
+  % Nodes
+  \node[draw, circle, minimum size=2.8cm, fill=blue!10, align=center, text width=2.5cm] (Alg) at (90:2.5) {Algorithms\\(Model)};
+  \node[draw, circle, minimum size=2.8cm, fill=green!10, align=center, text width=2.5cm] (Sys) at (210:2.5) {Systems\\(Hardware)};
+  \node[draw, circle, minimum size=2.8cm, fill=orange!10, align=center, text width=2.5cm, line width=1.5pt] (Data) at (330:2.5) {\textbf{Data}\\\textbf{Efficiency}};
+
+  % Connections
+  \draw[<->, thick] (Alg) -- node[left, font=\footnotesize, text width=1.5cm, align=right] {Compute\\Bound} (Sys);
+  \draw[<->, thick] (Sys) -- node[below, font=\footnotesize] {I/O Bound} (Data);
+  \draw[<->, thick] (Data) -- node[right, font=\footnotesize, text width=1.5cm, align=left] {Sample\\Efficiency} (Alg);
+
+  % Center Label
+  \node[align=center, font=\bfseries] at (0,0) {ML\\Scale};
+\end{tikzpicture}
+```
+:::
 
 We can formalize this as the **Information-Compute Ratio (ICR)**:
 
 $$ 	ext{ICR} = rac{\Delta 	ext{Model Performance}}{\Delta 	ext{FLOPs}} $$
 
-A random batch of raw data often has low ICR: it contains redundant examples, noisy samples, or "easy" examples the model has already mastered. Training on such a batch wastes GPU cycles on zero-information updates. High-efficiency data pipelines filter, order, and synthesize data to maximize ICR, ensuring that every FLOP contributes to learning.
+A random batch of raw data often has low ICR: it contains redundant examples, noisy samples, or "easy" examples the model has already mastered. Training on such a batch wastes GPU cycles on zero-information updates. High-efficiency data pipelines (@fig-data-efficiency-pipeline) filter, order, and synthesize data to maximize ICR, ensuring that every FLOP contributes to learning.
+
+::: {#fig-data-efficiency-pipeline fig-cap="**The Data Efficiency Pipeline**: A structured approach to increasing data value. Raw data is first pruned to remove redundancy (Static Pruning), then dynamically selected during training (Active Learning), and finally augmented to increase diversity (Synthesis). Each stage increases the Information-Compute Ratio (ICR)." fig-alt="A flow diagram showing the progression of data: Raw Data -> Static Pruning -> Dynamic Selection -> Synthetic Generation -> High Value Model. Arrows indicate the flow."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=1.5cm, >={Stealth[length=3mm]}]
+  % Nodes
+  \node[draw, rectangle, fill=gray!10, minimum height=1cm, minimum width=2cm] (Raw) {Raw Data};
+
+  \node[draw, rectangle, fill=blue!10, minimum height=1cm, minimum width=2.5cm, right=1cm of Raw, align=center] (Prune) {1. Static\\Pruning};
+
+  \node[draw, rectangle, fill=green!10, minimum height=1cm, minimum width=2.5cm, right=1cm of Prune, align=center] (Select) {2. Dynamic\\Selection};
+
+  \node[draw, rectangle, fill=orange!10, minimum height=1cm, minimum width=2.5cm, right=1cm of Select, align=center] (Synth) {3. Synthetic\\Gen};
+
+  \node[draw, circle, fill=red!10, minimum size=1.2cm, right=1cm of Synth] (Model) {Model};
+
+  % Edges
+  \draw[->, thick] (Raw) -- (Prune);
+  \draw[->, thick] (Prune) -- (Select);
+  \draw[->, thick] (Select) -- (Synth);
+  \draw[->, thick] (Synth) -- node[above, font=\footnotesize] {High ICR} (Model);
+
+  % Annotations
+  \node[below=0.2cm of Prune, font=\footnotesize, color=gray] {Pre-training};
+  \node[below=0.2cm of Select, font=\footnotesize, color=gray] {During Training};
+  \node[below=0.2cm of Synth, font=\footnotesize, color=gray] {On-Demand};
+\end{tikzpicture}
+```
+:::
 
 This chapter explores three strategies to maximize this ratio:
 1.  **Static Data Pruning**: Removing low-value samples before training begins (Coresets, Deduplication).
@@ -64,7 +111,31 @@ Supervised learning has been a cornerstone of modern AI, enabling models to achi
 
 Not all data points contribute equally to a model’s learning. Some samples provide high-value information, while others are redundant or even misleading. Instead of treating all data as equally useful, machine learning systems can be designed to prioritize the most informative data points, leverage unlabeled data effectively, and generalize from minimal supervision. These approaches reduce the burden of annotation while maintaining model accuracy and generalization.
 
-One way to achieve this is through active learning, a technique where the model itself identifies which examples are most valuable for training and selectively queries human annotators for labels. Unlike traditional supervised learning, where all data points are labeled in advance, active learning prioritizes uncertain or high-impact samples, allowing models to improve with fewer labeled examples. For instance, in medical imaging, an AI system diagnosing diseases from X-rays may already be confident in classifying common conditions but uncertain about rarer cases. Instead of labeling the entire dataset, active learning focuses human annotation efforts on these ambiguous cases, optimizing the use of labeling resources. By iteratively refining the dataset with the most informative examples, active learning reduces annotation costs while accelerating model performance gains.
+One way to achieve this is through active learning, a technique where the model itself identifies which examples are most valuable for training and selectively queries human annotators for labels. Unlike traditional supervised learning, where all data points are labeled in advance, active learning (@fig-active-learning-loop) prioritizes uncertain or high-impact samples, allowing models to improve with fewer labeled examples.
+
+::: {#fig-active-learning-loop fig-cap="**Active Learning Loop**: Instead of labeling all data, the model selects the most 'confusing' or informative samples from an unlabeled pool. These samples are sent to an Oracle (human annotator) and added to the training set. The model is retrained, and the cycle repeats, creating a feedback loop that maximizes data efficiency." fig-alt="A cycle diagram: Unlabeled Pool -> Selection Strategy -> Oracle -> Labeled Set -> Model Training -> back to Selection Strategy."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, >={Stealth[length=3mm]}]
+  % Nodes arranged in a circle
+  \node[draw, cylinder, shape border rotate=90, aspect=0.25, fill=gray!10, minimum height=1.5cm, minimum width=1.2cm, align=center] (Pool) at (0, 2) {Unlabeled\\Pool};
+
+  \node[draw, rectangle, rounded corners, fill=blue!10, minimum height=1cm, align=center] (Select) at (4, 2) {Selection\\Strategy};
+
+  \node[draw, circle, fill=orange!10, minimum size=1.5cm, align=center] (Oracle) at (4, -1) {Oracle\\(Human)};
+
+  \node[draw, rectangle, fill=green!10, minimum height=1cm, align=center] (Train) at (0, -1) {Training\\Set};
+
+  \node[draw, rectangle, fill=red!10, minimum height=1cm, align=center] (Model) at (-2, 0.5) {Model};
+
+  % Edges representing the flow
+  \draw[->, thick] (Pool) -- node[above, font=\footnotesize] {Query} (Select);
+  \draw[->, thick] (Select) -- node[right, font=\footnotesize] {Uncertainty} (Oracle);
+  \draw[->, thick] (Oracle) -- node[below, font=\footnotesize] {Labels} (Train);
+  \draw[->, thick] (Train) -- node[left, font=\footnotesize] {Train} (Model);
+  \draw[->, thick, dashed] (Model) |- node[near start, left, font=\footnotesize] {Update} (Select);
+\end{tikzpicture}
+```
+::: For instance, in medical imaging, an AI system diagnosing diseases from X-rays may already be confident in classifying common conditions but uncertain about rarer cases. Instead of labeling the entire dataset, active learning focuses human annotation efforts on these ambiguous cases, optimizing the use of labeling resources. By iteratively refining the dataset with the most informative examples, active learning reduces annotation costs while accelerating model performance gains.
 
 Another approach to minimizing labeled data requirements is self-supervised learning, which enables models to generate their own training signals from raw, unlabeled data. Instead of relying on manually labeled samples, self-supervised learning formulates auxiliary tasks that help the model learn meaningful representations. In natural language processing, for example, models like BERT and GPT are trained by predicting missing words in sentences, learning from billions of text documents without requiring explicit annotations. In computer vision, self-supervised learning can involve tasks such as predicting the spatial relationship between image patches or identifying whether two cropped regions belong to the same image. These learning objectives allow models to extract useful patterns from data independently, significantly reducing the reliance on labeled datasets.
 
@@ -178,7 +249,44 @@ $$
 PPD = \frac{86.5 - 86}{10000} = 0.00005 \text{% per sample}
 $$
 
-The sharp decline in PPD indicates diminishing returns—even though more data is added, it contributes progressively less to overall accuracy. At this stage, continuing to expand the dataset increases computational costs without yielding meaningful accuracy improvements.
+The sharp decline in PPD (@fig-ppd-curve) indicates diminishing returns—even though more data is added, it contributes progressively less to overall accuracy. At this stage, continuing to expand the dataset increases computational costs without yielding meaningful accuracy improvements.
+
+::: {#fig-ppd-curve fig-cap="**Diminishing Returns of Data**: A comparison of random sampling (gray dashed line) versus data-efficient selection (blue solid line). The efficient strategy achieves higher performance with less data (High PPD region), reaching the convergence plateau much earlier. Adding data beyond this point (Low PPD) yields minimal gains." fig-alt="A plot with X-axis 'Dataset Size' and Y-axis 'Performance'. Two curves start at 0. The 'Random' curve rises slowly. The 'Efficient' curve rises steeply and plateaus early."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\begin{axis}[
+    width=8cm, height=6cm,
+    xlabel={Dataset Size},
+    ylabel={Performance},
+    xmin=0, xmax=100,
+    ymin=0, ymax=100,
+    xtick={0,100}, xticklabels={0, Max},
+    ytick={0,100}, yticklabels={0, Max},
+    axis lines=left,
+    legend pos=south east,
+    legend style={draw=none, fill=none},
+    clip=false
+]
+    % Random Selection - Log-like slow growth
+    \addplot[color=gray, thick, dashed, domain=0:100, samples=50] {100 * (1 - exp(-0.03 * x))};
+    \addlegendentry{Random Selection}
+
+    % Efficient Selection - Fast growth then plateau
+    \addplot[color=blue, very thick, domain=0:100, samples=50] {100 * (1 - exp(-0.1 * x))};
+    \addlegendentry{Efficient Selection}
+
+    % Annotation
+    \node[anchor=west, color=blue] at (axis cs: 10, 80) {High PPD};
+    \node[anchor=west, color=gray] at (axis cs: 60, 50) {Low PPD};
+
+    % Vertical line showing efficiency gap
+    \draw[<->, red, thick] (axis cs: 20, 45) -- (axis cs: 20, 86);
+    \node[right, color=red, font=\footnotesize, align=left] at (axis cs: 20, 65) {Efficiency\\Gap};
+
+\end{axis}
+\end{tikzpicture}
+```
+:::
 
 #### PPD and System Efficiency
 
