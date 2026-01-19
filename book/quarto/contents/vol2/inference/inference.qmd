@@ -39,13 +39,9 @@ Training optimizes for throughput over extended periods, tolerating latency vari
 
 ## Scaling Inference Beyond Single Machines {#sec-inference-scaling-beyond}
 
+In the **Systems Sandwich** (@sec-vol2-introduction), Inference is the **Service Layer**—the interface where the model meets the user. While the **Operational Layer** (training) optimizes for throughput over weeks, the Service Layer must deliver predictions in milliseconds. If the **Iron Law** defines the speed limit of training, it defines the **deadline** of inference: $L_{inference} \le \text{SLO}$.
+
 Single-machine model serving establishes foundational principles that this chapter extends to distributed systems. Single-machine inference optimization, including batching, caching, model optimization, and hardware acceleration, provides the building blocks. This chapter addresses when those techniques reach their limits and distributed approaches become necessary.
-
-::: {.callout-note title="Connection: The Systems Sandwich"}
-Inference is the **Service Layer** of the Systems Sandwich. It sits above the **Operational Layer** (distributed training) and **Physical Layer** (infrastructure). While training builds the model, inference is where the model meets the user. The latency constraints here ($<100$ms) are far stricter than the throughput constraints of training, forcing us to rethink the entire stack—from batching strategies to memory management.
-:::
-
-The transition from single-machine to distributed inference parallels the transition from single-machine to distributed training, but with fundamentally different constraints. Training optimizes throughput over extended periods and tolerates latency variations measured in minutes or hours. Inference at scale must maintain strict latency bounds measured in milliseconds while handling request volumes that fluctuate unpredictably. This inversion of priorities transforms every design decision, from how requests are batched to how failures are handled.
 
 Distributed inference systems must solve problems that do not exist at single-machine scale. Load balancing[^fn-load-balancing] becomes critical when requests must be distributed across hundreds of GPU instances while maintaining latency guarantees. Request routing must account for model-specific characteristics: recommendation systems with trillion-parameter embedding tables require different placement strategies than large language models that generate responses token by token. Autoscaling must anticipate demand fluctuations that can change request volume by orders of magnitude within minutes while maintaining latency bounds users expect.
 
@@ -126,6 +122,18 @@ Minimizing this tax requires co-locating communicating components, using high-ba
 
 ::: {.callout-perspective title="The Economics of Inference"}
 A critical insight for infrastructure planning is that serving cost typically dominates training cost over a model's operational lifetime. This reversal from the training-centric view of model development has profound implications for where optimization effort should focus. While training is a one-time capital expenditure (CapEx), serving is a continuous operational expenditure (OpEx) that scales with user growth.
+:::
+
+::: {.callout-perspective title="Back-of-the-Napkin: The Serving Cost Multiplier"}
+**Problem**: You spent **$2 Million** training a 70B parameter model. You serve it to 1 million daily active users (DAU), each making 50 requests/day. Is training or serving the dominant cost over 1 year?
+
+**The Math**:
+1.  **Training Cost**: $2,000,000 (One-time).
+2.  **Inference Volume**: $1M \text{ users} \times 50 \text{ reqs} \times 365 \text{ days} \approx 18 \text{ Billion requests/year}$.
+3.  **Cost per Request**: Assume a 70B model on H100 costs $\approx \$0.001$ per request (input + output).
+4.  **Annual Serving Cost**: $18 \times 10^9 \times \$0.001 = \mathbf{\$18,000,000}$.
+
+**The Systems Conclusion**: Serving costs **9x** more than training in just the first year. A 10% optimization in inference latency saves **$1.8M**—paying for the entire training run almost immediately.
 :::
 
 The total cost of operating a model comprises training cost (a one-time expense) and serving cost (an ongoing expense) (@eq-total-cost):
@@ -946,7 +954,7 @@ where $\alpha$ represents fixed overhead (kernel launch, weight loading from HBM
 
 The **effective service rate** for batched processing is:
 
-$$\mu_{eff}(B) = \frac{B}{S(B)} = \frac{B}{\alpha + \beta \cdot B}$$ {#eq-effective-service-rate}
+$$\mu_{eff}(B) = \frac{B}{S(B)} = \frac{B}{\alpha + \beta \cdot B}$$
 
 This effective rate increases with batch size, approaching the asymptotic limit $1/\beta$ as $B \to \infty$.
 
@@ -954,7 +962,7 @@ This effective rate increases with batch size, approaching the asymptotic limit 
 
 The total response time $T$ for a request consists of three components:
 
-$$E[T] = E[W] + E[S_{batch}] + E[S_{compute}]$$ {#eq-total-response-time}
+$$E[T] = E[W] + E[S_{batch}] + E[S_{compute}]$$
 
 where:
 
@@ -964,14 +972,14 @@ where:
 
 For dynamic batching with maximum wait time $T_{max}$ and maximum batch size $B_{max}$, the batch formation process is bounded. Under Poisson arrivals with rate $\lambda$, the expected number of requests accumulated in time $T_{max}$ is $\lambda \cdot T_{max}$. The actual batch size $B$ follows:
 
-$$E[B] = \min(B_{max}, \lambda \cdot T_{max})$$ {#eq-expected-batch-size}
+$$E[B] = \min(B_{max}, \lambda \cdot T_{max})$$
 
 The batch accumulation delay depends on whether the batch fills by reaching $B_{max}$ or by timeout:
 
 $$E[S_{batch}] = \begin{cases}
 \frac{B_{max}}{\lambda} & \text{if } \lambda \cdot T_{max} \geq B_{max} \text{ (batch fills)} \\
 \frac{T_{max}}{2} & \text{if } \lambda \cdot T_{max} < B_{max} \text{ (timeout triggers)}
-\end{cases}$$ {#eq-batch-accumulation}
+\end{cases}$$
 
 The factor of $1/2$ in the timeout case reflects the average wait for requests arriving uniformly throughout the batch window.
 
@@ -979,23 +987,23 @@ The factor of $1/2$ in the timeout case reflects the average wait for requests a
 
 The optimal batch size $B^*$ minimizes expected response time subject to throughput requirements. We seek:
 
-$$B^* = \arg\min_{B} E[T(B)] \quad \text{subject to} \quad \mu_{eff}(B) \geq \lambda$$ {#eq-optimal-batch-objective}
+$$B^* = \arg\min_{B} E[T(B)] \quad \text{subject to} \quad \mu_{eff}(B) \geq \lambda$$
 
 The constraint ensures system stability (service rate exceeds arrival rate).
 
 Substituting the response time components:
 
-$$E[T(B)] = E[W(B)] + \frac{B}{2\lambda} + S(B)$$ {#eq-response-time-expanded}
+$$E[T(B)] = E[W(B)] + \frac{B}{2\lambda} + S(B)$$
 
 For an M/G/1 queue with batch arrivals (treating each batch as a single "super-request"), the Pollaczek-Khinchine formula gives the expected waiting time:
 
-$$E[W] = \frac{\lambda \cdot E[S^2]}{2(1 - \rho)}$$ {#eq-pk-formula}
+$$E[W] = \frac{\lambda \cdot E[S^2]}{2(1 - \rho)}$$
 
 where $\rho = \lambda \cdot E[S] / B$ is the server utilization (arrival rate times service time per request). The second moment $E[S^2]$ captures service time variability.
 
 For our linear service time model with deterministic service (variance zero within a batch):
 
-$$E[W(B)] = \frac{\lambda \cdot S(B)^2}{2B(1 - \lambda \cdot S(B)/B)}$$ {#eq-waiting-time-batch}
+$$E[W(B)] = \frac{\lambda \cdot S(B)^2}{2B(1 - \lambda \cdot S(B)/B)}$$
 
 Taking the derivative with respect to $B$ and setting equal to zero yields the optimal batch size. While the full derivation involves solving a cubic equation, the approximate solution for systems where $\alpha \gg \beta$ (high fixed overhead, typical of LLMs) is:
 
@@ -1048,11 +1056,15 @@ However, this exceeds practical limits (memory constraints typically cap batch s
 | **Batch**  | **Service Time**  | **Throughput**    | **Utilization**   | **Queue Wait**    | **Total Latency** |
 | **Size B** | **S(B) (ms)**     | **(req/s)**       | **$\rho$**        | **E[W] (ms)**     | **E[T] (ms)**     |
 +:===========+==================:+==================:+==================:+==================:+==================:+
-| 1          | 50.5              | 19.8              | 505% (unstable)   | $\infty$          | $\infty$          |
-| 4          | 52.0              | 76.9              | 130% (unstable)   | $\infty$          | $\infty$          |
-| 8          | 54.0              | 148.1             | 67.5%             | 42.3              | 123.2             |
-| 16         | 58.0              | 275.9             | 36.2%             | 16.4              | 92.4              |
-| 32         | 66.0              | 484.8             | 20.6%             | 8.9               | 91.5              |
+| **1**      | 50.5              | 19.8              | 505% (unstable)   | $\infty$          | $\infty$          |
++------------+-------------------+-------------------+-------------------+-------------------+-------------------+
+| **4**      | 52.0              | 76.9              | 130% (unstable)   | $\infty$          | $\infty$          |
++------------+-------------------+-------------------+-------------------+-------------------+-------------------+
+| **8**      | 54.0              | 148.1             | 67.5%             | 42.3              | 123.2             |
++------------+-------------------+-------------------+-------------------+-------------------+-------------------+
+| **16**     | 58.0              | 275.9             | 36.2%             | 16.4              | 92.4              |
++------------+-------------------+-------------------+-------------------+-------------------+-------------------+
+| **32**     | 66.0              | 484.8             | 20.6%             | 8.9               | 91.5              |
 +------------+-------------------+-------------------+-------------------+-------------------+-------------------+
 
 : **Batch Size Impact on GPT-3 Serving Performance**. Batch sizes below 8 cannot sustain 100 QPS (utilization exceeds 100%). The optimal operating point balances throughput against latency, with B=32 achieving lowest total latency despite higher service time. {#tbl-batch-size-comparison}
@@ -1075,6 +1087,9 @@ At B=32 with $\lambda = 100$ req/s and $E[T] = 91.5$ ms:
 $$L = 100 \times 0.0915 = 9.15 \text{ requests in system}$$
 
 With batch size 32 and utilization 20.6%:
+
+
+
 - Expected requests in service: $32 \times 0.206 = 6.6$
 - Expected requests in queue: $9.15 - 6.6 = 2.55$
 
@@ -1093,7 +1108,7 @@ Measure $\alpha$ and $\beta$ empirically by profiling inference at batch sizes 1
 
 Find minimum batch size $B_{min}$ such that $\mu_{eff}(B_{min}) > \lambda$:
 
-$$B_{min} = \frac{\alpha \lambda}{1 - \beta \lambda}$$ {#eq-stability-threshold}
+$$B_{min} = \frac{\alpha \lambda}{1 - \beta \lambda}$$
 
 Any batch size below $B_{min}$ results in an unstable system.
 
@@ -1107,7 +1122,7 @@ $$E[T(B)] = \frac{\lambda \cdot S(B)^2}{2B(1 - \lambda S(B)/B)} + \frac{B}{2\lam
 
 For P99 SLO compliance, use the heavy-traffic approximation for tail latency:
 
-$$T_{P99} \approx E[T] + 2.33 \cdot \sigma_T$$ {#eq-p99-approximation}
+$$T_{P99} \approx E[T] + 2.33 \cdot \sigma_T$$
 
 where $\sigma_T$ is the standard deviation of response time. For exponential-like service time distributions, $\sigma_T \approx E[T]$, yielding $T_{P99} \approx 3.3 \cdot E[T]$.
 
@@ -1115,18 +1130,21 @@ where $\sigma_T$ is the standard deviation of response time. For exponential-lik
 
 Choose the largest $B$ such that $T_{P99}(B) \leq \text{SLO}$:
 
-$$B^* = \max\{B : T_{P99}(B) \leq \text{SLO}\}$$ {#eq-batch-selection-rule}
+$$B^* = \max\{B : T_{P99}(B) \leq \text{SLO}\}$$
 
 @tbl-batch-decision-framework summarizes the decision process:
 
-+-----------------------+-----------------------------------------------+-------------------------------------+
-| **Condition**         | **Recommended Action**                        | **Rationale**                       |
-+:======================+:==============================================+:====================================+
-| $B < B_{min}$         | Increase batch size or add replicas           | System is unstable                  |
-| $T_{P99} > \text{SLO}$| Reduce batch size or add replicas             | Latency exceeds target              |
-| $\rho < 0.5$          | Consider reducing replicas to save cost       | System is overprovisioned           |
-| $\rho > 0.85$         | Add replicas for headroom                     | Approaching instability             |
-+-----------------------+-----------------------------------------------+-------------------------------------+
++-------------------------+-----------------------------------------------+-------------------------------------+
+| **Condition**           | **Recommended Action**                        | **Rationale**                       |
++:========================+:==============================================+:====================================+
+| **$B < B_{min}$**       | Increase batch size or add replicas           | System is unstable                  |
++-------------------------+-----------------------------------------------+-------------------------------------+
+| **$T_{P99} > \text{SLO}$**| Reduce batch size or add replicas             | Latency exceeds target              |
++-------------------------+-----------------------------------------------+-------------------------------------+
+| **$\rho < 0.5$**        | Consider reducing replicas to save cost       | System is overprovisioned           |
++-------------------------+-----------------------------------------------+-------------------------------------+
+| **$\rho > 0.85$**       | Add replicas for headroom                     | Approaching instability             |
++-------------------------+-----------------------------------------------+-------------------------------------+
 
 : **Batch Size Decision Framework**. Systematic approach to selecting batch size based on stability, latency SLO, and utilization targets. {#tbl-batch-decision-framework}
 
@@ -1319,11 +1337,11 @@ The performance gap between traditional and continuous batching becomes quantifi
 
 Traditional batching (also called static batching) processes all requests in a batch through all decode iterations until the longest sequence completes. For a batch of $n$ sequences with output lengths $\{L_1, L_2, ..., L_n\}$, the total compute performed is:
 
-$$C_{traditional} = n \times L_{max} \times c_{decode}$$ {#eq-traditional-compute}
+$$C_{traditional} = n \times L_{max} \times c_{decode}$$
 
 where $L_{max} = \max_i(L_i)$ and $c_{decode}$ is the compute cost per decode iteration per sequence. However, the useful compute is only:
 
-$$C_{useful} = \sum_{i=1}^{n} L_i \times c_{decode}$$ {#eq-useful-compute}
+$$C_{useful} = \sum_{i=1}^{n} L_i \times c_{decode}$$
 
 The **waste ratio** quantifies the inefficiency:
 
@@ -1499,7 +1517,7 @@ The analysis above reveals that continuous batching's benefit scales with output
 
 **Benefit formula**: Let $CV = \sigma / \mu$ be the coefficient of variation of output lengths. The throughput improvement from continuous batching over traditional batching is:
 
-$$\text{Improvement} \approx \frac{L_{max}}{\bar{L}} = \frac{\mu + k\sigma}{\mu} = 1 + k \cdot CV$$ {#eq-continuous-benefit}
+$$\text{Improvement} \approx \frac{L_{max}}{\bar{L}} = \frac{\mu + k\sigma}{\mu} = 1 + k \cdot CV$$
 
 where $k$ is the number of standard deviations the maximum output exceeds the mean (typically 2-3 for realistic distributions).
 
@@ -1825,9 +1843,13 @@ Is the model autoregressive (LLM, speech)?
 | **Strategy**         | **Key Parameters**    | **Tuning Goal**                  |
 +:=====================+:======================+:=================================+
 | **Static**           | Batch size            | Maximize throughput              |
++----------------------+-----------------------+----------------------------------+
 | **Dynamic**          | Window, max batch     | Balance latency vs throughput    |
++----------------------+-----------------------+----------------------------------+
 | **Continuous**       | Chunk size, max batch | Minimize decode latency variance |
++----------------------+-----------------------+----------------------------------+
 | **Feature-parallel** | Accumulation window   | Match embedding shard capacity   |
++----------------------+-----------------------+----------------------------------+
 | **Streaming**        | Pipeline depth        | Meet real-time deadline          |
 +----------------------+-----------------------+----------------------------------+
 

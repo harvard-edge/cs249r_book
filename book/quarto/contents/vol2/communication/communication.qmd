@@ -37,11 +37,9 @@ Large-scale machine learning systems spread computation across many machines to 
 
 ## Communication Fundamentals {#sec-communication-fundamentals}
 
-::: {.callout-note title="Connection: The Systems Sandwich"}
-Communication algorithms sit squarely in the **Operational Layer (Logic)** of the Systems Sandwich. We are defining the *protocols* of data movement (e.g., Ring vs. Tree AllReduce). These protocols dictate the requirements for the **Physical Layer (Infrastructure)** below: a logical ring requires a physical topology that supports low-latency neighbor connections. This chapter defines the *software demand* that the hardware in Part II must supply.
-:::
+In the **Systems Sandwich** (@sec-vol2-introduction), Communication algorithms sit squarely in the **Operational Layer**. While the physical network provides the raw bandwidth (the road), these algorithms determine the traffic patterns (the traffic lights). If the **Iron Law** defines the step time, then communication is the **Friction**—the term that grows with scale and resists our attempts to train larger models.
 
-The parallelism strategies introduced in @sec-distributed-training—data parallelism, model parallelism, and pipeline parallelism—all share a common assumption: workers can exchange data efficiently. That assumption hides what becomes the dominant engineering challenge at scale. While @sec-infrastructure examines the physical network architectures providing the substrate (from NVLink within nodes to InfiniBand across nodes), this chapter focuses on the logical communication patterns that run on top of them. The transition from single-machine to distributed training fundamentally changes which resource constrains system performance. On a single GPU, computation throughput typically limits training speed. Add a second GPU, and memory bandwidth often becomes the constraint. Scale to hundreds or thousands of GPUs, and network communication emerges as the dominant bottleneck that determines whether distributed training achieves meaningful speedup or wastes computational resources waiting for data to arrive.
+The parallelism strategies introduced in @sec-distributed-training—data parallelism, model parallelism, and pipeline parallelism—all share a common assumption: workers can exchange data efficiently. That assumption hides what becomes the dominant engineering challenge at scale.
 
 This transition reveals a fundamental asymmetry in how computation and communication scale. Computation is inherently local: each GPU operates on its own data independently, so adding GPUs increases aggregate compute capacity proportionally. Communication, however, is inherently global: ensuring all GPUs converge on the same synchronized state requires information to traverse physical distances between them. Adding more independent workers scales local work linearly, but coordinating those workers requires moving data across physical space.
 
@@ -176,9 +174,26 @@ Ring AllReduce[^fn-ring-history] arranges processes in a logical ring and pipeli
 
 [^fn-ring-history]: **Ring AllReduce History**: Andrew Gibiansky's 2017 blog post "Bringing HPC Techniques to Deep Learning" at Baidu popularized ring AllReduce for ML, demonstrating near-linear scaling to hundreds of GPUs. The algorithm itself dates to the 1990s HPC community, but its application to gradient synchronization catalyzed modern distributed training. Uber's Horovod (2017) and NVIDIA's NCCL subsequently optimized ring AllReduce for GPU clusters, making it the default algorithm in PyTorch's DistributedDataParallel.
 
-The algorithm divides the message into $N$ chunks and proceeds in two phases, each with $N-1$ steps.
+::: {.callout-perspective title="Back-of-the-Napkin: The Ring vs. Tree Crossover"}
+**Problem**: You are synchronizing a **1 MB** buffer across **64 GPUs**. The network has latency $\alpha = 10 \mu s$ and bandwidth $\beta = 10 \text{ GB/s}$. Should you use Ring or Tree?
 
-**ReduceScatter Phase**: Each process sends one chunk to its right neighbor and receives one chunk from its left neighbor. After receiving, the process combines the received chunk with its local chunk using the reduction operator. After $N-1$ steps, each process holds the complete reduction for one chunk.
+**The Math**:
+1.  **Ring Latency**: $2(N-1)\alpha = 2 \times 63 \times 10 \mu s \approx \mathbf{1,260 \mu s}$.
+2.  **Tree Latency**: $2(\log_2 N)\alpha = 2 \times 6 \times 10 \mu s \approx \mathbf{120 \mu s}$.
+3.  **Bandwidth Cost**: $2M/\beta = 2 \text{ MB} / 10 \text{ GB/s} = 200 \mu s$.
+
+**Total Time**:
+
+
+
+- **Ring**: 
+,260 + 200 = \mathbf{1,460 \mu s}$.
+- **Tree**: $120 + 200 = \mathbf{320 \mu s}$. (Tree wins).
+
+**The Systems Conclusion**: For small messages (like MoE routing or scalar reductions), the linear latency of Ring AllReduce kills performance. You *must* switch to a logarithmic algorithm like Tree AllReduce.
+:::
+
+The algorithm divides the message into $N$ chunks...
 
 **AllGather Phase**: Each process sends its fully reduced chunk to its right neighbor and receives a fully reduced chunk from its left neighbor. After $N-1$ steps, every process has all $N$ fully reduced chunks.
 

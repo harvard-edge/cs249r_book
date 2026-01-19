@@ -37,11 +37,9 @@ Machine learning workloads create distinctive storage demands. Training requires
 
 ## Storage Fundamentals for ML {#sec-storage-fundamentals}
 
-::: {.callout-note title="Connection: The Systems Sandwich"}
-Storage is the data foundation of the **Physical Layer (Infrastructure)**. Just as compute nodes provide the FLOPS, storage systems provide the bytes. The **Operational Layer (Logic)**, particularly distributed training algorithms, relies on this foundation to feed data at sufficient velocity to prevent starvation. If storage bandwidth ($B_{disk}$) is insufficient, the sophisticated logic of data parallelism stalls.
-:::
+In the **Systems Sandwich** (@sec-vol2-introduction), Storage is the **Fuel Line** of the Machine Learning Fleet. While compute nodes (Chapter 4) provide the engine and networks (Chapter 5) provide the transmission, storage provides the fuel (data). If the **Iron Law** states that $L = (\text{Data} + \text{Compute}) / \text{Bandwidth}$, this chapter is about ensuring that the storage bandwidth term ($\text{Bandwidth}_{disk}$) never becomes the bottleneck.
 
-The infrastructure foundations established in @sec-infrastructure provide the compute fabric and networking topology for large-scale ML systems. Even the most powerful GPU clusters remain idle without data to process. Storage systems determine whether thousands of accelerators receive training data at the rates they require, whether model checkpoints can be saved before failures corrupt hours of computation, and whether features can be retrieved within the latency budgets that production inference demands. Understanding storage architecture for ML begins with recognizing how ML workloads differ from the applications that shaped traditional storage system design. This chapter examines storage systems through the lens of these ML workload requirements, following data through the ML lifecycle: from storage fundamentals that explain why ML inverts traditional storage assumptions, through training data infrastructure including distributed file systems and object storage at scale, to checkpoint storage systems that address fault tolerance for long-running training jobs. Feature stores bridge training and serving for recommendation and real-time ML systems, while model registries provide the versioning and governance layer that connects training to deployment. Case studies from Google, Meta, Tesla, and Spotify illustrate how these principles manifest in production.
+The infrastructure foundations established in @sec-infrastructure provide the compute fabric...
 
 Traditional enterprise storage systems evolved to serve transactional databases and file servers, workloads characterized by small random accesses, strong consistency requirements, and moderate bandwidth demands. A database server might issue thousands of 4KB reads per second to serve user queries, each read potentially touching different storage locations. The storage industry optimized for this pattern, developing sophisticated caching algorithms, RAID[^fn-raid] configurations, and file systems tuned for small-block random access with transactional guarantees.
 
@@ -236,8 +234,11 @@ The checkpoint write burst must complete before the next training step can safel
 | **Model Type** | **Training Data Pattern**      | **Checkpoint Pattern**        | **Feature Pattern**       | **Serving Pattern**      |
 +:===============+:===============================+:==============================+:==========================+:=========================+
 | **LLM**        | Sequential streaming, TB-scale | Infrequent, 100GB-1TB bursts  | Minimal                   | Load once, cache in GPU  |
++----------------+--------------------------------+-------------------------------+---------------------------+--------------------------+
 | **RecSys**     | Log streaming, continuous      | Incremental embedding updates | Continuous random lookups | Hot embeddings in memory |
++----------------+--------------------------------+-------------------------------+---------------------------+--------------------------+
 | **Vision**     | Sequential with augmentation   | Regular, 1-10GB               | Minimal                   | Load once per model      |
++----------------+--------------------------------+-------------------------------+---------------------------+--------------------------+
 | **Scientific** | Irregular, domain-specific     | Regular or continuous         | Domain-specific           | Varies by application    |
 +----------------+--------------------------------+-------------------------------+---------------------------+--------------------------+
 
@@ -377,9 +378,13 @@ Object storage systems like S3 and GCS are suitable for training data. Since Dec
 | **Storage Tier**     | **Consistency Requirement**       | **Rationale**                                                   | **Suitable Systems**            |
 +:=====================+:==================================+:================================================================+:================================+
 | **Training data**    | Strong consistency (now standard) | Immutable data, modern object stores provide strong consistency | S3, GCS, HDFS                   |
++----------------------+-----------------------------------+-----------------------------------------------------------------+---------------------------------+
 | **Checkpoints**      | Strong consistency                | Partial checkpoints cause catastrophic failure                  | Parallel FS with atomic writes  |
++----------------------+-----------------------------------+-----------------------------------------------------------------+---------------------------------+
 | **Offline features** | Eventual consistency              | Batch updates, staleness acceptable                             | Data warehouses, object storage |
++----------------------+-----------------------------------+-----------------------------------------------------------------+---------------------------------+
 | **Online features**  | Read-your-writes or stronger      | User experience requires fresh features                         | Redis, Bigtable, DynamoDB       |
++----------------------+-----------------------------------+-----------------------------------------------------------------+---------------------------------+
 | **Model weights**    | Read-after-write                  | Model updates must be immediately visible                       | Consistent object storage       |
 +----------------------+-----------------------------------+-----------------------------------------------------------------+---------------------------------+
 
@@ -1080,7 +1085,7 @@ import torch.profiler
 
 with torch.profiler.profile(
     activities=[torch.profiler.ProfilerActivity.CPU],
-    record_shapes=True
+    record_shapes=True,
 ) as prof:
     for batch in dataloader:
         # Training step
@@ -1319,6 +1324,20 @@ $$T_{opt} = \sqrt{2 \times T_{save} \times MTBF}$$
 
 where $T_{save}$ is the time to save a checkpoint and $MTBF$ is the mean time between failures.
 
+:::
+
+::: {.callout-perspective title="Back-of-the-Napkin: The Checkpoint Tax"}
+**Problem**: You are training a model on **1,000 GPUs**. The cluster fails (on average) every **4 hours**. It takes **5 minutes** to save a checkpoint. How often should you checkpoint?
+
+**The Math (Young-Daly)**:
+1.  **Checkpoint Cost ($C$)**: 5 minutes.
+2.  **MTBF ($M$)**: 4 hours = 240 minutes.
+3.  **Optimal Interval**: $\tau_{opt} = \sqrt{2 \cdot C \cdot M} = \sqrt{2 \cdot 5 \cdot 240} = \sqrt{2400} \approx \mathbf{49 \text{ minutes}}$.
+
+**The Systems Conclusion**: You should checkpoint roughly every hour.
+*   **Too Frequent (every 10 mins)**: You spend 50% of your time writing to disk.
+*   **Too Rare (every 4 hours)**: You lose 2 hours of work on average per failure.
+*   **Optimal**: You waste only ~10% of total time on overhead + recovery.
 :::
 
 This formula minimizes expected wasted work, accounting for both checkpoint overhead and work lost to failures. @fig-young-daly-storage plots the tradeoff: frequent checkpoints waste time on I/O; infrequent checkpoints lose more work during failures. The MTBF[^fn-mtbf] for GPU clusters decreases inversely with cluster size, making optimal checkpoint intervals surprisingly short for large-scale training.

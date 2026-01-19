@@ -39,7 +39,9 @@ Distributed training becomes an architectural necessity when training demands ex
 
 ## Multi-Machine Scaling Fundamentals {#sec-distributed-training-multimachine-scaling-fundamentals}
 
-Training frontier models requires computational resources that far exceed any single device. When a model requires $10^{25}$ FLOPS to train, or when its parameters consume terabytes of memory, distribution becomes mandatory. This chapter establishes the algorithmic foundations for scaling model training across multiple machines. By understanding how to partition computation and synchronize state, we define the workload requirements that will subsequently drive the physical infrastructure design examined in Part II.
+In the **Systems Sandwich** framework (@sec-vol2-introduction), Distributed Training represents the **Operational Layer**—the logic that partitions the mathematical workload across the physical fleet. While Volume 1 optimized the execution on a single device, Volume 2 solves the constraint satisfaction problem of mapping a model larger than any single memory bank onto a cluster with finite bandwidth.
+
+Training frontier models requires computational resources...
 
 ::: {.callout-note title="Connection: The Systems Sandwich"}
 In the **Systems Sandwich** framework (@fig-systems-sandwich in @sec-vol2-introduction), Distributed Training represents the **Operational Layer (Logic)**. We are defining *how* to split the math. The actual execution of these split workloads happens on the **Physical Layer (Infrastructure)**, which we will build in Part II. The algorithms defined here (Ring AllReduce, Tensor Parallelism) dictate the bandwidth requirements for the physical interconnects (NVLink, InfiniBand) discussed later. Throughout this chapter, we apply the Systems Sandwich methodology to diagnose distributed training bottlenecks by systematically examining Physical constraints, Operational choices, and Service metrics.
@@ -1276,7 +1278,20 @@ The memory optimization techniques examined in the previous section extend data 
 
 Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and parameters across workers, some architectures remain intractable. A 175B parameter model using FSDP across 64 GPUs still requires 700 GB / 64 = 11 GB of parameters per GPU before accounting for activations. For long-context transformers where activation memory dominates, a 2048-token sequence through 175B parameters generates 200+ GB of intermediate activations, and no amount of optimizer sharding addresses this constraint. Model parallelism addresses these limitations by splitting the model architecture itself across devices, rather than replicating it with sharded state.
 
-Model parallelism addresses this limitation by distributing neural networks across multiple computing devices. Unlike data parallelism, where each device contains a complete model copy, model parallelism assigns different model components to different devices [@shazeer_mixture_of_experts_2017].
+::: {.callout-perspective title="Back-of-the-Napkin: The Memory Wall of Scale"}
+**Problem**: You want to train a **175 Billion parameter** model (like GPT-3) on NVIDIA A100s (80 GB). Can you use Data Parallelism with ZeRO-3?
+
+**The Math**:
+1.  **Parameter Storage**: 175B params $\times$ 2 bytes (FP16) = **350 GB**.
+2.  **Optimizer State**: 175B params $\times$ 12 bytes (Adam FP32) = **2,100 GB**.
+3.  **Total Static Memory**: 2,450 GB.
+4.  **ZeRO-3 Sharding**: With 64 GPUs, per-GPU static memory = $2,450 / 64 \approx \mathbf{38 \text{ GB}}$.
+5.  **Activation Memory**: For sequence length 2048 and batch size 1, a 96-layer transformer generates $\approx \mathbf{50 \text{ GB}}$ of activations per GPU.
+
+**The Systems Conclusion**: $38 \text{ GB} (Static) + 50 \text{ GB} (Dynamic) = \mathbf{88 \text{ GB}}$. This exceeds the 80 GB capacity of the A100. Even with full ZeRO-3 sharding, **pure Data Parallelism fails**. You *must* use **Tensor Parallelism** to split the layers themselves.
+:::
+
+Model parallelism addresses this limitation...
 
 Several implementations of model parallelism exist. In layer-based splitting, devices process distinct groups of layers sequentially. The first device might compute layers 1-4 while the second handles layers 5-8. Channel-based splitting divides the channels within each layer across devices, where the first device processes 512 channels while the second manages the remaining ones. For transformer architectures, attention head splitting distributes different attention heads to separate devices.
 

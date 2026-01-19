@@ -47,9 +47,9 @@ We are now at the **Management Layer** of the Systems Sandwich. While Parts I an
 
 ## From Single-Model to Platform Operations {#sec-ops-scale-single-to-platform}
 
-@sec-inference-at-scale established the distributed serving architectures that enable individual models to handle massive request volumes through replication, sharding, and geographic distribution. This chapter examines what happens when organizations deploy not one but hundreds of such systems. The transition from managing individual models to operating enterprise-scale ML platforms represents a fundamental shift in operational complexity.
+In the **Systems Sandwich** (@sec-vol2-introduction), MLOps is the **Control Plane**—the nervous system that monitors and corrects the behavior of the fleet. While the **Operational Layer** (training) and **Service Layer** (inference) execute the work, the Control Plane ensures they remain within safe operating parameters. If the **Iron Law** defines performance, MLOps defines **Reliability**: ensuring that $L_{step}$ remains stable over months of operation.
 
-Just as a single developer can compile code manually, a single data scientist can train a model manually. But compiling an operating system requires a build system (Make/Bazel). Similarly, training a fleet of models requires an **ML Build System** that manages dependencies, compilation steps (training), and linking (serving) of the entire codebase. This chapter is about building that Make/Bazel for AI.
+@sec-inference-at-scale established the distributed serving architectures that enable individual models to handle massive request volumes through replication, sharding, and geographic distribution. This chapter examines what happens when organizations deploy not one but hundreds of such systems. The transition from managing individual models to operating enterprise-scale ML platforms represents a fundamental shift in operational complexity.
 
 Single-model MLOps focuses on continuous integration, deployment pipelines, and monitoring for individual models. This chapter addresses the distinct challenges that emerge when organizations deploy tens, hundreds, or thousands of models across distributed infrastructure. The practices that enable a single team to successfully develop, deploy, and maintain one model become unsustainable when applied at scale, not because they are wrong, but because they fail to account for the interactions, dependencies, and coordination requirements that characterize multi-model environments.
 
@@ -73,10 +73,15 @@ As the number of models grows, several problems emerge that are not simply multi
 | **Operational Aspect**         | **Single Model** | **10 Models**    | **100 Models**               |
 +:===============================+:=================+:=================+:=============================+
 | **Deployment coordination**    | None             | Ad hoc           | Critical path                |
++--------------------------------+------------------+------------------+------------------------------+
 | **Shared data dependencies**   | None             | Some overlap     | Dense graph                  |
++--------------------------------+------------------+------------------+------------------------------+
 | **Monitoring dashboards**      | 1                | 10               | Unmanageable                 |
++--------------------------------+------------------+------------------+------------------------------+
 | **On-call rotation scope**     | Single team      | Multiple teams   | Organization-wide            |
++--------------------------------+------------------+------------------+------------------------------+
 | **Infrastructure utilization** | Often idle       | Moderate sharing | Efficiency critical          |
++--------------------------------+------------------+------------------+------------------------------+
 | **Debugging complexity**       | Local            | Cross-team       | Distributed tracing required |
 +--------------------------------+------------------+------------------+------------------------------+
 
@@ -242,9 +247,13 @@ Beyond scale considerations, different model types require fundamentally differe
 | **Model Type**              | **Update Frequency** | **Deployment Pattern**      | **Primary Risk**           | **Rollback Speed** |
 +:============================+:=====================+:============================+:===========================+:===================+
 | **GPT-4 (Lighthouse)**      | Monthly to quarterly | Staged, careful             | Quality regression, safety | Hours to days      |
++-----------------------------+----------------------+-----------------------------+----------------------------+--------------------+
 | **DLRM (Lighthouse)**       | Daily to weekly      | Shadow, interleaving        | Engagement drop            | Minutes            |
++-----------------------------+----------------------+-----------------------------+----------------------------+--------------------+
 | **Fraud Detection**         | Hourly to daily      | Rapid with instant rollback | False negatives            | Seconds            |
++-----------------------------+----------------------+-----------------------------+----------------------------+--------------------+
 | **Vision (Classification)** | Weekly to monthly    | Canary                      | Accuracy regression        | Minutes            |
++-----------------------------+----------------------+-----------------------------+----------------------------+--------------------+
 | **Search Ranking**          | Daily                | A/B with holdout            | Relevance degradation      | Minutes            |
 +-----------------------------+----------------------+-----------------------------+----------------------------+--------------------+
 
@@ -540,10 +549,13 @@ Deploying ensemble updates requires coordination that single-model deployments d
 
 +----------------------+----------------------------------------------------------------------+--------------+----------------------------------------+
 | **Deployment Stage** | **Actions**                                                          | **Duration** | **Rollback Trigger**                   |
-+:=====================+:=====================================================================+=============:+:=======================================+
++:=====================+:=====================================================================+:=============+:=======================================+
 | **Shadow**           | New model scores alongside production, results logged but not served | 24-48 hours  | Quality metrics below threshold        |
++----------------------+----------------------------------------------------------------------+--------------+----------------------------------------+
 | **Canary**           | 1% traffic receives new model results                                | 4-8 hours    | Statistical significance of regression |
++----------------------+----------------------------------------------------------------------+--------------+----------------------------------------+
 | **Staged Rollout**   | 5% → 25% → 50% → 100%                                                | 24-72 hours  | Business metric degradation            |
++----------------------+----------------------------------------------------------------------+--------------+----------------------------------------+
 | **Soak**             | Full traffic, extended monitoring                                    | 7-14 days    | Delayed effects emerge                 |
 +----------------------+----------------------------------------------------------------------+--------------+----------------------------------------+
 
@@ -603,10 +615,13 @@ The appropriate deployment pattern depends on the number and interdependence of 
 
 +------------------+-----------------+----------------------+-------------------------+
 | **Pattern**      | **Model Count** | **Update Frequency** | **Example**             |
-+:=================+================:+:=====================+:========================+
++:=================+:================+:=====================+:========================+
 | **Single Model** | 1               | Monthly              | Vision classifier       |
++------------------+-----------------+----------------------+-------------------------+
 | **Pipeline**     | 3-5             | Weekly               | NLP processing pipeline |
++-----------------------------------+----------------------+-------------------------+
 | **Ensemble**     | 10-50           | Daily                | Recommendation system   |
++------------------+-----------------+----------------------+-------------------------+
 | **Platform**     | 100s            | Continuous           | Enterprise ML platform  |
 +------------------+-----------------+----------------------+-------------------------+
 
@@ -1583,6 +1598,18 @@ Successful navigation through CI/CD pipelines marks the beginning, not the end, 
 
 The mathematical reality of monitoring at scale exposes the limitations of per-model alerting. Consider the mathematics of monitoring 100 models with independent alerting. If each model has 10 monitored metrics, and each metric generates alerts at a 5% false positive rate, the expected number of false alerts is substantial.
 
+::: {.callout-perspective title="Back-of-the-Napkin: The False Alarm Tax"}
+**Problem**: You monitor **100 models**. Each model has **10 metrics** (latency, accuracy, drift, etc.). You set alert thresholds at **3-sigma** (99.7% specificity). How many false alarms does the on-call engineer wake up to per week?
+
+**The Math**:
+1.  **Total Monitors**: $100 \text{ models} \times 10 \text{ metrics} = 1,000 \text{ monitors}$.
+2.  **False Positive Rate**: $1 - 0.997 = 0.003$ (0.3%).
+3.  **Checks per Day**: Assume checks every 5 minutes ($288 \text{ checks/day}$).
+4.  **Daily False Alarms**: $1,000 \times 288 \times 0.003 \approx \mathbf{864 \text{ alerts/day}}$.
+
+**The Systems Conclusion**: Even with "high precision" (3-sigma) alerts, scale kills you. You cannot alert on raw metrics. You *must* use **hierarchical aggregation** (e.g., "Cluster Health" instead of "Node Health") to survive the false alarm tax.
+:::
+
 @eq-false-alert-rate reveals the mathematical inevitability of alert fatigue at scale: for a single metric with false positive rate $\alpha$, the probability of at least one false alert grows exponentially with the number of independent tests $N$:
 
 $$P(\text{at least one false alert}) = 1 - (1 - \alpha)^N$$ {#eq-false-alert-rate}
@@ -1892,13 +1919,13 @@ Infrastructure costs represent one of the largest operational expenditures for M
 
 The foundation of cost monitoring is statistical anomaly detection. For a cost time series with historical mean $\mu$ and standard deviation $\sigma$, the **Z-score** quantifies how unusual a current observation is:
 
-$$Z = \frac{C_{current} - \mu}{\sigma}$$ {#eq-cost-zscore}
+$$Z = \frac{C_{current} - \mu}{\sigma}$$
 
 where $C_{current}$ is the observed cost for the current period. A Z-score of 3 indicates the current cost is 3 standard deviations above the historical mean, an event expected less than 0.3% of the time under normal operations.
 
 Complementing Z-score analysis, **percentage change** detection captures sudden shifts regardless of historical variance:
 
-$$\Delta\% = \frac{C_{current} - C_{previous}}{C_{previous}} \times 100$$ {#eq-cost-pct-change}
+$$\Delta\% = \frac{C_{current} - C_{previous}}{C_{previous}} \times 100$$
 
 Percentage change detection excels at catching step-function increases, such as when a misconfigured autoscaler doubles instance count overnight.
 
@@ -1973,7 +2000,7 @@ Cost anomalies typically fall into five categories, each with distinct investiga
 |                           |                                | types, replica counts                    |
 +---------------------------+--------------------------------+------------------------------------------+
 
-: **Cost Anomaly Root Cause Categories**: Five primary categories of cost anomalies with their characteristic indicators and investigation approaches. Traffic increases show proportional QPS growth, while efficiency regressions exhibit rising latency with stable traffic. {#tbl-cost-anomaly-categories}
+: **Cost Anomaly Root Cause Categories**: Five primary categories of cost anomalies with their characteristic indicators and investigation approaches. Traffic increases show proportional QPS growth, while efficiency regressions exhibit rising latency with stable traffic.
 
 **Cost Attribution by Service and Team**
 
