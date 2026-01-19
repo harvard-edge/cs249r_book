@@ -42,7 +42,9 @@ Practical machine learning systems depend critically on hardware acceleration. W
 
 ## AI Hardware Acceleration Fundamentals {#sec-ai-acceleration-ai-hardware-acceleration-fundamentals-2096}
 
-Modern machine learning systems challenge the architectural assumptions underlying general-purpose processors. The efficiency framework established in @sec-introduction identified three pillars of ML system efficiency: algorithmic, compute, and data. While the software optimization techniques examined in @sec-model-compression address the algorithmic pillar through precision reduction, structural pruning, and execution refinements, hardware acceleration targets the compute pillar through architectural redesign rather than algorithmic modification. These software techniques operate within the constraints of existing computational substrates. Conventional CPUs achieve utilization rates of only 5-10% when executing typical machine learning workloads [@gholami2024ai], reflecting the architectural mismatch between sequential processing models and the highly parallel, data-intensive nature of neural network computations.
+If Data Efficiency optimizes the "Source Code" and Compression optimizes the "Binary," then **Hardware Acceleration** optimizes the machine itself. It is the final physical frontier of the **Iron Law** (@sec-optimize-principles), where we design silicon to maximize "Math per Second" while minimizing "Energy per Bit." 
+
+Modern machine learning systems challenge the architectural assumptions underlying general-purpose processors. The efficiency framework established in @sec-introduction identified three pillars of ML system efficiency: algorithmic, compute, and data. While the software optimization techniques examined in @sec-model-compression address the algorithmic pillar through precision reduction, structural pruning, and execution refinements, hardware acceleration targets the compute pillar through architectural redesign rather than algorithmic modification.
 
 This performance gap has driven a shift toward domain-specific hardware acceleration within computer architecture. The 2012 AlexNet breakthrough illustrates the principle of **hardware-software co-design** that defines modern ML systems engineering.
 
@@ -962,6 +964,18 @@ The systolic array architecture achieves computational efficiency through synchr
 3. **Processing Element Grid**: Individual processing elements execute multiply-accumulate operations on streaming data, generating partial results that accumulate toward the final computation
 4. **Output Collection**: Results aggregate at designated output boundaries where accumulated partial sums form complete matrix elements
 
+::: {.callout-perspective title="Dataflow Strategies: Matching Architecture to Workload"}
+**The Architects' Dilemma**: Systolic arrays must choose which data to keep stationary (in registers) to minimize movement. This choice hard-codes the hardware's preference for certain model types.
+
+| Strategy | Stationary Item | Optimized For | Example Workload |
+| :--- | :--- | :--- | :--- |
+| **Weight-Stationary** | Weights ($W$) | High Reuse of Weights | **CNNs (Conv2D)**: Filters are small and reused across the entire image. |
+| **Output-Stationary** | Partial Sums ($C$) | High Reuse of Accumulators | **Large Batch MatMul**: Accumulating results for many inputs against a large weight matrix. |
+| **Row-Stationary** | Input Rows ($A$) | Data Reuse | **General MatMul**: Balancing input and weight reuse. |
+
+There is no "perfect" accelerator. A chip optimized for Weight-Stationary flow (like early TPUs) excels at CNNs but might struggle with the massive, changing weights of LLMs, which push architectures toward different reuse patterns.
+:::
+
 The synchronized data flow ensures that matrix element A[i,k] encounters corresponding B[k,j] elements at precise temporal intervals, executing the multiply-accumulate operations required for matrix multiplication C[i,j] = Σ A[i,k] × B[k,j]. This systematic reuse of operands across multiple processing elements substantially reduces memory bandwidth requirements by eliminating redundant data fetches from external memory subsystems.
 
 Consider the multiplication of 2×2 matrices A and B within a systolic array. During the first computational cycle, element A[0,0]=2 propagates horizontally while B[0,0]=1 moves vertically, converging at processing element PE(0,0) to execute the multiplication 2×1=2. In the subsequent cycle, the same A[0,0]=2 advances to PE(0,1) where it encounters B[0,1]=3, computing 2×3=6. Concurrently, A[0,1]=4 enters PE(0,0) to engage with the next B matrix element. This coordinated data movement enables systematic operand reuse across multiple computational operations, eliminating redundant memory accesses and exemplifying the fundamental efficiency principle underlying systolic array architectures.
@@ -1675,7 +1689,22 @@ The roofline visualization shows performance (TFLOPS) on the vertical axis and a
 
 : **Hardware Ridge Points (Representative, order-of-magnitude)**: Different accelerators have different ridge points determined by their compute-to-bandwidth ratios. Higher ridge points require more operations per byte to achieve peak utilization. {#tbl-ridge-points}
 
-**Neural Network Operations on the Roofline**: Different operations fall at different positions on the roofline, ranging from memory-bound to compute-bound. @tbl-roofline-operations categorizes operations by their arithmetic intensity:
+::: {.callout-perspective title="Back-of-the-Napkin: Calculating the Ridge Point"}
+**Problem**: You are using an **NVIDIA H100** GPU. You want to know if your attention layer is compute-bound or bandwidth-bound.
+
+**The Math**:
+1.  **Peak Compute**: 990 TFLOPS (FP16).
+2.  **Peak Bandwidth**: 3.4 TB/s.
+3.  **Ridge Point**: $990 \text{ TFLOPS} / 3.4 \text{ TB/s} \approx \mathbf{291 \text{ Ops/Byte}}$.
+
+**The Systems Conclusion**: To achieve 100% utilization of an H100, your code must perform **291 mathematical operations for every 1 byte** it pulls from memory. 
+- A standard **ReLU** performs 1 operation for every 8 bytes (0.125 Ops/Byte). It is **2,300x below the roofline**.
+- A large **Dense MatMul** (batch=128) might reach 300 Ops/Byte. It is **Compute-Bound**.
+
+**The Engineering Moral**: Most of the time, your "Ferrari" (the H100) is stuck in traffic because you aren't feeding it enough "Fuel" (Data Bandwidth). This is why **Kernel Fusion** is the most important optimization in @sec-model-compression.
+:::
+
+**Neural Network Operations on the Roofline**:
 
 | **Operation** | **Arithmetic Intensity** | **Classification** | **Lighthouse Example** |
 |:---|---:|:---|:---|

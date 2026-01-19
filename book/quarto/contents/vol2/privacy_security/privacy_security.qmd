@@ -2113,12 +2113,38 @@ $$
 \tilde{f}(D) = f(D) + \text{Lap}\left(\frac{\Delta f}{\epsilon}\right)
 $$
 
-The Laplace distribution has density $p(x) = \frac{\epsilon}{2\Delta f}\exp\left(-\frac{\epsilon|x|}{\Delta f}\right)$, with scale parameter $b = \Delta f/\epsilon$. The noise magnitude scales inversely with $\epsilon$: stronger privacy ($\epsilon = 0.1$) requires 10× more noise than moderate privacy ($\epsilon = 1.0$).
+The Laplace distribution has density $p(x) = \frac{\epsilon}{2\Delta f}\exp\left(-\frac{\epsilon|x|}{\Delta f}\right)$, with scale parameter $b = \Delta f/\epsilon$. The noise magnitude scales inversely with $\epsilon$: stronger privacy ($\epsilon = 0.1$) requires 10x more noise than moderate privacy ($\epsilon = 1.0$).
+
+**Derivation of Laplace Mechanism Privacy Guarantee**: To prove that the Laplace mechanism achieves $\epsilon$-DP, consider the ratio of output probabilities on adjacent datasets $D$ and $D'$. Let $f(D) = v$ and $f(D') = v'$, where $|v - v'| \leq \Delta f$ by the sensitivity bound. For any output $y$, the probability ratio is:
+$$
+\frac{p(y | D)}{p(y | D')} = \frac{\exp(-\epsilon|y - v|/\Delta f)}{\exp(-\epsilon|y - v'|/\Delta f)} = \exp\left(\frac{\epsilon(|y - v'| - |y - v|)}{\Delta f}\right)
+$$
+
+By the triangle inequality, $|y - v'| - |y - v| \leq |v - v'| \leq \Delta f$. Therefore:
+$$
+\frac{p(y | D)}{p(y | D')} \leq \exp\left(\frac{\epsilon \cdot \Delta f}{\Delta f}\right) = e^{\epsilon}
+$$
+
+This establishes that the Laplace mechanism satisfies $\epsilon$-differential privacy. The derivation reveals why sensitivity calibration is essential: the noise scale must match the maximum possible change in the query output to mask individual contributions.
 
 *Gaussian Mechanism*: For $(\epsilon, \delta)$-DP, the Gaussian mechanism adds noise $\mathcal{N}(0, \sigma^2)$ where $\sigma$ is calibrated based on $\epsilon, \delta$, and the $\ell_2$ sensitivity $\Delta_2 f$:
 $$
 \tilde{f}(D) = f(D) + \mathcal{N}\left(0, \sigma^2 \cdot (\Delta_2 f)^2\right)
 $$
+
+**Derivation of Gaussian Mechanism Privacy Guarantee**: Unlike the Laplace mechanism, which achieves pure $\epsilon$-DP, the Gaussian mechanism requires the relaxed $(\epsilon, \delta)$-DP formulation because the Gaussian distribution has unbounded support. The derivation proceeds by analyzing the privacy loss random variable.
+
+For adjacent datasets with $\ell_2$ sensitivity $\Delta_2 f$, the privacy loss at output $y$ follows:
+$$
+L(y) = \ln\frac{p(y|D)}{p(y|D')} = \frac{\|y - f(D')\|_2^2 - \|y - f(D)\|_2^2}{2\sigma^2}
+$$
+
+When $y = f(D) + z$ for noise $z \sim \mathcal{N}(0, \sigma^2 I)$, the privacy loss becomes a shifted Gaussian with mean $\frac{\Delta_2 f^2}{2\sigma^2}$ and variance $\frac{\Delta_2 f^2}{\sigma^2}$. Using tail bounds on this distribution, the probability that $L(y) > \epsilon$ can be bounded by $\delta$ when:
+$$
+\sigma \geq \frac{\Delta_2 f}{\epsilon}\sqrt{2\ln\left(\frac{1.25}{\delta}\right)}
+$$
+
+This formula reveals the three-way trade-off: achieving smaller $\epsilon$ (stronger privacy) or smaller $\delta$ (higher confidence) requires proportionally larger noise $\sigma$, which degrades model utility. The factor $\sqrt{2\ln(1.25/\delta)}$ grows slowly with $1/\delta$, so cryptographically small $\delta$ (e.g., $10^{-8}$) only moderately increases the required noise compared to $\delta = 10^{-5}$.
 
 ::: {.callout-example title="Engineering Metric: The Privacy-Accuracy Tax"}
 **The Trade-off**: Stronger privacy requires adding more noise to gradients during training. This noise acts like a "tax" on model accuracy.
@@ -2232,6 +2258,128 @@ A critical aspect of differential privacy is that privacy loss accumulates. Ever
 *   **Rényi Differential Privacy (RDP)**: A modern framework used in deep learning (e.g., DP-SGD) that offers even tighter composition tracking, essential for training neural networks over thousands of iterations.
 
 The practical implication is that organizations must manage a **global privacy budget** for each dataset, halting access once the budget is exhausted.
+
+#### Quantifying the Privacy-Utility Trade-off {#sec-security-privacy-privacy-utility-tradeoff-b3e7}
+
+The theoretical framework of differential privacy translates into measurable accuracy degradation in practice. Empirical studies across benchmark datasets reveal consistent patterns in how privacy parameters affect model performance, enabling practitioners to make informed decisions about privacy-utility trade-offs.
+
+@tbl-dp-accuracy-tradeoff summarizes accuracy degradation across standard benchmarks when training with DP-SGD at various privacy levels. These results, drawn from published research and industry deployments, provide quantitative guidance for practitioners.
+
++-----------------+---------------------+------------------------+-------------------------+--------------------------+
+| **Dataset**     | **Model**           | **Non-Private Acc.**   | **$\epsilon=8$ Acc.**   | **$\epsilon=1$ Acc.**    |
++:================+:====================+:=======================+:========================+:=========================+
+| MNIST           | CNN                 | 99.2%                  | 98.1% (-1.1%)           | 96.6% (-2.6%)            |
++-----------------+---------------------+------------------------+-------------------------+--------------------------+
+| CIFAR-10        | ResNet-18           | 93.5%                  | 83.0% (-10.5%)          | 67.0% (-26.5%)           |
++-----------------+---------------------+------------------------+-------------------------+--------------------------+
+| ImageNet        | ResNet-50           | 76.1%                  | 47.8% (-28.3%)          | N/A (not feasible)       |
++-----------------+---------------------+------------------------+-------------------------+--------------------------+
+| IMDB (text)     | BERT-base           | 93.0%                  | 88.5% (-4.5%)           | 82.0% (-11.0%)           |
++-----------------+---------------------+------------------------+-------------------------+--------------------------+
+
+: **Privacy-Accuracy Trade-offs**: Model accuracy degradation when training with DP-SGD at different privacy budgets ($\delta = 10^{-5}$ throughout). Strong privacy ($\epsilon = 1$) causes significant accuracy loss on complex tasks, while moderate privacy ($\epsilon = 8$) preserves most utility for simpler datasets. Data synthesized from [@abadi2016deep] and subsequent DP-SGD benchmarking studies. {#tbl-dp-accuracy-tradeoff}
+
+Several patterns emerge from these empirical results. First, simpler tasks tolerate DP better: MNIST classification loses only 2.6 percentage points at $\epsilon = 1$, while CIFAR-10 loses 26.5 points. The noise required to protect privacy has a larger relative impact when the learning task requires capturing fine-grained patterns. Second, dataset size matters critically: larger datasets enable higher signal-to-noise ratios because gradient noise averages out across more samples. Training DP models on small datasets (fewer than 10,000 samples) typically yields unacceptable accuracy degradation. Third, the privacy-accuracy curve is non-linear: the marginal accuracy cost of tightening privacy increases as $\epsilon$ decreases. Moving from $\epsilon = 8$ to $\epsilon = 1$ costs more accuracy than moving from non-private to $\epsilon = 8$.
+
+#### Decision Framework: When is Differential Privacy Worth It? {#sec-security-privacy-dp-decision-framework-c4a8}
+
+Given the quantified trade-offs, practitioners need a systematic framework for deciding whether and how to deploy differential privacy. The following decision criteria synthesize considerations from regulatory requirements, threat models, and operational constraints.
+
+**Criterion 1: Regulatory and Legal Requirements**
+
+DP becomes essential when regulations mandate formal privacy guarantees. GDPR's "privacy by design" principle and HIPAA's technical safeguards both align with DP's mathematical framework. If audit trails require demonstrable privacy bounds, DP provides defensible documentation that ad-hoc anonymization cannot match. Organizations handling EU health data, US medical records, or financial data subject to CCPA/CPRA should evaluate DP as a compliance mechanism.
+
+**Criterion 2: Threat Model Assessment**
+
+DP protects against membership inference (determining if a specific individual's data was used in training) and training data extraction attacks. If your threat model includes sophisticated adversaries attempting these attacks (e.g., competitors, nation-state actors, or malicious insiders), DP provides provable protection that other techniques lack. However, if your primary threats are data breaches of stored data rather than inference attacks on deployed models, encryption and access controls may be more appropriate defenses.
+
+**Criterion 3: Dataset Characteristics**
+
+Evaluate whether your data supports effective DP training:
+
+- **Size threshold**: Datasets with fewer than 50,000 samples rarely achieve acceptable utility with meaningful privacy ($\epsilon < 10$). For small datasets, consider federated learning with secure aggregation as an alternative.
+- **Task complexity**: Simple classification tasks (binary or few-class) tolerate noise better than fine-grained recognition or generation tasks.
+- **Data sensitivity distribution**: If sensitive attributes are concentrated in rare subgroups, DP may disproportionately degrade performance on those subgroups, raising fairness concerns.
+
+**Criterion 4: Acceptable Utility Loss**
+
+Quantify the maximum acceptable accuracy degradation before deployment. For safety-critical applications (medical diagnosis, autonomous vehicles), even 5% accuracy loss may be unacceptable. For recommendation systems or content personalization, 10-15% degradation might be tolerable given privacy benefits. Use @tbl-dp-accuracy-tradeoff as a starting point, then conduct experiments on your specific task.
+
+**Criterion 5: Computational Budget**
+
+DP training typically requires 2-5x more compute than non-private training due to per-sample gradient computation and larger batch sizes needed to overcome noise. If computational resources are constrained, this overhead may be prohibitive. Cloud deployments can scale compute, but edge training scenarios may find DP impractical.
+
+**Decision Matrix Summary**
+
+Use DP when: (1) formal privacy guarantees are legally required, (2) membership inference is a credible threat, (3) dataset exceeds 50,000 samples, (4) task can tolerate 5-15% accuracy loss, and (5) computational budget supports increased training costs.
+
+Consider alternatives when: (1) primary threats are data breaches (use encryption), (2) dataset is small (use federated learning), (3) task requires maximum accuracy (use access controls and audit logging), or (4) deployment is resource-constrained (use differential privacy at inference only for aggregate queries).
+
+This framework treats DP as one tool in a privacy-preserving toolkit rather than a universal solution. The most effective deployments often combine DP with complementary techniques: federated learning for data minimization, secure aggregation for gradient protection, and access controls for deployment security.
+
+::: {.callout-example title="Worked Example: DP-SGD Privacy Budget Calculation"}
+**Scenario**: Train a sentiment classifier on 100,000 customer reviews with target privacy $(\epsilon, \delta) = (8, 10^{-6})$.
+
+**Step 1: Configure DP-SGD Parameters**
+
+- Dataset size: $N = 100,000$
+- Batch size: $B = 2,000$ (sampling rate $q = B/N = 0.02$)
+- Gradient clipping norm: $C = 1.0$
+- Training epochs: $T = 10$ (total steps $k = T \times N/B = 500$)
+- Target: $\epsilon = 8$, $\delta = 10^{-6}$
+
+**Step 2: Calculate Required Noise Multiplier**
+
+Using the Gaussian mechanism formula and RDP accounting, we need noise multiplier $\sigma$ such that after $k = 500$ iterations with sampling rate $q = 0.02$, the total privacy loss is $\epsilon \leq 8$.
+
+The per-step RDP guarantee for Gaussian mechanism with subsampling is approximately:
+$$\varepsilon_{\text{step}}(\alpha) \approx \frac{q^2 \alpha}{2\sigma^2}$$
+
+For $\sigma = 0.8$ (a typical starting point):
+$$\varepsilon_{\text{step}}(\alpha) = \frac{(0.02)^2 \alpha}{2(0.8)^2} = \frac{0.0004\alpha}{1.28} \approx 0.000312\alpha$$
+
+After 500 steps: $\varepsilon_{\text{total}}(\alpha) = 500 \times 0.000312\alpha = 0.156\alpha$
+
+**Step 3: Convert RDP to $(\epsilon, \delta)$-DP**
+
+Converting to $(\epsilon, \delta)$-DP by optimizing over $\alpha$:
+$$\epsilon = \varepsilon_{\text{total}}(\alpha) + \frac{\ln(1/\delta)}{\alpha - 1} = 0.156\alpha + \frac{\ln(10^6)}{\alpha - 1}$$
+
+Evaluating at different $\alpha$ values:
+
+- $\alpha = 20$: $\epsilon = 0.156(20) + 13.8/19 = 3.12 + 0.73 = 3.85$
+- $\alpha = 50$: $\epsilon = 0.156(50) + 13.8/49 = 7.8 + 0.28 = 8.08$
+- $\alpha = 45$: $\epsilon = 0.156(45) + 13.8/44 = 7.02 + 0.31 = 7.33$
+
+Optimal $\alpha^* \approx 48$ yields $\epsilon \approx 7.8$, which satisfies our target of $\epsilon \leq 8$.
+
+**Step 4: Expected Accuracy Impact**
+
+With $\sigma = 0.8$ and $\epsilon \approx 8$, expect 3-5% accuracy degradation compared to non-private training. For a sentiment classifier achieving 92% accuracy without DP, the private version should achieve 87-89% accuracy.
+
+**Step 5: Implementation Verification**
+
+```python
+# Using Opacus library for PyTorch
+from opacus import PrivacyEngine
+from opacus.accountants import RDPAccountant
+
+privacy_engine = PrivacyEngine()
+model, optimizer, data_loader = privacy_engine.make_private(
+    module=model,
+    optimizer=optimizer,
+    data_loader=train_loader,
+    noise_multiplier=0.8,
+    max_grad_norm=1.0,
+)
+
+# After training, verify privacy spent
+epsilon = privacy_engine.get_epsilon(delta=1e-6)
+print(f"Final epsilon: {epsilon:.2f}")  # Should be ~7.8
+```
+
+This worked example demonstrates how theoretical privacy accounting translates into concrete implementation parameters, enabling practitioners to verify privacy guarantees before and after training.
+:::
 
 #### Federated Learning {#sec-security-privacy-federated-learning-3834}
 

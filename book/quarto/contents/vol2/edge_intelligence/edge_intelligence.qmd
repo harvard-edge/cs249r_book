@@ -1980,6 +1980,101 @@ node[Txt,left,pos=0.75]{(4) Weighted Aggregation\\[1.15ex]$\displaystyle\theta^{
 
 This basic structure introduces a number of design choices and tradeoffs. The number of local steps $E$ impacts the balance between computation and communication: larger $E$ reduces communication frequency but risks divergence if local data distributions vary too much. The selection of participating clients affects convergence stability and fairness. In real-world deployments, not all devices are available at all times, and hardware capabilities may differ substantially, requiring robust participation scheduling and failure tolerance.
 
+#### Federated Learning Convergence Analysis {#sec-edge-intelligence-federated-convergence-analysis}
+
+Understanding when federated learning converges and how fast it reaches acceptable accuracy is essential for system design. Unlike centralized training where convergence depends primarily on learning rate and batch size, federated learning convergence depends on the interplay between communication rounds, local computation, client participation, and data heterogeneity. These factors determine whether a federated deployment will reach target accuracy in hours, days, or never.
+
+**Convergence Rate Fundamentals.** The theoretical convergence rate of FedAvg under standard assumptions (smooth, strongly convex objectives) follows:
+
+$$
+\mathbb{E}[F(\theta^R) - F(\theta^*)] \leq \mathcal{O}\left(\frac{1}{\sqrt{CER}}\right)
+$$
+
+where $C$ is the number of clients participating per round, $E$ is the number of local epochs each client performs, and $R$ is the total number of communication rounds [@mcmahan2017communication]. This result reveals that convergence improves with the square root of total computation: doubling clients, local epochs, or rounds each provides diminishing returns. To halve the optimality gap, the system must quadruple total computation.
+
+The product $CER$ represents total client-epochs, the fundamental unit of federated computation. A system with 10 clients performing 5 local epochs over 100 rounds ($CER = 5000$) achieves similar convergence to one with 50 clients performing 2 epochs over 50 rounds ($CER = 5000$), assuming identical data distributions. This equivalence enables flexible resource allocation: bandwidth-constrained deployments can compensate with more local computation, while computation-constrained devices can rely on more frequent communication.
+
+**Non-IID Data Impact.** The convergence rate above assumes IID data across clients, an assumption that rarely holds in practice. When client data distributions differ, a heterogeneity penalty $\beta$ degrades convergence:
+
+$$
+\mathbb{E}[F(\theta^R) - F(\theta^*)] \leq \mathcal{O}\left(\frac{\beta}{\sqrt{CER}} + \frac{\beta^2 E^2}{R}\right)
+$$
+
+The heterogeneity factor $\beta$ quantifies the divergence between local and global optima. Formally, $\beta^2 = \frac{1}{K}\sum_{k=1}^{K} \|\nabla F_k(\theta^*) - \nabla F(\theta^*)\|^2$ measures how much local gradients disagree at the global optimum [@li2020federated; @zhao2018federated]. When data is IID, $\beta = 0$ and the bound reduces to the standard rate. When data is highly heterogeneous, $\beta$ can exceed 1, significantly slowing convergence.
+
+The second term $\frac{\beta^2 E^2}{R}$ reveals a critical interaction: more local epochs $E$ amplify the heterogeneity penalty. Each additional local step moves the local model further from the global optimum before aggregation, and these deviations compound across heterogeneous clients. This creates a communication-computation trade-off that depends on data distribution characteristics.
+
+**Quantifying Heterogeneity in Practice.** Real-world federated deployments exhibit $\beta$ values that vary dramatically by application domain. Keyboard prediction across users speaking the same language typically shows $\beta \approx 0.3$-$0.8$, as vocabulary and typing patterns vary but share common linguistic structure. Cross-language keyboard prediction increases to $\beta \approx 1.5$-$3.0$ due to fundamentally different character distributions and word patterns. Health monitoring with diverse patient populations can reach $\beta \approx 2.0$-$5.0$ when physiological baselines vary dramatically across age groups, fitness levels, and medical conditions.
+
+**Worked Example: Federated Learning with 100 Clients.** Consider a production deployment with the following parameters: $K = 100$ total clients in the population, $C = 10$ clients selected per round, $E = 5$ local epochs per round, target optimality gap $\epsilon = 0.01$, and two scenarios comparing IID data ($\beta = 0$) versus moderately non-IID data ($\beta = 1.5$).
+
+*IID Case ($\beta = 0$):* Using the convergence bound $\epsilon \leq \frac{\sigma}{\sqrt{CER}}$ where $\sigma$ captures gradient variance (typically $\sigma \approx 1$ for normalized objectives), we solve for required rounds:
+
+$$
+R_{\text{IID}} \geq \frac{\sigma^2}{C \cdot E \cdot \epsilon^2} = \frac{1}{10 \cdot 5 \cdot 0.0001} = 200 \text{ rounds}
+$$
+
+With 10 clients per round and 5 local epochs, this represents $200 \times 10 \times 5 = 10,000$ total client-epochs of computation.
+
+*Non-IID Case ($\beta = 1.5$):* The heterogeneity penalty requires satisfying both terms of the bound. The dominant constraint becomes:
+
+$$
+\frac{\beta^2 E^2}{R} \leq \epsilon \implies R \geq \frac{\beta^2 E^2}{\epsilon} = \frac{2.25 \times 25}{0.01} = 5,625 \text{ rounds}
+$$
+
+This represents a $28\times$ increase in communication rounds compared to the IID case. The non-IID scenario requires $5,625 \times 10 \times 5 = 281,250$ client-epochs, demonstrating how data heterogeneity dominates convergence costs.
+
+*Reducing Local Epochs:* The quadratic dependence on $E$ suggests reducing local computation when heterogeneity is high. With $E = 2$ instead of $E = 5$:
+
+$$
+R \geq \frac{2.25 \times 4}{0.01} = 900 \text{ rounds}
+$$
+
+This reduces total rounds by $6.25\times$ at the cost of $2.5\times$ more communication per unit of local computation. The total client-epochs become $900 \times 10 \times 2 = 18,000$, a $15.6\times$ reduction from the $E = 5$ non-IID case. This illustrates why adaptive local epoch selection based on estimated data heterogeneity significantly improves federated learning efficiency.
+
+**Communication-Computation Trade-off.** The interaction between local epochs and communication rounds creates a fundamental design trade-off visualized in @fig-convergence-tradeoff. More local epochs reduce communication frequency but increase client drift, while fewer local epochs maintain tighter synchronization at higher communication cost.
+
+::: {.callout-note title="Figure: Communication-Computation Trade-off" collapse="false"}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85]
+  \definecolor{IIDColor}{RGB}{100,149,237}
+  \definecolor{NonIIDColor}{RGB}{220,20,60}
+
+  % Axes
+  \draw[->, thick] (0,0) -- (8,0) node[right] {Local Epochs $E$};
+  \draw[->, thick] (0,0) -- (0,5) node[above] {Rounds to $\epsilon$-optimal};
+
+  % IID curve (nearly flat)
+  \draw[IIDColor, line width=1.5pt] plot[smooth] coordinates {(0.5,1.2) (2,1.0) (4,0.9) (6,0.85) (7.5,0.82)};
+  \node[IIDColor, right] at (7.5,1.2) {IID ($\beta=0$)};
+
+  % Non-IID curve (quadratic growth)
+  \draw[NonIIDColor, line width=1.5pt] plot[smooth] coordinates {(0.5,0.8) (2,1.5) (4,3.2) (6,4.5) (7,4.8)};
+  \node[NonIIDColor, right] at (5.5,4.8) {Non-IID ($\beta=1.5$)};
+
+  % Optimal region annotation
+  \draw[dashed, gray] (2,0) -- (2,1.5);
+  \node[below, font=\tiny] at (2,0) {Sweet spot};
+  \node[font=\tiny, align=center] at (4,2.2) {Client drift\\dominates};
+
+  % Axis labels
+  \node[below, font=\tiny] at (1,0) {1};
+  \node[below, font=\tiny] at (4,0) {5};
+  \node[below, font=\tiny] at (7,0) {10};
+  \node[left, font=\tiny] at (0,1) {100};
+  \node[left, font=\tiny] at (0,2.5) {500};
+  \node[left, font=\tiny] at (0,4) {1000};
+\end{tikzpicture}
+```
+**Communication-Computation Trade-off**. For IID data, increasing local epochs consistently reduces total communication with minimal penalty. For non-IID data, client drift causes convergence degradation beyond an optimal point (typically $E = 2$-$5$), making aggressive local computation counterproductive. System designers must estimate data heterogeneity to select appropriate operating points.
+:::
+
+The optimal operating point depends on deployment-specific factors. Communication cost (bandwidth, energy) favors larger $E$, while convergence speed under heterogeneity favors smaller $E$. Practical systems often use adaptive strategies that start with small $E$ and increase as the model approaches convergence and client drift diminishes.
+
+**When Does Federated Learning Work?** Based on convergence analysis and empirical validation across production deployments, federated learning achieves practical convergence when several conditions are met [@kairouz2021advances]. First, heterogeneity must remain bounded: $\beta < 3$ ensures the heterogeneity penalty does not dominate training time. Applications with $\beta > 5$ may require clustering clients into more homogeneous groups or using personalization techniques rather than training a single global model. Second, client participation must be sufficient: at least 1% of the total client population should be available per round ($C/K > 0.01$) to ensure adequate gradient diversity. With participation below this threshold, gradient estimates become too noisy for stable convergence. Third, local data must be adequate: each participating client needs sufficient local data for meaningful gradient computation, typically at least 10-50 samples per round. Clients with fewer samples contribute high-variance updates that can destabilize training.
+
+When these conditions are violated, alternative approaches become necessary. Extremely heterogeneous data ($\beta > 5$) suggests hierarchical federated learning with regional aggregation or fully personalized models without global aggregation. Very low participation rates indicate the need for asynchronous protocols that do not require synchronized rounds. Clients with minimal local data benefit from few-shot adaptation techniques rather than gradient-based training.
+
 #### Client Scheduling {#sec-edge-intelligence-client-scheduling-f675}
 
 Federated learning operates under the assumption that clients, devices, which hold local data, periodically become available for participation in training rounds. In real-world systems, client availability is intermittent and variable. Devices may be turned off, disconnected from power, lacking network access, or otherwise unable to participate at any given time. As a result, client scheduling plays a central role in the effectiveness and efficiency of distributed learning.

@@ -955,7 +955,7 @@ Effective fault tolerance extends beyond detection to encompass adaptive perform
 
 Fault detection techniques, including hardware-level and software-level approaches, and effective mitigation strategies enhance the resilience of ML systems. Resilient ML system design considerations, case studies, and research in fault-tolerant ML systems provide insights into building robust systems.
 
-Robust fault mitigation requires coordinated adaptation across the entire ML system stack. While the focus here is on fault detection and basic recovery mechanisms, comprehensive performance adaptation strategies are implemented through dynamic resource management, fault-tolerant distributed training approaches that synchronize updates across multiple nodes, and adaptive model optimization techniques including quantization and pruning that maintain performance under resource constraints. These adaptation strategies ensure that ML systems not only detect and recover from faults but also maintain optimal performance through intelligent resource allocation and model complexity adjustment. The future paradigms for more robust architectures that address fundamental vulnerabilities are explored in @sec-agi-systems.
+Robust fault mitigation requires coordinated adaptation across the entire ML system stack. While the focus here is on fault detection and basic recovery mechanisms, comprehensive performance adaptation strategies are implemented through dynamic resource management, fault-tolerant distributed training approaches that synchronize updates across multiple nodes, and adaptive model optimization techniques including quantization and pruning that maintain performance under resource constraints. These adaptation strategies ensure that ML systems not only detect and recover from faults but also maintain optimal performance through intelligent resource allocation and model complexity adjustment. The future paradigms for more robust architectures that address fundamental vulnerabilities are explored in @sec-emerging-systems.
 
 #### Hardware Fault Detection Methods {#sec-robust-ai-hardware-fault-detection-methods-ea71}
 
@@ -1845,6 +1845,211 @@ Online learning enables models to continuously adapt to new data while maintaini
 Model ensembles and selection maintain multiple models specialized for different environmental conditions, dynamically selecting the most appropriate model based on detected environmental characteristics [@ross2013model]. Ensemble systems with 3-7 models achieve 8-15% better accuracy than single models under distribution shift, with selection overhead of 2-5&nbsp;ms per prediction. Dynamic weighting based on recent performance (sliding windows of 500-2,000 samples) provides optimal adaptation to gradual drift.
 
 Federated learning enables distributed adaptation across multiple deployment environments while preserving privacy. FL systems with 50-1,000 participants achieve convergence in 10-50 communication rounds, each requiring 10-100&nbsp;MB of parameter transmission depending on model size. Local training typically requires 5-20 epochs per round, with communication costs dominating when bandwidth falls below 1 Mbps. Differential privacy (ε = 1.0-8.0) adds noise but maintains model utility above 90% for most applications.
+
+### Quantitative Drift Detection {#sec-robust-ai-quantitative-drift-detection}
+
+While the previous section introduced statistical distance metrics conceptually, production ML systems require rigorous quantitative methods for detecting distribution drift and making principled retraining decisions. This section develops the mathematical foundations and operational thresholds that transform drift detection from an art into an engineering discipline.
+
+#### Population Stability Index (PSI) {#sec-robust-ai-psi}
+
+The Population Stability Index quantifies how much a distribution has shifted between two time periods, originally developed for credit scoring validation and now widely applied in ML model monitoring [@yurdakul2018statistical]. PSI measures the divergence between an expected (baseline) distribution $P$ and an actual (current) distribution $Q$ by computing the symmetric difference in log-odds across discretized bins.
+
+For a feature discretized into $k$ bins, PSI is defined as:
+
+$$
+\text{PSI} = \sum_{i=1}^{k} (p_i - q_i) \times \ln\left(\frac{p_i}{q_i}\right)
+$$ {#eq-psi}
+
+where $p_i$ represents the proportion of observations in bin $i$ for the baseline distribution and $q_i$ represents the corresponding proportion in the current distribution. The logarithmic term penalizes large relative changes, while the $(p_i - q_i)$ term weights by absolute magnitude.
+
+::: {.callout-note title="PSI Interpretation Thresholds"}
+Established industry thresholds provide actionable guidance for drift response:
+
+| PSI Value | Interpretation | Recommended Action |
+|-----------|----------------|-------------------|
+| PSI < 0.1 | Negligible shift | Continue monitoring |
+| 0.1 ≤ PSI < 0.2 | Minor shift | Investigate root cause |
+| 0.2 ≤ PSI < 0.25 | Moderate shift | Consider retraining |
+| PSI ≥ 0.25 | Major shift | Retrain required |
+
+These thresholds derive from empirical studies showing that PSI > 0.2 correlates with statistically significant performance degradation (p < 0.05) in most production systems [@yurdakul2018statistical].
+:::
+
+**Practical Considerations for PSI Computation**
+
+Bin selection significantly affects PSI sensitivity. For categorical features, each category forms a natural bin. For continuous features, equal-width bins (10-20 bins typical) or quantile-based bins provide different trade-offs: equal-width bins preserve the absolute scale of the feature space, while quantile bins ensure adequate sample sizes in each bin but may mask shifts in the tails. Production systems often use 10 bins with a minimum of 5% of observations per bin to ensure statistical stability.
+
+When a bin has zero observations in either distribution, adding a small smoothing constant (typically $\epsilon = 10^{-8}$) prevents undefined logarithms while minimally affecting the PSI value.
+
+#### Kullback-Leibler Divergence {#sec-robust-ai-kl-divergence}
+
+For continuous features where binning may lose information, Kullback-Leibler (KL) divergence provides a more direct measure of distributional difference. The KL divergence from distribution $P$ to distribution $Q$ is defined as:
+
+$$
+D_{\text{KL}}(P \| Q) = \int_{-\infty}^{\infty} p(x) \ln\left(\frac{p(x)}{q(x)}\right) dx
+$$ {#eq-kl-divergence}
+
+where $p(x)$ and $q(x)$ are the probability density functions of the baseline and current distributions, respectively. Unlike PSI, KL divergence is asymmetric: $D_{\text{KL}}(P \| Q) \neq D_{\text{KL}}(Q \| P)$. For drift detection, we typically compute $D_{\text{KL}}(\text{baseline} \| \text{current})$, measuring how much information is lost when using the current distribution to approximate the baseline.
+
+**Symmetric Variants**
+
+To address asymmetry, practitioners often use the Jensen-Shannon divergence:
+
+$$
+D_{\text{JS}}(P \| Q) = \frac{1}{2} D_{\text{KL}}(P \| M) + \frac{1}{2} D_{\text{KL}}(Q \| M)
+$$ {#eq-js-divergence}
+
+where $M = \frac{1}{2}(P + Q)$ is the mixture distribution. Jensen-Shannon divergence is bounded between 0 and $\ln(2)$ (approximately 0.693), making threshold selection more intuitive than unbounded KL divergence.
+
+**KL Divergence Interpretation**
+
+| $D_{\text{KL}}$ Value | Interpretation |
+|----------------------|----------------|
+| $D_{\text{KL}}$ < 0.05 | Minimal divergence |
+| 0.05 ≤ $D_{\text{KL}}$ < 0.1 | Moderate divergence |
+| $D_{\text{KL}}$ ≥ 0.1 | Significant divergence |
+
+For practical computation, kernel density estimation (KDE) with Gaussian kernels provides smooth density approximations suitable for integration, though computational cost scales as $O(n^2)$ for $n$ samples, making sampling necessary for large datasets.
+
+#### Statistical Significance Testing {#sec-robust-ai-statistical-significance}
+
+While PSI and KL divergence quantify the magnitude of distributional change, statistical hypothesis tests determine whether observed differences are statistically significant or attributable to sampling variability.
+
+**Kolmogorov-Smirnov Test**
+
+The two-sample Kolmogorov-Smirnov (KS) test [@berger2014kolmogorov] compares the empirical cumulative distribution functions (CDFs) of two samples without assuming any specific parametric form. The test statistic is:
+
+$$
+D_{n,m} = \sup_x |F_n(x) - G_m(x)|
+$$ {#eq-ks-test}
+
+where $F_n$ and $G_m$ are the empirical CDFs of samples of size $n$ and $m$ respectively. The null hypothesis (no distributional difference) is rejected when:
+
+$$
+D_{n,m} > c(\alpha) \sqrt{\frac{n + m}{nm}}
+$$ {#eq-ks-threshold}
+
+where $c(\alpha)$ depends on the significance level (e.g., $c(0.05) \approx 1.36$). The KS test is particularly effective for detecting shifts in location (mean) and spread (variance) but less sensitive to changes in distribution shape.
+
+**Chi-Square Test for Categorical Features**
+
+For categorical features, the chi-square goodness-of-fit test compares observed frequencies to expected frequencies under the baseline distribution:
+
+$$
+\chi^2 = \sum_{i=1}^{k} \frac{(O_i - E_i)^2}{E_i}
+$$ {#eq-chi-square}
+
+where $O_i$ is the observed count in category $i$ and $E_i$ is the expected count based on the baseline distribution. With $k-1$ degrees of freedom, the null hypothesis is rejected when $\chi^2$ exceeds the critical value for significance level $\alpha$.
+
+**Multiple Testing Correction**
+
+When monitoring many features simultaneously, applying Bonferroni correction (dividing $\alpha$ by the number of tests) or false discovery rate (FDR) control prevents excessive false alarms. For $m$ features at significance level $\alpha = 0.05$, Bonferroni requires each test to achieve $p < 0.05/m$ for significance.
+
+#### Worked Example: Production Fraud Detection Model {#sec-robust-ai-drift-worked-example}
+
+Consider a fraud detection model serving an e-commerce platform with two key input features: user country (categorical) and transaction amount (continuous). After six months in production, the operations team suspects distribution drift and must decide whether to retrain.
+
+**Step 1: Categorical Feature Analysis (User Country)**
+
+The baseline (training) distribution and current (production) distribution for the top 5 countries:
+
+| Country | Baseline ($p_i$) | Current ($q_i$) | $p_i - q_i$ | $\ln(p_i/q_i)$ | Contribution |
+|---------|------------------|-----------------|-------------|----------------|--------------|
+| USA | 0.45 | 0.38 | 0.07 | 0.169 | 0.0118 |
+| UK | 0.20 | 0.18 | 0.02 | 0.105 | 0.0021 |
+| Germany | 0.15 | 0.14 | 0.01 | 0.069 | 0.0007 |
+| France | 0.10 | 0.12 | -0.02 | -0.182 | 0.0036 |
+| Other | 0.10 | 0.18 | -0.08 | -0.588 | 0.0470 |
+
+$$
+\text{PSI}_{\text{country}} = 0.0118 + 0.0021 + 0.0007 + 0.0036 + 0.0470 = 0.065
+$$
+
+The PSI of 0.065 indicates negligible drift in user country distribution, falling well below the 0.1 threshold. No action required for this feature.
+
+**Step 2: Continuous Feature Analysis (Transaction Amount)**
+
+For the transaction amount feature (log-transformed for normality), compute KL divergence using kernel density estimation:
+
+- Baseline distribution: $\mu = 4.2$, $\sigma = 1.1$ (log-dollars)
+- Current distribution: $\mu = 4.5$, $\sigma = 1.3$ (log-dollars)
+
+For approximately Gaussian distributions, KL divergence has a closed-form solution:
+
+$$
+D_{\text{KL}} = \ln\frac{\sigma_Q}{\sigma_P} + \frac{\sigma_P^2 + (\mu_P - \mu_Q)^2}{2\sigma_Q^2} - \frac{1}{2}
+$$
+
+$$
+D_{\text{KL}} = \ln\frac{1.3}{1.1} + \frac{1.1^2 + (4.2 - 4.5)^2}{2 \times 1.3^2} - 0.5 = 0.167 + 0.385 - 0.5 = 0.052
+$$
+
+The KL divergence of 0.052 indicates moderate drift, warranting further investigation but not immediate retraining.
+
+**Step 3: Statistical Significance via KS Test**
+
+Using the KS test on 10,000 baseline samples and 10,000 current samples for transaction amount:
+
+$$
+D_{10000,10000} = 0.089
+$$
+
+Critical value at $\alpha = 0.05$: $c(0.05) \sqrt{\frac{20000}{10^8}} \approx 0.019$
+
+Since $0.089 > 0.019$, the difference is statistically significant (p < 0.001). However, statistical significance alone does not mandate retraining; the practical significance (PSI, KL values) suggests monitoring rather than immediate action.
+
+**Step 4: Decision Framework Application**
+
+Combining the quantitative evidence:
+
+| Metric | Value | Threshold | Action Level |
+|--------|-------|-----------|--------------|
+| PSI (country) | 0.065 | < 0.1 | Monitor |
+| $D_{\text{KL}}$ (amount) | 0.052 | < 0.1 | Monitor |
+| KS test | p < 0.001 | $\alpha$ = 0.05 | Significant |
+
+**Decision**: Continue monitoring with increased frequency (weekly instead of monthly). If PSI or KL divergence exceeds 0.1 in the next monitoring cycle, or if model performance metrics (precision, recall) degrade by more than 5%, initiate retraining.
+
+#### Retraining Decision Framework {#sec-robust-ai-retraining-framework}
+
+A systematic decision framework integrates drift metrics with performance monitoring to determine optimal retraining timing. The framework operates on three levels.
+
+**Level 1: Automated Monitoring**
+
+Configure automated alerts for:
+
+- PSI > 0.1 on any high-importance feature
+- KL divergence > 0.05 on continuous features
+- KS test p-value < 0.01 with Bonferroni correction
+
+**Level 2: Performance Correlation**
+
+When drift alerts trigger, correlate with model performance:
+
+- If performance degradation > 3% coincides with drift: Initiate retraining
+- If drift detected but performance stable: Continue monitoring, investigate drift source
+- If performance degrades without detected drift: Investigate concept drift or label shift
+
+**Level 3: Retraining vs. Investigation**
+
+Not all drift requires retraining. The decision tree:
+
+1. **Retrain immediately** when:
+   - PSI > 0.25 on critical features AND performance degraded > 5%
+   - Concept drift confirmed (P(y|x) changed)
+   - Regulatory or compliance requirements mandate fresh models
+
+2. **Investigate first** when:
+   - PSI 0.1-0.25 with stable performance
+   - Drift localized to non-predictive features
+   - Drift may be temporary (seasonal effects, one-time events)
+
+3. **Continue monitoring** when:
+   - PSI < 0.1 across all features
+   - Performance within acceptable bounds
+   - No external signals suggesting environmental change
+
+This quantitative framework transforms drift detection from reactive troubleshooting into proactive model maintenance, enabling ML systems to maintain reliability as production environments evolve [@gama2014survey].
 
 ### Robustness in Generative AI {#sec-robust-ai-generative}
 

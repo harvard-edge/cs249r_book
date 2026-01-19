@@ -545,6 +545,57 @@ If checkpoints occur hourly, the system wastes **$24,000 per day** simply waitin
 
 : **Checkpoint Overhead by Model Type**: Larger models with correspondingly larger checkpoints require longer save times but also benefit from longer optimal checkpoint intervals. The percentage overhead remains manageable (under 5%) for most configurations. {#tbl-checkpoint-overhead-by-model}
 
+::: {.callout-example title="Systems Sandwich: Debugging Checkpoint Overhead"}
+
+A team training a 70B parameter model observes that checkpointing takes 10 minutes per checkpoint, far exceeding their expected 2-minute target. Training throughput has dropped 30% because the cluster sits idle during checkpoints. How do we diagnose and resolve this?
+
+**The Systems Sandwich Diagnosis**
+
+The Systems Sandwich framework (@sec-vol2-introduction) structures our investigation across three layers:
+
+**Physical Layer Analysis (Infrastructure)**
+
+We begin at the bottom of the sandwich, examining the hardware constraints:
+
+- **Model state size**: 70B parameters $\times$ 2 bytes (BF16) = 140 GB for weights, plus 280 GB for Adam optimizer states (first and second moments), totaling approximately 420 GB per checkpoint
+- **Storage system**: Shared NFS filer with 10 Gbps network attachment
+- **Theoretical bandwidth**: 10 Gbps = 1.25 GB/s maximum throughput
+- **Minimum write time**: 420 GB / 1.25 GB/s = 336 seconds (5.6 minutes)
+
+The physical layer reveals our first insight: even with perfect efficiency, the NFS bandwidth cannot achieve a 2-minute checkpoint for this model size.
+
+**Operational Layer Analysis (Distribution Logic)**
+
+Moving to the middle layer, we examine the checkpoint coordination:
+
+- **Checkpoint mode**: Synchronous, all 512 GPUs pause and wait
+- **Write pattern**: All 64 nodes writing simultaneously to shared NFS
+- **Observed behavior**: 10-minute writes instead of the 5.6-minute theoretical minimum
+
+The operational layer reveals contention: 64 nodes competing for 10 Gbps creates severe congestion. Each node effectively receives only 156 MB/s (10 Gbps / 64 nodes), extending checkpoint time to 420 GB / 0.156 GB/s $\approx$ 45 minutes per node if writes were serialized. The observed 10 minutes reflects partial parallelism with significant queuing delays.
+
+**Societal Layer Analysis (Control Plane)**
+
+At the top layer, we consider organizational constraints:
+
+- **SLA requirement**: Training must complete within 2 weeks
+- **Current trajectory**: 30% overhead extends training to 2.6 weeks
+- **Budget impact**: Extended training incurs additional $500K in compute costs
+
+**The Solution: Layer-Aware Fix**
+
+Understanding all three layers enables a targeted solution:
+
+1. **Physical Layer**: Install local NVMe staging drives (3.5 GB/s per node)
+2. **Operational Layer**: Implement asynchronous checkpointing:
+   - Phase 1: GPU $\rightarrow$ CPU memory copy (fast, 32 GB/s PCIe)
+   - Phase 2: CPU $\rightarrow$ local NVMe (3.5 GB/s, training resumes)
+   - Phase 3: Background NVMe $\rightarrow$ NFS copy (overlapped with training)
+3. **Validation**: New checkpoint overhead drops to 12 seconds (GPU-to-CPU copy), reducing training impact from 30% to under 1%
+
+This example illustrates the Systems Sandwich principle: diagnosing distributed systems failures requires examining all layers. A purely algorithmic fix (Operational Layer) would fail because the physical bandwidth was insufficient. A purely hardware fix (Physical Layer) would be wasteful without understanding the coordination pattern. The solution required changes at multiple layers working in concert.
+:::
+
 #### Synchronous vs Asynchronous Checkpointing {#sec-sync-async-checkpoint-ft}
 
 The synchronous and asynchronous checkpointing approaches examined in @sec-storage create different failure recovery trade-offs. **Synchronous checkpointing** guarantees a globally consistent state, with all workers at the same training step, simplifying recovery logic. All workers coordinate to reach a consistent state, write their portions, and resume training only after all writes complete.

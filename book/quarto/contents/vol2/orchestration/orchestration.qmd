@@ -28,6 +28,10 @@ While @sec-cluster-networking built the physical nervous system of the fleet (In
 
 ## Introduction {#sec-orch-introduction}
 
+::: {.callout-note title="Connection: The Systems Sandwich"}
+In the **Systems Sandwich** model of Volume II (introduced in @sec-vol2-introduction), Orchestration operates at the **Operational Layer (Distribution)**, but its decisions are fundamentally constrained by the **Physical Layer (Infrastructure)**. The scheduler must reason about physical realities: GPU heterogeneity, NVLink topology, rack power limits, and network bisection bandwidth. When scheduling goes wrong, debugging requires examining all three layers to identify whether the root cause is physical (hardware constraints), logical (algorithm limitations), or operational (policy misconfiguration). The Systems Sandwich provides a systematic framework for this diagnosis.
+:::
+
 Training GPT-3 required 1024 A100 GPUs running continuously for 34 days [@brown2020language]. Now consider a research organization operating a 10,000 GPU cluster with 100 such training jobs queued, alongside thousands of smaller experiments and inference workloads competing for the same resources. How should the system decide which jobs run, when they run, and where they run? This scheduling problem sits at the heart of large-scale ML infrastructure.
 
 The economic stakes are substantial. Consider the cost of poor scheduling decisions: a 10,000 GPU cluster at $2 per GPU-hour costs $480,000 per day to operate. If scheduling inefficiencies leave 30 percent of GPUs idle, that translates to $144,000 per day in wasted capacity, or over $52 million annually. Conversely, improving utilization from 50 percent to 80 percent effectively adds 6,000 GPUs worth of productive capacity without purchasing additional hardware.
@@ -227,6 +231,78 @@ Research schedulers have demonstrated significant improvements over general-purp
 **Themis** [@mahajan2020themis] addresses fairness in long-running ML workloads. Traditional fair-share treats all GPU-seconds equally, but ML jobs have diminishing returns as training progresses. Themis defines a finish-time fairness metric, allocating resources to minimize the maximum slowdown any job experiences relative to exclusive access. This approach benefits shorter jobs without excessive penalty to longer ones.
 
 Locality-aware scheduling recognizes that communication topology matters for distributed training. A 64-GPU job performs better on 8 nodes of 8 GPUs each than 16 nodes of 4 GPUs, due to higher NVLink bandwidth within nodes. Advanced schedulers consider the fat-tree topology discussed in @sec-networking-ml, preferring allocations that share fewer switch hops. Experiments show 15 to 30 percent training throughput improvement from topology-aware placement.
+
+::: {.callout-example title="Systems Sandwich: Debugging Low GPU Utilization"}
+
+**The Problem**: A 1,000-GPU cluster reports 60% average utilization despite a full job queue with over 50 pending jobs. Engineering leadership expects greater than 85% utilization given the capital investment. The standard monitoring dashboards show plenty of idle GPUs, yet users complain about long queue times. Where is the problem, and how do we systematically diagnose it?
+
+The **Systems Sandwich** framework (introduced in @sec-vol2-introduction) provides a structured approach: analyze the Physical Layer first to understand hardware constraints, then the Operational Layer to understand scheduling logic, and finally the interaction between layers to identify the root cause.
+
+**Physical Layer Analysis**: The cluster contains heterogeneous hardware acquired over three procurement cycles:
+
++------------------+------------+------------------+--------------------+-------------------+
+| **GPU Type**     | **Count**  | **Memory**       | **Interconnect**   | **Nodes**         |
++:=================+===========:+:=================+:===================+:==================+
+| A100-80GB        | 400        | 80 GB HBM2e      | NVLink (600 GB/s)  | 50 nodes x 8 GPUs |
++------------------+------------+------------------+--------------------+-------------------+
+| A100-40GB        | 400        | 40 GB HBM2e      | NVLink (600 GB/s)  | 50 nodes x 8 GPUs |
++------------------+------------+------------------+--------------------+-------------------+
+| V100-32GB        | 200        | 32 GB HBM2       | PCIe Gen3 (32 GB/s)| 50 nodes x 4 GPUs |
++------------------+------------+------------------+--------------------+-------------------+
+
+The physical topology creates three distinct resource pools with different capabilities. The A100 nodes support efficient tensor parallelism via NVLink, while V100 nodes are limited to data parallelism due to PCIe bandwidth constraints.
+
+**Operational Layer Analysis**: The Slurm scheduler implements gang scheduling with strict resource type matching. Examining the job specifications reveals the demand pattern:
+
+- 15 large training jobs requesting 64+ A100-80GB GPUs (total demand: 1,200 A100-80GB GPUs)
+- 8 medium jobs requesting 32 A100-40GB GPUs (total demand: 256 A100-40GB)
+- Zero jobs explicitly requesting V100 resources
+
+The scheduler's allocation log shows A100-80GB GPUs at 95% allocation (380/400), but with only 5 jobs actually running because gang scheduling holds resources for jobs that cannot yet be fully satisfied. The remaining 10 large jobs each hold partial allocations (64-96 GPUs reserved) while waiting for additional A100-80GB resources that never become available, creating a **hold-and-wait deadlock pattern**.
+
+**Diagnosis**: Multiple pathologies compound to create low utilization:
+
+1. **Over-specification**: Model memory analysis reveals that 12 of the 15 large jobs actually require only 45 GB peak memory per GPU, well within A100-40GB capacity. Users copied job templates specifying A100-80GB without recalculating requirements.
+
+2. **Pool fragmentation**: The strict homogeneity requirement means a 64-GPU job requesting "A100-80GB" cannot use any A100-40GB GPUs, even when 300 A100-40GB GPUs sit idle.
+
+3. **Stranded resources**: No jobs target V100 hardware because researchers perceive it as "legacy." The 200 V100 GPUs contribute zero productive work despite consuming power and cooling.
+
+4. **Gang scheduling deadlock**: Without a timeout or preemption policy, partially-satisfied jobs hold resources indefinitely, blocking other work.
+
+**Root Cause (Policy-Infrastructure Mismatch)**: Job templates and organizational practices evolved for a homogeneous A100-80GB cluster. When infrastructure expanded with heterogeneous hardware, the Operational Layer policies were never updated. The scheduler correctly implements its configured policy; the policy itself creates the utilization gap.
+
+**Solution**: Implement tiered resource matching with topology awareness:
+
+1. **Capability-based scheduling**: Replace exact GPU type requests with capability requirements. Instead of `--gres=gpu:a100-80g:64`, jobs specify `--constraint="gpu_mem>=40GB"` and let the scheduler select appropriate hardware.
+
+2. **Topology-aware placement**: For jobs requiring tensor parallelism, add constraint `--constraint="nvlink"` to ensure placement on NVLink-connected nodes. Data-parallel jobs can omit this constraint to enable V100 scheduling.
+
+3. **Gang scheduling with timeout**: Configure `SchedulerParameters=bf_continue,bf_window=7200` to enable backfill scheduling and prevent indefinite resource holding. Jobs waiting more than 2 hours for gang completion release partial allocations.
+
+4. **Workload-hardware matching guidance**: Provide researchers with a decision matrix mapping model sizes to minimum GPU memory requirements, reducing over-specification.
+
+**Quantified Impact**: After implementing tiered matching and backfill scheduling over a two-week validation period:
+
++------------------+------------------+------------------+------------------+
+| **Pool**         | **Before**       | **After**        | **Change**       |
++:=================+=================:+=================:+=================:+
+| A100-80GB        | 95% allocated,   | 89% allocated,   | +5% effective    |
+|                  | 72% effective    | 94% effective    |                  |
++------------------+------------------+------------------+------------------+
+| A100-40GB        | 64% allocated    | 88% allocated    | +24%             |
++------------------+------------------+------------------+------------------+
+| V100             | 0% allocated     | 71% allocated    | +71%             |
++------------------+------------------+------------------+------------------+
+| **Cluster-wide** | **60%**          | **84%**          | **+40%**         |
++------------------+------------------+------------------+------------------+
+
+The distinction between "allocated" and "effective" utilization captures the gang scheduling deadlock: before the fix, A100-80GB GPUs showed high allocation in Slurm but low actual compute utilization because allocated jobs could not start.
+
+This 40% improvement in effective cluster capacity equals approximately 400 additional GPUs worth of productive work. At $2 per GPU-hour, this represents $7 million in annual recovered value, achieved through policy changes requiring zero additional hardware investment.
+
+**The Systems Sandwich Lesson**: Surface-level diagnosis suggested a scheduling algorithm problem (Operational Layer), perhaps requiring a more sophisticated scheduler. Deeper analysis revealed the root cause as a **mismatch between Physical Layer heterogeneity and Operational Layer policies designed for homogeneous infrastructure**. The scheduler worked correctly; it implemented the wrong policy. Effective debugging required examining both layers and their interaction, recognizing that infrastructure evolution had invalidated assumptions embedded in job templates and scheduling configuration. The fix addressed the policy layer, not the algorithm layer.
+:::
 
 ### Online Serving Resource Management
 

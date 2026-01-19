@@ -42,7 +42,9 @@ Training and serving are fundamentally different computational paradigms requiri
 
 ## The Serving Paradigm {#sec-serving-paradigm}
 
-Parts I through III built a complete foundation for creating optimized ML models. You understand where systems deploy (@sec-ml-systems), how data flows through pipelines (@sec-data-engineering), what neural networks compute (@sec-dl-primer, @sec-dnn-architectures), how frameworks enable implementation (@sec-ai-frameworks), and how training produces learned models (@sec-ai-training). Part III then addressed making those models efficient: the conceptual framework for efficiency (@sec-introduction), specific optimization techniques (@sec-model-compression), hardware acceleration strategies (@sec-ai-acceleration), and measurement methodologies for validating improvements (@sec-benchmarking-ai). The result is an optimized model ready for deployment. Part IV addresses what happens next: delivering predictions to users in production.
+If **Benchmarking** (@sec-benchmarking-ai) is the sensor of our deployment control loop, then **Serving** is the actuator—the high-performance execution of the Silicon Contract in the face of unpredictable user demand. In this phase, the **Iron Law** moves from the laboratory into the wild, where we must minimize **Overhead** while balancing the needs of individual users against the economics of throughput.
+
+Parts I through III built a complete foundation...
 
 Serving introduces a fundamental inversion that transforms everything established in prior chapters. Training optimizes for samples processed per hour over days of computation. Serving must deliver predictions within milliseconds under unpredictable load. @sec-benchmarking-ai established techniques for measuring throughput and accuracy under controlled conditions; production serving faces traffic patterns that no benchmark could anticipate. @sec-model-compression provided quantization methods that reduced model size; serving must validate that those optimizations preserve accuracy under real traffic distributions. This inversion from throughput to latency, from controlled to unpredictable, from offline to real time defines the serving challenge.
 
@@ -662,7 +664,21 @@ The throughput-latency tradeoff for ResNet-50 on a V100 GPU illustrates the powe
 
 :::
 
-However, batching forces requests to wait. A request arriving just after a batch closes must wait for the current batch to complete plus full processing of its own batch. This waiting time directly adds to user-perceived latency, creating the fundamental tradeoff that serving system designers navigate.
+::: {.callout-perspective title="Back-of-the-Napkin: The Batching Sweet Spot"}
+**Problem**: You are serving a ResNet-50 model. At batch=1, the GPU is mostly idle (15% utilization). You want to increase throughput to save money, but you have a **20 ms** latency budget.
+
+**The Math**:
+1.  **Baseline (Batch 1)**: Inference = **5 ms**. Throughput = **200 img/s**.
+2.  **Optimized (Batch 8)**:
+    - **Wait Time**: You set a **5 ms** batching window to collect requests.
+    - **Inference Time**: Batch 8 inference takes **9 ms**.
+    - **User Latency**: $5 \text{ ms (wait)} + 9 \text{ ms (compute)} = \mathbf{14 \text{ ms}}$.
+    - **Throughput**: $8 \text{ img} / 14 \text{ ms} \approx \mathbf{570 \text{ img/s}}$.
+
+**The Systems Conclusion**: By accepting a **3x increase in latency** (5ms $\rightarrow$ 14ms), you have achieved nearly **3x higher throughput** on the same hardware. As long as 14ms is under your 20ms budget, this is "free" capacity. This trade-off is the fundamental lever of serving economics.
+:::
+
+However, batching forces requests to wait...
 
 ### Static vs Dynamic Batching {#sec-serving-batching-types}
 
@@ -1232,6 +1248,16 @@ The model processes the 1,000-token prompt in parallel. On an H100, this compute
 **2. Decode Phase (Time Per Output Token)**
 
 The model generates 256 tokens sequentially. This phase is memory-bandwidth bound; the system must read the entire 3.5 GB weight tensor from VRAM to generate a single token.
+
+::: {.callout-perspective title="The Physics of Token Generation"}
+**The Memory Wall for Generative AI**: Because the decode phase has an arithmetic intensity of $\approx 1$ FLOP/byte (we read every weight to generate just one token), performance is strictly limited by memory bandwidth ($BW$), not compute.
+
+$$ T_{\text{token}} \approx \frac{\text{Model Size (Bytes)}}{\text{Memory Bandwidth (Bytes/s)}} $$
+
+**The Engineering Implication**:
+For Llama-3-7B (3.5 GB int4), an A100 (2 TB/s) generates tokens at $\approx 1.7$ ms/token. An H100 (3.3 TB/s) improves this to $\approx 1$ ms/token. Adding more *compute cores* yields **zero** latency improvement; only faster memory (or smaller models) can speed up generation.
+:::
+
 *   $T_{\text{token}} \approx \frac{3.5 \text{ GB}}{3.35 \text{ TB/s}} \approx 1 \text{ ms}$ (theoretical limit).
 *   Accounting for kernel launch overhead and attention computation, realized $T_{\text{token}}$ is approximately 10 ms.
 *   Total decode time = $256 \text{ tokens} \times 10 \text{ ms/token} = 2.56 \text{ seconds}$.

@@ -889,6 +889,228 @@ ImageNet training with 1000 WebDataset shards across 100 nodes:
 
 Locality provides 100x throughput improvement for this workload.
 
+### I/O Optimization for ML Data Pipelines {#sec-io-optimization}
+
+The bandwidth calculations in @sec-storage-throughput-requirements establish what storage systems must deliver. This section examines how to achieve those targets through systematic I/O optimization, addressing the gap between raw storage capabilities and effective training throughput.
+
+#### The I/O Bandwidth Requirement Equation {#sec-io-bandwidth-equation}
+
+Training pipelines must deliver data faster than GPUs consume it. When I/O bandwidth falls below GPU consumption rate, expensive accelerators idle waiting for data. The fundamental constraint is:
+
+::: {.callout-definition title="I/O Bandwidth Requirement"}
+
+For I/O not to bottleneck training, storage bandwidth must satisfy:
+
+$$B_{io} \geq B_{gpu} \times \frac{T_{preprocess}}{T_{batch}}$$
+
+where $B_{gpu}$ is the effective data consumption rate of the accelerator, $T_{preprocess}$ is the time to preprocess one batch (decode, augment, normalize), and $T_{batch}$ is the GPU batch processing time. The ratio $T_{preprocess}/T_{batch}$ represents how many batches must be in flight to hide preprocessing latency.
+
+:::
+
+This equation reveals that I/O requirements depend not just on GPU speed but on preprocessing complexity. Vision models with heavy augmentation (random crops, color jitter, mixup) may require 3-5x higher I/O bandwidth than the raw data consumption rate suggests, because preprocessing takes 3-5x longer than GPU computation.
+
+#### Sequential vs Random Access: The Performance Gap {#sec-sequential-vs-random}
+
+Storage device performance varies dramatically with access pattern. The numbers in @tbl-io-access-patterns reveal why data format and access pattern optimization matter more than raw device specifications.
+
++------------------+------------------------+------------------------+-----------------------+
+| **Storage Type** | **Sequential Read**    | **Random Read (4KB)**  | **Random/Sequential** |
++:=================+=======================:+=======================:+======================:+
+| **HDD (7200 RPM)**   | 150-200 MB/s       | 0.5-1 MB/s (100 IOPS)  | 0.3-0.5%              |
+| **SATA SSD**         | 500-550 MB/s       | 200-400 MB/s           | 40-70%                |
+| **NVMe SSD**         | 3-7 GB/s           | 500 MB/s - 1.5 GB/s    | 15-25%                |
+| **NVMe (4x RAID 0)** | 12-25 GB/s         | 2-6 GB/s               | 15-25%                |
++------------------+------------------------+------------------------+-----------------------+
+
+: **Storage Performance by Access Pattern**: HDDs suffer 200-300x degradation for random access due to mechanical seek time; SSDs suffer 4-7x degradation due to small transfer sizes not amortizing controller overhead. ML training pipelines must be designed for sequential access to achieve advertised throughput. {#tbl-io-access-patterns}
+
+The performance gap between sequential and random access has profound implications for ML data pipelines:
+
+**HDDs are unusable for random access ML workloads.** A 7200 RPM HDD delivers 150-200 MB/s sequential throughput, sufficient for a modest training pipeline. But random 4KB reads (the pattern when accessing individual small images from disk) yield only 0.5-1 MB/s due to 8-10ms seek times. A dataset of 1 million individual JPEG files on HDD would require over 10 days to read randomly, versus 2 hours sequentially.
+
+**SSDs narrow but do not eliminate the gap.** NVMe SSDs achieve 3-7 GB/s sequential throughput, but random 4KB reads drop to 500 MB/s-1.5 GB/s. The 4-7x degradation occurs because small transfers do not amortize the fixed overhead per I/O operation (command processing, internal flash page reads). For ML, this means that storing images as individual files on NVMe still leaves significant performance on the table.
+
+**Aggregated formats recover sequential performance.** Converting a dataset from individual files to TFRecord, WebDataset, or Parquet transforms random access into sequential streaming. A WebDataset TAR archive containing 10,000 images reads at full sequential bandwidth (7 GB/s on NVMe) rather than random access rates (1.5 GB/s). This 4-5x throughput improvement often makes the difference between I/O-bound and compute-bound training.
+
+#### Worked Example: ImageNet Data Loading Bottleneck Analysis {#sec-imagenet-io-analysis}
+
+::: {.callout-example title="ImageNet I/O Bottleneck Analysis for ResNet-50"}
+
+Consider training ResNet-50 [@he2016resnet] on ImageNet [@deng2009imagenet] with a single NVIDIA A100 GPU. We analyze whether I/O bottlenecks training and quantify the benefit of format optimization.
+
+**Training configuration:**
+
+- Model: ResNet-50 (25.6M parameters)
+- Dataset: ImageNet (1.28M training images, ~150 KB average JPEG size)
+- Batch size: 256 images
+- Target throughput: 1000 images/second (achievable A100 throughput)
+- Preprocessing: Decode JPEG, random crop to 224x224, normalize, augment
+
+**Step 1: Calculate raw I/O requirement**
+
+$$B_{raw} = 1000 \text{ images/s} \times 150 \text{ KB/image} = 150 \text{ MB/s}$$
+
+This 150 MB/s requirement seems modest. Even an HDD could sustain this rate for sequential reads.
+
+**Step 2: Account for access pattern**
+
+ImageNet stored as individual JPEG files (the common download format) creates a directory structure with 1000 class folders. Training with shuffling requires random access across the entire dataset:
+
+- HDD random read: ~100 IOPS = 100 images/s (10x slower than target)
+- NVMe random read: ~300K IOPS = 300K images/s (sufficient, with overhead)
+
+**Step 3: Account for preprocessing overhead**
+
+JPEG decoding and augmentation require CPU time. Typical preprocessing costs:
+
+- JPEG decode: 2-5 ms per image
+- Augmentation (crop, flip, normalize): 1-2 ms per image
+- Total preprocessing: 3-7 ms per image
+
+For 256-image batches at 1000 images/s:
+
+$$T_{batch} = \frac{256}{1000} = 256 \text{ ms}$$
+
+$$T_{preprocess} = 256 \times 5 \text{ ms} = 1280 \text{ ms (single-threaded)}$$
+
+Single-threaded preprocessing is 5x slower than GPU consumption. This requires 5 parallel workers to keep pace.
+
+**Step 4: Calculate effective I/O requirement**
+
+With preprocessing parallelism, effective I/O bandwidth must support 5 concurrent streams reading ahead:
+
+$$B_{effective} = 5 \times 150 \text{ MB/s} = 750 \text{ MB/s}$$
+
+**Step 5: Format optimization impact**
+
+| Configuration | Read Pattern | Achievable | Bottleneck? |
+|:--------------|:-------------|:-----------|:------------|
+| Individual JPEGs on HDD | Random | 15 MB/s | Yes (50x too slow) |
+| Individual JPEGs on NVMe | Random | 1.5 GB/s | No |
+| WebDataset on HDD | Sequential | 150 MB/s | Yes (5x too slow) |
+| WebDataset on NVMe | Sequential | 7 GB/s | No (9x headroom) |
+
+**Conclusion:** Individual JPEG storage on HDD creates a 50x I/O bottleneck. Converting to WebDataset and using NVMe provides 9x headroom, ensuring I/O never limits training throughput.
+
+:::
+
+#### Prefetching Benefit Quantification {#sec-prefetch-quantification}
+
+Prefetching overlaps I/O latency with GPU computation, but its benefit depends on the relationship between I/O latency, preprocessing time, and batch time.
+
+::: {.callout-definition title="Prefetch Efficiency"}
+
+The **prefetch efficiency** $\eta_{prefetch}$ measures how much of I/O latency is hidden:
+
+$$\eta_{prefetch} = \min\left(1, \frac{N_{prefetch} \times T_{batch}}{T_{io} + T_{preprocess}}\right)$$
+
+where $N_{prefetch}$ is the number of batches prefetched, $T_{batch}$ is GPU batch processing time, $T_{io}$ is I/O latency to fetch one batch, and $T_{preprocess}$ is preprocessing time per batch.
+
+When $\eta_{prefetch} = 1$, all I/O latency is hidden and the GPU never waits for data.
+
+:::
+
+**Numerical example: Prefetch buffer sizing**
+
+Consider a training pipeline with:
+
+- $T_{batch} = 200$ ms (GPU batch processing)
+- $T_{io} = 50$ ms (NVMe read latency for one batch)
+- $T_{preprocess} = 400$ ms (preprocessing with 4 workers)
+
+The I/O + preprocessing pipeline takes 450 ms end-to-end. To hide this latency:
+
+$$N_{prefetch} \geq \frac{T_{io} + T_{preprocess}}{T_{batch}} = \frac{450}{200} = 2.25$$
+
+Rounding up, 3 batches must be prefetched to achieve $\eta_{prefetch} = 1$.
+
+**Memory cost of prefetching:**
+
+Each prefetched batch consumes memory. For ImageNet with 256-image batches at 224x224x3 float32:
+
+$$\text{Memory per batch} = 256 \times 224 \times 224 \times 3 \times 4 = 154 \text{ MB}$$
+
+Three prefetched batches require 462 MB of CPU memory, a negligible cost on modern systems with 256+ GB DRAM.
+
+**Diminishing returns beyond the minimum:**
+
+Prefetching more than the minimum provides robustness against I/O latency variance. If I/O latency varies from 20-150 ms (typical for object storage), the worst-case pipeline time becomes:
+
+$$T_{pipeline,worst} = 150 + 400 = 550 \text{ ms}$$
+
+Required prefetch depth: $\lceil 550/200 \rceil = 3$ batches.
+
+Additional prefetch beyond this point provides diminishing returns: buffer 4 batches tolerates up to 400 ms latency spikes; buffer 5 tolerates up to 600 ms. The marginal benefit decreases while memory cost increases linearly.
+
+#### Data Format Performance Comparison {#sec-format-performance}
+
+Data format selection impacts both storage efficiency and read throughput. @tbl-format-performance compares common formats across dimensions relevant to ML training.
+
++----------------+------------------+----------------------+---------------------+----------------------+
+| **Format**     | **Read Speed**   | **Storage Overhead** | **Random Access**   | **Best For**         |
++:===============+=================:+=====================:+====================:+:=====================+
+| **Raw JPEG**   | 1x (baseline)    | None                 | Yes (slow)          | Small datasets       |
+| **TFRecord**   | 3-5x             | 5-10% (headers)      | No                  | TensorFlow pipelines |
+| **WebDataset** | 3-5x             | 1-2% (TAR headers)   | No                  | PyTorch, multi-modal |
+| **Parquet**    | 2-3x             | -20% (compression)   | Column-level        | Tabular/sparse data  |
+| **LMDB**       | 4-6x             | 10-20%               | Yes (fast)          | Repeated epochs      |
+| **HDF5**       | 2-4x             | 5-15%                | Yes (chunked)       | Scientific data      |
++----------------+------------------+----------------------+---------------------+----------------------+
+
+: **Data Format Performance Comparison**: Sequential formats (TFRecord, WebDataset) achieve 3-5x read speedup over individual files by eliminating per-file metadata overhead. LMDB provides fast random access through memory-mapped B-trees, ideal for workloads requiring non-sequential access. {#tbl-format-performance}
+
+**TFRecord** excels for TensorFlow pipelines, providing native integration with `tf.data` and supporting transparent compression. The 5-10% storage overhead from record headers is offset by optional GZIP/ZSTD compression that typically reduces total size by 10-30%.
+
+**WebDataset** uses the ubiquitous TAR format, enabling direct streaming from HTTP/S3 without custom readers. Its minimal 1-2% overhead makes it storage-efficient, and the format's simplicity ensures long-term readability.
+
+**Parquet** provides column pruning for tabular datasets where training uses a subset of features. A recommendation model training on 10 of 500 features reads only 2% of the data, yielding effective 50x speedup over row-oriented formats.
+
+**LMDB** (Lightning Memory-Mapped Database) maintains a B-tree index enabling O(log n) random access while achieving near-sequential read speeds through memory mapping. This makes LMDB ideal for workloads that require random access (such as curriculum learning or hard example mining) without sacrificing throughput.
+
+#### I/O Profiling and Diagnosis {#sec-io-profiling}
+
+Diagnosing I/O bottlenecks requires measurement at multiple levels. The following metrics identify where pipeline time is spent:
+
+**GPU utilization** below target (< 90%) indicates a bottleneck somewhere in the pipeline. However, low GPU utilization does not pinpoint whether the bottleneck is I/O, preprocessing, or data transfer.
+
+**Data loader wait time** measures how long the training loop blocks waiting for the next batch. PyTorch's DataLoader exposes this through profiling:
+
+```python
+import torch.profiler
+
+with torch.profiler.profile(
+    activities=[torch.profiler.ProfilerActivity.CPU],
+    record_shapes=True
+) as prof:
+    for batch in dataloader:
+        # Training step
+        pass
+
+# Look for "DataLoader" entries showing wait time
+print(prof.key_averages().table(sort_by="cpu_time_total"))
+```
+
+**Storage bandwidth utilization** indicates whether the storage system is saturated. On Linux, `iostat -x 1` shows per-device utilization:
+
+```bash
+$ iostat -x 1
+Device    r/s    rMB/s   rrqm/s  %util
+nvme0n1   45000  6800    0       98%    # Near saturation
+nvme1n1   12000  1800    0       45%    # Underutilized
+```
+
+If storage utilization is low but GPU utilization is also low, the bottleneck is CPU preprocessing. If storage utilization is high and GPU utilization is low, the storage system is undersized.
+
+**I/O wait percentage** in CPU statistics (`top`, `htop`) reveals when processes block on I/O:
+
+```bash
+$ top
+%Cpu(s):  15.2 us,  3.1 sy,  0.0 ni, 45.3 id, 35.4 wa, ...
+                                           ^^^^^ I/O wait
+```
+
+I/O wait above 20% indicates storage is constraining the pipeline.
+
 ### Model-Type Diversity in Training Data {#sec-training-data-diversity}
 
 Training data requirements vary dramatically across model types, affecting storage architecture, data format selection, and pipeline design. LLMs demand massive text corpora with sophisticated deduplication; vision models require high-bandwidth image pipelines; recommendation systems process continuous streams of user logs that can reach petabyte scale.
@@ -1961,6 +2183,18 @@ Teams assume that feature lookup latency is negligible compared to model inferen
 **Pitfall:** _Underestimating point-in-time correctness requirements._
 
 Training a recommendation model on features that include the label (using "user clicked on item X" as a feature when predicting "will user click on item X?") creates models that work perfectly during training and fail catastrophically in production. Point-in-time correctness requires that features used during training reflect only information available before the prediction event. This constraint is easy to state and deceptively difficult to enforce in @sec-feature-store-architecture implementations. Feature pipelines that aggregate over time windows, join multiple data sources, or depend on asynchronous updates can all violate point-in-time correctness in subtle ways. As @fig-pit-correctness demonstrates, joining training labels with features requires careful timestamp filtering to prevent future information from contaminating training data. The failure mode is insidious: models train well (95% offline accuracy), validate well (94% holdout accuracy), and then underperform in production (78% online CTR) without clear explanation. Engineering teams often chase phantom bugs for weeks before identifying temporal leakage as the root cause.
+
+**Fallacy:** _SSDs eliminate I/O bottlenecks for ML training._
+
+The transition from HDDs to SSDs represents a transformative improvement in storage performance: 100x better random access latency, 10-30x higher IOPS, and 10-30x greater sequential bandwidth. This leads teams to assume that NVMe storage eliminates I/O as a bottleneck. As @sec-io-optimization quantifies, this assumption fails for three reasons.
+
+First, the GPU-storage bandwidth gap remains vast. An H100 GPU consumes data at 3.35 TB/s from HBM. Even four NVMe drives in RAID 0 deliver only 25 GB/s, a 130x deficit. SSDs close the gap relative to HDDs but remain fundamentally slower than GPU memory bandwidth.
+
+Second, preprocessing often dominates over I/O. Vision model training requires JPEG decoding (2-5 ms per image), random augmentation (1-2 ms), and normalization. At 1000 images/second, single-threaded preprocessing takes 7 seconds per second of training. The bottleneck shifts from storage to CPU, requiring 7+ parallel preprocessing workers. SSDs with their abundant bandwidth sit idle while CPUs struggle to decode images.
+
+Third, access pattern matters more than raw speed. As @tbl-io-access-patterns demonstrates, NVMe SSDs achieve 7 GB/s sequential but only 1.5 GB/s for random 4KB reads. A dataset of 1 million individual JPEG files accessed randomly achieves only 20% of the drive's potential. Converting to WebDataset or TFRecord recovers the full 7 GB/s. The format optimization provides 5x speedup independent of storage medium.
+
+The quantitative reality: a team upgrading from HDD to NVMe may see 3-5x improvement rather than the expected 30x, because preprocessing or access pattern inefficiencies were the true bottleneck. Effective I/O optimization requires profiling to identify the actual bottleneck, then addressing it systematically: storage upgrades help when storage is saturated, format optimization helps when access patterns are inefficient, and worker parallelism helps when preprocessing is the constraint.
 
 ## Summary {#sec-storage-summary}
 

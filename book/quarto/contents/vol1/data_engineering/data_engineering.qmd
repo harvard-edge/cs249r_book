@@ -42,9 +42,11 @@ Machine learning systems depend on data quality: no algorithm can overcome poor 
 
 ## Data Engineering as Dataset Compilation {#sec-data-engineering-dataset-compilation}
 
-The methodologies examined in @sec-ai-workflow establish the foundations of machine learning development. Every phase of these workflows requires reliable data infrastructure. In traditional software, computational logic is defined by code. In machine learning, system behavior is defined by data. This shift makes data a first-class engineering artifact, requiring the same rigor we apply to code.
+The methodologies examined in @sec-ai-workflow establish the **when** and **why** of data preparation. However, executing those stages at scale requires a dedicated infrastructure. If the workflow is the plan, **Data Engineering** is the factory floor. 
 
-We reframe data engineering as **Dataset Compilation**. Just as a compiler transforms human-readable source code into an optimized binary executable, a data pipeline transforms raw, noisy observations into a clean, optimized training set (the binary) that the model (the processor) consumes.
+In traditional software, computational logic is defined by code. In machine learning, system behavior is defined by data. This shift makes data a first-class engineering artifact, requiring the same rigor we apply to code. We reframe data engineering not as "data cleaning," but as **Dataset Compilation**. 
+
+Just as a compiler transforms human-readable source code into an optimized binary executable, a data pipeline transforms raw, noisy observations into a clean, optimized training set (the binary) that the model (the processor) consumes.
 
 ::: {.callout-perspective title="The Data-Code Equivalence"}
 **The Invariant:** Data *is* the source code of the ML system. A change in the training dataset ($\Delta D$) is functionally equivalent to a change in the executable logic ($\Delta P$).
@@ -853,6 +855,17 @@ Perhaps the most insidious validation challenge arises from training-serving ske
 
 [^fn-training-serving-skew]: **Training-Serving Skew**: A ML systems failure where identical features are computed differently during training versus serving, causing silent model degradation. Occurs when training uses batch processing with one implementation while serving uses real-time processing with different libraries, creating subtle differences that compound to degrade accuracy significantly without obvious errors.
 
+::: {.callout-perspective title="Back-of-the-Napkin: The Deduplication Dividend"}
+**Problem**: You are training a large model on a web-scraped dataset of **100 Billion tokens**. Your training run costs **$1 Million** in GPU time. Your data engineering audit reveals that **30%** of the data consists of near-duplicate documents.
+
+**The Systems Impact**:
+1.  **Wasted Compute**: 30% of your gradient updates are redundant. You are spending **$300,000** to learn nothing new.
+2.  **Training Speed**: By removing duplicates, you reduce the dataset to 70 Billion tokens.
+3.  **The Result**: Your training finishes **30% faster**, saving **$300,000** and reducing your time-to-market.
+
+**The Engineering Conclusion**: A high-performance **Deduplication Pipeline** is not just about "quality"—it is a **30% hardware accelerator** implemented in software.
+:::
+
 ### Data Quality as Code {#sec-data-engineering-data-quality-as-code}
 
 Just as unit tests protect software systems, data expectation tests protect ML pipelines. Teams codify quality expectations as executable assertions that run on every pipeline execution.
@@ -1117,7 +1130,22 @@ Recognizing the limitations of either approach alone, many modern ML systems emp
 
 Beyond ingestion patterns, distributed processing becomes necessary when single machines cannot handle data volumes or processing complexity. The challenge in distributed systems is that data must be partitioned across multiple computing resources, which introduces coordination overhead. Distributed coordination is limited by network round-trip times: local operations complete in microseconds while network coordination requires milliseconds, creating a 1000x latency difference. This constraint explains why operations requiring global coordination, like computing normalization statistics across 100 machines, create bottlenecks. Each partition computes local statistics quickly, but combining them requires information from all partitions, and the round-trip time for gathering results dominates total execution time.
 
-Data locality becomes critical at this scale. At 10 GB/s peak throughput, transferring one terabyte of training data across a network takes on the order of 100 seconds; reading the same amount from a 5 GB/s SSD takes on the order of 200 seconds. These are the same order of magnitude, which drives ML system design toward compute-follows-data architectures where processing moves to data rather than data moving to processing. When processing nodes access local data at RAM speeds (50-200 GB/s) but must coordinate over networks limited to 1-10 GB/s, the bandwidth mismatch creates fundamental bottlenecks. Geographic distribution amplifies these challenges: cross-datacenter coordination must handle network latency (50-200ms between regions), partial failures during network partitions, and regulatory constraints preventing data from crossing borders. Understanding which operations parallelize easily versus those requiring expensive coordination determines system architecture and performance characteristics.
+Data locality becomes critical at this scale. At 10 GB/s peak throughput, transferring one terabyte of training data across a network takes on the order of 100 seconds; reading the same amount from a 5 GB/s SSD takes on the order of 200 seconds. These are the same order of magnitude, which drives ML system design toward compute-follows-data architectures where processing moves to data rather than data moving to processing.
+
+::: {.callout-perspective title="The Physics of Data Locality"}
+**Why moving data kills performance**: The "time" cost of data movement is intuitive, but the **energy** cost is the hard physical constraint. Engineering decisions about storage tiers (RAM vs SSD vs S3) are ultimately governed by this hierarchy:
+
+| **Operation** | **Energy (Approx.)** | **Relative Cost** |
+| :--- | :--- | :--- |
+| **32-bit Integer Add** | 0.1 pJ | 1x |
+| **32-bit Float Add** | 0.9 pJ | 9x |
+| **32-bit DRAM Read** | 640 pJ | **6,400x** |
+| **Network Transfer (1KB)** | ~1,000,000+ pJ | **10,000,000x** |
+
+**The Engineering Implication**: Fetching a single weight from off-chip memory (DRAM) costs 3 orders of magnitude more energy than performing the math on it. Fetching it over the network costs 7 orders of magnitude more. This physics dictates the design of **Feature Stores** (caching data close to compute) and **Data Lakes** (batching data to amortize transfer costs).
+:::
+
+When processing nodes access local data at RAM speeds (50-200 GB/s) but must coordinate over networks limited to 1-10 GB/s, the bandwidth mismatch creates fundamental bottlenecks. Geographic distribution amplifies these challenges: cross-datacenter coordination must handle network latency (50-200ms between regions), partial failures during network partitions, and regulatory constraints preventing data from crossing borders. Understanding which operations parallelize easily versus those requiring expensive coordination determines system architecture and performance characteristics.
 
 For our KWS system, these scalability patterns manifest concretely through quantitative capacity planning that dimensions infrastructure appropriately for workload requirements. Development uses batch processing on sample datasets to iterate on model architectures rapidly. Training scales to distributed processing across GPU clusters when model complexity or dataset size (23 million examples) exceeds single-machine capacity. Production deployment requires stream processing for real-time wake word detection on millions of concurrent devices. The system must handle traffic spikes when news events trigger synchronized usage—millions of users simultaneously asking about breaking news.
 

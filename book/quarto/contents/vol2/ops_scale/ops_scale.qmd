@@ -37,6 +37,8 @@ Traditional software engineering uses toolchains (GCC, LLVM) to transform source
 
 - Evaluate feature store architectures that maintain freshness SLOs and point-in-time correctness at scale
 
+- Apply the TCO framework ($TCO_{ML} = C_{train} + C_{infer} + C_{data} + C_{iter}$) to make strategic investment decisions based on cost structure evolution from early-stage to production-scale systems
+
 :::
 
 ::: {.callout-note title="Connection: The Systems Sandwich"}
@@ -1750,11 +1752,11 @@ Concept drift occurs when the relationship $P(Y|X)$ changes, such as when users 
 
 Because labels are often delayed, most real-time monitoring systems focus on detecting covariate shift as a leading indicator of potential performance degradation. Statistical tests like the Population Stability Index (PSI) quantify this shift.
 
-For continuous features, the Population Stability Index (PSI)[^fn-psi] quantifies distribution shift [@yurdakul2018statistical]. @eq-psi computes PSI as the sum of log-ratio weighted differences between actual and expected bucket proportions, yielding actionable thresholds: values below 0.1 indicate stability, while values at or above 0.25 demand immediate investigation:
+For continuous features, the Population Stability Index (PSI)[^fn-psi] quantifies distribution shift [@yurdakul2018statistical]. @eq-psi-monitoring computes PSI as the sum of log-ratio weighted differences between actual and expected bucket proportions, yielding actionable thresholds: values below 0.1 indicate stability, while values at or above 0.25 demand immediate investigation. The mathematical foundation of PSI is established in @sec-robust-ai.
 
 [^fn-psi]: **Population Stability Index**: Originally developed in credit scoring to detect shifts in applicant populations, PSI is based on information-theoretic divergence measures. The thresholds (0.1 and 0.25) were established empirically in financial services, where regulatory requirements demand model monitoring. PSI has since become a standard metric across ML domains for detecting when retraining may be necessary.
 
-$$PSI = \sum_{i=1}^{n} (A_i - E_i) \times \ln\left(\frac{A_i}{E_i}\right)$$ {#eq-psi}
+$$PSI = \sum_{i=1}^{n} (A_i - E_i) \times \ln\left(\frac{A_i}{E_i}\right)$$ {#eq-psi-monitoring}
 
 where $A_i$ is the proportion in bucket $i$ of the actual (current) distribution, $E_i$ is the proportion in bucket $i$ of the expected (reference) distribution, and $n$ is the number of buckets.
 
@@ -1881,6 +1883,148 @@ Interactive analysis tools for incident response:
 - Time-series overlay for root cause identification
 - Log search integrated with metric views
 - Trace exploration for request-level debugging
+
+### Cost Monitoring and Anomaly Detection {#sec-ops-scale-cost-monitoring}
+
+Infrastructure costs represent one of the largest operational expenditures for ML platforms, yet cost monitoring often receives less attention than performance or quality metrics. At scale, undetected cost anomalies can accumulate millions of dollars in unexpected charges before manual review catches them. This section develops a quantitative framework for cost anomaly detection that balances sensitivity against false positive rates.
+
+**Cost Anomaly Detection Metrics**
+
+The foundation of cost monitoring is statistical anomaly detection. For a cost time series with historical mean $\mu$ and standard deviation $\sigma$, the **Z-score** quantifies how unusual a current observation is:
+
+$$Z = \frac{C_{current} - \mu}{\sigma}$$ {#eq-cost-zscore}
+
+where $C_{current}$ is the observed cost for the current period. A Z-score of 3 indicates the current cost is 3 standard deviations above the historical mean, an event expected less than 0.3% of the time under normal operations.
+
+Complementing Z-score analysis, **percentage change** detection captures sudden shifts regardless of historical variance:
+
+$$\Delta\% = \frac{C_{current} - C_{previous}}{C_{previous}} \times 100$$ {#eq-cost-pct-change}
+
+Percentage change detection excels at catching step-function increases, such as when a misconfigured autoscaler doubles instance count overnight.
+
+**Alerting Thresholds and False Positive Analysis**
+
+Effective alerting requires calibrating thresholds to balance detection sensitivity against operational burden. Two common threshold configurations are:
+
+- **Z-score threshold**: Alert when $|Z| > 3$ (3-sigma rule)
+- **Percentage change threshold**: Alert when $|\Delta\%| > 50$% day-over-day
+
+The choice of thresholds determines false positive rates. For a normally distributed cost metric checked daily, a 3-sigma threshold produces:
+
+$$P(\text{false positive per day}) = 2 \times (1 - \Phi(3)) \approx 0.0027$$
+
+Over a year of daily monitoring:
+
+$$E[\text{false alerts per year}] = 365 \times 0.0027 \approx 1$$
+
+This rate is operationally acceptable. Lowering the threshold to 2-sigma would increase annual false alerts to approximately 16, likely causing alert fatigue without meaningfully improving detection.
+
+For percentage-based alerts, false positive rates depend on the underlying volatility of costs. Services with naturally variable demand may require higher thresholds (75% or 100%) to avoid excessive alerts, while stable baseline services can use tighter thresholds (25% or 30%).
+
+**Worked Example: Detecting an Inference Cost Spike**
+
+A recommendation service typically costs \$100 per day for inference compute. The operations team receives an alert: today's cost has reached \$250 by end of day.
+
+*Step 1: Compute the Z-score*
+
+Historical data shows mean daily cost $\mu = \$100$ with standard deviation $\sigma = \$15$.
+
+$$Z = \frac{\$250 - \$100}{\$15} = \frac{\$150}{\$15} = 10$$
+
+A Z-score of 10 is extraordinarily unlikely under normal operations. This is unambiguously anomalous.
+
+*Step 2: Verify the anomaly is real*
+
+Before investigating root causes, confirm the data is accurate. Check for billing system delays, double-counting, or data pipeline errors. In this case, the billing data is confirmed accurate.
+
+*Step 3: Root cause analysis*
+
+The investigation proceeds through a structured checklist:
+
+1. **Traffic analysis**: Query volume (QPS) is unchanged from historical baseline. Traffic did not cause the spike.
+2. **Latency analysis**: P99 latency doubled from 50ms to 100ms. Each request now consumes twice the GPU-seconds.
+3. **Model version check**: A new model version deployed at 2:00 AM used larger batch sizes for quality improvements.
+4. **Resource utilization**: GPU utilization remained at 95%, but throughput (requests per second per GPU) dropped 50%.
+
+*Root cause*: The model update increased computational cost per prediction. With unchanged traffic and doubled per-request cost, total cost doubled.
+
+*Resolution*: The team must decide whether the quality improvement justifies the cost increase or whether optimization (quantization, smaller batches, model distillation) is required.
+
+**Root Cause Analysis Framework**
+
+Cost anomalies typically fall into five categories, each with distinct investigation paths:
+
++---------------------------+--------------------------------+------------------------------------------+
+| **Category**              | **Indicators**                 | **Investigation Path**                   |
++:==========================+:===============================+:=========================================+
+| Traffic increase          | QPS proportional to cost       | Check upstream services, marketing       |
+|                           |                                | campaigns, viral events                  |
++---------------------------+--------------------------------+------------------------------------------+
+| Efficiency regression     | Cost up, QPS unchanged,        | Review recent deployments, model         |
+|                           | latency up                     | updates, infrastructure changes          |
++---------------------------+--------------------------------+------------------------------------------+
+| Resource leak             | Gradual cost growth,           | Check for orphaned resources,            |
+|                           | utilization stable             | failed cleanup jobs, zombie processes    |
++---------------------------+--------------------------------+------------------------------------------+
+| Pricing change            | Cost up, all metrics stable    | Verify cloud provider pricing,           |
+|                           |                                | reserved instance expiration             |
++---------------------------+--------------------------------+------------------------------------------+
+| Configuration error       | Step-function cost increase    | Audit autoscaling rules, instance        |
+|                           |                                | types, replica counts                    |
++---------------------------+--------------------------------+------------------------------------------+
+
+: **Cost Anomaly Root Cause Categories**: Five primary categories of cost anomalies with their characteristic indicators and investigation approaches. Traffic increases show proportional QPS growth, while efficiency regressions exhibit rising latency with stable traffic. {#tbl-cost-anomaly-categories}
+
+**Cost Attribution by Service and Team**
+
+Effective cost management requires attributing costs to organizational units. Tag-based allocation assigns costs based on resource metadata:
+
+```yaml
+# Resource tagging schema for cost attribution
+cost_allocation:
+  dimensions:
+    - team: "recommendation"      # Organizational owner
+    - service: "ranking-model"    # Specific service
+    - environment: "production"   # prod/staging/dev
+    - model_type: "inference"     # training/inference
+    - cost_center: "CC-4521"      # Finance tracking
+
+  shared_cost_distribution:
+    # Platform infrastructure costs distributed by usage
+    - resource: "shared-gpu-cluster"
+      method: "proportional_gpu_hours"
+    - resource: "feature-store"
+      method: "proportional_query_volume"
+    - resource: "monitoring-infrastructure"
+      method: "equal_split"
+```
+
+Shared infrastructure costs require allocation policies. Common methods include:
+
+- **Proportional allocation**: Distribute shared costs based on usage metrics (GPU-hours, storage bytes, API calls)
+- **Equal split**: Divide costs equally among consuming teams (appropriate for fixed infrastructure)
+- **Marginal cost**: Charge teams for the incremental cost their usage adds
+
+**Cost Dashboards**
+
+Effective cost monitoring dashboards present information at multiple granularities:
+
+*Executive view*: Total ML infrastructure cost, month-over-month trend, budget versus actual, cost efficiency metrics (cost per prediction, cost per active user).
+
+*Portfolio view*: Cost breakdown by domain (recommendations, fraud, search), cost trends by model type, anomaly indicators.
+
+*Service view*: Per-service cost with drill-down, cost per inference, GPU utilization efficiency, comparison to budget allocation.
+
+*Investigation view*: Time-series cost with deployment markers, correlation with operational metrics, attribution breakdown.
+
+The key metrics for ongoing monitoring include:
+
+- **Cost per inference**: Total serving cost divided by prediction count. Track trends to detect efficiency regressions.
+- **Cost per active user**: Infrastructure cost normalized by user base. Enables comparison across services with different scales.
+- **GPU utilization efficiency**: Revenue or value generated per GPU-hour. Connects infrastructure cost to business outcomes.
+- **Budget burn rate**: Current spending velocity relative to allocated budget. Enables proactive intervention before overruns.
+
+Integrating cost monitoring with the hierarchical monitoring architecture ensures that cost anomalies receive appropriate attention alongside performance and quality metrics.
 
 ## Platform Engineering {#sec-ops-scale-platform}
 
@@ -2273,7 +2417,259 @@ Track efficiency metrics alongside model quality:
 - *GPU utilization*: Low utilization suggests over-provisioning or inefficient code
 - *Spot utilization rate*: Fraction of eligible workloads using spot instances
 
-Regular review of these metrics identifies systemic inefficiencies and guides platform improvements
+Regular review of these metrics identifies systemic inefficiencies and guides platform improvements.
+
+### ML Systems TCO Framework {#sec-ops-scale-tco}
+
+While FinOps practices provide operational cost visibility, strategic ML investment decisions require a comprehensive **Total Cost of Ownership (TCO)** framework that captures the complete economic picture across the ML lifecycle. Unlike traditional software where infrastructure costs dominate, ML systems exhibit a distinctive four-component cost structure that evolves differently with scale.
+
+::: {.callout-definition title="ML Systems TCO"}
+**Total Cost of Ownership for ML Systems** encompasses all costs associated with developing, deploying, and operating machine learning capabilities, including training compute, inference infrastructure, data management, and iterative development. Unlike point-in-time cost snapshots, TCO enables lifecycle-aware investment decisions.
+:::
+
+**The TCO Equation**
+
+@eq-tco-ml expresses the total cost of ownership as the sum of four distinct cost components, each with different scaling characteristics and optimization levers:
+
+$$TCO_{ML} = C_{train} + C_{infer} + C_{data} + C_{iter}$$ {#eq-tco-ml}
+
+where $C_{train}$ represents training costs (one-time and retraining), $C_{infer}$ represents inference costs (ongoing serving), $C_{data}$ represents data costs (storage, transfer, processing), and $C_{iter}$ represents iteration costs (experimentation and development).
+
+This decomposition reveals a critical insight: the dominant cost component shifts as organizations mature. Early-stage ML efforts are dominated by $C_{iter}$ (experimentation), growth-stage by $C_{train}$ (model development), and production-scale by $C_{infer}$ (serving at volume). Optimization strategies must match the current cost structure.
+
+**Training Cost Model**
+
+Training costs encompass the compute required to develop and maintain models. @eq-training-cost formalizes training cost as a function of GPU count, training duration, hourly rates, datacenter efficiency, and failure overhead:
+
+$$C_{train} = N_{GPU} \times T_{hours} \times R_{GPU/hr} \times PUE \times (1 + F_{fail})$$ {#eq-training-cost}
+
+where:
+
+- $N_{GPU}$ is the number of GPUs allocated
+- $T_{hours}$ is the training duration in hours
+- $R_{GPU/hr}$ is the hourly GPU cost (including instance overhead)
+- $PUE$ is the Power Usage Effectiveness multiplier (typically 1.1-1.5)
+- $F_{fail}$ is the failure overhead factor (fraction of training lost to failures and restarts)
+
+The PUE factor captures datacenter efficiency: a PUE of 1.2 means 20% additional power for cooling and infrastructure. The failure overhead $F_{fail}$ accounts for checkpoint-and-restart costs; at scale, @sec-fault-tolerance establishes that failure rates of 1-5% per GPU-day require 10-25% overhead for fault tolerance.
+
+**Worked Example: Training Cost Calculation**
+
+Consider training a large language model:
+
+- Configuration: 256 H100 GPUs for 14 days
+- Hourly rate: \$3.50 per H100 GPU-hour (cloud pricing)
+- PUE: 1.15 (modern hyperscale datacenter)
+- Failure overhead: 15% (typical for multi-node training)
+
+$$C_{train} = 256 \times (14 \times 24) \times \$3.50 \times 1.15 \times 1.15 = \$398,131$$
+
+If this model requires quarterly retraining, annual training cost reaches approximately \$1.6 million. However, training cost often represents a small fraction of total TCO for production systems serving millions of users.
+
+**Inference Cost Model**
+
+Inference costs dominate TCO for production ML systems at scale. @eq-inference-cost expresses serving cost as a function of query volume, latency requirements, and utilization efficiency:
+
+$$C_{infer} = \frac{Q_{daily} \times L_{avg}}{U_{GPU} \times B_{eff}} \times R_{GPU/hr} \times 24 \times 365$$ {#eq-inference-cost}
+
+where:
+
+- $Q_{daily}$ is the daily query volume
+- $L_{avg}$ is the average latency per inference (in hours, for unit consistency)
+- $U_{GPU}$ is the effective GPU utilization (typically 0.4-0.8)
+- $B_{eff}$ is the effective batch size (throughput multiplier from batching)
+- $R_{GPU/hr}$ is the hourly GPU cost
+
+The key insight is that inference cost scales linearly with query volume but sublinearly with optimization: improving utilization from 40% to 80% halves infrastructure requirements, and effective batching ($B_{eff} > 1$) further reduces per-query costs.
+
+**Alternative Formulation**
+
+For capacity planning, express inference cost in terms of required GPU-seconds per query:
+
+$$C_{infer} = Q_{annual} \times \frac{t_{inference}}{U_{GPU}} \times \frac{R_{GPU/hr}}{3600}$$
+
+where $t_{inference}$ is the inference time in seconds. This formulation directly connects latency optimization to cost reduction.
+
+**Data Cost Model**
+
+Data costs exhibit superlinear scaling with user base due to storage growth, transfer volume, and processing requirements. @eq-data-cost decomposes data cost into three components:
+
+$$C_{data} = C_{storage} + C_{egress} + C_{process}$$ {#eq-data-cost}
+
+Each component scales differently:
+
+**Storage costs** grow with data retention requirements:
+$$C_{storage} = V_{data} \times R_{storage/GB} \times T_{retention}$$
+
+where $V_{data}$ is data volume in GB, $R_{storage/GB}$ is the monthly storage rate, and $T_{retention}$ is retention period in months.
+
+**Egress costs** scale with data transfer volume:
+$$C_{egress} = V_{transfer} \times R_{egress/GB}$$
+
+Cloud egress pricing (\$0.08-0.12 per GB) makes data transfer a significant cost driver for multi-region deployments and training data distribution.
+
+**Processing costs** scale with compute requirements for ETL, feature engineering, and data validation:
+$$C_{process} = V_{processed} \times R_{process/GB}$$
+
+Data processing costs often surprise organizations: a feature engineering pipeline processing 10TB daily at \$0.02 per GB costs \$73,000 annually.
+
+**Iteration Cost Model**
+
+Development costs capture the engineering investment in experimentation and model improvement. @eq-iteration-cost formalizes this as the product of experiment count, experiment duration, and combined engineering and compute costs:
+
+$$C_{iter} = N_{exp} \times T_{exp} \times (C_{engineer} + C_{compute})$$ {#eq-iteration-cost}
+
+where:
+
+- $N_{exp}$ is the number of experiments conducted
+- $T_{exp}$ is the average experiment duration
+- $C_{engineer}$ is the engineering cost per experiment (time allocation)
+- $C_{compute}$ is the compute cost per experiment
+
+A critical but often overlooked factor: failed experiments have real cost. If 90% of experiments do not improve production metrics, the effective cost per successful experiment is 10x the nominal experiment cost. This motivates investment in experiment infrastructure that reduces $T_{exp}$ and improves experiment success rates.
+
+**Worked Example: Startup vs. Production Company TCO**
+
+@tbl-tco-comparison illustrates how cost structure evolves with scale by comparing two organizations:
+
+**Startup Profile:**
+- 1 production model serving 100,000 daily users
+- Monthly retraining cycle
+- Small engineering team (2 ML engineers)
+- Cloud-native infrastructure
+
+**Production Company Profile:**
+- 50 production models serving 10 million daily users
+- Weekly retraining for high-velocity models
+- Dedicated ML platform team (15 engineers)
+- Hybrid cloud/on-premise infrastructure
+
++---------------------+--------------------+------------------------+--------------------------------+
+| **Cost Component**  | **Startup**        | **Production Company** | **Scaling Factor**             |
++:====================+:==================:+:======================:+:===============================+
+| **Training**        | \$5,000/month      | \$150,000/month        | 30x (more models, larger)      |
+| **Inference**       | \$2,000/month      | \$400,000/month        | 200x (100x users, optimization)|
+| **Data**            | \$500/month        | \$80,000/month         | 160x (superlinear with users)  |
+| **Iteration**       | \$40,000/month     | \$350,000/month        | 8.75x (team size, experiments) |
++---------------------+--------------------+------------------------+--------------------------------+
+| **Total TCO**       | **\$47,500/month** | **\$980,000/month**    | **20.6x**                      |
++---------------------+--------------------+------------------------+--------------------------------+
+| **Dominant Cost**   | Iteration (84%)    | Inference (41%)        |                                |
++---------------------+--------------------+------------------------+--------------------------------+
+
+: **TCO Comparison: Startup vs. Production Company**. Cost structure shifts dramatically with scale. Startups are dominated by iteration costs (engineering salaries for experimentation), while production companies see inference costs dominate as serving volume grows. The 100x user increase yields only 20x TCO increase due to optimization effects, but note the superlinear 160x scaling in data costs. {#tbl-tco-comparison}
+
+**Key Insights from Comparison:**
+
+1. **Cost structure inversion**: Startups spend 84% on iteration (people), production companies spend 41% on inference (infrastructure). This shift demands different optimization strategies.
+
+2. **Sublinear TCO scaling**: 100x users yields 20x TCO due to economies of scale in inference (batching, utilization) and amortized training costs across larger user base.
+
+3. **Data cost superlinearity**: Data costs scale 160x for 100x users because storage requirements grow with user history, and processing costs increase with feature complexity.
+
+4. **Iteration efficiency**: Production company runs 10x more experiments but iteration cost only grows 8.75x due to platform automation reducing per-experiment overhead.
+
+**TCO Sensitivity Analysis**
+
+Understanding how TCO responds to key parameters enables strategic planning. @tbl-tco-sensitivity shows the impact of 2x increases in key parameters on each cost component:
+
++--------------------+-------------+-----------+----------+------------+------------------+
+| **Parameter**      | **Change**  | Training  | Inference| Data       | **Total Impact** |
++:===================+:===========:+:=========:+:========:+:==========:+:================:+
+| Daily users        | 2x          | ---       | +100%    | +120%      | +45%             |
+| Model count        | 2x          | +100%     | +100%    | +50%       | +85%             |
+| Queries per user   | 2x          | ---       | +100%    | +80%       | +40%             |
+| Model size         | 2x          | +150%     | +120%    | +30%       | +55%             |
+| Retraining freq.   | 2x          | +100%     | ---      | +40%       | +25%             |
++--------------------+-------------+-----------+----------+------------+------------------+
+
+: **TCO Sensitivity Analysis**. Impact of 2x increase in key parameters on cost components. Model count has the highest total impact (85%) because it affects all components, while retraining frequency has the lowest (25%) as it affects only training and associated data costs. User growth shows superlinear data cost impact (120%) due to storage and processing requirements scaling faster than user count. {#tbl-tco-sensitivity}
+
+**Nonlinear Effects:**
+
+- **User scaling**: Data costs grow superlinearly (120% for 2x users) due to user history accumulation and cross-user feature computation.
+- **Model size scaling**: Training cost grows superlinearly (150% for 2x parameters) due to increased memory requirements forcing multi-GPU configurations.
+- **Model count**: Creates multiplicative effects across all components, making portfolio growth the most expensive scaling dimension.
+
+**Decision Framework: Speed vs. Efficiency**
+
+TCO analysis enables principled decisions about when to optimize for development speed versus operational efficiency. @eq-optimization-breakeven calculates the breakeven point for optimization investments:
+
+$$T_{breakeven} = \frac{C_{optimization}}{S_{monthly}}$$ {#eq-optimization-breakeven}
+
+where $C_{optimization}$ is the one-time cost of implementing an optimization and $S_{monthly}$ is the monthly savings it produces.
+
+**Decision Rules Based on Cost Structure:**
+
+When **iteration costs dominate** (early-stage, $C_{iter} > 50\%$ of TCO):
+
+- Optimize for development velocity, not infrastructure efficiency
+- Accept higher per-inference costs for faster experimentation
+- Invest in experiment infrastructure (reduce $T_{exp}$)
+- Defer infrastructure optimization until cost structure shifts
+
+When **training costs dominate** (growth-stage, $C_{train} > 40\%$ of TCO):
+
+- Invest in training efficiency (mixed precision, gradient checkpointing)
+- Consider spot instances with checkpoint-and-resume
+- Evaluate model architecture changes that reduce training time
+- Breakeven threshold: 3-6 month payback acceptable
+
+When **inference costs dominate** (scale-stage, $C_{infer} > 40\%$ of TCO):
+
+- Prioritize serving optimization (quantization, batching, caching)
+- Model optimization ROI is highest at this stage
+- Consider model distillation to reduce per-query cost
+- Breakeven threshold: 1-3 month payback required (faster iteration)
+
+**Worked Example: Optimization Investment Decision**
+
+A production company ($C_{infer}$ = \$400K/month) evaluates INT8 quantization:
+
+- Implementation cost: \$80,000 (engineering time + validation)
+- Expected inference cost reduction: 40%
+- Monthly savings: \$400,000 x 0.40 = \$160,000
+
+$$T_{breakeven} = \frac{\$80,000}{\$160,000/month} = 0.5 \text{ months}$$
+
+Breakeven in 2 weeks makes this investment highly attractive. However, if the same company ($C_{train}$ = \$150K/month) evaluates a training optimization:
+
+- Implementation cost: \$80,000
+- Expected training cost reduction: 30%
+- Monthly savings: \$150,000 x 0.30 = \$45,000
+
+$$T_{breakeven} = \frac{\$80,000}{\$45,000/month} = 1.8 \text{ months}$$
+
+Still attractive, but lower priority than inference optimization due to longer payback and smaller absolute savings.
+
+**Optimization Priority Matrix**
+
+@tbl-optimization-priority provides a decision framework mapping cost structure to optimization priorities:
+
++---------------------+-------------------------+---------------------------+-----------------------------+
+| **Dominant Cost**   | **First Priority**      | **Second Priority**       | **Avoid**                   |
++:====================+:========================+:==========================+:============================+
+| Iteration (>50%)    | Experiment velocity     | Developer tooling         | Infrastructure optimization |
+| Training (>40%)     | Training efficiency     | Spot/preemptible compute  | Over-engineering serving    |
+| Inference (>40%)    | Model optimization      | Serving infrastructure    | Excessive retraining        |
+| Data (>30%)         | Storage tiering         | Egress reduction          | Premature feature expansion |
++---------------------+-------------------------+---------------------------+-----------------------------+
+
+: **Optimization Priority Matrix**. Match optimization investments to current cost structure. When iteration dominates, invest in developer velocity, not infrastructure. When inference dominates, model optimization yields fastest payback. Data-dominated cost structures (unusual but possible with large feature stores) require storage and transfer optimization before model improvements. {#tbl-optimization-priority}
+
+**TCO-Driven Architecture Decisions**
+
+TCO analysis should inform architectural choices, not just operational optimization:
+
+1. **Build vs. buy**: Platform services with usage-based pricing may have lower TCO than self-managed infrastructure despite higher unit costs, especially when iteration costs dominate.
+
+2. **Model architecture selection**: A model requiring 2x training cost but 0.5x inference cost may have lower TCO at scale where inference dominates.
+
+3. **Retraining frequency**: More frequent retraining increases $C_{train}$ and $C_{data}$ but may reduce $C_{iter}$ by catching drift earlier and avoiding emergency interventions.
+
+4. **Feature complexity**: Additional features increase $C_{data}$ (storage, processing) and $C_{train}$ (longer training) but may reduce $C_{iter}$ by improving model performance faster.
+
+The TCO framework transforms these architectural debates from opinion-based discussions into quantitative analyses with measurable outcomes.
 
 ## Feature Store Operations {#sec-ops-scale-feature-store}
 
@@ -3253,12 +3649,13 @@ ML Operations at scale is the "nervous system" of the Machine Learning Fleet. Th
 
 The transition from managing a single model to operating an organizational platform represents a qualitative shift in complexity. We established that per-model operational practices do not compose; instead, they create combinatorial debt that can only be resolved through platform abstractions like centralized registries, ensemble-aware CI/CD, and hierarchical monitoring.
 
-We examined how operational cadences must match model risk profiles—from the staged, weeks-long rollouts of LLMs to the seconds-fast rollbacks of adversarial fraud detection. Finally, we extended the MLOps vision to the edge, addressing the "Fleet Version Skew" and "Hardware-in-the-Loop" validation requirements essential for managing intelligence on millions of heterogeneous devices.
+We examined how operational cadences must match model risk profiles, from the staged, weeks-long rollouts of LLMs to the seconds-fast rollbacks of adversarial fraud detection. The TCO framework ($TCO_{ML} = C_{train} + C_{infer} + C_{data} + C_{iter}$) provides quantitative foundations for strategic investment decisions, revealing how cost structure shifts from iteration-dominated (early stage) to inference-dominated (production scale) and how optimization priorities must evolve accordingly. Finally, we extended the MLOps vision to the edge, addressing the "Fleet Version Skew" and "Hardware-in-the-Loop" validation requirements essential for managing intelligence on millions of heterogeneous devices.
 
 ::: {.callout-important title="Key Takeaways"}
 * **Platform ROI is Superlinear**: The value of shared ML infrastructure grows faster than the model count. Organizations that defer platform investment until "at scale" often find themselves paralyzed by accumulated operational debt.
+* **TCO Drives Strategy**: ML systems exhibit a four-component cost structure (training, inference, data, iteration) that evolves with scale. Early-stage systems are iteration-dominated (optimize for velocity); production systems are inference-dominated (optimize for efficiency). Match optimization investments to your current cost structure using breakeven analysis.
 * **Management of the Edge Fleet**: MLOps extends beyond the datacenter. Managing edge intelligence requires handling extreme version skew (weeks-long rollouts) and Hardware-in-the-Loop (HIL) CI/CD to ensure models don't crash on diverse NPU/DSP architectures.
-* **Ensembles are the Unit of Management**: In production (especially recommendation), the atomic unit is rarely a single model but an ensemble of 10–50 components. Management must be "dependency-aware" to prevent upstream updates from breaking downstream consumers.
+* **Ensembles are the Unit of Management**: In production (especially recommendation), the atomic unit is rarely a single model but an ensemble of 10-50 components. Management must be "dependency-aware" to prevent upstream updates from breaking downstream consumers.
 * **Aggregation over Enumeration**: Monitoring 100 models with independent alerts is mathematically guaranteed to cause alert fatigue. Effective platforms use hierarchical monitoring and fleet-wide anomaly detection to find the "signal" across the portfolio.
 * **FinOps for AI**: GPU compute is the primary cost driver. Effective MLOps requires granular cost attribution (Cost-per-Inference) and opportunistic resource scheduling (Spot instances) to maintain economic viability.
 :::

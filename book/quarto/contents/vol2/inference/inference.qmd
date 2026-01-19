@@ -921,6 +921,282 @@ Queue wait time added to latency must not violate SLO.
 
 : **Batching Strategy by Model Type**. Each model type has characteristic batching behavior determined by its computational bottleneck. {#tbl-batching-by-model}
 
+### Queuing Theory for Batched Inference {#sec-inference-queuing-theory}
+
+The batching efficiency curve provides intuition about throughput-latency tradeoffs, but production systems require rigorous analysis to determine optimal batch sizes under stochastic arrival patterns. Queuing theory provides the mathematical framework to derive these optimal operating points and to understand why certain batch sizes outperform others under specific conditions.
+
+#### The M/G/c/K Queue Model for GPU Serving {#sec-inference-mgck-model}
+
+GPU inference systems can be modeled as **M/G/c/K queues**, a standard notation from queueing theory that captures the essential characteristics of production serving systems:
+
+- **M (Markov arrivals)**: Requests arrive according to a Poisson process with rate $\lambda$. This models the memoryless property of user requests, where arrival of one request does not predict the timing of the next.
+- **G (General service distribution)**: Service times follow a general distribution, not restricted to exponential. GPU inference times depend on batch size and exhibit deterministic components (compute) mixed with stochastic variation (memory contention, kernel scheduling).
+- **c (Number of servers)**: The system has $c$ parallel GPU workers, each capable of serving requests independently.
+- **K (Queue capacity)**: The system maintains a finite queue of capacity $K$ requests. Requests arriving to a full queue are rejected (load shedding).
+
+::: {.callout-note title="Connection: Queuing Theory and Systems Performance"}
+Queuing theory, developed by Agner Krarup Erlang in 1909 for telephone network analysis, remains foundational to systems performance engineering. The same mathematical framework that sized telephone exchanges now determines GPU cluster capacity. The M/G/c/K model is standard in systems textbooks, appearing in Jain's *The Art of Computer Systems Performance Analysis* [@jain1991art] and Kleinrock's *Queueing Systems* [@kleinrock1975queueing].
+:::
+
+For a batched inference system with batch size $B$, service time becomes a function of batch size. Let $S(B)$ denote the time to process a batch of $B$ requests. From the physics of batching (@sec-inference-batching-differences), we model this as:
+
+$$S(B) = \alpha + \beta \cdot B$$ {#eq-service-time-batch}
+
+where $\alpha$ represents fixed overhead (kernel launch, weight loading from HBM) and $\beta$ represents marginal per-request computation time. This linear model captures the first-order behavior observed in production systems, though actual service times may exhibit slight sublinearity due to memory bandwidth saturation at large batch sizes.
+
+The **effective service rate** for batched processing is:
+
+$$\mu_{eff}(B) = \frac{B}{S(B)} = \frac{B}{\alpha + \beta \cdot B}$$ {#eq-effective-service-rate}
+
+This effective rate increases with batch size, approaching the asymptotic limit $1/\beta$ as $B \to \infty$.
+
+#### Response Time Analysis {#sec-inference-response-time}
+
+The total response time $T$ for a request consists of three components:
+
+$$E[T] = E[W] + E[S_{batch}] + E[S_{compute}]$$ {#eq-total-response-time}
+
+where:
+
+- $E[W]$ is the expected waiting time in queue before joining a batch
+- $E[S_{batch}]$ is the expected time to form a complete batch (batch accumulation delay)
+- $E[S_{compute}]$ is the expected inference time once the batch executes
+
+For dynamic batching with maximum wait time $T_{max}$ and maximum batch size $B_{max}$, the batch formation process is bounded. Under Poisson arrivals with rate $\lambda$, the expected number of requests accumulated in time $T_{max}$ is $\lambda \cdot T_{max}$. The actual batch size $B$ follows:
+
+$$E[B] = \min(B_{max}, \lambda \cdot T_{max})$$ {#eq-expected-batch-size}
+
+The batch accumulation delay depends on whether the batch fills by reaching $B_{max}$ or by timeout:
+
+$$E[S_{batch}] = \begin{cases}
+\frac{B_{max}}{\lambda} & \text{if } \lambda \cdot T_{max} \geq B_{max} \text{ (batch fills)} \\
+\frac{T_{max}}{2} & \text{if } \lambda \cdot T_{max} < B_{max} \text{ (timeout triggers)}
+\end{cases}$$ {#eq-batch-accumulation}
+
+The factor of $1/2$ in the timeout case reflects the average wait for requests arriving uniformly throughout the batch window.
+
+#### Optimal Batch Size Derivation {#sec-inference-optimal-batch}
+
+The optimal batch size $B^*$ minimizes expected response time subject to throughput requirements. We seek:
+
+$$B^* = \arg\min_{B} E[T(B)] \quad \text{subject to} \quad \mu_{eff}(B) \geq \lambda$$ {#eq-optimal-batch-objective}
+
+The constraint ensures system stability (service rate exceeds arrival rate).
+
+Substituting the response time components:
+
+$$E[T(B)] = E[W(B)] + \frac{B}{2\lambda} + S(B)$$ {#eq-response-time-expanded}
+
+For an M/G/1 queue with batch arrivals (treating each batch as a single "super-request"), the Pollaczek-Khinchine formula gives the expected waiting time:
+
+$$E[W] = \frac{\lambda \cdot E[S^2]}{2(1 - \rho)}$$ {#eq-pk-formula}
+
+where $\rho = \lambda \cdot E[S] / B$ is the server utilization (arrival rate times service time per request). The second moment $E[S^2]$ captures service time variability.
+
+For our linear service time model with deterministic service (variance zero within a batch):
+
+$$E[W(B)] = \frac{\lambda \cdot S(B)^2}{2B(1 - \lambda \cdot S(B)/B)}$$ {#eq-waiting-time-batch}
+
+Taking the derivative with respect to $B$ and setting equal to zero yields the optimal batch size. While the full derivation involves solving a cubic equation, the approximate solution for systems where $\alpha \gg \beta$ (high fixed overhead, typical of LLMs) is:
+
+$$B^* \approx \sqrt{\frac{2\alpha\lambda}{1 - \rho_{target}}}$$ {#eq-optimal-batch-approx}
+
+where $\rho_{target}$ is the target utilization (typically 0.7-0.8 for production systems to maintain latency headroom).
+
+::: {.callout-important title="The Square Root Law for Batch Sizing"}
+Equation @eq-optimal-batch-approx reveals a fundamental insight: **optimal batch size scales with the square root of the fixed overhead times arrival rate**. This means:
+
+1. **Higher traffic ($\lambda$)**: Optimal batch size increases, but sublinearly
+2. **Higher fixed overhead ($\alpha$)**: Optimal batch size increases (amortize more overhead)
+3. **Higher target utilization ($\rho_{target}$)**: Optimal batch size increases (more aggressive batching)
+
+This square root relationship explains why LLMs (high $\alpha$ from weight loading) benefit from larger batches than vision models (low $\alpha$), even at the same arrival rate.
+:::
+
+#### Worked Example: GPT-3 Serving at 100 QPS {#sec-inference-gpt3-example}
+
+Consider serving a GPT-3 class model (175B parameters) with the following characteristics:
+
+**System Parameters**:
+
+- Arrival rate: $\lambda = 100$ requests/second
+- Hardware: 8x A100 GPUs with tensor parallelism
+- Weight loading overhead: $\alpha = 50$ ms (time to load attention matrices per forward pass)
+- Per-token compute: $\beta = 0.5$ ms per request (amortized across batch)
+- Average output length: 100 tokens per request
+- Target utilization: $\rho_{target} = 0.75$
+
+**Service Time Model**:
+
+For the prefill phase (processing input prompt), service time follows @eq-service-time-batch:
+
+$$S(B) = 50 + 0.5 \cdot B \text{ ms}$$
+
+**Optimal Batch Size Calculation**:
+
+Applying @eq-optimal-batch-approx:
+
+$$B^* \approx \sqrt{\frac{2 \times 50 \times 100}{1 - 0.75}} = \sqrt{\frac{10000}{0.25}} = \sqrt{40000} = 200$$
+
+However, this exceeds practical limits (memory constraints typically cap batch size around 32-64 for large LLMs). With $B_{max} = 32$:
+
+**Performance at Different Batch Sizes**:
+
+@tbl-batch-size-comparison quantifies the tradeoffs across batch sizes from 1 to 32:
+
++------------+-------------------+-------------------+-------------------+-------------------+-------------------+
+| **Batch**  | **Service Time**  | **Throughput**    | **Utilization**   | **Queue Wait**    | **Total Latency** |
+| **Size B** | **S(B) (ms)**     | **(req/s)**       | **$\rho$**        | **E[W] (ms)**     | **E[T] (ms)**     |
++:===========+==================:+==================:+==================:+==================:+==================:+
+| 1          | 50.5              | 19.8              | 505% (unstable)   | $\infty$          | $\infty$          |
+| 4          | 52.0              | 76.9              | 130% (unstable)   | $\infty$          | $\infty$          |
+| 8          | 54.0              | 148.1             | 67.5%             | 42.3              | 123.2             |
+| 16         | 58.0              | 275.9             | 36.2%             | 16.4              | 92.4              |
+| 32         | 66.0              | 484.8             | 20.6%             | 8.9               | 91.5              |
++------------+-------------------+-------------------+-------------------+-------------------+-------------------+
+
+: **Batch Size Impact on GPT-3 Serving Performance**. Batch sizes below 8 cannot sustain 100 QPS (utilization exceeds 100%). The optimal operating point balances throughput against latency, with B=32 achieving lowest total latency despite higher service time. {#tbl-batch-size-comparison}
+
+**Analysis**:
+
+1. **Batch sizes 1-4 are unstable**: Utilization exceeds 100%, meaning the system cannot keep up with arrivals. Queues grow unboundedly.
+
+2. **Batch size 8 achieves stability**: At 67.5% utilization, the system is stable but queuing delays contribute significantly to latency.
+
+3. **Batch size 32 minimizes total latency**: Despite longer service time (66ms vs 54ms), the dramatic reduction in queue wait time (8.9ms vs 42.3ms) yields lower total latency.
+
+4. **Diminishing returns beyond B=32**: Further batch size increases would reduce utilization but memory constraints prevent exploration.
+
+::: {.callout-notebook title="Engineering Calculation: Applying Little's Law to Verify" collapse="true"}
+**Verification using Little's Law**: $L = \lambda \cdot W$
+
+At B=32 with $\lambda = 100$ req/s and $E[T] = 91.5$ ms:
+
+$$L = 100 \times 0.0915 = 9.15 \text{ requests in system}$$
+
+With batch size 32 and utilization 20.6%:
+- Expected requests in service: $32 \times 0.206 = 6.6$
+- Expected requests in queue: $9.15 - 6.6 = 2.55$
+
+This matches our queue wait calculation: approximately 2-3 requests waiting on average.
+:::
+
+#### Decision Framework: Batch Size Selection Given SLA {#sec-inference-batch-decision}
+
+Production systems must select batch size to meet Service Level Objectives (SLOs), typically specified as latency percentiles (e.g., P99 latency < 200ms). The following framework systematizes this decision:
+
+**Step 1: Characterize Service Time**
+
+Measure $\alpha$ and $\beta$ empirically by profiling inference at batch sizes 1, 8, and 32. Fit the linear model $S(B) = \alpha + \beta B$.
+
+**Step 2: Compute Stability Threshold**
+
+Find minimum batch size $B_{min}$ such that $\mu_{eff}(B_{min}) > \lambda$:
+
+$$B_{min} = \frac{\alpha \lambda}{1 - \beta \lambda}$$ {#eq-stability-threshold}
+
+Any batch size below $B_{min}$ results in an unstable system.
+
+**Step 3: Compute Latency at Candidate Batch Sizes**
+
+For each candidate $B \in \{B_{min}, 2B_{min}, ..., B_{max}\}$, compute:
+
+$$E[T(B)] = \frac{\lambda \cdot S(B)^2}{2B(1 - \lambda S(B)/B)} + \frac{B}{2\lambda} + S(B)$$
+
+**Step 4: Account for Tail Latency**
+
+For P99 SLO compliance, use the heavy-traffic approximation for tail latency:
+
+$$T_{P99} \approx E[T] + 2.33 \cdot \sigma_T$$ {#eq-p99-approximation}
+
+where $\sigma_T$ is the standard deviation of response time. For exponential-like service time distributions, $\sigma_T \approx E[T]$, yielding $T_{P99} \approx 3.3 \cdot E[T]$.
+
+**Step 5: Select Optimal Batch Size**
+
+Choose the largest $B$ such that $T_{P99}(B) \leq \text{SLO}$:
+
+$$B^* = \max\{B : T_{P99}(B) \leq \text{SLO}\}$$ {#eq-batch-selection-rule}
+
+@tbl-batch-decision-framework summarizes the decision process:
+
++-----------------------+-----------------------------------------------+-------------------------------------+
+| **Condition**         | **Recommended Action**                        | **Rationale**                       |
++:======================+:==============================================+:====================================+
+| $B < B_{min}$         | Increase batch size or add replicas           | System is unstable                  |
+| $T_{P99} > \text{SLO}$| Reduce batch size or add replicas             | Latency exceeds target              |
+| $\rho < 0.5$          | Consider reducing replicas to save cost       | System is overprovisioned           |
+| $\rho > 0.85$         | Add replicas for headroom                     | Approaching instability             |
++-----------------------+-----------------------------------------------+-------------------------------------+
+
+: **Batch Size Decision Framework**. Systematic approach to selecting batch size based on stability, latency SLO, and utilization targets. {#tbl-batch-decision-framework}
+
+#### Trade-off Curves: Visualizing the Operating Region {#sec-inference-tradeoff-curves}
+
+The relationship between batch size, throughput, and latency defines an **operating region** within which production systems must function. @fig-batch-tradeoff-curves illustrates this region:
+
+::: {#fig-batch-tradeoff-curves fig-env="figure" fig-pos="htb" fig-cap="**Batch Size Trade-off Curves**. The operating region (shaded) is bounded by the stability constraint (minimum throughput) and latency SLO (maximum latency). Larger batch sizes increase throughput but also increase latency. The optimal operating point maximizes throughput while meeting the SLO." fig-alt="Graph showing throughput on y-axis and latency on x-axis. A curved line represents different batch sizes from B=1 to B=64. The operating region is shaded, bounded by a vertical line for SLO and horizontal line for minimum throughput."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9]
+  % Axes
+  \draw[->, thick] (0,0) -- (8,0) node[right] {Latency (ms)};
+  \draw[->, thick] (0,0) -- (0,5) node[above] {Throughput (req/s)};
+
+  % Grid
+  \draw[gray!30, thin] (0,0) grid[step=1] (7.5,4.5);
+
+  % Operating region (shaded)
+  \fill[blue!10] (0.5,1.5) -- (0.5,4) -- (5,4) -- (5,1.5) -- cycle;
+
+  % SLO boundary
+  \draw[red, thick, dashed] (5,0) -- (5,4.5) node[above, font=\scriptsize] {SLO};
+
+  % Minimum throughput
+  \draw[orange, thick, dashed] (0,1.5) -- (7.5,1.5) node[right, font=\scriptsize] {Min $\lambda$};
+
+  % Trade-off curve (batch size increasing)
+  \draw[blue, very thick]
+    (0.5,0.5) node[below, font=\scriptsize] {B=1}
+    .. controls (1,1.2) and (1.5,2) ..
+    (2,2.5) node[above left, font=\scriptsize] {B=4}
+    .. controls (2.5,3) and (3,3.3) ..
+    (3.5,3.5) node[above, font=\scriptsize] {B=8}
+    .. controls (4,3.7) and (4.5,3.9) ..
+    (5.5,4) node[above, font=\scriptsize] {B=16}
+    .. controls (6,4.05) and (6.5,4.1) ..
+    (7,4.1) node[right, font=\scriptsize] {B=32};
+
+  % Optimal point
+  \fill[green!70!black] (5,4) circle (3pt);
+  \node[above right, font=\scriptsize, green!50!black] at (5,4) {Optimal $B^*$};
+
+  % Labels
+  \node[font=\scriptsize] at (3,2.5) {Operating};
+  \node[font=\scriptsize] at (3,2.1) {Region};
+
+  % Axis labels
+  \node[font=\scriptsize] at (1,-0.5) {50};
+  \node[font=\scriptsize] at (3,-0.5) {150};
+  \node[font=\scriptsize] at (5,-0.5) {250};
+  \node[font=\scriptsize] at (7,-0.5) {350};
+  \node[font=\scriptsize] at (-0.5,1.5) {100};
+  \node[font=\scriptsize] at (-0.5,3) {200};
+  \node[font=\scriptsize] at (-0.5,4.5) {300};
+\end{tikzpicture}
+```
+:::
+
+The trade-off curve demonstrates several key insights:
+
+1. **Pareto frontier**: The curve represents efficient operating points; any point below the curve is dominated by a point on the curve with either higher throughput or lower latency.
+
+2. **Knee of the curve**: The optimal batch size often lies at the "knee" where throughput gains diminish while latency continues to increase linearly.
+
+3. **SLO-constrained optimum**: When an SLO bounds maximum latency, the optimal point is where the curve intersects the SLO boundary.
+
+4. **Diminishing returns**: Beyond the knee, doubling batch size may increase throughput by only 10-20% while doubling latency.
+
+This queuing-theoretic framework provides the mathematical foundation for the batching strategies examined in the following sections. Where intuition might suggest "larger batches are better for throughput," the analysis reveals that stability constraints, latency targets, and diminishing returns create a well-defined optimal operating region that varies by model type and deployment requirements.
+
 ### Static and Dynamic Batching for Vision Models {#sec-inference-static-dynamic-batching}
 
 Vision models represent the simplest batching case because inputs have uniform size (after preprocessing) and computation follows a predictable pattern. Single-machine batching principles apply directly, with scale introducing considerations of batch formation across multiple replicas.
@@ -1032,6 +1308,284 @@ vLLM implements a virtual memory mechanism similar to an operating system's swap
 +----------------------------+---------------------------+---------------------+
 
 The 3x throughput improvement from continuous batching comes from eliminating idle GPU cycles during sequence length variation.
+
+:::
+
+### Quantitative Analysis: Traditional vs Continuous Batching {#sec-inference-batching-quantitative}
+
+The performance gap between traditional and continuous batching becomes quantifiable through careful analysis of wasted compute cycles. This section develops the mathematics of batching waste and demonstrates the improvement through a worked example with realistic LLM serving parameters.
+
+#### The Waste Function for Traditional Batching
+
+Traditional batching (also called static batching) processes all requests in a batch through all decode iterations until the longest sequence completes. For a batch of $n$ sequences with output lengths $\{L_1, L_2, ..., L_n\}$, the total compute performed is:
+
+$$C_{traditional} = n \times L_{max} \times c_{decode}$$ {#eq-traditional-compute}
+
+where $L_{max} = \max_i(L_i)$ and $c_{decode}$ is the compute cost per decode iteration per sequence. However, the useful compute is only:
+
+$$C_{useful} = \sum_{i=1}^{n} L_i \times c_{decode}$$ {#eq-useful-compute}
+
+The **waste ratio** quantifies the inefficiency:
+
+$$W = 1 - \frac{C_{useful}}{C_{traditional}} = 1 - \frac{\sum_{i=1}^{n} L_i}{n \times L_{max}} = 1 - \frac{\bar{L}}{L_{max}}$$ {#eq-waste-ratio}
+
+where $\bar{L}$ is the mean output length. This reveals that waste depends entirely on the ratio of mean to maximum output length within the batch. For uniform output lengths ($\bar{L} = L_{max}$), waste is zero. For highly variable lengths, waste can exceed 50%.
+
+#### Worked Example: LLM Serving with Variable-Length Outputs
+
+Consider a GPT-class model serving four concurrent requests with the following generation lengths (in tokens):
+
+**Request characteristics**:
+
+| Request | Prompt Length | Output Length | Total Tokens |
+|:--------|:-------------:|:-------------:|:------------:|
+| R1      | 100           | 50            | 150          |
+| R2      | 80            | 200           | 280          |
+| R3      | 120           | 100           | 220          |
+| R4      | 90            | 150           | 240          |
+
+**System parameters**:
+
+- Decode time per iteration (batch of 4): 20 ms
+- Maximum output length in batch: 200 tokens (R2)
+- Mean output length: (50 + 200 + 100 + 150) / 4 = 125 tokens
+
+**Traditional Batching Analysis**
+
+With traditional batching, all four requests must wait for R2 to complete its 200 tokens:
+
+- Total decode iterations: 200
+- Total batch time: 200 × 20 ms = 4,000 ms
+- Request completion times:
+  - R1 completes useful work at iteration 50, but waits until iteration 200 → latency = 4,000 ms
+  - R2 completes at iteration 200 → latency = 4,000 ms
+  - R3 completes useful work at iteration 100, but waits until iteration 200 → latency = 4,000 ms
+  - R4 completes useful work at iteration 150, but waits until iteration 200 → latency = 4,000 ms
+
+Waste calculation using @eq-waste-ratio:
+
+$$W = 1 - \frac{125}{200} = 1 - 0.625 = 37.5\%$$
+
+The GPU performs 4 × 200 = 800 "sequence-iterations" but only 500 are useful.
+
+**Continuous Batching Analysis**
+
+With continuous batching, sequences depart the batch upon completion, and new requests can join:
+
+- Iteration 50: R1 completes → slot freed, new request R5 can join
+- Iteration 100: R3 completes → slot freed, new request R6 can join
+- Iteration 150: R4 completes → slot freed, new request R7 can join
+- Iteration 200: R2 completes
+
+Request latencies with continuous batching (assuming no queuing delay):
+
+- R1: 50 × 20 ms = 1,000 ms (4x improvement over traditional)
+- R3: 100 × 20 ms = 2,000 ms (2x improvement)
+- R4: 150 × 20 ms = 3,000 ms (1.33x improvement)
+- R2: 200 × 20 ms = 4,000 ms (no improvement for longest request)
+
+**Average latency comparison**:
+
+- Traditional: 4,000 ms (all requests)
+- Continuous: (1,000 + 2,000 + 3,000 + 4,000) / 4 = 2,500 ms
+
+This represents a **37.5% reduction in average latency**, exactly matching the waste ratio.
+
+::: {.callout-note title="Figure: Traditional vs Continuous Batching Timeline" collapse="false"}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.65]
+  \definecolor{R1Color}{RGB}{100,180,100}
+  \definecolor{R2Color}{RGB}{100,100,200}
+  \definecolor{R3Color}{RGB}{200,150,100}
+  \definecolor{R4Color}{RGB}{180,100,180}
+  \definecolor{WasteColor}{RGB}{220,220,220}
+  \definecolor{NewColor}{RGB}{255,200,100}
+
+  % Traditional Batching (top)
+  \node[anchor=west, font=\bfseries] at (0, 6.5) {Traditional Batching};
+
+  % Time axis
+  \draw[->, thick] (0, 0.5) -- (12, 0.5);
+  \node[anchor=west] at (12, 0.5) {Time};
+  \foreach \x/\label in {0/0, 2.5/50, 5/100, 7.5/150, 10/200} {
+    \draw (\x, 0.4) -- (\x, 0.6);
+    \node[below, font=\scriptsize] at (\x, 0.4) {\label};
+  }
+
+  % R1 row
+  \fill[R1Color] (0, 5.5) rectangle (2.5, 6);
+  \fill[WasteColor] (2.5, 5.5) rectangle (10, 6);
+  \node[anchor=west, font=\scriptsize] at (0.1, 5.75) {R1: 50 tokens};
+  \node[font=\scriptsize, text=gray] at (6, 5.75) {Idle (waiting)};
+
+  % R2 row
+  \fill[R2Color] (0, 4.5) rectangle (10, 5);
+  \node[anchor=west, font=\scriptsize, text=white] at (0.1, 4.75) {R2: 200 tokens};
+
+  % R3 row
+  \fill[R3Color] (0, 3.5) rectangle (5, 4);
+  \fill[WasteColor] (5, 3.5) rectangle (10, 4);
+  \node[anchor=west, font=\scriptsize] at (0.1, 3.75) {R3: 100 tokens};
+  \node[font=\scriptsize, text=gray] at (7.5, 3.75) {Idle};
+
+  % R4 row
+  \fill[R4Color] (0, 2.5) rectangle (7.5, 3);
+  \fill[WasteColor] (7.5, 2.5) rectangle (10, 3);
+  \node[anchor=west, font=\scriptsize, text=white] at (0.1, 2.75) {R4: 150 tokens};
+  \node[font=\scriptsize, text=gray] at (8.75, 2.75) {Idle};
+
+  % Waste annotation
+  \draw[<->, red, thick] (10.3, 2.5) -- (10.3, 6);
+  \node[anchor=west, font=\scriptsize, text=red] at (10.5, 4.25) {37.5\% waste};
+
+  % Continuous Batching (bottom, shifted down)
+  \node[anchor=west, font=\bfseries] at (0, -0.5) {Continuous Batching};
+
+  % Time axis for continuous
+  \draw[->, thick] (0, -6.5) -- (12, -6.5);
+  \node[anchor=west] at (12, -6.5) {Time};
+  \foreach \x/\label in {0/0, 2.5/50, 5/100, 7.5/150, 10/200} {
+    \draw (\x, -6.6) -- (\x, -6.4);
+    \node[below, font=\scriptsize] at (\x, -6.6) {\label};
+  }
+
+  % R1 row (completes early, freed)
+  \fill[R1Color] (0, -1.5) rectangle (2.5, -1);
+  \draw[thick, green!50!black] (2.5, -1.25) circle (0.15);
+  \node[font=\tiny, green!50!black] at (2.5, -1.25) {\checkmark};
+  \node[anchor=west, font=\scriptsize] at (0.1, -1.25) {R1};
+
+  % R5 joins in R1's slot
+  \fill[NewColor] (2.5, -1.5) rectangle (7, -1);
+  \node[anchor=west, font=\scriptsize] at (2.6, -1.25) {R5 (new)};
+
+  % R2 row (longest, no change)
+  \fill[R2Color] (0, -2.5) rectangle (10, -2);
+  \node[anchor=west, font=\scriptsize, text=white] at (0.1, -2.25) {R2: 200 tokens};
+
+  % R3 row (completes at 100)
+  \fill[R3Color] (0, -3.5) rectangle (5, -3);
+  \draw[thick, green!50!black] (5, -3.25) circle (0.15);
+  \node[font=\tiny, green!50!black] at (5, -3.25) {\checkmark};
+  \node[anchor=west, font=\scriptsize] at (0.1, -3.25) {R3};
+
+  % R6 joins in R3's slot
+  \fill[NewColor] (5, -3.5) rectangle (9, -3);
+  \node[anchor=west, font=\scriptsize] at (5.1, -3.25) {R6 (new)};
+
+  % R4 row (completes at 150)
+  \fill[R4Color] (0, -4.5) rectangle (7.5, -4);
+  \draw[thick, green!50!black] (7.5, -4.25) circle (0.15);
+  \node[font=\tiny, green!50!black] at (7.5, -4.25) {\checkmark};
+  \node[anchor=west, font=\scriptsize, text=white] at (0.1, -4.25) {R4};
+
+  % R7 joins in R4's slot
+  \fill[NewColor] (7.5, -4.5) rectangle (10, -4);
+  \node[anchor=west, font=\scriptsize] at (7.6, -4.25) {R7};
+
+  % Benefit annotation
+  \draw[<->, green!50!black, thick] (10.3, -4.5) -- (10.3, -1);
+  \node[anchor=west, font=\scriptsize, text=green!50!black] at (10.5, -2.75) {0\% waste};
+  \node[anchor=west, font=\scriptsize, text=green!50!black] at (10.5, -3.25) {+3 requests};
+
+\end{tikzpicture}
+```
+**Traditional vs Continuous Batching**. Top: Traditional batching wastes 37.5% of GPU cycles as completed requests (R1, R3, R4) wait idle for the longest request (R2). Bottom: Continuous batching immediately frees slots upon completion, allowing new requests (R5, R6, R7) to join. This eliminates waste and increases effective throughput.
+:::
+
+#### When Continuous Batching Provides Maximum Benefit
+
+The analysis above reveals that continuous batching's benefit scales with output length variance. We can formalize this relationship:
+
+**Benefit formula**: Let $CV = \sigma / \mu$ be the coefficient of variation of output lengths. The throughput improvement from continuous batching over traditional batching is:
+
+$$\text{Improvement} \approx \frac{L_{max}}{\bar{L}} = \frac{\mu + k\sigma}{\mu} = 1 + k \cdot CV$$ {#eq-continuous-benefit}
+
+where $k$ is the number of standard deviations the maximum output exceeds the mean (typically 2-3 for realistic distributions).
+
+@tbl-continuous-batching-benefit quantifies this relationship across different workload types:
+
++-------------------------+--------+---------+-------------------+--------------------------+
+| **Workload Type**       | **CV** | **k**   | **Waste (Trad.)** | **Speedup (Continuous)** |
++:========================+:======:+:=======:+:=================:+:========================:+
+| Code completion         | 0.3    | 2.5     | 18%               | 1.2x                     |
+| Chat (short responses)  | 0.6    | 2.0     | 33%               | 1.5x                     |
+| General text generation | 1.0    | 2.5     | 50%               | 2.0x                     |
+| Creative writing        | 1.5    | 3.0     | 64%               | 2.8x                     |
+| RAG with variable docs  | 2.0    | 2.5     | 71%               | 3.5x                     |
++-------------------------+--------+---------+-------------------+--------------------------+
+
+: **Continuous Batching Benefit by Workload Type**. Higher output length variance (CV) yields greater improvement from continuous batching. Workloads with predictable output lengths (code completion) see modest gains, while highly variable workloads (RAG with documents of varying length) see dramatic improvement. {#tbl-continuous-batching-benefit}
+
+**Key insight**: Continuous batching is most valuable when:
+
+1. **Output lengths are unpredictable**: User queries that may elicit responses from 10 to 1,000 tokens
+2. **Mixed workload types**: Combining summarization (short) with generation (long) on the same cluster
+3. **High request volume**: More opportunities to fill vacated slots with waiting requests
+4. **Tight latency SLOs**: Short requests benefit most from early completion
+
+Conversely, continuous batching provides minimal benefit when:
+
+1. **Output lengths are uniform**: Fixed-length tasks like classification or embedding generation
+2. **Batch sizes are small**: Few opportunities for slot reuse within a batch
+3. **Request volume is low**: Vacated slots sit empty waiting for new requests
+
+#### Implementation Complexity Trade-offs
+
+Continuous batching's performance benefits come with implementation complexity that systems engineers must weigh:
+
+**Memory management complexity**: Traditional batching allocates a fixed KV cache region per sequence at batch formation, deallocating only when the entire batch completes. Continuous batching requires dynamic allocation as sequences grow and immediate deallocation upon completion, necessitating sophisticated memory management akin to operating system virtual memory.
+
+**Scheduler complexity**: Traditional batching uses simple FIFO scheduling: collect requests until batch is full or timeout expires, then execute. Continuous batching requires per-iteration decision making about which sequences to admit, which to preempt if memory pressure exists, and how to handle priority classes. This increases scheduler overhead from O(1) per batch to O(n) per iteration.
+
+**Kernel design**: Batched GPU kernels traditionally assume fixed batch composition. Continuous batching requires kernels that handle variable-length sequences efficiently, often through techniques like packing multiple short sequences into shared attention masks or using specialized memory layouts that support dynamic batch membership.
+
+@tbl-batching-tradeoffs summarizes these trade-offs:
+
++---------------------------+---------------------------+----------------------------------+
+| **Dimension**             | **Traditional Batching**  | **Continuous Batching**          |
++:==========================+:==========================+:=================================+
+| **Implementation effort** | Low (standard frameworks) | High (custom scheduler, kernels) |
+| **Memory overhead**       | Fixed allocation          | Dynamic + fragmentation mgmt     |
+| **Scheduler latency**     | ~0.1 ms per batch         | ~0.5-1 ms per iteration          |
+| **Debugging complexity**  | Deterministic behavior    | State-dependent, harder to trace |
+| **Throughput (variable)** | Baseline                  | 1.5-3.5x improvement             |
+| **Throughput (uniform)**  | Baseline                  | ~1.0x (no improvement)           |
++---------------------------+---------------------------+----------------------------------+
+
+: **Traditional vs Continuous Batching Trade-offs**. Continuous batching provides significant throughput gains for variable-length workloads at the cost of implementation complexity. For uniform-length workloads, the complexity overhead may not justify adoption. {#tbl-batching-tradeoffs}
+
+**Practical recommendation**: For new LLM serving deployments, continuous batching frameworks like vLLM, TensorRT-LLM, or TGI provide the implementation complexity as a solved problem. The decision becomes whether to adopt these frameworks versus building custom serving infrastructure. For organizations with existing traditional batching systems, the migration cost must be weighed against the workload's output length variance using @tbl-continuous-batching-benefit.
+
+::: {.callout-tip title="Systems Sandwich: Debugging High P99 Latency"}
+
+**Problem**: An LLM serving system exhibits unexpectedly high tail latency. P50 latency is 100ms and P95 is 180ms, both within SLO, but P99 spikes to 500ms against a 200ms target. GPU utilization appears healthy at 85%. Where is the bottleneck?
+
+**Physical Layer Analysis** (Hardware Constraints):
+
+The system runs on 4 A100-80GB GPUs connected via PCIe Gen4 (64 GB/s per GPU) rather than NVLink. The server has a dual-socket CPU with NUMA topology. Memory bandwidth per GPU is 2 TB/s (HBM2e), adequate for decode operations. However, PCIe bandwidth limits tensor parallelism communication to 64 GB/s versus NVLink's 600 GB/s. For a batch requiring 100MB activation transfers between GPUs, PCIe adds approximately 1.5ms per synchronization point versus 0.17ms for NVLink.
+
+**Operational Layer Analysis** (Algorithmic Behavior):
+
+Dynamic batching is configured with max batch size 32 and timeout 50ms. Examining the batch size distribution reveals the problem: 90% of batches contain 4 to 8 requests (explaining good P50/P95), but 5% of batches reach the full 32 requests. These large batches occur during traffic bursts and experience head-of-line blocking: short requests that would complete quickly must wait for long-sequence requests in the same batch to finish all their decode iterations.
+
+With continuous batching enabled, why does this occur? Further investigation reveals the scheduler uses FIFO ordering without preemption, meaning a burst of 32 simultaneous arrivals all enter the same batch and none can exit early because they all started at the same iteration.
+
+**Diagnosis**:
+
+The root cause is not the hardware (Physical Layer) but the scheduling policy (Operational Layer). Head-of-line blocking occurs when the scheduler forms large batches from bursty arrivals without considering request heterogeneity. The 500ms P99 corresponds to large batches where short requests wait for long-sequence completions.
+
+**Solution**:
+
+Implement priority-aware scheduling with separate batch size limits by request type:
+
+1. **Request classification**: Tag requests by expected output length (short: under 50 tokens, medium: 50 to 200 tokens, long: over 200 tokens) based on prompt patterns or user-provided hints
+2. **Differentiated batching**: Limit short-request batches to 8, medium to 16, long to 32
+3. **Priority preemption**: Allow short requests to preempt long-running sequences when P99 approaches SLO
+
+After implementing these changes, P99 dropped to 185ms. The Physical Layer was adequate; the problem was entirely in the Operational Layer's scheduling logic.
+
+**Lesson**: When tail latency exceeds expectations despite healthy utilization, examine the batching and scheduling policies. High average GPU utilization can mask head-of-line blocking that only affects a small percentage of requests but drives P99. The Systems Sandwich methodology systematically isolates whether bottlenecks arise from hardware constraints or algorithmic decisions. See @sec-vol2-introduction for the complete Systems Sandwich framework.
 
 :::
 
