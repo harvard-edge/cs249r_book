@@ -103,19 +103,19 @@ export function initCloud(svgSelection, width, height, tooltipSel) {
 
     // Location Update Hint Box
     const noteGroup = hintGroup.append("g")
-        .attr("transform", "translate(-90, -23)");
+        .attr("transform", "translate(-105, -23)");
 
     // Shadow Rectangle (matching Hello World style)
     noteGroup.append("rect")
         .attr("x", 2)
         .attr("y", 2)
-        .attr("width", 85)
+        .attr("width", 100)
         .attr("height", 46)
         .attr("fill", "rgba(255, 102, 0, 0.3)");
 
     // Background Box
     noteGroup.append("rect")
-        .attr("width", 85)
+        .attr("width", 100)
         .attr("height", 46)
         .attr("fill", "#fff")
         .attr("stroke", "#555")
