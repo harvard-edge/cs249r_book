@@ -362,6 +362,18 @@ Standard collective algorithms assume a flat network with uniform bandwidth. Rea
 
 This approach reduces inter-node traffic by a factor of $G$ (GPUs per node), trading cheap intra-node bandwidth for scarce inter-node bandwidth.
 
+### Adaptive Routing and Congestion Control {#sec-adaptive-routing}
+
+The topology-aware algorithms discussed above assume a static network where paths are predictable. However, in large clusters, **Flow Collisions** (incast) and **Head-of-Line Blocking** can destroy performance even on non-blocking topologies like Fat-Trees.
+
+**Static Routing (ECMP)**: Traditional Equal-Cost Multi-Path (ECMP) routing hashes flow headers (SrcIP, DstIP, SrcPort, DstPort) to select a path. For long-lived, high-bandwidth flows (like a 1GB gradient transfer), the hash fixes the flow to a single path. If two such flows hash to the same link, they collide, cutting bandwidth by 50% while other links sit idle. This is the **ECMP Collision** problem.
+
+**Adaptive Routing (Packet Spraying)**: To solve this, modern fabrics (like InfiniBand HDR/NDR and specialized Ethernet RoCEv2 fabrics) employ **Adaptive Routing**. Instead of routing per-flow, the switch routes **per-packet**. Each packet of a message is dynamically sent across the least-congested available path. This "sprays" the message across all available wires, achieving near-perfect load balancing.
+
+**The Reordering Cost**: Packet spraying causes packets to arrive out of order. The receiving NIC must have a sufficient **Reordering Buffer** and logic to reconstruct the message. If the buffer overflows, packets are dropped, triggering costly retransmissions (Go-Back-N).
+
+**Congestion Control (DCQCN)**: Even with adaptive routing, many senders targeting one receiver causes **Incast**. Data Center Quantized Congestion Notification (DCQCN) provides backpressure. The switch marks packets (ECN) when queues fill; the receiver echoes this to the sender (CNP); the sender throttles its injection rate. Tuning DCQCN parameters ($K_{min}$, $K_{max}$, $P_{max}$) is critical for preventing "Congestion Spreading" where one slow receiver backs up the entire fabric.
+
 ### Topology Detection and Selection
 
 Communication libraries like NCCL automatically detect topology to select optimal algorithms. The library builds a graph of GPU connectivity (NVLink vs PCIe vs Network) and runs a graph search to find the highest-bandwidth paths for rings and trees.

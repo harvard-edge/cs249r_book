@@ -224,11 +224,32 @@ The strategies discussed so far—pruning, active learning, and synthesis—are 
 
 ### The Selection Bottleneck
 
-Dynamic data selection introduces a new bottleneck: the selection latency. In standard training, the data loader simply reads the next batch. In active learning or curriculum learning, the system must evaluate a selection function $f(x)$ over a large candidate pool to determine the next batch.
+Dynamic data selection introduces a new bottleneck: **selection latency**. In standard training, the data loader simply reads the next batch. In active learning or curriculum learning, the system must evaluate a selection function $f(x)$ over a large candidate pool to determine the next batch.
 
-If $f(x)$ requires a forward pass of the model (e.g., measuring uncertainty), the cost of selection can exceed the cost of training. To mitigate this, high-efficiency systems employ **Proxy Selection**:
-1.  **Small Proxy Models:** Use a distilled, lightweight model to score the data pool, selecting candidates for the large training model.
-2.  **Embedding Indices:** Pre-compute embeddings for the entire dataset and store them in a vector search index (e.g., FAISS, ScaNN). Selection becomes a nearest-neighbor search (finding samples diverse from the current training set) rather than a linear scan.
+For a selection strategy to be systems-efficient, it must satisfy the **Selection Inequality**:
+
+$$ T_{selection} + T_{train}(N_{subset}) < T_{train}(N_{total}) $$
+
+Where $T_{selection}$ is the time spent scoring the pool and $T_{train}$ is the compute time. If $f(x)$ requires a forward pass of a large model, the cost of selection can exceed the cost of training, leading to a negative ROI.
+
+### Hardware Empathy: The Random Access Penalty
+
+Data efficiency strategies like coresets or dynamic sampling often require **random access** to samples across the dataset. While standard training uses sequential reads (benefiting from hardware readahead and OS page caching), random access patterns devastate throughput, especially on distributed filesystems or traditional hard drives.
+
+::: {#tbl-io-performance fig-cap="**The Cost of Randomness**: Comparative I/O throughput for sequential vs. random 4KB reads across different storage tiers. Standard data loaders optimize for Sequential throughput; Data Efficiency strategies often fall into the 'Random' trap."}
+
+| Storage Tier | Sequential Throughput | Random I/O (IOPS) | Random Throughput (approx) | Random Penalty |
+|--------------|-----------------------|-------------------|---------------------------|----------------|
+| HDD (7.2k)   | ~150 MB/s             | ~80               | ~0.3 MB/s                 | **500x**       |
+| SATA SSD     | ~550 MB/s             | ~10k              | ~40 MB/s                  | **14x**        |
+| NVMe SSD     | ~3,500 MB/s           | ~500k             | ~2,000 MB/s               | **1.75x**      |
+| Cloud (S3)   | ~100 MB/s (per conn)  | ~10-50ms (lat)    | Very Low (per conn)       | **Extreme**    |
+
+:::
+
+To mitigate this, high-efficiency systems employ **Proxy Selection**:
+1.  **Small Proxy Models:** Use a distilled, lightweight model (e.g., a 10M parameter "student") to score the data pool for a 7B parameter "teacher."
+2.  **Embedding Indices:** Pre-compute embeddings and store them in a vector search index (e.g., FAISS). Selection becomes a $O(\log N)$ nearest-neighbor search rather than a $O(N)$ linear scan.
 
 ### Optimizing Data Loaders
 

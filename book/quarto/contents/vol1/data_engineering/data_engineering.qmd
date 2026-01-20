@@ -2556,6 +2556,31 @@ The bandwidth hierarchy fundamentally constrains ML system design, creating bott
 
 Understanding these quantitative relationships enables informed architectural decisions about storage system selection and data pipeline optimization, which become even more critical during distributed training as examined in @sec-ai-training. The training throughput equation reveals the critical dependencies:
 
+::: {.callout-notebook title="Engineering Calculation: The Data Roofline Model"}
+**Problem**: You are training ResNet-50. Your GPU can process **1,000 img/sec**. Your training pipeline achieves only **600 img/sec**. Why?
+
+**The Physics of Data Loading**:
+Total throughput is determined by the slowest stage in the pipeline (the bottleneck).
+$$ \text{Pipeline Throughput} = \min(\text{Disk BW}, \text{Decode Throughput}, \text{Transfer BW}, \text{GPU Compute}) $$
+
+**1. Disk I/O Bandwidth**:
+*   Batch Size: 256 images.
+*   Avg Image Size (JPEG): 150 KB.
+*   Data per Batch: $256 \times 150 \text{ KB} \approx 38 \text{ MB}$.
+*   Required Disk Speed for 1000 img/sec: $1000 \times 150 \text{ KB} = 150 \text{ MB/s}$.
+*   *Constraint*: A standard SATA SSD ($\approx 500$ MB/s) is sufficient. A spinning HDD ($\approx 100$ MB/s) would be a bottleneck.
+
+**2. Decode Throughput (The Hidden Killer)**:
+*   JPEG decoding is CPU-intensive.
+*   Single Core Decode Speed: $\approx 100 \text{ img/sec}$.
+*   Required Cores: $1000 / 100 = 10 \text{ cores}$.
+*   *Constraint*: If your training machine has only 4 vCPUs, your **maximum theoretical throughput** is 400 img/sec, regardless of GPU power. This is a **CPU-Bound Data Bottleneck**.
+
+**3. The Solution**:
+*   **Increase `num_workers`**: Parallelize decoding across all available CPU cores.
+*   **Move to GPU Decoding**: Use libraries like **NVIDIA DALI** to move JPEG decoding to the GPU, bypassing the CPU bottleneck entirely.
+:::
+
 $$\text{Training Throughput} = \min(\text{Compute Capacity}, \text{Data Supply Rate})$$
 
 $$\text{Data Supply Rate} = \text{Storage Bandwidth} \times (1 - \text{Overhead})$$
