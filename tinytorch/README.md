@@ -255,11 +255,36 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
+## Contributors
+
+Thanks to these wonderful people who helped improve TinyTorch ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/AmirAlasady"><img src="https://avatars.githubusercontent.com/AmirAlasady?v=4?s=80" width="80px;" alt="Amir Alasady"/><br /><sub><b>Amir Alasady</b></sub></a><br /><a href="https://github.com/harvard-edge/cs249r_book/issues?q=author%3AAmirAlasady" title="Bug reports">🐛</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+**Recognize a contributor:** Comment on any issue or PR:
+```
+@all-contributors please add @username for bug, code, doc, or ideas
+```
+
+---
+
 ## Acknowledgments
 
 Created by [Prof. Vijay Janapa Reddi](https://vijay.seas.harvard.edu) at Harvard University.
-
-Special thanks to students and contributors who helped build this framework.
 
 ---
 
