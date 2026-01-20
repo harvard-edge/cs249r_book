@@ -70,7 +70,7 @@ class LoginCommand(BaseCommand):
                 # Wait for tokens without stopping the server yet
                 import time
                 start_time = time.time()
-                timeout = 120
+                timeout = 300
                 while getattr(receiver.server, "auth_data", None) is None:
                     if time.time() - start_time > timeout:
                         break
@@ -87,6 +87,8 @@ class LoginCommand(BaseCommand):
                 return 0
             else:
                 self.console.print("[red]Login timed out.[/red]")
+                self.console.print("\n[yellow]💡 If the browser didn't open or authentication failed, you can try again manually with:[/yellow]")
+                self.console.print("   [bold green]tito community login[/bold green]\n")
                 return 1
         except Exception as e:
             self.console.print(f"[red]Error: {e}[/red]")
@@ -130,7 +132,7 @@ class LogoutCommand(BaseCommand):
                 # Wait for logout signal without stopping the server yet
                 import time
                 start_time = time.time()
-                timeout = 30
+                timeout = 60
                 while not getattr(receiver.server, "logout_requested", False):
                     if time.time() - start_time > timeout:
                         break

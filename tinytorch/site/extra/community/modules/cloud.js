@@ -101,33 +101,22 @@ export function initCloud(svgSelection, width, height, tooltipSel) {
         .attr("stroke", "#ccc")
         .attr("stroke-width", 1);
 
-    // Label for the vertical line
-    hintGroup.append("text")
-        .attr("x", -5) // Slightly to the left of the vertical line
-        .attr("y", 0)
-        .attr("text-anchor", "end") // Align to the right of x=-5
-        .style("font-family", "Courier New")
-        .style("font-size", "8px")
-        .style("fill", "#777")
-        .style("pointer-events", "none")
-        .text("Launched: 12.2025 🔥");
-
     // Location Update Hint Box
     const noteGroup = hintGroup.append("g")
-        .attr("transform", "translate(-90, 12)");
+        .attr("transform", "translate(-90, -23)");
 
     // Shadow Rectangle (matching Hello World style)
     noteGroup.append("rect")
         .attr("x", 2)
         .attr("y", 2)
         .attr("width", 85)
-        .attr("height", 30)
+        .attr("height", 46)
         .attr("fill", "rgba(255, 102, 0, 0.3)");
 
     // Background Box
     noteGroup.append("rect")
         .attr("width", 85)
-        .attr("height", 30)
+        .attr("height", 46)
         .attr("fill", "#fff")
         .attr("stroke", "#555")
         .attr("stroke-width", 0.8)
@@ -146,6 +135,13 @@ export function initCloud(svgSelection, width, height, tooltipSel) {
     textElem.append("tspan")
         .attr("x", 5)
         .attr("dy", 0)
+        .style("fill", "#777")
+        .text("Launched: 12.2025 🔥");
+
+    textElem.append("tspan")
+        .attr("x", 5)
+        .attr("dy", 12)
+        .style("fill", "#333")
         .text("Update location in");
 
     const linkTspan = textElem.append("tspan")

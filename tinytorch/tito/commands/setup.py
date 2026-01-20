@@ -514,7 +514,8 @@ class SetupCommand(BaseCommand):
                         self.console.print("[dim]Opening profile editor...[/dim]")
                         open_url("https://mlsysbook.ai/tinytorch/community/?action=profile&community=true", self.console, show_manual_fallback=True)
                 else:
-                    self.console.print("[yellow]⚠️  Community connection failed or was cancelled. You can try again later with 'tito login'.[/yellow]")
+                    self.console.print("[yellow]⚠️  Community connection timed out or was cancelled.[/yellow]")
+                    self.console.print("[yellow]💡 You can complete this anytime with:[/yellow] [bold green]tito community login[/bold green]")
             except Exception as e:
                  self.console.print(f"[yellow]⚠️  Error during login: {e}[/yellow]")
         else:
@@ -536,7 +537,8 @@ class SetupCommand(BaseCommand):
                 if login_result == 0:
                     self.console.print("[green]✅ Successfully connected to the TinyTorch community![/green]")
                 else:
-                    self.console.print("[yellow]⚠️  Community connection failed or was cancelled. You can try again later with 'tito community login'.[/yellow]")
+                    self.console.print("[yellow]⚠️  Community connection timed out or was cancelled.[/yellow]")
+                    self.console.print("[yellow]💡 You can complete this anytime with:[/yellow] [bold green]tito community login[/bold green]")
             except Exception as e:
                  self.console.print(f"[yellow]⚠️  Error during login: {e}[/yellow]")
         else:
