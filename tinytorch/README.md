@@ -265,7 +265,13 @@ Thanks to these wonderful people who helped improve TinyTorch ([emoji key](https
 <table>
   <tbody>
     <tr>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/AmirAlasady"><img src="https://avatars.githubusercontent.com/AmirAlasady?v=4?s=80" width="80px;" alt="Amir Alasady"/><br /><sub><b>Amir Alasady</b></sub></a><br /><a href="https://github.com/harvard-edge/cs249r_book/issues?q=author%3AAmirAlasady" title="Bug reports">🐛</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/AmirAlasady"><img src="https://avatars.githubusercontent.com/AmirAlasady?v=4?s=80" width="80px;" alt="Amir Alasady"/><br /><sub><b>Amir Alasady</b></sub></a><br />🐛</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🐛 💻 🎨 📖 💡 👀 🧪 🔧</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/kai4avaya"><img src="https://avatars.githubusercontent.com/kai4avaya?v=4?s=80" width="80px;" alt="kai"/><br /><sub><b>kai</b></sub></a><br />🐛 💻 🎨 📖 🧪</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/minhdang26403"><img src="https://avatars.githubusercontent.com/minhdang26403?v=4?s=80" width="80px;" alt="Dang Truong"/><br /><sub><b>Dang Truong</b></sub></a><br />🐛 💻 📖 🧪</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/didier-durand"><img src="https://avatars.githubusercontent.com/didier-durand?v=4?s=80" width="80px;" alt="Didier Durand"/><br /><sub><b>Didier Durand</b></sub></a><br />🐛 💻 📖</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/karthikdani"><img src="https://avatars.githubusercontent.com/karthikdani?v=4?s=80" width="80px;" alt="Karthik Dani"/><br /><sub><b>Karthik Dani</b></sub></a><br />🐛 💻</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/jettythek"><img src="https://avatars.githubusercontent.com/jettythek?v=4?s=80" width="80px;" alt="jettythek"/><br /><sub><b>jettythek</b></sub></a><br />💻</td>
     </tr>
   </tbody>
 </table>
