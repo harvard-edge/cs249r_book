@@ -249,6 +249,35 @@ class TestTensorOperations:
         except (ImportError, TypeError):
             pytest.skip("Matrix multiplication not implemented yet")
 
+    def test_matrix_multiplication_rejects_scalars(self):
+        """
+        WHAT: Matrix multiplication rejects 0D tensors (scalars).
+
+        WHY: Matrix multiplication requires at least 1D inputs:
+        - Scalars have no dimensions to contract
+        - Use * for scalar multiplication, @ for matrix multiplication
+        - This matches PyTorch/NumPy behavior
+
+        STUDENT LEARNING: @ and * are different operations.
+        Use * for element-wise/scalar multiplication, @ for matrix multiplication.
+        """
+        try:
+            from tinytorch.core.tensor import Tensor
+
+            scalar = Tensor(5.0)
+            vector = Tensor([1, 2, 3])
+
+            # Scalar @ vector should raise ValueError
+            with pytest.raises(ValueError):
+                _ = scalar @ vector
+
+            # Vector @ scalar should also raise ValueError
+            with pytest.raises(ValueError):
+                _ = vector @ scalar
+
+        except ImportError:
+            pytest.skip("Tensor not implemented yet")
+
 
 class TestTensorMemory:
     """
