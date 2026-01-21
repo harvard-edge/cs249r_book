@@ -24,47 +24,25 @@ The fundamental surprise of modern computing is that arithmetic is nearly free w
 
 ::: {.callout-tip title="Learning Objectives"}
 
-After completing this chapter, you should be able to:
+- Calculate arithmetic intensity for neural network operations and use the roofline model to determine whether workloads are compute-bound or memory-bound on specific hardware
 
-- **Calculate arithmetic intensity** for neural network operations and use the roofline model to determine whether workloads are compute-bound or memory-bound on specific hardware
+- Explain why systolic arrays and tensor cores achieve 10-100× better efficiency than general-purpose processors for matrix operations
 
-- **Explain why** systolic arrays and tensor cores achieve 10-100× better efficiency than general-purpose processors for matrix operations
+- Predict performance bottlenecks by quantifying the memory wall: bandwidth limits, energy costs of data movement, and cache hierarchy trade-offs
 
-- **Predict performance bottlenecks** by quantifying the memory wall: bandwidth limits, energy costs of data movement, and cache hierarchy trade-offs
+- Select appropriate dataflow strategies (weight-stationary, output-stationary, input-stationary) based on whether a workload prioritizes weight reuse, activation reuse, or accumulator locality
 
-- **Select appropriate dataflow strategies** (weight-stationary, output-stationary, input-stationary) based on whether a workload prioritizes weight reuse, activation reuse, or accumulator locality
+- Identify compiler optimization opportunities including kernel fusion, tiling, and memory planning that translate high-level models into efficient hardware execution
 
-- **Identify compiler optimization opportunities** including kernel fusion, tiling, and memory planning that translate high-level models into efficient hardware execution
+- Evaluate accelerator choices for specific deployment scenarios (training vs. inference, cloud vs. edge, latency vs. throughput) using quantitative cost-performance analysis
 
-- **Evaluate accelerator choices** for specific deployment scenarios (training vs. inference, cloud vs. edge, latency vs. throughput) using quantitative cost-performance analysis
-
-- **Recognize common pitfalls** such as ignoring memory bandwidth limits, expecting linear multi-GPU scaling, or optimizing for peak FLOPS rather than sustained throughput
-
-:::
-
-::: {.callout-chapter-connection title="From Algorithmic to Physical Optimization"}
-
-The Model Compression chapter (@sec-model-compression) introduced techniques that reduce computational requirements through algorithmic means: quantization shrinks precision from FP32 to INT8, pruning removes unnecessary weights, and knowledge distillation trains smaller networks. But *why* does reducing precision from 32 bits to 8 bits yield 2-4× speedup? Why does structured pruning improve performance while unstructured pruning often doesn't?
-
-The answers lie in hardware architecture. Quantization works because accelerators pack 4× more INT8 operations into the same silicon. Structured pruning works because it preserves memory access patterns that hardware can optimize. This chapter explains the physical constraints that make algorithmic optimizations effective—and reveals why some theoretically promising techniques fail to deliver real-world speedups.
-
-**The Optimization Pipeline**: Think of ML optimization as a three-stage pipeline:
-
-1. **Algorithmic** (Model Compression): Reduce what needs to be computed
-2. **Mapping** (This Chapter): Match computation to hardware capabilities
-3. **Deployment** (Benchmarking, Ops): Validate and operationalize the gains
-
-Understanding hardware acceleration transforms you from a consumer of optimization techniques into an engineer who can reason about *why* techniques work and *when* they'll fail.
+- Recognize common pitfalls such as ignoring memory bandwidth limits, expecting linear multi-GPU scaling, or optimizing for peak FLOPS rather than sustained throughput
 
 :::
 
 ## AI Hardware Acceleration Fundamentals {#sec-ai-acceleration-ai-hardware-acceleration-fundamentals-2096}
 
-If Data Efficiency optimizes the "Source Code" and Compression optimizes the "Binary," then **Hardware Acceleration** optimizes the machine itself. It is the final physical frontier of the **Iron Law** (@sec-optimize-principles), where we design silicon to maximize "Math per Second" while minimizing "Energy per Bit."
-
-Modern machine learning systems challenge the architectural assumptions underlying general-purpose processors. The efficiency framework established in @sec-introduction identified three pillars of ML system efficiency: algorithmic, compute, and data. While the software optimization techniques examined in @sec-model-compression address the algorithmic pillar through precision reduction, structural pruning, and execution refinements, hardware acceleration targets the compute pillar through architectural redesign rather than algorithmic modification.
-
-This performance gap has driven a shift toward domain-specific hardware acceleration within computer architecture. The 2012 AlexNet breakthrough illustrates the principle of **hardware-software co-design** that defines modern ML systems engineering.
+The Model Compression chapter (@sec-model-compression) introduced techniques that reduce computational requirements through algorithmic means: quantization shrinks precision from FP32 to INT8, pruning removes unnecessary weights, and knowledge distillation trains smaller networks. But *why* does reducing precision from 32 bits to 8 bits yield 2-4× speedup? Why does structured pruning improve performance while unstructured pruning often doesn't? The answers lie in hardware architecture. Quantization works because accelerators pack 4× more INT8 operations into the same silicon. Structured pruning works because it preserves memory access patterns that hardware can optimize. This chapter explains the physical constraints that make algorithmic optimizations effective and reveals why some theoretically promising techniques fail to deliver real-world speedups.
 
 ::: {.callout-definition title="Hardware-Software Co-design"}
 
@@ -72,15 +50,9 @@ This performance gap has driven a shift toward domain-specific hardware accelera
 
 :::
 
-::: {.callout-perspective title="The Central Question: Compute-Bound or Memory-Bound?"}
+Modern machine learning systems challenge the architectural assumptions underlying general-purpose processors. The efficiency framework established in @sec-introduction identified three pillars of ML system efficiency: algorithmic, compute, and data. While the software optimization techniques examined in @sec-model-compression address the algorithmic pillar through precision reduction, structural pruning, and execution refinements, hardware acceleration targets the compute pillar through architectural redesign rather than algorithmic modification. This performance gap has driven a shift toward domain-specific hardware acceleration within computer architecture.
 
-Throughout this chapter, one question will recur: *Is this workload limited by how fast we can compute, or how fast we can move data?* The answer determines everything—which accelerator to choose, which optimizations matter, and whether a 10× more powerful chip will actually help.
-
-The **Roofline Model** (@sec-ai-acceleration-roofline-model) provides the analytical framework for answering this question. It plots an operation's **arithmetic intensity** (operations per byte of memory traffic) against hardware capabilities, revealing whether performance is capped by compute or bandwidth. A dense matrix multiplication with high arithmetic intensity benefits from more TFLOPS; a LayerNorm with low arithmetic intensity benefits from more memory bandwidth. Most real neural networks contain both types of operations, requiring careful analysis to optimize end-to-end performance.
-
-Keep this distinction in mind as we examine hardware architectures. When we discuss systolic arrays, ask: "What arithmetic intensity do they require to achieve full utilization?" When we examine memory hierarchies, ask: "How do they shift the roofline boundary?" This analytical lens transforms hardware selection from guesswork into engineering.
-
-:::
+Throughout this chapter, one question will recur: *Is this workload limited by how fast we can compute, or how fast we can move data?* The answer determines everything: which accelerator to choose, which optimizations matter, and whether a 10× more powerful chip will actually help. The **Roofline Model** (@sec-ai-acceleration-roofline-model) provides the analytical framework for answering this question. It plots an operation's **arithmetic intensity** (operations per byte of memory traffic) against hardware capabilities, revealing whether performance is capped by compute or bandwidth. A dense matrix multiplication with high arithmetic intensity benefits from more TFLOPS; a LayerNorm with low arithmetic intensity benefits from more memory bandwidth. Most real neural networks contain both types of operations, requiring careful analysis to optimize end-to-end performance. We will analyze this distinction through the Lighthouse Examples established in @sec-introduction: ResNet-50's convolutions are compute-bound while GPT-2's attention layers are memory-bound, explaining why these architectures require fundamentally different optimization strategies.
 
 The co-evolution of machine learning algorithms and specialized computing architectures has enabled the transition from computationally prohibitive research conducted on high-performance computing systems to ubiquitous deployment across diverse computing environments, from hyperscale data centers to resource-constrained edge devices.
 
@@ -114,7 +86,7 @@ The Intel 8087 (1980)[^fn-intel-8087] addressed this bottleneck by offloading ar
 
 [^fn-intel-8087]: **Intel 8087 Impact**: The 8087 coprocessor transformed scientific computing by providing dedicated hardware for the IEEE 754 floating-point standard. This success established the economic model for hardware specialization: premium pricing for dramatic performance jumps in specific domains (CAD, simulation).
 
-As specialized functions like floating-point math proved their value, they followed a recurring pattern of **integration**. The Intel 486DX (1989) moved the FPU directly onto the CPU die, eliminating the off-chip communication latency and making high-precision math a standard feature rather than an optional accelerator. This cycle (specialization to solve a bottleneck, followed by integration into the general-purpose stack) repeats across every era of hardware evolution.
+As specialized functions like floating-point math proved their value, they followed a recurring pattern of **integration**. The Intel 486DX (1989) moved the FPU directly onto the CPU die, eliminating the off-chip communication latency and making high-precision math a standard feature rather than an optional accelerator [@patterson2021computer]. This cycle (specialization to solve a bottleneck, followed by integration into the general-purpose stack) repeats across every era of hardware evolution.
 
 This progression from specialization to integration has shaped modern computing. Each domain—graphics, signal processing, machine learning—introduced specialized architectures that were later absorbed into general-purpose platforms.
 
@@ -884,7 +856,7 @@ Each execution unit combines these computational primitives with specialized mem
 
 Single Instruction Multiple Data (SIMD)[^fn-simd-evolution] execution applies identical operations to multiple data elements in parallel, minimizing instruction overhead while maximizing data throughput. This execution model is widely used to accelerate workloads with regular, independent data parallelism, such as neural network computations. The ARM Scalable Vector Extension (SVE) provides a representative example of how modern architectures implement SIMD operations efficiently. @lst-arm_sve_vector demonstrates this approach.
 
-[^fn-simd-evolution]: **SIMD Evolution**: SIMD originated in Flynn's 1966 taxonomy for scientific computing, but neural networks transformed it from a niche HPC concept to mainstream necessity. Modern CPUs have wide SIMD units (e.g., AVX-512 on some platforms), but AI workloads pushed broad adoption of SIMT (Single Instruction, Multiple Thread) where *many* lightweight threads execute in parallel. In practice, GPU architectures coordinate tens of thousands of threads concurrently, far beyond what is practical with classic SIMD alone.
+[^fn-simd-evolution]: **SIMD Evolution**: SIMD originated in Flynn's 1966 taxonomy [@flynn1966very] for scientific computing, but neural networks transformed it from a niche HPC concept to mainstream necessity. Modern CPUs have wide SIMD units (e.g., AVX-512 on some platforms), but AI workloads pushed broad adoption of SIMT (Single Instruction, Multiple Thread) where *many* lightweight threads execute in parallel. In practice, GPU architectures coordinate tens of thousands of threads concurrently, far beyond what is practical with classic SIMD alone.
 
 ::: {#lst-arm_sve_vector lst-cap="**Vector Operation**: Vector multiplication and addition operations enable efficient parallel processing in machine learning models. [@ARM2020]"}
 ```{.c}
@@ -1691,6 +1663,8 @@ These factors such as interconnect latency, bandwidth limitations, and synchroni
 ### Model Memory Pressure {#sec-ai-acceleration-model-memory-pressure-f95e}
 
 Machine learning models impose varying memory access patterns that significantly influence accelerator performance. The way data is transferred between the host and accelerator, how frequently memory is accessed, and the efficiency of caching mechanisms all determine overall execution efficiency. While multilayer perceptrons (MLPs), convolutional neural networks (CNNs), and transformer networks each require large parameter sets, their distinct memory demands necessitate tailored optimization strategies for accelerators. Understanding these differences provides insight into why different hardware architectures exhibit varying levels of efficiency across workloads.
+
+To ground this analysis, we return to the Lighthouse Examples introduced in @sec-introduction: **ResNet-50** represents CNN workloads with high spatial reuse, **GPT-2/Llama** exemplifies transformer memory pressure, **MobileNet** demonstrates efficiency-optimized architectures with depthwise convolutions, and **DLRM** illustrates sparse embedding lookups that stress memory systems differently than dense operations. These examples will recur throughout the remainder of this chapter as we analyze how memory characteristics translate to hardware utilization.
 
 #### Multilayer Perceptrons {#sec-ai-acceleration-multilayer-perceptrons-0bbc}
 
