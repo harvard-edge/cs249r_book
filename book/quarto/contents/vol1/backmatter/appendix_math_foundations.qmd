@@ -7,31 +7,31 @@ This appendix provides the mathematical tools you will need to reason about ML s
 Before diving in, here is a map of what this appendix covers and where each concept appears in the main text.
 
 +-------------------------------+--------------------------------------------+-------------------------------------------+
-| Topic                         | What It Helps You Do                       | Where It Appears                          |
+| **Topic**                     | **What It Helps You Do**                   | **Where It Appears**                      |
 +:==============================+:===========================================+:==========================================+
-| Roofline Model                | Determine if a workload is memory-bound    | @sec-ai-acceleration, @sec-ai-training,   |
+| **Roofline Model**            | Determine if a workload is memory-bound    | @sec-ai-acceleration, @sec-ai-training,   |
 |                               | or compute-bound                           | @sec-serving                              |
 +-------------------------------+--------------------------------------------+-------------------------------------------+
-| Amdahl's Law                  | Calculate maximum speedup from             | @sec-ai-acceleration, @sec-ai-training    |
+| **Amdahl's Law**              | Calculate maximum speedup from             | @sec-ai-acceleration, @sec-ai-training    |
 |                               | parallelization                            |                                           |
 +-------------------------------+--------------------------------------------+-------------------------------------------+
-| Gustafson's Law               | Understand weak scaling for large models   | @sec-ai-training                          |
+| **Gustafson's Law**           | Understand weak scaling for large models   | @sec-ai-training                          |
 +-------------------------------+--------------------------------------------+-------------------------------------------+
-| Little's Law                  | Size serving infrastructure for target QPS | @sec-serving                              |
+| **Little's Law**              | Size serving infrastructure for target QPS | @sec-serving                              |
 +-------------------------------+--------------------------------------------+-------------------------------------------+
-| Memory Hierarchy              | Optimize data movement and cache usage     | @sec-ai-acceleration, @sec-efficient-ai   |
+| **Memory Hierarchy**          | Optimize data movement and cache usage     | @sec-ai-acceleration, @sec-efficient-ai   |
 +-------------------------------+--------------------------------------------+-------------------------------------------+
-| Numerical Formats             | Choose precision for training vs inference | @sec-model-optimizations, @sec-serving    |
+| **Numerical Formats**         | Choose precision for training vs inference | @sec-model-optimizations, @sec-serving    |
 +-------------------------------+--------------------------------------------+-------------------------------------------+
-| GEMM Operations               | Understand the core computation in         | @sec-dl-primer, @sec-ai-acceleration      |
+| **GEMM Operations**           | Understand the core computation in         | @sec-dl-primer, @sec-ai-acceleration      |
 |                               | neural networks                            |                                           |
 +-------------------------------+--------------------------------------------+-------------------------------------------+
-| Backpropagation               | Debug gradient issues and memory usage     | @sec-dl-primer, @sec-ai-training          |
+| **Backpropagation**           | Debug gradient issues and memory usage     | @sec-dl-primer, @sec-ai-training          |
 +-------------------------------+--------------------------------------------+-------------------------------------------+
-| Sparse Formats (CSR)          | Work with recommendation systems and       | @sec-model-optimizations                  |
+| **Sparse Formats (CSR)**      | Work with recommendation systems and       | @sec-model-optimizations                  |
 |                               | pruned models                              |                                           |
 +-------------------------------+--------------------------------------------+-------------------------------------------+
-| Computational Graphs          | Understand compiler optimizations          | @sec-ai-frameworks, @sec-ai-acceleration  |
+| **Computational Graphs**      | Understand compiler optimizations          | @sec-ai-frameworks, @sec-ai-acceleration  |
 +-------------------------------+--------------------------------------------+-------------------------------------------+
 
 : **Appendix Quick Reference**: Each mathematical concept in this appendix, what engineering decisions it informs, and where it appears in the main text. {#tbl-appendix-overview}
@@ -52,9 +52,7 @@ The Roofline Model [@williams2009roofline] answers a deceptively simple question
 
 Every operation has an **arithmetic intensity**: the ratio of computations performed to bytes moved from memory. Matrix multiplication has high arithmetic intensity because you can reuse each loaded element many times. Element-wise operations like ReLU have low intensity because you load a number, do one operation, and write it back.
 
-As illustrated in @fig-roofline, the model plots achievable performance against arithmetic intensity. The resulting "roofline" shape reveals two distinct operating regions.
-
-::: {#fig-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Model**: The plot visualizes the memory-bound (sloped) and compute-bound (horizontal) regions of a hardware platform. Workload A, situated on the slope, is constrained by memory bandwidth, while Workload B, on the plateau, is limited by peak compute capability."
+::: {#fig-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Model**: Performance ceiling for a hypothetical accelerator. The sloped line represents memory bandwidth limits; the horizontal line represents peak compute. Every workload can be plotted on this diagram to determine its optimization strategy." fig-alt="A plot with arithmetic intensity on the x-axis and performance on the y-axis. Two lines form a roofline shape: a diagonal line rising from the origin labeled Memory Bound, and a horizontal line labeled Compute Bound. They meet at the Ridge Point. Two workloads are plotted: Workload A on the diagonal slope, Workload B on the horizontal plateau."
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=1.0]
   % Define Project Colors
@@ -78,7 +76,7 @@ As illustrated in @fig-roofline, the model plots achievable performance against 
 
   % Grid
   \draw[step=0.5, gray!10, very thin] (0,0) grid (6,4);
-  
+
   % Axes
   \draw[Axis] (0,0) -- (6,0) node[right, text=TextBlack] {Arithmetic Intensity (Ops/Byte)};
   \draw[Axis] (0,0) -- (0,4.2) node[above, text=TextBlack] {Performance (FLOP/s)};
@@ -112,7 +110,21 @@ As illustrated in @fig-roofline, the model plots achievable performance against 
 ```
 :::
 
-The key equations are straightforward. Arithmetic intensity is:
+**How to read a roofline plot.** @fig-roofline shows the roofline for a hypothetical accelerator. The key to reading this diagram is the **ridge point**, the corner where the two lines meet. Start there and work outward:
+
+1. **Find the ridge point.** This tells you the hardware's balance between compute and memory. For this accelerator, the ridge point occurs at a specific arithmetic intensity (marked on the x-axis). Calculate yours using @eq-ridge-point below.
+
+2. **Plot your workload's arithmetic intensity.** Compute @eq-arithmetic-intensity for your operation. Draw a vertical line up from that x-value until it hits the roofline.
+
+3. **Read off the regime.** If your vertical line hits the sloped portion, you are **memory-bound**. If it hits the flat portion, you are **compute-bound**. This distinction determines your entire optimization strategy.
+
+Now examine where Workload A sits on the plot. It falls on the sloped portion, meaning it operates in the memory-bound regime. What does this mean practically? Every byte of additional memory bandwidth would directly translate to more FLOP/s. Buying a faster GPU would not help much because the compute units are already waiting for data. Instead, you should focus on data reuse: can you tile the computation to keep data in cache? Can you fuse this operation with adjacent operations to avoid writing intermediate results to HBM?
+
+Contrast this with Workload B on the flat portion. This workload is already hitting peak compute. The memory system is feeding data fast enough; the bottleneck is raw arithmetic throughput. Adding more memory bandwidth would not help. The only paths to better performance are: (1) a faster processor, (2) algorithmic improvements that reduce total FLOPs, or (3) mixed-precision arithmetic that doubles throughput.
+
+The power of this diagram is that once you learn to read it, you can interpret ANY roofline plot for any hardware. The specific numbers change (an A100 has a different ridge point than an H100), but the interpretation process is identical.
+
+The key equations formalize these observations. Arithmetic intensity is:
 
 $$ \text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{Bytes Accessed}} $$ {#eq-arithmetic-intensity}
 
@@ -176,9 +188,9 @@ The previous section gave you tools to analyze workloads. This section explains 
 
 ### The Memory Hierarchy {#sec-appendix-memory-hierarchy}
 
-Computer systems use a hierarchy of memory technologies because no single technology provides both high capacity and low latency. As shown in @fig-memory-hierarchy, memories closer to the compute units are faster but dramatically smaller.
+Computer systems use a hierarchy of memory technologies because no single technology provides both high capacity and low latency. Understanding this hierarchy explains why your model's memory access patterns matter as much as its computational complexity.
 
-::: {#fig-memory-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Memory Hierarchy**: Computational efficiency in ML depends on keeping the 'working set' (active weights and activations) as high up the pyramid as possible. Transfers between the HBM/DRAM layer and the Compute Units represent the primary performance bottleneck in modern accelerators."
+::: {#fig-memory-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Memory Hierarchy**: Each level trades off speed against capacity. The performance of your ML code depends on which level your working data resides in during the critical inner loops." fig-alt="A pyramid diagram with four levels from top to bottom: Registers (smallest, fastest), L1/L2/L3 Cache, HBM/DRAM, and Storage/SSD/Disk (largest, slowest). Arrows on the left indicate increasing capacity downward; arrows on the right indicate increasing speed upward."
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=1.0]
   % Define Project Colors
@@ -202,19 +214,19 @@ Computer systems use a hierarchy of memory technologies because no single techno
   % Registers
   \filldraw[fill=RedFill, draw=RedLine, line width=1pt] (0, 5.2) -- (-1.2, 4.2) -- (1.2, 4.2) -- cycle;
   \node[text=RedLine] at (0, 4.55) {\textbf{Registers}};
-  
+
   % Cache
   \filldraw[fill=YellowFill, draw=YellowLine, line width=1pt] (-1.2, 4.2) -- (-2.4, 2.8) -- (2.4, 2.8) -- (1.2, 4.2) -- cycle;
   \node[text=YellowLine!80!black] at (0, 3.5) {\textbf{L1 / L2 / L3 Cache}};
-  
+
   % HBM
   \filldraw[fill=BlueFill, draw=BlueLine, line width=1pt] (-2.4, 2.8) -- (-3.6, 1.4) -- (3.6, 1.4) -- (2.4, 2.8) -- cycle;
   \node[text=BlueLine] at (0, 2.1) {\textbf{HBM / DRAM}};
-  
+
   % Storage
   \filldraw[fill=GreenFill, draw=GreenLine, line width=1pt] (-3.6, 1.4) -- (-4.8, 0) -- (4.8, 0) -- (3.6, 1.4) -- cycle;
   \node[text=GreenLine] at (0, 0.7) {\textbf{Storage (SSD / Disk)}};
-  
+
   % Side Arrows
   \draw[->, ultra thick, gray!40] (5.5, 0) -- (5.5, 5.2) node[midway, right, LabelAxis, text=gray] {Faster Speed\\Lower Latency};
   \draw[->, ultra thick, gray!40] (-5.5, 5.2) -- (-5.5, 0) node[midway, left, LabelAxis, text=gray] {Larger Capacity\\Lower Cost};
@@ -222,9 +234,29 @@ Computer systems use a hierarchy of memory technologies because no single techno
 ```
 :::
 
-The performance gap between compute and memory is called the "Memory Wall." Modern ML accelerators attack this problem with High Bandwidth Memory (HBM), which provides several terabytes per second of bandwidth compared to hundreds of gigabytes per second in standard DDR5 DRAM. Even so, the gap remains: an NVIDIA H100 can perform computations far faster than it can feed data to those computations.
+**How to use this mental model.** @fig-memory-hierarchy is not just a diagram to memorize; it is a tool for reasoning about code performance. When analyzing any ML workload, ask: *where does my data live during the inner loop?*
 
-This is why **data reuse** is the primary goal of ML systems optimization. Every technique that keeps data in registers or cache longer (tiling, fusion, batching) directly addresses the memory wall.
+Consider a concrete scenario. You are writing a custom attention kernel, and your inner loop computes dot products between query and key vectors. If those vectors fit in registers, each dot product takes about 1 nanosecond. If they must be fetched from HBM on every iteration, each access takes roughly 100 nanoseconds. That is a 100x difference in memory access time alone.
+
+The latency numbers to internalize:
+
+| Level | Latency | Relative to Registers | Example Capacity |
+|-------|---------|----------------------|------------------|
+| Registers | ~1 ns | 1x | ~20 MB (A100 total) |
+| L1 Cache | ~4 ns | 4x | 128 KB per SM |
+| L2 Cache | ~20 ns | 20x | 40 MB (A100) |
+| HBM | ~100 ns | 100x | 80 GB (A100) |
+| SSD | ~100 us | 100,000x | TB scale |
+
+Now apply this to real code patterns:
+
+**Data loading**: If your training loop reads each batch from SSD, you pay 100 microseconds per access. At 1,000 batches per epoch, that is 100 milliseconds of I/O per epoch, which may dominate training time for small models. This is why data loaders prefetch batches into DRAM while the GPU computes.
+
+**Activation memory**: During backpropagation, you need intermediate activations stored during the forward pass. If these exceed HBM capacity, they spill to CPU memory or SSD. A single access to CPU memory over PCIe takes roughly 1 microsecond. If your backward pass touches millions of activations, the slowdown is catastrophic. This is why gradient checkpointing exists: it trades compute (recomputing activations) for memory (not storing them).
+
+**Weight updates**: During training, you read weights from HBM, compute gradients, and write updated weights back. If you can keep the optimizer state in HBM rather than swapping to CPU, you avoid the 10x latency penalty of crossing the PCIe bus.
+
+The design principle this diagram teaches: **every technique that keeps data higher in the pyramid directly improves performance**. Tiling keeps working sets in cache. Operator fusion avoids writing intermediates to HBM. Batching amortizes the cost of loading weights from HBM across multiple inputs. Once you internalize this hierarchy, optimization strategies become intuitive rather than mysterious.
 
 ### Bandwidth vs. Latency {#sec-appendix-bandwidth-latency}
 
@@ -251,20 +283,20 @@ Neural networks are remarkably tolerant of reduced numerical precision. This sec
 The IEEE 754 standard and its AI-specific derivatives define different trade-offs between dynamic range (the span of representable values) and precision (how finely you can represent values within that range).
 
 +----------+-------+----------+----------+-----------------+--------------------------------------------+
-| Format   | Bits  | Exponent | Mantissa | Dynamic Range   | Typical Use Case                           |
+| **Format** | **Bits** | **Exponent** | **Mantissa** | **Dynamic Range** | **Typical Use Case**                     |
 +:=========+:======+:=========+:=========+:================+:===========================================+
-| FP32     | 32    | 8        | 23       | ~$10^{-38}$ to  | Training (full precision), reference       |
+| **FP32** | 32    | 8        | 23       | ~$10^{-38}$ to  | Training (full precision), reference       |
 |          |       |          |          | $10^{38}$       | inference                                  |
 +----------+-------+----------+----------+-----------------+--------------------------------------------+
-| FP16     | 16    | 5        | 10       | ~$10^{-5}$ to   | Training with loss scaling, inference      |
+| **FP16** | 16    | 5        | 10       | ~$10^{-5}$ to   | Training with loss scaling, inference      |
 |          |       |          |          | $6.5 \times     |                                            |
 |          |       |          |          | 10^{4}$         |                                            |
 +----------+-------+----------+----------+-----------------+--------------------------------------------+
-| BF16     | 16    | 8        | 7        | Same as FP32    | Training (preferred), avoids loss scaling  |
+| **BF16** | 16    | 8        | 7        | Same as FP32    | Training (preferred), avoids loss scaling  |
 +----------+-------+----------+----------+-----------------+--------------------------------------------+
-| FP8      | 8     | 4 or 5   | 3 or 2   | Varies          | Inference on newest hardware (H100+)       |
+| **FP8**  | 8     | 4 or 5   | 3 or 2   | Varies          | Inference on newest hardware (H100+)       |
 +----------+-------+----------+----------+-----------------+--------------------------------------------+
-| INT8     | 8     | N/A      | N/A      | -128 to 127     | Inference after quantization               |
+| **INT8** | 8     | N/A      | N/A      | -128 to 127     | Inference after quantization               |
 +----------+-------+----------+----------+-----------------+--------------------------------------------+
 
 : **Numerical Format Comparison**: Each format trades off precision, dynamic range, memory footprint, and compute throughput. BF16 has emerged as the preferred training format because it matches FP32's range while using half the memory. {#tbl-numerical-formats}
@@ -335,9 +367,9 @@ In deep networks, this chain extends across many layers. Each layer contributes 
 
 ### The Backpropagation Algorithm {#sec-appendix-backprop}
 
-Backpropagation implements the chain rule efficiently through two passes. As shown in @fig-backprop-graph, the forward pass computes outputs while caching intermediate activations. The backward pass then reuses these cached values to compute gradients.
+Backpropagation implements the chain rule efficiently through two passes: forward to compute outputs, backward to compute gradients.
 
-::: {#fig-backprop-graph fig-env="figure" fig-pos="htb" fig-cap="**Backpropagation Computational Graph**: The forward pass (black) computes activations $h$ and loss $L$. The backward pass (red) propagates the error signal $\\frac{\\partial L}{\\partial y}$ through local derivatives to update parameters $W_1$ and $W_2$."
+::: {#fig-backprop-graph fig-env="figure" fig-pos="htb" fig-cap="**Backpropagation Computational Graph**: A two-layer network showing the forward pass (black arrows) and backward pass (red dashed arrows). Each node caches values during the forward pass that are reused during the backward pass." fig-alt="A computational graph with four nodes labeled x, h, y, and L connected left to right. Solid black arrows show the forward pass with weights W1 and W2. Dashed red arrows curve backward showing gradient flow with partial derivative notation."
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=3cm, auto, >=stealth, thick]
   % Define Project Colors
@@ -374,7 +406,21 @@ Backpropagation implements the chain rule efficiently through two passes. As sho
 ```
 :::
 
-The memory implication is significant: you must store all intermediate activations during the forward pass to use them in the backward pass. For a transformer with billions of parameters and long sequences, this activation memory often exceeds the memory needed for the model weights themselves. Gradient checkpointing trades computation for memory by recomputing activations instead of storing them.
+**How to trace the computation.** @fig-backprop-graph shows a simple two-layer network. Practice tracing both passes to understand what happens during training:
+
+**Forward pass (black arrows, left to right)**: Start at $x$, your input. Multiply by $W_1$ to get hidden activation $h$. Cache $h$ because you will need it later. Multiply $h$ by $W_2$ to get output $y$. Cache $y$. Compare $y$ to the target label to compute loss $L$.
+
+At this point, you have computed the loss and your memory contains: the input $x$, the cached activation $h$, the cached output $y$, and the loss $L$. For a large model, these cached activations dominate memory usage.
+
+**Backward pass (red arrows, right to left)**: Now trace backward from $L$. The loss function tells you $\frac{\partial L}{\partial y}$, the gradient of loss with respect to your prediction. This is where the error signal enters the network.
+
+To compute $\frac{\partial L}{\partial W_2}$, you need to know how $W_2$ affected $y$. That requires the cached value of $h$. The chain rule gives you: $\frac{\partial L}{\partial W_2} = \frac{\partial L}{\partial y} \cdot h^T$.
+
+To continue backward to $W_1$, you need $\frac{\partial L}{\partial h}$, then multiply by the cached input $x$. Each step backward requires the activations cached during the forward pass.
+
+**Why this matters for memory.** The cached activations at each layer cannot be freed until the backward pass reaches that layer. For a 100-layer network, you store 100 layers of activations simultaneously. For a transformer processing a 4096-token sequence with hidden dimension 4096, a single layer's activations consume $4096 \times 4096 \times 4$ bytes $\approx 67$ MB in FP32. Multiply by 100 layers: 6.7 GB just for activations, often exceeding the memory for weights themselves.
+
+**Gradient checkpointing** addresses this by not caching all activations. Instead, you cache every $k$th layer's activations and recompute the intermediate ones during the backward pass. This trades compute (recomputing activations) for memory (not storing them). For a 100-layer network with checkpointing every 10 layers, you store only 10 activations instead of 100, reducing activation memory by 10x at the cost of roughly 33% more forward-pass compute.
 
 ### Automatic Differentiation {#sec-appendix-autodiff}
 
@@ -392,13 +438,13 @@ Recommendation systems and pruned models contain mostly zeros. Storing and compu
 
 When most elements in a matrix are zero, specialized storage formats avoid wasting memory on zeros and enable computations that skip them entirely.
 
-The **Compressed Sparse Row (CSR)** format uses three arrays to represent a sparse matrix efficiently, as shown in @fig-csr-format:
+The **Compressed Sparse Row (CSR)** format uses three arrays:
 
-- `Values`: The non-zero elements, in row order
+- `Values`: The non-zero elements, stored in row order
 - `Col_Idx`: The column index of each non-zero element
-- `Row_Ptr`: The starting position in `Values` for each row
+- `Row_Ptr`: The starting position in `Values` for each row (length = num_rows + 1)
 
-::: {#fig-csr-format fig-env="figure" fig-pos="htb" fig-cap="**Compressed Sparse Row (CSR)**: The `Row_Ptr` array [0, 2, 3, 3, 4] indicates that Row 0 has 2 non-zero elements, Row 1 has 1, Row 2 is empty, and Row 3 has 1. This representation avoids storing the 12 zero values in this $4 \\times 4$ matrix."
+::: {#fig-csr-format fig-env="figure" fig-pos="htb" fig-cap="**Compressed Sparse Row (CSR)**: A $4 \\times 4$ matrix with only 4 non-zero values. CSR stores these 4 values plus indexing overhead, rather than all 16 elements." fig-alt="A 4x4 grid showing a sparse matrix with values 5, 8, 3, and 6 in specific cells, most cells empty. An arrow points to three arrays: Values containing the four numbers, Col_Idx containing their column positions, and Row_Ptr containing row boundary indices."
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=1.0]
   % Define Project Colors
@@ -420,9 +466,9 @@ The **Compressed Sparse Row (CSR)** format uses three arrays to represent a spar
   \begin{scope}
     \draw[GridLine, step=0.6cm] (0,0) grid (2.4, 2.4);
     % Values
-    \node[Cell, text=BlueLine] at (0.3, 2.1) {5}; \node[Cell, text=BlueLine] at (1.5, 2.1) {8}; 
-    \node[Cell, text=BlueLine] at (0.9, 1.5) {3};                          
-    \node[Cell, text=BlueLine] at (2.1, 0.3) {6};                          
+    \node[Cell, text=BlueLine] at (0.3, 2.1) {5}; \node[Cell, text=BlueLine] at (1.5, 2.1) {8};
+    \node[Cell, text=BlueLine] at (0.9, 1.5) {3};
+    \node[Cell, text=BlueLine] at (2.1, 0.3) {6};
     \node[anchor=south, font=\small\bfseries, text=TextBlack] at (1.2, 2.5) {Sparse Matrix};
   \end{scope}
 
@@ -439,7 +485,19 @@ The **Compressed Sparse Row (CSR)** format uses three arrays to represent a spar
 ```
 :::
 
-CSR enables fast row-wise access, which is the dominant access pattern in sparse matrix-vector multiplication. For a matrix with $N$ total elements and $K$ non-zeros, CSR uses $O(K)$ storage instead of $O(N)$, with corresponding speedups for sparse-aware computations.
+**How to read a CSR representation.** @fig-csr-format shows a $4 \times 4$ sparse matrix and its CSR encoding. The skill you need is reconstructing the matrix from the three arrays. Work through this step by step:
+
+**Finding all values in a specific row.** Suppose you want row 0. Look at `Row_Ptr[0] = 0` and `Row_Ptr[1] = 2`. This tells you row 0's non-zeros are at indices 0 through 1 (inclusive) in the `Values` array. Check `Values[0:2] = [5, 8]` and `Col_Idx[0:2] = [0, 2]`. So row 0 has value 5 in column 0 and value 8 in column 2.
+
+**Finding a specific element.** To find the element at row 1, column 1: First, `Row_Ptr[1] = 2` and `Row_Ptr[2] = 3`, so row 1 has one non-zero at index 2 in `Values`. Check `Col_Idx[2] = 1`. Since we are looking for column 1 and this matches, the value is `Values[2] = 3`. If the column did not appear in `Col_Idx` for this row, the element would be zero.
+
+**Detecting empty rows.** Look at row 2: `Row_Ptr[2] = 3` and `Row_Ptr[3] = 3`. Since these are equal, row 2 has no non-zeros. The entire row is zeros.
+
+**Why this matters for ML.** Recommendation systems use embedding tables where each user or item maps to a sparse high-dimensional vector. A typical embedding table might have millions of users but each user only interacts with hundreds of items. Storing this as a dense matrix wastes 99.99% of memory on zeros. CSR stores only the non-zero interactions.
+
+Pruned neural networks exhibit similar sparsity. After pruning 90% of weights, you have 10x fewer values to store and 10x fewer multiplications to perform, but only if your storage format and compute kernels exploit sparsity. Dense GEMM on a 90%-sparse matrix does all the work for zeros that contribute nothing to the result.
+
+For a matrix with $N$ total elements and $K$ non-zeros, CSR uses $O(K)$ storage instead of $O(N)$. The crossover where CSR becomes more efficient than dense storage depends on the sparsity pattern, but typically occurs around 90% sparsity.
 
 ---
 
