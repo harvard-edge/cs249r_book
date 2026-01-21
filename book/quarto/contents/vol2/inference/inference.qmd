@@ -268,31 +268,9 @@ Each level has distinct optimization levers. @tbl-serving-hierarchy maps these l
 
 The remainder of this chapter progresses through these levels: batching and caching (request level), model sharding (replica level), load balancing and autoscaling (service level), and multi-tenancy (platform level).
 
-### Chapter Roadmap {#sec-inference-roadmap}
-
-This chapter develops the techniques for inference at scale through the lens of the serving hierarchy:
-
-**Batching Strategies at Scale** (@sec-inference-batching) examines how different model types require fundamentally different batching approaches. We contrast static batching for vision models, continuous batching for LLMs, and feature-parallel batching for recommendation systems, providing quantitative analysis of throughput-latency tradeoffs.
-
-**Model Sharding for Inference** (@sec-inference-sharding) addresses when and how to distribute model computation across multiple devices. We examine tensor parallelism, pipeline parallelism, expert parallelism, and embedding sharding, with emphasis on communication patterns and overhead.
-
-**Load Balancing and Request Routing** (@sec-inference-load-balancing) develops the theory and practice of distributing requests across replicas. We derive why power-of-two-choices achieves exponentially better load distribution than random assignment and examine routing strategies for stateful workloads.
-
-**Optimization Techniques** (@sec-optimization-at-scale) covers advanced efficiency methods like KV cache management, quantization, and speculative decoding.
-
-**Multi-Tenancy and Isolation** (@sec-inference-multitenancy) examines platform-level concerns: sharing infrastructure across multiple models and users while maintaining isolation and fairness.
-
-**Autoscaling** (@sec-inference-autoscaling) addresses dynamic capacity management, including the cold start problem unique to GPU-based serving and predictive scaling strategies.
-
-**Global Inference Infrastructure** (@sec-inference-global) explores architectural patterns for multi-region deployment, including latency optimization, failover strategies, and cost management.
-
-**Case Studies** (@sec-inference-case-studies) grounds these principles in production systems at Meta, OpenAI, Google, and TikTok, demonstrating how the techniques combine in real deployments.
-
-Throughout, we maintain the model-type diversity essential for practitioners: every major concept is illustrated across LLMs, recommendation systems, vision models, and other production workloads.
-
 ## Serving Framework Selection {#sec-inference-frameworks}
 
-The batching, sharding, and load balancing techniques described in the chapter roadmap do not exist in isolation; they are implemented within serving frameworks that constrain and enable different optimizations. Before examining these techniques in depth, practitioners face an immediate practical decision: which serving infrastructure to build upon?
+The batching, sharding, and load balancing techniques introduced above do not exist in isolation; they are implemented within serving frameworks that constrain and enable different optimizations. Before examining these techniques in depth, practitioners face an immediate practical decision: which serving infrastructure to build upon?
 
 The choice of serving framework determines which optimizations are available, how models are deployed, and what performance characteristics are achievable. Understanding this landscape first provides essential context: when we discuss continuous batching in @sec-inference-continuous-batching, we will see how vLLM and TensorRT-LLM implement it differently. This section provides a systematic framework for selecting among the major options.
 
@@ -1052,20 +1030,20 @@ However, this exceeds practical limits (memory constraints typically cap batch s
 
 @tbl-batch-size-comparison quantifies the tradeoffs across batch sizes from 1 to 32:
 
-+------------+-------------------+-------------------+-------------------+-------------------+-------------------+
-| **Batch**  | **Service Time**  | **Throughput**    | **Utilization**   | **Queue Wait**    | **Total Latency** |
-| **Size B** | **S(B) (ms)**     | **(req/s)**       | **$\rho$**        | **E[W] (ms)**     | **E[T] (ms)**     |
-+:===========+==================:+==================:+==================:+==================:+==================:+
-| **1**      | 50.5              | 19.8              | 505% (unstable)   | $\infty$          | $\infty$          |
-+------------+-------------------+-------------------+-------------------+-------------------+-------------------+
-| **4**      | 52.0              | 76.9              | 130% (unstable)   | $\infty$          | $\infty$          |
-+------------+-------------------+-------------------+-------------------+-------------------+-------------------+
-| **8**      | 54.0              | 148.1             | 67.5%             | 42.3              | 123.2             |
-+------------+-------------------+-------------------+-------------------+-------------------+-------------------+
-| **16**     | 58.0              | 275.9             | 36.2%             | 16.4              | 92.4              |
-+------------+-------------------+-------------------+-------------------+-------------------+-------------------+
-| **32**     | 66.0              | 484.8             | 20.6%             | 8.9               | 91.5              |
-+------------+-------------------+-------------------+-------------------+-------------------+-------------------+
++------------+------------------+----------------+-----------------+----------------+-------------------+
+| **Batch**  | **Service Time** | **Throughput** | **Utilization** | **Queue Wait** | **Total Latency** |
+| **Size B** | **S(B) (ms)**    | **(req/s)**    | **$\rho$**      | **E[W] (ms)**  | **E[T] (ms)**     |
++===========:+=================:+===============:+================:+:===============+:==================+
+| **1**      | 50.5             | 19.8           | 505% (unstable) | $\infty$       | $\infty$          |
++------------+------------------+----------------+-----------------+----------------+-------------------+
+| **4**      | 52.0             | 76.9           | 130% (unstable) | $\infty$       | $\infty$          |
++------------+------------------+----------------+-----------------+----------------+-------------------+
+| **8**      | 54.0             | 148.1          | 67.5%           | 42.3           | 123.2             |
++------------+------------------+----------------+-----------------+----------------+-------------------+
+| **16**     | 58.0             | 275.9          | 36.2%           | 16.4           | 92.4              |
++------------+------------------+----------------+-----------------+----------------+-------------------+
+| **32**     | 66.0             | 484.8          | 20.6%           | 8.9            | 91.5              |
++------------+------------------+----------------+-----------------+----------------+-------------------+
 
 : **Batch Size Impact on GPT-3 Serving Performance**. Batch sizes below 8 cannot sustain 100 QPS (utilization exceeds 100%). The optimal operating point balances throughput against latency, with B=32 achieving lowest total latency despite higher service time. {#tbl-batch-size-comparison}
 
@@ -1132,17 +1110,17 @@ $$B^* = \max\{B : T_{P99}(B) \leq \text{SLO}\}$$
 
 @tbl-batch-decision-framework summarizes the decision process:
 
-+-------------------------+-----------------------------------------------+-------------------------------------+
-| **Condition**           | **Recommended Action**                        | **Rationale**                       |
-+:========================+:==============================================+:====================================+
-| **$B < B_{min}$**       | Increase batch size or add replicas           | System is unstable                  |
-+-------------------------+-----------------------------------------------+-------------------------------------+
-| **$T_{P99} > \text{SLO}$**| Reduce batch size or add replicas             | Latency exceeds target              |
-+-------------------------+-----------------------------------------------+-------------------------------------+
-| **$\rho < 0.5$**        | Consider reducing replicas to save cost       | System is overprovisioned           |
-+-------------------------+-----------------------------------------------+-------------------------------------+
-| **$\rho > 0.85$**       | Add replicas for headroom                     | Approaching instability             |
-+-------------------------+-----------------------------------------------+-------------------------------------+
++-------------------------------+-----------------------------------------+---------------------------+
+| **Condition**                 | **Recommended Action**                  | **Rationale**             |
++==============================:+:========================================+:==========================+
+| **$B &lt; B_{min}$**          | Increase batch size or add replicas     | System is unstable        |
++-------------------------------+-----------------------------------------+---------------------------+
+| **$T_{P99} &gt; \text{SLO}$** | Reduce batch size or add replicas       | Latency exceeds target    |
++-------------------------------+-----------------------------------------+---------------------------+
+| **$\rho &lt; 0.5$**           | Consider reducing replicas to save cost | System is overprovisioned |
++-------------------------------+-----------------------------------------+---------------------------+
+| **$\rho &gt; 0.85$**          | Add replicas for headroom               | Approaching instability   |
++-------------------------------+-----------------------------------------+---------------------------+
 
 : **Batch Size Decision Framework**. Systematic approach to selecting batch size based on stability, latency SLO, and utilization targets. {#tbl-batch-decision-framework}
 
@@ -1353,17 +1331,17 @@ Consider a GPT-class model serving four concurrent requests with the following g
 
 **Request characteristics**:
 
-+---------+---------------+---------------+--------------+
-| Request | Prompt Length | Output Length | Total Tokens |
-+=========+===============+===============+==============+
-| R1      | 100           | 50            | 150          |
-+---------+---------------+---------------+--------------+
-| R2      | 80            | 200           | 280          |
-+---------+---------------+---------------+--------------+
-| R3      | 120           | 100           | 220          |
-+---------+---------------+---------------+--------------+
-| R4      | 90            | 150           | 240          |
-+---------+---------------+---------------+--------------+
++-------------+-------------------+-------------------+------------------+
+| **Request** | **Prompt Length** | **Output Length** | **Total Tokens** |
++============:+==================:+==================:+=================:+
+| **R1**      | 100               | 50                | 150              |
++-------------+-------------------+-------------------+------------------+
+| **R2**      | 80                | 200               | 280              |
++-------------+-------------------+-------------------+------------------+
+| **R3**      | 120               | 100               | 220              |
++-------------+-------------------+-------------------+------------------+
+| **R4**      | 90                | 150               | 240              |
++-------------+-------------------+-------------------+------------------+
 
 **System parameters**:
 
@@ -1526,15 +1504,15 @@ where $k$ is the number of standard deviations the maximum output exceeds the me
 
 @tbl-continuous-batching-benefit quantifies this relationship across different workload types:
 
-+-------------------------+--------+---------+-------------------+--------------------------+
-| **Workload Type**       | **CV** | **k**   | **Waste (Trad.)** | **Speedup (Continuous)** |
-+:========================+:======:+:=======:+:=================:+:========================:+
-| Code completion         | 0.3    | 2.5     | 18%               | 1.2x                     |
-| Chat (short responses)  | 0.6    | 2.0     | 33%               | 1.5x                     |
-| General text generation | 1.0    | 2.5     | 50%               | 2.0x                     |
-| Creative writing        | 1.5    | 3.0     | 64%               | 2.8x                     |
-| RAG with variable docs  | 2.0    | 2.5     | 71%               | 3.5x                     |
-+-------------------------+--------+---------+-------------------+--------------------------+
++-----------------------------+--------+-------+-------------------+--------------------------+
+| **Workload Type**           | **CV** | **k** | **Waste (Trad.)** | **Speedup (Continuous)** |
++:============================+=======:+======:+==================:+=========================:+
+| **Code completion**         | 0.3    | 2.5   | 18%               | 1.2x                     |
+| **Chat (short responses)**  | 0.6    | 2.0   | 33%               | 1.5x                     |
+| **General text generation** | 1.0    | 2.5   | 50%               | 2.0x                     |
+| **Creative writing**        | 1.5    | 3.0   | 64%               | 2.8x                     |
+| **RAG with variable docs**  | 2.0    | 2.5   | 71%               | 3.5x                     |
++-----------------------------+--------+-------+-------------------+--------------------------+
 
 : **Continuous Batching Benefit by Workload Type**. Higher output length variance (CV) yields greater improvement from continuous batching. Workloads with predictable output lengths (code completion) see modest gains, while highly variable workloads (RAG with documents of varying length) see dramatic improvement. {#tbl-continuous-batching-benefit}
 
