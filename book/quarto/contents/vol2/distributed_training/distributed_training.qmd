@@ -15,9 +15,9 @@ _Gemini Pro 3 Prompt: A technical illustration of distributed training with mult
 
 ## Purpose {.unnumbered}
 
-_What makes distributed training a fundamental shift in how we approach machine learning at scale, rather than merely a technical optimization?_
+_Why does adding more machines to training eventually make it slower rather than faster?_
 
-Distributed training becomes an architectural necessity when training demands exceed the capabilities of individual machines, and the principles governing coordination across distributed systems fundamentally reshape how we approach optimization, fault tolerance, and cost efficiency. Moving from single-machine to distributed training requires understanding how communication overhead, synchronization costs, and system heterogeneity create entirely new constraints that affect algorithm design and system architecture. The challenges of distributed training, including parameter synchronization across thousands of devices, absorbing failures without losing progress, and balancing communication with computation, demand different engineering solutions than single-device scenarios. As models grow to billions of parameters and training datasets expand to continental scales, distributed training becomes the foundation upon which feasible machine learning systems are built, directly determining which problems can be tackled, which timelines are realistic, and which organizations can meaningfully participate in advanced AI development.
+Distributed training appears simple: split the work across machines and combine the results. But communication costs grow with the number of machines while computation per machine shrinks, until synchronization overhead dominates and adding hardware provides no benefit or actively degrades performance. This scaling ceiling is not a bug to be fixed but a fundamental property of distributed systems: coordinating independent machines requires moving data between them, and data movement across networks is orders of magnitude slower than data movement within a chip. The art of distributed training is managing this tension—partitioning work to minimize communication, overlapping communication with computation to hide latency, choosing synchronization strategies that balance consistency against throughput. Without this understanding, organizations waste millions on hardware that sits idle waiting for gradients to arrive, or produce models that never converge because stale updates corrupted the optimization.
 
 ::: {.callout-tip title="Learning Objectives"}
 
@@ -117,11 +117,15 @@ The systematic optimization methodology established for single-machine training 
 
 Choosing the right parallelism strategy is not a matter of preference; it is a constraint satisfaction problem governed by model size ($M$), batch size ($B$), and interconnect bandwidth. @tbl-parallelism-tradeoffs quantifies the communication costs for each strategy, revealing which approaches are physically feasible for a given hardware topology.
 
-| **Strategy**               | **Communication Pattern**    | **Comm. Volume**              | **Hardware Constraint**           |
-|:---------------------------|:-----------------------------|:------------------------------|:-----------------------------------|
-| **Data Parallel (DP)**     | AllReduce Gradients          | $\propto M$ (Model Size)      | Requires high bisection BW        |
-| **Tensor Parallel (TP)**   | AllReduce Activations        | $\propto B \times L$ (Layers) | **Critical**: Needs NVLink        |
-| **Pipeline Parallel (PP)** | Point-to-Point (P2P)        | $\propto B \times H$ (Hidden) | Low BW (Ethernet is sufficient)   |
++----------------------------+---------------------------+-------------------------------+---------------------------------+
+| **Strategy**               | **Communication Pattern** | **Comm. Volume**              | **Hardware Constraint**         |
++============================+===========================+===============================+=================================+
+| **Data Parallel (DP)**     | AllReduce Gradients       | $\propto M$ (Model Size)      | Requires high bisection BW      |
++----------------------------+---------------------------+-------------------------------+---------------------------------+
+| **Tensor Parallel (TP)**   | AllReduce Activations     | $\propto B \times L$ (Layers) | **Critical**: Needs NVLink      |
++----------------------------+---------------------------+-------------------------------+---------------------------------+
+| **Pipeline Parallel (PP)** | Point-to-Point (P2P)      | $\propto B \times H$ (Hidden) | Low BW (Ethernet is sufficient) |
++----------------------------+---------------------------+-------------------------------+---------------------------------+
 
 : **Parallelism Communication Costs**: Tensor Parallelism has the highest communication frequency (per layer), confining it to intra-node (NVLink) usage. Pipeline Parallelism has the lowest communication volume (boundary activations only), making it suitable for inter-node (Ethernet/InfiniBand) scaling. Data Parallelism sits in the middle but scales poorly as $M$ grows, necessitating ZeRO optimizations. {#tbl-parallelism-tradeoffs}
 
@@ -505,11 +509,15 @@ where $\bar{\tau}$ is the average staleness. The staleness penalty now scales wi
 
 @tbl-convergence-comparison summarizes the convergence properties of each synchronization model.
 
-| **Model** | **Staleness** | **Convergence Rate** | **Variance Reduction** | **Best For** |
-|:----------|:--------------|:---------------------|:-----------------------|:-------------|
-| **BSP** | $\tau = 0$ | $O(1/\sqrt{NbM})$ | Full ($1/N$) | Final training, reproducibility |
-| **SSP** | $\tau \leq s$ | $O(1/\sqrt{NbM}) + O(s^2\eta^2)$ | Partial | Heterogeneous clusters |
-| **ASP** | $\tau = \infty$ | $O(1/\sqrt{M}) + O(\bar{\tau}^2\eta^2)$ | None | Maximum throughput, early exploration |
++-----------+-----------------+-----------------------------------------+------------------------+---------------------------------------+
+| **Model** | **Staleness**   | **Convergence Rate**                    | **Variance Reduction** | **Best For**                          |
++===========+=================+=========================================+========================+=======================================+
+| **BSP**   | $\tau = 0$      | $O(1/\sqrt{NbM})$                       | Full ($1/N$)           | Final training, reproducibility       |
++-----------+-----------------+-----------------------------------------+------------------------+---------------------------------------+
+| **SSP**   | $\tau \leq s$   | $O(1/\sqrt{NbM}) + O(s^2\eta^2)$        | Partial                | Heterogeneous clusters                |
++-----------+-----------------+-----------------------------------------+------------------------+---------------------------------------+
+| **ASP**   | $\tau = \infty$ | $O(1/\sqrt{M}) + O(\bar{\tau}^2\eta^2)$ | None                   | Maximum throughput, early exploration |
++-----------+-----------------+-----------------------------------------+------------------------+---------------------------------------+
 
 : **Convergence Properties by Synchronization Model**. BSP provides optimal convergence guarantees at the cost of synchronization overhead. SSP offers a tunable trade-off between throughput and convergence. ASP maximizes throughput but loses the variance reduction benefit of parallelism. {#tbl-convergence-comparison}
 
@@ -670,12 +678,17 @@ To illustrate these concepts concretely, consider training a transformer languag
 
 **Analysis**
 
-| Configuration | Iterations | Comm. Overhead | Wall-clock Speedup | Sample Efficiency |
-|:--------------|:-----------|:---------------|:-------------------|:------------------|
-| 1 GPU (baseline) | 100,000 | 0% | 1.0$\times$ | 100% |
-| 8 GPU BSP | 12,800 | 15% | 6.8$\times$ | 97% |
-| 64 GPU BSP | 1,720 | 45% | 40.1$\times$ | 91% |
-| 64 GPU SSP | 2,100 | 25% | 38.1$\times$ | 74% |
++------------------+------------+----------------+--------------------+-------------------+
+| Configuration    | Iterations | Comm. Overhead | Wall-clock Speedup | Sample Efficiency |
++==================+============+================+====================+===================+
+| 1 GPU (baseline) | 100,000    | 0%             | 1.0$\times$        | 100%              |
++------------------+------------+----------------+--------------------+-------------------+
+| 8 GPU BSP        | 12,800     | 15%            | 6.8$\times$        | 97%               |
++------------------+------------+----------------+--------------------+-------------------+
+| 64 GPU BSP       | 1,720      | 45%            | 40.1$\times$       | 91%               |
++------------------+------------+----------------+--------------------+-------------------+
+| 64 GPU SSP       | 2,100      | 25%            | 38.1$\times$       | 74%               |
++------------------+------------+----------------+--------------------+-------------------+
 
 The 64-GPU BSP configuration achieves 40$\times$ speedup despite only 91% sample efficiency because the communication overhead (45%) is offset by the massive parallelism. SSP provides comparable wall-clock time with lower communication overhead but requires more total samples.
 

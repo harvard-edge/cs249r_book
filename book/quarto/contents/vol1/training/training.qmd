@@ -18,9 +18,9 @@ glossary: training_glossary.json
 
 ## Purpose {.unnumbered}
 
-_What makes training the most computationally intensive phase of machine learning, and how do systematic techniques transform hardware constraints into efficient learning pipelines?_
+_Why does training consume resources so disproportionate to inference that it dominates the economics of machine learning development?_
 
-Modern neural network training confronts a fundamental tension: models routinely exceed the memory and compute capacity of available hardware. Before loading any training data, the memory budget may already be consumed by model weights, gradients, and optimizer states, with large models requiring several times more memory than the parameters alone would suggest. This tension between what models require and what hardware provides defines the systems engineering challenge of training. Training time depends on total operations, peak hardware throughput, and actual utilization, and every optimization technique works by improving one of these terms: mixed precision increases throughput via specialized hardware units, prefetching improves utilization by eliminating idle time, gradient checkpointing trades computation for memory, and algorithmic improvements reduce the operations required. Understanding training as a systems engineering problem rather than purely an algorithmic one transforms how engineers approach this gap, revealing why seemingly small decisions about batch sizes, precision formats, and data loading strategies can mean the difference between training runs that complete efficiently versus those that become impractical.
+Training is where models acquire their capabilities, and that acquisition is extraordinarily expensive. A forward pass through a neural network computes a prediction; training requires that forward pass plus a backward pass that computes gradients, plus optimizer state that often exceeds the model size itself, plus repetition across billions of examples until statistical patterns crystallize into learned behavior. This multiplicative cost structure—memory for weights, gradients, and optimizer states; compute for forward, backward, and update steps; repetition across epochs and hyperparameter searches—explains why training a frontier model costs millions of dollars while inference costs fractions of a cent. The asymmetry also explains why training efficiency determines which organizations can participate in advancing machine learning: not because inference is unimportant, but because training is the gate that must be passed before any inference can occur.
 
 ::: {.callout-tip title="Learning Objectives"}
 
@@ -97,12 +97,17 @@ This chapter establishes systems engineering foundations for training infrastruc
 **Why this model?**
 GPT-2 (1.5B) serves as our primary case study for **large-scale training** because it sits at the "sweet spot" of systems complexity. It is large enough to require distributed training and serious memory optimizations, yet small enough to comprehend without the massive infrastructure complexity of trillion-parameter clusters.
 
-| **Property** | **Specification** | **Systems Implication** |
-| :--- | :--- | :--- |
-| **Parameters** | 1.5 Billion (XL) | Requires ~3GB (FP16) or ~6GB (FP32) for weights alone. |
-| **Architecture** | 48 Layers, 1600 Dim | Deep pipeline creates heavy activation memory pressure. |
-| **Dataset** | OpenWebText (40GB) | I/O throughput must match high-speed accelerator compute. |
-| **Compute** | ~ $10^{23}$ FLOPs total | Training takes days/weeks; demands parallelization. |
++------------------+-------------------------+-----------------------------------------------------------+
+| **Property**     | **Specification**       | **Systems Implication**                                   |
++==================+=========================+===========================================================+
+| **Parameters**   | 1.5 Billion (XL)        | Requires ~3GB (FP16) or ~6GB (FP32) for weights alone.    |
++------------------+-------------------------+-----------------------------------------------------------+
+| **Architecture** | 48 Layers, 1600 Dim     | Deep pipeline creates heavy activation memory pressure.   |
++------------------+-------------------------+-----------------------------------------------------------+
+| **Dataset**      | OpenWebText (40GB)      | I/O throughput must match high-speed accelerator compute. |
++------------------+-------------------------+-----------------------------------------------------------+
+| **Compute**      | ~ $10^{23}$ FLOPs total | Training takes days/weeks; demands parallelization.       |
++------------------+-------------------------+-----------------------------------------------------------+
 
 **Key Systems Challenge:**
 Training GPT-2 is primarily **memory-bound** (due to activation storage) and **compute-intensive** (requiring massive matrix multiplications). It forces us to move beyond simple training loops to sophisticated pipelines that manage data movement as carefully as computation.
@@ -331,12 +336,17 @@ The memory footprint of activations is proportional to the batch size and networ
 
 @tbl-compare-activations synthesizes these system-level trade-offs, showing how mathematical behavior translates into operational constraints.
 
-| **Function** | **Key Advantages** | **Key Disadvantages** | **System Implications** |
-| :--- | :--- | :--- | :--- |
-| **Sigmoid** | Smooth gradients; bounded output in $(0, 1)$. | Vanishing gradients; non-zero-centered output. | Exponential computation adds overhead; LUT-based hardware implementation is required for efficiency. |
-| **Tanh** | Zero-centered output in $(-1, 1)$. | Vanishing gradients at extremes. | Better convergence than sigmoid; similar computational cost due to exponential terms. |
-| **ReLU** | Extremely efficient computation; avoids vanishing gradients for positive inputs. | Can suffer from "dying ReLU" (inactive neurons). | Single-instruction hardware implementation; enables sparsity-based optimizations. |
-| **Softmax** | Outputs probability distribution over classes. | High computational cost; non-local dependencies. | Requires global normalization; memory-intensive due to dependencies across the entire input vector. |
++--------------+----------------------------------------------------------------------------------+--------------------------------------------------+------------------------------------------------------------------------------------------------------+
+| **Function** | **Key Advantages**                                                               | **Key Disadvantages**                            | **System Implications**                                                                              |
++==============+==================================================================================+==================================================+======================================================================================================+
+| **Sigmoid**  | Smooth gradients; bounded output in $(0, 1)$.                                    | Vanishing gradients; non-zero-centered output.   | Exponential computation adds overhead; LUT-based hardware implementation is required for efficiency. |
++--------------+----------------------------------------------------------------------------------+--------------------------------------------------+------------------------------------------------------------------------------------------------------+
+| **Tanh**     | Zero-centered output in $(-1, 1)$.                                               | Vanishing gradients at extremes.                 | Better convergence than sigmoid; similar computational cost due to exponential terms.                |
++--------------+----------------------------------------------------------------------------------+--------------------------------------------------+------------------------------------------------------------------------------------------------------+
+| **ReLU**     | Extremely efficient computation; avoids vanishing gradients for positive inputs. | Can suffer from "dying ReLU" (inactive neurons). | Single-instruction hardware implementation; enables sparsity-based optimizations.                    |
++--------------+----------------------------------------------------------------------------------+--------------------------------------------------+------------------------------------------------------------------------------------------------------+
+| **Softmax**  | Outputs probability distribution over classes.                                   | High computational cost; non-local dependencies. | Requires global normalization; memory-intensive due to dependencies across the entire input vector.  |
++--------------+----------------------------------------------------------------------------------+--------------------------------------------------+------------------------------------------------------------------------------------------------------+
 
 : **Activation Function Systems Comparison**: While activation functions contribute only a fraction of total training time, their implementation characteristics (computational complexity, hardware utilization, and memory patterns) significantly impact the efficiency of modern learning pipelines. {#tbl-compare-activations}
 
@@ -920,13 +930,19 @@ Standard attention computes $\text{softmax}(QK^T)V$ by materializing the full $N
 
 **Quantitative Impact**:
 
-| Metric | Standard Attention | FlashAttention | Improvement |
-|:-------|-------------------:|---------------:|------------:|
-| Memory reads/writes | $O(N^2)$ | $O(N)$ | Quadratic → Linear |
-| SRAM utilization | Low | High | 5-10× |
-| Arithmetic intensity | ~50 FLOP/byte | ~200+ FLOP/byte | Memory → Compute-bound |
-| Wall-clock speedup | Baseline | 2-4× faster | — |
-| Memory footprint | $O(N^2)$ | $O(N)$ | Enables longer sequences |
++----------------------+--------------------+-----------------+--------------------------+
+| Metric               | Standard Attention | FlashAttention  | Improvement              |
++======================+====================+=================+==========================+
+| Memory reads/writes  | $O(N^2)$           | $O(N)$          | Quadratic → Linear       |
++----------------------+--------------------+-----------------+--------------------------+
+| SRAM utilization     | Low                | High            | 5-10×                    |
++----------------------+--------------------+-----------------+--------------------------+
+| Arithmetic intensity | ~50 FLOP/byte      | ~200+ FLOP/byte | Memory → Compute-bound   |
++----------------------+--------------------+-----------------+--------------------------+
+| Wall-clock speedup   | Baseline           | 2-4× faster     | —                        |
++----------------------+--------------------+-----------------+--------------------------+
+| Memory footprint     | $O(N^2)$           | $O(N)$          | Enables longer sequences |
++----------------------+--------------------+-----------------+--------------------------+
 
 **System Implication**: FlashAttention doesn't reduce FLOPs—it reduces memory traffic. By keeping intermediate values in fast SRAM rather than slow HBM, it shifts attention from below to above the roofline ridge point. This is why @fig-training-roofline shows FlashAttention in the compute-bound region while standard attention remains memory-bound.
 
@@ -1399,12 +1415,17 @@ A common mistake in ML systems is treating batch size as a continuous variable. 
 
 **Quantitative Example**:
 
++------------+--------------+-------------+---------------+
 | Batch Size | Warps Needed | Utilization | Relative Time |
-|:-----------|-------------:|------------:|--------------:|
-| 32 | 1 | 100% | 1.0× |
-| 33 | 2 | 52% | ~2.0× |
-| 64 | 2 | 100% | 1.0× |
-| 65 | 3 | 68% | ~1.5× |
++============+==============+=============+===============+
+| 32         | 1            | 100%        | 1.0×          |
++------------+--------------+-------------+---------------+
+| 33         | 2            | 52%         | ~2.0×         |
++------------+--------------+-------------+---------------+
+| 64         | 2            | 100%        | 1.0×          |
++------------+--------------+-------------+---------------+
+| 65         | 3            | 68%         | ~1.5×         |
++------------+--------------+-------------+---------------+
 
 **Engineering Rule**: Always choose batch sizes and hidden dimensions that are **powers of 2** or multiples of 8/32/64 to avoid this "quantization tax." A batch of 32 is often faster than 33, and a batch of 64 is often just as fast as 33.
 
@@ -3047,12 +3068,17 @@ After optimization:
 
 **Step 6: Final Profile and Results**
 
-| Metric | Naive | Optimized | Improvement |
-|:-------|------:|----------:|------------:|
-| Memory | 101 GB | 26 GB | 3.9× reduction |
-| GPU utilization | N/A | 85% | Trainable |
-| Throughput | N/A | 1,200 tokens/sec | — |
-| Time per epoch | N/A | 8.3 hours | — |
++-----------------+--------+------------------+----------------+
+| Metric          | Naive  | Optimized        | Improvement    |
++=================+========+==================+================+
+| Memory          | 101 GB | 26 GB            | 3.9× reduction |
++-----------------+--------+------------------+----------------+
+| GPU utilization | N/A    | 85%              | Trainable      |
++-----------------+--------+------------------+----------------+
+| Throughput      | N/A    | 1,200 tokens/sec | —              |
++-----------------+--------+------------------+----------------+
+| Time per epoch  | N/A    | 8.3 hours        | —              |
++-----------------+--------+------------------+----------------+
 
 **Remaining bottleneck**: Compute-bound (as desired). The 85% utilization indicates good efficiency; remaining 15% is overhead from gradient synchronization, loss scaling, and kernel launch latency.
 

@@ -18,9 +18,9 @@ _DALL·E 3 Prompt: Create an intricate and colorful representation of a System o
 
 ## Purpose {.unnumbered}
 
-_Why does the same neural network run dramatically faster on specialized accelerators than general-purpose processors, and why do some optimizations that reduce theoretical computation fail to improve actual runtime?_
+_Why does moving data cost more than computing on it, and how does this inversion reshape everything about ML system design?_
 
-The gap between general-purpose and specialized hardware determines what machine learning applications are economically viable. Training large language models requires astronomical numbers of floating-point operations; on CPUs alone, this would take impractical amounts of time, but hardware acceleration compresses it to manageable durations. The difference between CPU and accelerator execution can be the difference between an impractical demonstration and a usable product. Yet raw throughput specifications tell only part of the story. Typical training workloads achieve only a fraction of advertised peak performance because the missing performance disappears into memory bandwidth limitations, data movement patterns, and the fundamental physics of silicon. Understanding why specialized hardware achieves dramatic improvements, recognizing when memory bandwidth rather than compute limits performance, and knowing which architectural patterns enable efficient deployment from data centers to mobile devices transforms engineers from consumers of hardware specifications into practitioners who can reason about the gap between theoretical capability and realized performance.
+The fundamental surprise of modern computing is that arithmetic is nearly free while memory access is expensive. A GPU can perform thousands of floating-point operations in the time required to fetch a single value from main memory. This inversion—where the cost of feeding data to processors dominates the cost of processing it—explains why specialized accelerators achieve order-of-magnitude speedups on neural networks: they are not primarily faster at arithmetic, but better at hiding and reducing data movement through massive parallelism, specialized memory hierarchies, and architectures tuned to the regular access patterns of matrix operations. The same inversion explains why some optimizations that reduce theoretical computation fail to improve actual runtime: if the operation was already memory-bound, computing less does nothing because the bottleneck was never computation. Understanding this reality transforms hardware selection from comparing peak FLOPS to analyzing whether workload characteristics align with what the hardware actually accelerates.
 
 ::: {.callout-tip title="Learning Objectives"}
 
@@ -1000,11 +1000,15 @@ The systolic array architecture achieves computational efficiency through synchr
 ::: {.callout-perspective title="Dataflow Strategies: Matching Architecture to Workload"}
 **The Architects' Dilemma**: Systolic arrays must choose which data to keep stationary (in registers) to minimize movement. This choice hard-codes the hardware's preference for certain model types.
 
-| Strategy | Stationary Item | Optimized For | Example Workload |
-| :--- | :--- | :--- | :--- |
-| **Weight-Stationary** | Weights ($W$) | High Reuse of Weights | **CNNs (Conv2D)**: Filters are small and reused across the entire image. |
++-----------------------+--------------------+----------------------------+---------------------------------------------------------------------------------------------+
+| Strategy              | Stationary Item    | Optimized For              | Example Workload                                                                            |
++=======================+====================+============================+=============================================================================================+
+| **Weight-Stationary** | Weights ($W$)      | High Reuse of Weights      | **CNNs (Conv2D)**: Filters are small and reused across the entire image.                    |
++-----------------------+--------------------+----------------------------+---------------------------------------------------------------------------------------------+
 | **Output-Stationary** | Partial Sums ($C$) | High Reuse of Accumulators | **Large Batch MatMul**: Accumulating results for many inputs against a large weight matrix. |
-| **Row-Stationary** | Input Rows ($A$) | Data Reuse | **General MatMul**: Balancing input and weight reuse. |
++-----------------------+--------------------+----------------------------+---------------------------------------------------------------------------------------------+
+| **Row-Stationary**    | Input Rows ($A$)   | Data Reuse                 | **General MatMul**: Balancing input and weight reuse.                                       |
++-----------------------+--------------------+----------------------------+---------------------------------------------------------------------------------------------+
 
 There is no "perfect" accelerator. A chip optimized for Weight-Stationary flow (like early TPUs) excels at CNNs but might struggle with the massive, changing weights of LLMs, which push architectures toward different reuse patterns.
 :::
@@ -1778,14 +1782,21 @@ The roofline visualization shows performance (TFLOPS) on the vertical axis and a
 
 **Neural Network Operations on the Roofline**:
 
-| **Operation** | **Arithmetic Intensity** | **Classification** | **Lighthouse Example** |
-|:---|---:|:---|:---|
-| **Conv2D (Dense)** | 50-200 FLOP/byte | Compute-bound | **ResNet-50** |
-| **Dense MatMul** | 64-256 FLOP/byte | Compute-bound | **GPT-2 (Projections)** |
-| **Depthwise Conv** | 10-20 FLOP/byte | Memory-bound | **MobileNet** |
-| **Attention Softmax** | 2-5 FLOP/byte | Memory-bound | **GPT-2 (Generation)** |
-| **LayerNorm** | 5-10 FLOP/byte | Memory-bound | **GPT-2 / Llama** |
-| **Embedding lookup** | &lt;1 FLOP/byte | Memory-bound | **DLRM** |
++-----------------------+--------------------------+--------------------+-------------------------+
+| **Operation**         | **Arithmetic Intensity** | **Classification** | **Lighthouse Example**  |
++=======================+==========================+====================+=========================+
+| **Conv2D (Dense)**    | 50-200 FLOP/byte         | Compute-bound      | **ResNet-50**           |
++-----------------------+--------------------------+--------------------+-------------------------+
+| **Dense MatMul**      | 64-256 FLOP/byte         | Compute-bound      | **GPT-2 (Projections)** |
++-----------------------+--------------------------+--------------------+-------------------------+
+| **Depthwise Conv**    | 10-20 FLOP/byte          | Memory-bound       | **MobileNet**           |
++-----------------------+--------------------------+--------------------+-------------------------+
+| **Attention Softmax** | 2-5 FLOP/byte            | Memory-bound       | **GPT-2 (Generation)**  |
++-----------------------+--------------------------+--------------------+-------------------------+
+| **LayerNorm**         | 5-10 FLOP/byte           | Memory-bound       | **GPT-2 / Llama**       |
++-----------------------+--------------------------+--------------------+-------------------------+
+| **Embedding lookup**  | &lt;1 FLOP/byte          | Memory-bound       | **DLRM**                |
++-----------------------+--------------------------+--------------------+-------------------------+
 
 : **Operations on the Roofline**: Neural network layers span a wide range of arithmetic intensities. By mapping these operations to our **Lighthouse Examples**, we can see why ResNet-50 is compute-bound (high AI) while MobileNet and DLRM are memory-bound (low AI). {#tbl-roofline-operations}
 
@@ -3254,13 +3265,19 @@ Before procuring accelerators, work through this decision framework:
 
 **Step 2: Match Workload to Hardware**
 
-| If Your Workload Is... | Prioritize... | Deprioritize... |
-|:---|:---|:---|
-| **Memory-bound** (AI < 50 FLOP/byte) | Memory bandwidth (GB/s) | Peak TFLOPS |
-| **Compute-bound** (AI > 200 FLOP/byte) | Peak TFLOPS, Tensor Cores | Memory capacity |
-| **Latency-sensitive** (batch=1-4) | Lower-cost inference cards | High-compute training cards |
-| **Throughput-oriented** (large batches) | High-compute datacenter GPUs | Edge accelerators |
-| **Memory-constrained** (>40GB model) | Memory capacity (80GB+ cards) | Entry-level accelerators |
++-----------------------------------------+-------------------------------+-----------------------------+
+| If Your Workload Is...                  | Prioritize...                 | Deprioritize...             |
++=========================================+===============================+=============================+
+| **Memory-bound** (AI < 50 FLOP/byte)    | Memory bandwidth (GB/s)       | Peak TFLOPS                 |
++-----------------------------------------+-------------------------------+-----------------------------+
+| **Compute-bound** (AI > 200 FLOP/byte)  | Peak TFLOPS, Tensor Cores     | Memory capacity             |
++-----------------------------------------+-------------------------------+-----------------------------+
+| **Latency-sensitive** (batch=1-4)       | Lower-cost inference cards    | High-compute training cards |
++-----------------------------------------+-------------------------------+-----------------------------+
+| **Throughput-oriented** (large batches) | High-compute datacenter GPUs  | Edge accelerators           |
++-----------------------------------------+-------------------------------+-----------------------------+
+| **Memory-constrained** (>40GB model)    | Memory capacity (80GB+ cards) | Entry-level accelerators    |
++-----------------------------------------+-------------------------------+-----------------------------+
 
 **Step 3: Validate Before Committing**
 
