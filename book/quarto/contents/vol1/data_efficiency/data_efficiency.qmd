@@ -20,9 +20,26 @@ _DALL·E 3 Prompt: A futuristic digital illustration depicting the concept of da
 
 ## Purpose {.unnumbered}
 
-_Why has data efficiency become the critical bottleneck as compute scales faster than the supply of high-quality training data?_
+_How do we maximize the learning extracted from each training sample while minimizing the computational, storage, and labeling costs of the entire ML pipeline?_
 
-For decades, the dominant strategy in machine learning was simple: more data yields better models. Teams responded rationally by scraping more web pages, labeling more images, and generating more synthetic examples. But this era is ending. Compute capacity has grown exponentially, while high-quality human-generated content grows far more slowly. The most accessible sources have already been harvested, and domain experts cannot label faster. This asymmetry inverts the optimization priority: when compute was scarce and data abundant, the winning strategy was algorithmic efficiency; now that compute is abundant and quality data is scarce, the winning strategy is data efficiency. When significant portions of training data are redundant or contribute little new information, proportional fractions of expensive compute cycles are wasted learning nothing new. The organizations that will lead machine learning's next era are not those with the most GPUs but those that extract the most capability from each byte of data—because data has become the scarce resource that compute once was.
+Model compression reduces the cost of inference. Hardware acceleration increases throughput. But data efficiency operates upstream of both: it reduces the total computation required to *train* the model in the first place. A 50% reduction in dataset size—achieved through intelligent curation rather than random sampling—directly translates to 50% fewer training FLOPs, 50% less storage, and 50% lower energy consumption. This chapter examines data efficiency not as a statistical curiosity but as a first-class systems optimization, providing techniques to extract maximum information from minimum data.
+
+::: {.callout-note title="Definition: Data Efficiency"}
+**Data Efficiency** is the ratio of model capability gained to data resources consumed. A data-efficient system maximizes learning per sample, per byte stored, per label acquired, and per FLOP expended on data processing. Formally:
+
+$$
+\text{Data Efficiency} = \frac{\Delta \text{Model Capability}}{\Delta \text{Data Cost}}
+$$
+
+where Data Cost encompasses:
+
+- **Acquisition cost**: Time and money to collect or generate samples
+- **Labeling cost**: Human expert annotation effort
+- **Storage cost**: Bytes required to persist the dataset
+- **Compute cost**: FLOPs to process samples during training
+
+A perfectly efficient dataset would contain only samples that contribute unique information to the model's decision boundary—no redundancy, no noise, no "easy" examples already mastered.
+:::
 
 ::: {.callout-tip title="Learning Objectives"}
 
@@ -36,41 +53,87 @@ For decades, the dominant strategy in machine learning was simple: more data yie
 
 - Design active learning and curriculum learning strategies for training-time optimization
 
-- Measure data efficiency using metrics: PPD, DUE, CED, RR, and DGE
+- Analyze the cost-benefit trade-offs of data efficiency techniques using ROI frameworks
 
-- Address systems engineering challenges: selection bottleneck, I/O patterns, and data loader design
+- Address systems engineering challenges: selection bottleneck, I/O patterns, distributed selection, and data loader design
 
 :::
 
 ## The Data Wall: Why Efficiency Matters Now {#sec-data-efficiency-data-wall}
 
-For decades, the dominant strategy in machine learning was simple: **more data, better models**. This intuition, codified in scaling laws, showed that model performance improves predictably with dataset size. Teams responded rationally—scrape more web pages, label more images, generate more synthetic examples. But this era is ending.
+For decades, the dominant strategy in machine learning was simple: **more data, better models**. This intuition, codified in scaling laws [@kaplan2020scaling; @hoffmann2022training], showed that model performance improves predictably with dataset size. Teams responded rationally—scrape more web pages, label more images, generate more synthetic examples. But this era is ending.
 
-The machine learning field has hit what researchers call the **Data Wall**: the empirical observation that high-quality training data is growing far slower than compute capacity. While GPU FLOPS have increased roughly 10× every 3-4 years following Moore's Law extensions, the supply of novel, high-quality human-generated text and images grows at perhaps 2× per decade. The internet has already been scraped. Domain experts cannot label faster. The asymmetry is stark:
+The machine learning field has hit what researchers call the **Data Wall** [@villalobos2022will]: the empirical observation that high-quality training data is growing far slower than compute capacity. While GPU FLOPS have increased roughly 10× every 3-4 years following Moore's Law extensions, the supply of novel, high-quality human-generated text and images grows at perhaps 2× per decade. The internet has already been scraped. Domain experts cannot label faster. The asymmetry is stark:
 
 ::: {.callout-perspective title="The Scaling Asymmetry"}
 **The Problem**: Compute scales exponentially. Data does not.
 
-+---------------------+-----------------+-----------------------------------------------------------+
-| Resource            | Growth Rate     | Implication                                               |
-+=====================+=================+===========================================================+
-| GPU Compute         | ~10× / 3 years  | Hardware vendors deliver reliable exponential gains       |
-+---------------------+-----------------+-----------------------------------------------------------+
-| Training Data (Web) | ~2× / 5 years   | High-quality web text is finite; much already scraped     |
-+---------------------+-----------------+-----------------------------------------------------------+
-| Labeled Data        | ~1.5× / 5 years | Human annotation throughput is fundamentally bounded      |
-+---------------------+-----------------+-----------------------------------------------------------+
-| Synthetic Data      | Unbounded       | But bounded by generator quality (risk of model collapse) |
-+---------------------+-----------------+-----------------------------------------------------------+
++-------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------------------------------------------------+
+| **Resource**            | **Growth Rate**                                                                                                                                                                                                                                                          | **Implication**                                           |
++:========================+=========================================================================================================================================================================================================================================================================:+:==========================================================+
+| **GPU Compute**         | ~10× / 3 years^[Training compute has grown at ~4.4× per year since 2010, with large-scale models doubling roughly every 10 months [@epochai2024compute]. This translates to approximately 10× every 3 years.]                                                            | Hardware vendors deliver reliable exponential gains       |
++-------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------------------------------------------------+
+| **Training Data (Web)** | ~2× / 5 years^[Epoch AI analysis estimates high-quality text data grows at ~2.4× per year in LLM datasets, but the *stock* of human-generated text is finite. Villalobos et al. project exhaustion of high-quality public text between 2026-2032 [@villalobos2022will].] | High-quality web text is finite; much already scraped     |
++-------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------------------------------------------------+
+| **Labeled Data**        | ~1.5× / 5 years                                                                                                                                                                                                                                                          | Human annotation throughput is fundamentally bounded      |
++-------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------------------------------------------------+
+| **Synthetic Data**      | Unbounded                                                                                                                                                                                                                                                                | But bounded by generator quality (risk of model collapse) |
++-------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------------------------------------------------+
 
 **The Consequence**: In 2020, compute and data were roughly balanced for frontier models. By 2025, compute budgets can support training runs 10-100× larger than available high-quality data can fill. We are **compute-rich and data-poor**.
 :::
 
 This asymmetry inverts the optimization priority. When data was abundant and compute was scarce, the right strategy was algorithmic efficiency—squeeze more accuracy from limited GPU cycles. Now that compute is abundant and *quality data* is scarce, the winning strategy is **data efficiency**—squeeze more learning from each sample.
 
-Consider the training economics: a frontier language model might cost $100M in compute. If 30% of the training data is redundant (a conservative estimate for web-scraped corpora), that's $30M in wasted GPU cycles learning nothing new. If another 20% consists of "easy" examples the model masters in early epochs, that's $20M more. Half the budget—$50M—produces zero marginal learning. Data efficiency techniques aim to recover this waste.
+**Concrete Example**: Consider training a model in the **GPT-2/Llama Lighthouse** family (@sec-dnn-architectures)—a 70B parameter language model:
 
-The Data Wall also explains why data efficiency has shifted from academic curiosity to industrial necessity. Companies like Anthropic, OpenAI, and Google are no longer bottlenecked by GPU access—they are bottlenecked by the quality and diversity of their training corpora. The differentiator is not who has the most data, but who extracts the most *information* from their data.
+- **Compute available**: 10,000 H100 GPUs for 3 months = ~$50M budget, capable of processing 15 trillion tokens
+- **High-quality data available**: ~5 trillion tokens of deduplicated, filtered web text
+- **The gap**: 3× more compute than data can utilize
+
+The team faces a choice: (1) train on the same data multiple epochs (diminishing returns after epoch 2-3), (2) lower quality thresholds to include more data (degrades model quality), or (3) invest in data efficiency—better filtering, curriculum design, and synthetic augmentation to extract more learning from each token. Option 3 is increasingly the winning strategy.
+
+Unlike our compute-bound ResNet-50 Lighthouse, GPT-2/Llama models are **memory bandwidth-bound** during inference but still benefit enormously from data efficiency during training. Each token processed requires the same forward/backward pass cost regardless of model bottleneck—fewer tokens means fewer FLOPs.
+
+The Data Wall explains why data efficiency has shifted from academic curiosity to industrial necessity. Companies training frontier models are no longer bottlenecked by GPU access—they are bottlenecked by the quality and diversity of their training corpora. The differentiator is not who has the most data, but who extracts the most *information* from their data.
+
+## Data Efficiency as a Systems Problem {#sec-data-efficiency-systems-problem}
+
+Data efficiency is typically framed as a machine learning problem: *how do I achieve the same accuracy with fewer samples?* This framing focuses on statistical sample complexity and generalization theory. While valid, it misses the larger picture.
+
+In this textbook, we adopt a **systems framing**: *how do I reduce the total cost of achieving target performance across the entire ML lifecycle?* This shifts attention from accuracy curves to resource consumption:
+
+| ML Framing | Systems Framing |
+|------------|-----------------|
+| "Fewer samples for same accuracy" | "Fewer FLOPs for same accuracy" |
+| "Better generalization" | "Lower training cost (time, money, energy)" |
+| "Sample complexity bounds" | "End-to-end resource efficiency" |
+| "Learning theory" | "Cost engineering" |
+
+The systems framing reveals optimization opportunities invisible to the ML framing:
+
+**1. Training Cost Reduction**
+A 50% reduction in dataset size doesn't just improve sample efficiency—it directly halves the number of forward passes, backward passes, and gradient updates. For a $100M training run, this translates to $50M in compute savings. The relationship is linear and immediate.
+
+**2. Storage and I/O Costs**
+Large datasets consume petabytes of storage and saturate network bandwidth during distributed training. Data efficiency techniques like deduplication reduce storage costs and eliminate I/O bottlenecks that can idle expensive GPU clusters.
+
+**3. Labeling Economics**
+Expert labeling costs ($5-100+ per sample in domains like medical imaging) often exceed compute costs. Active learning and semi-supervised methods aren't just "ML tricks"—they're cost engineering that can reduce labeling budgets by 10-100×.
+
+**4. Energy and Sustainability**
+Training a large language model can emit hundreds of tons of CO₂. Data efficiency is the most direct lever for Green AI: halving the dataset halves training energy, with no accuracy trade-off if done correctly.
+
+**5. Iteration Velocity**
+Smaller, curated datasets enable faster experimentation cycles. A team that can iterate in hours rather than days has a compounding advantage in model development.
+
+::: {.callout-perspective title="The Systems Engineer's View of Data"}
+**The ML Researcher asks:** "What is the sample complexity of this learning problem?"
+
+**The Systems Engineer asks:** "What is the cost-per-accuracy-point across the entire pipeline—from data acquisition through deployment?"
+
+This chapter equips you with the systems engineer's toolkit: techniques to minimize total cost, metrics to quantify efficiency gains, and architectural patterns to implement data efficiency at scale.
+:::
 
 ## The Information-Compute Ratio {#sec-data-efficiency-info-compute}
 
@@ -103,9 +166,38 @@ In the optimization triad (@fig-optimization-triad), data efficiency plays the r
 
 We can formalize this as the **Information-Compute Ratio (ICR)**:
 
-$$ 	ext{ICR} = rac{\Delta 	ext{Model Performance}}{\Delta 	ext{FLOPs}} $$
+$$
+\text{ICR} = \frac{\Delta \text{Model Performance}}{\Delta \text{FLOPs}}
+$$
 
 A random batch of raw data often has low ICR: it contains redundant examples, noisy samples, or "easy" examples the model has already mastered. Training on such a batch wastes GPU cycles on zero-information updates. High-efficiency data pipelines (@fig-data-efficiency-pipeline) filter, order, and synthesize data to maximize ICR, ensuring that every FLOP contributes to learning.
+
+::: {.callout-example title="Worked Example: Computing ICR for Coreset vs. Random Selection"}
+**Scenario**: Training our **ResNet-50 Lighthouse model** (@sec-dnn-architectures) on ImageNet for one epoch. We compare random batch selection versus EL2N-based coreset selection. ResNet-50's compute-bound nature (high arithmetic intensity) makes it an ideal candidate for data efficiency optimization—reducing dataset size directly reduces training FLOPs with minimal I/O impact.
+
+**Setup**:
+
+- Dataset: ImageNet (1.28M images)
+- Model: ResNet-50 Lighthouse (~4 GFLOPs per forward pass, ~8 GFLOPs forward + backward)
+- One epoch: 1.28M × 8 GFLOPs = **1.02 × 10^16 FLOPs**
+- Accuracy improvement per epoch (early training): ~5% points
+
+**Random Selection (baseline)**:
+
+- Process all 1.28M samples uniformly
+- Accuracy gain: 5.0 percentage points
+- ICR_random = 5.0 / (1.02 × 10^16) = **4.9 × 10^-16 per FLOP**
+
+**EL2N Coreset (50% of data)**:
+
+- Process 640K high-uncertainty samples selected by EL2N scoring
+- Coreset focuses on decision boundary samples
+- Accuracy gain: 4.5 percentage points (90% of full data performance)
+- Compute: 640K × 8 GFLOPs = **5.1 × 10^15 FLOPs**
+- ICR_coreset = 4.5 / (5.1 × 10^15) = **8.8 × 10^-16 per FLOP**
+
+**Result**: The coreset achieves **1.8× higher ICR**—nearly twice the learning per FLOP—by eliminating low-information "easy" samples that contribute little to the decision boundary. The 0.5 percentage point accuracy difference is often acceptable given the 50% compute savings.
+:::
 
 ::: {#fig-data-efficiency-pipeline fig-cap="**The Data Efficiency Pipeline**: A structured approach to increasing data value. Raw data is first pruned to remove redundancy (Static Pruning), then dynamically selected during training (Active Learning), and finally augmented to increase diversity (Synthesis). Each stage increases the Information-Compute Ratio (ICR)." fig-alt="A flow diagram showing the progression of data: Raw Data -> Static Pruning -> Dynamic Selection -> Synthetic Generation -> High Value Model. Arrows indicate the flow."}
 ```{.tikz}
@@ -136,9 +228,13 @@ A random batch of raw data often has low ICR: it contains redundant examples, no
 :::
 
 This chapter explores three strategies to maximize this ratio:
+
 1.  **Static Data Pruning**: Removing low-value samples before training begins (Coresets, Deduplication).
 2.  **Dynamic Selection**: Selecting high-value samples during training (Curriculum Learning, Active Learning).
 3.  **Synthetic Generation**: Creating high-value samples on demand (Augmentation, Distillation).
+
+We begin with static pruning—the techniques that can reduce your dataset by 30-50% before you even start training.
+
 ## Static Data Pruning: Pre-Training Filtration {#sec-data-efficiency-static}
 
 Before a single gradient is computed, we can dramatically improve efficiency by removing low-value samples from the dataset. This "pre-training filtration" reduces the total computation required without affecting—and sometimes improving—final model accuracy.
@@ -147,9 +243,9 @@ Before a single gradient is computed, we can dramatically improve efficiency by 
 
 Machine learning models are often trained on large datasets under the assumption that increasing data volume improves performance. While this holds in many cases, it is not always necessary. Empirical studies on coreset selection and data pruning have consistently demonstrated significant redundancy in standard benchmarks:
 
-- **ImageNet-1K**: Studies using gradient-based selection (EL2N, GraNd) have shown that training on 50% of ImageNet with carefully selected samples achieves within 1% of full-dataset accuracy. The savings: 50% fewer training FLOPs.
-- **CIFAR-10**: Because CIFAR-10 is smaller and more redundant, aggressive pruning works even better. Experiments report that 10-30% of samples (selected by forgetting scores or margin-based methods) can match 90%+ of original accuracy—a 3-10× reduction.
-- **Large Language Model Corpora**: Web-scraped datasets like The Pile and C4 contain substantial exact and near-duplicate content. Deduplication studies report 10-30% redundancy ratios, with deduplicated training yielding *better* downstream performance (less memorization, more generalization).
+- **ImageNet-1K**: Studies using gradient-based selection (EL2N, GraNd) [@paul2021deep] have shown that training on 50% of ImageNet with carefully selected samples achieves within 1% of full-dataset accuracy. The savings: 50% fewer training FLOPs.
+- **CIFAR-10**: Because CIFAR-10 is smaller and more redundant, aggressive pruning works even better. Experiments report that 10-30% of samples (selected by forgetting scores [@toneva2019empirical] or margin-based methods) can match 90%+ of original accuracy—a 3-10× reduction.
+- **Large Language Model Corpora**: Web-scraped datasets like The Pile and C4 contain substantial exact and near-duplicate content. Deduplication studies [@lee2022deduplicating] report 10-30% redundancy ratios, with deduplicated training yielding *better* downstream performance (less memorization, more generalization).
 
 ::: {.callout-warning title="Caveat: Results Vary by Task and Model"}
 These numbers are benchmark-specific. Gains from pruning depend on the dataset's intrinsic redundancy, the selection algorithm, and the model architecture. Always validate on your specific task before deploying aggressive pruning in production.
@@ -171,6 +267,106 @@ The key insight is that not all data points provide equal value for training. So
 - **GraNd (Gradient Normed)**: Scores samples by the norm of their gradients early in training. High-gradient samples are near the decision boundary and most informative.
 - **Forgetting Events**: Tracks how often a sample is "forgotten" (correctly classified, then misclassified) during training. Frequently forgotten samples are harder and more valuable.
 - **EL2N (Error L2-Norm)**: Ranks samples by prediction confidence after a few epochs. Samples the model is uncertain about are prioritized.
+
+@tbl-coreset-comparison summarizes the trade-offs between these approaches:
+
++----------------+------------------+-----------------------+-----------------------+---------------------------+
+| **Method**     | **Compute Cost** | **Requires Training** | **Best For**          | **Limitation**            |
++:===============+:=================+:======================+:======================+:==========================+
+| **k-Center**   | O(N²) or O(NK)   | No                    | Coverage, exploration | Ignores label information |
++----------------+------------------+-----------------------+-----------------------+---------------------------+
+| **Herding**    | O(NK)            | No                    | Distribution matching | Assumes Gaussian-like     |
++----------------+------------------+-----------------------+-----------------------+---------------------------+
+| **GraNd**      | O(epochs × N)    | Yes (few epochs)      | Decision boundaries   | Requires proxy training   |
++----------------+------------------+-----------------------+-----------------------+---------------------------+
+| **Forgetting** | O(full training) | Yes (full)            | Hard examples         | Expensive to compute      |
++----------------+------------------+-----------------------+-----------------------+---------------------------+
+| **EL2N**       | O(epochs × N)    | Yes (few epochs)      | Uncertainty sampling  | Best with proxy model     |
++----------------+------------------+-----------------------+-----------------------+---------------------------+
+
+: Comparison of coreset selection algorithms. N = dataset size, K = coreset size. Gradient-based methods generally outperform geometry-based methods but require proxy model training. {#tbl-coreset-comparison .striped .hover}
+
+@fig-coreset-selection illustrates the core insight behind coreset methods: samples near the decision boundary (high uncertainty) are more informative than samples deep within class regions (low uncertainty). Random sampling wastes budget on redundant "easy" examples.
+
+::: {#fig-coreset-selection fig-env="figure" fig-pos="htb" fig-cap="**Coreset Selection Strategy**: Random sampling (left) selects uniformly, wasting budget on easy samples far from the decision boundary. Coreset selection (right) prioritizes samples near the boundary where the model is uncertain, capturing more information per sample." fig-alt="Two scatter plots with a diagonal decision boundary. Left plot shows random dots selected. Right plot highlights dots near the boundary as selected."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+% Left plot: Random Sampling
+\begin{scope}
+    \node[font=\bfseries] at (2.5, 4.2) {Random Sampling};
+
+    % Decision boundary
+    \draw[thick, dashed, gray] (0, 0) -- (5, 5);
+
+    % Class A points (below line) - circles
+    \foreach \x/\y in {0.5/0.2, 1.0/0.5, 0.8/1.2, 1.5/0.8, 2.0/1.0,
+                       2.5/1.5, 1.2/0.3, 0.3/0.8, 1.8/1.5, 2.2/0.5,
+                       3.0/2.0, 3.5/2.5, 2.8/1.8, 3.2/1.2, 4.0/2.8} {
+        \fill[blue!60] (\x, \y) circle (2pt);
+    }
+
+    % Class B points (above line) - triangles
+    \foreach \x/\y in {0.5/1.5, 1.0/2.0, 0.3/2.5, 1.5/2.5, 2.0/3.0,
+                       2.5/3.5, 1.2/3.2, 0.8/3.8, 1.8/3.5, 2.2/4.0,
+                       3.0/4.0, 3.5/4.5, 2.8/3.8, 3.2/4.2, 4.0/4.5} {
+        \fill[red!60] (\x, \y) circle (2pt);
+    }
+
+    % Randomly selected (circled) - some easy, some hard
+    \foreach \x/\y in {0.5/0.2, 1.5/2.5, 3.0/2.0, 0.8/3.8, 2.2/0.5} {
+        \draw[thick, orange] (\x, \y) circle (5pt);
+    }
+
+    % Axis
+    \draw[->] (0, 0) -- (5.2, 0) node[right, font=\tiny] {$x_1$};
+    \draw[->] (0, 0) -- (0, 5.2) node[above, font=\tiny] {$x_2$};
+
+    % Label
+    \node[font=\footnotesize, orange] at (2.5, -0.5) {Selected (random)};
+\end{scope}
+
+% Right plot: Coreset Selection
+\begin{scope}[xshift=7cm]
+    \node[font=\bfseries] at (2.5, 4.2) {Coreset Selection};
+
+    % Decision boundary
+    \draw[thick, dashed, gray] (0, 0) -- (5, 5);
+
+    % Uncertainty band near boundary
+    \fill[yellow!20] (0, 0) -- (0, 1) -- (4, 5) -- (5, 5) -- (5, 4) -- (1, 0) -- cycle;
+    \node[font=\tiny, fill=white, inner sep=1pt] at (3.5, 3.0) {High uncertainty};
+
+    % Class A points (below line) - circles
+    \foreach \x/\y in {0.5/0.2, 1.0/0.5, 0.8/1.2, 1.5/0.8, 2.0/1.0,
+                       2.5/1.5, 1.2/0.3, 0.3/0.8, 1.8/1.5, 2.2/0.5,
+                       3.0/2.0, 3.5/2.5, 2.8/1.8, 3.2/1.2, 4.0/2.8} {
+        \fill[blue!60] (\x, \y) circle (2pt);
+    }
+
+    % Class B points (above line) - triangles
+    \foreach \x/\y in {0.5/1.5, 1.0/2.0, 0.3/2.5, 1.5/2.5, 2.0/3.0,
+                       2.5/3.5, 1.2/3.2, 0.8/3.8, 1.8/3.5, 2.2/4.0,
+                       3.0/4.0, 3.5/4.5, 2.8/3.8, 3.2/4.2, 4.0/4.5} {
+        \fill[red!60] (\x, \y) circle (2pt);
+    }
+
+    % Coreset selected (near boundary) - circled
+    \foreach \x/\y in {0.8/1.2, 2.5/1.5, 3.0/2.0, 1.0/2.0, 2.0/3.0} {
+        \draw[thick, green!60!black] (\x, \y) circle (5pt);
+    }
+
+    % Axis
+    \draw[->] (0, 0) -- (5.2, 0) node[right, font=\tiny] {$x_1$};
+    \draw[->] (0, 0) -- (0, 5.2) node[above, font=\tiny] {$x_2$};
+
+    % Label
+    \node[font=\footnotesize, green!60!black] at (2.5, -0.5) {Selected (boundary)};
+\end{scope}
+\end{tikzpicture}
+```
+:::
+
+**Practical Recommendation**: For most practitioners, **EL2N with a small proxy model** offers the best balance of selection quality and computational cost. Train a lightweight model (e.g., ResNet-18 instead of ResNet-50) for 5-10 epochs, compute scores, and select. The proxy doesn't need to be accurate—it only needs to identify which samples are "hard."
 
 ::: {.callout-example title="Coreset Selection in Practice"}
 **Scenario**: You have 1 million training images and want to reduce to 100,000 (10%) for faster experimentation.
@@ -238,6 +434,12 @@ Beyond selecting informative samples, removing **exact and near-duplicates** pro
 
 For foundation model pre-training, deduplication is now considered essential. Studies on GPT-3 and LLaMA training show that deduplicated data improves both training efficiency and downstream performance by preventing memorization of repeated content.
 
+::: {.callout-note title="Lighthouse Connection: DLRM and Embedding Deduplication"}
+Our **DLRM Lighthouse model** (@sec-dnn-architectures) presents a unique deduplication challenge. Recommendation systems are memory capacity-bound, with embedding tables consuming terabytes of storage for billions of user/item IDs. Much of this capacity is wasted on **cold embeddings**—IDs that appear rarely in training data.
+
+Data efficiency for DLRM focuses on **interaction deduplication** (removing redundant user-item pairs) and **embedding pruning** (removing or sharing cold embeddings). A 20% reduction in unique interactions can reduce embedding table size by 30-40%, directly addressing DLRM's primary bottleneck: memory capacity rather than compute.
+:::
+
 ### Data Pruning by Quality
 
 **Data pruning** removes samples that do not contribute meaningfully to learning, going beyond deduplication to assess intrinsic quality:
@@ -254,7 +456,7 @@ While static pruning happens before training begins, **dynamic selection** optim
 
 ### Curriculum Learning: Easy to Hard
 
-**Curriculum learning** structures the order in which data is presented to the model. Instead of random shuffling, it starts with simpler examples and gradually introduces more complex ones—mirroring how humans learn by mastering fundamentals before advanced topics.
+**Curriculum learning** [@bengio2009curriculum; @soviany2022curriculum] structures the order in which data is presented to the model. Instead of random shuffling, it starts with simpler examples and gradually introduces more complex ones—mirroring how humans learn by mastering fundamentals before advanced topics.
 
 **Why It Works**: Neural networks benefit from a smooth loss landscape early in training. Easy examples provide clear, consistent gradients that establish good feature representations. Hard examples introduced too early produce noisy gradient signals that slow convergence or cause the model to memorize outliers rather than learn general patterns.
 
@@ -269,8 +471,8 @@ where $t$ is the current epoch and $T_{warmup}$ is the epoch at which the full d
 **Curriculum Design Strategies**:
 
 +-----------------------+-------------------------------------------+---------------------------------------------+
-| Strategy              | Difficulty Score                          | Best For                                    |
-+=======================+===========================================+=============================================+
+| **Strategy**          | **Difficulty Score**                      | **Best For**                                |
++:======================+:==========================================+:============================================+
 | **Loss-Based**        | Loss from probe model (low = easy)        | General-purpose; requires probe training    |
 +-----------------------+-------------------------------------------+---------------------------------------------+
 | **Confidence-Based**  | Teacher model confidence (high = easy)    | When teacher available; distillation setups |
@@ -280,7 +482,25 @@ where $t$ is the current epoch and $T_{warmup}$ is the epoch at which the full d
 | **Self-Paced**        | Current model's loss (updated each epoch) | Adaptive; no probe needed                   |
 +-----------------------+-------------------------------------------+---------------------------------------------+
 
-**Efficiency Gains**: Curriculum learning typically provides 10-30% faster convergence (fewer epochs to target accuracy) by reducing wasted updates on samples the model cannot yet learn from. The ICR is higher in early training because easy samples provide strong learning signal relative to their compute cost.
+**Efficiency Gains**: Curriculum learning improves convergence by reducing wasted updates on samples the model cannot yet learn from. The ICR is higher in early training because easy samples provide strong learning signal relative to their compute cost.
+
+@tbl-curriculum-benchmarks summarizes measured speedups from curriculum learning across standard benchmarks:
+
++---------------+-----------+---------------------+---------------------------+----------------+
+| **Dataset**   | **Model** | **Pacing Strategy** | **Epochs to Target Acc.** | **Speedup**    |
++:==============+==========:+:====================+==========================:+===============:+
+| **CIFAR-10**  | ResNet-18 | Linear warmup       | 115 vs. 150 baseline      | **23%** faster |
++---------------+-----------+---------------------+---------------------------+----------------+
+| **CIFAR-100** | ResNet-32 | Self-paced          | 180 vs. 220 baseline      | **18%** faster |
++---------------+-----------+---------------------+---------------------------+----------------+
+| **ImageNet**  | ResNet-50 | Loss-based          | 80 vs. 90 baseline        | **11%** faster |
++---------------+-----------+---------------------+---------------------------+----------------+
+| **ImageNet**  | ResNet-50 | MentorNet (noisy)   | 70 vs. 90 baseline        | **22%** faster |
++---------------+-----------+---------------------+---------------------------+----------------+
+
+: Curriculum learning convergence speedups on standard benchmarks. Target accuracy is 95% of final baseline performance. Gains are larger on redundant datasets (CIFAR-10) and noisy datasets (MentorNet removes ~40% noise). ImageNet shows smaller gains because the dataset is less redundant. {#tbl-curriculum-benchmarks .striped .hover}
+
+The table reveals an important pattern: curriculum learning gains are **inversely proportional to dataset quality**. On highly curated datasets like ImageNet, the 11% speedup is modest. On noisy or redundant data, gains can exceed 20%.
 
 ::: {.callout-note title="Anti-Curriculum and Self-Paced Learning"}
 The optimal ordering is task-dependent. **Anti-curriculum** (hard examples first) can work when the decision boundary is complex and easy examples don't help define it. **Self-paced learning** lets the model dynamically adjust difficulty based on its current loss, avoiding the need to pre-define a curriculum. Empirically, self-paced methods often match or exceed hand-designed curricula.
@@ -288,7 +508,7 @@ The optimal ordering is task-dependent. **Anti-curriculum** (hard examples first
 
 ### Active Learning: Human-in-the-Loop
 
-In specialized fields such as medical diagnosis, autonomous driving, and scientific research, labeling requires domain expertise and can cost $5–100+ per sample. Rather than labeling everything upfront, **active learning** lets the model identify which unlabeled examples would be most valuable to label next (@fig-active-learning-loop).
+In specialized fields such as medical diagnosis, autonomous driving, and scientific research, labeling requires domain expertise and can cost $5–100+ per sample. Rather than labeling everything upfront, **active learning** [@settles2009active; @ren2021survey] lets the model identify which unlabeled examples would be most valuable to label next (@fig-active-learning-loop).
 
 **Query Strategies** determine which samples to send to the oracle:
 
@@ -319,7 +539,9 @@ In specialized fields such as medical diagnosis, autonomous driving, and scienti
   \draw[->, thick, dashed] (Model) |- node[near start, left, font=\footnotesize] {Update} (Select);
 \end{tikzpicture}
 ```
-::: For instance, in medical imaging, an AI system diagnosing diseases from X-rays may already be confident in classifying common conditions but uncertain about rarer cases. Instead of labeling the entire dataset, active learning focuses human annotation efforts on these ambiguous cases, optimizing the use of labeling resources. By iteratively refining the dataset with the most informative examples, active learning reduces annotation costs while accelerating model performance gains.
+:::
+
+Active learning is particularly valuable in domains where labeling requires expertise. For instance, in medical imaging, an AI system diagnosing diseases from X-rays may already be confident in classifying common conditions but uncertain about rarer cases. Instead of labeling the entire dataset, active learning focuses human annotation efforts on these ambiguous cases, optimizing the use of labeling resources. By iteratively refining the dataset with the most informative examples, active learning reduces annotation costs while accelerating model performance gains.
 
 ::: {.callout-perspective title="Back-of-the-Napkin: The Active Learning ROI"}
 **Problem**: You are building a medical diagnostic AI. You have a pool of **1 Million unlabeled scans**. A specialist doctor charges **$5.00** to label one scan. You have a budget of **$500,000** and a deadline of **1 month**.
@@ -340,21 +562,208 @@ In specialized fields such as medical diagnosis, autonomous driving, and scienti
 
 ### Semi-Supervised Learning: Leveraging Unlabeled Data
 
-When some labeled data is available but insufficient for fully supervised learning, **semi-supervised learning** offers a middle ground. It leverages a small set of labeled examples to guide learning on a much larger unlabeled pool.
+When some labeled data is available but insufficient for fully supervised learning, **semi-supervised learning** offers a middle ground. It leverages a small set of labeled examples to guide learning on a much larger unlabeled pool—typically achieving 80-95% of fully-supervised accuracy with only 10-20% of the labels.
+
+**The Core Insight**: Unlabeled data contains structural information about the input distribution $P(X)$. While it cannot directly teach the mapping $P(Y|X)$, it constrains the hypothesis space. A decision boundary that cuts through dense regions of $P(X)$ is unlikely to generalize well; semi-supervised methods use unlabeled data to push boundaries toward low-density regions.
 
 **Key Techniques**:
 
-- **Pseudo-Labeling**: Train on labeled data, use the model to generate "pseudo-labels" for unlabeled data, then train on both. Iteratively refines predictions.
-- **Consistency Regularization**: Enforce that the model produces similar predictions for augmented versions of the same input. Methods like FixMatch combine this with pseudo-labeling.
-- **Label Propagation**: In graph-based approaches, propagate labels from labeled nodes to similar unlabeled nodes based on feature similarity.
+- **Pseudo-Labeling**: Train on labeled data, use the model to generate "pseudo-labels" for high-confidence unlabeled predictions, then train on both. The threshold for "high confidence" (e.g., >0.95 probability) is critical—too low introduces noise, too high wastes data.
 
-### Self-Supervised Pre-training: The Ultimate Data Efficiency
+- **Consistency Regularization**: Enforce that the model produces similar predictions for augmented versions of the same input. The intuition: a robust classifier should be invariant to realistic perturbations. Methods like **FixMatch** combine this with pseudo-labeling, only assigning pseudo-labels to samples where the unaugmented prediction is confident but training on strongly-augmented versions.
 
-The techniques above—active learning, semi-supervised learning—reduce labeling requirements by a factor of 10-100×. But the most dramatic data efficiency gain comes from **self-supervised pre-training**, which eliminates task-specific labels entirely.
+- **Label Propagation**: In graph-based approaches, construct a similarity graph over all samples (labeled and unlabeled), then propagate labels from labeled nodes to neighbors. Works well when the feature space has clear cluster structure.
 
-As detailed in @sec-training, self-supervised methods like masked language modeling (BERT), contrastive learning (SimCLR), and next-token prediction (GPT) derive supervision from the data's inherent structure. The result is **foundation models**: general-purpose representations trained on massive unlabeled corpora that can be fine-tuned with minimal labeled data for specific tasks.
+**Efficiency Gains**: Semi-supervised learning typically achieves the same accuracy as fully supervised training with **5-10× fewer labels**. The compute cost increases (training on more total samples), but the labeling cost—often the dominant expense—drops dramatically.
 
-From a data efficiency perspective, self-supervised pre-training represents a **1000×+ multiplier**: instead of labeling millions of task-specific examples, practitioners fine-tune on hundreds or thousands of labeled samples while inheriting knowledge from billions of unlabeled tokens. This paradigm shift—from "label everything" to "pre-train once, fine-tune cheaply"—is why foundation models dominate modern ML. The architectural and training details appear in Part II; here, we recognize it as the ceiling of what data efficiency can achieve.
+::: {.callout-example title="Quantitative Benchmark: FixMatch on CIFAR-10"}
+**FixMatch** [@sohn2020fixmatch] combines pseudo-labeling with consistency regularization to achieve remarkable label efficiency:
+
+| Label Budget | Method | Accuracy | Label Efficiency |
+|--------------|--------|----------|------------------|
+| 50,000 (100%) | Fully Supervised | 96.1% | Baseline |
+| 4,000 (8%) | FixMatch | 95.7% | **12.5× more efficient** |
+| 250 (0.5%) | FixMatch | 94.9% | **200× more efficient** |
+| 40 (0.08%) | FixMatch | 88.6% | 1250× more efficient |
+
+With only 250 labeled samples (25 per class), FixMatch achieves 94.9% accuracy—within 1.2 points of full supervision using 200× fewer labels. The technique works by generating pseudo-labels on weakly-augmented unlabeled images (only when model confidence exceeds 0.95), then training to predict these labels on strongly-augmented versions of the same images.
+
+**The Systems Insight**: Semi-supervised learning trades labeled data for unlabeled data and compute. On CIFAR-10, training FixMatch requires ~5× more compute than supervised training (processing 50K unlabeled samples per epoch). But when labels cost \$1 each and GPU hours cost \$0.50, the math favors semi-supervised:
+
+- Supervised (4000 labels): \$4,000 labeling + \$50 compute = **\$4,050**
+- FixMatch (250 labels): \$250 labeling + \$250 compute = **\$500**
+
+An 8× cost reduction for <1% accuracy loss.
+:::
+
+::: {.callout-note title="When Semi-Supervised Learning Works Best"}
+Semi-supervised learning assumes that the unlabeled data comes from the same distribution as the labeled data. It struggles when:
+
+- Unlabeled data contains out-of-distribution samples (the model confidently mislabels them)
+- Class imbalance is severe (pseudo-labels amplify majority class bias)
+- The labeled set doesn't cover all classes (can't propagate labels for unseen classes)
+
+Always validate on a held-out set with true labels to catch distribution mismatch.
+:::
+
+With semi-supervised learning, we've reduced label requirements by 5-10× while maintaining accuracy. But we can go further: what if we could eliminate task-specific labels entirely? This is the promise of self-supervised learning.
+
+## Self-Supervised Learning: Eliminating the Label Bottleneck {#sec-data-efficiency-self-supervised}
+
+Active learning reduces labeling cost by 10×. Semi-supervised learning reduces it by another 5-10×. But the most dramatic data efficiency gain comes from **self-supervised learning**, which removes the human annotation bottleneck completely.
+
+### The Paradigm Shift: Labels from Structure
+
+**The Key Insight**: Labels are just one form of supervision. The structure of data itself provides rich learning signals that require no human annotation:
+
+| Modality | Self-Supervised Task | Supervision Signal |
+|----------|---------------------|-------------------|
+| Text | Masked language modeling | Predict [MASK] from context |
+| Text | Next-token prediction | Predict next word in sequence |
+| Images | Contrastive learning | Same image (augmented) vs. different images |
+| Images | Masked autoencoding | Reconstruct masked patches |
+| Multi-modal | CLIP-style alignment | Match image-text pairs |
+
+These **pretext tasks** generate "labels" automatically from the data. A model that can predict masked words has learned grammar, semantics, and world knowledge. A model that distinguishes augmented views of the same image from different images has learned robust visual features invariant to transformations.
+
+The systems implication is profound: **self-supervised pre-training moves the data cost from the critical path**. Instead of waiting for labels before training begins, pre-training can start immediately on unlabeled data—often web-scale corpora of billions of samples.
+
+### The Economics of Amortization
+
+Self-supervised pre-training fundamentally changes the economics of the data pipeline through **cost amortization**:
+
+| Approach | Labels per Task | Compute per Task | Data Acquisition |
+|----------|----------------|------------------|------------------|
+| Train from scratch | 100k-1M labeled | 100% full training | Task-specific collection |
+| Fine-tune foundation model | 100-1k labeled | 1-5% of full training | Reuse pre-training corpus |
+
+**Concrete Example**: Consider a company building ten specialized classifiers (fraud detection, content moderation, medical diagnosis, etc.):
+
+**From Scratch Approach:**
+- 10 tasks × 100,000 labels × \$1/label = **\$1,000,000 labeling**
+- 10 tasks × 1,000 GPU-hours = **10,000 GPU-hours**
+- 10 separate data collection efforts
+- **Total time**: 6-12 months per task
+
+**Fine-Tuning Approach:**
+- Pre-training: 1 model × 10,000 GPU-hours on unlabeled data (one-time cost)
+- Fine-tuning: 10 tasks × 1,000 labels × \$1/label = **\$10,000 labeling**
+- Fine-tuning: 10 tasks × 50 GPU-hours = **500 GPU-hours**
+- **Total time**: 1-2 weeks per task after pre-training
+
+**The ROI**:
+- **100× reduction in labeling cost** (\$1M → \$10k)
+- **10× reduction in per-task compute** (amortized over tasks)
+- **20-50× faster time-to-deployment** per task
+
+This explains why the fine-tuning paradigm dominates production ML. The pre-training cost is high but amortized across many downstream applications; the fine-tuning cost is low per-task.
+
+@fig-amortization-comparison visualizes this cost structure. Training from scratch (left) incurs the full cost for each task independently. The foundation model approach (right) pays a large upfront pre-training cost but then fine-tunes each task at a fraction of the per-task cost.
+
+::: {#fig-amortization-comparison fig-env="figure" fig-pos="htb" fig-cap="**Cost Amortization in Foundation Models**: Training from scratch (left) requires full cost for each task. The foundation model approach (right) pays a large pre-training cost once, then amortizes it across many low-cost fine-tuning tasks. After 3-4 tasks, the foundation model approach becomes more cost-effective; after 10+ tasks, the savings are dramatic." fig-alt="Two bar charts side by side. Left shows 10 equally tall bars representing train-from-scratch costs. Right shows one tall pre-training bar followed by 10 short fine-tuning bars, with total height much lower."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\begin{axis}[
+    name=scratch,
+    ybar,
+    bar width=8pt,
+    width=6cm, height=5cm,
+    ylabel={Cost (GPU-hours)},
+    xlabel={Task Number},
+    title={Train from Scratch},
+    ymin=0, ymax=12000,
+    xtick={1,2,3,4,5,6,7,8,9,10},
+    xticklabel style={font=\tiny},
+    ytick={0,2000,4000,6000,8000,10000},
+    yticklabel style={font=\tiny, /pgf/number format/1000 sep={}},
+    axis lines=left,
+    enlarge x limits=0.08,
+]
+    \addplot[fill=red!60, draw=red!80] coordinates {
+        (1,1000) (2,1000) (3,1000) (4,1000) (5,1000)
+        (6,1000) (7,1000) (8,1000) (9,1000) (10,1000)
+    };
+\end{axis}
+
+\begin{axis}[
+    at={(scratch.east)},
+    anchor=west,
+    xshift=1.5cm,
+    ybar stacked,
+    bar width=8pt,
+    width=6cm, height=5cm,
+    xlabel={Task Number},
+    title={Foundation Model},
+    ymin=0, ymax=12000,
+    xtick={0,1,2,3,4,5,6,7,8,9,10},
+    xticklabels={Pre,1,2,3,4,5,6,7,8,9,10},
+    xticklabel style={font=\tiny},
+    ytick={0,2000,4000,6000,8000,10000},
+    yticklabel style={font=\tiny, /pgf/number format/1000 sep={}},
+    axis lines=left,
+    enlarge x limits=0.08,
+    legend style={at={(0.98,0.98)}, anchor=north east, font=\tiny, draw=none},
+]
+    % Pre-training cost (only for task 0)
+    \addplot[fill=blue!60, draw=blue!80] coordinates {
+        (0,10000) (1,0) (2,0) (3,0) (4,0) (5,0)
+        (6,0) (7,0) (8,0) (9,0) (10,0)
+    };
+    % Fine-tuning cost (for tasks 1-10)
+    \addplot[fill=green!60, draw=green!80] coordinates {
+        (0,0) (1,50) (2,50) (3,50) (4,50) (5,50)
+        (6,50) (7,50) (8,50) (9,50) (10,50)
+    };
+    \legend{Pre-training, Fine-tuning}
+\end{axis}
+
+% Totals annotation
+\node[font=\footnotesize\bfseries, red!70!black] at (2.2, -0.3) {Total: 10,000 hrs};
+\node[font=\footnotesize\bfseries, blue!70!black] at (8.7, -0.3) {Total: 10,500 hrs};
+\end{tikzpicture}
+```
+:::
+
+### Trade-Offs Across Self-Supervised Approaches
+
+Different self-supervised methods occupy different points on the efficiency frontier:
+
++---------------------+----------------------------+---------------------------+------------------------------+
+| **Method**          | **Batch Size Requirement** | **Data Efficiency**       | **Best Use Case**            |
++:====================+===========================:+:==========================+:=============================+
+| **Contrastive**     | Very large (4096+)         | High (per labeled sample) | Vision, small datasets       |
+| **(SimCLR, MoCo)**  |                            | Low (pre-training cost)   |                              |
++---------------------+----------------------------+---------------------------+------------------------------+
+| **Masked Modeling** | Moderate (256-1024)        | Moderate                  | NLP, balanced efficiency     |
+| **(BERT, MAE)**     |                            |                           |                              |
++---------------------+----------------------------+---------------------------+------------------------------+
+| **Generative**      | Large (512-2048)           | Highest at scale          | Foundation models, unlimited |
+| **(GPT)**           |                            |                           | unlabeled data               |
++---------------------+----------------------------+---------------------------+------------------------------+
+
+**Contrastive learning** requires many negative examples per batch to distinguish similar samples, making it compute-intensive during pre-training. However, it achieves excellent downstream performance with minimal labeled data.^[The batch size sensitivity is substantial: SimCLR achieves 66.6% ImageNet top-1 accuracy with batch size 8192 but drops to 61.9% with batch size 256—a 4.7 percentage point degradation [@chen2020mocov2]. This is because contrastive learning treats all other samples in a batch as negatives; with fewer negatives, the pretext task becomes easier and the learned representations are weaker.]
+
+**Masked modeling** works with smaller batches but requires more iterations. It balances pre-training cost with downstream efficiency.
+
+**Generative pre-training** scales extremely well with data volume—performance improves log-linearly with dataset size up to trillions of tokens. This makes it the method of choice for foundation models, where pre-training cost can be amortized across thousands of downstream tasks.
+
+### From 1000× Multiplier to Foundation Model Paradigm
+
+From a data efficiency perspective, self-supervised pre-training represents a **1000×+ multiplier**: instead of labeling millions of task-specific examples, practitioners fine-tune on hundreds or thousands of labeled samples while inheriting knowledge from billions of unlabeled tokens.
+
+This multiplicative advantage created the **foundation model paradigm** [@bommasani2021opportunities] that defines modern ML systems:
+
+1. **Pre-train once** on massive unlabeled corpora (billions of tokens/images)
+2. **Fine-tune many times** on small task-specific datasets (hundreds to thousands of samples)
+3. **Amortize pre-training cost** across all downstream applications
+
+The architectural and training details for these methods appear in @sec-ai-training. Here, we recognize self-supervised learning as the current ceiling of what data efficiency can achieve—the technique that transformed data from the bottleneck into an abundant resource.
+
+::: {.callout-note title="Scaling Self-Supervised Pre-training"}
+Self-supervised pre-training at scale requires distributed infrastructure. While this chapter focuses on single-machine data efficiency, the techniques that make foundation models possible—gradient accumulation across mini-batches, mixed precision to reduce memory footprint, and pipeline parallelism to split models across devices—are essential for pre-training billion-parameter models. The data efficiency principles here (coreset selection, curriculum learning) apply regardless of scale, but their implementation must account for distributed coordination overhead.
+:::
+
+Having eliminated the label bottleneck through self-supervision, the final data efficiency lever is **creating samples that don't exist**—synthetic data generation and augmentation.
 
 ## Synthetic Data Generation and Augmentation {#sec-data-efficiency-synthetic}
 
@@ -368,7 +777,7 @@ The third strategy for maximizing ICR is to **create** high-value samples on dem
 
 - **Geometric**: Rotation, flipping, cropping, scaling
 - **Photometric**: Brightness, contrast, saturation, hue shifts
-- **Advanced**: Cutout (random rectangular masks), MixUp (blend two images and labels), CutMix (paste patches between images)
+- **Advanced**: Cutout (random rectangular masks), MixUp [@zhang2018mixup] (blend two images and labels), CutMix (paste patches between images)
 
 **Text Augmentations**:
 
@@ -378,6 +787,12 @@ The third strategy for maximizing ICR is to **create** high-value samples on dem
 
 ::: {.callout-note title="AutoAugment and Learned Policies"}
 Rather than hand-designing augmentation policies, **AutoAugment** uses reinforcement learning to discover optimal augmentation strategies for specific datasets. RandAugment simplifies this by randomly sampling from a fixed set of transformations, achieving similar performance with less computation.
+:::
+
+::: {.callout-note title="Lighthouse Connection: MobileNet and Aggressive Augmentation"}
+Our **MobileNet Lighthouse model** (@sec-dnn-architectures) exemplifies how data augmentation compensates for model capacity constraints. MobileNet's depthwise separable convolutions reduce parameters by 8-9× compared to standard convolutions, but this efficiency comes at a cost: smaller models are more prone to overfitting on limited data.
+
+The solution is **aggressive augmentation**. MobileNet training typically uses stronger augmentation than ResNet-50 training—RandAugment with higher magnitude, more aggressive cropping, and longer training schedules. The augmentation effectively increases dataset diversity without increasing model capacity, allowing MobileNet to achieve near-ResNet accuracy at a fraction of the parameter count. For edge deployment where both data collection and model size are constrained, augmentation is not optional—it's essential.
 :::
 
 ### Generative Synthesis: Creating New Samples
@@ -394,13 +809,105 @@ Rather than hand-designing augmentation policies, **AutoAugment** uses reinforce
 - **Diffusion Models**: Iterative denoising produces high-quality images. Stable Diffusion enables text-to-image synthesis for training data.
 - **Simulation Engines**: Physics-based rendering (e.g., CARLA for autonomous driving, Unity/Unreal for robotics) generates unlimited labeled data with ground-truth annotations.
 
-::: {.callout-warning title="The Domain Gap"}
-Synthetic data often differs from real data in subtle ways (lighting, texture, physics). Models trained purely on synthetic data may not generalize to real-world deployment. **Domain adaptation** and **domain randomization** techniques help bridge this gap.
+### Bridging the Domain Gap
+
+Synthetic data's greatest limitation is the **domain gap**: the statistical difference between generated and real-world data. A model trained on perfectly rendered simulation images may fail on blurry, poorly-lit real camera footage. This gap can negate the efficiency gains of synthetic data if not addressed.
+
+@fig-domain-gap illustrates the problem. Synthetic data (left distribution) and real data (right distribution) occupy different regions of feature space. A model trained only on synthetic data learns a decision boundary that doesn't transfer to real deployment.
+
+::: {#fig-domain-gap fig-env="figure" fig-pos="htb" fig-cap="**The Domain Gap Problem**: Synthetic data (blue) and real data (orange) have different distributions. A model trained on synthetic data alone learns a boundary that fails on real data. Domain adaptation techniques aim to align these distributions or learn domain-invariant features." fig-alt="Two overlapping bell curves representing synthetic and real data distributions, with a decision boundary that works for synthetic but misses real data."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\begin{axis}[
+    width=10cm, height=5cm,
+    xlabel={Feature Space},
+    ylabel={Density},
+    xmin=-3, xmax=7,
+    ymin=0, ymax=0.5,
+    axis lines=left,
+    xtick=\empty,
+    ytick=\empty,
+    legend style={at={(0.98,0.98)}, anchor=north east, font=\footnotesize, draw=none},
+    clip=false
+]
+    % Synthetic data distribution (centered at 0)
+    \addplot[thick, blue, domain=-3:4, samples=100, fill=blue!20, fill opacity=0.5]
+        {0.4*exp(-0.5*(x)^2)};
+    \addlegendentry{Synthetic}
+
+    % Real data distribution (centered at 3, slightly different shape)
+    \addplot[thick, orange, domain=0:7, samples=100, fill=orange!20, fill opacity=0.5]
+        {0.35*exp(-0.4*(x-3)^2)};
+    \addlegendentry{Real}
+
+    % Decision boundary learned from synthetic
+    \draw[thick, dashed, red] (axis cs: 1.5, 0) -- (axis cs: 1.5, 0.45);
+    \node[red, font=\footnotesize, align=center] at (axis cs: 1.5, 0.48) {Synthetic\\boundary};
+
+    % Ideal boundary for real data
+    \draw[thick, dotted, green!60!black] (axis cs: 3, 0) -- (axis cs: 3, 0.45);
+
+    % Domain gap annotation
+    \draw[<->, thick, purple] (axis cs: 0, 0.42) -- (axis cs: 3, 0.42);
+    \node[purple, font=\footnotesize, fill=white, inner sep=1pt] at (axis cs: 1.5, 0.42) {Domain Gap};
+
+\end{axis}
+\end{tikzpicture}
+```
+:::
+
+**Domain Randomization** makes the model robust by training on wildly varied synthetic data:
+
+- Randomize lighting, textures, backgrounds, camera parameters during generation
+- The real world becomes "just another variation" the model has seen
+- Effective for robotics and autonomous driving where simulation is mature
+
+**Domain Adaptation** explicitly aligns synthetic and real distributions:
+
+- **Feature alignment**: Train on synthetic data while minimizing the distance between synthetic and real feature distributions (e.g., using adversarial training)
+- **Fine-tuning**: Pre-train on abundant synthetic data, then fine-tune on small real dataset
+- **Self-training**: Use synthetic-trained model to pseudo-label real data, then retrain
+
+**The Synthetic-Real Mix**: In practice, the best results often come from mixing synthetic and real data:
+
+| Synthetic Fraction | Typical Outcome |
+|-------------------|-----------------|
+| 100% synthetic | Poor real-world generalization |
+| 80% synthetic + 20% real | Good performance, significant cost savings |
+| 50% synthetic + 50% real | Best performance in many domains |
+| 100% real | Baseline (expensive) |
+
+The optimal mix depends on simulation fidelity, domain complexity, and the cost differential between synthetic and real data.
+
+::: {.callout-warning title="Model Collapse Risk"}
+When synthetic data is generated by ML models (not simulators), there's a risk of **model collapse**: training on model-generated data amplifies errors and reduces diversity over generations. This is particularly concerning for foundation models where synthetic data from earlier model generations may contaminate future training corpora.
+:::
+
+::: {.callout-example title="Lighthouse Example: Keyword Spotting Data Efficiency"}
+**Scenario**: Our **Keyword Spotting Lighthouse model** (@sec-dnn-architectures)—a DS-CNN with ~250K parameters and <500KB footprint—represents the extreme end of data efficiency challenges. You're building a wake-word detector ("Hey Device") for a microcontroller with 256KB SRAM (see @sec-tinyml for hardware constraints). The model must be tiny (~50KB), but you need 10,000+ labeled audio samples to train it—samples that don't exist yet.
+
+**The Data Collection Problem**:
+
+- Recording 10,000 real utterances requires 500+ speakers for diversity
+- Professional recording costs \$2-5 per sample (\$20-50K total)
+- Target deployment environment (noisy kitchen, car interior) differs from recording studio
+
+**Data Efficiency Solution Stack**:
+
+1. **Seed Data (500 samples)**: Record 50 speakers × 10 utterances in controlled conditions
+2. **Augmentation (5,000 samples)**: Apply pitch shift, time stretch, speed variation to 10× the seed data
+3. **Noise Injection (10,000 samples)**: Mix clean audio with environmental noise (kitchen appliances, HVAC, traffic) sampled from AudioSet
+4. **Negative Mining**: Use acoustic similarity to find hard negatives ("Hey Siri", "Hey Google") from public datasets
+5. **Simulation (optional)**: Text-to-speech synthesis with diverse voice models
+
+**Result**: 500 real recordings → 10,000+ training samples at 5% of the cost. The noise injection serves as domain randomization, improving deployment robustness.
+
+**Key Insight for TinyML**: When the target model is tiny, the data efficiency challenge shifts from "reduce terabytes to gigabytes" to "create a useful dataset from almost nothing." Augmentation and simulation become essential rather than optional.
 :::
 
 ### Knowledge Distillation: Compressing Information
 
-**Knowledge distillation** is a form of data efficiency where a smaller "student" model learns from a larger "teacher" model's outputs rather than raw labels. The teacher's soft predictions contain more information than hard labels—they encode inter-class relationships and uncertainty.
+**Knowledge distillation** [@hinton2015distilling] is a form of data efficiency where a smaller "student" model learns from a larger "teacher" model's outputs rather than raw labels. The teacher's soft predictions contain more information than hard labels—they encode inter-class relationships and uncertainty.
 
 This is especially powerful for creating **synthetic labels**: run a large model (e.g., GPT-4) on unlabeled data to generate high-quality annotations, then train a smaller model on these synthetic labels. The smaller model inherits much of the teacher's capability at a fraction of the inference cost.
 
@@ -408,37 +915,159 @@ This is especially powerful for creating **synthetic labels**: run a large model
 
 @tbl-data-efficiency summarizes the three-stage optimization pipeline introduced at the beginning of this chapter.
 
-+-----------------------------+-----------------+-------------------------------------------------------+--------------------------------+
-| Stage                       | When Applied    | Techniques                                            | Typical Gains                  |
-+=============================+=================+=======================================================+================================+
-| **1. Static Pruning**       | Before training | Coreset Selection, Deduplication, Quality Filtering   | 30-50% dataset reduction       |
-+-----------------------------+-----------------+-------------------------------------------------------+--------------------------------+
-| **2. Dynamic Selection**    | During training | Curriculum Learning, Active Learning, Semi-Supervised | 10-30% faster convergence      |
-+-----------------------------+-----------------+-------------------------------------------------------+--------------------------------+
-| **3. Synthetic Generation** | On-demand       | Augmentation, Generative Models, Distillation         | 2-10× effective data expansion |
-+-----------------------------+-----------------+-------------------------------------------------------+--------------------------------+
++-----------------------------+------------------+-------------------------------------------------------+--------------------------------+
+| **Stage**                   | **When Applied** | **Techniques**                                        | **Typical Gains**              |
++============================:+:=================+:======================================================+===============================:+
+| **1. Static Pruning**       | Before training  | Coreset Selection, Deduplication, Quality Filtering   | 30-50% dataset reduction       |
++-----------------------------+------------------+-------------------------------------------------------+--------------------------------+
+| **2. Dynamic Selection**    | During training  | Curriculum Learning, Active Learning, Semi-Supervised | 10-30% faster convergence      |
++-----------------------------+------------------+-------------------------------------------------------+--------------------------------+
+| **3. Synthetic Generation** | On-demand        | Augmentation, Generative Models, Distillation         | 2-10× effective data expansion |
++-----------------------------+------------------+-------------------------------------------------------+--------------------------------+
 
 : The three-stage data efficiency pipeline. Each stage increases ICR by different mechanisms: pruning removes low-value samples, dynamic selection focuses compute on high-value samples, and synthesis creates new high-value samples. {#tbl-data-efficiency .striped .hover}
 
 @tbl-technique-selection provides a decision guide for selecting techniques based on your specific constraints.
 
-+----------------------------+-------------------------+------------------------------------------------------+
-| Constraint                 | Best Technique          | Why                                                  |
-+============================+=========================+======================================================+
-| Limited labeling budget    | Active Learning         | Maximizes label ROI by selecting informative samples |
-+----------------------------+-------------------------+------------------------------------------------------+
-| High redundancy in data    | Deduplication + Coreset | Removes waste before training begins                 |
-+----------------------------+-------------------------+------------------------------------------------------+
-| Rare classes or edge cases | Synthetic Generation    | Creates samples that don't exist in raw data         |
-+----------------------------+-------------------------+------------------------------------------------------+
-| Slow convergence           | Curriculum Learning     | Improves gradient quality in early training          |
-+----------------------------+-------------------------+------------------------------------------------------+
-| Privacy requirements       | Synthetic Data          | Train on generated data, not real user data          |
-+----------------------------+-------------------------+------------------------------------------------------+
-| Large model, small dataset | Knowledge Distillation  | Leverage teacher model's knowledge as "data"         |
-+----------------------------+-------------------------+------------------------------------------------------+
++--------------------------------+-------------------------+------------------------------------------------------+
+| **Constraint**                 | **Best Technique**      | **Why**                                              |
++:===============================+:========================+:=====================================================+
+| **Limited labeling budget**    | Active Learning         | Maximizes label ROI by selecting informative samples |
++--------------------------------+-------------------------+------------------------------------------------------+
+| **High redundancy in data**    | Deduplication + Coreset | Removes waste before training begins                 |
++--------------------------------+-------------------------+------------------------------------------------------+
+| **Rare classes or edge cases** | Synthetic Generation    | Creates samples that don't exist in raw data         |
++--------------------------------+-------------------------+------------------------------------------------------+
+| **Slow convergence**           | Curriculum Learning     | Improves gradient quality in early training          |
++--------------------------------+-------------------------+------------------------------------------------------+
+| **Privacy requirements**       | Synthetic Data          | Train on generated data, not real user data          |
++--------------------------------+-------------------------+------------------------------------------------------+
+| **Large model, small dataset** | Knowledge Distillation  | Leverage teacher model's knowledge as "data"         |
++--------------------------------+-------------------------+------------------------------------------------------+
 
 : Technique selection guide based on primary constraint. {#tbl-technique-selection .striped .hover}
+
+### Decision Framework: Choosing the Right Technique
+
+With many techniques available, practitioners need a systematic approach to selection. @fig-technique-decision-tree provides a visual flowchart that captures the key branching points:
+
+::: {#fig-technique-decision-tree fig-env="figure" fig-pos="htb" fig-cap="**Data Efficiency Technique Selection Tree**: Start at the top by identifying your primary bottleneck, then follow the branches to find the most appropriate technique. Leaf nodes show recommended methods. Multiple paths may apply—combine techniques as needed." fig-alt="A decision tree flowchart with diamond decision nodes and rectangular technique recommendations. Starts with bottleneck identification and branches to specific techniques."}
+```{.tikz}
+\begin{tikzpicture}[
+    font=\small\usefont{T1}{phv}{m}{n},
+    decision/.style={diamond, draw, fill=yellow!20, text width=2cm, align=center, inner sep=1pt, aspect=2},
+    technique/.style={rectangle, draw, rounded corners, fill=green!20, text width=2.2cm, align=center, minimum height=0.8cm},
+    arrow/.style={->, >=stealth, thick},
+    level 1/.style={sibling distance=5cm},
+    level 2/.style={sibling distance=2.5cm},
+    edge from parent/.style={arrow},
+    scale=0.85, transform shape
+]
+
+% Root node
+\node[decision] (root) {What is your primary bottleneck?}
+    child {
+        node[decision, below left=1.5cm and 2cm] (label) {Labeling cost}
+        child {
+            node[decision, below left=1.2cm and 0.5cm] (oracle) {Oracle available?}
+            child {
+                node[technique, below left=1cm and 0cm] (al) {Active\\Learning}
+                edge from parent node[left, font=\tiny] {Yes}
+            }
+            child {
+                node[technique, below right=1cm and 0cm] (ssl) {Semi-\\Supervised}
+                edge from parent node[right, font=\tiny] {No}
+            }
+            edge from parent node[left, font=\tiny] {Yes}
+        }
+        child {
+            node[technique, below right=1.2cm and 0.5cm] (sslu) {Self-\\Supervised}
+            edge from parent node[right, font=\tiny] {Large unlabeled pool}
+        }
+        edge from parent node[above left, font=\tiny] {Labeling \$\$\$}
+    }
+    child {
+        node[decision, below=1.5cm] (compute) {Compute cost}
+        child {
+            node[decision, below=1.2cm] (redundant) {Data redundant?}
+            child {
+                node[technique, below left=1cm and 0cm] (dedup) {Dedup +\\Coreset}
+                edge from parent node[left, font=\tiny] {High}
+            }
+            child {
+                node[technique, below right=1cm and 0cm] (curr) {Curriculum\\Learning}
+                edge from parent node[right, font=\tiny] {Low}
+            }
+            edge from parent
+        }
+        edge from parent node[above, font=\tiny] {Compute \$\$\$}
+    }
+    child {
+        node[decision, below right=1.5cm and 2cm] (scarcity) {Data scarcity}
+        child {
+            node[decision, below left=1.2cm and 0.5cm] (sim) {Simulator?}
+            child {
+                node[technique, below left=1cm and 0cm] (syn) {Synthetic\\Generation}
+                edge from parent node[left, font=\tiny] {Yes}
+            }
+            child {
+                node[technique, below right=1cm and 0cm] (aug) {Data\\Augmentation}
+                edge from parent node[right, font=\tiny] {No}
+            }
+            edge from parent node[left, font=\tiny] {Domain}
+        }
+        child {
+            node[technique, below right=1.2cm and 0.5cm] (dist) {Knowledge\\Distillation}
+            edge from parent node[right, font=\tiny] {Teacher available}
+        }
+        edge from parent node[above right, font=\tiny] {Not enough data}
+    };
+
+\end{tikzpicture}
+```
+:::
+
+The following text-based decision tree elaborates on each path:
+
+**Step 1: Assess your bottleneck**
+
+- **Labeling cost dominates** → Focus on label efficiency (Active Learning, Semi-Supervised, Self-Supervised)
+- **Compute cost dominates** → Focus on dataset reduction (Coreset, Deduplication, Curriculum)
+- **Data scarcity dominates** → Focus on data creation (Augmentation, Synthesis, Distillation)
+
+**Step 2: Check prerequisites**
+
+| Technique | Prerequisites |
+|-----------|---------------|
+| Active Learning | Access to oracle, unlabeled pool, retraining infrastructure |
+| Coreset Selection | Proxy model or embedding extractor, full dataset accessible |
+| Curriculum Learning | Difficulty scoring method, pacing schedule |
+| Semi-Supervised | Some labeled data, unlabeled data from same distribution |
+| Self-Supervised | Large unlabeled corpus, pre-training compute budget |
+| Augmentation | Domain knowledge of invariances, augmentation library |
+| Synthetic Generation | Generative model or simulator, domain gap mitigation |
+
+**Step 3: Estimate ROI**
+
+Before committing to a technique, estimate its return:
+
+$$
+\text{ROI} = \frac{\text{(Baseline Cost)} - \text{(Technique Cost + Implementation Cost)}}{\text{Technique Cost + Implementation Cost}}
+$$
+
+A technique with high theoretical gains but high implementation cost may have lower ROI than a simpler approach. Deduplication, for example, often has the highest ROI because implementation cost is low and gains are immediate.
+
+**Step 4: Combine techniques strategically**
+
+The techniques in this chapter are not mutually exclusive. A typical production pipeline combines multiple stages:
+
+1. **Deduplicate** the raw corpus (immediate wins, low cost)
+2. **Apply coreset selection** to reduce to informative samples
+3. **Use curriculum learning** to order the coreset for training
+4. **Augment** during training to increase effective diversity
+5. **Fine-tune** from a self-supervised foundation model
+
+Each stage compounds the efficiency gains of previous stages.
 
 ## Engineering Data Efficiency Systems
 
@@ -453,6 +1082,33 @@ For a selection strategy to be systems-efficient, it must satisfy the **Selectio
 $$ T_{selection} + T_{train}(N_{subset}) < T_{train}(N_{total}) $$
 
 Where $T_{selection}$ is the time spent scoring the pool and $T_{train}$ is the compute time. If $f(x)$ requires a forward pass of a large model, the cost of selection can exceed the cost of training, leading to a negative ROI.
+
+::: {.callout-example title="Worked Example: Selection Inequality in Practice"}
+**Scenario**: You have 1 million training images and want to select a 100k coreset (10%) using EL2N scoring.
+
+**Option A: Full Model Selection**
+- Score all 1M images with your target ResNet-50: 1M × 0.01s = **10,000 seconds** (2.8 hours)
+- Train on 100k coreset for 100 epochs: 100k × 100 × 0.01s = **100,000 seconds** (27.8 hours)
+- **Total: 30.6 hours**
+
+**Option B: Proxy Model Selection**
+- Score all 1M images with a small proxy (ResNet-18): 1M × 0.002s = **2,000 seconds** (0.6 hours)
+- Train on 100k coreset for 100 epochs: **100,000 seconds** (27.8 hours)
+- **Total: 28.4 hours**
+
+**Baseline: No Selection**
+- Train on full 1M dataset for 100 epochs: 1M × 100 × 0.01s = **1,000,000 seconds** (278 hours)
+
+**Analysis**:
+- Option A saves 247 hours vs. baseline (89% reduction) ✓
+- Option B saves 250 hours vs. baseline (90% reduction) ✓
+- Option B beats Option A by 2.2 hours—proxy selection has better ROI
+
+**The Trap**: If your selection required 50 hours (e.g., running a 7B parameter model), you'd spend 77.8 hours total—still better than baseline, but the selection overhead consumes 64% of your savings.
+
+**Rule of thumb**: Selection time should be <10% of subset training time for good ROI.
+:::
+
 
 ::: {#fig-selection-inequality fig-cap="**The Selection Inequality**: Data selection only improves end-to-end efficiency if the overhead of selection plus training on the subset is less than training on the full dataset. A lightweight selection function (proxy model, cached embeddings) keeps selection overhead low; an expensive selection function (full model forward pass) can negate the savings." fig-alt="Bar chart comparing two approaches: baseline shows one tall bar for full training; data-efficient shows two shorter bars for selection overhead and subset training, with total shorter than baseline."}
 ```{.tikz}
@@ -497,17 +1153,17 @@ Data efficiency strategies like coresets or dynamic sampling often require **ran
 
 ::: {#tbl-io-performance fig-cap="**The Cost of Randomness**: Comparative I/O throughput for sequential vs. random 4KB reads across different storage tiers. Standard data loaders optimize for Sequential throughput; Data Efficiency strategies often fall into the 'Random' trap."}
 
-+--------------+-----------------------+-------------------+----------------------------+----------------+
-| Storage Tier | Sequential Throughput | Random I/O (IOPS) | Random Throughput (approx) | Random Penalty |
-+==============+=======================+===================+============================+================+
-| HDD (7.2k)   | ~150 MB/s             | ~80               | ~0.3 MB/s                  | **500x**       |
-+--------------+-----------------------+-------------------+----------------------------+----------------+
-| SATA SSD     | ~550 MB/s             | ~10k              | ~40 MB/s                   | **14x**        |
-+--------------+-----------------------+-------------------+----------------------------+----------------+
-| NVMe SSD     | ~3,500 MB/s           | ~500k             | ~2,000 MB/s                | **1.75x**      |
-+--------------+-----------------------+-------------------+----------------------------+----------------+
-| Cloud (S3)   | ~100 MB/s (per conn)  | ~10-50ms (lat)    | Very Low (per conn)        | **Extreme**    |
-+--------------+-----------------------+-------------------+----------------------------+----------------+
++------------------+---------------------------+-----------------------+--------------------------------+--------------------+
+| **Storage Tier** | **Sequential Throughput** | **Random I/O (IOPS)** | **Random Throughput (approx)** | **Random Penalty** |
++:=================+==========================:+======================:+===============================:+===================:+
+| **HDD (7.2k)**   | ~150 MB/s                 | ~80                   | ~0.3 MB/s                      | **500x**           |
++------------------+---------------------------+-----------------------+--------------------------------+--------------------+
+| **SATA SSD**     | ~550 MB/s                 | ~10k                  | ~40 MB/s                       | **14x**            |
++------------------+---------------------------+-----------------------+--------------------------------+--------------------+
+| **NVMe SSD**     | ~3,500 MB/s               | ~500k                 | ~2,000 MB/s                    | **1.75x**          |
++------------------+---------------------------+-----------------------+--------------------------------+--------------------+
+| **Cloud (S3)**   | ~100 MB/s (per conn)      | ~10-50ms (lat)        | Very Low (per conn)            | **Extreme**        |
++------------------+---------------------------+-----------------------+--------------------------------+--------------------+
 
 :::
 
@@ -527,39 +1183,445 @@ To maintain GPU utilization, data loaders must be architected for **sharded rand
 
 Synthetic data generation moves the data bottleneck from I/O (disk speed) to CPU (augmentation compute). Heavy augmentations (e.g., 3D rotations, MixUp) or generative synthesis can starve the GPU if the CPU cannot keep up.
 
-**Data Echoing** is a system optimization that reuses a batch of data multiple times in the GPU, applying different cheap augmentations on the GPU itself, or simply replaying the batch to amortize the cost of fetching and decoding. This reduces the pressure on the upstream data pipeline, ensuring that the GPU remains the bottleneck.
-## Measuring Data Efficiency {#sec-data-efficiency-measuring}
+### Data Echoing: Amortizing I/O Costs
 
-The techniques in this chapter—coreset selection, active learning, augmentation—all claim to improve efficiency. But how do we *measure* that improvement? Without metrics, we cannot compare approaches, set targets, or know when to stop optimizing. This section introduces five metrics that quantify different dimensions of data efficiency.
+**Data Echoing** [@chowdhery2023data] is a systems technique that reuses batches of data multiple times before fetching new samples. When the data pipeline (reading, decoding, augmenting) is slower than GPU processing, the GPU idles waiting for data. Data echoing fills this gap by "echoing" (repeating) each batch $e$ times, applying different augmentations each repetition.
 
-### Performance-Per-Data Unit (PPD)
-
-**PPD** measures the marginal learning value of additional data: how much does model performance improve per sample added?
+**When Data Echoing Helps**: The optimal echo factor depends on the ratio $R$ of upstream processing time to downstream training time:
 
 $$
-PPD = \frac{\Delta \mathcal{M}}{\Delta N}
+R = \frac{T_{\text{data pipeline}}}{T_{\text{GPU training}}}
+$$
+
+If $R > 1$ (data pipeline is the bottleneck), set echo factor $e \leq R$ to fully utilize GPU capacity. If $R < 1$ (GPU is the bottleneck), data echoing provides no benefit.
+
+::: {.callout-example title="Worked Example: Data Echoing ROI"}
+**Scenario**: Training ResNet-50 on ImageNet with heavy augmentation (RandAugment + MixUp).
+
+**Measurements**:
+
+- Data pipeline throughput: 300 images/second (reading, decoding, augmenting on CPU)
+- GPU training throughput: 800 images/second (forward + backward pass)
+- Ratio $R = 800/300 = 2.67$ (GPU waiting 63% of time)
+
+**Without Echoing**:
+
+- Effective throughput: 300 images/second (limited by data pipeline)
+- Training time for 90 epochs: 90 × 1.28M / 300 = **384,000 seconds (106 hours)**
+- GPU utilization: ~38%
+
+**With Echo Factor $e = 2$**:
+
+- Each batch is processed twice with different augmentations
+- Effective throughput: 600 images/second (still below GPU capacity)
+- Unique images per second: 300 (unchanged)
+- Training time: 90 × 1.28M / 600 = **192,000 seconds (53 hours)** if echoed data is equally valuable
+
+**But echoed data has diminishing returns**: Research shows echoed samples provide ~70-90% of the value of fresh samples (depending on augmentation diversity). Empirically, Choi et al. measured a **3.25× speedup** on ResNet-50 ImageNet training when reading data over a network, with minimal accuracy degradation.
+
+**The Trade-Off**: Data echoing trades sample diversity for GPU utilization. It works best when:
+
+1. Augmentation is diverse (each echo sees different transforms)
+2. The dataset is already somewhat redundant
+3. The echo factor $e$ stays below the critical threshold (~4× for ImageNet)
+
+Above this threshold, the model starts memorizing and accuracy degrades.
+:::
+
+**Interaction with Batch Normalization**: Data echoing changes the effective batch statistics. When the same image appears multiple times in a batch (or across nearby batches), batch normalization statistics become less representative. Practitioners often exclude consecutive echoes from the same batch or use separate BN statistics for echoed samples.
+
+These engineering patterns—proxy selection, sharded formats, data echoing—transform data efficiency from an algorithmic idea into a deployable system. But how do you decide *which* techniques to invest in? The answer requires economic analysis.
+
+## Cost Modeling and Economics {#sec-data-efficiency-cost-modeling}
+
+The systems framing of data efficiency demands quantitative answers to resource allocation questions: *Should I label 10,000 more samples or buy more GPU hours? When does active learning pay for itself? What's the ROI of investing in deduplication infrastructure?*
+
+This section provides the economic framework to answer these questions.
+
+### The Total Cost of Training Data
+
+The true cost of training data extends far beyond storage:
+
+$$
+C_{\text{total}} = C_{\text{acquire}} + C_{\text{label}} + C_{\text{store}} + C_{\text{process}}
 $$
 
 where:
 
-- $\Delta \mathcal{M}$ represents the change in model performance (e.g., accuracy, F1-score, or loss reduction).
-- $\Delta N$ represents the number of new training samples added.
+| Component | Formula | Typical Range |
+|-----------|---------|---------------|
+| $C_{\text{acquire}}$ | $N \times c_{\text{sample}}$ | \$0.001–\$10/sample (web scrape vs. licensed) |
+| $C_{\text{label}}$ | $N_{\text{labeled}} \times c_{\text{label}}$ | \$0.10–\$100/sample (crowd vs. expert) |
+| $C_{\text{store}}$ | $S_{\text{bytes}} \times c_{\text{storage}} \times T$ | \$0.02–\$0.10/GB/month |
+| $C_{\text{process}}$ | $N \times E \times c_{\text{FLOP}}$ | Proportional to training FLOPs |
 
-For example, suppose a model trained on 10,000 images achieves 85% accuracy on a test set. If adding 1,000 more images increases accuracy to 86%, the PPD is:
+For a concrete example, consider training a vision model:
+
+::: {.callout-example title="Cost Breakdown: ImageNet-Scale Training"}
+| Cost Component | Calculation | Amount |
+|----------------|-------------|--------|
+| Raw data (1.2M images) | Licensed dataset | \$50,000 |
+| Labels (1.2M × \$0.05) | Crowd annotation | \$60,000 |
+| Storage (150GB × 12 months) | Cloud storage | \$200 |
+| Training (100 epochs × 8 A100s × 24h) | GPU compute | \$25,000 |
+| **Total** | | **\$135,200** |
+| **Data vs. Compute ratio** | | **81% data, 19% compute** |
+
+This ratio—where data costs dominate—is typical for supervised learning. It inverts for self-supervised learning on web-scraped data, where compute dominates.
+:::
+
+### ROI Framework for Data Efficiency Techniques
+
+Every data efficiency technique has a cost (implementation, compute overhead) and a benefit (reduced data needs, faster training). The **Return on Investment** is:
 
 $$
-PPD = \frac{86 - 85}{1000} = 0.001 \text{% per sample}
+\text{ROI} = \frac{\text{Savings} - \text{Investment}}{\text{Investment}} \times 100\%
 $$
 
-This suggests that each additional sample contributed, on average, a 0.001% improvement in accuracy. However, if adding another 10,000 images only improves accuracy to 86.5%, then:
+The key is quantifying both sides accurately:
+
++-----------------------+-------------------------------+---------------------------------+
+| **Technique**         | **Investment (Cost)**         | **Savings (Benefit)**           |
++:======================+:==============================+:================================+
+| **Deduplication**     | One-time compute for hashing  | Reduced storage, fewer epochs   |
+|                       | + infrastructure              | for same accuracy               |
++-----------------------+-------------------------------+---------------------------------+
+| **Coreset Selection** | Proxy model training +        | Train on 10-50% of data         |
+|                       | selection compute             | with minimal accuracy loss      |
++-----------------------+-------------------------------+---------------------------------+
+| **Active Learning**   | Inference on unlabeled pool + | 2-10× reduction in labeling     |
+|                       | human-in-the-loop latency     | budget for same accuracy        |
++-----------------------+-------------------------------+---------------------------------+
+| **Data Augmentation** | CPU/GPU cycles for transforms | Effective dataset size increase |
+|                       |                               | without new data acquisition    |
++-----------------------+-------------------------------+---------------------------------+
+
+### Break-Even Analysis
+
+For any technique, there exists a **break-even point** where the investment equals the savings. Below this point, the technique costs more than it saves.
+
+**Example: Active Learning Break-Even**
+
+Suppose labeling costs \$10/sample and active learning requires:
+- Initial labeled set: 1,000 samples (\$10,000)
+- Oracle queries per round: 100 samples
+- Inference cost per round: \$50 (scoring unlabeled pool)
+- Target accuracy achievable with 5,000 random samples
+
+If active learning reaches target accuracy with only 2,000 labeled samples:
 
 $$
-PPD = \frac{86.5 - 86}{10000} = 0.00005 \text{% per sample}
+\text{Random labeling cost} = 5000 \times \$10 = \$50,000
 $$
 
-The sharp decline in PPD (@fig-ppd-curve) indicates diminishing returns. At the plateau, continuing to expand the dataset increases costs without meaningful accuracy improvements—a clear signal to switch from data collection to data curation.
+$$
+\text{Active learning cost} = 2000 \times \$10 + 10 \text{ rounds} \times \$50 = \$20,500
+$$
 
-::: {#fig-ppd-curve fig-cap="**Diminishing Returns of Data**: Random sampling (gray) versus data-efficient selection (blue). The efficient strategy achieves higher performance with less data (High PPD region), reaching the convergence plateau much earlier. The red arrow shows the efficiency gap at a fixed dataset size." fig-alt="A plot with X-axis 'Dataset Size' and Y-axis 'Performance'. Two curves start at 0. The 'Random' curve rises slowly. The 'Efficient' curve rises steeply and plateaus early."}
+$$
+\text{ROI} = \frac{\$50,000 - \$20,500}{\$20,500} \times 100\% = 144\%
+$$
+
+The break-even occurs when the labeling reduction equals the selection overhead. If active learning only reduces labeling by 20%, and selection overhead is high, ROI may be negative.
+
+### Amortization: The Time Value of Data Efficiency
+
+Many data efficiency techniques have high upfront costs but pay dividends over multiple training runs. The **amortized ROI** accounts for how often the investment is reused:
+
+$$
+\text{Amortized ROI} = \frac{N_{runs} \times \text{Per-Run Savings} - \text{One-Time Investment}}{\text{One-Time Investment}}
+$$
+
+**Example: Deduplication Infrastructure**
+
+| Component | Cost |
+|-----------|------|
+| Build deduplication pipeline | \$50,000 (engineering time) |
+| Compute MinHash signatures (one-time) | \$5,000 |
+| Per-run savings (20% less data) | \$10,000/run |
+
+| Number of Runs | Amortized ROI |
+|----------------|---------------|
+| 1 run | -82% (net loss) |
+| 5 runs | -9% (near break-even) |
+| 10 runs | +82% (positive) |
+| 50 runs | +809% (highly profitable) |
+
+**The lesson**: Data efficiency investments are most valuable when:
+
+1. **Training is repeated** (hyperparameter search, model iterations, retraining)
+2. **The dataset is reused** (multiple teams, multiple model architectures)
+3. **The technique is general** (deduplication helps all models; task-specific coresets don't transfer)
+
+For one-off training runs, simple techniques (random sampling, basic augmentation) often have better ROI than sophisticated methods requiring infrastructure investment.
+
+::: {.callout-tip title="When to Invest in Data Efficiency"}
+**High ROI scenarios:**
+
+- Labeling is expensive (medical, legal, scientific domains)
+- Dataset is large and redundant (web-scraped corpora)
+- Training runs are repeated frequently (hyperparameter search, retraining)
+- Iteration speed matters more than final accuracy
+
+**Low ROI scenarios:**
+
+- Labeling is cheap or already done
+- Dataset is small and curated
+- Single training run (one-time cost)
+- Accuracy is paramount, efficiency is secondary
+:::
+
+## Distributed Data Efficiency {#sec-data-efficiency-distributed}
+
+Production ML training is distributed across hundreds or thousands of workers. Data efficiency techniques that work on a single machine face new challenges at scale.
+
+### The Distributed Selection Problem
+
+In standard distributed training, data parallelism is straightforward: shard the dataset across workers, each processes its shard independently. But data efficiency techniques introduce **selection dependencies**:
+
+| Technique | Single-Node Assumption | Distributed Challenge |
+|-----------|------------------------|----------------------|
+| Coreset Selection | Global view of dataset | Each worker sees only its shard |
+| Active Learning | Centralized uncertainty scoring | Scoring requires model synchronization |
+| Curriculum Learning | Global difficulty ordering | Workers may have different "hardest" samples |
+| Deduplication | Hash table fits in memory | Distributed hash tables add latency |
+
+### Strategies for Distributed Selection
+
+**1. Centralized Selection, Distributed Training**
+
+A coordinator node performs selection on the full dataset, then distributes selected indices to workers. This preserves selection quality but introduces a bottleneck:
+
+```
+Coordinator: score_all_samples() → selected_indices
+Broadcast: selected_indices → all workers  
+Workers: train on subset(local_shard, selected_indices)
+```
+
+**Trade-off:** Clean semantics, but coordinator becomes a single point of failure and bandwidth bottleneck for large selections.
+
+**2. Hierarchical Selection**
+
+Each worker performs local selection on its shard, then a coordinator merges results:
+
+```
+Workers: local_selected = select_top_k(local_shard)
+Coordinator: global_selected = merge_and_rerank(all local_selected)
+Broadcast: final_indices → all workers
+```
+
+**Trade-off:** Reduces coordinator load but may miss globally important samples that are locally unimportant.
+
+**3. Approximate Global Selection**
+
+Use distributed approximate algorithms that trade exactness for scalability:
+
+- **Distributed MinHash** for deduplication: Each worker computes MinHash signatures, signatures are aggregated to find near-duplicates across shards
+- **Federated Uncertainty Sampling**: Workers compute local uncertainty scores, global threshold determined by score distribution statistics rather than exact ranking
+
+### Consistency Challenges in Active Learning
+
+Active learning is particularly challenging in distributed settings because the model changes during selection:
+
+1. Worker A scores samples using model at step $t$
+2. Worker B updates model to step $t+1$
+3. Worker A's scores are now stale
+
+**Staleness mitigation strategies:**
+
+- **Synchronous scoring**: All workers pause training to score simultaneously (expensive)
+- **Score refresh rate**: Re-score every $k$ epochs rather than every batch (trade-off freshness vs. overhead)
+- **Robust selection**: Choose samples that are high-uncertainty under multiple model checkpoints
+
+::: {.callout-example title="End-to-End: Distributed Coreset Selection for ImageNet"}
+**Scenario**: Select a 10% coreset from ImageNet (1.2M images) using 8 workers with 4 GPUs each.
+
+**Architecture**:
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Coordinator Node                      │
+│  • Maintains global embedding index (FAISS)             │
+│  • Merges local selections                              │
+│  • Broadcasts final coreset indices                     │
+└─────────────────────────────────────────────────────────┘
+        ↑                    ↑                    ↑
+        │ local_scores       │ local_scores       │
+┌───────┴───────┐    ┌───────┴───────┐    ┌───────┴───────┐
+│   Worker 0    │    │   Worker 1    │    │   Worker N    │
+│ 150K images   │    │ 150K images   │    │ 150K images   │
+│ Local EL2N    │    │ Local EL2N    │    │ Local EL2N    │
+└───────────────┘    └───────────────┘    └───────────────┘
+```
+
+**Pipeline**:
+1. **Embedding phase** (parallel): Each worker computes ResNet-18 embeddings for its shard → store in shared filesystem
+2. **Deduplication phase** (distributed): Coordinator builds FAISS index, workers query for near-duplicates → remove 15% duplicates
+3. **Scoring phase** (parallel): Each worker computes EL2N scores on its deduplicated shard using proxy model
+4. **Selection phase** (centralized): Coordinator collects top-20% scores from each worker, re-ranks globally, selects final 10%
+5. **Broadcast**: Selected indices distributed to all workers for training
+
+**Performance** (measured on 8× A100 cluster):
+- Embedding: 20 minutes (parallel)
+- Deduplication: 15 minutes (distributed hash join)
+- Scoring: 30 minutes (parallel, 5 epochs proxy training)
+- Selection: 2 minutes (centralized)
+- **Total overhead: 67 minutes** for 10× training speedup
+
+**Key insight**: The 67-minute selection overhead pays for itself if full training takes >12 hours. For ImageNet with modern architectures, full training is ~24 hours, so coreset selection has clear positive ROI.
+:::
+
+::: {.callout-warning title="The Coordination Tax"}
+Distributed data efficiency always incurs a **coordination tax**: the overhead of maintaining consistent selection across workers. This tax must be smaller than the efficiency gains, or distributed selection has negative ROI.
+
+**Rule of thumb:** If selection overhead exceeds 10% of training time, simplify the selection strategy or increase selection interval.
+:::
+
+## Interactions with Other Optimizations {#sec-data-efficiency-interactions}
+
+Data efficiency does not exist in isolation. It interacts—sometimes synergistically, sometimes antagonistically—with other optimization techniques. Understanding these interactions helps practitioners design end-to-end efficient systems rather than optimizing components in isolation.
+
+### Data Efficiency × Model Compression
+
+Model compression (@sec-model-compression) reduces the size of the trained model through pruning, quantization, and distillation. The training dataset directly affects how compressible the resulting model becomes.
+
+**Key insight:** Models trained on smaller, higher-quality datasets may be *more* compressible.
+
+- **Redundant data → Redundant weights**: A model trained on repetitive data learns redundant features that pruning later removes. The training compute to learn those features was wasted.
+- **Curated data → Efficient representations**: A model trained on diverse, informative samples learns compact, non-redundant representations from the start, making subsequent compression more effective.
+
+**Quantitative example**: In experiments on ImageNet, models trained on 50% coresets (selected by EL2N) compress to 4-bit precision with 2% less accuracy loss than models trained on the full dataset—the curated training led to cleaner weight distributions.
+
+**Implication:** Data efficiency and model compression are *complementary*. The techniques in this chapter (coresets, curriculum learning) can reduce both training cost *and* post-training compression effort. When planning an efficiency pipeline, apply data efficiency first; the resulting model will be easier to compress.
+
+### Data Efficiency × Hardware Acceleration
+
+Hardware acceleration (@sec-hw-acceleration) increases throughput through specialized accelerators, kernel optimization, and parallelization. Data efficiency affects which hardware bottlenecks dominate:
+
+| Scenario | Likely Bottleneck | Hardware Optimization |
+|----------|-------------------|----------------------|
+| Large, sequential dataset | Memory bandwidth | Larger batch sizes, gradient accumulation |
+| Small, curated dataset | Compute (GPU idle waiting for data) | Faster data loaders, data echoing |
+| Dynamic selection | Selection compute | Proxy models, cached embeddings |
+
+**Implication:** Data efficiency can shift the system from one bottleneck regime to another. A technique that reduces dataset size by 80% may move the bottleneck from I/O to GPU compute, requiring different hardware optimizations. Before applying aggressive data reduction, profile your system to understand which bottleneck you're targeting.
+
+### Data Efficiency × Distributed Training
+
+When scaling to multiple machines, data efficiency interacts with parallelism strategies:
+
+- **Strong scaling (fixed dataset, more workers)**: Data efficiency reduces communication overhead by reducing gradient updates per epoch. Fewer samples means fewer synchronization points.
+- **Weak scaling (more data per worker)**: Data efficiency techniques can maintain accuracy while adding workers without proportionally increasing total data—essential when data is the bottleneck.
+- **Data parallelism**: Smaller, curated datasets reduce the per-worker shard size, potentially improving cache utilization and reducing I/O stalls.
+
+The distributed selection challenges discussed in @sec-data-efficiency-distributed become critical at scale. A technique that works well on a single GPU may have prohibitive coordination overhead across 1000 workers.
+
+### The Optimization Stack
+
+The full optimization stack, from data to deployment, can be visualized as a pipeline where each stage amplifies or attenuates the effects of others:
+
+```
+Raw Data → [Data Efficiency] → Curated Data → [Training] → Model 
+         → [Compression] → Compact Model → [Hardware] → Deployed System
+```
+
+Optimizing early in the pipeline (data efficiency) has a **multiplicative effect**: every FLOP saved in data processing is a FLOP that never needs to be executed, compressed, or accelerated.
+
+## Measuring Data Efficiency {#sec-data-efficiency-measuring}
+
+The techniques in this chapter—coreset selection, active learning, augmentation—all claim to improve efficiency. But how do we know if they're working? Rigorous measurement separates effective techniques from intuition.
+
+### Core Metrics
+
+**Performance-Per-Data (PPD)**: The most direct metric measures accuracy gain per sample:
+
+$$
+\text{PPD}(n) = \frac{\text{Accuracy}(n) - \text{Accuracy}(0)}{n}
+$$
+
+where $n$ is the number of training samples. A higher PPD indicates more efficient use of data. The key insight is that PPD exhibits **diminishing returns**: the first 10,000 samples contribute far more to model performance than the next 10,000.
+
+**Area Under the Learning Curve (AULC)**: Rather than comparing at a single point, AULC integrates performance across all dataset sizes:
+
+$$
+\text{AULC} = \int_0^N \text{Accuracy}(n) \, dn
+$$
+
+A data-efficient strategy has higher AULC because it achieves good accuracy faster. This metric is particularly useful for comparing coreset selection algorithms.
+
+**Data Compression Ratio (DCR)**: For coreset methods, measure how much data reduction is achieved at a target accuracy:
+
+$$
+\text{DCR} = \frac{N_{\text{full}}}{N_{\text{coreset}}} \text{ at } \text{Accuracy}_{\text{target}}
+$$
+
+A DCR of 5× means the coreset achieves target accuracy with 20% of the data.
+
+### The Data Roofline Model
+
+Just as the compute Roofline model diagnoses whether a system is compute-bound or memory-bound, we can construct a **Data Roofline** to diagnose whether training is **data-bound** or **compute-bound** (@fig-data-roofline).
+
+::: {#fig-data-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Data Roofline Model**: Analogous to the compute Roofline, this diagnostic tool shows two regimes. Below the diagonal (data-bound), adding more data improves performance—invest in data collection. Above the diagonal (compute-bound), more data won't help without more training compute—invest in GPUs. The optimal operating point is at the knee where data and compute are balanced. Data efficiency techniques move you along the diagonal by extracting more value per sample." fig-alt="A log-log plot with Data Quality on x-axis and Model Performance on y-axis. A diagonal line separates data-bound (lower) and compute-bound (upper) regimes. Points show system positions."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\begin{axis}[
+    width=10cm, height=7cm,
+    xlabel={Data Quality (ICR: info/FLOP)},
+    ylabel={Model Performance},
+    xmin=0.1, xmax=100,
+    ymin=0.1, ymax=100,
+    xmode=log, ymode=log,
+    axis lines=left,
+    xtick={0.1, 1, 10, 100},
+    xticklabels={Low, Med, High, Max},
+    ytick={0.1, 1, 10, 100},
+    yticklabels={Poor, Fair, Good, Optimal},
+    clip=false,
+    legend style={at={(0.02,0.98)}, anchor=north west, font=\footnotesize, draw=none, fill=white, fill opacity=0.8}
+]
+    % Compute ceiling (horizontal line)
+    \addplot[thick, red, domain=1:100] {80};
+    \addlegendentry{Compute ceiling}
+
+    % Data-bound regime (diagonal)
+    \addplot[thick, blue, domain=0.1:80] {x};
+    \addlegendentry{Data-bound slope}
+
+    % Fill data-bound region
+    \fill[blue!10, opacity=0.5] (axis cs: 0.1, 0.1) -- (axis cs: 80, 80) -- (axis cs: 80, 0.1) -- cycle;
+
+    % Fill compute-bound region
+    \fill[red!10, opacity=0.5] (axis cs: 80, 80) -- (axis cs: 100, 80) -- (axis cs: 100, 100) -- (axis cs: 80, 100) -- cycle;
+
+    % Operating points
+    \node[circle, fill=orange, inner sep=2pt, label={[font=\tiny]right:Redundant data}] at (axis cs: 1, 0.8) {};
+    \node[circle, fill=green!60!black, inner sep=2pt, label={[font=\tiny]above:Curated coreset}] at (axis cs: 10, 9) {};
+    \node[circle, fill=purple, inner sep=2pt, label={[font=\tiny]above left:Optimal (knee)}] at (axis cs: 80, 80) {};
+
+    % Region labels
+    \node[blue!70!black, font=\footnotesize, rotate=45] at (axis cs: 3, 1.5) {DATA-BOUND};
+    \node[red!70!black, font=\footnotesize] at (axis cs: 90, 90) {COMPUTE-};
+    \node[red!70!black, font=\footnotesize] at (axis cs: 90, 85) {BOUND};
+
+    % Arrow showing data efficiency improvement
+    \draw[->, thick, green!60!black, dashed] (axis cs: 1, 0.8) -- (axis cs: 10, 9);
+    \node[green!60!black, font=\tiny, align=center] at (axis cs: 4, 3) {Data efficiency\\improves ICR};
+
+\end{axis}
+\end{tikzpicture}
+```
+:::
+
+**Reading the Data Roofline**:
+
+- **Below the diagonal (data-bound)**: Your system is limited by data quality, not compute. More FLOPs won't help—invest in better data curation, deduplication, or coreset selection to increase ICR.
+- **Above the diagonal (compute-bound)**: You have high-quality data but insufficient compute to exploit it. Adding more training time or GPUs will improve performance.
+- **At the knee**: Data quality and compute are balanced. This is the optimal operating point where both resources are fully utilized.
+
+**Using the Roofline for diagnosis**: If your training run is performing below expectations, compute your effective ICR (performance gain per training FLOP) and plot your position. If you're in the data-bound region, the techniques in this chapter (coreset selection, curriculum learning, deduplication) will move you right along the diagonal. If you're compute-bound, focus on hardware acceleration or distributed training instead.
+
+@fig-ppd-curve illustrates diminishing returns visually. A data-efficient selection strategy (blue) reaches the performance plateau much faster than random sampling (gray). The gap between the curves at any dataset size represents the efficiency opportunity—compute that could be saved by smarter data curation.
+
+::: {#fig-ppd-curve fig-cap="**Diminishing Returns of Data**: Random sampling (gray) versus data-efficient selection (blue). The efficient strategy achieves higher performance with less data, reaching the convergence plateau much earlier. The red arrow shows the efficiency gap at a fixed dataset size." fig-alt="A plot with X-axis 'Dataset Size' and Y-axis 'Performance'. Two curves start at 0. The 'Random' curve rises slowly. The 'Efficient' curve rises steeply and plateaus early."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
 \begin{axis}[
@@ -584,8 +1646,8 @@ The sharp decline in PPD (@fig-ppd-curve) indicates diminishing returns. At the 
     \addlegendentry{Efficient Selection}
 
     % Annotation
-    \node[anchor=west, color=blue] at (axis cs: 10, 80) {High PPD};
-    \node[anchor=west, color=gray] at (axis cs: 60, 50) {Low PPD};
+    \node[anchor=west, color=blue] at (axis cs: 10, 80) {High value/sample};
+    \node[anchor=west, color=gray] at (axis cs: 60, 50) {Low value/sample};
 
     % Vertical line showing efficiency gap
     \draw[<->, red, thick] (axis cs: 20, 45) -- (axis cs: 20, 86);
@@ -596,140 +1658,26 @@ The sharp decline in PPD (@fig-ppd-curve) indicates diminishing returns. At the 
 ```
 :::
 
-**Systems implication**: Since training cost scales as $C_T = N \cdot C_s$ (samples × cost-per-sample), low PPD means dollars spent on diminishing returns. The techniques in this chapter—pruning, active learning, augmentation—all work by keeping PPD high throughout training.
+**The practical question** for practitioners: At what point should you stop collecting data and start curating it? When does adding more samples waste compute rather than improve accuracy? These questions require rigorous metrics—ways to quantify diminishing returns, compare selection strategies, and evaluate the cost-effectiveness of different data sources.
 
-### Additional Efficiency Metrics
+::: {.callout-note title="Validating Data Efficiency: The Benchmarking Connection"}
+Data efficiency techniques—coreset selection, active learning, deduplication—all make implicit claims about the value of different samples. But how do you know if your curated dataset actually preserves model quality? The answer lies in systematic benchmarking.
 
-While PPD measures the marginal value of new data, a complete picture requires additional metrics that capture different dimensions of data efficiency.
+@sec-benchmarking-ai provides the measurement framework for validating data efficiency investments. Specifically:
 
-#### Data Usage Efficiency (DUE)
+- **Coverage metrics** validate that coreset selection preserved representation across classes and demographic groups
+- **Distribution alignment metrics** detect if your curated training set drifted from the deployment distribution
+- **Label quality metrics** (inter-annotator agreement, confident learning) validate that active learning didn't introduce systematic labeling errors
 
-**Definition**: The ratio of effective data to total data.
+The key insight is that data efficiency optimizations must be validated just like model compression or hardware acceleration. A 50% dataset reduction is only valuable if benchmarking confirms the model maintains target accuracy, calibration, and robustness. Otherwise, you've saved compute at the cost of deployment failures.
+:::
 
-$$
-DUE = \frac{N_{\text{eff}}}{N_{\text{total}}}
-$$
-
-Where $N_{\text{eff}}$ is the minimum samples needed to reach target performance. A DUE of 10% means 90% of your data is redundant—a massive optimization opportunity.
-
-**When It Matters**: High DUE indicates a well-curated dataset. Low DUE signals that pruning or coreset selection could dramatically reduce training costs without hurting accuracy.
-
-#### Computational Efficiency of Data (CED)
-
-**Definition**: Performance improvement per unit of compute.
-
-$$
-CED = \frac{\Delta \mathcal{M}}{\Delta C_T}
-$$
-
-Where $\Delta C_T$ is measured in FLOPs or GPU-hours. CED differs from PPD by accounting for the fact that some samples are computationally expensive to process (e.g., high-resolution images, long sequences).
-
-**When It Matters**: Two datasets may have equal PPD but different CED if one requires more preprocessing or augmentation compute. Optimize CED by improving data representations or using efficient augmentations.
-
-#### Redundancy Ratio (RR)
-
-**Definition**: The fraction of data that can be removed without performance loss.
-
-$$
-RR = 1 - \frac{N_{\text{eff}}}{N_{\text{total}}}
-$$
-
-Note that $RR = 1 - DUE$. An RR of 60% means you can train on 40% of your data and achieve the same accuracy.
-
-**When It Matters**: High RR is a direct call-to-action for deduplication and pruning. Before scaling your dataset, check if you can achieve the same performance with a smaller subset.
-
-#### Dataset Growth Efficiency (DGE)
-
-**Definition**: The amount of data required for a fixed performance improvement.
-
-$$
-DGE = \frac{\Delta N}{\Delta \mathcal{M}}
-$$
-
-Unlike PPD (which measures value per sample), DGE measures samples per value. A DGE of 50,000 samples/1% accuracy means you need 50,000 new samples for each additional percentage point of accuracy.
-
-**When It Matters**: Track DGE over time. When DGE spikes (requiring exponentially more data for marginal gains), you've hit diminishing returns—switch to augmentation, better curation, or architectural improvements.
-
-### Metrics Reference
-
-The table below translates data efficiency metrics into actionable steps that directly impact system efficiency.
-
-+----------------------------------------+----------------------------------------------------------------------+--------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------+
-| Metric                                 | What It Measures                                                     | Why It Matters for Data Efficiency                                 | How It Affects System Efficiency                                                                        | What Actions to Take                                                                  |
-+========================================+======================================================================+====================================================================+=========================================================================================================+=======================================================================================+
-| Performance-Per-Data Unit (PPD)        | The learning improvement per additional data point                   | Helps decide whether more data is necessary or wasteful            | Low PPD inflates dataset size unnecessarily, increasing storage and compute costs                       | Stop adding data if PPD is low—focus on improving data quality instead                |
-+----------------------------------------+----------------------------------------------------------------------+--------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------+
-| Data Usage Efficiency (DUE)            | The proportion of data actually needed to reach a target performance | A low DUE suggests too much data is being used for the same result | Low DUE increases training time, memory usage, and energy consumption                                   | Reduce dataset size by removing unnecessary data points                               |
-+----------------------------------------+----------------------------------------------------------------------+--------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------+
-| Computational Efficiency of Data (CED) | The computational cost per unit of model improvement                 | Shows whether data is expensive to process relative to its value   | Low CED increases GPU/TPU costs, slows training, and raises power consumption                           | Use more efficient preprocessing or feature extraction to reduce computational burden |
-+----------------------------------------+----------------------------------------------------------------------+--------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------+
-| Redundancy Ratio (RR)                  | The fraction of the dataset that is redundant or unnecessary         | High RR means data is being repeated without adding new insights   | Inflates storage needs, wastes compute, and slows down training                                         | Prune duplicate or near-duplicate samples to reduce redundancy                        |
-+----------------------------------------+----------------------------------------------------------------------+--------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------+
-| Dataset Growth Efficiency (DGE)        | How much additional data is required for a fixed model improvement   | Helps determine when data collection becomes inefficient           | Low DGE means that further data expansion yields minimal returns, increasing labeling and storage costs | Stop data collection if DGE is high—consider synthetic data or augmentation instead   |
-+----------------------------------------+----------------------------------------------------------------------+--------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------+
-
-<!-- ✅ If PPD is low → More data is NOT the solution → Focus on data quality instead of dataset expansion
-
-✅ If DUE is low → Too much data is being used inefficiently → Reduce dataset size while maintaining performance
-
-✅ If CED is low → Data is computationally expensive to process → Use better data representations or feature extraction
-
-✅ If RR is high → Dataset contains excessive duplication → Remove redundant samples to accelerate training
-
-✅ If DGE is low → Adding more data isn’t improving accuracy enough → Stop data collection, focus on curation instead   -->
-
-## Benchmarking Data Efficiency {#sec-data-efficiency-benchmarking}
-
-### The Need for Data Efficiency Benchmarks
-
-Existing ML benchmarks like MLPerf measure model accuracy and computational throughput, but largely ignore data efficiency. Two models achieving identical accuracy are treated as equivalent, even if one required twice as much training data and 40% longer to train. This gap matters because:
-
-1. **Data costs are hidden**: Training data curation, labeling, and storage often exceed compute costs but are not tracked.
-2. **Techniques are incomparable**: Active learning, data pruning, and augmentation methods are evaluated with inconsistent metrics across papers.
-3. **Sustainability is unmeasured**: A data-efficient model that achieves the same accuracy with 50% less data is fundamentally more sustainable, but current benchmarks don't reward this.
-
-### Components of a Data Efficiency Benchmark
-
-A comprehensive benchmark should evaluate three dimensions:
-
-**1. Dataset Efficiency**: Can the model achieve target accuracy with less data?
-- Metric: Data Usage Efficiency (DUE), Performance-Per-Data Unit (PPD)
-- Protocol: Train on progressively smaller subsets; measure accuracy retention
-
-**2. System Efficiency**: Do data optimizations reduce total resource consumption?
-- Metric: Computational Efficiency of Data (CED)
-- Protocol: Track GPU-hours, memory, and energy alongside accuracy
-
-**3. Robustness Trade-offs**: Do efficiency gains compromise generalization?
-- Metric: Redundancy Ratio (RR), out-of-distribution accuracy
-- Protocol: Evaluate on held-out distributions; check for overfitting to pruned subset
-
-### Benchmarking Methodologies
-
-+-----------------------+--------------------------------------------------------+-------------+
-| Methodology           | Description                                            | Key Metrics |
-+=======================+========================================================+=============+
-| Fixed-Budget          | Train with constrained data/compute; compare accuracy  | PPD, DUE    |
-+-----------------------+--------------------------------------------------------+-------------+
-| Adaptive Selection    | Model selects training data dynamically                | DUE, RR     |
-+-----------------------+--------------------------------------------------------+-------------+
-| Real-World Simulation | Include labeling costs, storage limits, streaming data | CED, DGE    |
-+-----------------------+--------------------------------------------------------+-------------+
-
-### DataPerf and Future Directions
-
-The **DataPerf** initiative (launched 2022) represents an early effort to standardize data-centric benchmarks, focusing on data selection, labeling, and quality assessment. Future benchmarks should extend this to include:
-
-- End-to-end efficiency metrics that span data curation through deployment
-- Task-specific protocols for vision, NLP, and structured data
-- Standardized reporting of data efficiency alongside accuracy
-
-Until standardized benchmarks are widely adopted, practitioners should track their own data efficiency metrics (PPD, DUE, CED) to guide optimization decisions and quantify the ROI of data-centric techniques.
+For a comprehensive treatment of data efficiency metrics and benchmarking methodologies—including how initiatives like DataPerf are standardizing evaluation protocols—see @sec-benchmarking-ai. That chapter provides the measurement framework needed to quantify the ROI of the techniques introduced here.
 
 ## Fallacies and Pitfalls {#sec-data-efficiency-fallacies}
 
 **Fallacy: "Data is the new oil, so more is always better."**
-The "Data is Oil" metaphor fails to capture the diminishing returns of information. As shown by the Dataset Growth Efficiency (DGE) metric, there is a saturation point where adding terabytes of data yields negligible accuracy gains while exploding compute costs.
+The "Data is Oil" metaphor fails to capture the diminishing returns of information. There is a saturation point where adding terabytes of data yields negligible accuracy gains while exploding compute costs.
 **Reality:** Data is like fuel—it has a specific energy density. High-quality, curated data (high octane) powers models more efficiently than vast quantities of raw data (crude oil).
 
 **Fallacy: "Synthetic data can completely replace real data."**
@@ -740,23 +1688,157 @@ While synthetic data addresses scarcity, it is bounded by the generator's knowle
 Cleaning (removing errors) is necessary but insufficient. True data efficiency involves *selection* (finding the decision boundary) and *synthesis* (creating hard negatives).
 **Reality:** You can have a perfectly clean dataset that is highly inefficient because it is filled with redundant, easy examples. Efficiency requires optimizing the information content, not just the hygiene.
 
-## Summary {#sec-data-efficiency-summary}
+**Fallacy: "Data efficiency is only for resource-constrained settings."**
+Many practitioners view data efficiency as a corner-case optimization for TinyML or budget-limited startups, irrelevant when training foundation models with massive budgets.
+**Reality:** Data efficiency is *most* valuable at scale. A 10% efficiency gain on a \$100M training run saves \$10M. The Data Wall affects frontier labs more than anyone—they have the compute but lack the data. The techniques in this chapter are increasingly adopted by exactly those organizations with "unlimited" resources.
 
-As machine learning systems continue to grow in complexity, data efficiency will play an increasingly central role in AI scalability, accessibility, and sustainability. This chapter has reframed data not as a static asset to be collected, but as a dynamic resource to be optimized. By applying the Information-Compute Ratio (ICR), we can rigorously evaluate whether our data pipelines are contributing to learning or merely consuming GPU cycles.
+---
 
-We explored the three-stage optimization pipeline: **Static Pruning** to remove redundancy before training, **Dynamic Selection** to focus compute on hard examples during training, and **Synthetic Generation** to create information where none exists. Together, these strategies allow us to break the "Data Wall" and scale performance without linearly scaling costs.
+**Pitfall: Optimizing selection without measuring selection overhead.**
+A sophisticated coreset algorithm that takes 10 hours to select samples for a 2-hour training run has negative ROI. Always measure the Selection Inequality: $T_{selection} + T_{train}(subset) < T_{train}(full)$.
+**Fix:** Use lightweight proxy models or cached embeddings for selection. Profile selection time alongside training time.
 
-::: {.callout-important title="Key Takeaways"}
+**Pitfall: Pruning rare classes into oblivion.**
+Aggressive coreset selection often removes rare classes entirely because they contribute little to average loss. The model then fails catastrophically on these classes in production.
+**Fix:** Stratify selection by class. Set minimum samples per class before applying any pruning algorithm.
 
-* **Information > Volume**: The goal of data efficiency is to maximize the Information-Compute Ratio (ICR). A smaller, higher-density dataset often yields better convergence than a massive, redundant one.
-* **The Three Stages of Efficiency**: Optimization happens at three stages: *Pre-training* (Coresets/Deduplication), *During Training* (Active/Curriculum Learning), and *On-Demand* (Augmentation/Synthesis).
-* **Metrics Matter**: You cannot optimize what you cannot measure. Metrics like Performance-Per-Data (PPD) and Data Usage Efficiency (DUE) are as critical as accuracy or latency.
-* **Sustainability**: Data efficiency is the most powerful lever for Green AI. Reducing dataset size by 50% cuts training energy by 50%—a gain that hardware optimization alone rarely achieves.
+**Pitfall: Training on deduplicated data, evaluating on duplicated test sets.**
+If your test set contains duplicates of training samples (common in web-scraped data), deduplication appears to hurt performance when it actually improves generalization.
+**Fix:** Deduplicate train and test sets jointly, or use truly held-out evaluation data.
+
+**Pitfall: Active learning without considering annotation latency.**
+Active learning theory assumes instant oracle responses. In practice, getting expert labels takes days or weeks. By the time labels arrive, the model has moved on, and the selected samples may no longer be optimal.
+**Fix:** Select larger batches to amortize latency. Use diversity sampling to hedge against model drift.
+
+---
+
+**Fallacy: "If a technique works on ImageNet, it will work on my dataset."**
+Data efficiency results are highly dataset-dependent. CIFAR-10 is highly redundant—50% coresets work well. ImageNet has moderate redundancy. But domain-specific datasets (medical imaging, satellite imagery, scientific data) may have near-zero redundancy where every sample captures unique information. A coreset that preserves 95% accuracy on ImageNet may catastrophically fail on a well-curated radiology dataset.
+**Reality:** Always pilot data efficiency techniques on your specific distribution. The "free lunch" ratios reported in benchmark papers (50% pruning, 10× label reduction) rarely transfer directly. Start with conservative pruning (20-30%) and validate on held-out data before aggressive reduction.
+
+**Pitfall: Optimizing data efficiency metrics instead of deployment metrics.**
+A team achieves excellent PPD (Performance-Per-Data) and DCR (Data Compression Ratio) during development—they've created a beautifully efficient 10% coreset. But at deployment, the model fails on edge cases: rare classes, unusual lighting conditions, demographic subgroups underrepresented in the coreset. The efficiency metrics looked great; the production metrics are catastrophic.
+**Fix:** Include deployment-relevant evaluation in data efficiency optimization. If the task requires 99.9% reliability on edge cases, ensure the coreset *oversamples* those cases, even if it reduces average PPD. Stratify evaluation by subgroup, not just overall accuracy. The goal is deployment success, not benchmark efficiency.
+
+## Exercises {#sec-data-efficiency-exercises}
+
+::: {.callout-note title="Quantitative Exercises"}
+
+**Exercise 5.1 (Selection Inequality)**: You have a dataset of 2 million images. Training on the full dataset takes 48 hours on your GPU cluster. You're considering EL2N coreset selection that would reduce the dataset to 400,000 images (20%).
+
+a) If EL2N scoring requires 0.002 seconds per image using a proxy model, what is the total selection overhead?
+b) Assuming training time scales linearly with dataset size, what is the total time for the coreset approach (selection + training)?
+c) Does the Selection Inequality hold? What is the speedup ratio?
+d) If you used the full model (0.01 seconds per image) for scoring instead of a proxy, would the Selection Inequality still hold?
+
+**Exercise 5.2 (Deduplication ROI)**: A company is building a deduplication pipeline for their 10TB training corpus. The estimated costs are:
+
+- Engineering time to build pipeline: \$80,000 (one-time)
+- Compute for MinHash signatures: \$3,000 (one-time)
+- Expected deduplication: 25% of data removed
+- Training cost per run: \$50,000 on full dataset
+- Planned training runs: 20 (hyperparameter search + model iterations)
+
+a) Calculate the per-run savings from deduplication (assume linear cost scaling).
+b) Calculate the break-even point (number of runs needed to recover investment).
+c) Calculate the total ROI over all 20 planned runs.
+d) If the company only planned 3 training runs, would deduplication be worth the investment?
+
+**Exercise 5.3 (Active Learning Budget)**: A medical imaging company has a pool of 500,000 unlabeled X-rays. Expert radiologist labeling costs \$25 per image. They have a budget of \$200,000 for labeling.
+
+a) How many images can they label with naive random sampling?
+b) Research shows active learning achieves the same accuracy as random sampling with 4× fewer labels. How many images would active learning require to match the accuracy of 8,000 randomly labeled images?
+c) If each active learning round requires \$500 in compute (for uncertainty scoring), and each round selects 500 images, how many rounds can they afford while staying within budget?
+d) What is the total number of labeled images they can acquire through active learning, and how does this compare to naive labeling?
+
+**Exercise 5.4 (ICR Computation)**: You're training a language model and comparing two data selection strategies:
+
+**Strategy A (Random)**:
+
+- Dataset: 100B tokens, uniformly sampled
+- Training: 1 epoch = 3 × 10^21 FLOPs
+- Final perplexity improvement: 15 points (from 50 to 35)
+
+**Strategy B (Quality Filtered)**:
+
+- Dataset: 30B tokens, filtered by perplexity and deduplication
+- Training: 1 epoch = 9 × 10^20 FLOPs
+- Final perplexity improvement: 13 points (from 50 to 37)
+
+a) Compute the ICR (perplexity improvement per FLOP) for each strategy.
+b) Which strategy is more data-efficient?
+c) If you had a fixed compute budget of 5 × 10^21 FLOPs, how many epochs could you train with each strategy?
+d) Assuming diminishing returns (each subsequent epoch provides 60% of the previous epoch's improvement), estimate final perplexity for each strategy under the fixed compute budget.
+
+**Exercise 5.5 (Data Echoing)**: Your training pipeline has the following characteristics:
+
+- Data loading + augmentation: 400 images/second
+- GPU training throughput: 1200 images/second
+- Dataset: 1 million images
+- Target: 100 epochs
+
+a) Calculate $R$, the ratio of GPU throughput to data pipeline throughput.
+b) What is the effective training throughput without data echoing?
+c) If you use echo factor $e = 2$, what is the new effective throughput (assuming echoed samples are processed at GPU speed)?
+d) Calculate training time with and without echoing. What is the speedup?
+e) If echoed samples provide only 80% of the learning value of fresh samples, how does this affect the effective number of "information-equivalent" epochs?
+
+**Exercise 5.6 (Synthetic Data Mix)**: A robotics team is training a grasping model. They have:
+
+- 10,000 real-world grasping attempts (\$20 each to collect = \$200,000)
+- Access to a physics simulator that generates grasps for \$0.01 each
+- A budget of \$250,000 total
+
+Research shows that for their domain:
+
+- 100% synthetic: 65% success rate
+- 80% synthetic + 20% real: 82% success rate
+- 50% synthetic + 50% real: 88% success rate
+- 100% real: 90% success rate
+
+a) They have \$50,000 remaining budget. How many synthetic samples can they generate?
+b) If they want to maximize total training data, what mix should they use? Calculate the total samples.
+c) If they want to maximize expected success rate within budget, what mix should they use?
+d) Calculate the cost-per-accuracy-point for each strategy ($/% success rate).
 
 :::
 
-With a high-efficiency data pipeline in place, we have minimized the "math required to learn." But even a perfectly optimized dataset still trains a model that may be larger than necessary. A 7B parameter model trained on a coreset still has 7B parameters at inference time. The next optimization lever addresses this: minimizing the "math required to represent."
+
+Data efficiency transforms how we think about the ML development lifecycle. Rather than treating data as a static input to be collected and labeled, this chapter has reframed it as a dynamic resource to be optimized—and critically, as a *systems* problem where the goal is minimizing total cost (compute, storage, labeling, energy, time) rather than just maximizing accuracy.
+
+We explored the three-stage optimization pipeline: **Static Pruning** removes redundancy before training through coreset selection and deduplication; **Dynamic Selection** focuses compute on informative examples during training through curriculum and active learning; and **Synthetic Generation** creates data where none exists through augmentation, simulation, and distillation. Together, these strategies address the "Data Wall"—the fundamental asymmetry between exponentially growing compute and slowly growing high-quality data.
+
+The self-supervised learning paradigm represents a ceiling of data efficiency: by eliminating task-specific labels entirely, foundation models achieve 1000× multipliers on downstream tasks through cost amortization. This paradigm shift from "train from scratch" to "pre-train once, fine-tune many" has become the dominant approach in production ML precisely because of its superior data economics.
+
+::: {.callout-important title="Key Takeaways"}
+
+* **Data efficiency is a systems problem**: The goal is not just "fewer samples for same accuracy" but reduced cost across the entire pipeline—compute, storage, labeling, energy, and time-to-deployment.
+* **Start with deduplication**: It has the highest ROI—low implementation cost, immediate gains, and no accuracy penalty. Always deduplicate before applying more sophisticated techniques.
+* **The Selection Inequality must hold**: Any data selection technique must satisfy $T_{selection} + T_{train}(subset) < T_{train}(full)$. Use lightweight proxy models or cached embeddings to keep selection overhead below 10% of training time.
+* **Amortization determines ROI**: Data efficiency investments pay off when training is repeated (hyperparameter search, model iterations) or datasets are reused (multiple teams, architectures). For one-off training, simple techniques often beat sophisticated ones.
+* **Self-supervised pre-training is the efficiency ceiling**: When possible, fine-tune from foundation models rather than training from scratch. The pre-training cost is amortized; the fine-tuning cost is minimal.
+* **Synthetic data requires domain gap mitigation**: Never use 100% synthetic data. Mix 50-80% synthetic with 20-50% real, and apply domain randomization or adaptation techniques to bridge the distribution shift.
+* **Measure before optimizing**: Use PPD (Performance-Per-Data), AULC (Area Under Learning Curve), and DCR (Data Compression Ratio) to quantify efficiency gains. Intuition about data value is often wrong.
+
+:::
+
+::: {.callout-note title="Lighthouse Models: Data Efficiency Across the Spectrum"}
+This chapter has applied data efficiency principles to all five Lighthouse models, demonstrating that the techniques are universal but the priorities differ by bottleneck:
+
+| Lighthouse | Primary Bottleneck | Data Efficiency Priority |
+|------------|-------------------|-------------------------|
+| **ResNet-50** | Compute | Coreset selection directly reduces training FLOPs |
+| **GPT-2/Llama** | Memory bandwidth | Deduplication reduces corpus size; curriculum learning improves token efficiency |
+| **MobileNet** | Latency/Power | Aggressive augmentation compensates for reduced model capacity |
+| **DLRM** | Memory capacity | Interaction deduplication and embedding pruning reduce table size |
+| **Keyword Spotting** | Extreme constraints | Augmentation and synthesis create datasets from minimal seeds |
+
+The common thread: **data efficiency is not a single technique but a systems optimization** tailored to whichever resource is most constrained.
+:::
+
+With a high-efficiency data pipeline in place, we have minimized the "math required to learn." But even a perfectly optimized dataset still trains a model that may be larger than necessary. A 7B parameter model trained on a coreset still has 7B parameters at inference time. The next chapter addresses this: minimizing the "math required to represent" through model compression techniques that reduce parameter counts, precision, and computational requirements while preserving accuracy.
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->
 ::: { .quiz-end }
 :::
+
