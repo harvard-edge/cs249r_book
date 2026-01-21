@@ -40,23 +40,34 @@ Training is where models acquire their capabilities, and that acquisition is ext
 
 :::
 
-### Chapter Roadmap {.unnumbered}
+## Training Systems Fundamentals {#sec-ai-training-training-systems-fundamentals}
 
-This chapter develops training systems understanding through four progressive stages:
+The previous chapters established how to express neural network computations: @sec-dl-primer introduced gradient descent and backpropagation, @sec-dnn-architectures examined the architectural patterns that define modern models, and @sec-ai-frameworks showed how software abstractions translate these operations into executable code. This chapter shifts perspective from *what* neural networks compute to *what it costs* to compute at scale—and how to reduce those costs systematically.
 
-1. **Mathematical Foundations** (@sec-ai-training-mathematical-foundations-71a8): What computational operations constitute neural network training, and what resources—FLOPs, memory, bandwidth—do they consume? This section establishes why matrix multiplications dominate training workloads and how activation storage creates memory pressure.
+::: {.callout-definition title="Training Systems"}
 
-2. **Pipeline Architecture** (@sec-ai-training-pipeline-architecture-622a): How should training systems orchestrate data loading, forward and backward passes, and parameter updates? This section examines the components of training pipelines and their interactions.
+**Machine Learning Training Systems** refer to computational frameworks that execute the _iterative optimization_ of model parameters through coordinated _data processing_, _gradient computation_, and _distributed computation_ across hardware and software infrastructure.
 
-3. **Pipeline Optimizations** (@sec-ai-training-pipeline-optimizations-3397): What techniques address specific bottlenecks? This section covers prefetching for data-bound workloads, mixed-precision training for memory and compute efficiency, and gradient accumulation for memory-constrained scenarios.
+:::
 
-4. **Scaling Decisions** (@sec-ai-training-scaling-beyond-single-machines): When does single-machine training become insufficient, and what indicators signal the need for distributed approaches? This section establishes criteria for scaling decisions that connect to Volume II's distributed training coverage.
+Training workloads exhibit three distinguishing characteristics that separate them from general-purpose computing: extreme computational intensity from iterative gradient computations across massive models, substantial memory pressure from storing parameters, activations, and optimizer states simultaneously, and complex data dependencies requiring synchronized parameter updates. Large language model training requires approximately $10^{23}$ floating-point operations [@brown2020language], memory footprints reaching terabytes when including activation storage, and coordination across many devices. The multiplicative cost structure described in the Purpose—where training requires memory for weights, gradients, and optimizer states simultaneously—explains why training systems engineering evolved as a distinct discipline.
 
-Throughout these sections, GPT-2 (1.5 billion parameters) serves as a running case study, providing concrete examples of how theoretical concepts translate to engineering decisions.
+::: {.callout-note title="Historical Perspective: Four Decades of Training Systems Evolution"}
 
-## Training Systems Evolution and Architecture {#sec-ai-training-training-systems-evolution-architecture-0293}
+The progression from 1986 to today illustrates how training systems co-evolved with hardware capabilities:
 
-The memory challenge introduced above—where a 7-billion parameter model demands 84+ GB before storing a single activation—illustrates why training systems engineering evolved as a distinct discipline. The computational frameworks examined in @sec-ai-frameworks provide software abstractions for expressing training algorithms, but training systems engineering determines whether those algorithms can execute within physical resource limits. The Iron Law reveals three levers for improvement: reduce total operations through algorithmic innovation, increase peak throughput through hardware utilization, or improve utilization through better pipeline orchestration. Each optimization technique in this chapter pulls one or more of these levers.
+- **1986**: Backpropagation algorithm formalized [@rumelhart1986learning]. Training a 3-layer network on toy datasets required days on CPU workstations.
+- **2012**: AlexNet demonstrated GPU training [@krizhevsky2012imagenet]. Two GTX 580 GPUs reduced ImageNet training from weeks to days—a 10× improvement that launched the deep learning era.
+- **2017**: Transformers introduced attention mechanisms [@vaswani2017attention]. NVIDIA Volta GPUs with Tensor Cores enabled mixed-precision training, delivering 5× speedup over previous generation.
+- **2020**: GPT-3 training required 1,024 A100 GPUs for months, consuming an estimated $4.6M in compute [@brown2020language]. This scale made training efficiency economically critical.
+- **2023**: Training efficiency improved 10× through the techniques examined in this chapter. FlashAttention, gradient checkpointing, and ZeRO optimization enable training models previously requiring clusters on single machines.
+
+Each generation's constraints drove the next generation's innovations. Memory limits motivated gradient checkpointing; bandwidth limits motivated FlashAttention; cost limits motivated mixed precision. Understanding this progression contextualizes why the techniques in this chapter exist.
+:::
+
+### The Iron Law of Training Performance {#sec-ai-training-iron-law}
+
+Frameworks provide abstractions for expressing training algorithms, but training systems engineering determines whether those algorithms can execute within physical resource limits. The Iron Law provides the organizing framework for understanding how every optimization technique improves training time.
 
 ::: {.callout-definition title="The Iron Law of Training Performance"}
 
@@ -66,7 +77,7 @@ $$\text{Training Time} = \frac{\text{Total Operations}}{\text{Peak Throughput} \
 
 where **Total Operations** is the FLOPs required for one epoch times the number of epochs, **Peak Throughput** is the hardware's theoretical FLOP/s capacity, and **Utilization** is the fraction of peak actually achieved (typically 30-70% for training workloads).
 
-This equation reveals that every optimization technique improves training time by affecting one or more terms:
+This equation reveals three levers for improvement: reduce total operations through algorithmic innovation, increase peak throughput through hardware utilization, or improve utilization through better pipeline orchestration. Each optimization technique in this chapter pulls one or more of these levers:
 
 +----------------------------------+------------------------+------------------------------------------------+
 | **Technique**                    | **Term Affected**      | **Mechanism**                                  |
@@ -89,9 +100,7 @@ This equation reveals that every optimization technique improves training time b
 
 :::
 
-The system design methodologies from @sec-ml-systems, data pipeline architectures from @sec-data-engineering, and computational frameworks from @sec-ai-frameworks provide the foundation for addressing these constraints. Contemporary training workloads push computational limits: models with billions of parameters demand memory capacity exceeding single-device limits, training corpora span petabyte storage systems, and gradient optimization algorithms require careful orchestration of computation and data movement. Training represents the integration point where theoretical design principles meet performance engineering constraints.
-
-This chapter establishes systems engineering foundations for training infrastructure by translating mathematical operations into concrete computational requirements, analyzing performance bottlenecks (memory bandwidth limitations, computational throughput constraints, data loading delays), and developing systematic optimization strategies. The focus is primarily on single-machine training, establishing the techniques—mixed-precision arithmetic, gradient accumulation, activation checkpointing—that maximize efficiency within hardware constraints. These principles provide the foundation for understanding when single-machine approaches become insufficient and what trade-offs distributed training entails.
+### Running Example: Training GPT-2 {#sec-ai-training-gpt2-case-study}
 
 ::: {.callout-lighthouse title="Lighthouse Example: Training GPT-2"}
 **Why this model?**
@@ -115,40 +124,12 @@ Training GPT-2 is primarily **memory-bound** (due to activation storage) and **c
 
 **Note on Precision:**
 Throughout this chapter, we reference **FP32** (32-bit) and **FP16** (16-bit) floating-point formats.
+
 *   **FP32**: Standard precision, high numerical stability.
 *   **FP16**: Half precision, halves memory usage and accelerates math on modern hardware (like Tensor Cores).
 *   **Mixed-Precision**: Combines both to get the speed of FP16 with the stability of FP32 (detailed in @sec-ai-training-mixedprecision-training-77ad).
 
-## Training Systems {#sec-ai-training-training-systems-45a3}
-
-Modern machine learning models rely on specialized computational frameworks that manage iterative optimization. These systems differ from traditional computing infrastructures by requiring careful orchestration of data processing, gradient computation, parameter updates, and distributed coordination across potentially thousands of devices. Understanding what constitutes a training system and how it differs from general-purpose computing provides the foundation for architectural decisions and optimization strategies.
-
-::: {.callout-definition title="Training Systems"}
-
-**Machine Learning Training Systems** refer to computational frameworks that execute the _iterative optimization_ of model parameters through coordinated _data processing_, _gradient computation_, and _distributed computation_ across hardware and software infrastructure.
-
-:::
-
-Machine learning training systems represent a distinct class of computational workload with unique demands on hardware and software infrastructure. When you execute training commands in frameworks like PyTorch or TensorFlow, these systems must efficiently orchestrate repeated computations over large datasets while managing memory requirements and data movement patterns that exceed general-purpose computing capabilities.
-
-Training workloads exhibit three distinguishing characteristics: extreme computational intensity from iterative gradient computations across massive models, substantial memory pressure from storing parameters, activations, and optimizer states simultaneously, and complex data dependencies requiring synchronized parameter updates across distributed resources. Large language model training requires approximately \(10^{23}\) floating-point operations [@brown2020language], memory footprints reaching terabytes when including activation storage, and coordination across many devices. General-purpose systems were not designed for these demands.
-
-::: {.callout-note title="Historical Perspective: Four Decades of Training Systems Evolution"}
-
-The progression from 1986 to today illustrates how training systems co-evolved with hardware capabilities:
-
-- **1986**: Backpropagation algorithm formalized [@rumelhart1986learning]. Training a 3-layer network on toy datasets required days on CPU workstations.
-- **2012**: AlexNet demonstrated GPU training [@krizhevsky2012imagenet]. Two GTX 580 GPUs reduced ImageNet training from weeks to days—a 10× improvement that launched the deep learning era.
-- **2017**: Transformers introduced attention mechanisms [@vaswani2017attention]. NVIDIA Volta GPUs with Tensor Cores enabled mixed-precision training, delivering 5× speedup over previous generation.
-- **2020**: GPT-3 training required 1,024 A100 GPUs for months, consuming an estimated $4.6M in compute [@brown2020language]. This scale made training efficiency economically critical.
-- **2023**: Training efficiency improved 10× through the techniques examined in this chapter. FlashAttention, gradient checkpointing, and ZeRO optimization enable training models previously requiring clusters on single machines.
-
-Each generation's constraints drove the next generation's innovations. Memory limits motivated gradient checkpointing; bandwidth limits motivated FlashAttention; cost limits motivated mixed precision. Understanding this progression contextualizes why the techniques in this chapter exist.
-:::
-
-Contemporary training systems continue this evolutionary trajectory. While training focuses on iterative optimization for learning, inference systems (detailed throughout this book) optimize for low-latency prediction serving. These represent complementary but distinct computational paradigms. The architectural progression from general-purpose computing to specialized training systems reveals principles that inform modern infrastructure design.
-
-### Training Systems in the ML Development Lifecycle {#sec-ai-training-training-systems-ml-development-lifecycle-6222}
+### Training in the ML Development Lifecycle {#sec-ai-training-training-systems-ml-development-lifecycle-6222}
 
 Training systems occupy a critical position in the machine learning pipeline: they consume prepared data from upstream engineering (@sec-data-engineering) and produce trained models for downstream deployment (@sec-ml-operations). This position creates bidirectional dependencies—data quality directly impacts training stability, while training efficiency determines iteration velocity during model development.
 
@@ -158,29 +139,21 @@ Modern training systems face three scaling challenges that define their architec
 
 [^fn-training-model-parallelism]: **Model Parallelism**: Splits the model across devices when it exceeds single-device memory. Introduces pipeline bubbles and coordination overhead.
 
-Beyond performance, training systems must balance computational throughput against energy consumption—a consideration that becomes increasingly important at scale, as the "Utility Bill" napkin calculation later in this chapter demonstrates.
-
-### System Design Principles for Training Infrastructure {#sec-ai-training-system-design-principles-training-infrastructure-8d92}
+### System Design Principles {#sec-ai-training-system-design-principles-training-infrastructure-8d92}
 
 Training is not merely a mathematical optimization problem; it is a system-driven process that requires careful orchestration of computing hardware, memory, and data movement.
 
-Training workflows consist of interdependent stages: data preprocessing, forward and backward passes, and parameter updates, extending the basic neural network concepts from @sec-dl-primer. Each stage imposes specific demands on system resources. The data preprocessing stage relies on storage and I/O subsystems to provide computing hardware with continuous input. The quality and reliability of this input data are critical. @sec-data-engineering covers data validation, corruption detection, feature engineering, schema enforcement, and pipeline reliability strategies. While @sec-data-engineering focuses on ensuring data quality and consistency, this chapter examines the efficiency of data movement, transformation throughput, and delivery to computational resources during training.
+Training workflows consist of interdependent stages: data preprocessing, forward and backward passes, and parameter updates, extending the basic neural network concepts from @sec-dl-primer. Each stage imposes specific demands on system resources. The data preprocessing stage relies on storage and I/O subsystems to provide computing hardware with continuous input. @sec-data-engineering covers data validation, corruption detection, feature engineering, schema enforcement, and pipeline reliability strategies; this chapter examines the efficiency of data movement, transformation throughput, and delivery to computational resources during training.
 
-While traditional processors like CPUs handle many training tasks effectively, increasingly complex models have driven the adoption of hardware accelerators. Graphics Processing Units (GPUs) and specialized machine learning processors process mathematical operations in parallel, offering substantial speedups for matrix-heavy computations. These accelerators, alongside CPUs, handle operations like gradient computation and parameter updates, enabling the training of hierarchical representations whose theoretical foundations are explored in @sec-dnn-architectures. Performance depends on how well the system manages bottlenecks such as memory bandwidth and communication latency.
+System constraints often dictate the performance limits of training workloads. Modern accelerators are frequently bottlenecked by memory bandwidth, as data movement between memory hierarchies can be slower and more energy-intensive than the computations themselves [@patterson2021hardware]. In distributed setups, synchronization across devices introduces additional latency, with interconnect performance (NVLink, InfiniBand) playing an important role. For example, training large Transformer models[^fn-transformer-training] requires partitioning data and model parameters across multiple devices, introducing synchronization challenges during gradient updates. Communication libraries such as NVIDIA's Collective Communications Library (NCCL) [@nvidia_nccl] enable efficient gradient sharing.
 
-System constraints often dictate the performance limits of training workloads. Modern accelerators are frequently bottlenecked by memory bandwidth, as data movement between memory hierarchies can be slower and more energy-intensive than the computations themselves [@patterson2021hardware]. In distributed setups, synchronization across devices introduces additional latency, with interconnect performance (NVLink, InfiniBand) playing an important role.
-
-Systematic approaches detailed in @sec-ai-training-systematic-optimization-framework-9f23 overcome these limitations. Techniques like overlapping computation with data loading, mixed-precision training [@micikevicius2017mixed], and efficient memory allocation address the primary bottlenecks that constrain training performance. These low-level optimizations complement the higher-level model compression strategies covered in @sec-model-compression, creating an integrated approach to training efficiency.
-
-System-level constraints often guide the development of new model architectures and training approaches. The hardware-software co-design principles discussed in @sec-ai-acceleration demonstrate how understanding system capabilities can inspire architectural innovations. Memory limitations have motivated research into more efficient neural network architectures [@vaswani2017attention], while communication overhead in distributed systems has influenced optimization algorithm design. These adaptations demonstrate how practical system considerations shape the evolution of machine learning approaches.
-
-For example, training large Transformer models[^fn-transformer-training] requires partitioning data and model parameters across multiple devices. This introduces synchronization challenges, particularly during gradient updates. Communication libraries such as NVIDIA's Collective Communications Library (NCCL) [@nvidia_nccl] enable efficient gradient sharing, providing the foundation for distributed training optimization techniques. The benchmarking methodologies in @sec-benchmarking-ai provide systematic approaches for evaluating these distributed training performance characteristics. These examples illustrate how system-level considerations influence the feasibility and efficiency of modern training workflows.
+The hardware-software co-design principles discussed in @sec-ai-acceleration demonstrate how understanding system capabilities can inspire architectural innovations. Memory limitations have motivated research into more efficient neural network architectures, while communication overhead in distributed systems has influenced optimization algorithm design. These adaptations demonstrate how practical system considerations shape the evolution of machine learning approaches.
 
 ## Mathematical Foundations {#sec-ai-training-mathematical-foundations-71a8}
 
-The systems perspective established above reveals why understanding the mathematical operations at the heart of training is essential. These operations are not abstract concepts but concrete computations that dictate every aspect of training system design. The computational characteristics of neural network mathematics directly determine hardware requirements, memory architectures, and parallelization constraints. When system architects choose GPUs over CPUs, design memory hierarchies, or select distributed training strategies, they are responding to the specific demands of these mathematical operations.
+@sec-dl-primer established the mathematical mechanics of neural network training: forward propagation computes predictions through weighted sums and activation functions, backpropagation applies the chain rule to compute gradients, and optimization algorithms update parameters to minimize loss. Those explanations focused on *what* these operations compute and *why* they enable learning. This section shifts to *what they cost*—the FLOPs consumed, the memory required, and the bandwidth demanded when these conceptually simple operations execute at scale.
 
-The specialized training systems discussed above are designed specifically to execute these operations efficiently. Understanding these mathematical foundations is essential because they directly determine system requirements: the type of operations dictates hardware specialization needs (why matrix multiplication units dominate modern accelerators), the memory access patterns influence cache design (why activation storage becomes a bottleneck), and the computational dependencies shape parallelization strategies (why some operations cannot be trivially distributed). When we discussed how AI hypercomputing differs from HPC systems earlier, the distinction emerges from differences in the mathematical operations each must perform.
+The shift in perspective is essential because the same mathematical operations that elegantly describe learning in equations become formidable engineering challenges in implementation. A matrix multiplication is just $C = AB$ in notation, but training GPT-2 requires executing that operation billions of times with matrices too large to fit in fast memory. The activation function $f(x) = \max(0, x)$ appears trivial, yet the choice between ReLU and sigmoid determines whether Tensor Cores can accelerate computation. Understanding these system-level implications of familiar mathematics enables practitioners to identify bottlenecks and apply targeted optimizations.
 
 Training systems must execute three categories of operations repeatedly. First, forward propagation computes predictions through matrix multiplications and activation functions. Second, gradient computation via backpropagation calculates parameter updates using stored activations and the chain rule. Third, parameter updates apply gradients using optimization algorithms that maintain momentum and adaptive learning rate state. Each category exhibits distinct computational patterns and system requirements that training architectures must accommodate.
 
@@ -952,7 +925,7 @@ Standard attention computes $\text{softmax}(QK^T)V$ by materializing the full $N
 
 ## Pipeline Architecture {#sec-ai-training-pipeline-architecture-622a}
 
-The mathematical operations examined above define what training systems must compute—for GPT-2, approximately 10 trillion FLOPs per training step distributed across attention, feedforward, and normalization operations. Pipeline architecture determines how to orchestrate these computations efficiently across real hardware with finite memory and bandwidth constraints. A training pipeline provides the organizational framework that coordinates mathematical operations with data movement, system resources, and operational monitoring. This architectural perspective enables optimization not just of individual operations, but their orchestration across the entire training process.
+The mathematical operations examined above define what training systems must compute—for GPT-2, approximately 10 trillion FLOPs per training step distributed across attention, feedforward, and normalization operations. @sec-ai-frameworks introduced how frameworks like PyTorch and TensorFlow provide APIs for defining models and executing forward passes; here we examine the *system-level orchestration* that makes those API calls efficient. Pipeline architecture determines how to coordinate these computations across real hardware with finite memory and bandwidth constraints, managing data loading, preprocessing, GPU transfers, and parameter updates as a unified system rather than isolated operations.
 
 @fig-training-pipeline maps the complete training pipeline architecture, showing how three main components interconnect: the data pipeline for ingestion and preprocessing, the training loop that handles model updates, and the evaluation pipeline for assessing performance. Processed batches flow from the data pipeline to the training loop, and evaluation metrics provide feedback to guide the training process.
 
@@ -1630,9 +1603,44 @@ Determining the optimal batch size involves balancing these factors within hardw
 **The Systems Conclusion**: Training is a physical industrial process. At trillion-parameter scale, electricity alone costs millions—driving the efficiency optimizations in Part III. The same optimizations that reduce training time also reduce energy consumption and carbon footprint.
 :::
 
+The pipeline architecture established above—data loading, forward pass, backward pass, parameter updates—provides the *what* of training systems. The mathematical foundations quantified the FLOPs, memory, and bandwidth each stage demands. But understanding *what* must happen does not reveal *where* the system currently underperforms. A pipeline can be limited by any of its stages, and optimizing the wrong stage wastes engineering effort while leaving the actual bottleneck untouched. The systematic optimization methodology that follows requires first identifying which constraint currently limits performance.
+
+## Identifying Bottlenecks {#sec-ai-training-identifying-bottlenecks}
+
+Before applying optimization techniques, you must identify which bottleneck currently limits your training performance. The techniques in the next section—prefetching, mixed precision, gradient accumulation—each target specific bottlenecks. Applying the wrong optimization wastes engineering effort; applying the right one can yield 2-10× speedups.
+
+::: {.callout-definition title="Model FLOPs Utilization (MFU)"}
+
+**Model FLOPs Utilization (MFU)** is the ratio of the _actual floating-point operations_ performed by a model during training to the _theoretical peak FLOPs_ of the hardware. Unlike standard hardware utilization, MFU excludes overhead from recomputation (gradient checkpointing) and padding, providing a true measure of _useful training work_ per second.
+
+:::
+
+Training bottlenecks fall into three categories, each with distinct symptoms and solutions:
+
+**Compute-bound**: The GPU's arithmetic units are fully utilized, but more compute would make training faster. Symptoms: high GPU utilization (>90%), low memory bandwidth usage. Solutions: algorithmic improvements (FlashAttention), better hardware, or accepting current speed as near-optimal.
+
+**Memory-bound**: Data movement between memory hierarchies limits performance. Symptoms: moderate GPU utilization (50-80%), high memory bandwidth usage, arithmetic units often idle. Solutions: mixed-precision training, operator fusion, memory-efficient attention.
+
+**Data-bound**: The GPU waits for input data from CPU or storage. Symptoms: periodic GPU utilization drops to near-zero, CPU fully utilized during these gaps. Solutions: data prefetching, faster storage, more data loading workers.
+
+### Profiling to Identify Bottlenecks {#sec-ai-training-profiling-bottlenecks}
+
+Profiling tools reveal which bottleneck dominates your workload. @fig-tf-bottleneck-trace captures a data-bound pathology through TensorFlow's profiler: the gaps in GPU activity (white regions between compute blocks) reveal that the device frequently waits for input data, with utilization dropping to zero during data loading phases.
+
+![**GPU Underutilization**: Profiling reveals data loading as a bottleneck, preventing full GPU utilization during training. The gaps in GPU activity indicate the device frequently waits for input data, suggesting optimization of the data pipeline is necessary to maximize computational throughput.](images/png/tf_profiler.png){#fig-tf-bottleneck-trace fig-alt="TensorFlow profiler screenshot showing GPU activity timeline. Colored blocks indicate computation periods with white gaps revealing idle time when GPU waits for data loading to complete."}
+
+Tools integrated into machine learning frameworks provide detailed bottleneck analysis:
+
+- **PyTorch Profiler** (`torch.profiler`): Shows time spent in each operation, memory allocation patterns, and GPU kernel execution
+- **TensorFlow Profiler**: Visualizes the training timeline, identifies input pipeline bottlenecks, and shows device placement
+- **NVIDIA Nsight Systems**: Low-level GPU profiling showing kernel execution, memory transfers, and synchronization points
+- **NVIDIA Nsight Compute**: Detailed kernel analysis showing arithmetic intensity, memory throughput, and occupancy
+
+The profiling workflow follows a systematic pattern: run a representative training iteration with profiling enabled, examine the timeline for gaps (data-bound), check memory bandwidth utilization (memory-bound vs. compute-bound), and identify the dominant bottleneck before selecting an optimization technique.
+
 ## Pipeline Optimizations {#sec-ai-training-pipeline-optimizations-3397}
 
-Even well-designed pipeline architectures rarely achieve optimal performance without targeted optimization. The gap between theoretical hardware capability and realized training throughput often reaches 50--70%: GPUs advertised at 300 TFLOPS may deliver only 90--150 TFLOPS for training workloads, and distributed systems with aggregate 1000 TFLOPS capacity frequently achieve under 500 TFLOPS effective throughput [@wang2019superneurons]. This efficiency gap stems from systematic bottlenecks that optimization techniques can address.
+With bottlenecks identified, we can apply targeted optimizations. Even well-designed pipeline architectures rarely achieve optimal performance without such optimization. The gap between theoretical hardware capability and realized training throughput often reaches 50--70%: GPUs advertised at 300 TFLOPS may deliver only 90--150 TFLOPS for training workloads, and distributed systems with aggregate 1000 TFLOPS capacity frequently achieve under 500 TFLOPS effective throughput [@wang2019superneurons]. This efficiency gap stems from systematic bottlenecks that optimization techniques can address.
 
 The following table provides a roadmap for matching optimization techniques to the bottlenecks they solve, serving as a practical guide for systematic performance improvement:
 
@@ -2306,7 +2314,7 @@ FP16 halves memory traffic for the same computation, effectively doubling availa
 
 **Practical Framework Integration:**
 
-PyTorch Automatic Mixed Precision (AMP) abstracts hardware complexity through automatic operation routing:
+Modern frameworks abstract hardware complexity through automatic operation routing—determining which operations benefit from reduced precision and which require FP32 for numerical stability. The following example illustrates this pattern:
 
 ```python
 import torch
@@ -2454,9 +2462,7 @@ Both approaches require $O(n^2 d)$ FLOPs for attention computation. Flash Attent
 
 #### Implementation and Hardware Utilization {#sec-ai-training-flash-attention-implementation}
 
-Flash Attention's performance gains materialize through careful exploitation of GPU memory hierarchy and modern framework integration.
-
-PyTorch 2.0+ includes Flash Attention through `torch.nn.functional.scaled_dot_product_attention`, which automatically selects the most efficient implementation:
+Flash Attention's performance gains materialize through careful exploitation of GPU memory hierarchy. Modern frameworks integrate these optimizations transparently—automatically selecting the most efficient attention implementation based on hardware capabilities and input characteristics. The contrast between standard and optimized attention illustrates the principle:
 
 ```python
 import torch
@@ -2833,7 +2839,7 @@ Optimal checkpointing (sqrt(48) approximately equals 7 checkpoints): Memory = 7 
 
 Gradient accumulation[^fn-gradient-accumulation] and activation checkpointing[^fn-training-activation-checkpointing] provide solutions to the memory limitations often encountered in training large-scale machine learning models. By optimizing how memory is used during training, these techniques enable the development and deployment of complex architectures, even on hardware with constrained resources.
 
-[^fn-gradient-accumulation]: **Gradient Accumulation Impact**: Enables effective batch sizes of 2048+ on single GPUs with only 32-64 mini-batch size, essential for transformer training. BERT-Large training uses effective batch size of 256 (accumulated over 8 steps) achieving 99.5% of full-batch performance while reducing memory requirements by 8x. The technique trades 10-15% compute overhead for massive memory savings.
+[^fn-gradient-accumulation]: **Gradient Accumulation Impact**: Enables effective batch sizes of 2048+ on single GPUs with only 32-64 micro-batch size, essential for transformer training. BERT-Large training uses effective batch size of 256 (accumulated over 8 steps) achieving 99.5% of full-batch performance while reducing memory requirements by 8x. The technique trades 10-15% compute overhead for massive memory savings.
 
 [^fn-training-activation-checkpointing]: **Activation Checkpointing Trade-offs**: Reduces memory usage by 50--90% at the cost of 15--30% additional compute time due to recomputation. For training GPT-3 on V100s, checkpointing enables 2.8$\times$ larger models (from 1.3 B to 3.7 B parameters) within 32 GB memory constraints, making it essential for memory-bound large model training despite the compute penalty.
 
@@ -3092,31 +3098,248 @@ This walkthrough demonstrates three key principles:
 
 The systematic framework—profile, identify bottleneck, apply targeted technique, re-profile—transforms optimization from trial-and-error into engineering practice.
 
+### Optimization Impact Summary {#sec-ai-training-optimization-impact-summary}
+
+The GPT-2 case study demonstrates how the optimization techniques examined in this section combine to transform infeasible training requirements into practical configurations. @tbl-gpt2-summary quantifies the cumulative impact across memory, time, energy, and cost dimensions:
+
++------------------------------+------------------+------------------+--------------------------------------------+
+| **Metric**                   | **FP32 Baseline**| **Optimized**    | **Technique Applied**                      |
++:=============================+=================:+=================:+:===========================================+
+| Parameters                   | 6.0 GB           | 3.0 GB           | Mixed precision (FP16)                     |
++------------------------------+------------------+------------------+--------------------------------------------+
+| Gradients                    | 6.0 GB           | 3.0 GB           | Mixed precision (FP16)                     |
++------------------------------+------------------+------------------+--------------------------------------------+
+| Optimizer State (Adam)       | 24.0 GB          | 12.0 GB          | FP32 required for stability                |
++------------------------------+------------------+------------------+--------------------------------------------+
+| Activations (batch=32)       | 65.0 GB          | 8.0 GB           | Gradient checkpointing + FP16              |
++------------------------------+------------------+------------------+--------------------------------------------+
+| **Total Memory**             | **101.0 GB**     | **26.0 GB**      | —                                          |
++------------------------------+------------------+------------------+--------------------------------------------+
+| Training Time (32 V100s)     | 14 days          | 8.4 days         | 2.4× Tensor Core speedup                   |
++------------------------------+------------------+------------------+--------------------------------------------+
+| Energy Consumption           | 275,000 kWh      | 115,000 kWh      | Reduced time + improved efficiency         |
++------------------------------+------------------+------------------+--------------------------------------------+
+| Electricity Cost (@$0.10/kWh)| $27,500          | $11,500          | —                                          |
++------------------------------+------------------+------------------+--------------------------------------------+
+| Carbon Footprint             | ~125 tons CO₂    | ~52 tons CO₂     | Regional grid average (0.45 kg/kWh)        |
++------------------------------+------------------+------------------+--------------------------------------------+
+
+: **GPT-2 Training Optimization Summary**: Applying mixed-precision training and gradient checkpointing reduces memory from 101 GB to 26 GB, training time by 40%, energy consumption by 58%, and carbon footprint proportionally. {#tbl-gpt2-summary}
+
+This 4× memory reduction, combined with 2.4× computational speedup and 58% energy reduction, exemplifies how systematic optimization transforms hardware constraints into engineering design parameters. The same optimizations that improve throughput also reduce energy consumption and operational cost—a perspective increasingly important as training scale grows.
+
 However, even perfectly optimized single-machine training eventually reaches hard limits.
 
-## Scaling Beyond Single Machines {#sec-ai-training-scaling-beyond-single-machines}
+## Scaling Training Systems {#sec-ai-training-scaling-systems}
 
-The optimization techniques examined throughout this chapter extend single-machine training capabilities substantially, but practitioners eventually encounter limits that no single-device optimization can overcome. Recognizing when these limits are reached—and when the complexity of distributed training is justified—is essential for making informed scaling decisions.
+The optimization techniques examined throughout this chapter extend single-device training capabilities substantially, but modern deep learning increasingly requires harnessing multiple accelerators. This section examines parallelism strategies for scaling training—from multi-GPU configurations within a single machine to the threshold where distributed systems become necessary.
 
-### Recognizing Scaling Limits {#sec-ai-training-recognizing-scaling-limits}
+### The Evolution of Training Infrastructure {#sec-ai-training-evolution-infrastructure}
 
-Three concrete signals indicate that single-machine training has reached its practical limits:
+Computing system architectures have evolved through distinct generations, each building upon previous advances while introducing specialized optimizations for emerging application requirements (@fig-evolution-systems). This progression demonstrates how hardware adaptation to application needs shapes modern machine learning systems.
 
-**Memory exhaustion** occurs when model parameters, optimizer states, and activation storage exceed single-device capacity even after applying all memory optimization techniques. For transformer models, this threshold typically occurs around 10--20 billion parameters on current generation GPUs with 40--80 GB memory. The 7-billion parameter example from this chapter's opening required 84 GB before optimizations; models 2--3$\times$ larger exceed even optimized single-device capacity.
+::: {#fig-evolution-systems fig-env="figure" fig-pos="htb" fig-cap="**Computing System Evolution**: Hardware advancements continuously adapted to the increasing demands of machine learning workloads, transitioning from centralized mainframes to specialized architectures optimized for parallel processing and massive datasets." fig-alt="Timeline spanning 1950s to 2020s showing evolution from mainframes through HPC and warehouse-scale computing to AI hypercomputing with GPUs and TPUs."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\sf,node distance=0pt,xscale=2]
+\tikzset{
+  Box/.style={inner xsep=2pt, draw=black!80, line width=0.75pt,
+    fill=black!10, anchor=south, rounded corners=2pt,
+    font=\sf\footnotesize, align=center, minimum height=5mm},
+}
+\definecolor{col1}{RGB}{240,240,255}
+\definecolor{col2}{RGB}{255, 255, 205}
+\def\du{190mm}
+\def\vi{15mm}
+\node[fill=green!10,draw=none,minimum width=\du,
+name path=G4,anchor=south west, minimum height=\vi](B1)at(-19.0mm,3mm){};
+\node[right=2mm of B1.west,anchor=west,align=left]{AI Hypercomputing\\ Era};
+\node[fill=col2,draw=none,minimum width=\du,
+name path=G3,anchor=south west, minimum height=\vi](Z)at(B1.north west){};
+\node[right=2mm of Z.west,anchor=west,align=left]{Warehouse Scale\\ Computing};
+\node[fill=red!10,draw=none,minimum width=\du,
+anchor=south west, minimum height=\vi](B2)at (Z.north west){};
+\node[right=2mm of B2.west,anchor=west,align=left]{High-Performance\\ Computing};
+\node[fill=col1,draw=none,minimum width=\du,
+name path=G1,anchor=south west, minimum height=\vi](V)at(B2.north west){};
+\node[right=2mm of V.west,anchor=west,align=left]{Mainframe};
+\def\hi{6.75}
+\draw[thick,name path=V1](0mm,0)node[below]{1950}--++(90:\hi);
+\draw[thick,name path=V2](10mm,0)node[below]{1960}--++(90:\hi);
+\draw[thick,name path=V3](20mm,0)node[below]{1970}--++(90:\hi);
+\draw[thick,name path=V4](30mm,0)node[below]{1980}--++(90:\hi);
+\draw[thick,name path=V5](40mm,0)node[below]{1990}--++(90:\hi);
+\draw[thick,name path=V6](50mm,0)node[below]{2000}--++(90:\hi);
+\draw[thick,name path=V7](60mm,0)node[below]{2010}--++(90:\hi);
+\draw[thick,name path=V8](70mm,0)node[below]{2020}--++(90:\hi);
+\def\fa{2}
+\path [name intersections={of=V1 and G1,by={A,B}}];
+\node[Box, minimum width=20mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]B){ENIAC};
+\path [name intersections={of=V3 and G1,by={C,D}}];
+\node[Box, minimum width=20mm, anchor=north west, xshift=-\fa*6mm]at([yshift=-1pt]C){IBM\\ System/360};
+\node[Box, minimum width=40mm, anchor=north west, xshift=-\fa*6mm]at([yshift=-1pt]D){CDC 6600};
+\path [name intersections={of=V4 and G3,by={E,F}}];
+\node[Box, minimum width=30mm, anchor=south west, xshift=-\fa*4mm]at([yshift=1pt]E){Cray-1};
+\path [name intersections={of=V6 and G3,by={G,H}}];
+\node[Box, minimum width=20mm, anchor=north west, xshift=0mm]at([yshift=-1pt]G){Google Data\\ Centers};
+\path [name intersections={of=V7 and G3,by={I,J}}];
+\node[Box, minimum width=22mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]J){AWS};
+\path [name intersections={of=V8 and G4,by={K,L}}];
+\node[Box, minimum width=20mm, anchor=north west, xshift=-\fa*5mm]at([yshift=-1pt]K){NVIDIA GPU};
+\node[Box,minimum width=2mm, anchor=south, xshift=-\fa*0mm]at([yshift=1pt]L){};
+\node[minimum width=20mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]L){Google TPUs};
+\end{tikzpicture}
+```
+:::
 
-**Unacceptable training duration** emerges when single-device training would require weeks or months to converge, making iteration impractical. Training a large language model on trillions of tokens might require months on a single device—an unacceptable timeline for research iteration or production deployment schedules.
+This architectural progression illuminates why traditional computing systems proved insufficient for neural network training. As shown in @tbl-computing-eras, while HPC systems provided the foundation for parallel numerical computation and warehouse-scale systems demonstrated distributed processing at scale, neither fully addressed the computational patterns of model training. Modern neural networks combine intensive parameter updates, complex memory access patterns, and coordinated distributed computation in ways that demanded new architectural approaches.
 
-**Dataset scale** exceeds single-machine capacity when training data reaches multiple terabytes. While data can be streamed from networked storage, the bandwidth requirements often exceed what single-machine I/O can sustain without starving the accelerator.
++-----------------------+-----------------------------+-------------------------------+------------------------------+
+| **Era**               | **Primary Workload**        | **Memory Patterns**           | **Processing Model**         |
++:======================+:============================+:==============================+:=============================+
+| **Mainframe**         | Sequential batch processing | Simple memory hierarchy       | Single instruction stream    |
++-----------------------+-----------------------------+-------------------------------+------------------------------+
+| **HPC**               | Scientific simulation       | Regular array access          | Synchronized parallel        |
++-----------------------+-----------------------------+-------------------------------+------------------------------+
+| **Warehouse-scale**   | Internet services           | Sparse, irregular access      | Independent parallel tasks   |
++-----------------------+-----------------------------+-------------------------------+------------------------------+
+| **AI Hypercomputing** | Neural network training     | Parameter-heavy, mixed access | Hybrid parallel, distributed |
++-----------------------+-----------------------------+-------------------------------+------------------------------+
 
-### Distributed Training Overview {#sec-ai-training-distributed-training-concepts}
+: **Computing Era Characteristics**: Each computing era optimized for different workload patterns. AI hypercomputing uniquely combines HPC's parallel numerical computation with warehouse-scale's distributed processing, while adding specialized support for the gradient-based optimization central to neural network training. {#tbl-computing-eras}
 
-When these limits are reached, distributed training coordinates computation across multiple devices. Three fundamental parallelization strategies exist, each addressing different bottlenecks:
+### Single-Node Multi-GPU Training {#sec-ai-training-multi-gpu-node}
 
-- **Data parallelism**: Replicates the model across devices, each processing different batches; effective when models fit in memory but datasets are large
-- **Model parallelism**: Partitions the model across devices; necessary when models exceed single-device memory
-- **Pipeline parallelism**: Combines model partitioning with microbatching to reduce idle time
+Multi-GPU training predates large-scale distributed systems. AlexNet[^fn-training-alexnet] (2012) famously split its model across two GTX 580 GPUs—not because the model was too large, but because the 3GB memory per GPU couldn't hold both the model and the batch activations. This single-node, multi-GPU configuration remains common today and introduces the fundamental parallelism strategies without the complexity of network communication.
 
-Production systems typically combine these strategies—for example, model parallelism within nodes and data parallelism across nodes. The implementation details, including gradient synchronization algorithms, communication patterns, fault tolerance mechanisms, and scaling efficiency analysis, are covered comprehensively in Volume II (@sec-distributed-training).
+[^fn-training-alexnet]: **AlexNet**: Developed by Alex Krizhevsky, Ilya Sutskever, and Geoffrey Hinton, AlexNet won ImageNet 2012 with 15.3% error rate (vs. 26.2% for second place), using two GTX 580 GPUs for 5-6 days of training. The model was split across GPUs with cross-GPU communication only at certain layers—an early form of model parallelism that launched the deep learning revolution.
+
+**Data Parallelism** replicates the entire model on each GPU, with each processing different batches. After computing gradients locally, GPUs synchronize via gradient averaging. @fig-train-data-parallelism illustrates this process: input data splits into non-overlapping batches, each GPU computes forward and backward passes independently, then gradients aggregate before updating the shared model.
+
+::: {#fig-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data Parallelism**: Each GPU holds a complete model copy, processes different data batches, then synchronizes gradients. This approach scales training throughput linearly with GPU count when models fit in single-GPU memory." fig-alt="Diagram showing input data splitting into 4 batches, each assigned to a GPU for forward/backward pass, with gradients aggregating for model update."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\tikzset{Line/.style={line width=0.75pt,black!50,text=black},
+  Box/.style={inner xsep=2pt, line width=0.75pt, node distance=2.0,
+    fill=VioletL2, draw=VioletLine2, text width=27mm, align=flush center,
+    minimum width=27mm, minimum height=9mm},
+  Box2/.style={Box, draw=BlueLine, fill=BlueL, text width=21mm,
+    minimum width=22mm, minimum height=9mm},
+  Text/.style={inner xsep=6pt, inner ysep=4pt, draw=none, line width=0.75pt,
+    fill=TextColor!80, font=\usefont{T1}{phv}{m}{n}\footnotesize,
+    align=flush center, minimum width=22mm, minimum height=5mm},
+}
+\node[Box,node distance=1](B1){GPU 1\\Forward \& Backward};
+\node[Box,node distance=1.2,right=of B1](B2){GPU 2\\Forward \& Backward};
+\node[Box,node distance=1.2,right=of B2](B3){GPU 3\\Forward \& Backward};
+\node[Box,node distance=1.2,right=of B3](B4){GPU 4\\Forward \& Backward};
+\node[Box2,above=1.06 of B1](GB1){Batch 1};
+\node[Box2,above=1.06 of B2](GB2){Batch 2};
+\node[Box2,above=1.06 of B3](GB3){Batch 3};
+\node[Box2,above=1.06 of B4](GB4){Batch 4};
+\node[Box2,above=1.8of $(GB2)!0.5!(GB3)$,fill=RedL,draw=RedLine](GGB1){Input Data};
+\node[Box,below=of $(B2)!0.5!(B3)$,fill=GreenL,draw=GreenLine](DB1){Gradients from All GPUs};
+\node[Box,below=1.05 of DB1,fill=GreenL,draw=GreenLine](DB2){Gradient Aggregation};
+\node[Box,below=1.05 of DB2,fill=GreenL,draw=GreenLine](DB3){Model Update};
+\draw[Line,-latex](GGB1)--++(270:1.4)-|(GB2);
+\draw[Line,-latex](GGB1)--++(270:1.4)-|(GB3);
+\draw[Line,-latex](GGB1)--++(270:1.4)-|(GB4);
+\draw[Line,-latex](GGB1)--node[Text,pos=0.5,anchor=center]{Split Data}++(270:1.4)-|(GB1);
+\draw[Line,-latex](GB1)--(B1);
+\draw[Line,-latex](GB2)--(B2);
+\draw[Line,-latex](GB3)--(B3);
+\draw[Line,-latex](GB4)--(B4);
+\draw[Line,-latex](B3)--++(270:0.9)-|(DB1);
+\draw[Line,-latex](B2)--++(270:0.9)-|(DB1);
+\draw[Line,-latex](B1)--++(270:0.9)-|(DB1);
+\draw[Line,-latex](B4)--++(270:0.9)-|(DB1);
+\draw[Line,-latex](DB1)--(DB2);
+\draw[Line,-latex](DB2)--(DB3);
+\end{tikzpicture}
+```
+:::
+
+**Model Parallelism** partitions the model itself across GPUs—necessary when the model exceeds single-GPU memory. AlexNet used a simple form: certain layers resided on GPU 1, others on GPU 2, with activations passing between them. @fig-model-parallelism shows this sequential flow: data moves through model partitions on different devices, with gradients flowing backward during training.
+
+::: {#fig-model-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Model Parallelism**: The model is partitioned across devices, with intermediate activations passing between them. This enables training models larger than single-GPU memory at the cost of sequential dependencies." fig-alt="Diagram showing input flowing through model parts on different devices, with forward pass going right and backward pass returning left."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\tikzset{Line/.style={line width=1.0pt,black!50,text=black},
+    Box/.style={inner xsep=2pt, draw=GreenLine, node distance=1.5,
+    line width=0.75pt, fill=GreenL, anchor=west, text width=23mm,
+    align=flush center, minimum width=23mm, minimum height=10mm},
+  Text/.style={inner xsep=4pt, draw=none, line width=0.75pt,
+    fill=TextColor!80, font=\usefont{T1}{phv}{m}{n}\footnotesize,
+    align=flush center, minimum width=22mm, minimum height=6mm},
+}
+\node[Box](B1){Input Data};
+\node[Box,right=of B1](B2){Layers 1-16\\Device 1};
+\node[Box,right=of B2](B3){Layers 17-32\\Device 2};
+\node[Box,right=of B3](B4){Layers 33-48\\Device 3};
+\node[Box,right=of B4](B5){Output};
+\draw[Line,-latex](B1)--++(90:12mm)-|node[Text,pos=0.25]{Forward Pass}(B2.120);
+\draw[Line,latex-](B1)--++(270:12mm)-|node[Text,pos=0.25]{Backward Pass}(B2.240);
+\draw[Line,-latex](B2)--++(90:12mm)-|node[Text,pos=0.25]{Activations}(B3.120);
+\draw[Line,latex-](B2)--++(270:12mm)-|node[Text,pos=0.25]{Gradients}(B3.240);
+\draw[Line,-latex](B3)--++(90:12mm)-|node[Text,pos=0.25]{Activations}(B4.120);
+\draw[Line,latex-](B3)--++(270:12mm)-|node[Text,pos=0.25]{Gradients}(B4.240);
+\draw[Line,-latex](B4)--++(90:12mm)-|node[Text,pos=0.25]{Output}(B5.120);
+\draw[Line,latex-](B4)--++(270:12mm)-|node[Text,pos=0.25]{Loss Gradient}(B5.240);
+\end{tikzpicture}
+```
+:::
+
+In practice, model parallelism typically partitions by layers. @fig-layers-blocks shows how a 24-layer transformer might be distributed: Device 1 handles blocks 1--6, Device 2 handles blocks 7--12, and so forth. This layer-wise partitioning minimizes cross-device communication to the boundaries between partitions.
+
+::: {#fig-layers-blocks fig-env="figure" fig-pos="htb" fig-cap="**Layer-wise Partitioning**: A 24-layer transformer distributed across four devices, with each device responsible for six consecutive transformer blocks. Communication occurs only at partition boundaries." fig-alt="Diagram showing transformer blocks 1-6 on GPU 1, blocks 7-12 on GPU 2, blocks 13-18 on GPU 3, and blocks 19-24 on GPU 4."}
+```{.tikz}
+\begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
+\tikzset{Line/.style={line width=1.0pt,black!50},
+  Box/.style={inner xsep=2pt, draw=VioletLine2, line width=0.75pt,
+    node distance=1.8, fill=VioletL2, align=flush center,
+    text width=19mm, minimum width=19mm, minimum height=8mm},
+}
+\node[Box,fill=RedL,draw=RedLine](B1){Blocks 1-6};
+\node[Box,right=of B1,fill=OrangeL,draw=OrangeLine](B2){Blocks 7-12};
+\node[Box,right=of B2,fill=GreenL,draw=GreenLine](B3){Blocks 13-18};
+\node[Box,right=of B3,fill=BlueL,draw=BlueLine](B4){Blocks 19-24};
+\node[Box,below=1.3 of B1,fill=VioletL2,draw=VioletLine2](G1){GPU 1};
+\node[Box,below=1.3 of B2,fill=VioletL2,draw=VioletLine2](G2){GPU 2};
+\node[Box,below=1.3 of B3,fill=VioletL2,draw=VioletLine2](G3){GPU 3};
+\node[Box,below=1.3 of B4,fill=VioletL2,draw=VioletLine2](G4){GPU 4};
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=13, line width=0.75pt,
+inner ysep=18, fill=BackColor,yshift=6, fit=(B1)(G1)](BB1){};
+\node[below=1pt of BB1.north,anchor=north]{Device 1};
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=13, line width=0.75pt,
+inner ysep=18, fill=BackColor,yshift=6, fit=(B2)(G2)](BB2){};
+\node[below=1pt of BB2.north,anchor=north]{Device 2};
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=13, line width=0.75pt,
+inner ysep=18, fill=BackColor,yshift=6, fit=(B3)(G3)](BB3){};
+\node[below=1pt of BB3.north,anchor=north]{Device 3};
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=13, line width=0.75pt,
+inner ysep=18, fill=BackColor,yshift=6, fit=(B4)(G4)](BB4){};
+\node[below=1pt of BB4.north,anchor=north]{Device 4};
+\draw[Line,-latex](BB1.east)--(BB2.west);
+\draw[Line,-latex](BB2.east)--(BB3.west);
+\draw[Line,-latex](BB3.east)--(BB4.west);
+\end{tikzpicture}
+```
+:::
+
+Within a single node, GPUs communicate via high-bandwidth interconnects like NVLink (up to 900 GB/s on modern systems), making gradient synchronization and activation transfers fast. This intra-node parallelism forms the building block for larger distributed systems.
+
+### Scaling Beyond a Single Node {#sec-ai-training-distributed-training-concepts}
+
+When single-node multi-GPU training remains insufficient, distributed training extends across multiple machines. This introduces network communication bottlenecks (typically 10-100 Gbps between nodes vs. 900 GB/s within a node) and fault tolerance requirements absent from single-node setups. Three additional strategies emerge:
+
+- **Pipeline parallelism**: Combines model partitioning with microbatching to reduce device idle time
+- **Tensor parallelism**: Splits individual operations (like large matrix multiplications) across devices
+- **Hybrid strategies**: Production systems combine approaches—for example, tensor parallelism within nodes and data parallelism across nodes
+
+The implementation details—gradient synchronization algorithms (AllReduce, ring-reduce), communication patterns (parameter server, peer-to-peer), fault tolerance mechanisms, and scaling efficiency analysis for training runs spanning thousands of GPUs—are covered comprehensively in Volume II (@sec-distributed-training).
 
 ### Decision Framework: Single-Machine vs. Distributed {#sec-ai-training-when-distributed}
 
@@ -3145,111 +3368,9 @@ Before accepting the complexity of distributed training, practitioners should sy
 
 Only when profiling reveals persistent bottlenecks despite these optimizations should distributed approaches be considered. The transition involves substantial complexity in infrastructure, debugging, and operations that must be justified by genuine scaling requirements. Volume II (@sec-distributed-training) covers the full spectrum of distributed training, including gradient synchronization algorithms (AllReduce, ring-reduce), communication patterns (parameter server, peer-to-peer), fault tolerance mechanisms, and scaling efficiency analysis for training runs spanning thousands of GPUs.
 
-## Performance Optimization {#sec-ai-training-performance-optimization-2ad5}
-
-Whether training on a single machine or preparing for distributed scaling, systematic performance analysis provides the foundation for informed optimization decisions. The techniques examined throughout this chapter—prefetching, mixed precision, gradient accumulation—each target specific bottlenecks. Identifying which bottleneck currently limits performance determines which technique provides the greatest benefit. This section establishes the analytical methodology for bottleneck identification and presents profiling tools that reveal where optimization effort should focus.
-
-::: {.callout-definition title="Model FLOPs Utilization (MFU)"}
-
-**Model FLOPs Utilization (MFU)** is the ratio of the _actual floating-point operations_ performed by a model during training to the _theoretical peak FLOPs_ of the hardware. Unlike standard hardware utilization, MFU excludes overhead from recomputation (gradient checkpointing) and padding, providing a true measure of _useful training work_ per second.
-
-:::
-
-Optimization techniques improve the efficiency of training systems. By targeting specific bottlenecks, optimizing hardware and software interactions, and employing systematic optimization strategies, these methods help practitioners build systems that effectively utilize resources while minimizing training time.
-
-### Bottleneck Analysis {#sec-ai-training-bottleneck-analysis-1134}
-
-Effective optimization of training systems requires a systematic approach to identifying and addressing performance bottlenecks. Bottlenecks can arise at various levels, including computation, memory, and data handling, and they directly impact the efficiency and scalability of the training process.
-
-Computational bottlenecks can significantly impact training efficiency. One common bottleneck occurs when computational resources, such as GPUs or TPUs, are underutilized. This can happen due to imbalanced workloads or inefficient parallelization strategies. For example, if one device completes its assigned computation faster than others, it remains idle while waiting for the slower devices to catch up. Such inefficiencies reduce the overall training throughput.
-
-Memory-related bottlenecks are particularly challenging when dealing with large models. Insufficient memory can lead to frequent swapping of data between device memory and slower storage, significantly slowing down the training process. In some cases, the memory required to store intermediate activations during the forward and backward passes can exceed the available capacity, forcing the system to employ techniques such as gradient checkpointing, which trade off computational efficiency for memory savings.
-
-Data handling bottlenecks can severely limit the utilization of computational resources. Training systems often rely on a continuous supply of data to keep computational resources fully utilized. If data loading and preprocessing are not optimized, computational devices may sit idle while waiting for new batches of data to arrive. @fig-tf-bottleneck-trace captures this pathology through TensorFlow's profiler: the gaps in GPU activity (white regions between compute blocks) reveal that the device frequently waits for input data, with utilization dropping to zero during data loading phases. This profiling evidence quantifies the problem and directs optimization effort toward the data pipeline.
-
-![**GPU Underutilization**: Profiling reveals identify data loading as a bottleneck, preventing full GPU utilization during training and increasing overall training time. The gaps in GPU activity indicate the device frequently waits for input data, suggesting optimization of the data pipeline is necessary to maximize computational throughput.](images/png/tf_profiler.png){#fig-tf-bottleneck-trace fig-alt="TensorFlow profiler screenshot showing GPU activity timeline. Colored blocks indicate computation periods with white gaps revealing idle time when GPU waits for data loading to complete."}
-
-Identifying these bottlenecks typically involves using profiling tools to analyze the performance of the training system. Tools integrated into machine learning frameworks, such as PyTorch's `torch.profiler` or TensorFlow's `tf.data` analysis utilities, can provide detailed insights into where time and resources are being spent during training. By pinpointing the specific stages or operations that are causing delays, practitioners can design targeted optimizations to address these issues effectively.
-
-### System-Level Techniques {#sec-ai-training-systemlevel-techniques-4145}
-
-After identifying the bottlenecks in a training system, the next step is to implement optimizations at the system level. These optimizations target the underlying hardware, data flow, and resource allocation to improve overall performance and scalability.
-
-One essential technique is profiling training workloads[^fn-profiling-tools]. Profiling involves collecting detailed metrics about the system's performance during training, such as computation times, memory usage, and communication overhead. These metrics help reveal inefficiencies, such as imbalanced resource usage or excessive time spent in specific stages of the training pipeline. Profiling tools such as NVIDIA Nsight Systems or TensorFlow Profiler can provide actionable insights, enabling developers to make informed adjustments to their training configurations.
-
-[^fn-profiling-tools]: **Training Profiling Tools**: NVIDIA Nsight Systems can identify that data loading consumes 20-40% of training time in poorly optimized pipelines, while TensorFlow Profiler reveals GPU utilization rates (optimal: >90%). Intel VTune showed that memory bandwidth often limits performance more than raw compute—typical deep learning workloads achieve only 30-50% of peak FLOPS due to memory bottlenecks.
-
-Leveraging hardware-specific features is another critical aspect of system-level optimization. Modern accelerators, such as GPUs and TPUs, include specialized capabilities that can significantly enhance performance when utilized effectively. For instance, mixed precision training, which uses lower-precision floating-point formats like FP16 or bfloat16 for computations, can dramatically reduce memory usage and improve throughput without sacrificing model accuracy. Similarly, tensor cores in NVIDIA GPUs are designed to accelerate matrix operations, a common computational workload in deep learning, making them ideal for optimizing forward and backward passes.
-
-Data pipeline optimization is also an important consideration at the system level. Ensuring that data is loaded, preprocessed, and delivered to the training devices efficiently can eliminate potential bottlenecks caused by slow data delivery. Techniques such as caching frequently used data, prefetching batches to overlap computation and data loading, and using efficient data storage formats like TFRecord or RecordIO can help maintain a steady flow of data to computational devices.
-
-### Software-Level Techniques {#sec-ai-training-softwarelevel-techniques-1743}
-
-In addition to system-level adjustments, software-level optimizations focus on improving the efficiency of training algorithms and their implementation within machine learning frameworks.
-
-One effective software-level optimization is the use of fused kernels. In traditional implementations, operations like matrix multiplications, activation functions, and gradient calculations are often executed as separate steps. Fused kernels combine these operations into a single optimized routine, reducing the overhead associated with launching multiple operations and improving cache utilization. Many frameworks, such as PyTorch and TensorFlow, automatically apply kernel fusion where possible, but developers can further optimize custom operations by explicitly using libraries like cuBLAS or cuDNN.
-
-Dynamic graph execution is another useful technique for software-level optimization. In frameworks that support dynamic computation graphs, such as PyTorch, the graph of operations is constructed on-the-fly during each training iteration. This flexibility allows for fine-grained optimizations based on the specific inputs and outputs of a given iteration. Dynamic graphs also enable more efficient handling of variable-length sequences, such as those encountered in natural language processing tasks.
-
-Gradient accumulation is an additional strategy that can be implemented at the software level to address memory constraints. Instead of updating model parameters after every batch, gradient accumulation allows the system to compute gradients over multiple smaller batches and update parameters only after aggregating them. This approach effectively increases the batch size without requiring additional memory, enabling training on larger datasets or models.
-
-### Scale-Up Strategies {#sec-ai-training-scaleup-strategies-aa96}
-
-Scaling techniques aim to extend the capabilities of training systems to handle larger datasets and models by optimizing the training configuration and resource allocation.
-
-One common scaling technique is batch size scaling. Increasing the batch size can reduce the number of synchronization steps required during training, as fewer updates are needed to process the same amount of data. This approach contrasts with the dynamic batching strategies used in inference serving, where the goal is optimizing throughput for variable-length requests rather than training convergence. However, larger batch sizes may introduce challenges, such as slower convergence or reduced generalization. Techniques like learning rate scaling and warmup schedules[^fn-lr-schedules] can help mitigate these issues, ensuring stable and effective training even with large batches.
-
-[^fn-lr-schedules]: Learning Rate Schedules: Critical for training stability and convergence. Cosine annealing (introduced in 2016) and linear warmup (from BERT 2018) became standard after showing 2--5% accuracy improvements. Large batch training requires linear scaling rule: multiply learning rate by batch size ratio (batch 512 → LR 0.1, batch 4096 → LR 0.8), discovered through extensive experimentation by Facebook and Google teams.
-
-::: {.callout-definition title="Transfer Learning"}
-
-**Transfer Learning** refers to the technique of adapting models _pretrained_ on large-scale datasets to new tasks, dramatically reducing _training time_ and _data requirements_ by leveraging learned representations.
-
-:::
-
-Layer-freezing strategies provide another method for scaling training systems efficiently. In many scenarios, particularly in transfer learning, the lower layers of a model capture general features and do not need frequent updates. By freezing these layers and allowing only the upper layers to train, memory and computational resources can be conserved, enabling the system to focus its efforts on fine-tuning the most critical parts of the model.
-
-Distributed training techniques provide one dimension of scaling, but the computational efficiency of individual devices within distributed systems determines overall performance. The optimization techniques and parallelization strategies we have explored achieve their full potential only when executed on hardware architectures designed to maximize throughput for machine learning workloads. This motivates our examination of specialized hardware platforms that accelerate the mathematical operations underlying all training scenarios.
-
-## Hardware Platforms for Training {#sec-ai-training-hardware-acceleration-24b3}
-
-The optimization techniques examined throughout this chapter achieve their full potential only when executed on appropriate hardware. Mixed-precision training leverages specialized Tensor Cores on GPUs; Flash Attention exploits GPU memory hierarchy through careful tiling; gradient accumulation benefits from high-bandwidth memory systems. Understanding how hardware enables these optimizations connects the algorithmic techniques we have explored to the physical systems that execute them.
-
-Training relies primarily on three categories of specialized hardware:
-
-**GPUs** provide massively parallel architectures with thousands of cores optimized for matrix operations. NVIDIA GPUs include Tensor Cores that accelerate reduced-precision computation, directly enabling the mixed-precision training techniques discussed earlier in this chapter. The CUDA ecosystem and communication libraries facilitate both single-device optimization and multi-GPU training coordination.
-
-**TPUs** are Google's custom accelerators featuring systolic arrays designed specifically for machine learning matrix operations. Their architecture optimizes for batch processing workloads and integrates tightly with TensorFlow, providing high throughput and energy efficiency for large-scale training. TPUs can be configured in pods for distributed training scenarios.
-
-**Specialized ASICs** trade generality for maximum training throughput. Designs like the Cerebras Wafer-Scale Engine consolidate computation and memory on a single wafer-scale chip, eliminating inter-device communication overhead. Other custom accelerators such as AWS Trainium and Intel Gaudi target specific cloud and on-premise deployment scenarios.
-
-Each platform embodies distinct design trade-offs: GPUs offer versatility and ecosystem maturity; TPUs provide efficiency within Google's ecosystem; ASICs deliver peak performance for specific workloads. The selection depends on model characteristics, scale requirements, and infrastructure constraints.
-
-How these platforms implement training optimizations, their architectural trade-offs, memory hierarchies, and performance characteristics is examined in detail in @sec-ai-acceleration. That chapter provides comprehensive coverage of hardware accelerator design principles, the roofline model for performance analysis, and hardware-software co-design strategies that extend the training-focused perspective introduced here.
-
 ## Fallacies and Pitfalls {#sec-ai-training-fallacies-pitfalls-c54d}
 
 Training involves counterintuitive resource trade-offs and scaling behavior that defy intuitions from traditional software systems. These fallacies and pitfalls capture errors that waste compute resources, delay research progress, and cause production training failures.
-
-@tbl-fallacies-roadmap provides a quick reference mapping each misconception to the chapter section where correct understanding is established.
-
-+------------------------------------------------------------------+------------------------------------------+----------------------------------+
-| **Misconception**                                                | **Reality**                              | **Chapter Reference**            |
-+:=================================================================+:=========================================+:=================================+
-| Larger models always yield better performance                    | Model capacity must match dataset size   | @sec-ai-training-mathematical-foundations-71a8 |
-+------------------------------------------------------------------+------------------------------------------+----------------------------------+
-| Distributed training automatically accelerates development       | Communication overhead limits speedup    | @sec-ai-training-scaling-beyond-single-machines |
-+------------------------------------------------------------------+------------------------------------------+----------------------------------+
-| Hyperparameters scale linearly with model/batch size             | Learning rate requires linear scaling rule | @sec-ai-training-performance-optimization-2ad5 |
-+------------------------------------------------------------------+------------------------------------------+----------------------------------+
-| Mixed precision is a simple toggle                               | Requires loss scaling and validation     | @sec-ai-training-pipeline-optimizations-3397 |
-+------------------------------------------------------------------+------------------------------------------+----------------------------------+
-| Memory and computation can be optimized independently            | Batch size affects both simultaneously   | @sec-ai-training-pipeline-optimizations-3397 |
-+------------------------------------------------------------------+------------------------------------------+----------------------------------+
-| Data pipeline optimization can wait                              | I/O often dominates training time        | @sec-ai-training-data-prefetching-pipeline-overlapping-e9c8 |
-+------------------------------------------------------------------+------------------------------------------+----------------------------------+
-
-: **Fallacies and Pitfalls Quick Reference**: Common training misconceptions and where this chapter establishes the correct understanding. {#tbl-fallacies-roadmap}
 
 **Fallacy:** _Larger models always yield better performance._
 
@@ -3257,11 +3378,11 @@ Engineers assume model scaling guarantees accuracy gains. In production, scaling
 
 **Pitfall:** _Assuming distributed training automatically accelerates development._
 
-Many practitioners add devices expecting proportional speedup. Communication overhead destroys this assumption. Small models on 8 GPUs with data parallelism spend 30 to 50 percent of time synchronizing gradients, achieving only 4 to 6x speedup instead of 8x. As @sec-ai-training-scaling-beyond-single-machines demonstrates, single-device training with optimized pipelines often beats poorly configured distributed setups. A 7B model training on a single A100 for 24 hours can outperform an 8-GPU cluster completing in 6 hours when synchronization overhead consumes theoretical speedup. Organizations that reflexively distribute training burn budget on infrastructure complexity without profiling whether data loading, memory, or computation is the actual bottleneck.
+Many practitioners add devices expecting proportional speedup. Communication overhead destroys this assumption. Small models on 8 GPUs with data parallelism spend 30 to 50 percent of time synchronizing gradients, achieving only 4 to 6x speedup instead of 8x. As @sec-ai-training-scaling-systems demonstrates, single-device training with optimized pipelines often beats poorly configured distributed setups. A 7B model training on a single A100 for 24 hours can outperform an 8-GPU cluster completing in 6 hours when synchronization overhead consumes theoretical speedup. Organizations that reflexively distribute training burn budget on infrastructure complexity without profiling whether data loading, memory, or computation is the actual bottleneck.
 
 **Fallacy:** _Hyperparameters scale linearly with model size and batch size._
 
-This belief transfers learning rates from small experiments to large-scale training without adjustment. Large batch training requires the linear scaling rule: multiply learning rate by batch size ratio. Training ResNet-50 with batch 512 uses learning rate 0.1; scaling to batch 4096 requires learning rate 0.8, not 0.1. Ignoring this relationship causes training instability or divergence. As discussed in @sec-ai-training-performance-optimization-2ad5, large-scale training requires warmup schedules and adjusted momentum to maintain convergence. Teams that apply small-scale hyperparameters to large models experience training failures 3 to 5 days into multi-week runs, wasting substantial compute budgets.
+This belief transfers learning rates from small experiments to large-scale training without adjustment. Large batch training requires the linear scaling rule: multiply learning rate by batch size ratio. Training ResNet-50 with batch 512 uses learning rate 0.1; scaling to batch 4096 requires learning rate 0.8, not 0.1. Ignoring this relationship causes training instability or divergence. As discussed in @sec-ai-training-pipeline-optimizations-3397, large-scale training requires warmup schedules and adjusted momentum to maintain convergence. Teams that apply small-scale hyperparameters to large models experience training failures 3 to 5 days into multi-week runs, wasting substantial compute budgets.
 
 **Pitfall:** _Treating mixed precision training as a simple toggle without validation._
 
@@ -3285,36 +3406,6 @@ This co-design principle—where algorithms, software frameworks, and hardware a
 
 The training optimizations explored throughout this chapter provide the foundation for the model-level efficiency techniques and deployment strategies examined in subsequent chapters. These systems principles extend naturally from training infrastructure to production inference systems, demonstrating how the engineering insights gained from optimizing training workflows inform the broader machine learning system lifecycle.
 
-### GPT-2 Training Summary {.unnumbered}
-
-The GPT-2 case study demonstrates how optimization techniques combine to transform infeasible training requirements into practical configurations. @tbl-gpt2-summary quantifies the impact across memory, time, energy, and cost dimensions:
-
-+------------------------------+------------------+------------------+--------------------------------------------+
-| **Metric**                   | **FP32 Baseline**| **Optimized**    | **Technique Applied**                      |
-+:=============================+=================:+=================:+:===========================================+
-| Parameters                   | 6.0 GB           | 3.0 GB           | Mixed precision (FP16)                     |
-+------------------------------+------------------+------------------+--------------------------------------------+
-| Gradients                    | 6.0 GB           | 3.0 GB           | Mixed precision (FP16)                     |
-+------------------------------+------------------+------------------+--------------------------------------------+
-| Optimizer State (Adam)       | 24.0 GB          | 12.0 GB          | FP32 required for stability                |
-+------------------------------+------------------+------------------+--------------------------------------------+
-| Activations (batch=32)       | 65.0 GB          | 8.0 GB           | Gradient checkpointing + FP16              |
-+------------------------------+------------------+------------------+--------------------------------------------+
-| **Total Memory**             | **101.0 GB**     | **26.0 GB**      | —                                          |
-+------------------------------+------------------+------------------+--------------------------------------------+
-| Training Time (32 V100s)     | 14 days          | 8.4 days         | 2.4× Tensor Core speedup                   |
-+------------------------------+------------------+------------------+--------------------------------------------+
-| Energy Consumption           | 275,000 kWh      | 115,000 kWh      | Reduced time + improved efficiency         |
-+------------------------------+------------------+------------------+--------------------------------------------+
-| Electricity Cost (@$0.10/kWh)| $27,500          | $11,500          | —                                          |
-+------------------------------+------------------+------------------+--------------------------------------------+
-| Carbon Footprint             | ~125 tons CO₂    | ~52 tons CO₂     | Regional grid average (0.45 kg/kWh)        |
-+------------------------------+------------------+------------------+--------------------------------------------+
-
-: **GPT-2 Training Optimization Summary**: Applying mixed-precision training and gradient checkpointing reduces memory from 101 GB to 26 GB, training time by 40%, energy consumption by 58%, and carbon footprint proportionally. The techniques examined in this chapter deliver compounding benefits across all efficiency dimensions. {#tbl-gpt2-summary}
-
-This 4× memory reduction, combined with 2.4× computational speedup and 58% energy reduction, exemplifies how systematic optimization transforms hardware constraints into engineering design parameters. Modern training systems engineering treats energy and carbon as first-class design constraints alongside memory and compute—a perspective increasingly important as model scale grows and environmental impact becomes a consideration in ML system design.
-
 [^fn-transformer-training]: **Transformer Training**: Large-scale transformer training requires specialized techniques including gradient checkpointing (saving memory by recomputing activations), mixed-precision training (FP16 forward/backward with FP32 accumulation), and sequence parallelism distributing long contexts across devices. GPT-3 training used 1024 V100s for months, detailed in @sec-dnn-architectures.
 
 [^fn-convolution]: **Convolutional Operations**: Sliding kernel operations applying learned filters across spatial dimensions to detect hierarchical features. A 3$\times$ 3 convolution requires $9K^2$ multiplications for K-channel inputs; depthwise-separable variants (MobileNet) reduce this by 8--9$\times$. GPU implementations achieve >90% theoretical throughput through im2col matrix transformations, detailed in @sec-dnn-architectures.
@@ -3323,6 +3414,7 @@ This 4× memory reduction, combined with 2.4× computational speedup and 58% ene
 
 ::: {.callout-important title="Key Takeaways"}
 * The **Iron Law of Training Performance** (Training Time = Total Operations / (Peak Throughput × Utilization)) provides a framework for understanding which optimization techniques affect which performance components
+* **Systematic optimization** follows an iterative methodology: profile to identify bottlenecks, apply targeted techniques, and re-profile—never optimize blindly
 * Training efficiency depends on optimizing the entire pipeline from data loading through gradient computation and parameter updates
 * Memory management techniques like gradient checkpointing and mixed precision are essential for training large models within hardware constraints
 * **Energy and cost** scale with training time; the same optimizations that improve throughput also reduce environmental impact and operational expenses
