@@ -133,7 +133,7 @@ Quantization (e.g., INT8) hits two birds with one stone: it reduces the **Comput
 
 **3. Efficient Hardware Implementation:** Ensures operations run efficiently on target processors. Techniques like **operator fusion**, **sparsity exploitation**, and **hardware-aware scheduling** align computational patterns with hardware capabilities (memory hierarchy, vector units) to maximize utilization and throughput.
 
-These dimensions are interdependent. Pruning reduces complexity but may require architectural changes for hardware efficiency. Quantization reduces precision but impacts execution logic. The most effective strategies combine techniques across all three layers.
+These dimensions are interdependent. Pruning reduces complexity but may require architectural changes for hardware efficiency. Quantization reduces precision but impacts execution logic. The most effective strategies combine techniques across all three layers. For practitioners seeking immediate guidance on which techniques to apply, @sec-model-compression-technique-selection-guide provides a decision framework that maps deployment constraints to specific technique recommendations. The intervening sections provide the technical foundation needed to apply that framework effectively.
 
 ## Deployment Context {#sec-model-compression-deployment-context-c1b0}
 
@@ -3422,11 +3422,13 @@ PTQ is not always suitable for training purposes. Since PTQ applies quantization
 
 Post-training quantization remains one of the most practical and widely used techniques for improving inference efficiency. It provides significant memory and computational savings with minimal overhead, making it an ideal choice for deploying machine learning models in resource-constrained environments. However, the success of PTQ depends on model architecture, task sensitivity, and hardware compatibility. In scenarios where accuracy degradation is unacceptable, alternative quantization strategies, such as quantization-aware training, may be required.
 
-Post-training quantization provides the foundation for more advanced quantization methods. The core concepts—quantization workflows, numerical format trade-offs, and calibration methods—remain essential throughout all precision optimization techniques. For rapid deployment scenarios with production deadlines under two weeks and acceptable accuracy loss of 1-2%, PTQ with min-max calibration often provides a complete solution. Production systems requiring less than 1% accuracy loss should consider Quantization-Aware Training, which recovers accuracy through fine-tuning with quantization simulation at the cost of 20-50% additional training time. Extreme constraints like sub-1MB models or sub-10mW power budgets may require INT4 or binary quantization, accepting 5-20% accuracy degradation that necessitates architectural changes.
+Post-training quantization provides the foundation for more advanced quantization methods. The core concepts of quantization workflows, numerical format trade-offs, and calibration methods remain essential throughout all precision optimization techniques. For rapid deployment scenarios with production deadlines under two weeks and acceptable accuracy loss of 1-2%, PTQ with min-max calibration often provides a complete solution. Extreme constraints like sub-1MB models or sub-10mW power budgets may require INT4 or binary quantization, accepting 5-20% accuracy degradation that necessitates architectural changes.
+
+When PTQ's accuracy preservation is insufficient, particularly for transformer-based models where attention mechanisms amplify small numerical differences, practitioners need a more powerful approach. Quantization-Aware Training addresses exactly this limitation by incorporating quantization effects during training, allowing the model to adapt its weight distributions to low-precision constraints before deployment.
 
 #### Quantization-Aware Training {#sec-model-compression-quantizationaware-training-7148}
 
-QAT integrates quantization constraints directly into the training process, simulating low-precision arithmetic during forward passes to allow the model to adapt to quantization effects [@jacob2018quantization]. This approach proves particularly important for models requiring fine-grained numerical precision, such as transformers used in NLP and speech recognition systems [@nagel2021whitepaper]. @fig-qat illustrates the QAT process: quantization is applied to a pre-trained model, followed by fine-tuning to adapt weights to low-precision constraints.
+QAT integrates quantization constraints directly into the training process, simulating low-precision arithmetic during forward passes to allow the model to adapt to quantization effects [@jacob2018quantization]. Production systems requiring less than 1% accuracy loss benefit most from this approach, which recovers accuracy through fine-tuning with quantization simulation at the cost of 20-50% additional training time. This approach proves particularly important for models requiring fine-grained numerical precision, such as transformers used in NLP and speech recognition systems [@nagel2021whitepaper]. @fig-qat illustrates the QAT process: quantization is applied to a pre-trained model, followed by fine-tuning to adapt weights to low-precision constraints.
 
 ::: {#fig-qat fig-env="figure" fig-pos="htb" fig-cap="**Quantization-Aware Training**: Retraining a pre-trained model with simulated low-precision arithmetic adapts weights to mitigate accuracy loss during deployment with reduced numerical precision, enabling efficient inference on resource-constrained devices. This process refines the model to become robust to the effects of quantization, maintaining performance despite lower precision representations." fig-alt="Vertical flowchart showing QAT process. Pre-trained model feeds into Quantization step, then Retraining/Finetuning step with Training data input, producing final Quantized model output."}
 ```{.tikz}
@@ -3562,7 +3564,7 @@ x_{fake} &= (q_{level} - z) \times s
 $$
 where $z$ is the zero-point offset enabling asymmetric range representation.
 
-@lst-qat-conv-forward demonstrates the computational graph for a quantized convolution layer, which contains fake quantization nodes for both weights and activations:
+The following implementation demonstrates how frameworks simulate quantization during training while maintaining gradient flow. As you read the code, focus on two key aspects: first, the forward pass applies quantization to both inputs and weights before convolution, mimicking INT8 inference behavior; second, the implementation maintains floating-point precision throughout, allowing gradients to flow during backpropagation through the Straight-Through Estimator discussed earlier. @lst-qat-conv-forward demonstrates the computational graph for a quantized convolution layer, which contains fake quantization nodes for both weights and activations:
 
 ::: {#lst-qat-conv-forward lst-cap="**QAT Convolution Forward Pass**: Fake quantization nodes simulate integer quantization during training while maintaining gradient flow through the straight-through estimator."}
 ```{.python}
@@ -3731,11 +3733,11 @@ Despite enabling ultra-low-power machine learning for embedded systems and mobil
 
 Accuracy loss remains a critical concern. These methods suit tasks where high precision is not critical or where QAT can compensate for precision constraints. Despite challenges, the ability to drastically reduce model size while maintaining acceptable accuracy makes them attractive for edge AI and resource-constrained environments [@Jacob2018]. Future advances in specialized hardware and training techniques will likely enhance their role in efficient, scalable AI.
 
-We have now covered two optimization dimensions: structural optimization (pruning, distillation, NAS) determines *what* to compute, and precision optimization (quantization) determines *how precisely* to compute it. But here is a sobering reality: you can prune 50% of parameters and quantize to INT8, yet see only a 20% latency improvement on actual hardware.
+We have now covered two optimization dimensions: structural optimization (pruning, distillation, NAS) determines *what* to compute, and precision optimization (quantization) determines *how precisely* to compute it. Together, these techniques can reduce a model's theoretical complexity by 80% or more, from removing half the parameters through pruning to compressing weights from 32-bit floats to 4-bit integers through quantization.
 
-Why? Because theoretical FLOPs and actual execution time are not the same thing. Sparse matrices stored in dense format waste memory bandwidth. Operations that could run in parallel execute sequentially. Simple inputs receive the same computational budget as complex ones. The gap between "optimized on paper" and "optimized in practice" is the domain of our third and final optimization dimension: **architectural efficiency**.
+Yet practitioners often discover a frustrating gap between theory and practice: a model pruned to 50% parameters and quantized to INT8 may achieve only 20% latency improvement on actual hardware. This theory-practice gap reveals that optimization must extend beyond the model itself to how computations execute on physical hardware.
 
-This dimension ensures that your structural and precision optimizations actually translate into real-world speedups by aligning computation patterns with hardware capabilities.
+Why does this gap exist? Sparse matrices stored in dense format waste memory bandwidth loading zeros. Operations that could run in parallel execute sequentially due to data dependencies. Simple inputs receive the same computational budget as complex ones. The gap between "optimized on paper" and "optimized in practice" is the domain of our third and final optimization dimension: **architectural efficiency**. This dimension ensures that structural and precision optimizations actually translate into real-world speedups by aligning computation patterns with hardware capabilities.
 
 ## Architectural Efficiency Techniques {#sec-model-compression-architectural-efficiency-techniques-ba84}
 
@@ -4012,9 +4014,11 @@ Hardware considerations affect fusion strategies. GPUs with large register files
 
 Fusion trade-offs include increased compilation time, reduced flexibility for dynamic shapes, and potential code bloat from specialized kernels. Advanced inference frameworks balance these trade-offs by selectively fusing hot paths while maintaining flexibility for dynamic workloads.
 
+Operator fusion optimizes how operations execute by reducing memory traffic between fixed computational steps. A complementary approach asks a different question: must we execute all computational steps at all? This leads to adaptive computation methods that vary the amount of work performed based on input characteristics.
+
 ### Adaptive Computation Methods {#sec-model-compression-adaptive-computation-methods-4513}
 
-Dynamic computation enables models to adapt computational load based on input complexity, allocating resources more effectively than traditional fixed-architecture approaches. While conventional models apply uniform processing to all inputs regardless of complexity—wasting resources on simple cases and increasing power consumption—dynamic computation allows models to skip layers or operations for simple inputs while processing deeper networks for complex cases.
+While operator fusion optimizes memory access patterns for fixed computation graphs, adaptive computation methods optimize the computation itself by allocating resources based on input complexity. While conventional models apply uniform processing to all inputs regardless of complexity—wasting resources on simple cases and increasing power consumption—dynamic computation allows models to skip layers or operations for simple inputs while processing deeper networks for complex cases.
 
 This adaptive approach optimizes computational efficiency, reduces energy consumption, minimizes latency, and preserves predictive performance. Dynamic adjustment based on input complexity proves essential for resource-constrained hardware in mobile devices, embedded systems, and autonomous vehicles where computational efficiency and real-time processing are critical.
 
@@ -5724,11 +5728,11 @@ The following decision framework guides technique selection based on primary dep
 - Magnitude-based pruning with fine-tuning (days)
 - Avoid: NAS, full QAT, architecture redesign
 
-This guide provides starting points; actual technique selection requires understanding the interactions between techniques when combined, which the following section addresses.
+This guide provides starting points for individual technique selection. However, production deployments rarely rely on a single technique. Combining pruning with quantization, or distillation with hardware-aware design, introduces interaction effects that can either amplify benefits or create unexpected accuracy degradation. The following section addresses how to sequence and combine techniques effectively.
 
 ## Optimization Strategies {#sec-model-compression-multitechnique-integration-strategies-70dc}
 
-The most significant optimization gains emerge from combining multiple techniques across our three-dimensional framework. Model representation techniques (pruning) reduce parameter count, numerical precision techniques (quantization) reduce computational cost per operation, and architectural efficiency techniques (operator fusion, dynamic computation) reduce execution overhead. These techniques operate at different optimization dimensions, providing multiplicative benefits when sequenced appropriately.
+The preceding framework guides individual technique selection, but the most significant optimization gains emerge from combining multiple techniques across our three-dimensional framework. Model representation techniques (pruning) reduce parameter count, numerical precision techniques (quantization) reduce computational cost per operation, and architectural efficiency techniques (operator fusion, dynamic computation) reduce execution overhead. These techniques operate at different optimization dimensions, providing multiplicative benefits when sequenced appropriately.
 
 Each optimization technique addresses distinct aspects of model efficiency: quantization reduces numerical precision, pruning eliminates redundant parameters, knowledge distillation transfers capabilities to compact architectures, and NAS optimizes structural design. These techniques exhibit complementary characteristics that enable powerful combinations.
 

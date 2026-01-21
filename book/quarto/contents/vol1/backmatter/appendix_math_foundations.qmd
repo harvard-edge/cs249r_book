@@ -1,343 +1,466 @@
----
----
-
 # Mathematical Foundations {#sec-appendix-math-foundations}
 
-::: {layout-narrow}
-::: {.column-margin}
-_This appendix provides the mathematical foundations that underpin ML systems engineering. These tools appear throughout the textbook and are collected here for reference._
+This appendix provides the mathematical tools you will need to reason about ML system performance. Rather than an exhaustive reference, think of this as a practitioner's toolkit: the concepts that come up again and again when debugging slow training jobs, optimizing inference latency, or choosing between hardware configurations.
+
+## Quick Reference {.unnumbered}
+
+Before diving in, here is a map of what this appendix covers and where each concept appears in the main text.
+
++-------------------------------+--------------------------------------------+-------------------------------------------+
+| Topic                         | What It Helps You Do                       | Where It Appears                          |
++:==============================+:===========================================+:==========================================+
+| Roofline Model                | Determine if a workload is memory-bound    | @sec-ai-acceleration, @sec-ai-training,   |
+|                               | or compute-bound                           | @sec-serving                              |
++-------------------------------+--------------------------------------------+-------------------------------------------+
+| Amdahl's Law                  | Calculate maximum speedup from             | @sec-ai-acceleration, @sec-ai-training    |
+|                               | parallelization                            |                                           |
++-------------------------------+--------------------------------------------+-------------------------------------------+
+| Gustafson's Law               | Understand weak scaling for large models   | @sec-ai-training                          |
++-------------------------------+--------------------------------------------+-------------------------------------------+
+| Little's Law                  | Size serving infrastructure for target QPS | @sec-serving                              |
++-------------------------------+--------------------------------------------+-------------------------------------------+
+| Memory Hierarchy              | Optimize data movement and cache usage     | @sec-ai-acceleration, @sec-efficient-ai   |
++-------------------------------+--------------------------------------------+-------------------------------------------+
+| Numerical Formats             | Choose precision for training vs inference | @sec-model-optimizations, @sec-serving    |
++-------------------------------+--------------------------------------------+-------------------------------------------+
+| GEMM Operations               | Understand the core computation in         | @sec-dl-primer, @sec-ai-acceleration      |
+|                               | neural networks                            |                                           |
++-------------------------------+--------------------------------------------+-------------------------------------------+
+| Backpropagation               | Debug gradient issues and memory usage     | @sec-dl-primer, @sec-ai-training          |
++-------------------------------+--------------------------------------------+-------------------------------------------+
+| Sparse Formats (CSR)          | Work with recommendation systems and       | @sec-model-optimizations                  |
+|                               | pruned models                              |                                           |
++-------------------------------+--------------------------------------------+-------------------------------------------+
+| Computational Graphs          | Understand compiler optimizations          | @sec-ai-frameworks, @sec-ai-acceleration  |
++-------------------------------+--------------------------------------------+-------------------------------------------+
+
+: **Appendix Quick Reference**: Each mathematical concept in this appendix, what engineering decisions it informs, and where it appears in the main text. {#tbl-appendix-overview}
+
+---
+
+## Performance Analysis Models {#sec-appendix-performance-models}
+
+::: {.callout-tip title="Why This Matters"}
+You have trained a model that achieves good accuracy, but inference takes 200ms when your SLA requires 50ms. Where do you start? Performance analysis models give you a systematic way to diagnose whether you are limited by computation, memory bandwidth, or something else entirely. Without these tools, optimization becomes guesswork.
 :::
 
-\noindent
-:::
+The models in this section form the foundation of quantitative systems thinking. Master them, and you will be able to look at almost any ML workload and predict where the bottlenecks lie.
 
-## Purpose {.unnumbered}
+### The Roofline Model {#sec-appendix-roofline}
 
-_Why do ML systems engineers need a shared vocabulary of mathematical tools?_
+The Roofline Model [@williams2009roofline] answers a deceptively simple question: *how fast can this workload possibly run on this hardware?* The answer depends on whether you run out of compute or memory bandwidth first.
 
-The chapters in this textbook repeatedly invoke a small set of analytical frameworks: the Roofline Model appears when analyzing hardware utilization, Amdahl's Law emerges in discussions of parallelization, and arithmetic intensity determines whether a workload is compute-bound or memory-bound. These tools are not chapter-specific—they are *universal lenses* for reasoning about ML system performance. An engineer debugging a slow training job needs the Roofline Model. An architect choosing between more GPUs or faster interconnects needs Amdahl's Law. A practitioner selecting between FP32 and INT8 needs to understand numerical representation trade-offs.
+Every operation has an **arithmetic intensity**: the ratio of computations performed to bytes moved from memory. Matrix multiplication has high arithmetic intensity because you can reuse each loaded element many times. Element-wise operations like ReLU have low intensity because you load a number, do one operation, and write it back.
 
-This appendix consolidates these foundational tools in one reference. Each section provides: (1) the mathematical formulation, (2) worked examples with realistic ML workloads, (3) the key insights for engineering decisions, and (4) cross-references to chapters where the tool is applied. Readers can consult this appendix when encountering these concepts in any chapter, or read it sequentially as preparation before the technical chapters.
+As illustrated in @fig-roofline, the model plots achievable performance against arithmetic intensity. The resulting "roofline" shape reveals two distinct operating regions.
 
-::: {.callout-tip title="How to Use This Appendix"}
-
-- **As a reference**: Jump directly to the section you need when a chapter invokes these concepts
-- **As preparation**: Read sections A.1–A.2 before the Hardware Acceleration chapter (@sec-ai-acceleration) for maximum benefit
-- **As review**: Revisit after completing Part III (Optimize) to consolidate your understanding
-
-:::
-
-## A.1 Performance Analysis Models {#sec-appendix-performance-models}
-
-Quantitative performance analysis is fundamental to predicting system behavior and diagnosing bottlenecks. This section details the primary models used to characterize the execution of machine learning workloads.
-
-### A.1.1 The Roofline Model {#sec-appendix-roofline}
-
-The **Roofline Model** [@williams2009roofline] provides a visual framework for understanding the relationship between computational throughput and memory bandwidth. It determines whether a workload is limited by the processor's peak performance or the memory system's bandwidth.
-
-As illustrated in @fig-roofline, the model plots achievable performance against **arithmetic intensity**. The resulting "roofline" shape defines the operational boundaries of the hardware.
-
-::: {#fig-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Model**: The plot visualizes the memory-bound (sloped) and compute-bound (horizontal) regions of a hardware platform. Workload A, situated on the slope, is constrained by memory bandwidth, while Workload B, on the plateau, is limited by peak compute capability."} 
+::: {#fig-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Model**: The plot visualizes the memory-bound (sloped) and compute-bound (horizontal) regions of a hardware platform. Workload A, situated on the slope, is constrained by memory bandwidth, while Workload B, on the plateau, is limited by peak compute capability."
 ```{.tikz}
-\begin{tikzpicture}[scale=0.9, font=\small]
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=1.0]
+  % Define Project Colors
+  \definecolor{BlueLine}{RGB}{66, 133, 244}
+  \definecolor{BlueFill}{RGB}{232, 240, 254}
+  \definecolor{RedLine}{RGB}{234, 67, 53}
+  \definecolor{RedFill}{RGB}{252, 232, 230}
+  \definecolor{GreenLine}{RGB}{52, 168, 83}
+  \definecolor{GreenFill}{RGB}{230, 244, 234}
+  \definecolor{YellowLine}{RGB}{251, 188, 4}
+  \definecolor{GrayLine}{RGB}{95, 99, 104}
+  \definecolor{TextBlack}{RGB}{32, 33, 36}
+
+  % Styles
+  \tikzset{
+    Axis/.style={line width=1.0pt, draw=GrayLine, ->, >=stealth},
+    Guide/.style={dashed, draw=GrayLine!60, line width=0.6pt},
+    Label/.style={text=TextBlack, align=center, font=\footnotesize\usefont{T1}{phv}{m}{n}},
+    Dot/.style={circle, fill=#1, draw=white, line width=0.5pt, minimum size=5pt, inner sep=0pt}
+  }
+
+  % Grid
+  \draw[step=0.5, gray!10, very thin] (0,0) grid (6,4);
+  
   % Axes
-  \draw[->, thick] (0,0) -- (6,0) node[right] {Arithmetic Intensity (Ops/Byte)};
-  \draw[->, thick] (0,0) -- (0,4) node[above] {Performance (FLOP/s)};
-  
+  \draw[Axis] (0,0) -- (6,0) node[right, text=TextBlack] {Arithmetic Intensity (Ops/Byte)};
+  \draw[Axis] (0,0) -- (0,4.2) node[above, text=TextBlack] {Performance (FLOP/s)};
+
   % Roofline
-  \draw[blue, very thick] (0,0) -- (3,3) node[midway, above, rotate=45] {Memory Bound (Bandwidth)};
-  \draw[red, very thick] (3,3) -- (5.5,3) node[midway, above] {Compute Bound (Peak FLOPs)};
-  
+  % Memory Bound Line
+  \draw[BlueLine, line width=2pt] (0,0) -- (3,3);
+  % Compute Bound Line
+  \draw[RedLine, line width=2pt] (3,3) -- (5.8,3);
+
+  % Region Labels
+  \node[Label, text=BlueLine, rotate=45, anchor=south, yshift=2pt] at (1.5, 1.5) {\textbf{Memory Bound}};
+  \node[Label, text=RedLine, anchor=south, yshift=2pt] at (4.4, 3) {\textbf{Compute Bound}};
+
   % Ridge Point
-  \filldraw[black] (3,3) circle (2pt);
-  \draw[dashed] (3,0) -- (3,3);
-  \node[below] at (3,0) {Ridge Point};
-  
-  % Workload dots
-  \filldraw[orange] (1.5, 1.5) circle (2pt) node[right] {A (Mem Bound)};
-  \filldraw[green!60!black] (4.5, 3) circle (2pt) node[below] {B (Compute Bound)};
+  \node[Dot=TextBlack] at (3,3) {};
+  \draw[Guide] (3,0) -- (3,3);
+  \node[below, font=\scriptsize\usefont{T1}{phv}{m}{n}, text=TextBlack] at (3,0) {Ridge Point};
+
+  % Workloads
+  % Workload A (Memory Bound)
+  \node[Dot=YellowLine] (WA) at (1.5, 1.5) {};
+  \node[Label, right, xshift=4pt, align=left] at (1.5, 1.3) {Workload A\\(Mem Bound)};
+  \draw[->, gray, thin, shorten >=2pt] (1.6, 1.3) -- (WA);
+
+  % Workload B (Compute Bound)
+  \node[Dot=GreenLine] (WB) at (4.5, 3) {};
+  \node[Label, below, yshift=-4pt] at (4.5, 3) {Workload B (Compute Bound)};
+
 \end{tikzpicture}
 ```
 :::
 
-#### Mathematical Foundation
-
-The model relates performance to **arithmetic intensity** (FLOP/byte), defined as the ratio of floating-point operations to bytes of data accessed from memory:
+The key equations are straightforward. Arithmetic intensity is:
 
 $$ \text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{Bytes Accessed}} $$ {#eq-arithmetic-intensity}
 
-The boundary of attainable performance is defined by two regions:
+In the **memory-bound region** (the sloped portion), performance scales with bandwidth:
 
-1. **Memory-bound region** (sloped segment): Performance is proportional to bandwidth.
 $$ \text{Attainable Performance} = \text{Bandwidth} \times \text{Arithmetic Intensity} $$ {#eq-memory-bound}
 
-2. **Compute-bound region** (horizontal segment): Performance is capped by peak throughput.
+In the **compute-bound region** (the flat portion), you hit the hardware ceiling:
+
 $$ \text{Attainable Performance} = \text{Peak FLOP/s} $$ {#eq-compute-bound}
 
-The intersection of these constraints is the **ridge point**, which characterizes the hardware's balance:
+The transition point, called the **ridge point**, characterizes the hardware's balance between compute and memory:
 
 $$ \text{Ridge Point} = \frac{\text{Peak FLOP/s}}{\text{Memory Bandwidth}} $$ {#eq-ridge-point}
 
-#### Worked Example: Matrix Multiplication vs. Element-wise Operations
+#### A Concrete Example
 
-Consider an NVIDIA A100 GPU with FP16 Tensor Core performance of 312 TFLOP/s and HBM2e bandwidth of 2.0 TB/s. The ridge point is $312 \div 2.0 = 156$ FLOP/byte.
+Consider an NVIDIA A100 GPU with FP16 Tensor Core performance of 312 TFLOP/s and HBM2e bandwidth of 2.0 TB/s. The ridge point is $312 / 2.0 = 156$ FLOP/byte.
 
-**Operation 1: GEMM**. For two $4096 \times 4096$ matrices, the arithmetic intensity is $\approx 1365$ FLOP/byte. Since $1365 > 156$, this operation is **compute-bound**.
+Now compare two common operations:
 
-**Operation 2: ReLU**. For a $4096 \times 4096$ tensor, the intensity is $\approx 0.25$ op/byte. Since $0.25 \ll 156$, this is **memory-bound**, achieving only $\approx 0.16\%$ of peak TFLOP/s.
+**GEMM (Matrix Multiplication)**: For two $4096 \times 4096$ matrices, arithmetic intensity is approximately $1365$ FLOP/byte. Since $1365 > 156$, this operation is compute-bound. You are using the hardware efficiently.
 
-#### Key Engineering Insights
+**ReLU (Element-wise)**: For a $4096 \times 4096$ tensor, intensity is approximately $0.25$ op/byte. Since $0.25 \ll 156$, this operation is severely memory-bound, achieving only about $0.16\%$ of peak TFLOP/s. The hardware is mostly waiting for data.
 
-1. **Batching Increases Intensity**: Amortizing weight loading across multiple samples shifts workloads toward the compute-bound region.
-2. **Kernel Fusion**: Combining operations (e.g., Activation after MatMul) reduces memory traffic, effectively increasing arithmetic intensity.
+This explains why modern frameworks fuse operations: combining ReLU with the preceding MatMul avoids writing intermediate results to memory, effectively increasing arithmetic intensity.
 
-::: {.callout-note title="Cross-References"}
-The Roofline Model is applied in: @sec-ai-acceleration (Hardware Analysis), @sec-ai-training (Pipeline Optimization), and @sec-serving (Inference Optimization).
-:::
+### Amdahl's Law and Gustafson's Law {#sec-appendix-scaling-laws}
 
-### A.1.2 Amdahl's Law {#sec-appendix-amdahl}
+You have access to a cluster with 64 GPUs. How much faster will training be compared to a single GPU? The answer is almost never "64 times faster," and these two laws explain why.
 
-**Amdahl's Law** [@amdahl1967validity] quantifies the theoretical speedup of a system when only a part of it is improved. It establishes that the serial portion of a workload acts as an asymptotic limit on the overall speedup achievable through parallelization.
-
-#### Mathematical Foundation
-
-If a fraction $p$ of a workload can be parallelized, the maximum speedup with $n$ processors is:
+**Amdahl's Law** [@amdahl1967validity] captures the fundamental limit of parallelization. If a fraction $p$ of your workload can be parallelized, the maximum speedup with $n$ processors is:
 
 $$ \text{Speedup}(n) = \frac{1}{(1-p) + \frac{p}{n}} $$ {#eq-amdahl}
 
-As $n \to \infty$, the maximum speedup approaches $\frac{1}{1-p}$. For example, if 10% of a training iteration is serial (e.g., data loading on CPU), the maximum possible speedup is 10×, regardless of the number of GPUs added.
+As $n \to \infty$, speedup approaches $\frac{1}{1-p}$. If 10% of your training iteration is serial (data loading on CPU, gradient aggregation), the maximum possible speedup is 10x. Adding more GPUs beyond that point yields diminishing returns.
 
-#### Gustafson's Law
+This sounds pessimistic, but **Gustafson's Law** [@gustafson1988reevaluating] offers a more optimistic view for ML workloads. In practice, when you get more hardware, you often train larger models or use larger batches rather than just trying to finish faster. Under this "weak scaling" model, speedup becomes:
 
-**Gustafson's Law** [@gustafson1988reevaluating] offers a complementary view: if the problem size scales with the number of processors (weak scaling), the speedup is linear: $\text{Speedup}(n) = (1-p) + p \times n$. This model more accurately describes large-scale ML training, where increased resources are typically used to train larger models or batches rather than just reducing the time for a fixed problem.
+$$ \text{Speedup}(n) = (1-p) + p \times n $$ {#eq-gustafson}
 
-### A.1.3 Little's Law {#sec-appendix-little}
+This linear scaling better describes large-scale ML training, where increased resources enable training models that would otherwise be impossible, not just faster training of the same model.
 
-**Little's Law** [@little1961proof] is a fundamental result in queuing theory that relates the average number of items in a system ($L$), the arrival rate ($\lambda$), and the average wait time ($W$):
+### Little's Law {#sec-appendix-little}
+
+Shifting from training to serving, **Little's Law** [@little1961proof] is the essential tool for capacity planning. It relates the average number of items in a system ($L$), the arrival rate ($\lambda$), and the average wait time ($W$):
 
 $$ L = \lambda \times W $$ {#eq-little}
 
-In ML serving, this relates target QPS and latency to required concurrency. To sustain 1,000 QPS with a 20ms average latency, a system must be capable of handling $1000 \times 0.02 = 20$ concurrent requests.
+For ML serving: to sustain 1,000 queries per second (QPS) with 20ms average latency, your system must handle $1000 \times 0.02 = 20$ concurrent requests. This tells you how many inference workers you need and helps you right-size your infrastructure.
 
-## A.2 Computer Architecture Essentials {#sec-appendix-architecture}
+---
 
-Machine learning workloads are characterized by high arithmetic intensity and massive data requirements. Understanding the underlying hardware architecture is essential for optimizing these systems.
+## Computer Architecture Essentials {#sec-appendix-architecture}
 
-### A.2.1 The Memory Hierarchy {#sec-appendix-memory-hierarchy}
+::: {.callout-tip title="Why This Matters"}
+Your model runs 100x slower on CPU than GPU, but why? Understanding the memory hierarchy explains not just why GPUs are faster, but also why some optimizations (like batching) help dramatically while others (like buying more RAM) barely matter. The concepts here underpin every hardware decision you will make.
+:::
 
-Computer systems utilize a hierarchical memory structure to balance the trade-offs between capacity, cost, and access speed. As shown in the pyramid in @fig-memory-hierarchy, memory technologies closer to the compute units are faster but have significantly lower capacity.
+The previous section gave you tools to analyze workloads. This section explains the hardware constraints those analyses reveal.
 
-::: {#fig-memory-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Memory Hierarchy**: Computational efficiency in ML depends on keeping the 'working set' (active weights and activations) as high up the pyramid as possible. Transfers between the HBM/DRAM layer and the Compute Units represent the primary performance bottleneck in modern accelerators."} 
+### The Memory Hierarchy {#sec-appendix-memory-hierarchy}
+
+Computer systems use a hierarchy of memory technologies because no single technology provides both high capacity and low latency. As shown in @fig-memory-hierarchy, memories closer to the compute units are faster but dramatically smaller.
+
+::: {#fig-memory-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Memory Hierarchy**: Computational efficiency in ML depends on keeping the 'working set' (active weights and activations) as high up the pyramid as possible. Transfers between the HBM/DRAM layer and the Compute Units represent the primary performance bottleneck in modern accelerators."
 ```{.tikz}
-\begin{tikzpicture}[font=\small, scale=0.8]
-  % Pyramid levels
-  \fill[red!20] (0,6) -- (-1,5) -- (1,5) -- cycle;
-  \node at (0,5.3) {Registers};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=1.0]
+  % Define Project Colors
+  \definecolor{BlueLine}{RGB}{66, 133, 244}
+  \definecolor{BlueFill}{RGB}{232, 240, 254}
+  \definecolor{RedLine}{RGB}{234, 67, 53}
+  \definecolor{RedFill}{RGB}{252, 232, 230}
+  \definecolor{GreenLine}{RGB}{52, 168, 83}
+  \definecolor{GreenFill}{RGB}{230, 244, 234}
+  \definecolor{YellowLine}{RGB}{251, 188, 4}
+  \definecolor{YellowFill}{RGB}{254, 247, 224}
+  \definecolor{TextBlack}{RGB}{32, 33, 36}
+
+  % Styles
+  \tikzset{
+    Level/.style={draw=black!80, line width=0.8pt, align=center, text=TextBlack},
+    LabelAxis/.style={text=TextBlack!60, font=\footnotesize\usefont{T1}{phv}{m}{n}, align=center}
+  }
+
+  % Pyramid Levels
+  % Registers
+  \filldraw[fill=RedFill, draw=RedLine, line width=1pt] (0, 5.2) -- (-1.2, 4.2) -- (1.2, 4.2) -- cycle;
+  \node[text=RedLine] at (0, 4.55) {\textbf{Registers}};
   
-  \fill[orange!20] (-1,5) -- (-2,3.5) -- (2,3.5) -- (1,5) -- cycle;
-  \node at (0,4.2) {L1 / L2 / L3 Cache};
+  % Cache
+  \filldraw[fill=YellowFill, draw=YellowLine, line width=1pt] (-1.2, 4.2) -- (-2.4, 2.8) -- (2.4, 2.8) -- (1.2, 4.2) -- cycle;
+  \node[text=YellowLine!80!black] at (0, 3.5) {\textbf{L1 / L2 / L3 Cache}};
   
-  \fill[yellow!20] (-2,3.5) -- (-3,2) -- (3,2) -- (2,3.5) -- cycle;
-  \node at (0,2.7) {HBM / DRAM};
+  % HBM
+  \filldraw[fill=BlueFill, draw=BlueLine, line width=1pt] (-2.4, 2.8) -- (-3.6, 1.4) -- (3.6, 1.4) -- (2.4, 2.8) -- cycle;
+  \node[text=BlueLine] at (0, 2.1) {\textbf{HBM / DRAM}};
   
-  \fill[green!20] (-3,2) -- (-4.5,0) -- (4.5,0) -- (3,2) -- cycle;
-  \node at (0,1) {Storage (SSD / Disk)};
+  % Storage
+  \filldraw[fill=GreenFill, draw=GreenLine, line width=1pt] (-3.6, 1.4) -- (-4.8, 0) -- (4.8, 0) -- (3.6, 1.4) -- cycle;
+  \node[text=GreenLine] at (0, 0.7) {\textbf{Storage (SSD / Disk)}};
   
-  % Borders
-  \draw (0,6) -- (-4.5,0) -- (4.5,0) -- cycle;
-  \draw (-1,5) -- (1,5);
-  \draw (-2,3.5) -- (2,3.5);
-  \draw (-3,2) -- (3,2);
-  
-  % Annotations
-  \draw[->, thick] (5,0) -- (5,6) node[midway, right, align=left] {Faster Speed\\Lower Latency};
-  \draw[->, thick] (-5,6) -- (-5,0) node[midway, left, align=right] {Larger Capacity\\Lower Cost};
+  % Side Arrows
+  \draw[->, ultra thick, gray!40] (5.5, 0) -- (5.5, 5.2) node[midway, right, LabelAxis, text=gray] {Faster Speed\\Lower Latency};
+  \draw[->, ultra thick, gray!40] (-5.5, 5.2) -- (-5.5, 0) node[midway, left, LabelAxis, text=gray] {Larger Capacity\\Lower Cost};
 \end{tikzpicture}
 ```
 :::
 
-The performance disparity between compute and memory—the "Memory Wall"—makes **data reuse** the primary goal of systems optimization. Modern accelerators like the NVIDIA H100 utilize High Bandwidth Memory (HBM) to mitigate this bottleneck, providing several terabytes per second of bandwidth compared to the hundreds of gigabytes per second in standard DDR5 DRAM.
+The performance gap between compute and memory is called the "Memory Wall." Modern ML accelerators attack this problem with High Bandwidth Memory (HBM), which provides several terabytes per second of bandwidth compared to hundreds of gigabytes per second in standard DDR5 DRAM. Even so, the gap remains: an NVIDIA H100 can perform computations far faster than it can feed data to those computations.
 
-### A.2.2 Bandwidth vs. Latency {#sec-appendix-bandwidth-latency}
+This is why **data reuse** is the primary goal of ML systems optimization. Every technique that keeps data in registers or cache longer (tiling, fusion, batching) directly addresses the memory wall.
 
-Bandwidth (throughput) and latency (delay) are distinct constraints. Total transfer time is modeled as $T = L + \frac{B}{BW}$. For small data chunks (e.g., KV cache lookups), latency dominates. For large model checkpoints or dataset streaming, bandwidth is the primary constraint.
+### Bandwidth vs. Latency {#sec-appendix-bandwidth-latency}
 
-## A.3 Numerical Representations {#sec-appendix-numerical}
+Bandwidth (throughput) and latency (delay) are distinct constraints that matter in different situations. Total transfer time follows:
 
-Neural networks are remarkably resilient to reduced numerical precision. This section details the binary formats used to represent weights and activations in modern systems.
+$$ T = L + \frac{B}{BW} $$
 
-### A.3.1 Floating-Point Formats {#sec-appendix-floating-point}
+where $L$ is latency, $B$ is the data size, and $BW$ is bandwidth.
 
-The IEEE 754 standard and its AI-specific derivatives (BF16, FP8) define the trade-off between dynamic range and precision. **Brain Float 16 (BF16)** is particularly effective for training because it matches the 8-bit exponent of FP32 (preserving range) while truncating the mantissa to 7 bits. This avoids the need for complex **loss scaling** required by the narrower-range FP16.
+For small transfers (e.g., KV cache lookups in autoregressive generation), latency dominates. For large transfers (e.g., loading model checkpoints), bandwidth dominates. Understanding which regime you are in determines whether you should optimize for lower latency or higher throughput.
 
-### A.3.2 Integer Quantization {#sec-appendix-quantization}
+---
 
-Quantization maps floating-point values to discrete integers, typically INT8. **Symmetric quantization** uses a zero-point of 0 and a scale factor $\frac{\alpha}{127}$ to map $[-\alpha, \alpha]$ to $[-127, 127]$. **Asymmetric quantization** handles non-centered distributions (common in ReLU activations) by explicitly storing a zero-point offset.
+## Numerical Representations {#sec-appendix-numerical}
 
-## A.4 Linear Algebra for Neural Networks {#sec-appendix-linear-algebra}
+::: {.callout-tip title="Why This Matters"}
+Your production model runs at 50 QPS in FP32 but your target is 200 QPS. Switching to INT8 could get you there, but will accuracy suffer? Understanding numerical formats lets you make this trade-off quantitatively rather than hoping for the best.
+:::
 
-Neural network computation is dominated by tensor operations. This section provides the formal notation and complexity analysis for these primitives.
+Neural networks are remarkably tolerant of reduced numerical precision. This section explains the formats you will encounter and their trade-offs.
 
-### A.4.1 Tensor Operations and Notation {#sec-appendix-tensors}
+### Floating-Point Format Comparison {#sec-appendix-floating-point}
 
-We utilize **Einstein summation** notation for clarity. For example, matrix multiplication $C = AB$ is expressed as $C_{ij} = \sum_k A_{ik} B_{kj}$, or simply `ik,kj->ij`. This notation extends naturally to complex attention mechanisms like `bhid,bhjd->bhij` (batched head-indexed attention).
+The IEEE 754 standard and its AI-specific derivatives define different trade-offs between dynamic range (the span of representable values) and precision (how finely you can represent values within that range).
 
-### A.4.2 General Matrix Multiply (GEMM) {#sec-appendix-gemm}
++----------+-------+----------+----------+-----------------+--------------------------------------------+
+| Format   | Bits  | Exponent | Mantissa | Dynamic Range   | Typical Use Case                           |
++:=========+:======+:=========+:=========+:================+:===========================================+
+| FP32     | 32    | 8        | 23       | ~$10^{-38}$ to  | Training (full precision), reference       |
+|          |       |          |          | $10^{38}$       | inference                                  |
++----------+-------+----------+----------+-----------------+--------------------------------------------+
+| FP16     | 16    | 5        | 10       | ~$10^{-5}$ to   | Training with loss scaling, inference      |
+|          |       |          |          | $6.5 \times     |                                            |
+|          |       |          |          | 10^{4}$         |                                            |
++----------+-------+----------+----------+-----------------+--------------------------------------------+
+| BF16     | 16    | 8        | 7        | Same as FP32    | Training (preferred), avoids loss scaling  |
++----------+-------+----------+----------+-----------------+--------------------------------------------+
+| FP8      | 8     | 4 or 5   | 3 or 2   | Varies          | Inference on newest hardware (H100+)       |
++----------+-------+----------+----------+-----------------+--------------------------------------------+
+| INT8     | 8     | N/A      | N/A      | -128 to 127     | Inference after quantization               |
++----------+-------+----------+----------+-----------------+--------------------------------------------+
 
-The **GEMM** operation is the core computational kernel for MLPs, CNNs (via im2col), and Transformers. For $M \times K$ and $K \times N$ matrices, GEMM performs $2MNK$ operations. The arithmetic intensity of GEMM scales linearly with the matrix dimension $n$ (specifically $n/3$ for square matrices), explaining why hardware utilization improves with larger batch sizes and hidden dimensions.
+: **Numerical Format Comparison**: Each format trades off precision, dynamic range, memory footprint, and compute throughput. BF16 has emerged as the preferred training format because it matches FP32's range while using half the memory. {#tbl-numerical-formats}
 
-### A.4.3 Memory Layouts and Performance {#sec-appendix-memory-layouts}
+**Brain Float 16 (BF16)** deserves special attention. It matches FP32's 8-bit exponent (preserving dynamic range) while truncating the mantissa to 7 bits. This avoids the gradient underflow problems that plague FP16 training, eliminating the need for complex loss scaling. Most modern training uses BF16 for this reason.
 
-Data layout in memory (Row-major vs. Column-major) dictates cache efficiency. Strided or non-contiguous access can reduce effective bandwidth by 10–100×. Systems optimization often involves transposing tensors once to ensure subsequent high-frequency operations utilize contiguous memory access.
+### Integer Quantization {#sec-appendix-quantization}
 
-## A.5 Calculus for Backpropagation {#sec-appendix-calculus}
+Quantization maps continuous floating-point values to discrete integers, typically INT8. The key challenge is choosing how to map the floating-point range to integers.
 
-Modern deep learning frameworks automate the application of the chain rule to compute gradients.
+**Symmetric quantization** centers the mapping at zero:
+$$ x_{int} = \text{round}\left(\frac{x}{\alpha} \times 127\right) $$
 
-### A.5.1 The Chain Rule {#sec-appendix-chain-rule}
+where $\alpha$ is the scale factor (typically the maximum absolute value). This works well for weight distributions centered around zero.
 
-For a composed function $y = f(g(x))$, the derivative is $\frac{dy}{dx} = \frac{dy}{dg} \cdot \frac{dg}{dx}$. In deep networks, this chain extends across dozens or hundreds of layers, where each layer provides a local Jacobian that is multiplied during the backward pass.
+**Asymmetric quantization** handles distributions that are not centered (common after ReLU, which produces only non-negative values) by adding a zero-point offset:
+$$ x_{int} = \text{round}\left(\frac{x - z}{\alpha} \times 255\right) $$
 
-### A.5.2 Backpropagation Algorithm {#sec-appendix-backprop}
+The choice between symmetric and asymmetric quantization depends on your tensor's distribution and has measurable accuracy implications.
 
-Backpropagation implements the chain rule efficiently through a two-pass algorithm. As visualized in the computational graph in @fig-backprop-graph, intermediate activations are cached during the forward pass and reused to compute gradients in reverse order.
+---
 
-::: {#fig-backprop-graph fig-env="figure" fig-pos="htb" fig-cap="**Backpropagation Computational Graph**: The forward pass (black) computes activations $h$ and loss $L$. The backward pass (red) propagates the error signal $\frac{\partial L}{\partial y}$ through local derivatives to update parameters $W_1$ and $W_2$."}
+## Linear Algebra for Neural Networks {#sec-appendix-linear-algebra}
+
+::: {.callout-tip title="Why This Matters"}
+Every neural network, regardless of architecture, spends most of its time doing matrix multiplication. Understanding GEMM performance characteristics explains why batch size affects throughput, why certain layer dimensions are "better" than others, and how to interpret profiler output.
+:::
+
+### Tensor Operations and Notation {#sec-appendix-tensors}
+
+We use **Einstein summation** notation throughout this book because it makes complex operations explicit. Matrix multiplication $C = AB$ becomes:
+
+$$ C_{ij} = \sum_k A_{ik} B_{kj} $$
+
+Or in einsum notation: `ik,kj->ij`. This notation extends naturally to the multi-dimensional operations in attention mechanisms. For example, batched multi-head attention is `bhid,bhjd->bhij` (batch, head, sequence indices).
+
+### General Matrix Multiply (GEMM) {#sec-appendix-gemm}
+
+GEMM is the computational workhorse of deep learning. For matrices of size $M \times K$ and $K \times N$, GEMM performs $2MNK$ floating-point operations (multiply-accumulate counts as two operations).
+
+The arithmetic intensity of GEMM scales linearly with matrix dimension. For square $n \times n$ matrices, intensity is approximately $n/3$ FLOP/byte. This explains several important phenomena:
+
+- **Larger batches improve efficiency**: Batching increases the effective matrix dimensions, pushing workloads toward the compute-bound region of the roofline.
+- **Power-of-two dimensions help**: Hardware tensor cores are optimized for specific tile sizes (typically 16x16 or 32x32). Dimensions that align with these sizes avoid padding overhead.
+- **Small matrices are inefficient**: A 64x64 GEMM may achieve only 10% of peak throughput because it cannot fully utilize the hardware.
+
+### Memory Layouts and Performance {#sec-appendix-memory-layouts}
+
+Data layout in memory (row-major vs. column-major) directly affects cache efficiency. When iterating over a matrix, accessing contiguous memory locations is dramatically faster than strided access. The difference can be 10x to 100x in effective bandwidth.
+
+A common optimization pattern: transpose tensors once before repeated operations to ensure contiguous access in the hot loop. The one-time transpose cost is amortized across many subsequent operations.
+
+---
+
+## Calculus for Backpropagation {#sec-appendix-calculus}
+
+::: {.callout-tip title="Why This Matters"}
+When training fails (loss goes to NaN, gradients explode, memory runs out), understanding what backpropagation actually does helps you diagnose the problem. This section gives you the mental model to reason about gradient flow and memory usage during training.
+:::
+
+### The Chain Rule in Deep Networks {#sec-appendix-chain-rule}
+
+For a composed function $y = f(g(x))$, the derivative is:
+
+$$ \frac{dy}{dx} = \frac{dy}{dg} \cdot \frac{dg}{dx} $$
+
+In deep networks, this chain extends across many layers. Each layer contributes a local Jacobian that multiplies during the backward pass. When these multiplied terms consistently exceed 1.0, gradients explode; when they consistently fall below 1.0, gradients vanish.
+
+### The Backpropagation Algorithm {#sec-appendix-backprop}
+
+Backpropagation implements the chain rule efficiently through two passes. As shown in @fig-backprop-graph, the forward pass computes outputs while caching intermediate activations. The backward pass then reuses these cached values to compute gradients.
+
+::: {#fig-backprop-graph fig-env="figure" fig-pos="htb" fig-cap="**Backpropagation Computational Graph**: The forward pass (black) computes activations $h$ and loss $L$. The backward pass (red) propagates the error signal $\\frac{\\partial L}{\\partial y}$ through local derivatives to update parameters $W_1$ and $W_2$."
 ```{.tikz}
-\begin{tikzpicture}[node distance=2.5cm, auto, font=\small, >=stealth]
-  \node[circle, draw, thick] (x) {x};
-  \node[circle, draw, thick, right of=x] (h) {h};
-  \node[circle, draw, thick, right of=h] (y) {y};
-  \node[circle, draw, thick, right of=y] (L) {L};
-  
-  % Forward
-  \draw[->, thick] (x) -- node {$W_1$} (h);
-  \draw[->, thick] (h) -- node {$W_2$} (y);
-  \draw[->, thick] (y) -- node {Loss} (L);
-  
-  % Backward
-  \draw[->, dashed, red, bend right=45] (L) -- node[above] {$\frac{\partial L}{\partial y}$} (y);
-  \draw[->, dashed, red, bend right=45] (y) -- node[above] {$\frac{\partial L}{\partial W_2}$} (h);
-  \draw[->, dashed, red, bend right=45] (h) -- node[above] {$\frac{\partial L}{\partial W_1}$} (x);
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=3cm, auto, >=stealth, thick]
+  % Define Project Colors
+  \definecolor{BlueLine}{RGB}{66, 133, 244}
+  \definecolor{BlueFill}{RGB}{232, 240, 254}
+  \definecolor{RedLine}{RGB}{234, 67, 53}
+  \definecolor{GrayLine}{RGB}{95, 99, 104}
+  \definecolor{TextBlack}{RGB}{32, 33, 36}
+
+  % Styles
+  \tikzset{
+    Node/.style={circle, draw=BlueLine, fill=BlueFill, line width=0.8pt, minimum size=0.9cm, text=TextBlack},
+    Edge/.style={->, draw=GrayLine, line width=0.8pt},
+    BackEdge/.style={->, dashed, draw=RedLine, line width=0.8pt, bend right=50},
+    Label/.style={font=\footnotesize\usefont{T1}{phv}{m}{n}, text=TextBlack}
+  }
+
+  % Nodes
+  \node[Node] (x) {x};
+  \node[Node, right of=x] (h) {h};
+  \node[Node, right of=h] (y) {y};
+  \node[Node, right of=y, fill=RedLine!10, draw=RedLine] (L) {L};
+
+  % Forward Pass
+  \draw[Edge] (x) -- node[below, Label] {$W_1$} (h);
+  \draw[Edge] (h) -- node[below, Label] {$W_2$} (y);
+  \draw[Edge] (y) -- node[below, Label] {Loss} (L);
+
+  % Backward Pass
+  \draw[BackEdge] (L) to node[above, Label, text=RedLine] {$\frac{\partial L}{\partial y}$} (y);
+  \draw[BackEdge] (y) to node[above, Label, text=RedLine] {$\frac{\partial L}{\partial W_2}$} (h);
+  \draw[BackEdge] (h) to node[above, Label, text=RedLine] {$\frac{\partial L}{\partial W_1}$} (x);
 \end{tikzpicture}
 ```
 :::
 
-### A.5.3 Automatic Differentiation {#sec-appendix-autodiff}
+The memory implication is significant: you must store all intermediate activations during the forward pass to use them in the backward pass. For a transformer with billions of parameters and long sequences, this activation memory often exceeds the memory needed for the model weights themselves. Gradient checkpointing trades computation for memory by recomputing activations instead of storing them.
 
-**Reverse-mode Autodiff** is the standard for neural networks because it computes gradients for all $N$ parameters in a single backward pass ($O(1)$ complexity with respect to the output loss). This is contrasted with forward-mode, which is only efficient when the number of outputs exceeds the number of inputs.
+### Automatic Differentiation {#sec-appendix-autodiff}
 
-## A.6 Theoretical Foundations of Learning {#sec-appendix-theory}
+Modern frameworks use **reverse-mode automatic differentiation**, which computes gradients for all $N$ parameters in a single backward pass. This is why training (which needs gradients) has similar compute cost to inference (which does not): one forward pass plus one backward pass, where the backward pass has roughly the same cost as the forward pass.
 
-Theoretical results provide the rigorous justification for neural network architectures and validation procedures.
+Forward-mode autodiff, by contrast, would require $N$ passes to compute all gradients. This would make training prohibitively expensive.
 
-### A.6.1 Universal Approximation Theorem {#sec-appendix-uat}
+---
 
-The **Universal Approximation Theorem** [@cybenko1989approximation] states that a neural network with a single hidden layer can approximate any continuous function to arbitrary precision. While this proves *possibility*, it does not address *efficiency*. Practical systems use deep architectures because the number of neurons required for approximation often grows exponentially with width but only polynomially with depth.
+## Sparse Matrix Formats {#sec-appendix-sparse}
 
-### A.6.2 Statistical Foundations of Drift Detection {#sec-appendix-drift-math}
+::: {.callout-tip title="Why This Matters"}
+Recommendation systems and pruned models contain mostly zeros. Storing and computing with dense matrices wastes both memory and compute. Understanding sparse formats lets you work efficiently with these common workloads.
+:::
 
-Operational monitoring relies on statistical distance metrics to detect distribution shift. The **Kolmogorov-Smirnov (K-S) Test** provides a non-parametric method to compare cumulative distributions, while the **Population Stability Index (PSI)** summarizes binned distribution shifts into a single interpretable score. Typical PSI thresholds used in industry are summarized in @tbl-psi-interpretation.
+When most elements in a matrix are zero, specialized storage formats avoid wasting memory on zeros and enable computations that skip them entirely.
 
-## A.7 Signal Processing Primitives {#sec-appendix-signal-processing}
+The **Compressed Sparse Row (CSR)** format uses three arrays to represent a sparse matrix efficiently, as shown in @fig-csr-format:
 
-Preprocessing physical signals into ML-ready features requires transformations that preserve information while reducing dimensionality.
+- `Values`: The non-zero elements, in row order
+- `Col_Idx`: The column index of each non-zero element
+- `Row_Ptr`: The starting position in `Values` for each row
 
-### A.7.1 The Fourier Transform {#sec-appendix-fourier}
-
-The **Discrete Fourier Transform (DFT)** converts a signal from the time domain to the frequency domain. The **FFT** algorithm reduces the complexity from $O(N^2)$ to $O(N \log N)$, enabling real-time processing on edge devices.
-
-### A.7.2 Spectrograms and STFT {#sec-appendix-stft}
-
-The **Short-Time Fourier Transform (STFT)** applies the FFT to overlapping windowed segments of a signal. The magnitude of the STFT result is the **Spectrogram**, a 2D time-frequency representation that allows CNNs to process audio as an image.
-
-### A.7.3 Mel-Frequency Cepstral Coefficients (MFCC) {#sec-appendix-mfcc}
-
-MFCCs map frequency to the **Mel scale**, which mimics human auditory perception by providing higher resolution at lower frequencies. This transformation significantly compresses audio data while retaining the timbral characteristics essential for speech recognition and keyword spotting.
-
-## A.8 Advanced Operator Implementation {#sec-appendix-advanced-ops}
-
-High-performance frameworks utilize algorithmic transformations to map mathematical operations to hardware primitives.
-
-### A.8.1 Convolution via im2col and GEMM {#sec-appendix-im2col}
-
-The **im2col** (image-to-column) transformation is the standard method for executing convolutions on matrix-optimized hardware. As shown in @fig-im2col-viz, overlapping image patches are unrolled into matrix columns. While this increases memory footprint due to data duplication, it allows the convolution to execute as a single, highly-optimized **GEMM** operation.
-
-::: {#fig-im2col-viz fig-env="figure" fig-pos="htb" fig-cap="**im2col Transformation**: The input image patches are unrolled into columns of a large matrix, while kernels are flattened into rows. The convolution operation then becomes a standard Matrix Multiplication (GEMM)."}
+::: {#fig-csr-format fig-env="figure" fig-pos="htb" fig-cap="**Compressed Sparse Row (CSR)**: The `Row_Ptr` array [0, 2, 3, 3, 4] indicates that Row 0 has 2 non-zero elements, Row 1 has 1, Row 2 is empty, and Row 3 has 1. This representation avoids storing the 12 zero values in this $4 \\times 4$ matrix."
 ```{.tikz}
-\begin{tikzpicture}[font=\sffamily, scale=0.8]
-  % Input Feature Map
-  \draw[step=0.5cm, gray, thin] (0,0) grid (1.5,1.5);
-  \node at (0.75, 1.8) {Input ($3 \times 3$)};
-  \fill[blue!30, opacity=0.5] (0,0.5) rectangle (1,1.5); % Patch 1
-  
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=1.0]
+  % Define Project Colors
+  \definecolor{BlueLine}{RGB}{66, 133, 244}
+  \definecolor{BlueFill}{RGB}{232, 240, 254}
+  \definecolor{RedLine}{RGB}{234, 67, 53}
+  \definecolor{GreenLine}{RGB}{52, 168, 83}
+  \definecolor{GrayLine}{RGB}{95, 99, 104}
+  \definecolor{TextBlack}{RGB}{32, 33, 36}
+
+  % Styles
+  \tikzset{
+    GridLine/.style={draw=GrayLine!30, line width=0.5pt},
+    Cell/.style={font=\normalsize\bfseries, text=TextBlack},
+    Label/.style={font=\footnotesize\usefont{T1}{phv}{m}{n}, text=TextBlack, anchor=west}
+  }
+
+  % Matrix Grid
+  \begin{scope}
+    \draw[GridLine, step=0.6cm] (0,0) grid (2.4, 2.4);
+    % Values
+    \node[Cell, text=BlueLine] at (0.3, 2.1) {5}; \node[Cell, text=BlueLine] at (1.5, 2.1) {8}; 
+    \node[Cell, text=BlueLine] at (0.9, 1.5) {3};                          
+    \node[Cell, text=BlueLine] at (2.1, 0.3) {6};                          
+    \node[anchor=south, font=\small\bfseries, text=TextBlack] at (1.2, 2.5) {Sparse Matrix};
+  \end{scope}
+
   % Arrow
-  \draw[->, thick] (1.8, 0.75) -- (3, 0.75) node[midway, above] {im2col};
-  
-  % Matrix
-  \draw[step=0.5cm, gray, thin] (3.5, -0.5) grid (5.5, 2);
-  \node at (4.5, 2.3) {Input Matrix};
-  \node at (4.5, -0.8) {Cols = Patches};
-  \fill[blue!30, opacity=0.5] (3.5, -0.5) rectangle (4, 2); % Unrolled Patch 1
-  
-  % Kernel
-  \draw[step=0.5cm, gray, thin] (6.5, 0.5) grid (7.5, 1.5);
-  \node at (7, 1.8) {Kernel ($2 \times 2$)};
-  
-  % GEMM
-  \node at (6, 0.75) {$\times$};
-  \node at (8, 0.75) {$=$ Output};
+  \draw[->, thick, GrayLine, bend left=20] (2.6, 2.0) to (3.3, 2.0);
+
+  % CSR Arrays
+  \begin{scope}[xshift=3.6cm, yshift=0.3cm]
+      \node[Label] at (0, 1.8) {\texttt{Values}: \textcolor{BlueLine}{[5, 8, 3, 6]}};
+      \node[Label] at (0, 1.2) {\texttt{Col\_Idx}: \textcolor{RedLine}{[0, 2, 1, 3]}};
+      \node[Label] at (0, 0.6) {\texttt{Row\_Ptr}: \textcolor{GreenLine}{[0, 2, 3, 3, 4]}};
+  \end{scope}
 \end{tikzpicture}
 ```
 :::
 
-### A.8.2 The Log-Sum-Exp Trick {#sec-appendix-logsumexp}
+CSR enables fast row-wise access, which is the dominant access pattern in sparse matrix-vector multiplication. For a matrix with $N$ total elements and $K$ non-zeros, CSR uses $O(K)$ storage instead of $O(N)$, with corresponding speedups for sparse-aware computations.
 
-Numerical stability in Softmax and Attention is maintained through the **Log-Sum-Exp** identity: $\log \sum e^{x_i} = a + \log \sum e^{x_i - a}$. By setting $a = \max(x)$, we prevent floating-point overflow, ensuring that the largest term in the exponentiation is $e^0 = 1$.
+---
 
-## A.9 Information Theory & Loss Functions {#sec-appendix-info-theory}
+## Computational Graphs and Optimization {#sec-appendix-graphs}
 
-Information-theoretic concepts provide the foundation for classification losses. **Entropy** $H(P)$ measures the uncertainty in a distribution. **KL Divergence** $D_{KL}(P || Q)$ measures the information loss when $Q$ approximates $P$. Minimizing **Cross-Entropy** is mathematically equivalent to minimizing KL Divergence between the model's predictions and the true labels.
-
-## A.10 Computational Graphs & Optimization {#sec-appendix-graphs}
-
-ML compilers represent models as directed acyclic graphs (DAGs) to enable hardware-independent optimizations. **Static Single Assignment (SSA)** form simplifies dataflow analysis, enabling **Operator Fusion**. Fusion combines sequential operations (e.g., Conv → ReLU) into a single kernel, eliminating redundant writes to off-chip memory (HBM).
-
-## A.11 Random Number Generation {#sec-appendix-rng}
-
-Reproducibility in parallel systems requires **Counter-Based RNGs** like Philox. Unlike sequential generators (e.g., Mersenne Twister), Philox computes the $n$-th random number as a cryptographic hash of a counter and seed. This allows any thread to jump to its specific random sequence in $O(1)$ time, ensuring that parallel execution order does not affect the final results.
-
-## A.12 Operating System Primitives {#sec-appendix-os}
-
-System performance is often gated by how the OS manages memory. **Memory mapping (`mmap`)** enables zero-copy loading by mapping files directly into the virtual address space. Random access in massive embedding tables can cause **TLB thrashing**, which is mitigated by using **Huge Pages** (2MB/1GB instead of 4KB) to increase address translation cache hit rates.
-
-## A.13 Sparse Matrix Formats {#sec-appendix-sparse}
-
-Sparse workloads (e.g., Recommendation systems or pruned models) require specialized storage to avoid wasting memory on zero-valued elements.
-
-The **Compressed Sparse Row (CSR)** format, shown in @fig-csr-format, utilizes three arrays—`Values`, `Col_Idx`, and `Row_Ptr`—to represent a matrix efficiently. This format enables fast row-wise access, which is the primary pattern for Matrix-Vector Multiplication.
-
-::: {#fig-csr-format fig-env="figure" fig-pos="htb" fig-cap="**Compressed Sparse Row (CSR)**: The `Row_Ptr` array [0, 2, 3, 3, 4] indicates that Row 0 has 2 non-zero elements, Row 1 has 1, Row 2 is empty, and Row 3 has 1. This representation avoids storing the 12 zero values in this $4 \times 4$ matrix."} 
-```{.tikz}
-\begin{tikzpicture}[font=\small, scale=0.9]
-  % Matrix
-  \draw[step=0.5cm, gray, thin] (0,0) grid (2,2);
-  \node at (0.25, 1.75) {5};
-  \node at (1.25, 1.75) {8};
-  \node at (0.75, 1.25) {3};
-  \node at (1.75, 0.25) {6};
-  \node[anchor=south] at (1, 2.1) {Sparse Matrix};
-  
-  % Arrays
-  \node[anchor=west] at (3, 1.8) {\texttt{Values}: [5, 8, 3, 6]};
-  \node[anchor=west] at (3, 1.3) {\texttt{Col\_Idx}: [0, 2, 1, 3]};
-  \node[anchor=west] at (3, 0.8) {\texttt{Row\_Ptr}: [0, 2, 3, 3, 4]};
-\end{tikzpicture}
-```
+::: {.callout-tip title="Why This Matters"}
+When you call `torch.compile()` or use TensorRT, the framework transforms your model into an optimized computational graph. Understanding what these transformations do helps you write code that compilers can optimize effectively and debug cases where optimization fails.
 :::
 
-## Summary {#sec-appendix-summary-final}
+ML compilers represent models as directed acyclic graphs (DAGs) where nodes are operations and edges are data dependencies. This representation enables hardware-independent optimizations.
 
-The thirteen categories of foundations presented in this appendix constitute the rigorous backbone of ML systems engineering. While high-level frameworks abstract many of these details, a mastery of these primitives allows engineers to look *under the hood*—optimizing performance, ensuring numerical stability, and building systems that remain robust under production constraints.
+The most impactful optimization is **operator fusion**. Consider a sequence like Conv followed by BatchNorm followed by ReLU. Without fusion, each operation reads its input from memory, computes, and writes its output back to memory. With fusion, all three operations execute as a single kernel: read input once, compute all three operations in registers, write final output once.
 
-```
+This fusion eliminates two round trips to HBM memory. Given the memory wall discussed earlier, the speedup from fusion often exceeds 2x for memory-bound operation sequences.
+
+**Static Single Assignment (SSA)** form simplifies the dataflow analysis needed to identify fusion opportunities. In SSA, each variable is assigned exactly once, making data dependencies explicit and enabling safe code transformations.
+
+---
+
+## Summary {.unnumbered}
+
+The concepts in this appendix share a common theme: **understanding the relationship between computation and data movement**. The Roofline Model quantifies this relationship. The memory hierarchy explains why it matters. Numerical formats and sparse representations reduce data movement. GEMM and computational graphs are the contexts where these trade-offs play out.
+
+When you encounter a slow ML system, reach for these tools. Is the workload memory-bound or compute-bound? Where does the data live, and how often must it move? What precision does the application actually require? Answering these questions systematically, rather than guessing, is what separates effective ML systems engineering from trial and error.

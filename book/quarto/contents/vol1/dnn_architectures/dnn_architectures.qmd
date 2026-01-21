@@ -2141,7 +2141,9 @@ This forces a specific parallelization strategy called **Model Parallelism** (sp
 
 This creates an **All-to-All** communication pattern: every GPU must talk to every other GPU to gather the necessary embedding vectors for its batch. Consequently, DLRM performance is often limited not by GPU compute speed (FLOPs), but by **network bandwidth** and **memory bandwidth**. Optimizing these systems requires high-speed interconnects (like NVLink or InfiniBand) and specialized embedding caches, fundamentally different optimizations than those used for CNNs or Transformers.
 
-Having examined five architectural paradigms—MLPs, CNNs, RNNs, Transformers, and DLRM—each optimized for different data types and system constraints, we now step back to identify the common building blocks they share. Understanding these shared foundations reveals why certain optimizations transfer across architectures while others remain architecture-specific.
+Having examined five architectural paradigms—MLPs, CNNs, RNNs, Transformers, and DLRM—each optimized for different data types and system constraints, a natural question emerges: beneath this diversity, what computational foundations do these architectures share?
+
+Understanding shared building blocks serves two engineering purposes. First, it explains why certain optimizations transfer across architectures (matrix tiling benefits all dense operations) while others remain architecture-specific (FlashAttention targets transformer attention patterns). Second, it reveals the evolutionary relationships that produced modern designs, showing how each architecture innovated by recombining and refining existing primitives rather than starting from scratch. We now examine these common elements, beginning with the computational primitives that appear across all deep learning systems.
 
 ## Architectural Building Blocks {#sec-dnn-architectures-architectural-building-blocks-a575}
 
@@ -2174,15 +2176,13 @@ Examination of these building blocks shows primitives evolving and combining to 
 
 ### Evolution from Perceptron to Multi-Layer Networks {#sec-dnn-architectures-evolution-perceptron-multilayer-networks-0f3f}
 
-While we examined MLPs in @sec-dnn-architectures-multilayer-perceptrons-dense-pattern-processing-259f as a mechanism for dense pattern processing, here we focus on how they established building blocks that appear throughout deep learning. The evolution from perceptron to MLP introduced several key concepts: the power of layer stacking, the importance of non-linear transformations, and the basic feedforward computation pattern.
+While @sec-dnn-architectures-multilayer-perceptrons-dense-pattern-processing-259f examined MLPs as dense pattern processors, the systems engineering legacy of MLPs extends far beyond their direct applications. The computational patterns established by early MLPs shaped the entire trajectory of deep learning hardware and software.
 
-The introduction of hidden layers between input and output created a template for feature transformation that appears in virtually every modern architecture. Even in sophisticated networks like Transformers, we find MLP-style feedforward layers performing feature processing. The concept of transforming data through successive non-linear layers has become a paradigm that transcends specific architecture types.
+MLPs introduced the GEMM-dominated computation profile that led GPU vendors to develop tensor cores. The backpropagation algorithm's[^fn-dnn-backpropagation] memory access patterns, with its alternating forward and backward passes storing intermediate activations, influenced accelerator memory hierarchies. The batch processing paradigm pioneered for MLP training established the datacenter-scale throughput optimization that defines modern ML infrastructure. These foundational patterns—dense matrix operations, gradient-based optimization, batch-oriented processing—appear in every architecture we have examined, even when obscured by domain-specific terminology.
 
-Most significantly, the development of MLPs established the backpropagation algorithm[^fn-dnn-backpropagation], which to this day remains the cornerstone of neural network optimization. This key contribution has allowed the development of deep architectures and influenced how later architectures would be designed to maintain gradient flow.
+[^fn-dnn-backpropagation]: **Backpropagation Algorithm**: While the chain rule was known since the 1600s, Rumelhart, Hinton, and Williams (1986) showed how to efficiently apply it to train multi-layer networks. This "learning by error propagation" algorithm made deep networks practical and remains virtually unchanged in modern systems.
 
-[^fn-dnn-backpropagation]: **Backpropagation Algorithm**: While the chain rule was known since the 1600s, Rumelhart, Hinton, and Williams (1986) showed how to efficiently apply it to train multi-layer networks. This "learning by error propagation" algorithm made deep networks practical and remains virtually unchanged in modern systems—a testament to its importance.
-
-These building blocks, layered feature transformation, non-linear activation, and gradient-based learning, set the foundation for more specialized architectures. Subsequent innovations often focused on structuring these basic components in new ways rather than replacing them entirely.
+The MLP paradigm also established the fundamental trade-off between model expressiveness and computational cost that every subsequent architecture navigates. Dense connectivity requires $O(n^2)$ parameters and operations for layers of width $n$, setting a baseline against which specialized architectures demonstrate efficiency gains. CNNs achieve spatial processing with $O(k^2)$ parameters per location (where $k$ is kernel size), transformers trade parameter efficiency for dynamic computation with $O(n^2)$ attention complexity, and sparse architectures like DLRM exploit embedding lookups to handle categorical dimensions that would explode dense layer sizes. Each innovation represents a different strategy for escaping the dense connectivity baseline that MLPs established.
 
 ### Evolution from Dense to Spatial Processing {#sec-dnn-architectures-evolution-dense-spatial-processing-1d3b}
 
@@ -2344,9 +2344,11 @@ Perhaps even more influential was the introduction of skip connections through R
 
 [^fn-dnn-resnet]: **ResNet Revolution**: ResNet (2016) solved the "degradation problem" where deeper networks performed worse than shallow ones. The key insight: adding identity shortcuts ($\mathcal{F}(\mathbf{x}) + \mathbf{x}$) let networks learn residual mappings instead of full transformations, enabling training of 1000+ layer networks and winning ImageNet 2015.
 
+The gradient flow improvements from skip connections solved one fundamental training challenge, but revealed another: controlling activation distributions across layers. The following analysis of normalization techniques provides essential foundations for understanding why modern architectures universally include these components.
+
 #### Normalization Layers: Mathematical Foundations {#sec-normalization-layers}
 
-While skip connections provide direct gradient pathways, normalization layers address a complementary problem: controlling the scale and distribution of activations throughout the network. CNNs introduced batch normalization [@ioffe2015batch], which has since evolved into variants essential for modern architectures. Understanding the mathematics of normalization reveals why these layers are not merely optimization tricks but fundamental components enabling deep network training.
+While skip connections provide direct gradient pathways, normalization layers address the complementary problem of controlling the scale and distribution of activations throughout the network. CNNs introduced batch normalization [@ioffe2015batch], which has since evolved into variants essential for modern architectures. Understanding the mathematics of normalization reveals why these layers are not merely optimization tricks but fundamental components enabling deep network training.
 
 **Batch Normalization: Definition and Formulation**
 
@@ -3215,7 +3217,9 @@ The theoretical insights about representation learning have direct implications 
 
 Understanding architectures as embodying different inductive biases helps explain both their strengths and their systems requirements, providing a principled foundation for architecture selection and system optimization decisions.
 
-While inductive biases provide theoretical guidance for architecture selection, practitioners must also navigate common misconceptions that can derail even well-informed design decisions. The principles we have established throughout this chapter offer a framework for avoiding these pitfalls, but experience shows that certain mistakes recur across projects regardless of theoretical understanding.
+Yet theoretical understanding alone does not prevent practitioners from making poor architectural choices. The gap between knowing principles and applying them correctly is where engineering experience proves essential. Organizations regularly deploy transformers for problems where CNNs would suffice at 10x lower cost, or select RNNs without accounting for sequential bottlenecks that cripple throughput. These mistakes stem from specific misconceptions—fallacies about architecture performance that appear plausible but collapse under systems analysis.
+
+The following section catalogs the most damaging misconceptions we have observed in production ML systems, each grounded in the architectural principles established throughout this chapter. Recognizing these pitfalls transforms theoretical knowledge into practical engineering judgment.
 
 ## Fallacies and Pitfalls {#sec-dnn-architectures-fallacies-pitfalls-3e82}
 

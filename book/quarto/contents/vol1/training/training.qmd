@@ -153,6 +153,8 @@ The hardware-software co-design principles discussed in @sec-ai-acceleration dem
 
 @sec-dl-primer established the mathematical mechanics of neural network training: forward propagation computes predictions through weighted sums and activation functions, backpropagation applies the chain rule to compute gradients, and optimization algorithms update parameters to minimize loss. Those explanations focused on *what* these operations compute and *why* they enable learning. This section shifts to *what they cost*—the FLOPs consumed, the memory required, and the bandwidth demanded when these conceptually simple operations execute at scale.
 
+We examine four dimensions of computational cost. First, the FLOP counts of matrix operations that dominate training. Second, the memory requirements for storing activations and optimizer states simultaneously. Third, the bandwidth demands that determine whether operations are compute-bound or memory-bound. Fourth, the arithmetic intensity classifications that guide optimization strategy selection. These dimensions provide the vocabulary for analyzing training bottlenecks systematically.
+
 The shift in perspective is essential because the same mathematical operations that elegantly describe learning in equations become formidable engineering challenges in implementation. A matrix multiplication is just $C = AB$ in notation, but training GPT-2 requires executing that operation billions of times with matrices too large to fit in fast memory. The activation function $f(x) = \max(0, x)$ appears trivial, yet the choice between ReLU and sigmoid determines whether Tensor Cores can accelerate computation. Understanding these system-level implications of familiar mathematics enables practitioners to identify bottlenecks and apply targeted optimizations.
 
 Training systems must execute three categories of operations repeatedly. First, forward propagation computes predictions through matrix multiplications and activation functions. Second, gradient computation via backpropagation calculates parameter updates using stored activations and the chain rule. Third, parameter updates apply gradients using optimization algorithms that maintain momentum and adaptive learning rate state. Each category exhibits distinct computational patterns and system requirements that training architectures must accommodate.
@@ -369,7 +371,7 @@ This explains why activation function choice matters less than expected. ReLU ve
 
 ### Optimization Algorithms {#sec-ai-training-optimization-algorithms-506e}
 
-Having examined how activation functions transform signals at each layer, we now turn to the algorithms that determine how model parameters evolve during training. While activation functions define the forward computation within a single pass through the network, optimization algorithms govern the learning process itself across thousands or millions of iterations.
+Activation functions determine what happens during a single forward pass: signals transform through the network and produce a prediction. But a single prediction is worthless without learning. Training requires thousands of passes, each followed by parameter adjustments that gradually reduce prediction error. How should those adjustments be computed? This question motivates optimization algorithms, which translate gradients into parameter updates that steer the model toward better performance. While activation functions define computation within a single pass, optimization algorithms govern learning dynamics across the full training trajectory.
 
 Optimization algorithms play an important role in neural network training by guiding the adjustment of model parameters to minimize a loss function. This process enables neural networks to learn from data, and it involves finding the optimal set of parameters that yield the best model performance on a given task. Broadly, these algorithms can be divided into two categories: classical methods, which provide the theoretical foundation, and advanced methods, which introduce enhancements for improved performance and efficiency.
 
@@ -436,19 +438,19 @@ This establishes a central theme in training systems: the hardware-software trad
 
 #### Adaptive and Momentum-Based Optimizers {#sec-ai-training-adaptive-momentumbased-optimizers-4634}
 
-Advanced optimization algorithms introduce mechanisms like momentum and adaptive learning rates to improve convergence. These methods have been instrumental in addressing the inefficiencies of classical approaches [@kingma2014adam].
+SGD computes correct gradients but struggles with ill-conditioned loss landscapes where some dimensions are steep (requiring small steps) while others are shallow (benefiting from large steps). A single learning rate either oscillates dangerously in steep dimensions or moves glacially in shallow ones. Each subsequent optimizer we examine solves a specific limitation of its predecessors: momentum smooths oscillations by averaging gradient history, RMSprop adapts step sizes per parameter, and Adam combines both strategies. Understanding this progression clarifies why Adam became the default choice for transformer training while revealing the system costs, specifically memory and computation, that each refinement introduces [@kingma2014adam].
 
 ##### Momentum-Based Methods {#sec-ai-training-momentumbased-methods-8774}
 
-Momentum methods enhance gradient descent by accumulating a velocity vector across iterations. From a systems perspective, momentum introduces additional memory requirements. The training system must maintain a velocity vector with the same dimensionality as the parameter vector, effectively doubling the memory needed for optimization state.
+Momentum methods address SGD's oscillation problem by accumulating a velocity vector across iterations, smoothing out noisy gradient directions. From a systems perspective, this smoothing comes at a cost: the training system must maintain a velocity vector with the same dimensionality as the parameter vector, effectively doubling the memory needed for optimization state.
 
 ##### Adaptive Learning Rate Methods {#sec-ai-training-adaptive-learning-rate-methods-a59c}
 
-RMSprop modifies the basic gradient descent update by maintaining a moving average of squared gradients for each parameter. This per-parameter adaptation requires storing the moving average $s_t$, creating memory overhead similar to momentum methods. The element-wise operations in RMSprop also introduce additional computational steps compared to basic gradient descent.
+While momentum smooths gradient direction, it does not address the different scales of gradients across parameters. RMSprop solves this by maintaining a moving average of squared gradients for each parameter, automatically reducing step sizes for parameters with historically large gradients. This per-parameter adaptation requires storing the moving average $s_t$, creating memory overhead similar to momentum methods. The element-wise operations in RMSprop also introduce additional computational steps compared to basic gradient descent.
 
 ##### Adam Optimization {#sec-ai-training-adam-optimization-2b6f}
 
-Adam combines concepts from both momentum and RMSprop, maintaining two moving averages for each parameter:
+Adam combines the benefits of both momentum and RMSprop: momentum's gradient smoothing addresses noisy updates, while RMSprop's adaptive scaling handles parameter-specific step sizes. This combination maintains two moving averages for each parameter:
 \begin{gather*}
 m_t = \beta_1 m_{t-1} + (1-\beta_1)\nabla L(\theta_t)
 \\
@@ -1603,11 +1605,13 @@ Determining the optimal batch size involves balancing these factors within hardw
 **The Systems Conclusion**: Training is a physical industrial process. At trillion-parameter scale, electricity alone costs millions—driving the efficiency optimizations in Part III. The same optimizations that reduce training time also reduce energy consumption and carbon footprint.
 :::
 
-The pipeline architecture established above—data loading, forward pass, backward pass, parameter updates—provides the *what* of training systems. The mathematical foundations quantified the FLOPs, memory, and bandwidth each stage demands. But understanding *what* must happen does not reveal *where* the system currently underperforms. A pipeline can be limited by any of its stages, and optimizing the wrong stage wastes engineering effort while leaving the actual bottleneck untouched. The systematic optimization methodology that follows requires first identifying which constraint currently limits performance.
+The pipeline architecture established above, spanning data loading, forward pass, backward pass, and parameter updates, provides the *what* of training systems. The mathematical foundations quantified the FLOPs, memory, and bandwidth each stage demands. Together, these sections establish what operations execute and what resources they require.
+
+But understanding *what* must happen does not reveal *where* the system currently underperforms. A pipeline can be limited by any of its stages, and optimizing the wrong stage wastes engineering effort while leaving the actual bottleneck untouched.
 
 ## Identifying Bottlenecks {#sec-ai-training-identifying-bottlenecks}
 
-Before applying optimization techniques, you must identify which bottleneck currently limits your training performance. The techniques in the next section—prefetching, mixed precision, gradient accumulation—each target specific bottlenecks. Applying the wrong optimization wastes engineering effort; applying the right one can yield 2-10× speedups.
+Before applying optimization techniques, you must diagnose which constraint currently limits performance. This diagnostic step is essential: the techniques in the next section, including prefetching, mixed precision, and gradient accumulation, each target specific bottlenecks. Applying the wrong optimization wastes engineering effort, while applying the right one can yield 2-10x speedups.
 
 ::: {.callout-definition title="Model FLOPs Utilization (MFU)"}
 
@@ -2378,7 +2382,7 @@ These speedups compound with the memory savings discussed earlier, enabling both
 
 ### Flash Attention: IO-Aware Attention Optimization {#sec-ai-training-flash-attention}
 
-While mixed-precision training optimizes computational throughput and memory capacity, Flash Attention [@dao2022flashattention] addresses a more fundamental bottleneck in transformer training: memory bandwidth. For sequence lengths beyond 2048 tokens, standard attention implementations become bandwidth-bound rather than compute-bound, with the GPU spending more time moving data between memory hierarchies than performing actual computation. Flash Attention transforms attention from a memory-intensive operation into an IO-aware algorithm through strategic tiling and recomputation, achieving 2-4× speedups while enabling training on sequences that would otherwise cause out-of-memory errors.
+Mixed-precision training addresses two bottlenecks: compute throughput (Tensor Cores operate faster on FP16) and memory capacity (half the bytes per value). But for transformer models, a third bottleneck often dominates: memory bandwidth. The attention mechanism's quadratic intermediate matrices must be repeatedly loaded and stored, and even with reduced precision, the sheer volume of memory traffic can leave compute units idle. This brings us to Flash Attention [@dao2022flashattention], which complements mixed precision by fundamentally restructuring how attention is computed. Rather than optimizing what precision to use, Flash Attention optimizes how data flows between memory hierarchies through strategic tiling and recomputation, achieving 2-4x speedups while enabling training on sequences that would otherwise cause out-of-memory errors.
 
 #### The Standard Attention Memory Bottleneck {#sec-ai-training-standard-attention-bottleneck}
 
@@ -3126,13 +3130,13 @@ The GPT-2 case study demonstrates how the optimization techniques examined in th
 
 : **GPT-2 Training Optimization Summary**: Applying mixed-precision training and gradient checkpointing reduces memory from 101 GB to 26 GB, training time by 40%, energy consumption by 58%, and carbon footprint proportionally. {#tbl-gpt2-summary}
 
-This 4× memory reduction, combined with 2.4× computational speedup and 58% energy reduction, exemplifies how systematic optimization transforms hardware constraints into engineering design parameters. The same optimizations that improve throughput also reduce energy consumption and operational cost—a perspective increasingly important as training scale grows.
+This 4x memory reduction, combined with 2.4x computational speedup and 58% energy reduction, exemplifies how systematic optimization transforms hardware constraints into engineering design parameters. The same optimizations that improve throughput also reduce energy consumption and operational cost.
 
-However, even perfectly optimized single-machine training eventually reaches hard limits.
+We have now exhausted the single-machine optimization toolkit. Mixed precision extracts maximum throughput from Tensor Cores. Flash Attention reduces bandwidth consumption to near-theoretical minimums. Gradient checkpointing trades compute for memory at the most favorable ratios possible. Prefetching hides data loading latency. When all these techniques are applied and the training still takes too long or the model still does not fit, a different approach becomes necessary: spreading the computation across multiple devices.
 
 ## Scaling Training Systems {#sec-ai-training-scaling-systems}
 
-The optimization techniques examined throughout this chapter extend single-device training capabilities substantially, but modern deep learning increasingly requires harnessing multiple accelerators. This section examines parallelism strategies for scaling training—from multi-GPU configurations within a single machine to the threshold where distributed systems become necessary.
+The optimization techniques examined throughout this chapter extend single-device training capabilities substantially, but they cannot overcome fundamental hardware limits. A single GPU has finite memory capacity, finite compute throughput, and finite memory bandwidth. When model size exceeds device memory even after gradient checkpointing, or when training duration remains unacceptable even at peak utilization, multi-accelerator training becomes necessary. This section examines when and how to scale beyond single-device training, from multi-GPU configurations within a single machine to the threshold where distributed systems across multiple machines become essential.
 
 ### The Evolution of Training Infrastructure {#sec-ai-training-evolution-infrastructure}
 

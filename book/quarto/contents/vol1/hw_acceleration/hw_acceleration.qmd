@@ -1961,7 +1961,9 @@ These two widely-deployed models illustrate how different architectures interact
 
 ## Hardware Mapping Fundamentals for Neural Networks {#sec-ai-acceleration-hardware-mapping-fundamentals-neural-networks-f9a9}
 
-The memory system challenges examined in the previous section—bandwidth limitations, hierarchical access costs, and model-specific pressure patterns—directly determine how effectively neural networks execute on accelerators. A systolic array with 1,200 GB/s on-chip bandwidth and sophisticated memory hierarchies delivers no performance benefit if computations are mapped without considering these memory access patterns. As established in @sec-ai-acceleration-understanding-ai-memory-wall-3ea9, the extreme energy penalty for memory access means that mapping strategies must prioritize data reuse and locality above all other considerations. This reality drives the need for systematic mapping approaches that coordinate computation placement, memory allocation, and data movement to exploit hardware capabilities while respecting memory constraints.
+The Roofline analysis in the previous section taught us to diagnose whether specific operations are compute-bound or memory-bound on given hardware. We saw that ResNet-50's convolutions achieve high arithmetic intensity (50-200 FLOP/byte) and operate in the compute-bound regime, while GPT-2's attention layers achieve only 2-5 FLOP/byte and are severely memory-bound. But diagnosis is only half the challenge. Once we know that LayerNorm achieves just 1-2 FLOP/byte on an A100, the question becomes: how do we execute it efficiently despite this limitation? This is the domain of hardware mapping, the art of translating abstract computational graphs into concrete execution plans that exploit accelerator architectures while respecting their constraints.
+
+The memory system challenges examined in @sec-ai-acceleration-understanding-ai-memory-wall-3ea9 established *why* memory access dominates modern AI systems: DRAM access consumes 100-200x more energy than a multiply-accumulate operation. The Roofline model established *how to measure* whether a workload is compute-bound or memory-bound. This section addresses the critical follow-up: *how to map* computations to maximize data reuse and minimize the energy-intensive transfers that the Roofline analysis revealed as the primary bottleneck. A systolic array with 1,200 GB/s on-chip bandwidth and sophisticated memory hierarchies delivers no performance benefit if computations are mapped without considering these memory access patterns.
 
 Efficient execution of machine learning models on specialized AI acceleration hardware requires a structured approach to computation, ensuring that available resources are fully utilized while minimizing performance bottlenecks. These mapping considerations become particularly critical in distributed training scenarios, as explored in @sec-ai-training. Unlike general-purpose processors, which rely on dynamic task scheduling, AI accelerators operate under a structured execution model that maximizes throughput by carefully assigning computations to processing elements. This process, known as mapping, dictates how computations are distributed across hardware resources, influencing execution speed, memory access patterns, and overall efficiency.
 
@@ -2209,13 +2211,21 @@ The combinatorial explosion revealed by this analysis, with potentially billions
 
 ## Dataflow Optimization Strategies {#sec-ai-acceleration-dataflow-optimization-strategies-ce52}
 
-Building on the mapping search space analysis, dataflow optimization strategies provide the structured approaches that make efficient execution achievable. Mapping strategies establish *where* computations execute and *where* data resides within an accelerator's architecture, but they do not specify *how* data flows through processing elements during execution. A systolic array might process a matrix multiplication with weights stored in local memory, but the order in which weights, inputs, and outputs move through the array fundamentally determines memory bandwidth consumption and energy efficiency. These dataflow patterns—termed optimization strategies—represent the critical implementation dimension that translates abstract mapping decisions into concrete execution plans.
+The mapping search space analysis revealed a daunting combinatorial explosion: billions of possible configurations for even simple neural network layers. How do practitioners routinely achieve near-optimal performance despite this vast space? The answer lies in a key insight: while the full configuration space is intractable, a small set of principled dataflow patterns capture the essential trade-offs.
+
+This section introduces these patterns through three questions that structure all dataflow decisions:
+
+1. **Which data stays local?** Weight-stationary, output-stationary, and input-stationary strategies each make different choices about what to cache near compute units, trading off different memory access patterns.
+2. **How is data organized?** Tensor layouts (NHWC vs. NCHW) determine whether memory accesses align with hardware preferences, with performance impacts of 2-5x.
+3. **How are operations combined?** Kernel fusion and tiling restructure computation to minimize memory traffic, often achieving 2-10x speedups through reduced data movement alone.
+
+By mastering these patterns, you will be able to reason about 90% of dataflow optimization decisions without exhaustive search. We examine each question in turn, then see how they combine for specific neural network architectures including ResNet-50, GPT-2, and MLPs.
+
+Mapping strategies establish *where* computations execute and *where* data resides within an accelerator's architecture, but they do not specify *how* data flows through processing elements during execution. A systolic array might process a matrix multiplication with weights stored in local memory, but the order in which weights, inputs, and outputs move through the array fundamentally determines memory bandwidth consumption and energy efficiency. These dataflow patterns, termed optimization strategies, represent the critical implementation dimension that translates abstract mapping decisions into concrete execution plans.
 
 The choice among weight-stationary, input-stationary, and output-stationary approaches directly impacts whether an accelerator operates in the compute-bound or memory-bound region. Understanding these trade-offs is essential because compilers (@sec-ai-acceleration-compiler-support-172e) and runtime systems (@sec-ai-acceleration-runtime-support-f94f) must select appropriate dataflow patterns based on computational characteristics and memory hierarchy capabilities analyzed in @sec-ai-acceleration-memory-hierarchy-1839.
 
-Efficiently mapping machine learning computations onto hardware is a complex challenge due to the vast number of possible configurations. As models grow in complexity, the number of potential mappings increases exponentially. Even for a single layer, there are thousands of ways to order computation loops, hundreds of parallelization strategies, and an exponentially growing number of memory placement choices. This combinatorial explosion makes exhaustive search impractical.
-
-To overcome this challenge, AI accelerators rely on structured mapping strategies that systematically balance computational efficiency, data locality, and parallel execution. Rather than evaluating every possible configuration, these approaches use a combination of heuristic, analytical, and machine learning-based techniques to find high-performance mappings efficiently.
+To overcome the combinatorial challenge, AI accelerators rely on structured mapping strategies that systematically balance computational efficiency, data locality, and parallel execution. Rather than evaluating every possible configuration, these approaches use a combination of heuristic, analytical, and machine learning-based techniques to find high-performance mappings efficiently.
 
 Understanding and applying a set of core techniques that optimize data movement, memory access, and computation enables effective mapping. These building blocks of mapping strategies provide a structured foundation for efficient execution.
 
@@ -2529,6 +2539,18 @@ Different AI accelerators and compilers handle fusion in distinct ways. NVIDIA G
 
 Despite its advantages, fusion is not always beneficial. Some AI frameworks allow developers to disable fusion selectively, especially when debugging performance issues or making frequent model modifications. The decision to fuse operations must consider trade-offs between memory efficiency, register usage, and hardware execution constraints to ensure that fusion leads to tangible performance improvements.
 
+::: {.callout-checkpoint title="Synthesis: Data Movement and Kernel Fusion"}
+
+At this point, you should be able to answer the first two questions from the roadmap:
+
+**Which data stays local?** The weight-stationary, output-stationary, and input-stationary patterns each make a principled choice about which data to cache near compute units. Weight-stationary (used in Google's TPU) maximizes weight reuse for CNN workloads. Output-stationary (used in NVIDIA's tensor cores) reduces partial sum memory traffic for fully connected layers. Input-stationary minimizes input reloads for models with shared inputs across multiple filters.
+
+**How are operations combined?** Kernel fusion eliminates intermediate memory writes by merging consecutive operations (Conv2D + BatchNorm + ReLU becomes a single kernel). This optimization is most effective for element-wise operations that share data dependencies and can achieve 2-10x speedups by avoiding round-trips to DRAM.
+
+The remaining question, *how is data organized*, brings us to tiling: the technique of partitioning computations into memory-friendly blocks. Tiling complements the stationary strategies by ensuring that whichever data we choose to keep local actually fits in fast memory.
+
+:::
+
 #### Memory-Efficient Tiling Strategies {#sec-ai-acceleration-memoryefficient-tiling-strategies-9fce}
 
 While modern AI accelerators offer high computational throughput, their performance is often limited by memory bandwidth rather than raw processing power. If data cannot be supplied to processing units fast enough, execution stalls occur, leading to wasted cycles and inefficient hardware utilization.
@@ -2828,7 +2850,14 @@ The mapping strategies and dataflow optimizations examined in preceding sections
 
 ## Compiler Support {#sec-ai-acceleration-compiler-support-172e}
 
-Machine learning compilers automate the translation of dataflow strategies into executable code, addressing a fundamental challenge: the mapping decisions analyzed above must be instantiated differently for each hardware target. These optimization techniques such as kernel fusion, tiling, memory scheduling, and data movement strategies are essential for maximizing efficiency. However, these optimizations must be systematically applied before execution to ensure they align with hardware constraints and computational requirements.
+Machine learning compilers automate the translation of dataflow strategies into executable code, addressing a fundamental challenge: the mapping decisions analyzed above must be instantiated differently for each hardware target. To see why this matters, consider what happens when you compile ResNet-50 for GPU inference:
+
+1. **Graph optimization** fuses the 49 Conv2D-BatchNorm-ReLU sequences into 49 single kernels, eliminating 98 intermediate memory writes that would otherwise consume bandwidth
+2. **Kernel selection** chooses Tensor Core implementations for the 3x3 convolutions, exploiting the high arithmetic intensity (50-200 FLOP/byte) we calculated in the Roofline analysis
+3. **Memory planning** determines that intermediate activations require approximately 2.1 GB at batch size 32, fitting comfortably in the A100's 40 GB HBM
+4. **Computation scheduling** overlaps memory transfers for layer N+1 with computation of layer N, hiding a substantial portion of transfer latency
+
+The result: inference time drops from approximately 47 ms (naive execution) to approximately 8 ms (optimized), roughly a 5-6x improvement from compilation alone, before any algorithmic changes to the model. This concrete example illustrates how the dataflow strategies from the previous section, including kernel fusion (@sec-ai-acceleration-kernel-fusion-7faf) and tiling (@sec-ai-acceleration-memoryefficient-tiling-strategies-9fce), translate into real performance through systematic compiler optimization.
 
 This process exemplifies the hardware-software co-design principle established in @sec-ai-acceleration-ai-hardware-acceleration-fundamentals-2096, where machine learning compilers bridge high-level model representations with low-level hardware execution. The compiler optimizes models by restructuring computations, selecting efficient execution kernels, and maximizing hardware utilization [@chen_tvmlang_2018]. Unlike traditional compilers designed for general-purpose computing, ML workloads require specialized approaches for tensor computations and parallel execution.
 
@@ -3113,11 +3142,15 @@ Efficient kernel scheduling can also be influenced by  real-time memory manageme
 
 These techniques enable AI runtimes to ensure optimal resource utilization and efficient parallel computation, which are essential for the high-performance execution of machine learning models, particularly in environments that require scaling across multiple hardware accelerators.
 
-The compiler and runtime systems examined thus far optimize execution within single accelerators, managing computation mapping, memory hierarchies, and kernel scheduling. While these single-chip optimizations achieve impressive performance gains, modern AI workloads increasingly exceed what any individual chip can deliver. Training GPT-3 required approximately 3.14 x 10^23 floating-point operations [@Brown2020]; even at the H100's peak FP16 throughput of nearly 2 petaFLOPS, completing this computation on a single accelerator would require over five years of continuous operation at theoretical peak, and considerably longer at realistic utilization rates. Real-time inference serving for global applications demands throughput beyond any single accelerator's capacity. These computational requirements necessitate scaling beyond single-chip systems.
+The compiler and runtime systems examined thus far optimize execution within single accelerators, managing computation mapping, memory hierarchies, and kernel scheduling. These single-chip optimizations achieve impressive results: ResNet-50 inference accelerates from 47 ms to 8 ms through compiler optimization alone; the dataflow strategies we examined can push GPU utilization from 20% to 80% of peak throughput. Yet for the largest AI workloads, even perfectly optimized single-chip execution proves fundamentally insufficient.
+
+Consider the scale of training GPT-3, which required approximately $3.14 \times 10^{23}$ floating-point operations [@Brown2020]. Even at the H100's peak FP16 throughput of nearly 2 petaFLOPS, completing this computation on a single accelerator would require over five years of continuous operation at theoretical peak, and considerably longer at realistic utilization rates of 40-60%. Real-time inference serving for global applications like ChatGPT or Google Search demands throughput beyond any single accelerator's capacity, requiring distributed inference across hundreds of chips. These computational requirements necessitate scaling beyond single-chip systems, introducing fundamentally different engineering challenges from those we have examined.
 
 ## Scaling Beyond Single Accelerators {#sec-ai-acceleration-scaling-beyond-single}
 
-When single-accelerator capacity proves insufficient, AI systems must scale across multiple chips, introducing fundamentally different engineering challenges. Understanding these scaling approaches is essential for practitioners who will encounter multi-chip systems in production environments, even when working primarily with single-accelerator deployments.
+This section provides essential awareness of multi-chip scaling while maintaining our Volume I focus on single-machine systems. The techniques we have covered, dataflow optimization, kernel fusion, memory hierarchy exploitation, and compiler optimization, remain the foundation for efficient execution even in distributed settings. Each individual accelerator in a multi-chip system must still be optimized using these principles. However, multi-chip architectures introduce additional concerns around communication overhead, memory coherence, and fault tolerance that transform the optimization landscape. The detailed implementation of distributed training systems, including gradient synchronization protocols, parameter server architectures, and cluster-scale orchestration, is covered comprehensively in @sec-distributed-training in Volume II.
+
+When single-accelerator capacity proves insufficient, AI systems must scale across multiple chips. Understanding these scaling approaches is essential for practitioners who will encounter multi-chip systems in production environments, even when working primarily with single-accelerator deployments.
 
 ### Multi-Chip Scaling Approaches {#sec-ai-acceleration-multichip-scaling-approaches}
 
@@ -3142,8 +3175,6 @@ Memory coherence presents another challenge at scale. Ensuring all processors se
 As systems grow larger, fault tolerance requirements increase correspondingly. Large-scale systems must handle component failures gracefully since the probability of at least one failure increases with system size. TPU Pods implement sophisticated consensus algorithms to maintain training consistency when optical links fail, while wafer-scale systems incorporate redundant cores to tolerate localized silicon defects.
 
 Perhaps most significantly, the energy costs of data movement come to dominate system design. Moving data across a TPU Pod's optical interconnect can consume orders of magnitude more energy than on-chip communication within individual TPUs. This energy differential transforms distributed training into a careful balance between computation parallelism and communication efficiency, a concern that shapes both hardware architecture and algorithm design.
-
-This section provides awareness of multi-chip scaling challenges. The implementation details of distributed training systems, including gradient synchronization protocols, multi-node communication patterns, and cluster-scale orchestration, are covered in Volume II on distributed ML systems.
 
 ## Heterogeneous SoC AI Acceleration {#sec-ai-acceleration-heterogeneous-soc-ai-acceleration-b1bb}
 
