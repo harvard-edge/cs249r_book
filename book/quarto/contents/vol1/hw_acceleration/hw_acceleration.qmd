@@ -18,31 +18,49 @@ _DALL·E 3 Prompt: Create an intricate and colorful representation of a System o
 
 ## Purpose {.unnumbered}
 
-_What makes specialized hardware acceleration not just beneficial but essential for practical machine learning deployment, and why does this represent a fundamental shift in how we approach computational system design?_
+_Why does the same neural network run dramatically faster on specialized accelerators than general-purpose processors, and why do some optimizations that reduce theoretical computation fail to improve actual runtime?_
 
-Practical machine learning systems depend critically on hardware acceleration. Without specialized processors, many modern workloads are economically or physically impractical on general-purpose processors alone. General-purpose CPUs deliver on the order of 10^2 GFLOPS[^fn-gflops] for neural network operations in representative analyses [@sze2017efficient], while modern training workloads demand far higher throughput, creating a performance gap that traditional scaling cannot bridge. Hardware acceleration turns otherwise impractical workloads into deployable systems, enabling new application categories. Engineers working with modern AI systems should understand acceleration principles to reason about the large (often order-of-magnitude) performance and efficiency gains that make real-time inference, large-scale training, and edge deployment viable.
+The gap between general-purpose and specialized hardware determines what machine learning applications are economically viable. Training large language models requires astronomical numbers of floating-point operations; on CPUs alone, this would take impractical amounts of time, but hardware acceleration compresses it to manageable durations. The difference between CPU and accelerator execution can be the difference between an impractical demonstration and a usable product. Yet raw throughput specifications tell only part of the story. Typical training workloads achieve only a fraction of advertised peak performance because the missing performance disappears into memory bandwidth limitations, data movement patterns, and the fundamental physics of silicon. Understanding why specialized hardware achieves dramatic improvements, recognizing when memory bandwidth rather than compute limits performance, and knowing which architectural patterns enable efficient deployment from data centers to mobile devices transforms engineers from consumers of hardware specifications into practitioners who can reason about the gap between theoretical capability and realized performance.
 
 ::: {.callout-tip title="Learning Objectives"}
 
-- Trace the evolution of AI hardware from floating-point coprocessors through GPUs to domain-specific accelerators
+After completing this chapter, you should be able to:
 
-- Analyze AI compute primitives (vector operations, matrix multiplication, systolic arrays) and their hardware implementations
+- **Calculate arithmetic intensity** for neural network operations and use the roofline model to determine whether workloads are compute-bound or memory-bound on specific hardware
 
-- Quantify the AI memory wall using bandwidth, latency, and energy metrics to predict performance bottlenecks
+- **Explain why** systolic arrays and tensor cores achieve 10-100× better efficiency than general-purpose processors for matrix operations
 
-- Compare dataflow optimization strategies (weight-stationary, output-stationary, input-stationary) for different workload types
+- **Predict performance bottlenecks** by quantifying the memory wall: bandwidth limits, energy costs of data movement, and cache hierarchy trade-offs
 
-- Apply compiler optimizations (graph transformation, kernel fusion, memory planning) to maximize hardware utilization
+- **Select appropriate dataflow strategies** (weight-stationary, output-stationary, input-stationary) based on whether a workload prioritizes weight reuse, activation reuse, or accumulator locality
 
-- Evaluate runtime architectures for dynamic kernel selection and workload scheduling across heterogeneous accelerators
+- **Identify compiler optimization opportunities** including kernel fusion, tiling, and memory planning that translate high-level models into efficient hardware execution
 
-- Critique common fallacies in accelerator selection, memory bandwidth analysis, and multi-chip scaling strategies
+- **Evaluate accelerator choices** for specific deployment scenarios (training vs. inference, cloud vs. edge, latency vs. throughput) using quantitative cost-performance analysis
+
+- **Recognize common pitfalls** such as ignoring memory bandwidth limits, expecting linear multi-GPU scaling, or optimizing for peak FLOPS rather than sustained throughput
+
+:::
+
+::: {.callout-chapter-connection title="From Algorithmic to Physical Optimization"}
+
+The Model Compression chapter (@sec-model-compression) introduced techniques that reduce computational requirements through algorithmic means: quantization shrinks precision from FP32 to INT8, pruning removes unnecessary weights, and knowledge distillation trains smaller networks. But *why* does reducing precision from 32 bits to 8 bits yield 2-4× speedup? Why does structured pruning improve performance while unstructured pruning often doesn't?
+
+The answers lie in hardware architecture. Quantization works because accelerators pack 4× more INT8 operations into the same silicon. Structured pruning works because it preserves memory access patterns that hardware can optimize. This chapter explains the physical constraints that make algorithmic optimizations effective—and reveals why some theoretically promising techniques fail to deliver real-world speedups.
+
+**The Optimization Pipeline**: Think of ML optimization as a three-stage pipeline:
+
+1. **Algorithmic** (Model Compression): Reduce what needs to be computed
+2. **Mapping** (This Chapter): Match computation to hardware capabilities
+3. **Deployment** (Benchmarking, Ops): Validate and operationalize the gains
+
+Understanding hardware acceleration transforms you from a consumer of optimization techniques into an engineer who can reason about *why* techniques work and *when* they'll fail.
 
 :::
 
 ## AI Hardware Acceleration Fundamentals {#sec-ai-acceleration-ai-hardware-acceleration-fundamentals-2096}
 
-If Data Efficiency optimizes the "Source Code" and Compression optimizes the "Binary," then **Hardware Acceleration** optimizes the machine itself. It is the final physical frontier of the **Iron Law** (@sec-optimize-principles), where we design silicon to maximize "Math per Second" while minimizing "Energy per Bit." 
+If Data Efficiency optimizes the "Source Code" and Compression optimizes the "Binary," then **Hardware Acceleration** optimizes the machine itself. It is the final physical frontier of the **Iron Law** (@sec-optimize-principles), where we design silicon to maximize "Math per Second" while minimizing "Energy per Bit."
 
 Modern machine learning systems challenge the architectural assumptions underlying general-purpose processors. The efficiency framework established in @sec-introduction identified three pillars of ML system efficiency: algorithmic, compute, and data. While the software optimization techniques examined in @sec-model-compression address the algorithmic pillar through precision reduction, structural pruning, and execution refinements, hardware acceleration targets the compute pillar through architectural redesign rather than algorithmic modification.
 
@@ -51,6 +69,16 @@ This performance gap has driven a shift toward domain-specific hardware accelera
 ::: {.callout-definition title="Hardware-Software Co-design"}
 
 **Hardware-Software Co-design** refers to the simultaneous and coordinated design of _machine learning algorithms_ and _computational hardware_ to optimize for performance, efficiency, and scalability, recognizing that neither can achieve peak potential in isolation.
+
+:::
+
+::: {.callout-perspective title="The Central Question: Compute-Bound or Memory-Bound?"}
+
+Throughout this chapter, one question will recur: *Is this workload limited by how fast we can compute, or how fast we can move data?* The answer determines everything—which accelerator to choose, which optimizations matter, and whether a 10× more powerful chip will actually help.
+
+The **Roofline Model** (@sec-ai-acceleration-roofline-model) provides the analytical framework for answering this question. It plots an operation's **arithmetic intensity** (operations per byte of memory traffic) against hardware capabilities, revealing whether performance is capped by compute or bandwidth. A dense matrix multiplication with high arithmetic intensity benefits from more TFLOPS; a LayerNorm with low arithmetic intensity benefits from more memory bandwidth. Most real neural networks contain both types of operations, requiring careful analysis to optimize end-to-end performance.
+
+Keep this distinction in mind as we examine hardware architectures. When we discuss systolic arrays, ask: "What arithmetic intensity do they require to achieve full utilization?" When we examine memory hierarchies, ask: "How do they shift the roofline boundary?" This analytical lens transforms hardware selection from guesswork into engineering.
 
 :::
 
@@ -68,15 +96,13 @@ Multi-chip architectures, from chiplet-based integration to distributed warehous
 
 ## Evolution of Hardware Specialization {#sec-ai-acceleration-evolution-hardware-specialization-1d21}
 
-Computing architectures follow a recurring pattern: as computational workloads grow in complexity, general-purpose processors become increasingly inefficient, prompting the development of specialized hardware accelerators. The need for higher computational efficiency, reduced energy consumption, and optimized execution of domain-specific workloads drives this transition. Machine learning acceleration represents the latest stage in this ongoing evolution, following a trajectory observed in prior domains such as floating-point arithmetic, graphics processing, and digital signal processing.
+Computing architectures follow a recurring pattern: as workloads grow in complexity, general-purpose processors become inefficient, prompting specialized hardware development. Machine learning acceleration represents the latest stage in this evolution, following a trajectory observed in floating-point arithmetic, graphics processing, and digital signal processing.
 
-This evolutionary progression provides context for understanding how modern ML accelerators such as GPUs with tensor cores (specialized units that accelerate matrix operations), Google's TPUs[^fn-hwacc-tpu], and Apple's Neural Engine emerged from established architectural principles. These technologies enable widely deployed applications such as real-time language translation, image recognition, and personalized recommendations. The architectural strategies that enable these capabilities derive from decades of hardware specialization research and development.
+Modern ML accelerators—GPUs with tensor cores, Google's TPUs[^fn-hwacc-tpu], Apple's Neural Engine—emerged from these established architectural principles. Understanding this history reveals why accelerators are designed the way they are and what trade-offs they embody.
 
 [^fn-hwacc-tpu]: **TPU Origins**: Google secretly developed the Tensor Processing Unit (TPU) starting in 2013 when they realized CPUs couldn't handle the computational demands of their neural networks. The TPUv1, deployed in 2015, delivered 15-30$\times$ better performance per watt than contemporary GPUs for inference. This breakthrough significantly changed how the industry approached AI hardware, proving that domain-specific architectures could dramatically outperform general-purpose processors for neural network workloads.
 
-Hardware specialization forms the foundation of this transition, enhancing performance and efficiency by optimizing frequently executed computational patterns through dedicated circuit implementations. While this approach yields significant gains, it introduces trade-offs in flexibility, silicon area utilization, and programming complexity. As computing demands continue to evolve, specialized accelerators must balance these factors to deliver sustained improvements in efficiency and performance.
-
-The evolution of hardware specialization provides perspective for understanding modern machine learning accelerators. Many principles that shaped the development of early floating-point and graphics accelerators now inform the design of AI-specific hardware. Examining these past trends offers a framework for analyzing contemporary approaches to AI acceleration and anticipating future developments in specialized computing.
+Hardware specialization enhances performance by implementing frequently executed patterns in dedicated circuits, but introduces trade-offs in flexibility, silicon area, and programming complexity. The principles that shaped early floating-point and graphics accelerators now inform AI hardware design.
 
 ### Specialized Computing {#sec-ai-acceleration-specialized-computing-1a77}
 
@@ -90,9 +116,9 @@ The Intel 8087 (1980)[^fn-intel-8087] addressed this bottleneck by offloading ar
 
 As specialized functions like floating-point math proved their value, they followed a recurring pattern of **integration**. The Intel 486DX (1989) moved the FPU directly onto the CPU die, eliminating the off-chip communication latency and making high-precision math a standard feature rather than an optional accelerator. This cycle (specialization to solve a bottleneck, followed by integration into the general-purpose stack) repeats across every era of hardware evolution.
 
-This progression from domain-specific specialization to general-purpose integration has shaped modern computing architectures. As computational workloads expanded beyond arithmetic operations, these core principles were applied to new domains, such as graphics processing, digital signal processing, and ultimately, machine learning acceleration. Each domain introduced specialized architectures tailored to their unique computational requirements, establishing hardware specialization as an approach for advancing computing performance and efficiency in increasingly complex workloads.
+This progression from specialization to integration has shaped modern computing. Each domain—graphics, signal processing, machine learning—introduced specialized architectures that were later absorbed into general-purpose platforms.
 
-The evolution of specialized computing hardware follows a consistent trajectory, in which architectural innovations are introduced to address emerging computational bottlenecks and are subsequently incorporated into mainstream computing platforms. @fig-timeline traces how each computing era produced accelerators that addressed the dominant workload characteristics of the period. These developments have advanced architectural efficiency and shaped the foundation upon which contemporary machine learning systems operate. The computational capabilities required for tasks such as real-time language translation, personalized recommendations, and on-device inference depend on foundational principles and architectural innovations established in earlier domains, including floating-point computation, graphics processing, and digital signal processing.
+@fig-timeline traces this trajectory: each era produced accelerators addressing the dominant computational bottleneck of the period. The capabilities enabling today's real-time translation, recommendations, and on-device inference build directly on principles established in earlier specialization waves.
 
 ::: {#fig-timeline fig-env="figure" fig-pos="htb" fig-cap="**Hardware Specialization Trajectory**: Computing architectures progressively incorporate specialized accelerators to address emerging performance bottlenecks and workload demands, mirroring a historical pattern from floating-point units to graphics processors and, ultimately, machine learning accelerators. This evolution reflects a strategy for improving computational efficiency by tailoring hardware to specific task characteristics and advancing increasingly complex applications." fig-alt="Timeline spanning 1980s to 2020s showing hardware evolution: floating-point units, GPUs with hardware transform and lighting, media codecs, TPUs with tensor cores, and application-specific AI engines."}
 ```{.tikz}
@@ -242,7 +268,7 @@ At the opposite extreme, edge deployment requires different optimization strateg
 
 The success of application-specific accelerators demonstrates that no single architecture can efficiently address all ML workloads. A massive installed base of edge devices demands architectures optimized for energy efficiency and real-time latency targets, while cloud-scale training continues advancing the boundaries of computational throughput. This diversity drives continued innovation in specialized architectures, each optimized for its specific deployment context and computational requirements.
 
-The evolution of specialized hardware architectures illustrates a principle in computing systems: as computational patterns emerge and mature, hardware specialization follows to achieve optimal performance and energy efficiency. This progression is clear in machine learning acceleration, where domain-specific architectures have evolved to meet the increasing computational demands of machine learning models. Unlike general-purpose processors, which prioritize flexibility, specialized accelerators optimize execution for well-defined workloads, balancing performance, energy efficiency, and integration with software frameworks.
+This historical progression reveals a crucial insight: each wave of hardware specialization responded to a specific computational bottleneck. Floating-point coprocessors addressed arithmetic precision limitations. GPUs addressed graphics throughput limitations. But what bottleneck does AI acceleration address? Understanding this question is essential because it reveals _why_ modern accelerators are designed the way they are—and why simply adding more transistors to general-purpose processors cannot solve the fundamental challenge.
 
 Key milestones in hardware specialization (@tbl-hw-evolution) reveal how each era produced architectures tailored to the prevailing computational demands. While these accelerators initially emerged to optimize domain-specific workloads such as floating-point operations, graphics rendering, and media processing, they also introduced architectural strategies that persist in contemporary systems. The specialization principles outlined in earlier generations now underpin the design of modern AI accelerators. Understanding this historical trajectory provides context for analyzing how hardware specialization continues to enable scalable, efficient execution of machine learning workloads across diverse deployment environments.
 
@@ -272,15 +298,11 @@ Key milestones in hardware specialization (@tbl-hw-evolution) reveal how each er
 
 : **Hardware Specialization Trends**: Successive computing eras progressively integrate specialized hardware to accelerate prevalent workloads, moving from general-purpose CPUs to domain-specific architectures and ultimately to customizable AI accelerators. This evolution reflects a fundamental principle: tailoring hardware to computational patterns improves performance and energy efficiency, driving innovation in machine learning systems. {#tbl-hw-evolution}
 
-This historical progression reveals a recurring pattern: each wave of hardware specialization responded to a computational bottleneck, whether graphics rendering, media encoding, or neural network inference. What distinguishes the 2020s is not just specialization, but its pervasiveness: AI accelerators now underpin everything from product recommendations on YouTube to object detection in autonomous vehicles. Unlike earlier accelerators, today's AI hardware must integrate tightly with dynamic software frameworks and scale across cloud-to-edge deployments. The table illustrates not just the past but also the trajectory toward increasingly tailored, high-impact computing platforms.
-
-For AI acceleration, this transition has introduced challenges that extend well beyond hardware design. Machine learning accelerators must integrate seamlessly into ML workflows by aligning with optimizations at multiple levels of the computing stack. They must operate effectively with widely adopted frameworks such as TensorFlow, PyTorch, and JAX, ensuring that deployment is smooth and consistent across varied hardware platforms. Compiler and runtime support become necessary; advanced optimization techniques, such as graph-level transformations, kernel fusion, and memory scheduling, are critical for using the full potential of these specialized accelerators.
-
-Scalability drives additional complexity as AI accelerators deploy across diverse environments from high-throughput data centers to resource-constrained edge and mobile devices, requiring tailored performance tuning and energy efficiency strategies. Integration into heterogeneous computing[^fn-heterogeneous] environments demands interoperability that enables specialized units to coordinate effectively with conventional CPUs and GPUs in distributed systems.
+What distinguishes AI acceleration from earlier specialization waves is not just the hardware itself, but the scale of integration required. AI accelerators must work seamlessly with frameworks like TensorFlow, PyTorch, and JAX. They require sophisticated compiler support for graph-level transformations, kernel fusion, and memory scheduling. And they must deploy across environments from data centers to mobile devices, each with distinct performance and efficiency requirements. This creates a system-level transformation that requires tight hardware-software coupling—the focus of most of this chapter.
 
 [^fn-heterogeneous]: **Heterogeneous Computing**: Computing systems that combine different types of processors (CPUs, GPUs, TPUs, FPGAs) to optimize performance for diverse workloads. Modern data centers mix x86 CPUs for control tasks, GPUs for training, and TPUs for inference. Programming heterogeneous systems requires frameworks like OpenCL or CUDA that can coordinate execution across different architectures, but offers 10-100$\times$ efficiency gains by matching each task to optimal hardware.
 
-AI accelerators represent a system-level transformation that requires tight hardware-software coupling. This transformation manifests in three specific computational patterns (compute primitives) that drive accelerator design decisions. Understanding these primitives determines the architectural features that enable 100-1000$\times$ performance improvements through coordinated hardware-software optimization.
+But first, we must understand _what_ bottleneck AI accelerators are designed to solve. The answer determines every subsequent architectural decision.
 
 ### The Integration Bottleneck: Why AI Needs Specialized Hardware {#sec-ai-acceleration-integration-bottleneck}
 
@@ -1289,7 +1311,7 @@ T_{\text{compute}} = \frac{\text{FLOPs}}{P_{\text{peak}}},
 $$
 with the number of floating-point operations (FLOPs) divided by the peak hardware throughput, $P_{\text{peak}}$. When $T_{\text{mem}} > T_{\text{compute}}$, the system becomes memory-bound, meaning that the processing elements spend more time waiting for data than performing computations. This imbalance demonstrates the need for memory-optimized architectures and efficient data movement strategies to sustain high performance.
 
-@fig-memory-wall demonstrates the emerging challenge between model growth and hardware memory capabilities, illustrating the "AI Memory Wall." The figure tracks AI model sizes (red dots) and hardware memory bandwidth (blue dots) over time on a log scale. Model parameters have grown exponentially, from AlexNet's ~62.3M parameters in 2012 to Gemini 1's trillion-scale parameters in 2023, as shown by the steeper red trend line. In contrast, hardware memory bandwidth, represented by successive generations of NVIDIA GPUs (~100-200 GB/s) and Google TPUs (~2-3 TB/s), has increased more gradually (blue trend line). The expanding shaded region between these trends corresponds to the "AI Memory Wall," which will be an architectural challenge where model scaling outpaces available memory bandwidth. This growing disparity necessitates increasingly sophisticated memory management and model optimization techniques to maintain computational efficiency.
+@fig-memory-wall quantifies this disparity for specific models and hardware generations, showing how model parameter counts have outpaced memory bandwidth improvements. The gap between these curves—from AlexNet to trillion-parameter models—represents the engineering challenge that drives accelerator memory system design.
 
 #### Irregular Memory Access {#sec-ai-acceleration-irregular-memory-access-c6ec}
 
@@ -1695,7 +1717,9 @@ Each model type presents unique challenges that directly impact accelerator desi
 
 To address these challenges, modern AI accelerators incorporate multi-tier memory hierarchies that balance speed, capacity, and energy efficiency. On-chip SRAM caches and scratchpad memories store frequently accessed data, while high-bandwidth external memory provides scalability for large models. Efficient interconnects, such as NVLink, help alleviate host-accelerator transfer bottlenecks, particularly in transformer workloads where memory movement constraints can dominate execution time.
 
-As ML workloads continue to grow in complexity, memory efficiency becomes as critical as raw compute power. The analysis reveals how memory systems dominate accelerator performance: DRAM access can have orders-of-magnitude higher energy cost than on-chip arithmetic, carefully structured memory hierarchies can improve effective bandwidth substantially, and different neural network architectures create distinct memory pressure patterns. These constraints, from bandwidth limitations to communication overheads, determine whether theoretical computational capabilities translate into real-world performance. Having established how memory systems constrain accelerator effectiveness, we now examine how mapping strategies systematically address these limitations.
+As ML workloads continue to grow in complexity, memory efficiency becomes as critical as raw compute power. The analysis reveals how memory systems dominate accelerator performance: DRAM access can have orders-of-magnitude higher energy cost than on-chip arithmetic, carefully structured memory hierarchies can improve effective bandwidth substantially, and different neural network architectures create distinct memory pressure patterns. These constraints—bandwidth limitations, energy costs, and communication overheads—determine whether theoretical computational capabilities translate into real-world performance.
+
+But how do we know if a specific workload is limited by compute or memory on a given accelerator? The memory wall analysis above establishes *why* memory matters, but practitioners need a quantitative framework to predict *which* operations will bottleneck on a specific hardware configuration. This is where the Roofline Model becomes indispensable—providing the analytical lens that transforms hardware selection from intuition into engineering.
 
 ## Measuring Hardware Efficiency {#sec-ai-acceleration-measuring-efficiency}
 
@@ -1745,7 +1769,7 @@ The roofline visualization shows performance (TFLOPS) on the vertical axis and a
 2.  **Peak Bandwidth**: 3.4 TB/s.
 3.  **Ridge Point**: $990 \text{ TFLOPS} / 3.4 \text{ TB/s} \approx \mathbf{291 \text{ Ops/Byte}}$.
 
-**The Systems Conclusion**: To achieve 100% utilization of an H100, your code must perform **291 mathematical operations for every 1 byte** it pulls from memory. 
+**The Systems Conclusion**: To achieve 100% utilization of an H100, your code must perform **291 mathematical operations for every 1 byte** it pulls from memory.
 - A standard **ReLU** performs 1 operation for every 8 bytes (0.125 Ops/Byte). It is **2,300x below the roofline**.
 - A large **Dense MatMul** (batch=128) might reach 300 Ops/Byte. It is **Compute-Bound**.
 
@@ -1906,7 +1930,33 @@ Example: Dense layer with M=N=2048
 - Batch=32: AI = 32 FLOP/byte (memory-bound)
 - Batch=256: AI = 186 FLOP/byte (compute-bound on A100)
 
-This explains the 10-100× throughput improvement from batching in production serving systems, as discussed in @sec-serving.
+This explains the 10-100× throughput improvement from batching in production inference systems, as the MLPerf scenarios in @sec-benchmarking-ai demonstrate.
+:::
+
+::: {.callout-lighthouse title="Roofline Analysis: ResNet-50 vs. GPT-2"}
+
+These two widely-deployed models illustrate how different architectures interact with hardware constraints:
+
+**ResNet-50 (Image Classification)**
+
+- Dominated by 3×3 convolutions with high weight reuse
+- Typical arithmetic intensity: 50-200 FLOP/byte (depending on layer)
+- Classification: **Compute-bound** on modern GPUs
+- Hardware implication: Benefits from Tensor Cores and high TFLOPS; memory bandwidth is rarely the bottleneck
+- Achieved utilization: 70-85% of peak on A100 for inference
+
+**GPT-2 (Language Generation)**
+
+- Mix of dense projections (high AI) and attention operations (low AI)
+- Dense layers: AI ≈ 100-200 FLOP/byte (compute-bound)
+- Attention softmax: AI ≈ 2-5 FLOP/byte (severely memory-bound)
+- LayerNorm: AI ≈ 1-2 FLOP/byte (severely memory-bound)
+- Classification: **Mixed**—projection layers are compute-bound, attention and normalization are memory-bound
+- Hardware implication: End-to-end performance limited by memory-bound operations; adding more TFLOPS helps less than expected
+- Achieved utilization: 40-60% of peak on A100 for training
+
+**The Engineering Lesson**: ResNet-50's consistent compute-bound behavior means hardware selection is straightforward—buy more TFLOPS. GPT-2's heterogeneous profile means that memory bandwidth and specialized attention optimizations (like FlashAttention) matter more than raw compute. This is why transformer optimization has become a specialized discipline.
+
 :::
 
 ## Hardware Mapping Fundamentals for Neural Networks {#sec-ai-acceleration-hardware-mapping-fundamentals-neural-networks-f9a9}
@@ -2570,30 +2620,9 @@ minimum width=60mm,minimum height=48mm](AM)at(-10,-10){};
 
 Tiling is based on a simple but powerful principle: instead of operating on an entire data structure at once, computations are divided into smaller tiles that fit within the available fast memory. By structuring execution around these tiles, data reuse is maximized, reducing redundant memory accesses and improving overall efficiency.
 
-Consider matrix multiplication, a key operation in machine learning workloads. The operation computes the output matrix $C$ from two input matrices $A$ and $B$:
-$$
-C = A \times B
-$$
-where each element $C[i,j]$ is computed as:
-$$
-C[i,j] = \sum_{k} A[i,k] \times B[k,j]
-$$
+Consider matrix multiplication, a key operation in machine learning workloads. The operation computes $C = A \times B$ where each element $C[i,j] = \sum_{k} A[i,k] \times B[k,j]$. The naive implementation shown earlier in @lst-naive_matmul demonstrates the core problem: every iteration of the innermost loop fetches elements from matrices $A$ and $B$ from memory, performs a multiplication, and updates matrix $C$. Because matrices are large, the processor repeatedly reloads the same values from memory, even though they were just used in previous computations.
 
-@lst-naive_matmul_repeat reveals the memory access inefficiencies that emerge when following the mathematical formula directly.
-
-::: {#lst-naive_matmul_repeat lst-cap="**Naïve Matrix Multiplication**: This code directly implements matrix multiplication using nested loops, showing how each element in the output matrix is computed as a sum of products from corresponding elements in the input matrices."}
-```{.python}
-for i in range(N):
-    for j in range(N):
-        for k in range(N):
-            C[i, j] += A[i, k] * B[k, j]  # Repeatedly fetching
-            # A[i, k] and B[k, j]
-```
-:::
-
-At first glance, this approach seems correct. It computes the desired result and follows the mathematical definition. However, the issue lies in how memory is accessed. Every time the innermost loop runs, it fetches an element from matrix $A$ and matrix $B$ from memory, performs a multiplication, and updates an element in matrix $C$. Because matrices are large, the processor frequently reloads the same values from memory, even though they were just used in previous computations.
-
-This unnecessary data movement is expensive. Fetching values from main memory (DRAM) is hundreds of times slower than accessing values stored in on-chip cache or registers. If the same values must be reloaded multiple times instead of being stored in fast memory, execution slows down significantly.
+This data movement overhead is expensive—fetching from DRAM is 100-1000× slower than accessing on-chip cache or registers. The solution is tiling.
 
 ##### Performance Benefits of Tiling {#sec-ai-acceleration-performance-benefits-tiling-e7bd}
 
@@ -2634,29 +2663,9 @@ While the general principle of tiling remains the same, which involves partition
 
 ###### Spatial Tiling {#sec-ai-acceleration-spatial-tiling-247e}
 
-Spatial tiling focuses on partitioning data structures into smaller blocks that fit within the fast memory of the processor. This approach ensures that each tile is fully processed before moving to the next, reducing redundant memory accesses. Spatial tiling is widely used in operations such as matrix multiplication, convolutions, and attention mechanisms in transformer models.
+Spatial tiling focuses on partitioning data structures into smaller blocks that fit within fast memory. The tiled matrix multiplication in @lst-tiled_matmul demonstrates this approach: each tile of $A$ and $B$ is loaded into cache or shared memory before processing, ensuring that the same data does not need to be fetched repeatedly from slower memory. The tile is fully used before moving to the next block, minimizing redundant memory accesses.
 
-@lst-tiled_spatial shows how computation proceeds over blocks of the input matrices, ensuring each tile is fully processed before moving to the next.
-
-::: {#lst-tiled_spatial lst-cap="**Spatial Tiling**: Reduces redundant memory accesses by processing matrix tiles sequentially."}
-```{.python}
-TILE_SIZE = 32  # Tile size chosen based on available
-# fast memory
-
-for i in range(0, N, TILE_SIZE):
-    for j in range(0, N, TILE_SIZE):
-        for k in range(0, N, TILE_SIZE):
-            # Process a submatrix (tile) at a time
-            for ii in range(i, i + TILE_SIZE):
-                for jj in range(j, j + TILE_SIZE):
-                    for kk in range(k, k + TILE_SIZE):
-                        C[ii, jj] += A[ii, kk] * B[kk, jj]
-```
-:::
-
-In this implementation, each tile of $A$ and $B$ is loaded into cache or shared memory before processing, ensuring that the same data does not need to be fetched repeatedly from slower memory. The tile is fully used before moving to the next block, minimizing redundant memory accesses. Since data is accessed in a structured, localized way, cache efficiency improves significantly.
-
-Spatial tiling is particularly beneficial when dealing with large tensors that do not fit entirely in fast memory. By breaking them into smaller tiles, computations remain localized, avoiding excessive data movement between memory levels. This technique is widely used in AI accelerators where machine learning workloads involve large-scale tensor operations that require careful memory management to achieve high performance.
+Spatial tiling is particularly beneficial for large tensors that exceed fast memory capacity. By breaking computations into smaller tiles, data movement between memory levels is minimized, keeping operations localized within cache hierarchies.
 
 ###### Temporal Tiling {#sec-ai-acceleration-temporal-tiling-563b}
 
@@ -2849,6 +2858,19 @@ This comparison highlights why machine learning models require a different compi
 
 : **Compiler Optimization Priorities**: Traditional and machine learning compilers diverge in their optimization targets; traditional compilers prioritize efficient execution of sequential code, while ML compilers focus on optimizing tensor operations within computation graphs for specialized hardware. This table clarifies how ML compilers incorporate domain-specific transformations—like kernel fusion and memory-aware scheduling—to achieve high performance on accelerators, unlike the instruction scheduling and register allocation techniques used in conventional software compilation. {#tbl-ml-vs-traditional-compilers}
 
+::: {.callout-perspective title="The Hidden Optimization Layer"}
+
+Most practitioners never interact directly with ML compilers, yet compiler quality often determines whether your model achieves 20% or 80% of hardware peak performance. When you call `model.compile()` in Keras, `torch.compile()` in PyTorch, or deploy through TensorRT, you're invoking sophisticated optimization pipelines that:
+
+- **Fuse operations** you never explicitly combined (Conv2D + BatchNorm + ReLU → single kernel)
+- **Reorder computations** to improve memory locality (tiling large matrix multiplies)
+- **Select kernels** from libraries containing hundreds of hand-tuned implementations
+- **Transform tensor layouts** between what your code expects and what hardware prefers
+
+This matters practically: the same model definition can run 2-5× faster simply by switching compilation backends (e.g., PyTorch eager mode vs. torch.compile with different backends). When performance doesn't meet expectations, compiler configuration and backend selection are often the first optimization levers—requiring no changes to model architecture or training procedure.
+
+:::
+
 ### ML Compilation Pipeline {#sec-ai-acceleration-ml-compilation-pipeline-7676}
 
 Machine learning models, as defined in modern frameworks, are initially represented in a high-level computation graph that describes operations on tensors. However, these representations are not directly executable on hardware accelerators such as GPUs, TPUs, and custom AI chips. To achieve efficient execution, models must go through a compilation process that transforms them into optimized execution plans suited for the target hardware [@tensorflow_xla_2020].
@@ -3037,7 +3059,23 @@ Memory management is another major differentiator. Traditional software runtimes
 
 AI runtimes are inherently designed for adaptability. While traditional runtimes often follow a mostly static execution plan, AI workloads typically operate in highly variable execution environments, such as cloud-based accelerators or multi-tenant hardware. As a result, AI runtimes must continuously adjust batch sizes, reallocate compute resources, and manage real-time scheduling decisions to maintain high throughput and minimize execution delays.
 
-These distinctions demonstrate why  AI runtimes require fundamentally different execution strategies  compared to traditional software runtimes. Rather than simply managing CPU processes, AI runtimes must oversee  large-scale tensor execution, multi-device coordination, and real-time workload adaptation  to ensure that machine learning models can run efficiently under diverse and ever-changing deployment conditions.
+These distinctions demonstrate why AI runtimes require fundamentally different execution strategies compared to traditional software runtimes. Rather than simply managing CPU processes, AI runtimes must oversee large-scale tensor execution, multi-device coordination, and real-time workload adaptation to ensure that machine learning models can run efficiently under diverse and ever-changing deployment conditions.
+
+::: {.callout-perspective title="When Production Differs from Development"}
+
+Runtime behavior often surprises engineers who optimized their models in development environments. Common production surprises include:
+
+**Variable batch sizes**: Training uses fixed batch sizes, but production inference may receive single requests (batch=1) or bursts (batch=64+). Runtimes must handle both efficiently—single requests need latency optimization, bursts need throughput optimization.
+
+**Memory fragmentation**: Long-running inference servers gradually fragment GPU memory. Runtimes implement defragmentation strategies, but understanding when to restart services or pre-allocate memory pools requires awareness of these dynamics.
+
+**Multi-tenant interference**: Cloud accelerators are often shared. Your model might run 20% slower when a neighbor's workload competes for memory bandwidth. Production systems need monitoring to detect and respond to this interference.
+
+**Thermal throttling**: Sustained workloads may trigger thermal throttling that wasn't observed in short benchmarks. The A100 can temporarily boost to 400W but sustains at 300W—production performance reflects sustained, not peak, capabilities.
+
+Understanding runtime adaptation mechanisms helps engineers design systems that degrade gracefully rather than fail unexpectedly.
+
+:::
 
 ### Dynamic Kernel Execution {#sec-ai-acceleration-dynamic-kernel-execution-33fc}
 
@@ -3109,7 +3147,7 @@ This section provides awareness of multi-chip scaling challenges. The implementa
 
 ## Heterogeneous SoC AI Acceleration {#sec-ai-acceleration-heterogeneous-soc-ai-acceleration-b1bb}
 
-While multi-chip architectures focus on maximizing computational throughput for data center workloads with kilowatt power budgets and rack-scale cooling infrastructure, the hardware acceleration principles established in this chapter, including specialized compute units, memory hierarchy optimization, and workload mapping strategies, must adapt dramatically for mobile and edge environments. A smartphone operates within a few-watt power budget, autonomous vehicles require deterministic real-time latency requirements, and IoT sensors must function for months to years on battery power. These constraints necessitate heterogeneous System-on-Chip (SoC) architectures that coordinate multiple specialized processors within a single chip while meeting stringent power, thermal, and latency requirements fundamentally different from data center deployments.
+While multi-chip architectures focus on maximizing computational throughput for data center workloads with kilowatt power budgets and rack-scale cooling infrastructure, the hardware acceleration principles established in this chapter—specialized compute units, memory hierarchy optimization, and workload mapping strategies—must adapt dramatically for mobile and edge environments. A smartphone's SoC operates within a 3-7 watt sustained power budget (with brief peaks to 10-15W), autonomous vehicles require deterministic sub-100ms latency for perception-to-action loops, and IoT sensors must function for months to years on battery power. These constraints necessitate heterogeneous System-on-Chip (SoC) architectures that coordinate multiple specialized processors within a single chip while meeting stringent power, thermal, and latency requirements fundamentally different from data center deployments.
 
 The mobile AI revolution has fundamentally transformed how we think about AI acceleration, moving beyond homogeneous data center architectures to heterogeneous System-on-Chip (SoC) designs that coordinate multiple specialized processors. Modern smartphones, automotive systems, and IoT devices integrate CPU cores, GPU shaders, digital signal processors (DSPs), and dedicated neural processing units (NPUs) within a single chip, requiring sophisticated orchestration to achieve optimal performance under strict power and thermal constraints.
 
@@ -3204,6 +3242,41 @@ Teams deploy high-throughput training accelerators (A100, H100) for latency-sens
 
 Organizations optimize exclusively for specific vendors to maximize performance without considering system flexibility. As discussed in @sec-ai-acceleration-compiler-support-172e, deep integration with vendor-specific libraries (CUDA, TensorRT, XLA) and custom kernels creates lock-in. A codebase with 50+ hand-written CUDA kernels requires 6-12 engineer-months to port to a different accelerator vendor, delaying hardware upgrades and preventing multi-vendor deployments. While vendor-specific optimizations provide 20-40% performance gains, they should be isolated behind hardware abstraction layers. Maintaining portable code paths enables vendor competition, hardware flexibility, and faster adoption of emerging accelerators while still capturing most performance benefits through framework-level optimizations.
 
+::: {.callout-lighthouse title="Hardware Selection Checklist"}
+
+Before procuring accelerators, work through this decision framework:
+
+**Step 1: Characterize Your Workload**
+
+- Calculate arithmetic intensity for dominant operations (use roofline analysis from @sec-ai-acceleration-roofline-model)
+- Determine memory footprint: Do model weights + activations fit in accelerator memory?
+- Identify batch size requirements: Single-request latency or batched throughput?
+
+**Step 2: Match Workload to Hardware**
+
+| If Your Workload Is... | Prioritize... | Deprioritize... |
+|:---|:---|:---|
+| **Memory-bound** (AI < 50 FLOP/byte) | Memory bandwidth (GB/s) | Peak TFLOPS |
+| **Compute-bound** (AI > 200 FLOP/byte) | Peak TFLOPS, Tensor Cores | Memory capacity |
+| **Latency-sensitive** (batch=1-4) | Lower-cost inference cards | High-compute training cards |
+| **Throughput-oriented** (large batches) | High-compute datacenter GPUs | Edge accelerators |
+| **Memory-constrained** (>40GB model) | Memory capacity (80GB+ cards) | Entry-level accelerators |
+
+**Step 3: Validate Before Committing**
+
+- Run representative workloads on target hardware (cloud instances enable low-cost trials)
+- Measure *sustained* throughput, not peak benchmarks
+- Profile to confirm whether bottleneck matches expectations (compute vs. memory)
+- Calculate cost-per-inference or cost-per-training-step, not just hardware cost
+
+**Step 4: Plan for Evolution**
+
+- Will model sizes increase? Budget for memory headroom.
+- Will batch sizes change in production? Test across expected range.
+- Can you switch vendors if pricing or performance shifts? Maintain portable code paths.
+
+:::
+
 ## Summary {#sec-ai-acceleration-summary-a5f8}
 
 Hardware acceleration has emerged as the key enabler that transforms machine learning from academic curiosity to practical reality, fundamentally reshaping how we design both computational systems and the algorithms that run on them. The evolution from general-purpose processors to specialized AI accelerators represents more than just incremental improvement—it reflects a paradigm shift toward domain-specific computing where hardware and software are co-designed to optimize specific computational patterns. The journey from CPUs through GPUs to specialized TPUs, NPUs, and wafer-scale systems demonstrates how understanding workload characteristics drives architectural innovation, creating opportunities for orders-of-magnitude performance improvements through targeted specialization.
@@ -3221,7 +3294,20 @@ Building on these foundational concepts, the emergence of multi-chip and distrib
 
 The principles of hardware acceleration established here provide the foundation for understanding how benchmarking methodologies evaluate accelerator performance and how deployment strategies must account for hardware constraints and capabilities.
 
-However, understanding that specialized hardware accelerates ML workloads is insufficient without methods to measure and compare performance across different hardware configurations, optimization strategies, and model architectures. The measurement discipline necessary for hardware acceleration decisions is established in @sec-benchmarking-ai: how to evaluate accelerator performance fairly, compare optimization trade-offs quantitatively, and validate that hardware investments deliver expected returns. The benchmarking frameworks and metrics introduced there connect directly to the hardware characteristics examined here, enabling practitioners to make data-driven decisions about accelerator selection and optimization strategies.
+::: {.callout-chapter-connection title="From Understanding to Measurement"}
+
+This chapter has equipped you to analyze hardware architectures and predict performance characteristics. But analysis must be validated through measurement. Consider: if you've quantized a model from FP32 to INT8 (following @sec-model-compression) and deployed it on a GPU with Tensor Core support, how do you verify the expected 2-4× speedup actually materializes? How do you isolate whether a performance gap stems from memory bandwidth, kernel inefficiency, or suboptimal batch sizing?
+
+@sec-benchmarking-ai provides the measurement discipline that transforms hardware understanding into validated engineering decisions:
+
+- **Metrics selection**: Latency vs. throughput, TFLOPS vs. TOPS, energy efficiency—which metrics matter for your deployment scenario?
+- **Fair comparison**: How to evaluate accelerator options while controlling for confounding factors like different compiler stacks or memory configurations
+- **Bottleneck identification**: Using profiling tools to determine whether your workload hits the compute or memory roof
+- **Cost-performance analysis**: Translating hardware characteristics into dollars-per-inference or time-to-train metrics that drive procurement decisions
+
+The roofline analysis techniques introduced here will inform how you interpret benchmark results; the memory hierarchy understanding will help you diagnose unexpected performance gaps; and the dataflow concepts will guide optimization priorities when benchmarks reveal underutilization.
+
+:::
 
 ::: { .quiz-end }
 :::

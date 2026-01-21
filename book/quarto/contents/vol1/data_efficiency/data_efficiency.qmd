@@ -20,31 +20,58 @@ _DALL·E 3 Prompt: A futuristic digital illustration depicting the concept of da
 
 ## Purpose {.unnumbered}
 
-_How does data influence the efficiency of machine learning systems?_
+_Why has data efficiency become the critical bottleneck as compute scales faster than the supply of high-quality training data?_
 
-Machine learning advances have traditionally emphasized algorithmic improvements and system optimizations. Researchers and practitioners focused on developing faster training methods, reducing model complexity, and optimizing hardware utilization. While these approaches yielded significant gains, they addressed only two of the three fundamental pillars of machine learning: algorithms and systems. Data efficiency, the third pillar, has received less systematic attention despite its fundamental impact on system performance and scalability. The volume and velocity of data moving through machine learning pipelines affect computation requirements, memory usage, and energy consumption. Understanding data efficiency uncovers optimization opportunities beyond model architecture and hardware utilization. Each data-centric decision influences training time, resource allocation, and inference speed, demonstrating how data shapes overall system efficiency. Examining this essential dimension enables machine learning systems that optimize across all three pillars, leading to implementations that achieve better performance with fewer resources.
+For decades, the dominant strategy in machine learning was simple: more data yields better models. Teams responded rationally by scraping more web pages, labeling more images, and generating more synthetic examples. But this era is ending. Compute capacity has grown exponentially, while high-quality human-generated content grows far more slowly. The most accessible sources have already been harvested, and domain experts cannot label faster. This asymmetry inverts the optimization priority: when compute was scarce and data abundant, the winning strategy was algorithmic efficiency; now that compute is abundant and quality data is scarce, the winning strategy is data efficiency. When significant portions of training data are redundant or contribute little new information, proportional fractions of expensive compute cycles are wasted learning nothing new. Data efficiency techniques aim to recover this waste by maximizing the information extracted from each sample, transforming data from an assumed commodity into a carefully optimized resource that determines whether training budgets translate into model capability or disappear into redundant computation.
 
 ::: {.callout-tip title="Learning Objectives"}
 
-- Layout the concept of data efficiency within the broader context of data-centric AI
+- Understand data efficiency as the third pillar of ML optimization alongside algorithms and systems
 
-- Define and outline the key components of data efficiency
+- Apply the Information-Compute Ratio (ICR) framework to evaluate dataset value
 
-- Explore techniques and strategies for improving data efficiency
+- Implement the three-stage optimization pipeline: static pruning, dynamic selection, and synthetic generation
 
-- Establish a standard set of metrics for measuring data efficiency
+- Select appropriate coreset and deduplication techniques for pre-training data reduction
 
-- Analyze the role of benchmarks in evaluating data efficiency
+- Design active learning and curriculum learning strategies for training-time optimization
 
-- Investigate tools and methods to enhance data efficiency
+- Measure data efficiency using metrics: PPD, DUE, CED, RR, and DGE
 
-- Develop a roadmap for developing data efficiency benchmarks
+- Address systems engineering challenges: selection bottleneck, I/O patterns, and data loader design
 
 :::
 
+## The Data Wall: Why Efficiency Matters Now {#sec-data-efficiency-data-wall}
+
+For decades, the dominant strategy in machine learning was simple: **more data, better models**. This intuition, codified in scaling laws, showed that model performance improves predictably with dataset size. Teams responded rationally—scrape more web pages, label more images, generate more synthetic examples. But this era is ending.
+
+The machine learning field has hit what researchers call the **Data Wall**: the empirical observation that high-quality training data is growing far slower than compute capacity. While GPU FLOPS have increased roughly 10× every 3-4 years following Moore's Law extensions, the supply of novel, high-quality human-generated text and images grows at perhaps 2× per decade. The internet has already been scraped. Domain experts cannot label faster. The asymmetry is stark:
+
+::: {.callout-perspective title="The Scaling Asymmetry"}
+**The Problem**: Compute scales exponentially. Data does not.
+
+| Resource | Growth Rate | Implication |
+|----------|-------------|-------------|
+| GPU Compute | ~10× / 3 years | Hardware vendors deliver reliable exponential gains |
+| Training Data (Web) | ~2× / 5 years | High-quality web text is finite; much already scraped |
+| Labeled Data | ~1.5× / 5 years | Human annotation throughput is fundamentally bounded |
+| Synthetic Data | Unbounded | But bounded by generator quality (risk of model collapse) |
+
+**The Consequence**: In 2020, compute and data were roughly balanced for frontier models. By 2025, compute budgets can support training runs 10-100× larger than available high-quality data can fill. We are **compute-rich and data-poor**.
+:::
+
+This asymmetry inverts the optimization priority. When data was abundant and compute was scarce, the right strategy was algorithmic efficiency—squeeze more accuracy from limited GPU cycles. Now that compute is abundant and *quality data* is scarce, the winning strategy is **data efficiency**—squeeze more learning from each sample.
+
+Consider the training economics: a frontier language model might cost $100M in compute. If 30% of the training data is redundant (a conservative estimate for web-scraped corpora), that's $30M in wasted GPU cycles learning nothing new. If another 20% consists of "easy" examples the model masters in early epochs, that's $20M more. Half the budget—$50M—produces zero marginal learning. Data efficiency techniques aim to recover this waste.
+
+The Data Wall also explains why data efficiency has shifted from academic curiosity to industrial necessity. Companies like Anthropic, OpenAI, and Google are no longer bottlenecked by GPU access—they are bottlenecked by the quality and diversity of their training corpora. The differentiator is not who has the most data, but who extracts the most *information* from their data.
+
 ## The Information-Compute Ratio {#sec-data-efficiency-info-compute}
 
-As defined in the **Pareto Frontier** (@sec-optimize-principles), optimization is the search for the best trade-off between Accuracy and Efficiency. While model compression and hardware acceleration focus on the *execution* of the math, **Data Efficiency** is our first and most powerful move: it reduces the *amount* of math required by optimizing the training dataset itself.
+The Optimize Principles (@sec-optimize-principles) established that optimization is not a single objective but a search for the **Pareto Frontier**—the boundary where improving one metric (accuracy) necessarily degrades another (efficiency). We introduced three pillars of efficiency: data, model, and hardware. This chapter tackles the first and often most powerful lever.
+
+While model compression (@sec-model-compression) and hardware acceleration (@sec-hw-acceleration) focus on the *execution* of the math, **Data Efficiency** reduces the *amount* of math required by optimizing what enters the training pipeline.
 
 Data engineering (@sec-data-engineering) ensures that data is clean, accessible, and correctly formatted. Data efficiency asks a different question: *how much information does each sample contribute to the model's learning per unit of computation?*
 
@@ -107,27 +134,158 @@ This chapter explores three strategies to maximize this ratio:
 1.  **Static Data Pruning**: Removing low-value samples before training begins (Coresets, Deduplication).
 2.  **Dynamic Selection**: Selecting high-value samples during training (Curriculum Learning, Active Learning).
 3.  **Synthetic Generation**: Creating high-value samples on demand (Augmentation, Distillation).
-## Static Data Pruning: Pre-Training Filtration
+## Static Data Pruning: Pre-Training Filtration {#sec-data-efficiency-static}
 
-Machine learning models are often trained on large datasets under the assumption that increasing data volume improves performance. While this holds in many cases, it is not always necessary. A significant portion of a dataset is often redundant or contributes little to learning. Models can achieve the same—or even better—performance by training on a smaller, carefully selected subset of data. Identifying and retaining only the most valuable samples reduces dataset size without compromising accuracy, leading to more efficient training, faster inference, and lower storage and labeling costs.
+Before a single gradient is computed, we can dramatically improve efficiency by removing low-value samples from the dataset. This "pre-training filtration" reduces the total computation required without affecting—and sometimes improving—final model accuracy.
 
-Not all data points provide equal value for training a model. Some samples are highly informative, capturing the underlying patterns of a dataset, while others are repetitive or noisy. Training on redundant data can introduce unnecessary computational overhead, while noisy or mislabeled samples can degrade model performance. Instead of treating all data equally, machine learning systems can be designed to identify and prioritize the most important training examples, so that models learn from high-quality, representative samples while ignoring less useful data.
+### The Case for Smaller Datasets
 
-One method for reducing dataset size is core-set selection, which focuses on identifying a small subset of data that preserves the statistical properties of the entire dataset. The goal is to find a compact set of examples that allows a model to generalize as well as it would if trained on the full dataset. Core-set selection is particularly valuable in resource-constrained environments, such as edge computing or mobile AI, where memory and processing power are limited. By selecting only the most informative data points, models can be trained more efficiently without sacrificing accuracy.
+Machine learning models are often trained on large datasets under the assumption that increasing data volume improves performance. While this holds in many cases, it is not always necessary. Empirical studies on coreset selection and data pruning have consistently demonstrated significant redundancy in standard benchmarks:
 
-Another approach is data pruning, which removes samples that do not contribute meaningfully to the learning process. Data pruning can be performed at different stages of training. Before training begins, redundant or low-variance samples can be removed based on statistical analysis. During training, misclassified or high-loss examples can be identified and selectively discarded to improve convergence. After training, unimportant samples can be filtered out to reduce storage costs for future retraining. By eliminating unnecessary data, pruning not only reduces dataset size but also improves model robustness by reducing exposure to noisy or ambiguous samples.
+- **ImageNet-1K**: Studies using gradient-based selection (EL2N, GraNd) have shown that training on 50% of ImageNet with carefully selected samples achieves within 1% of full-dataset accuracy. The savings: 50% fewer training FLOPs.
+- **CIFAR-10**: Because CIFAR-10 is smaller and more redundant, aggressive pruning works even better. Experiments report that 10-30% of samples (selected by forgetting scores or margin-based methods) can match 90%+ of original accuracy—a 3-10× reduction.
+- **Large Language Model Corpora**: Web-scraped datasets like The Pile and C4 contain substantial exact and near-duplicate content. Deduplication studies report 10-30% redundancy ratios, with deduplicated training yielding *better* downstream performance (less memorization, more generalization).
 
-A related technique, curriculum learning, improves training efficiency by structuring the order in which data is presented to the model. Instead of training on all samples at once, curriculum learning starts with simpler examples and gradually introduces more complex ones. Curriculum learning mirrors how humans learn by mastering fundamental concepts before tackling advanced topics. By prioritizing easier samples in the early stages of training, models can learn more efficiently, making better use of limited data and improving generalization.
+::: {.callout-warning title="Caveat: Results Vary by Task and Model"}
+These numbers are benchmark-specific. Gains from pruning depend on the dataset's intrinsic redundancy, the selection algorithm, and the model architecture. Always validate on your specific task before deploying aggressive pruning in production.
+:::
 
-These techniques—core-set selection, data pruning, and curriculum learning—demonstrate that bigger datasets are not always better. Careful selection and structuring of training data enables machine learning models to achieve the same or better performance with fewer examples, reducing computational demands and making AI development more efficient. Data-centric optimization is particularly beneficial in scenarios where collecting large-scale datasets is costly, impractical, or unnecessary.
+The key insight is that not all data points provide equal value for training. Some samples are highly informative—capturing decision boundaries or rare patterns—while others are repetitive or trivially easy. Training on redundant data wastes compute without improving the model.
 
-## Dynamic Data Selection: Active Learning
+### Coreset Selection Algorithms
 
-Supervised learning has been a cornerstone of modern AI, enabling strong task performance. However, it comes with a significant limitation: it requires vast amounts of labeled data, which is often resource-intensive to obtain. In specialized fields such as medical diagnosis, autonomous driving, and scientific research, annotation requires domain expertise, further increasing costs. The reliance on large-scale labeled datasets raises a critical challenge—how can machine learning models learn effectively while minimizing the need for manual labeling?
+**Coreset selection** identifies a small subset of data that preserves the statistical properties of the entire dataset. The goal is to find a compact set of examples that allows a model to generalize as well as it would if trained on the full dataset. Several algorithmic approaches have proven effective:
 
-Not all data points contribute equally to a model’s learning. Some samples provide high-value information, while others are redundant or even misleading. Instead of treating all data as equally useful, machine learning systems can be designed to prioritize the most informative data points, leverage unlabeled data effectively, and generalize from minimal supervision. These approaches reduce the burden of annotation while maintaining model accuracy and generalization.
+**Geometry-Based Methods** select samples that cover the data distribution:
 
-One way to achieve this is through active learning, a technique where the model itself identifies which examples are most valuable for training and selectively queries human annotators for labels. Unlike traditional supervised learning, where all data points are labeled in advance, active learning (@fig-active-learning-loop) prioritizes uncertain or high-impact samples, allowing models to improve with fewer labeled examples.
+- **k-Center (Facility Location)**: Selects samples that minimize the maximum distance from any point to its nearest selected center. This ensures coverage of the entire data manifold.
+- **Herding**: Iteratively selects samples whose features best approximate the mean of the full dataset, maintaining distributional fidelity.
+
+**Gradient-Based Methods** use training dynamics to identify important samples:
+
+- **GraNd (Gradient Normed)**: Scores samples by the norm of their gradients early in training. High-gradient samples are near the decision boundary and most informative.
+- **Forgetting Events**: Tracks how often a sample is "forgotten" (correctly classified, then misclassified) during training. Frequently forgotten samples are harder and more valuable.
+- **EL2N (Error L2-Norm)**: Ranks samples by prediction confidence after a few epochs. Samples the model is uncertain about are prioritized.
+
+::: {.callout-example title="Coreset Selection in Practice"}
+**Scenario**: You have 1 million training images and want to reduce to 100,000 (10%) for faster experimentation.
+
+**Naive Approach**: Random sampling loses rare classes and edge cases.
+
+**Coreset Approach**:
+1. Train a small proxy model for 5 epochs
+2. Compute EL2N scores for all samples
+3. Select the 100,000 samples with highest uncertainty
+4. Train your full model on this coreset
+
+**Result**: The coreset often achieves **higher accuracy** than random sampling because it focuses on the decision boundary rather than redundant "easy" examples.
+:::
+
+The following pseudocode shows how to compute EL2N scores and select a coreset:
+
+```python
+def compute_el2n_scores(model, dataloader, num_epochs=5):
+    """Compute EL2N scores: L2 norm of (prediction - one_hot_label)."""
+    # Train proxy model for a few epochs to get meaningful predictions
+    train_proxy(model, dataloader, num_epochs)
+
+    scores = []
+    model.eval()
+    for x, y in dataloader:
+        logits = model(x)
+        probs = softmax(logits, dim=1)
+        # One-hot encode labels
+        one_hot = zeros_like(probs).scatter_(1, y.unsqueeze(1), 1)
+        # EL2N score = L2 distance from confident prediction
+        el2n = (probs - one_hot).norm(dim=1)  # High = uncertain
+        scores.extend(el2n.tolist())
+    return scores
+
+
+def select_coreset(scores, dataset, fraction=0.1):
+    """Select top-k highest-scoring (most uncertain) samples."""
+    k = int(len(dataset) * fraction)
+    # Sort by score descending (highest uncertainty first)
+    indices = argsort(scores, descending=True)[:k]
+    return Subset(dataset, indices)
+
+
+# Usage: 10x data reduction with minimal accuracy loss
+scores = compute_el2n_scores(proxy_model, full_loader)
+coreset = select_coreset(scores, full_dataset, fraction=0.1)
+train_full_model(model, coreset)  # 10x faster training
+```
+
+### Data Deduplication
+
+Beyond selecting informative samples, removing **exact and near-duplicates** provides immediate efficiency gains with no accuracy penalty. Large web-scraped datasets contain substantial redundancy:
+
+**Exact Deduplication** uses hash-based methods:
+
+- Compute a hash (MD5, SHA-256) of each sample
+- Remove samples with identical hashes
+
+**Near-Duplicate Detection** uses similarity metrics:
+
+- **MinHash/LSH**: Approximate Jaccard similarity for text, detecting paraphrased content
+- **Embedding Similarity**: Compute embeddings (e.g., CLIP for images, sentence transformers for text) and cluster similar items
+- **Perceptual Hashing**: For images, hashes robust to minor transformations (resizing, compression)
+
+For foundation model pre-training, deduplication is now considered essential. Studies on GPT-3 and LLaMA training show that deduplicated data improves both training efficiency and downstream performance by preventing memorization of repeated content.
+
+### Data Pruning by Quality
+
+**Data pruning** removes samples that do not contribute meaningfully to learning, going beyond deduplication to assess intrinsic quality:
+
+- **Label Error Detection**: Tools like Cleanlab identify samples where the label is likely incorrect based on model confidence patterns. Removing or correcting these prevents learning contradictory signals.
+- **Outlier Removal**: Samples far from any cluster center may be noise or annotation errors rather than valuable edge cases.
+- **Low-Information Filtering**: For text, remove documents below a perplexity threshold or with low semantic coherence. For images, filter blurry or corrupted samples.
+
+These techniques—coreset selection, deduplication, and quality pruning—demonstrate that careful curation before training yields significant efficiency gains. The compute saved is multiplicative: a 50% dataset reduction means 50% fewer forward passes, backward passes, and gradient updates across all training epochs.
+
+## Dynamic Data Selection: Training-Time Optimization {#sec-data-efficiency-dynamic}
+
+While static pruning happens before training begins, **dynamic selection** optimizes which samples to use *during* training. This allows the system to adapt its data diet based on the model's evolving state—focusing compute on samples that provide the most learning signal at each stage.
+
+### Curriculum Learning: Easy to Hard
+
+**Curriculum learning** structures the order in which data is presented to the model. Instead of random shuffling, it starts with simpler examples and gradually introduces more complex ones—mirroring how humans learn by mastering fundamentals before advanced topics.
+
+**Why It Works**: Neural networks benefit from a smooth loss landscape early in training. Easy examples provide clear, consistent gradients that establish good feature representations. Hard examples introduced too early produce noisy gradient signals that slow convergence or cause the model to memorize outliers rather than learn general patterns.
+
+**The Pacing Function**: A curriculum is defined by two components: (1) a **difficulty scorer** that ranks samples, and (2) a **pacing function** that controls how quickly hard samples are introduced. A common choice is linear pacing:
+
+$$
+\text{samples}_t = \text{sort\_by\_difficulty}[:N \cdot \min(1, t/T_{warmup})]
+$$
+
+where $t$ is the current epoch and $T_{warmup}$ is the epoch at which the full dataset becomes available. Early epochs train on the easiest $N \cdot (t/T_{warmup})$ fraction; after warmup, training proceeds on the full dataset.
+
+**Curriculum Design Strategies**:
+
+| Strategy | Difficulty Score | Best For |
+|----------|-----------------|----------|
+| **Loss-Based** | Loss from probe model (low = easy) | General-purpose; requires probe training |
+| **Confidence-Based** | Teacher model confidence (high = easy) | When teacher available; distillation setups |
+| **Domain Heuristics** | Sentence length, image complexity | No extra compute; domain knowledge required |
+| **Self-Paced** | Current model's loss (updated each epoch) | Adaptive; no probe needed |
+
+**Efficiency Gains**: Curriculum learning typically provides 10-30% faster convergence (fewer epochs to target accuracy) by reducing wasted updates on samples the model cannot yet learn from. The ICR is higher in early training because easy samples provide strong learning signal relative to their compute cost.
+
+::: {.callout-note title="Anti-Curriculum and Self-Paced Learning"}
+The optimal ordering is task-dependent. **Anti-curriculum** (hard examples first) can work when the decision boundary is complex and easy examples don't help define it. **Self-paced learning** lets the model dynamically adjust difficulty based on its current loss, avoiding the need to pre-define a curriculum. Empirically, self-paced methods often match or exceed hand-designed curricula.
+:::
+
+### Active Learning: Human-in-the-Loop
+
+In specialized fields such as medical diagnosis, autonomous driving, and scientific research, labeling requires domain expertise and can cost $5–100+ per sample. Rather than labeling everything upfront, **active learning** lets the model identify which unlabeled examples would be most valuable to label next (@fig-active-learning-loop).
+
+**Query Strategies** determine which samples to send to the oracle:
+
+- **Uncertainty Sampling**: Select samples where the model is least confident (e.g., prediction probability near 0.5 for binary classification). Simple and effective.
+- **Query-by-Committee**: Train multiple models; select samples where they disagree most. Better captures epistemic uncertainty.
+- **Expected Model Change**: Select samples that would cause the largest gradient update. Computationally expensive but theoretically motivated.
+- **Diversity Sampling**: Select samples dissimilar from currently labeled data, ensuring coverage of the input space.
 
 ::: {#fig-active-learning-loop fig-cap="**Active Learning Loop**: Instead of labeling all data, the model selects the most 'confusing' or informative samples from an unlabeled pool. These samples are sent to an Oracle (human annotator) and added to the training set. The model is retrained, and the cycle repeats, creating a feedback loop that maximizes data efficiency." fig-alt="A cycle diagram: Unlabeled Pool -> Selection Strategy -> Oracle -> Labeled Set -> Model Training -> back to Selection Strategy."}
 ```{.tikz}
@@ -170,53 +328,96 @@ One way to achieve this is through active learning, a technique where the model 
 **The Systems Conclusion**: Data Efficiency is not just a "data trick"—it is a **20x compute accelerator** and a **$4.75 Million** cost-saving measure.
 :::
 
-Another approach to minimizing labeled data requirements...
+### Semi-Supervised Learning: Leveraging Unlabeled Data
 
-For cases where some labeled data is available but insufficient for fully supervised learning, semi-supervised learning offers a middle ground. This technique leverages a small set of labeled examples to guide the learning process for a much larger set of unlabeled data. The model first learns from the labeled subset and then generalizes its knowledge to make predictions on the remaining dataset. In speech recognition, for example, only a fraction of audio recordings may be transcribed, but semi-supervised learning enables models to infer patterns in the unannotated data, improving recognition accuracy without requiring full transcription of every sample. By making efficient use of limited labeled data, semi-supervised learning reduces annotation costs while maintaining strong model performance.
+When some labeled data is available but insufficient for fully supervised learning, **semi-supervised learning** offers a middle ground. It leverages a small set of labeled examples to guide learning on a much larger unlabeled pool.
 
-Each of these techniques contributes to reducing labeling needs in different ways. Active learning optimizes the annotation process by focusing on the most valuable data points, self-supervised learning eliminates the need for explicit labels by deriving supervision from raw data, and semi-supervised learning extends the utility of small labeled datasets to improve model generalization. Together, these methods address one of the fundamental challenges in machine learning—how to develop powerful models while minimizing the dependence on large-scale labeled datasets. By reducing labeling requirements, they make AI development more accessible, cost-effective, and scalable, particularly in domains where data annotation is costly or limited.
+**Key Techniques**:
 
-## Synthetic Data Generation and Augmentation
+- **Pseudo-Labeling**: Train on labeled data, use the model to generate "pseudo-labels" for unlabeled data, then train on both. Iteratively refines predictions.
+- **Consistency Regularization**: Enforce that the model produces similar predictions for augmented versions of the same input. Methods like FixMatch combine this with pseudo-labeling.
+- **Label Propagation**: In graph-based approaches, propagate labels from labeled nodes to similar unlabeled nodes based on feature similarity.
 
-Machine learning models often rely on large datasets to achieve strong performance, but collecting and labeling data is resource-intensive. Rather than continuously expanding datasets, machine learning systems can be designed to extract more value from the data that is already available. Value extraction improves data efficiency by ensuring that each sample contributes as much useful information as possible, reducing the need for additional data collection while still enhancing model performance.
+### Self-Supervised Pre-training: The Ultimate Data Efficiency
 
-One way to achieve this is through data augmentation, which artificially expands a dataset by applying transformations to existing data. In image classification, for instance, an image can be rotated, flipped, blurred, or color-adjusted to create multiple variations, exposing the model to a wider range of input conditions without requiring additional real-world samples. This technique is particularly useful for improving generalization, as models trained on augmented datasets are more robust to variations in lighting, viewpoint, and background clutter. In natural language processing, augmentation can involve paraphrasing, back-translation, or synonym replacement, allowing models to learn more diverse sentence structures and vocabulary. The key benefit of data augmentation is that it increases dataset diversity without requiring new labeled examples, making it a cost-effective way to enhance model learning.
+The techniques above—active learning, semi-supervised learning—reduce labeling requirements by a factor of 10-100×. But the most dramatic data efficiency gain comes from **self-supervised pre-training**, which eliminates task-specific labels entirely.
 
-Synthetic data generation extends this idea further by creating entirely new data points rather than modifying existing ones. Unlike data augmentation, which applies transformations to real-world samples, synthetic data generation relies on computational models to produce realistic training examples. This is particularly useful in cases where collecting real data is impractical or ethically challenging. For instance, in autonomous driving research, simulated environments can generate diverse road conditions, traffic scenarios, and edge cases that would be difficult to capture in real-world driving data. Similarly, in medical AI applications, synthetic patient data can be generated to train models without exposing sensitive health records. Advances in generative modeling, such as GANs (Generative Adversarial Networks) and diffusion models, have made synthetic data increasingly realistic, allowing it to serve as a substitute or complement to real-world data.
+As detailed in @sec-training, self-supervised methods like masked language modeling (BERT), contrastive learning (SimCLR), and next-token prediction (GPT) derive supervision from the data's inherent structure. The result is **foundation models**: general-purpose representations trained on massive unlabeled corpora that can be fine-tuned with minimal labeled data for specific tasks.
 
-Another powerful approach to improving data efficiency is transfer learning, which allows knowledge gained from one task to be repurposed for another. Instead of training a model from scratch, transfer learning uses a model pre-trained on a large dataset and fine-tunes it on a smaller, domain-specific dataset. This significantly reduces the amount of labeled data needed while still achieving high performance. For example, a neural network trained on millions of general-purpose images can be adapted to recognize rare medical conditions with only a few hundred annotated examples. Transfer learning is especially useful in low-resource settings where labeled data is scarce, as it leverages previously learned features and representations to accelerate learning on new tasks.
+From a data efficiency perspective, self-supervised pre-training represents a **1000×+ multiplier**: instead of labeling millions of task-specific examples, practitioners fine-tune on hundreds or thousands of labeled samples while inheriting knowledge from billions of unlabeled tokens. This paradigm shift—from "label everything" to "pre-train once, fine-tune cheaply"—is why foundation models dominate modern ML. The architectural and training details appear in Part II; here, we recognize it as the ceiling of what data efficiency can achieve.
 
-While these techniques differ in implementation, they all contribute to data efficiency by maximizing the utility of available data. Data augmentation enhances learning by introducing variability, synthetic data generation expands dataset diversity in controlled ways, and transfer learning reduces data requirements by leveraging existing knowledge. Together, these approaches ensure that models achieve strong performance without relying on massive labeled datasets, making AI development more scalable, accessible, and adaptable to real-world constraints.
+## Synthetic Data Generation and Augmentation {#sec-data-efficiency-synthetic}
 
-## Advanced Utilization Strategies
+The third strategy for maximizing ICR is to **create** high-value samples on demand. When real data is scarce, expensive, or lacks diversity, synthetic data can fill the gaps.
 
-Even when high-quality data is available, the way it is structured, retrieved, and used can significantly impact the efficiency and effectiveness of a machine learning system. Large data volumes alone are insufficient; models must be designed to make the most of the data they have. Optimizing data utilization involves ensuring that the right data is used at the right time and in the right way, minimizing waste while maximizing learning efficiency.
+### Data Augmentation: Transformation-Based Synthesis
 
-One key challenge in machine learning is that not all data points contribute equally to model improvement at every stage of training. Some samples provide critical learning signals early on, while others become more useful as the model develops its understanding. Effective data utilization requires strategies that allow models to dynamically adapt to the most relevant data throughout the training process.
+**Data augmentation** artificially expands a dataset by applying transformations to existing samples. The key insight is that many transformations preserve label semantics while creating novel inputs.
 
-One approach to optimizing data usage is reinforcement learning-based data selection, where models learn to prioritize training examples based on their potential impact on learning. Instead of feeding all data to the model indiscriminately, reinforcement learning techniques can guide data selection by rewarding choices that lead to faster convergence and better generalization. This method is particularly useful in domains where training on the entire dataset is computationally expensive, as it ensures that only the most valuable samples are used at any given time.
+**Image Augmentations**:
 
-Another strategy is meta-learning, often referred to as "learning to learn," which enables models to adapt quickly to new tasks with minimal data. Meta-learning techniques optimize how models use data by extracting transferable knowledge across tasks, allowing them to generalize from limited examples. In few-shot learning scenarios, for example, a model trained using meta-learning can efficiently classify new categories with just a handful of labeled samples by leveraging prior experience. This ability to make the most of small amounts of data reduces dependence on large-scale datasets while maintaining strong performance.
+- **Geometric**: Rotation, flipping, cropping, scaling
+- **Photometric**: Brightness, contrast, saturation, hue shifts
+- **Advanced**: Cutout (random rectangular masks), MixUp (blend two images and labels), CutMix (paste patches between images)
 
-Beyond training efficiency, optimizing data utilization also involves improving how data is stored, accessed, and managed. Large-scale machine learning systems require well-structured data pipelines that ensure seamless data retrieval and minimize redundancy. Efficient data indexing and retrieval mechanisms help models access relevant data points without unnecessary computation, particularly in applications involving real-time decision-making, such as search engines or recommendation systems. By structuring data intelligently, machine learning workflows can significantly reduce storage and processing overhead while improving responsiveness.
+**Text Augmentations**:
 
-Together, these strategies—reinforcement learning-based data selection, meta-learning, and efficient data management—demonstrate that improving how data is used is just as important as improving the data itself. By ensuring that models are trained on the most relevant examples, adapt quickly to new tasks, and retrieve information efficiently, AI systems can achieve higher performance while reducing computational and data requirements. These approaches are particularly valuable in large-scale, real-time, or resource-constrained settings, where optimizing data utilization can make the difference between a scalable, efficient system and an impractical one.
+- **Back-Translation**: Translate to another language and back, creating paraphrases
+- **Synonym Replacement**: Swap words with synonyms while preserving meaning
+- **Random Insertion/Deletion**: Add noise to make models robust to typos
 
-### Technique Overview
+::: {.callout-note title="AutoAugment and Learned Policies"}
+Rather than hand-designing augmentation policies, **AutoAugment** uses reinforcement learning to discover optimal augmentation strategies for specific datasets. RandAugment simplifies this by randomly sampling from a fixed set of transformations, achieving similar performance with less computation.
+:::
 
-Efficient use of data is essential for developing scalable and cost-effective machine learning systems. While conventional approaches rely on collecting ever-larger datasets, a data-centric perspective emphasizes optimizing how data is collected, structured, and used to achieve the same or better performance with fewer resources. The strategies discussed in this section represent five fundamental approaches for improving data efficiency.
+### Generative Synthesis: Creating New Samples
 
-Through the integration of these strategies, machine learning systems can achieve higher performance with fewer resources, making AI more accessible and environmentally sustainable. Table @tbl-data-efficiency summarizes these optimization goals, their approaches, key techniques, and benefits.
+**Synthetic data generation** goes beyond transformation to create entirely new samples using generative models. This is particularly valuable when:
 
-| Optimization Goal                | Approach                                      | Key Techniques | Benefit |
-|--------------------------------------|------------------------------------------------|--------------------|------------|
-| Improving Data Quality | Enhance dataset accuracy, consistency, and bias mitigation to ensure high-quality inputs. | Data Cleaning, Label Error Detection, Bias Correction, Data Validation | Reduces model errors caused by poor data quality and improves fairness and reliability. |
-| Reducing Labeling Needs          | Minimize reliance on labeled data by prioritizing essential examples or leveraging unlabeled data. | Active Learning, Self-Supervised Learning, Semi-Supervised Learning | Reduces annotation costs and effort while maintaining model performance. |
-| Extracting More Information from Data | Increase the value of existing data through transformation, generation, or transfer of knowledge. | Data Augmentation, Synthetic Data Generation, Transfer Learning | Enhances model generalization without requiring additional real-world data collection. |
-| Reducing Dataset Size Without Performance Loss | Identify and retain only the most important samples to reduce redundancy and improve efficiency. | Core-Set Selection, Data Pruning, Curriculum Learning | Decreases storage and computational costs while preserving model accuracy. |
-| Optimizing Data Utilization      | Improve how data is structured, retrieved, and used during training and inference. | Reinforcement Learning-Based Data Selection, Meta-Learning, Efficient Data Management | Ensures models prioritize relevant data and adapt quickly, reducing unnecessary computation. |
+- Real data is **privacy-sensitive** (medical records, financial data)
+- Edge cases are **rare** (autonomous driving failure scenarios)
+- Data collection is **expensive** (robotics, scientific experiments)
 
-: Summary of key data efficiency strategies and techniques. {#tbl-data-efficiency .striped .hover}
+**Generative Approaches**:
+
+- **GANs (Generative Adversarial Networks)**: Generator vs. discriminator training produces realistic images. StyleGAN generates photorealistic faces.
+- **Diffusion Models**: Iterative denoising produces high-quality images. Stable Diffusion enables text-to-image synthesis for training data.
+- **Simulation Engines**: Physics-based rendering (e.g., CARLA for autonomous driving, Unity/Unreal for robotics) generates unlimited labeled data with ground-truth annotations.
+
+::: {.callout-warning title="The Domain Gap"}
+Synthetic data often differs from real data in subtle ways (lighting, texture, physics). Models trained purely on synthetic data may not generalize to real-world deployment. **Domain adaptation** and **domain randomization** techniques help bridge this gap.
+:::
+
+### Knowledge Distillation: Compressing Information
+
+**Knowledge distillation** is a form of data efficiency where a smaller "student" model learns from a larger "teacher" model's outputs rather than raw labels. The teacher's soft predictions contain more information than hard labels—they encode inter-class relationships and uncertainty.
+
+This is especially powerful for creating **synthetic labels**: run a large model (e.g., GPT-4) on unlabeled data to generate high-quality annotations, then train a smaller model on these synthetic labels. The smaller model inherits much of the teacher's capability at a fraction of the inference cost.
+
+## Technique Summary {#sec-data-efficiency-summary-table}
+
+@tbl-data-efficiency summarizes the three-stage optimization pipeline introduced at the beginning of this chapter.
+
+| Stage | When Applied | Techniques | Typical Gains |
+|-------|--------------|------------|---------------|
+| **1. Static Pruning** | Before training | Coreset Selection, Deduplication, Quality Filtering | 30-50% dataset reduction |
+| **2. Dynamic Selection** | During training | Curriculum Learning, Active Learning, Semi-Supervised | 10-30% faster convergence |
+| **3. Synthetic Generation** | On-demand | Augmentation, Generative Models, Distillation | 2-10× effective data expansion |
+
+: The three-stage data efficiency pipeline. Each stage increases ICR by different mechanisms: pruning removes low-value samples, dynamic selection focuses compute on high-value samples, and synthesis creates new high-value samples. {#tbl-data-efficiency .striped .hover}
+
+@tbl-technique-selection provides a decision guide for selecting techniques based on your specific constraints.
+
+| Constraint | Best Technique | Why |
+|------------|----------------|-----|
+| Limited labeling budget | Active Learning | Maximizes label ROI by selecting informative samples |
+| High redundancy in data | Deduplication + Coreset | Removes waste before training begins |
+| Rare classes or edge cases | Synthetic Generation | Creates samples that don't exist in raw data |
+| Slow convergence | Curriculum Learning | Improves gradient quality in early training |
+| Privacy requirements | Synthetic Data | Train on generated data, not real user data |
+| Large model, small dataset | Knowledge Distillation | Leverage teacher model's knowledge as "data" |
+
+: Technique selection guide based on primary constraint. {#tbl-technique-selection .striped .hover}
 
 ## Engineering Data Efficiency Systems
 
@@ -231,6 +432,43 @@ For a selection strategy to be systems-efficient, it must satisfy the **Selectio
 $$ T_{selection} + T_{train}(N_{subset}) < T_{train}(N_{total}) $$
 
 Where $T_{selection}$ is the time spent scoring the pool and $T_{train}$ is the compute time. If $f(x)$ requires a forward pass of a large model, the cost of selection can exceed the cost of training, leading to a negative ROI.
+
+::: {#fig-selection-inequality fig-cap="**The Selection Inequality**: Data selection only improves end-to-end efficiency if the overhead of selection plus training on the subset is less than training on the full dataset. A lightweight selection function (proxy model, cached embeddings) keeps selection overhead low; an expensive selection function (full model forward pass) can negate the savings." fig-alt="Bar chart comparing two approaches: baseline shows one tall bar for full training; data-efficient shows two shorter bars for selection overhead and subset training, with total shorter than baseline."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\begin{axis}[
+    ybar stacked,
+    bar width=25pt,
+    width=10cm, height=6cm,
+    ylabel={Total Time},
+    symbolic x coords={Baseline, Efficient Selection, Expensive Selection},
+    xtick=data,
+    xticklabel style={align=center, text width=2.5cm},
+    ymin=0, ymax=120,
+    ytick={0,25,50,75,100},
+    legend style={at={(0.5,-0.25)}, anchor=north, legend columns=2, draw=none},
+    axis lines=left,
+    enlarge x limits=0.25,
+    nodes near coords,
+    every node near coord/.append style={font=\footnotesize, yshift=2pt}
+]
+    % Baseline: Full training only
+    \addplot+[fill=blue!40, draw=blue!60] coordinates {(Baseline, 100) (Efficient Selection, 0) (Expensive Selection, 0)};
+    % Selection overhead
+    \addplot+[fill=orange!40, draw=orange!60] coordinates {(Baseline, 0) (Efficient Selection, 5) (Expensive Selection, 60)};
+    % Subset training
+    \addplot+[fill=green!40, draw=green!60] coordinates {(Baseline, 0) (Efficient Selection, 40) (Expensive Selection, 40)};
+
+    \legend{Full Training, Selection Overhead, Subset Training}
+\end{axis}
+% Annotations
+\draw[<->, thick, red] (2.8, 4.2) -- (5.2, 4.2);
+\node[red, font=\footnotesize] at (4.0, 4.5) {55\% savings};
+\draw[<->, thick, red] (5.8, 4.2) -- (8.2, 4.2);
+\node[red, font=\footnotesize] at (7.0, 4.5) {No savings!};
+\end{tikzpicture}
+```
+:::
 
 ### Hardware Empathy: The Random Access Penalty
 
@@ -264,23 +502,13 @@ To maintain GPU utilization, data loaders must be architected for **sharded rand
 Synthetic data generation moves the data bottleneck from I/O (disk speed) to CPU (augmentation compute). Heavy augmentations (e.g., 3D rotations, MixUp) or generative synthesis can starve the GPU if the CPU cannot keep up.
 
 **Data Echoing** is a system optimization that reuses a batch of data multiple times in the GPU, applying different cheap augmentations on the GPU itself, or simply replaying the batch to amortize the cost of fetching and decoding. This reduces the pressure on the upstream data pipeline, ensuring that the GPU remains the bottleneck.
-## Measuring Data Efficiency
+## Measuring Data Efficiency {#sec-data-efficiency-measuring}
 
-Data efficiency plays a critical role in determining the scalability, sustainability, and accessibility of machine learning systems. However, its abstract nature makes it challenging to evaluate and compare systematically. Measuring data efficiency requires quantifying how effectively a model utilizes data to achieve performance goals with minimal resources, such as computational cost, time, or labeling effort.
-
-Without standardized metrics, it can be difficult to assess trade-offs between dataset size, quality, and computational efficiency. For instance, how do we evaluate whether a smaller, curated dataset performs better than a larger, noisier one? How do we ensure that efforts to improve data diversity or reduce labeling requirements do not inadvertently degrade performance? Developing reliable methods to measure data efficiency helps address these questions by offering insights into which data-centric strategies provide the greatest value.
-
-This section explores the principles and techniques for quantifying data efficiency. We begin by identifying key metrics that capture different dimensions of data efficiency, followed by practical methods to evaluate these metrics. Understanding these measurement strategies is essential for making informed decisions about data-centric optimizations and for advancing the broader goal of building efficient, resource-conscious AI systems.
+The techniques in this chapter—coreset selection, active learning, augmentation—all claim to improve efficiency. But how do we *measure* that improvement? Without metrics, we cannot compare approaches, set targets, or know when to stop optimizing. This section introduces five metrics that quantify different dimensions of data efficiency.
 
 ### Performance-Per-Data Unit (PPD)
 
-Machine learning models depend on data to improve their predictions, but more data does not always mean better performance. While increasing dataset size can enhance accuracy, the benefits are not always proportional—at some point, additional data contributes less meaningful information, making the learning process inefficient. This diminishing return creates an important question: how much data is actually needed to achieve a target level of model performance?
-
-#### Measuring PPD
-
-Performance-Per-Data Unit (PPD) provides a way to measure how efficiently a model learns from additional data. It quantifies the improvement in model performance per unit of data added, helping determine whether increasing dataset size is justified given the computational cost. A high PPD indicates that each additional data point meaningfully improves performance, making data collection and processing more efficient. Conversely, a low PPD suggests that adding more data increases system costs (e.g., training time, energy usage, storage) without significant performance gains.
-
-Mathematically, PPD is expressed as:
+**PPD** measures the marginal learning value of additional data: how much does model performance improve per sample added?
 
 $$
 PPD = \frac{\Delta \mathcal{M}}{\Delta N}
@@ -303,9 +531,9 @@ $$
 PPD = \frac{86.5 - 86}{10000} = 0.00005 \text{% per sample}
 $$
 
-The sharp decline in PPD (@fig-ppd-curve) indicates diminishing returns—even though more data is added, it contributes progressively less to overall accuracy. At this stage, continuing to expand the dataset increases computational costs without yielding meaningful accuracy improvements.
+The sharp decline in PPD (@fig-ppd-curve) indicates diminishing returns. At the plateau, continuing to expand the dataset increases costs without meaningful accuracy improvements—a clear signal to switch from data collection to data curation.
 
-::: {#fig-ppd-curve fig-cap="**Diminishing Returns of Data**: A comparison of random sampling (gray dashed line) versus data-efficient selection (blue solid line). The efficient strategy achieves higher performance with less data (High PPD region), reaching the convergence plateau much earlier. Adding data beyond this point (Low PPD) yields minimal gains." fig-alt="A plot with X-axis 'Dataset Size' and Y-axis 'Performance'. Two curves start at 0. The 'Random' curve rises slowly. The 'Efficient' curve rises steeply and plateaus early."}
+::: {#fig-ppd-curve fig-cap="**Diminishing Returns of Data**: Random sampling (gray) versus data-efficient selection (blue). The efficient strategy achieves higher performance with less data (High PPD region), reaching the convergence plateau much earlier. The red arrow shows the efficiency gap at a fixed dataset size." fig-alt="A plot with X-axis 'Dataset Size' and Y-axis 'Performance'. Two curves start at 0. The 'Random' curve rises slowly. The 'Efficient' curve rises steeply and plateaus early."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
 \begin{axis}[
@@ -342,328 +570,59 @@ The sharp decline in PPD (@fig-ppd-curve) indicates diminishing returns—even t
 ```
 :::
 
-#### PPD and System Efficiency
+**Systems implication**: Since training cost scales as $C_T = N \cdot C_s$ (samples × cost-per-sample), low PPD means dollars spent on diminishing returns. The techniques in this chapter—pruning, active learning, augmentation—all work by keeping PPD high throughout training.
 
-From a systems perspective, tracking PPD is essential because excessive data usage can lead to inefficiencies in computation, storage, and energy consumption. Machine learning pipelines must balance dataset size with the computational resources required for training and inference. If PPD is low, increasing the dataset size primarily increases costs without substantial performance improvements.
+### Additional Efficiency Metrics
 
-The total computational cost $C_T$ of training a model depends on both the dataset size $N$ and the computational cost per sample $C_s$:
+While PPD measures the marginal value of new data, a complete picture requires additional metrics that capture different dimensions of data efficiency.
 
-$$
-C_T = N \cdot C_s
-$$
+#### Data Usage Efficiency (DUE)
 
-If PPD is high, each new data sample significantly enhances learning, leading to efficient compute usage. However, if PPD is low, increasing $N$ leads to a higher training cost $C_T$ without proportional accuracy improvements, making training more expensive and time-consuming.
-
-A similar relationship exists with energy efficiency. The total energy consumption $E_T$ required for training is:
-
-$$
-E_T = C_T \cdot P
-$$
-
-where $P$ is the power consumption of the computing infrastructure. When PPD is low, increasing dataset size wastes energy by requiring more computational cycles for only marginal accuracy gains. This inefficiency is particularly problematic for large-scale AI systems, where massive datasets can consume significant financial and environmental resources.
-
-For example, training a large language model such as GPT-4 requires thousands of GPU hours. If much of the dataset has a low PPD, then the training process wastes both compute power and financial resources, making it less scalable and sustainable.
-
-#### Improving PPD
-
-Given the direct impact of PPD on system efficiency, it is essential to optimize data efficiency rather than blindly increasing dataset size. Several strategies can help maintain a high PPD, so that each data sample contributes maximum learning value:
-
-- Active Learning: Instead of labeling all available data, selectively annotate only the most uncertain or informative samples.
-- Dataset Pruning: Identify and remove redundant or uninformative samples, reducing dataset size without compromising accuracy.
-- Data Augmentation: Generate variations of existing data rather than collecting more raw data, increasing diversity without increasing labeling costs.
-
-Focusing on data quality rather than sheer volume allows machine learning practitioners to reduce computational overhead, decrease energy consumption, and accelerate training—all while maintaining or even improving model performance.
-
-Performance-Per-Data Unit (PPD) provides a structured way to evaluate the impact of dataset expansion. While adding more data can improve model performance, monitoring PPD ensures that these improvements justify the associated computational and energy costs. By integrating PPD into system design decisions, machine learning practitioners can develop models that are not only accurate but also efficient, scalable, and sustainable.
-
-### Data Usage Efficiency (DUE)
-
-Machine learning models require vast amounts of data to generalize well, but not all data contributes equally to learning. Some samples provide essential information that improves model accuracy, while others are redundant, mislabeled, or even misleading. When a dataset contains a high proportion of unnecessary samples, the system incurs extra computational, storage, and energy costs without significant performance gains. The concept of Data Usage Efficiency (DUE) addresses this challenge by measuring how effectively a dataset is utilized in achieving a target model performance. Instead of focusing purely on dataset size, DUE evaluates whether the available data is being used optimally to minimize resource consumption while maximizing learning.
-
-A high DUE indicates that the dataset is well-optimized, meaning that most of the data points contribute to the model’s performance. In contrast, a low DUE suggests that a significant portion of the dataset is redundant or irrelevant, creating inefficiencies that extend beyond model training into storage, deployment, and inference. Understanding and optimizing DUE is critical for building scalable, cost-effective, and environmentally sustainable machine learning systems.
-
-#### Measuring DUE
-
-To formally quantify DUE, we define it as the ratio of the minimum dataset size required to reach a target performance level to the total available dataset size:
+**Definition**: The ratio of effective data to total data.
 
 $$
 DUE = \frac{N_{\text{eff}}}{N_{\text{total}}}
 $$
 
-where:
+Where $N_{\text{eff}}$ is the minimum samples needed to reach target performance. A DUE of 10% means 90% of your data is redundant—a massive optimization opportunity.
 
-- $N_{\text{eff}}$ is the smallest number of training samples needed to achieve a given accuracy or performance threshold.
-- $N_{\text{total}}$ is the total dataset size.
+**When It Matters**: High DUE indicates a well-curated dataset. Low DUE signals that pruning or coreset selection could dramatically reduce training costs without hurting accuracy.
 
-Consider a classification model trained on one million samples. If it reaches the desired accuracy after using only 100,000 of those samples, then the DUE is:
+#### Computational Efficiency of Data (CED)
 
-$$
-DUE = \frac{100,000}{1,000,000} = 0.1 \quad (10\%)
-$$
-
-This result implies that 90% of the dataset is not contributing significantly to model improvement. In such cases, reducing dataset size through pruning, core-set selection, or active learning can significantly enhance efficiency without compromising performance.
-
-#### DUE and System Efficiency
-
-When DUE is low, machine learning systems become computationally inefficient, requiring more resources than necessary to achieve the same performance. The impact of a low DUE extends beyond just the training phase—it affects computation, memory, energy consumption, and deployment efficiency. Addressing these inefficiencies is essential for reducing operational costs and improving overall system performance.
-
-One of the most direct consequences of a low DUE is increased computational cost during training. Since every additional sample in the dataset incurs a computational overhead, the total training cost $C_T$ is given by:
-
-$$
-C_T = N_{\text{total}} \cdot C_s
-$$
-
-where $C_s$ represents the compute cost per sample. When $N_{\text{total}}$ is significantly larger than $N_{\text{eff}}$, resources are wasted on processing unnecessary data. This inefficiency slows down training, increases GPU/TPU usage, and leads to unnecessary cloud computing expenses.
-
-Beyond computational cost, low DUE impacts storage and memory requirements. Large datasets require more disk space for storage and greater memory bandwidth for loading and processing, creating bottlenecks in data pipelines. In cloud-based environments, where storage costs scale with usage, a dataset with low DUE unnecessarily inflates infrastructure costs. Moreover, when models are deployed in real-time systems or edge devices, an inefficient dataset may lead to higher latency and slower inference times, limiting scalability.
-
-Another major consequence of low DUE is its effect on energy consumption and sustainability. Since training a machine learning model is energy-intensive, excessive dataset size leads to increased power usage. The total energy consumption $E_T$ for training is proportional to computational cost:
-
-$$
-E_T = C_T \cdot P
-$$
-
-where $P$ is the power consumption of the computing infrastructure. When a dataset contains a high proportion of redundant samples, $C_T$ increases without substantial performance improvements, causing unnecessary energy expenditure. This inefficiency is particularly concerning for large-scale AI models, which require extensive computing clusters. Training a low-DUE dataset on thousands of GPUs results in a significant environmental footprint, making AI less sustainable.
-
-Low DUE also affects model inference efficiency. A model trained on an unnecessarily large dataset might have higher inference latency and memory requirements due to bloated architectures or inefficient feature representations. This can be problematic in real-time applications, such as autonomous systems, healthcare, or financial decision-making, where response time is critical. By optimizing DUE, machine learning models can achieve comparable accuracy while being leaner, faster, and more energy-efficient.
-
-#### Improving DUE
-
-To increase DUE, it is essential to refine how data is selected, structured, and utilized within the training pipeline. Several techniques can help maximize efficiency:
-
-- Core-Set Selection: Instead of using the entire dataset, identify and train on a small subset of highly informative samples that provide the same learning signal as the full dataset.
-- Active Learning: Prioritize labeling only the most uncertain or impactful samples, reducing annotation costs and dataset size.
-- Data Pruning: Remove redundant, mislabeled, or unimportant samples that do not contribute meaningfully to model learning.
-- Self-Supervised Learning: Reduce reliance on labeled data by leveraging unlabeled samples more effectively, allowing models to learn meaningful representations with fewer labeled examples.
-
-These methods enable machine learning systems to achieve the same level of performance with significantly less data, reducing training time, energy costs, and storage requirements.
-
-Data Usage Efficiency (DUE) provides a structured way to evaluate whether a dataset is being used optimally in machine learning training. A high DUE means that a dataset is well-curated, with most samples contributing valuable information to model learning. In contrast, a low DUE indicates inefficiency, leading to higher compute costs, longer training times, increased storage needs, and greater energy consumption.
-
-Optimizing DUE enables machine learning practitioners to develop more scalable, cost-effective, and environmentally sustainable AI systems. This ensures that every data point contributes meaningfully to learning, leading to leaner, more efficient models that perform well without excessive resource consumption.
-
-### Computational Efficiency of Data (CED)
-
-The efficiency of a machine learning system is not only determined by the size and quality of its dataset but also by how effectively data interacts with computational resources. Some data points require significantly more processing to extract useful features, while others are easier to learn from. This difference affects both the time it takes for a model to converge and the overall computational burden of training and inference.
-
-Computational Efficiency of Data (CED) provides a way to measure how efficiently a dataset translates into model improvements given the compute resources available. Unlike Performance-Per-Data Unit (PPD), which focuses solely on learning gains from data, and Data Usage Efficiency (DUE), which evaluates whether a dataset is being used effectively, CED quantifies the computational cost of processing data relative to its learning contribution. A high CED means that a dataset is well-structured, providing maximum learning benefits for minimal computational effort. A low CED, on the other hand, indicates that excessive compute resources are being spent on processing data that does not yield meaningful model improvements.
-
-#### Measuring CED
-
-Formally, we define CED as the ratio of the model performance improvement per unit of compute cost:
+**Definition**: Performance improvement per unit of compute.
 
 $$
 CED = \frac{\Delta \mathcal{M}}{\Delta C_T}
 $$
 
-where:
+Where $\Delta C_T$ is measured in FLOPs or GPU-hours. CED differs from PPD by accounting for the fact that some samples are computationally expensive to process (e.g., high-resolution images, long sequences).
 
-- $\Delta \mathcal{M}$ represents the change in model performance (e.g., accuracy, loss reduction).
-- $\Delta C_T$ represents the additional computational cost incurred, measured in FLOPs (floating-point operations), GPU-hours, or energy consumption.
+**When It Matters**: Two datasets may have equal PPD but different CED if one requires more preprocessing or augmentation compute. Optimize CED by improving data representations or using efficient augmentations.
 
-To illustrate this concept, suppose that two datasets—Dataset A and Dataset B—are used to train a model. If Dataset A leads to a 2% increase in accuracy but requires 100 GPU-hours, while Dataset B provides the same 2% improvement but requires only 50 GPU-hours, then the CED of Dataset B is twice as high as that of Dataset A. This means that Dataset B is computationally more efficient, allowing the model to achieve the same performance while using fewer resources.
+#### Redundancy Ratio (RR)
 
-The efficiency of data processing is important in deep learning, where training large-scale models involves billions to trillions of FLOPs. If a dataset has low CED, the model may require excessive computation to extract useful patterns, leading to longer training cycles, increased cloud costs, and higher energy consumption.
-
-#### CED and System Efficiency
-
-The computational burden of data processing directly affects the overall efficiency of machine learning pipelines. When a dataset is computationally inefficient, training and inference become unnecessarily expensive, consuming excessive hardware resources without yielding proportional improvements. Understanding CED helps diagnose these inefficiencies and improve the balance between model performance and compute usage.
-
-One major consequence of a low CED is the increased cost of training. The total training cost $C_T$ depends on both dataset size and the compute cost per sample $C_s$:
-
-$$
-C_T = N \cdot C_s
-$$
-
-where:
-
-- $N$ represents the number of training samples, and
-- $C_s$ represents the compute cost per sample, which varies depending on data complexity and model architecture.
-
-A dataset with low CED has a high $C_s$, meaning that each sample requires more processing than necessary to achieve learning improvements. As a result, training time is extended, compute resources are over-utilized, and overall system efficiency decreases.
-
-Beyond training costs, low CED affects inference efficiency as well. Many real-world applications, such as edge AI and real-time decision-making systems, require models to process data quickly and efficiently. If a model is trained on data that requires excessive computation per sample, inference latency increases, limiting scalability. For example, an autonomous vehicle must process sensor data in milliseconds—if the model’s learned representations are computationally inefficient, the system may fail to react in real-time, creating potential safety risks.
-
-Low CED also impacts energy efficiency and sustainability. Since computational cost is directly linked to power consumption, the total energy required for training is given by:
-
-$$
-E_T = C_T \cdot P
-$$
-
-where $P$ is the power draw of the computing infrastructure. When datasets require high $C_T$ to extract meaningful features, the result is higher power consumption, increased operational costs, and a larger carbon footprint. Large-scale AI models already consume significant energy—optimizing CED ensures that training resources are used responsibly.
-
-#### Improving CED
-
-Since CED is influenced by both data complexity and computational cost per sample, optimizing it requires improving how data is structured, processed, and utilized within machine learning pipelines. Several techniques can enhance CED while maintaining strong model performance:
-
-- Data Representation Optimization: Transform raw data into more structured, efficient representations before training. Techniques such as dimensionality reduction, feature extraction, and data compression reduce computational overhead while retaining essential information.
-- Efficient Data Augmentation: Apply computationally inexpensive transformations instead of using brute-force dataset expansion. For example, generating synthetic data using simple transformations rather than high-cost generative models can improve CED.
-- Adaptive Sampling: Dynamically adjust how much computation is spent on each sample. Some machine learning frameworks prioritize high-value samples that improve learning while reducing effort spent on redundant or less informative data.
-- Self-Supervised Pretraining: Learning robust representations from raw data before fine-tuning on a target dataset reduces the need for large-scale labeled data and lowers computational costs during training.
-
-These integrated approaches allow machine learning practitioners to reduce compute costs, speed up training, and improve model scalability, all while maintaining accuracy.
-
-Computational Efficiency of Data (CED) captures the relationship between data complexity and compute cost, highlighting how efficiently a dataset contributes to model improvements given the resources available. A high CED dataset provides strong performance gains while minimizing computational burden, whereas a low CED dataset requires excessive computation for limited improvements, leading to longer training times, higher energy consumption, and reduced system scalability.
-
-Optimizing CED enables machine learning practitioners to build faster, more efficient, and more sustainable AI systems, so that computational resources are allocated effectively. This optimization is particularly useful for large-scale AI models, real-time applications, and edge computing, where efficiency directly impacts performance and deployment feasibility.
-
-### Redundancy Ratio (RR)
-
-In machine learning, not all data is equally useful. Some samples contribute significantly to model learning, while others are highly repetitive, redundant, or even noisy, offering little additional value. As datasets grow larger, redundant data increases storage costs, prolongs training times, and unnecessarily inflates computational expenses. A dataset with excessive redundancy not only wastes resources but also slows down model convergence, making the training process less efficient.
-
-The Redundancy Ratio (RR) provides a structured way to quantify this inefficiency. It measures the proportion of a dataset that could be removed without negatively impacting model performance. A high RR suggests that a significant fraction of the dataset is unnecessary for learning, while a low RR indicates that most of the dataset is contributing meaningfully. Understanding RR is important for optimizing data storage, training efficiency, and system scalability—particularly in large-scale machine learning applications where dataset size directly impacts infrastructure costs.
-
-#### Measuring Redundancy Ratio
-
-Redundancy in a dataset can be estimated by identifying the minimum number of samples needed to achieve the desired model accuracy and comparing it to the total dataset size. The Redundancy Ratio (RR) is defined as:
+**Definition**: The fraction of data that can be removed without performance loss.
 
 $$
 RR = 1 - \frac{N_{\text{eff}}}{N_{\text{total}}}
 $$
 
-where:
+Note that $RR = 1 - DUE$. An RR of 60% means you can train on 40% of your data and achieve the same accuracy.
 
-- $N_{\text{eff}}$ is the effective dataset size, meaning the smallest subset of data required to reach the target model performance.
-- $N_{\text{total}}$ is the total dataset size.
+**When It Matters**: High RR is a direct call-to-action for deduplication and pruning. Before scaling your dataset, check if you can achieve the same performance with a smaller subset.
 
-For example, suppose a dataset contains 500,000 training samples, but an experiment finds that the model achieves the same accuracy when trained on only 200,000 of them. The RR in this case is:
+#### Dataset Growth Efficiency (DGE)
 
-$$
-RR = 1 - \frac{200,000}{500,000} = 0.6 \quad (60\%)
-$$
-
-This means that 60% of the dataset is redundant, meaning that removing these samples would not degrade performance. A high RR like this suggests that dataset pruning, deduplication, or better sampling strategies could significantly improve efficiency.
-
-#### RR and System Efficiency
-
-A high redundancy ratio leads to inefficiencies across multiple stages of the machine learning pipeline, affecting training, storage, and inference:
-
-Increased Training Cost and Time
-
-Training on highly redundant data means the model is processing similar or identical examples multiple times, which prolongs convergence and increases compute requirements. The total computational cost of training is given by:
-
-$$
-C_T = N_{\text{total}} \cdot C_s
-$$
-
-where $C_s$ is the per-sample compute cost. If a large portion of $N_{\text{total}}$ is redundant, training costs will increase unnecessarily, consuming additional GPU/TPU resources without proportional improvements in accuracy.
-
-Storage and Memory Overhead
-
-A dataset with high RR occupies unnecessary disk space and requires extra memory bandwidth for data retrieval, increasing infrastructure costs. In cloud-based machine learning environments, where data storage is often a significant expense, storing redundant data adds avoidable costs.
-
-Moreover, when datasets are loaded into memory for processing, redundancy results in higher memory demands, which can slow down data pipelines—especially in large-scale distributed training scenarios.
-
-Increased Energy Consumption
-
-Since computational cost is directly tied to power consumption, redundant data leads to higher energy usage. The total training energy required, $E_T$, is given by:
-
-$$
-E_T = C_T \cdot P
-$$
-
-where $P$ is the power draw of the computing hardware. A high RR dataset inflates $C_T$, leading to higher energy consumption and increased carbon footprint, making AI training less environmentally sustainable.
-
-Inefficient Inference and Deployment
-
-Redundancy is not just a training-time issue—it also impacts model deployment. If a model is trained on highly redundant data, it may learn unnecessary representations, leading to larger model sizes, increased inference latency, and higher memory requirements. This is particularly problematic for mobile and edge computing applications, where efficiency is critical.
-
-#### Improving RR
-
-To improve system efficiency, redundancy should be minimized while preserving model performance. Several strategies can reduce RR without compromising learning:
-
-- Data Deduplication: Identify and remove duplicate or near-duplicate samples before training.
-- Core-Set Selection: Identify the most informative subset of the data that achieves the same performance with fewer examples.
-- Contrastive Learning: Encourage the model to differentiate between similar examples, reducing the impact of redundancy.
-- Active Learning: Prioritize annotation for diverse, high-value samples, preventing unnecessary repetition in dataset construction.
-
-Removing redundant data allows machine learning pipelines to accelerate training, lower compute costs, and improve scalability without affecting accuracy.
-
-The Redundancy Ratio (RR) provides a structured way to measure how much of a dataset is unnecessary for achieving optimal model performance. A high RR indicates excessive duplication, which slows down training, inflates computational costs, and increases storage demands. Conversely, a low RR suggests that the dataset is well-optimized, so that every sample contributes meaningfully to learning.
-
-Active monitoring and redundancy reduction enable machine learning practitioners to develop more efficient, scalable, and sustainable AI systems. Removing redundant data not only reduces training costs and energy consumption but also improves deployment efficiency, making AI systems more adaptable to real-world constraints.
-
-### Dataset Growth Efficiency (DGE)
-
-As machine learning models continue to scale, the ability to efficiently incorporate new data becomes increasingly important. While larger datasets can improve performance, the benefits often diminish beyond a certain point, meaning that each additional data point contributes less to learning. Collecting and processing data without considering its actual impact on model performance leads to wasted resources, longer training times, and unnecessary computational overhead.
-
-Dataset Growth Efficiency (DGE) provides a way to measure how much additional data is required to achieve a fixed improvement in model performance. Unlike Performance-Per-Data Unit (PPD), which evaluates the impact of each new data point, DGE captures the scalability of data collection efforts—helping determine whether adding more data is cost-effective or if the dataset has reached a point of diminishing returns.
-
-A high DGE means that additional data contributes significantly to model improvements, making continued data collection valuable. Conversely, a low DGE suggests that expanding the dataset further is inefficient, and efforts should instead focus on data quality, selection, or augmentation strategies.
-
-#### Measuring DGE
-
-DGE is defined as the ratio of the amount of additional data required to achieve a given improvement in model performance:
+**Definition**: The amount of data required for a fixed performance improvement.
 
 $$
 DGE = \frac{\Delta N}{\Delta \mathcal{M}}
 $$
 
-where:
+Unlike PPD (which measures value per sample), DGE measures samples per value. A DGE of 50,000 samples/1% accuracy means you need 50,000 new samples for each additional percentage point of accuracy.
 
-- $\Delta N$ represents the number of additional data points added.
-- $\Delta \mathcal{M}$ represents the corresponding improvement in model performance (e.g., accuracy, F1-score, loss reduction).
-
-For example, suppose a model trained on 10,000 samples achieves 80% accuracy, and adding 5,000 more samples increases accuracy to 82%. The DGE in this case is:
-
-$$
-DGE = \frac{5,000}{82 - 80} = 2,500 \text{ samples per 1% accuracy improvement}
-$$
-
-This means that 2,500 additional samples were required to achieve a 1% accuracy gain. If the model’s accuracy improves by only 0.2% after adding another 10,000 samples, then:
-
-$$
-DGE = \frac{10,000}{0.2} = 50,000 \text{ samples per 1% accuracy improvement}
-$$
-
-This steep increase in DGE indicates that the dataset is reaching diminishing returns, meaning that further data collection is becoming less effective. At this stage, alternative approaches such as data curation, augmentation, or active learning may be more efficient than simply adding more raw data.
-
-#### DGE and System Efficiency
-
-A low Dataset Growth Efficiency can lead to substantial inefficiencies across the entire machine learning pipeline, impacting training cost, storage, and overall system performance:
-
-Increasing Data Collection Costs
-
-As datasets grow, the cost of acquiring and labeling new samples rises, particularly for domains where annotation is expensive (e.g., medical imaging, autonomous driving). If DGE is low, additional data provides little performance gain, meaning that data collection is no longer cost-effective.
-
-#### 2. Higher Computational and Energy Costs
-
-When additional data yields minimal improvements, the computational cost of processing it becomes disproportionate to the benefit. The total training cost $C_T$ scales with dataset size:
-
-$$
-C_T = N \cdot C_s
-$$
-
-where $C_s$ is the compute cost per sample. If DGE is low, $N$ grows without yielding substantial improvements, making training increasingly expensive. This also increases energy consumption, as total power usage is given by:
-
-$$
-E_T = C_T \cdot P
-$$
-
-where $P$ represents the power draw of the computing infrastructure. In large-scale AI training, low DGE datasets contribute significantly to carbon emissions and overall environmental costs.
-
-Storage and Memory Inefficiencies
-
-Datasets with low DGE require disproportionately large storage resources relative to their learning impact. Cloud-based machine learning pipelines, where storage is often a major expense, become less cost-effective when newly added data provides minimal gains.
-
-Slower Training and Inference Pipelines
-
-As datasets grow beyond an optimal point, training time increases significantly, even when performance gains are marginal. This can delay model development cycles, making AI systems less agile in responding to new tasks. Furthermore, when models are trained on unnecessary additional data, they may inherit inefficiencies that affect inference speed and model size, impacting deployment performance.
-
-#### Improving DGE
-
-Rather than blindly increasing dataset size, improving DGE requires targeted data collection and curation strategies that prioritize high-value samples. The following techniques can help optimize dataset growth while maintaining system efficiency:
-
-- Active Learning: Instead of adding data randomly, select the most informative or uncertain samples for annotation, reducing the total number of new samples required.
-- Data Augmentation: When DGE is low, augmenting existing data may provide better performance gains than collecting new raw data.
-- Self-Supervised Learning: Leverage unlabeled data efficiently to reduce the need for manually labeled samples.
-- Dataset Pruning and Curation: Before expanding a dataset, remove redundant, low-impact, or noisy samples to ensure new data contributes meaningfully.
-
-These methods ensure that each new data point provides maximum learning value, preventing unnecessary dataset expansion and reducing training costs.
-
-Dataset Growth Efficiency (DGE) measures how effectively new data improves model performance, helping determine when further data collection becomes inefficient. A high DGE indicates that additional data contributes significantly to learning, making continued dataset expansion valuable. Conversely, a low DGE suggests that adding more data provides minimal gains, leading to higher costs, longer training times, and wasted computational resources.
-
-Monitoring and optimizing DGE ensures that dataset expansion remains cost-effective, preventing unnecessary data collection and focusing instead on data quality, curation, and augmentation strategies. Efficient dataset growth leads to more scalable, efficient, and sustainable AI systems, making the best use of computational resources while minimizing storage and energy costs.
+**When It Matters**: Track DGE over time. When DGE spikes (requiring exponentially more data for marginal gains), you've hit diminishing returns—switch to augmentation, better curation, or architectural improvements.
 
 ### Metrics Reference
 
@@ -687,339 +646,49 @@ The table below translates data efficiency metrics into actionable steps that di
 
 ✅ If DGE is low → Adding more data isn’t improving accuracy enough → Stop data collection, focus on curation instead   -->
 
-## Recipes for Optimization
+## Benchmarking Data Efficiency {#sec-data-efficiency-benchmarking}
 
-The ability to measure data efficiency is essential for understanding how effectively a machine learning system utilizes data. However, measurement alone does not lead to improvement. Once inefficiencies are identified, the next step is to apply structured optimizations to ensure that datasets are not only sufficient for learning but also computationally efficient.
+### The Need for Data Efficiency Benchmarks
 
-Data inefficiencies can arise from redundancy, excessive volume, high computational cost, or diminishing returns from data expansion. Without a systematic approach to optimization, interventions may be applied inconsistently, leading to suboptimal model performance, increased training time, and unnecessary resource consumption.
+Existing ML benchmarks like MLPerf measure model accuracy and computational throughput, but largely ignore data efficiency. Two models achieving identical accuracy are treated as equivalent, even if one required twice as much training data and 40% longer to train. This gap matters because:
 
-This section provides a concise roadmap for improving data efficiency using the previously introduced metrics:
+1. **Data costs are hidden**: Training data curation, labeling, and storage often exceed compute costs but are not tracked.
+2. **Techniques are incomparable**: Active learning, data pruning, and augmentation methods are evaluated with inconsistent metrics across papers.
+3. **Sustainability is unmeasured**: A data-efficient model that achieves the same accuracy with 50% less data is fundamentally more sustainable, but current benchmarks don't reward this.
 
-- Performance-Per-Data Unit (PPD): Determines whether adding more data is beneficial.
-- Data Usage Efficiency (DUE): Measures the proportion of data actually contributing to learning.
-- Computational Efficiency of Data (CED): Evaluates how efficiently a dataset is processed.
-- Redundancy Ratio (RR): Quantifies unnecessary duplication in data.
-- Dataset Growth Efficiency (DGE): Assesses whether dataset expansion is justified.
+### Components of a Data Efficiency Benchmark
 
-Analysis of these metrics enables practitioners to identify bottlenecks and apply targeted interventions to optimize dataset composition, reduce computational overhead, and improve overall system efficiency. The following sections outline a structured approach to diagnosing inefficiencies, selecting appropriate optimization strategies, and evaluating the impact of interventions.
+A comprehensive benchmark should evaluate three dimensions:
 
-### Optimization Strategies and Their Impact
+**1. Dataset Efficiency**: Can the model achieve target accuracy with less data?
+- Metric: Data Usage Efficiency (DUE), Performance-Per-Data Unit (PPD)
+- Protocol: Train on progressively smaller subsets; measure accuracy retention
 
-Once inefficiencies in data usage have been identified, the next step is to apply targeted optimization strategies to improve both data efficiency and system performance. However, optimization should not be applied in an ad hoc manner. Instead, it should follow a structured, stepwise process that prioritizes eliminating redundancies first, then improving data selection and computational efficiency, before making adjustments to data augmentation or dataset growth strategies.
+**2. System Efficiency**: Do data optimizations reduce total resource consumption?
+- Metric: Computational Efficiency of Data (CED)
+- Protocol: Track GPU-hours, memory, and energy alongside accuracy
 
-A well-structured optimization sequence ensures that each intervention builds on prior improvements, preventing unnecessary computation and ensuring that data is being used effectively. The process follows the five-stage optimization framework described below.
+**3. Robustness Trade-offs**: Do efficiency gains compromise generalization?
+- Metric: Redundancy Ratio (RR), out-of-distribution accuracy
+- Protocol: Evaluate on held-out distributions; check for overfitting to pruned subset
 
-### Step 1. Pruning Redundant and Duplicate Data
+### Benchmarking Methodologies
 
-#### Objective
+| Methodology | Description | Key Metrics |
+|-------------|-------------|-------------|
+| Fixed-Budget | Train with constrained data/compute; compare accuracy | PPD, DUE |
+| Adaptive Selection | Model selects training data dynamically | DUE, RR |
+| Real-World Simulation | Include labeling costs, storage limits, streaming data | CED, DGE |
 
-Remove unnecessary data points that add little to model learning.
+### DataPerf and Future Directions
 
-#### Metric to Optimize
+The **DataPerf** initiative (launched 2022) represents an early effort to standardize data-centric benchmarks, focusing on data selection, labeling, and quality assessment. Future benchmarks should extend this to include:
 
-Redundancy Ratio (RR)
+- End-to-end efficiency metrics that span data curation through deployment
+- Task-specific protocols for vision, NLP, and structured data
+- Standardized reporting of data efficiency alongside accuracy
 
-#### Rationale
-
-The first step in improving data efficiency is to eliminate redundant and duplicate samples from the dataset. Many datasets contain near-identical examples or repetitive patterns that do not contribute to model learning but increase storage costs and prolong training times. By identifying and removing these redundant samples, dataset size can be reduced without sacrificing performance, leading to a more compact and computationally efficient training process.
-
-#### System Impact
-
-✅ Reduces dataset size, leading to lower memory and storage costs.
-✅ Speeds up training, as fewer data points need to be processed.
-✅ Ensures that only unique and diverse samples remain, improving model generalization.
-
-### Step 2. Selecting the Most Informative Data (Active Learning & Data Selection)
-
-#### Objective
-
-Retain only the most valuable training samples to maximize learning efficiency.
-
-#### Metric to Optimize
-
-Data Usage Efficiency (DUE)
-
-#### Rationale
-
-After removing redundancy, the next step is to ensure that every remaining data point contributes meaningfully to the learning process. Many datasets contain low-value or irrelevant samples that do not improve model generalization. By using data selection techniques, such as active learning, practitioners can identify the most informative examples and eliminate those that do not meaningfully impact the model’s learning curve.
-
-#### System Impact
-
-✅ Prevents unnecessary training on low-value data, reducing computational overhead.
-✅ Improves model convergence, as training focuses only on relevant information.
-✅ Optimizes data collection efforts, reducing labeling costs.
-
-### Step 3. Optimizing Computational Efficiency (Feature Selection & Representation Learning)
-
-#### Objective
-
-Reduce the processing cost per data point by improving how data is represented.
-
-#### Metric to Optimize
-
-Computational Efficiency of Data (CED)
-
-#### Rationale
-
-Even when data is well-selected and free of redundancy, it may still be computationally expensive to process. Some datasets require excessive preprocessing, while others contain high-dimensional features that increase memory and compute requirements without necessarily improving performance. By applying feature selection and representation learning techniques, data can be structured more efficiently, enabling faster and more effective training.
-
-#### System Impact
-
-✅ Reduces the computational cost of data processing during training and inference.
-✅ Lowers memory and storage requirements, improving system scalability.
-✅ Enhances feature extraction, potentially improving model accuracy with fewer data points.
-
-### Step 4. Increasing Dataset Diversity (Data Augmentation & Synthetic Data Generation)
-
-#### Objective
-
-Improve model generalization without excessive data collection.
-
-#### Metric to Optimize
-
-Performance-Per-Data Unit (PPD)
-
-#### Rationale
-
-Once a dataset is pruned, optimized, and computationally efficient, the next consideration is whether additional diversity is needed. Some models benefit from increased variation in training samples, but collecting more real-world data is often expensive and impractical. Instead, data augmentation and synthetic data generation techniques can be used to create additional training examples without requiring manual annotation. These methods expand the effective dataset size, improving generalization while keeping storage and compute costs low.
-
-#### System Impact
-
-✅ Improves model robustness to variations, reducing the risk of overfitting.
-✅ Minimizes reliance on real-world data collection, lowering annotation costs.
-✅ Balances dataset composition, ensuring better performance across different data distributions.
-
-### Step 5. Assessing the Need for Further Data Collection
-
-#### Objective
-
-Determine whether additional data acquisition is necessary.
-
-#### Metric to Optimize
-
-Dataset Growth Efficiency (DGE)
-
-#### Rationale
-
-The final step in the optimization process is determining whether additional data collection is justified. While increasing dataset size can sometimes improve model performance, it is not always the most efficient approach. If the Performance-Per-Data Unit (PPD) is low and the Dataset Growth Efficiency (DGE) is poor, then further data collection may not be necessary. Instead, efforts should be directed toward improving data selection, augmentation, or feature representation.
-
-#### System Impact
-
-✅ Prevents unnecessary data accumulation, reducing long-term storage and compute costs.
-✅ Ensures that data collection efforts are cost-effective and targeted toward actual performance gains.
-✅ Encourages smarter data acquisition strategies, focusing on underrepresented or high-value samples.
-
-### Structured Optimization for Maximum Efficiency
-
-A stepwise approach to data efficiency optimization ensures that each improvement builds upon the previous one, leading to a streamlined and computationally efficient dataset.
-
-The table below provides an overview of this structured process.
-
-| Step | Optimization Strategy | Metric to Optimize | Expected System Impact |
-|---------|-------------------------|---------------------|------------------------|
-| 1 | Prune redundant and duplicate data | Redundancy Ratio (RR) | Eliminates excess data, reducing storage and training costs |
-| 2 | Select the most informative samples (Active Learning) | Data Usage Efficiency (DUE) | Ensures that only useful data is retained, optimizing training efficiency |
-| 3 | Improve computational efficiency (Feature Learning, Representation Optimization) | Computational Efficiency of Data (CED) | Reduces the computational burden of processing data |
-| 4 | Increase dataset diversity (Augmentation, Synthetic Data) | Performance-Per-Data Unit (PPD) | Enhances generalization without requiring additional labeled data |
-| 5 | Determine whether additional data is needed | Dataset Growth Efficiency (DGE) | Ensures further data collection is only pursued when justified |
-
-Sequential application of each optimization enables machine learning pipelines to achieve higher performance while minimizing resource consumption. This ensures that data remains a valuable asset rather than an unnecessary burden in machine learning system design.
-
-### Evaluating Data Efficiency Optimizations
-
-Optimizing data efficiency is valuable only if it leads to measurable improvements in both data quality and system efficiency. Removing redundant samples, selecting more informative data points, or improving computational efficiency should not come at the cost of model accuracy or robustness. Therefore, evaluating the impact of optimizations is essential to ensure that efficiency gains translate into meaningful improvements without unintended consequences.
-
-At a high level, the success of data efficiency optimizations can be assessed across three dimensions:
-
-1. Dataset Quality: Has the dataset been improved without losing critical information?
-2. Computational Efficiency: Has training or inference become faster without sacrificing performance?
-3. Model Performance: Has the model maintained or improved accuracy, generalization, and robustness?
-
-These three factors provide a structured way to analyze whether an optimization process has led to real system improvements. If dataset pruning, for instance, reduces redundancy but inadvertently removes essential edge cases, then it may not be a true improvement. Similarly, an optimization that improves inference speed at the cost of increased model bias is not a meaningful gain.
-
-However, assessing optimization success is not always straightforward. Many efficiency improvements involve complex trade-offs, and the metrics used to measure these trade-offs are not always standardized. Without a systematic evaluation framework, different teams and researchers may apply different criteria for success, making it difficult to compare results.
-
-This challenge highlights the need for benchmarking in data efficiency. Just as machine learning models are evaluated using standardized benchmarks for accuracy, data efficiency optimizations require structured benchmarks that measure improvements in a consistent and reproducible manner. Benchmarks help ensure that data-centric optimizations are evaluated rigorously, enabling fair comparisons across different models, datasets, and optimization strategies.
-
-## Benchmarking Data Efficiency
-
-### Motivation for Data Efficiency Benchmarks
-
-Machine learning benchmarking has played a vital role in advancing AI systems, providing researchers and practitioners with standardized ways to evaluate models and compare different techniques. Benchmarks like MLPerf have helped optimize training and inference efficiency, allowing for fair comparisons between hardware accelerators, model architectures, and optimization strategies. However, while these benchmarks have greatly improved model and system efficiency, they largely overlook an equally important factor: data efficiency.
-
-As machine learning continues to scale, the ability to use data effectively has become just as important as optimizing models and hardware. A well-designed neural network trained on redundant, noisy, or excessive amounts of data can be far less efficient than a more compact model trained on well-curated, high-value examples. Yet, despite the growing emphasis on data-centric AI, there is currently no widely accepted way to measure data efficiency in a standardized manner.
-
-Imagine two machine learning models trained for the same image classification task. Both models achieve identical accuracy on a test set. However, one model required twice as much labeled data and took 40% longer to train than the other. From a data efficiency perspective, these models are not equal—one has learned to generalize effectively with fewer data points, while the other has relied on sheer volume to achieve the same result.
-
-Currently, most benchmarks would treat both models as equally successful, since they focus primarily on accuracy and computational cost, without considering how efficiently the data was used. This gap in evaluation highlights the need for a structured benchmark for data efficiency—one that measures not just model performance, but how well a system utilizes data to achieve that performance.
-
-A dedicated data efficiency benchmark would provide a structured, standardized way to evaluate dataset optimizations and training efficiency. Several challenges in modern AI development make this especially important:
-
-1. Current Benchmarks Focus on Model and System Efficiency, Not Data Efficiency
-   - Existing benchmarks prioritize accuracy, throughput, and computational efficiency, but do not assess whether a model is learning efficiently from its dataset.
-   - Two models may reach the same accuracy, but if one requires significantly more training data, it is less efficient in utilizing data as a resource.
-
-2. No Standardized Way to Evaluate Dataset Optimizations
-   - Techniques like data pruning, augmentation, and active learning are widely used, but their impact is measured inconsistently across studies.
-   - Without a benchmark, it is difficult to determine whether one data efficiency method truly outperforms another.
-
-3. Data Efficiency Directly Affects System Performance and Sustainability
-   - Using excessively large datasets increases training costs, energy consumption, and storage requirements without necessarily improving results.
-   - A data-efficient model achieves similar performance while using fewer resources, leading to more sustainable and accessible AI systems.
-
-4. Fair Comparisons Require Standardized Evaluation
-   - Without a structured benchmark, different ML teams rely on ad hoc methods to measure data efficiency, making it difficult to compare approaches.
-   - A well-defined benchmark would ensure fair, reproducible, and interpretable evaluations across models and datasets.
-
-In the following sections, we will explore the key  of a data efficiency benchmark, discuss how to design fair and reproducible evaluation protocols, and introduce a proposal for DataPerf 2.0, a next-generation benchmark that will enable the ML community to measure, compare, and optimize how efficiently models use data.
-
-### Key Components of a Data Efficiency Benchmark
-
-A well-designed benchmark for data efficiency must be built on clear and quantifiable metrics that measure how effectively a machine learning system utilizes data. The metrics introduced earlier---Performance-Per-Data Unit (PPD), Data Usage Efficiency (DUE), Computational Efficiency of Data (CED), Redundancy Ratio (RR), and Dataset Growth Efficiency (DGE)---serve as the core foundation for evaluating data efficiency in a structured manner.
-
-Each of these metrics captures a different aspect of data efficiency. PPD and DUE assess how well a dataset contributes to model learning, while CED links data efficiency to computational resource usage. RR helps determine whether dataset reductions remove meaningful diversity, and DGE measures how dataset expansion affects model performance over time. A comprehensive benchmark must incorporate all of these dimensions to ensure that efficiency improvements are genuinely beneficial across multiple axes, rather than simply reducing dataset size at the cost of generalization or fairness.
-
-#### Dataset Efficiency Evaluation
-
-The first essential component of a data efficiency benchmark is the dataset efficiency evaluation, which assesses how well a model performs given a constrained amount of data. A benchmark should quantify whether a model can achieve similar accuracy while using fewer data points, or whether dataset optimizations—such as pruning, augmentation, or active learning—lead to meaningful efficiency gains.
-
-The Performance-Per-Data Unit (PPD) metric plays an important role here, as it helps establish whether a given model is learning efficiently or simply benefiting from an abundance of training samples. Similarly, Data Usage Efficiency (DUE) provides insights into how effectively each data point contributes to the learning process, allowing practitioners to compare different dataset selection strategies in a structured manner. These metrics help ensure that benchmarks do not just evaluate raw model performance but also how efficiently models leverage the data available.
-
-#### System Efficiency Evaluation
-
-Beyond dataset efficiency, a comprehensive benchmark must also incorporate system efficiency metrics to ensure that improvements in data utilization lead to tangible reductions in computational cost. An optimized dataset should not just improve model accuracy; it should also reduce training time, memory consumption, and inference latency to prevent trade-offs that might outweigh the benefits.
-
-The Computational Efficiency of Data (CED) metric is important in this context. CED evaluates whether data optimizations reduce the time and resources required for training and inference. By tracking how much compute power is required per unit of training progress, the benchmark can identify approaches that genuinely improve efficiency rather than simply shifting the computational burden elsewhere.
-
-#### Trade-offs Between Data Efficiency and Model Robustness
-
-Another fundamental aspect of a data efficiency benchmark is its ability to capture trade-offs between data efficiency and model robustness. Many optimization techniques—such as dataset pruning or aggressive feature selection—may improve efficiency in controlled settings but degrade model generalization in real-world scenarios.
-
-To account for this, a well-designed benchmark must evaluate whether efficiency gains come at the expense of performance consistency. The Redundancy Ratio (RR) helps ensure that optimizations do not remove valuable variations in the data, leading to models that are overfitted to a limited dataset. Likewise, Dataset Growth Efficiency (DGE) determines whether increasing dataset size provides meaningful performance improvements or whether a model has already reached a saturation point where additional data is no longer beneficial.
-
-Together, these metrics offer a holistic view of how data-centric optimizations impact model behavior, so that benchmarking efforts capture both efficiency and generalization performance.
-
-#### Task-Specific Evaluation Protocols
-
-To be effective across different domains, a data efficiency benchmark must define task-specific evaluation protocols that align with the unique challenges of each machine learning application. The optimization of data efficiency in computer vision differs from that in natural language processing (NLP) or structured data analysis, requiring specialized benchmarks that account for these variations.
-
-For instance, in computer vision tasks, a benchmark may evaluate how dataset optimizations impact fine-grained classification accuracy, particularly in scenarios where labeling costs are high. In NLP, on the other hand, the focus might be on how well language models retain performance when token-level supervision is reduced. Similarly, in structured data tasks, efficiency evaluations may consider the impact of missing or imbalanced data on model learning.
-
-Adaptable evaluation protocols across different tasks allow benchmarks to enable meaningful and fair comparison of data efficiency improvements, rather than imposing one-size-fits-all evaluation criteria.
-
-#### Balancing Accuracy, Dataset Size, and Computational Efficiency
-
-Ultimately, a benchmark for data efficiency must balance accuracy, dataset size, and computational efficiency, providing clear guidance on how to optimize machine learning workflows. By incorporating metrics that measure dataset effectiveness, system efficiency, and model robustness, the benchmark ensures that data-centric improvements are evaluated in a structured, reproducible manner.
-
-### Standard Protocols and Best Practices
-
-Evaluating data efficiency requires more than just defining relevant metrics; it demands a structured approach that ensures fair and reproducible comparisons across different machine learning tasks, datasets, and models. Without standardized protocols, results may vary depending on experimental conditions, making it difficult to determine whether an optimization method genuinely improves data efficiency or if its benefits are specific to a particular setup. A well-designed evaluation framework should provide clear guidelines on how to measure and report data efficiency improvements in a way that is both reproducible and applicable across a wide range of machine learning applications.
-
-A key requirement for designing effective benchmarking protocols is ensuring alignment with the core data efficiency metrics introduced earlier. The Performance-Per-Data Unit (PPD), Data Usage Efficiency (DUE), Computational Efficiency of Data (CED), Redundancy Ratio (RR), and Dataset Growth Efficiency (DGE) provide a quantifiable foundation for comparing different optimization strategies. Standardized benchmarking protocols must define how and when these metrics are measured to ensure consistency across evaluations.
-
-#### Reproducibility and Fair Comparisons
-
-The first consideration in designing a benchmarking protocol is reproducibility. A reliable benchmark must produce consistent results when the same experiment is repeated under similar conditions. This means controlling for variables such as model architecture, hyperparameter settings, and data preprocessing methods. Without reproducibility, improvements in data efficiency may be attributed to factors unrelated to the actual optimization techniques being tested, leading to misleading conclusions. Establishing clearly defined baselines and ensuring that evaluations adhere to a standardized methodology allows researchers to draw meaningful comparisons between different approaches.
-
-Fairness is another essential principle in designing a data efficiency benchmark. Because machine learning tasks vary widely in terms of data availability, complexity, and computational requirements, an evaluation framework must account for these differences to ensure fair assessments. Benchmarks should define controlled scenarios that allow different data efficiency techniques to be tested under comparable conditions. For instance, if one approach is evaluated on a limited dataset, while another benefits from access to significantly more training data, any observed improvements may be due to data volume differences rather than the inherent efficiency of the method. Standardizing the evaluation process ensures that techniques are judged on their ability to make the most of available data, rather than simply leveraging more resources.
-
-The Redundancy Ratio (RR) plays a crucial role in ensuring fair comparisons, as it helps determine whether dataset optimizations preserve meaningful diversity rather than merely reducing dataset size. Similarly, Dataset Growth Efficiency (DGE) ensures that models benefiting from larger datasets are evaluated fairly by assessing whether data scaling leads to meaningful improvements or if diminishing returns are at play.
-
-#### Scalability and Generalization Across Domains
-
-Scalability is crucial in designing an effective benchmark. As machine learning models continue to grow in size and complexity, data efficiency evaluations must be designed to accommodate both small-scale and large-scale applications. A benchmark that works well for a limited dataset may not be practical for massive datasets used in industrial-scale machine learning. To address this, evaluation protocols should be adaptable to different dataset sizes and computational budgets while maintaining their ability to provide meaningful insights.
-
-To account for these differences, benchmarking protocols must integrate system-aware efficiency metrics, such as Computational Efficiency of Data (CED). A data efficiency technique should not only improve model accuracy or reduce dataset size but also enhance overall system performance. Benchmarks should explicitly track memory usage, training time, and compute cost to ensure that optimizations are viable at scale.
-
-Additionally, different domains—such as computer vision, NLP, and structured data analysis—have unique data efficiency challenges. A vision-based benchmark may focus on how efficiently models leverage labeled images, whereas an NLP benchmark might assess token-level supervision and pretraining efficiency. Standardized evaluation protocols should be flexible enough to accommodate these differences, so that fair comparisons are possible across diverse AI applications.
-
-#### Benchmarking Methodologies and Their Connection to Metrics
-
-To ensure comprehensive evaluation, a data efficiency benchmark can adopt multiple methodologies, depending on the nature of the task and the optimization approach being tested. These methodologies must be explicitly linked to relevant metrics, so that efficiency is measured systematically.
-
-1. Fixed-Dataset Benchmarks
-   - Models are trained and evaluated using a constrained dataset size.
-   - Measures how well an optimization technique improves performance under data limitations.
-   - Key Metrics: PPD (to measure model performance per data unit), DUE (to assess how effectively data points contribute to learning).
-
-2. Adaptive Benchmarks
-   - Models dynamically select and refine their training data over time.
-   - Evaluates active learning, self-supervised learning, and data pruning.
-   - Key Metrics: DUE (to measure selective learning efficiency), RR (to ensure that dataset pruning does not degrade model generalization).
-
-3. Real-World Task-Based Benchmarks
-   - Simulates practical constraints encountered in production, such as limited compute, storage, and real-time data availability.
-   - Evaluates how well a model can maintain efficiency in unpredictable conditions.
-   - Key Metrics: CED (to measure trade-offs between data and compute cost), DGE (to determine whether dataset expansion leads to meaningful improvements).
-
-Structuring benchmarking methodologies around specific, measurable criteria ensures that DataPerf 2.0 provides transparent and meaningful insights, rather than relying on subjective efficiency claims.
-
-#### Standardized Reporting and Open Benchmarking Efforts
-
-Beyond defining the evaluation methodologies, the benchmarking process must establish standardized procedures for measuring impact and reporting results. Each optimization method should be tested against a clearly defined baseline, with improvements measured using a consistent set of metrics. Results should be reported in a structured format, highlighting not only performance gains but also any trade-offs introduced by the optimization.
-
-A structured reporting format should include:
-
-- Dataset size and composition before and after optimization.
-- Model performance (accuracy, robustness, fairness) relative to dataset size.
-- Computational cost metrics (training time, inference latency, memory usage).
-- Trade-offs between data efficiency, system efficiency, and real-world constraints.
-
-Adopting open benchmarking efforts, such as community-driven leaderboards and reproducibility challenges, ensures that findings are transparent, interpretable, and comparable across studies. Integration with MLPerf, Hugging Face, and other machine learning evaluation platforms could further encourage industry adoption and establish data efficiency as a standard benchmarking practice.
-
-#### Challenges and Future Directions
-
-Designing effective protocols for evaluating data efficiency remains a complex task, with several open challenges:
-
-- Task-Specific Considerations: Some efficiency improvements may be highly domain-dependent, requiring custom evaluation methods.
-- Long-Term Learning Impact: Standardized benchmarks must account for how optimizations affect training efficiency over time.
-- Interoperability Across Workflows: Ensuring that benchmarks can be seamlessly integrated into existing ML pipelines is essential for adoption.
-
-Addressing these challenges requires ongoing collaboration between researchers, industry practitioners, and benchmarking organizations. By refining evaluation methodologies and establishing best practices, the ML community can ensure that data efficiency remains a core consideration in future AI development.
-
-A well-structured data efficiency benchmark provides the foundation for systematic evaluation, enabling the machine learning community to identify best practices and drive progress toward more efficient and sustainable AI systems. The next section will introduce DataPerf 2.0, a benchmark designed to fill this gap by establishing standardized evaluation protocols for data efficiency across diverse machine learning applications.
-
-### Proposal: Defining DataPerf 2.0
-
-The development of benchmarks for machine learning has traditionally focused on model performance and computational efficiency, but recent initiatives have recognized the need to evaluate the efficiency of data itself. One such initiative is DataPerf 1.0, a benchmark suite introduced to assess the quality and impact of data-centric AI techniques. DataPerf 1.0 was a foundational effort in defining structured evaluation methodologies for data quality, dataset selection, and active learning. However, as machine learning systems continue to evolve, it has become evident that a more comprehensive and scalable benchmarking framework is needed—one that extends beyond data selection and into the broader landscape of data efficiency.
-
-#### DataPerf 1.0: The First Step Toward Data Benchmarking
-
-DataPerf 1.0 was developed to address a critical gap in AI evaluation: while model benchmarks like MLPerf measure accuracy, latency, and throughput, there was no equivalent framework for evaluating how data optimization impacts learning efficiency. The first iteration of DataPerf introduced evaluation tracks for data selection, active learning, and labeling strategies, helping researchers compare methods for improving dataset quality. These benchmarks provided initial insights into how better-curated data could lead to improved model performance, even when using fewer labeled examples.
-
-Despite its contributions, DataPerf 1.0 had several limitations. It primarily focused on specific data curation techniques, such as dataset selection and active learning, but did not comprehensively evaluate the broader spectrum of data efficiency optimizations. Additionally, it lacked systematic assessments of trade-offs between dataset size, compute cost, and model generalization. As machine learning applications scale, data efficiency must be measured in a way that accounts for its impact not just on accuracy, but on overall system performance.
-
-#### The Need for DataPerf 2.0
-
-Building on the foundation of DataPerf 1.0, DataPerf 2.0 is designed to provide a more holistic and structured approach to benchmarking data efficiency. It expands the scope of evaluation beyond data selection and labeling to include data pruning, augmentation, compression, and dataset scalability. Unlike its predecessor, which focused primarily on isolated data quality improvements, DataPerf 2.0 introduces comprehensive metrics that capture the interplay between dataset optimization and system efficiency.
-
-A key advancement in DataPerf 2.0 is the introduction of a unified data efficiency score that integrates multiple dimensions of evaluation. While DataPerf 1.0 provided individual benchmarks for different data curation strategies, the new framework quantifies the trade-offs between dataset size reduction, model accuracy retention, and computational resource consumption. By incorporating metrics such as Performance-Per-Data Unit (PPD), Data Usage Efficiency (DUE), and Computational Efficiency of Data (CED), DataPerf 2.0 ensures that improvements in data efficiency are evaluated from both a data-centric and a system-centric perspective.
-
-#### Key Innovations in DataPerf 2.0
-
-To overcome the limitations of its predecessor, DataPerf 2.0 introduces several key innovations:
-
-- A broader evaluation framework that measures not just data selection efficiency, but also dataset pruning, augmentation strategies, self-supervised learning, and synthetic data generation.
-- Task-specific benchmarks covering computer vision, natural language processing, and structured data, so that data efficiency is measured across diverse AI applications.
-- Real-world deployment simulations that assess how data efficiency optimizations perform in production settings with limited compute, storage, and real-time constraints.
-- Standardized baselines and reporting protocols that ensure reproducibility and fair comparisons across different methods.
-
-Unlike DataPerf 1.0, which largely evaluated offline dataset curation, the new version also accounts for adaptive learning paradigms, where models refine their training data selection dynamically. By introducing benchmarks that assess the efficiency of data-centric AI techniques over time, DataPerf 2.0 enables a more realistic evaluation of how data optimizations impact long-term model training and deployment.
-
-With DataPerf 2.0, the machine learning community gains a standardized and scalable way to assess the efficiency of data-driven optimizations. This benchmark not only refines the methodologies introduced in DataPerf 1.0, but also aligns data efficiency evaluation with broader system performance considerations. By integrating dataset quality, computational resource usage, and model generalization into a single benchmark, DataPerf 2.0 ensures that data efficiency improvements are measured holistically rather than in isolation.
-
-To illustrate the progress from DataPerf 1.0 to 2.0, the following table highlights the key differences and improvements in the new benchmark:
-
-| Feature             | DataPerf 1.0 | DataPerf 2.0 |
-|-------------------------|-----------------|-----------------|
-| Focus              | Dataset selection and labeling strategies | Comprehensive data efficiency evaluation, including pruning, augmentation, and self-supervised learning |
-| Evaluation Scope   | Static dataset selection | Dynamic learning processes and adaptive data refinement |
-| Metrics Used       | Basic dataset filtering metrics | Holistic data efficiency metrics (PPD, DUE, CED, RR, DGE) |
-| System Considerations | Limited system-level evaluation | Measures trade-offs between data efficiency, computational cost, and model generalization |
-| Task Coverage      | Focused on dataset curation for vision and NLP | Broader scope covering vision, NLP, structured data, and real-world deployment constraints |
-| Benchmark Structure | Independent evaluations of data selection methods | Unified framework integrating multiple data efficiency optimizations |
-
-This comparison highlights how DataPerf 2.0 expands the scope of evaluation and establishes a more structured approach to data efficiency benchmarking. By moving beyond static dataset selection and incorporating system-aware evaluations, the new benchmark ensures that data efficiency improvements align with scalability and real-world applicability.
+Until standardized benchmarks are widely adopted, practitioners should track their own data efficiency metrics (PPD, DUE, CED) to guide optimization decisions and quantify the ROI of data-centric techniques.
 
 ## Fallacies and Pitfalls {#sec-data-efficiency-fallacies}
 
@@ -1050,9 +719,19 @@ We explored the three-stage optimization pipeline: **Static Pruning** to remove 
 
 :::
 
-With a high-efficiency data pipeline in place, we have minimized the "math required to learn." The next step in the optimization triad is to minimize the "math required to represent."
+With a high-efficiency data pipeline in place, we have minimized the "math required to learn." But even a perfectly optimized dataset still trains a model that may be larger than necessary. A 7B parameter model trained on a coreset still has 7B parameters at inference time. The next optimization lever addresses this: minimizing the "math required to represent."
 
-The next chapter, @sec-model-compression, examines how we can shrink the model itself through pruning, quantization, and distillation, ensuring that our efficient data feeds into an efficient engine.
+::: {.callout-chapter-forward}
+**Next: Model Compression (@sec-model-compression)**
+
+Data efficiency optimizes what goes *into* the model. Model compression optimizes what comes *out*. The next chapter examines how to shrink the trained model through:
+
+- **Pruning**: Removing redundant weights and neurons
+- **Quantization**: Reducing numerical precision from FP32 to INT8 or INT4
+- **Knowledge Distillation**: Training smaller models to mimic larger ones
+
+These techniques compound with data efficiency: a coreset-trained model that is then quantized delivers multiplicative savings. Together, data efficiency and model compression form the software-side of the optimization triad, reducing both the *volume* and *cost* of computation before hardware acceleration can do its work.
+:::
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->
 ::: { .quiz-end }
