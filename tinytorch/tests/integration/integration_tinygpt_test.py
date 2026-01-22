@@ -181,7 +181,7 @@ def test_transformer_components():
         print(f"    Transformer block: {x.shape} -> {block_out.shape}")
 
         print("  ✓ Testing Layer Normalization")
-        ln = LayerNorm(embed_dim=32)
+        ln = LayerNorm(normalized_shape=32)
         ln_out = ln(x)
         assert ln_out.shape == x.shape, "LayerNorm should preserve shape"
         print(f"    LayerNorm: {x.shape} -> {ln_out.shape}")
