@@ -169,7 +169,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 **Legend:** {legend}
 
-### 📖 Textbook Contributors ({book_count})
+### 📖 Textbook Contributors
 
 <!-- BOOK-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
@@ -182,7 +182,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 ---
 
-### 🔥 TinyTorch Contributors ({tinytorch_count})
+### 🔥 TinyTorch Contributors
 
 <!-- TINYTORCH-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
@@ -195,7 +195,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 ---
 
-### 🛠️ Hardware Kits Contributors ({kits_count})
+### 🛠️ Hardware Kits Contributors
 
 <!-- KITS-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
@@ -208,7 +208,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 ---
 
-### 🧪 Labs Contributors ({labs_count})
+### 🧪 Labs Contributors
 
 <!-- LABS-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
