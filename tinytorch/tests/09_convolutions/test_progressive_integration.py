@@ -1,9 +1,16 @@
 """
 Module 09: Progressive Integration Tests
-Tests that Module 09 (Convolutions) works correctly AND that Foundation + Training work.
+Tests that Module 09 (Convolutions/Spatial) works correctly AND that prior modules (01→08) still work.
 
-DEPENDENCY CHAIN: 01_tensor → ... → 05_dataloader → 06_autograd → 07_optimizers → 08_training → 09_convolutions
-This is where CNNs enable computer vision through spatial feature extraction.
+DEPENDENCY CHAIN: 01_tensor → 02_activations → 03_layers → 04_losses → 05_dataloader → 06_autograd → 07_optimizers → 08_training → 09_convolutions
+
+⚠️ IMPORTANT: This test ONLY uses modules 01-09.
+   Future modules (10_tokenization, 12_attention, 13_transformers, etc.) are NOT tested here.
+
+🎯 WHAT THIS TESTS:
+- Module 09: Conv2d, MaxPool2d, spatial operations
+- Integration: Convolutions work with all prior modules (01-08)
+- Regression: All previous modules still work correctly
 """
 
 import numpy as np
@@ -14,323 +21,471 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
-class TestPriorStackStillWorking:
-    """Quick regression checks that prior modules (01→06) still work."""
+class TestConvolutionCore:
+    """
+    🆕 NEW FUNCTIONALITY: Test Module 09 (Convolutions) core implementation.
+    """
 
-    def test_foundation_stack_stable(self):
-        """Verify foundation stack (01→05) remains stable."""
-        # Environment (Module 01)
-        assert sys.version_info >= (3, 8), "Foundation broken: Python version"
-
-        # Tensor foundation (Module 02)
+    def test_conv2d_exists(self):
+        """
+        ✅ TEST: Conv2d class exists and is importable
+        """
         try:
-            from tinytorch.core.tensor import Tensor
-            t = Tensor([1, 2, 3])
-            assert t.shape == (3,), "Foundation broken: Tensor creation"
+            from tinytorch.core.spatial import Conv2d
+            
+            assert Conv2d is not None, "Conv2d class not found"
+            
         except ImportError:
-            assert True, "Tensor foundation not implemented yet"
+            assert True, "Conv2d not implemented yet"
 
-    def test_spatial_operations_stable(self):
-        """Verify Module 09 (Convolutions/Spatial) operations still work."""
+    def test_conv2d_initialization(self):
+        """
+        ✅ TEST: Conv2d can be initialized with proper parameters
+        """
+        try:
+            from tinytorch.core.spatial import Conv2d
+            
+            conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3)
+            
+            assert hasattr(conv, 'weight'), "Conv2d missing weight"
+            assert hasattr(conv, 'forward'), "Conv2d missing forward"
+            
+            # Check weight shape: (out_channels, in_channels, kernel_h, kernel_w)
+            if hasattr(conv, 'weight'):
+                assert conv.weight.shape[0] == 16, "Conv2d out_channels wrong"
+                assert conv.weight.shape[1] == 3, "Conv2d in_channels wrong"
+                
+        except ImportError:
+            assert True, "Conv2d not implemented yet"
+
+    def test_conv2d_forward(self):
+        """
+        ✅ TEST: Conv2d forward pass produces correct output shape
+        """
+        try:
+            from tinytorch.core.spatial import Conv2d
+            from tinytorch.core.tensor import Tensor
+            
+            conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
+            
+            # Input: (batch, channels, height, width)
+            x = Tensor(np.random.randn(2, 3, 32, 32))
+            
+            output = conv(x)
+            
+            # With padding=1, kernel=3, output size should be same as input
+            assert output.shape == (2, 16, 32, 32), f"Conv2d output shape wrong: {output.shape}"
+            
+        except ImportError:
+            assert True, "Conv2d forward not implemented yet"
+
+    def test_maxpool2d_exists(self):
+        """
+        ✅ TEST: MaxPool2d class exists
+        """
+        try:
+            from tinytorch.core.spatial import MaxPool2d
+            
+            assert MaxPool2d is not None, "MaxPool2d not found"
+            
+        except ImportError:
+            assert True, "MaxPool2d not implemented yet"
+
+    def test_maxpool2d_forward(self):
+        """
+        ✅ TEST: MaxPool2d produces correct output shape
+        """
+        try:
+            from tinytorch.core.spatial import MaxPool2d
+            from tinytorch.core.tensor import Tensor
+            
+            pool = MaxPool2d(kernel_size=2)
+            
+            x = Tensor(np.random.randn(2, 16, 32, 32))
+            
+            output = pool(x)
+            
+            # Pool with kernel=2 halves spatial dimensions
+            assert output.shape == (2, 16, 16, 16), f"MaxPool2d output shape wrong: {output.shape}"
+            
+        except ImportError:
+            assert True, "MaxPool2d not implemented yet"
+
+
+class TestConvWithPriorModules:
+    """
+    🔗 INTEGRATION: Convolutions + Prior Modules (01-08)
+    """
+
+    def test_conv_with_activations(self):
+        """
+        ✅ TEST: Conv2d + ReLU activation
+        """
+        try:
+            from tinytorch.core.spatial import Conv2d
+            from tinytorch.core.activations import ReLU
+            from tinytorch.core.tensor import Tensor
+            
+            conv = Conv2d(3, 16, kernel_size=3, padding=1)
+            relu = ReLU()
+            
+            x = Tensor(np.random.randn(2, 3, 16, 16))
+            
+            conv_out = conv(x)
+            activated = relu(conv_out)
+            
+            # ReLU should not change shape
+            assert activated.shape == conv_out.shape, "ReLU changed shape"
+            # ReLU should make all values >= 0
+            assert np.all(activated.data >= 0), "ReLU not working"
+            
+        except ImportError:
+            assert True, "Conv + activation not ready"
+
+    def test_conv_with_linear(self):
+        """
+        ✅ TEST: CNN feature extraction → Linear classifier
+        """
         try:
             from tinytorch.core.spatial import Conv2d, MaxPool2d
+            from tinytorch.core.layers import Linear
+            from tinytorch.core.activations import ReLU
+            from tinytorch.core.tensor import Tensor
+            
+            # CNN layers
+            conv = Conv2d(3, 16, kernel_size=3, padding=1)  # (3, 32, 32) → (16, 32, 32)
+            pool = MaxPool2d(kernel_size=2)  # (16, 32, 32) → (16, 16, 16)
+            relu = ReLU()
+            
+            # Classifier
+            fc = Linear(16 * 16 * 16, 10)
+            
+            # Forward pass
+            x = Tensor(np.random.randn(2, 3, 32, 32))
+            
+            conv_out = relu(conv(x))
+            pooled = pool(conv_out)
+            
+            # Flatten for linear layer
+            flat = Tensor(pooled.data.reshape(2, -1))
+            logits = fc(flat)
+            
+            assert logits.shape == (2, 10), f"CNN classifier output wrong: {logits.shape}"
+            
+        except ImportError:
+            assert True, "CNN + Linear not ready"
 
-            # Basic spatial operations should work
-            conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3)
+    def test_conv_with_dataloader(self):
+        """
+        ✅ TEST: Convolutions work with DataLoader batches
+        """
+        try:
+            from tinytorch.core.spatial import Conv2d
+            from tinytorch.core.dataloader import TensorDataset, DataLoader
+            from tinytorch.core.tensor import Tensor
+            
+            # Image dataset
+            images = Tensor(np.random.randn(20, 3, 16, 16))
+            labels = Tensor(np.arange(20).astype(float))
+            
+            dataset = TensorDataset(images, labels)
+            dataloader = DataLoader(dataset, batch_size=4)
+            
+            conv = Conv2d(3, 8, kernel_size=3, padding=1)
+            
+            for batch_x, batch_y in dataloader:
+                out = conv(batch_x)
+                assert out.shape[0] == batch_x.shape[0], "Batch size changed"
+                break
+                
+        except ImportError:
+            assert True, "Conv + DataLoader not ready"
+
+    def test_conv_gradients(self):
+        """
+        ✅ TEST: Convolution gradients (if autograd works)
+        """
+        try:
+            from tinytorch.core.spatial import Conv2d
+            from tinytorch.core.tensor import Tensor
+            
+            conv = Conv2d(3, 8, kernel_size=3, padding=1)
+            
+            x = Tensor(np.random.randn(2, 3, 8, 8), requires_grad=True)
+            
+            out = conv(x)
+            
+            if hasattr(out, 'backward'):
+                try:
+                    out.backward(Tensor(np.ones(out.shape)))
+                    
+                    if x.grad is not None:
+                        assert x.grad.shape == x.shape, "Input gradient shape wrong"
+                    
+                    if hasattr(conv, 'weight') and conv.weight.grad is not None:
+                        assert conv.weight.grad.shape == conv.weight.shape, \
+                            "Conv weight gradient shape wrong"
+                except (TypeError, AttributeError):
+                    pass  # Gradients not fully implemented
+                    
+        except (ImportError, TypeError):
+            assert True, "Conv gradients not ready"
+
+
+class TestCNNArchitecture:
+    """
+    Test complete CNN architectures using modules 01-09.
+    """
+
+    def test_simple_cnn(self):
+        """
+        ✅ TEST: Simple CNN (Conv → Pool → Conv → Pool → FC)
+        """
+        try:
+            from tinytorch.core.spatial import Conv2d, MaxPool2d
+            from tinytorch.core.layers import Linear
+            from tinytorch.core.activations import ReLU
+            from tinytorch.core.tensor import Tensor
+            
+            # LeNet-style architecture
+            conv1 = Conv2d(1, 6, kernel_size=5)  # (1, 28, 28) → (6, 24, 24)
+            pool1 = MaxPool2d(kernel_size=2)     # → (6, 12, 12)
+            conv2 = Conv2d(6, 16, kernel_size=5) # → (16, 8, 8)
+            pool2 = MaxPool2d(kernel_size=2)     # → (16, 4, 4)
+            fc = Linear(16 * 4 * 4, 10)
+            relu = ReLU()
+            
+            # Forward
+            x = Tensor(np.random.randn(4, 1, 28, 28))
+            
+            h = relu(conv1(x))
+            h = pool1(h)
+            h = relu(conv2(h))
+            h = pool2(h)
+            h = Tensor(h.data.reshape(4, -1))
+            logits = fc(h)
+            
+            assert logits.shape == (4, 10), f"CNN output wrong: {logits.shape}"
+            
+        except ImportError:
+            assert True, "Simple CNN not ready"
+
+    def test_cnn_training_ready(self):
+        """
+        ✅ TEST: CNN can be trained (components work together)
+        """
+        try:
+            from tinytorch.core.spatial import Conv2d, MaxPool2d
+            from tinytorch.core.layers import Linear
+            from tinytorch.core.activations import ReLU
+            from tinytorch.core.losses import MSELoss
+            from tinytorch.core.optimizers import SGD
+            from tinytorch.core.tensor import Tensor
+            
+            # Simple CNN
+            conv = Conv2d(3, 8, kernel_size=3, padding=1)
             pool = MaxPool2d(kernel_size=2)
-
-            assert hasattr(conv, 'forward'), "Spatial broken: Conv2d interface"
-            assert hasattr(pool, 'forward'), "Spatial broken: MaxPool2d interface"
-
-        except ImportError:
-            assert True, "Spatial operations not implemented yet"
-
-
-class TestModule12AttentionCore:
-    """Test Module 12 (Attention) core functionality."""
-
-    def test_attention_mechanism_creation(self):
-        """Test basic attention mechanism works."""
-        try:
-            from tinytorch.core.attention import MultiHeadAttention
-            from tinytorch.core.tensor import Tensor
-
-            # Create attention mechanism
-            attention = MultiHeadAttention(embed_dim=64, num_heads=8)
-
-            # Should have proper components (q_proj, k_proj, v_proj naming)
-            assert hasattr(attention, 'q_proj') or hasattr(attention, 'query_proj'), "Attention broken: No query projection"
-            assert hasattr(attention, 'k_proj') or hasattr(attention, 'key_proj'), "Attention broken: No key projection"
-            assert hasattr(attention, 'v_proj') or hasattr(attention, 'value_proj'), "Attention broken: No value projection"
-
-            # Test with sequence input
-            seq_len, batch_size, embed_dim = 10, 4, 64
-            x = Tensor(np.random.randn(seq_len, batch_size, embed_dim))
-
-            output = attention(x)
-            assert output.shape == (seq_len, batch_size, embed_dim), "Attention output shape broken"
-
-        except ImportError:
-            assert True, "Attention mechanism not implemented yet"
-
-    def test_scaled_dot_product_attention(self):
-        """Test core attention computation."""
-        try:
-            from tinytorch.core.attention import scaled_dot_product_attention
-            from tinytorch.core.tensor import Tensor
-
-            # Attention inputs: queries, keys, values
-            seq_len, embed_dim = 8, 16
-            Q = Tensor(np.random.randn(seq_len, embed_dim))
-            K = Tensor(np.random.randn(seq_len, embed_dim))
-            V = Tensor(np.random.randn(seq_len, embed_dim))
-
-            # Compute attention
-            output, attention_weights = scaled_dot_product_attention(Q, K, V)
-
-            assert output.shape == V.shape, "Attention output shape wrong"
-            assert attention_weights.shape == (seq_len, seq_len), "Attention weights shape wrong"
-
-            # Attention weights should sum to 1 across keys
-            weight_sums = np.sum(attention_weights.data, axis=1)
-            assert np.allclose(weight_sums, 1.0), "Attention weights don't sum to 1"
-
-        except ImportError:
-            assert True, "Scaled dot-product attention not implemented yet"
-
-
-class TestProgressiveStackIntegration:
-    """Test that the complete stack (01→07) works together."""
-
-    def test_neural_network_with_attention(self):
-        """Test neural network enhanced with attention."""
-        try:
-            from tinytorch.core.tensor import Tensor
-            from tinytorch.core.layers import Linear
-            from tinytorch.core.activations import ReLU
-            from tinytorch.core.attention import MultiHeadAttention
-
-            # Build network: dense → attention → dense
-            encoder = Linear(64, 64)
-            attention = MultiHeadAttention(embed_dim=64, num_heads=8)
-            decoder = Linear(64, 10)
+            fc = Linear(8 * 8 * 8, 5)
             relu = ReLU()
-
-            # Sequence input
-            seq_len, batch_size, input_dim = 12, 4, 64
-            x = Tensor(np.random.randn(seq_len, batch_size, input_dim))
-
-            # Forward pass through network with attention
-            h = relu(encoder(x))        # Dense processing
-            attn_out = attention(h)     # Attention mechanism
-            output = decoder(attn_out)  # Final projection
-
-            assert output.shape == (seq_len, batch_size, 10), "Network with attention broken"
-
+            
+            # Collect parameters
+            params = []
+            for module in [conv, fc]:
+                if hasattr(module, 'parameters'):
+                    params.extend(module.parameters())
+            
+            optimizer = SGD(params, lr=0.01)
+            loss_fn = MSELoss()
+            
+            # Training step
+            x = Tensor(np.random.randn(2, 3, 16, 16))
+            target = Tensor(np.random.randn(2, 5))
+            
+            # Forward
+            h = relu(conv(x))
+            h = pool(h)
+            h = Tensor(h.data.reshape(2, -1))
+            pred = fc(h)
+            
+            loss = loss_fn(pred, target)
+            
+            if hasattr(loss, 'backward'):
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+            
+            assert loss.data.size == 1, "CNN training loss wrong"
+            
         except ImportError:
-            assert True, "Neural network with attention not ready yet"
-
-    def test_transformer_block_capability(self):
-        """Test building transformer-style blocks."""
-        try:
-            from tinytorch.core.attention import MultiHeadAttention
-            from tinytorch.core.layers import Linear
-            from tinytorch.core.activations import ReLU
-            from tinytorch.core.tensor import Tensor
-
-            # Transformer block components
-            attention = MultiHeadAttention(embed_dim=128, num_heads=8)
-            ff1 = Linear(128, 512)
-            ff2 = Linear(512, 128)
-            relu = ReLU()
-
-            # Input sequence
-            seq_len, batch_size, embed_dim = 16, 2, 128
-            x = Tensor(np.random.randn(seq_len, batch_size, embed_dim))
-
-            # Transformer block: attention + feedforward
-            attn_out = attention(x)
-            ff_out = ff2(relu(ff1(attn_out)))
-
-            # Residual connection (if implemented)
-            if hasattr(x, '__add__'):
-                output = x + ff_out  # Residual connection
-            else:
-                output = ff_out
-
-            assert output.shape == x.shape, "Transformer block broken"
-
-        except ImportError:
-            assert True, "Transformer block capability not ready yet"
-
-
-class TestSequenceUnderstandingCapability:
-    """Test that attention enables sequence understanding."""
-
-    def test_sequence_to_sequence_capability(self):
-        """Test sequence-to-sequence processing."""
-        try:
-            from tinytorch.core.attention import MultiHeadAttention
-            from tinytorch.core.tensor import Tensor
-
-            # Encoder-decoder style processing
-            encoder_attention = MultiHeadAttention(embed_dim=64, num_heads=4)
-            decoder_attention = MultiHeadAttention(embed_dim=64, num_heads=4)
-
-            # Source and target sequences
-            src_len, tgt_len, batch_size, embed_dim = 10, 8, 2, 64
-            src = Tensor(np.random.randn(src_len, batch_size, embed_dim))
-            tgt = Tensor(np.random.randn(tgt_len, batch_size, embed_dim))
-
-            # Encode source sequence
-            encoded = encoder_attention(src)
-
-            # Decode target sequence (with potential cross-attention)
-            if hasattr(decoder_attention, 'cross_attention'):
-                decoded = decoder_attention(tgt, encoded)
-            else:
-                decoded = decoder_attention(tgt)
-
-            assert encoded.shape == src.shape, "Sequence encoding broken"
-            assert decoded.shape == tgt.shape, "Sequence decoding broken"
-
-        except ImportError:
-            assert True, "Sequence-to-sequence not ready yet"
-
-    def test_attention_pattern_analysis(self):
-        """Test that attention creates meaningful patterns."""
-        try:
-            from tinytorch.core.attention import scaled_dot_product_attention
-            from tinytorch.core.tensor import Tensor
-
-            # Create sequence with clear patterns
-            seq_len, embed_dim = 6, 8
-
-            # Pattern: first and last tokens should attend to each other
-            pattern_input = np.zeros((seq_len, embed_dim))
-            pattern_input[0, :] = 1.0  # First token
-            pattern_input[-1, :] = 1.0  # Last token
-
-            Q = Tensor(pattern_input)
-            K = Tensor(pattern_input)
-            V = Tensor(pattern_input)
-
-            output, attention_weights = scaled_dot_product_attention(Q, K, V)
-
-            # Check attention patterns make sense
-            # First token should attend strongly to last token
-            first_to_last = attention_weights.data[0, -1]
-            last_to_first = attention_weights.data[-1, 0]
-
-            # These should be among the highest attention weights
-            assert first_to_last > 0.1, "Attention pattern not detected"
-            assert last_to_first > 0.1, "Attention pattern not detected"
-
-        except ImportError:
-            assert True, "Attention pattern analysis not ready yet"
-
-
-class TestNLPReadiness:
-    """Test readiness for NLP applications."""
-
-    def test_language_modeling_architecture(self):
-        """Test architecture suitable for language modeling."""
-        try:
-            from tinytorch.core.attention import MultiHeadAttention
-            from tinytorch.core.layers import Linear
-            from tinytorch.core.tensor import Tensor
-
-            # Language model components
-            vocab_size, embed_dim, seq_len = 1000, 256, 32
-
-            # Embedding layer (simplified)
-            embedding = Linear(vocab_size, embed_dim)
-
-            # Attention layers
-            attention1 = MultiHeadAttention(embed_dim=embed_dim, num_heads=8)
-            attention2 = MultiHeadAttention(embed_dim=embed_dim, num_heads=8)
-
-            # Output projection
-            output_proj = Linear(embed_dim, vocab_size)
-
-            # Token sequence (as embeddings)
-            batch_size = 4
-            tokens = Tensor(np.random.randint(0, vocab_size, (seq_len, batch_size)))
-
-            # Simple embedding lookup (simplified)
-            if hasattr(embedding, 'embedding_lookup'):
-                x = embedding.embedding_lookup(tokens)
-            else:
-                # Simplified: random embeddings
-                x = Tensor(np.random.randn(seq_len, batch_size, embed_dim))
-
-            # Transformer layers
-            h1 = attention1(x)
-            h2 = attention2(h1)
-
-            # Output logits
-            logits = output_proj(h2)
-
-            assert logits.shape == (seq_len, batch_size, vocab_size), "Language model architecture broken"
-
-        except ImportError:
-            assert True, "Language modeling architecture not ready yet"
+            assert True, "CNN training not ready"
 
 
 class TestRegressionPrevention:
-    """Ensure previous modules still work after Module 07 development."""
+    """
+    🔄 REGRESSION: Verify all previous modules (01-08) still work.
+    """
 
-    def test_no_foundation_regression(self):
-        """Verify foundation stack (01→05) unchanged."""
-        # Environment should remain stable
-        assert sys.version_info.major >= 3, "Foundation: Python detection broken"
-
-        # Project structure should remain intact
-        project_root = Path(__file__).parent.parent.parent
-        assert project_root.exists(), "Foundation: Project structure broken"
-
-    def test_no_spatial_regression(self):
-        """Verify convolution operations (Module 09) unchanged."""
+    def test_tensor_still_works(self):
+        """✅ Module 01"""
         try:
-            from tinytorch.core.spatial import Conv2d as Conv2D
+            from tinytorch.core.tensor import Tensor
+            a = Tensor([1, 2, 3])
+            assert a.shape == (3,)
+        except Exception as e:
+            assert False, f"Module 01: {e}"
 
-            # Spatial operations should still work
-            conv = Conv2D(in_channels=1, out_channels=8, kernel_size=3)
-            assert hasattr(conv, 'forward'), "Spatial regression: Conv2D broken"
+    def test_activations_still_work(self):
+        """✅ Module 02"""
+        try:
+            from tinytorch.core.tensor import Tensor
+            from tinytorch.core.activations import ReLU
+            relu = ReLU()
+            x = Tensor([-1, 0, 1])
+            y = relu(x)
+            assert y.data[0] == 0
+        except Exception as e:
+            assert False, f"Module 02: {e}"
 
-        except ImportError:
-            # If not implemented, that's fine
-            # But numpy should still work (from foundation)
-            import numpy as np
-            arr = np.array([1, 2, 3])
-            assert arr.shape == (3,), "Spatial regression: Numpy foundation broken"
-
-    def test_progressive_stability(self):
-        """Test the progressive stack is stable through attention."""
-        # Stack should be stable through: Setup → Tensor → Activations → Layers → Dense → Spatial → Attention
-
-        # Setup level
-        import numpy as np
-        assert np is not None, "Setup level broken"
-
-        # Foundation level (if available)
+    def test_layers_still_work(self):
+        """✅ Module 03"""
         try:
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
+            layer = Linear(4, 2)
+            x = Tensor(np.random.randn(2, 4))
+            y = layer(x)
+            assert y.shape == (2, 2)
+        except Exception as e:
+            assert False, f"Module 03: {e}"
 
-            # Should still be able to build neural networks
-            layer = Linear(10, 5)
-            x = Tensor(np.random.randn(4, 10))
-            output = layer(x)
-            assert output.shape == (4, 5), "Foundation level broken"
-
-        except ImportError:
-            pass  # Not implemented yet
-
-        # Attention level (if available)
+    def test_losses_still_work(self):
+        """✅ Module 04"""
         try:
-            from tinytorch.core.attention import MultiHeadAttention
-            attention = MultiHeadAttention(embed_dim=32, num_heads=4)
-            assert callable(attention), "Attention level broken"
-        except ImportError:
-            pass  # Not implemented yet
+            from tinytorch.core.tensor import Tensor
+            from tinytorch.core.losses import MSELoss
+            loss_fn = MSELoss()
+            pred = Tensor([[1.0, 2.0]])
+            target = Tensor([[1.5, 2.5]])
+            loss = loss_fn(pred, target)
+            assert loss.data.size == 1
+        except Exception as e:
+            assert False, f"Module 04: {e}"
+
+    def test_dataloader_still_works(self):
+        """✅ Module 05"""
+        try:
+            from tinytorch.core.tensor import Tensor
+            from tinytorch.core.dataloader import TensorDataset, DataLoader
+            data = Tensor(np.random.randn(10, 3))
+            targets = Tensor(np.arange(10).astype(float))
+            dataset = TensorDataset(data, targets)
+            dataloader = DataLoader(dataset, batch_size=2)
+            assert sum(1 for _ in dataloader) == 5
+        except Exception as e:
+            assert False, f"Module 05: {e}"
+
+    def test_autograd_still_works(self):
+        """✅ Module 06"""
+        try:
+            from tinytorch.core.tensor import Tensor
+            x = Tensor([1.0], requires_grad=True)
+            assert hasattr(x, 'requires_grad')
+        except TypeError:
+            pass  # OK if requires_grad not supported
+        except Exception as e:
+            assert False, f"Module 06: {e}"
+
+    def test_optimizers_still_work(self):
+        """✅ Module 07"""
+        try:
+            from tinytorch.core.optimizers import SGD
+            from tinytorch.core.layers import Linear
+            layer = Linear(3, 2)
+            opt = SGD(layer.parameters(), lr=0.01)
+            assert hasattr(opt, 'step')
+        except Exception as e:
+            assert False, f"Module 07: {e}"
+
+    def test_training_still_works(self):
+        """✅ Module 08"""
+        try:
+            from tinytorch.core.tensor import Tensor
+            from tinytorch.core.layers import Linear
+            from tinytorch.core.losses import MSELoss
+            from tinytorch.core.optimizers import SGD
+            
+            layer = Linear(4, 2)
+            loss_fn = MSELoss()
+            opt = SGD(layer.parameters(), lr=0.1)
+            
+            x = Tensor(np.random.randn(2, 4))
+            y = Tensor(np.random.randn(2, 2))
+            
+            pred = layer(x)
+            loss = loss_fn(pred, y)
+            
+            if hasattr(loss, 'backward'):
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
+                
+            assert loss.data.size == 1
+        except Exception as e:
+            assert False, f"Module 08: {e}"
+
+
+class TestModule09Completion:
+    """
+    ✅ COMPLETION CHECK: Module 09 ready for next module.
+    """
+
+    def test_convolution_foundation_complete(self):
+        """
+        ✅ FINAL TEST: Convolution ready for attention/transformers
+        
+        🎯 SUCCESS = Ready for Module 10: Tokenization!
+        """
+        capabilities = {
+            "Conv2d exists": False,
+            "Conv2d forward works": False,
+            "MaxPool2d exists": False,
+            "MaxPool2d forward works": False,
+            "CNN architecture works": False,
+        }
+        
+        try:
+            from tinytorch.core.spatial import Conv2d, MaxPool2d
+            from tinytorch.core.tensor import Tensor
+            
+            # Test 1: Conv2d exists
+            capabilities["Conv2d exists"] = True
+            
+            # Test 2: Conv2d forward
+            conv = Conv2d(3, 8, kernel_size=3, padding=1)
+            x = Tensor(np.random.randn(2, 3, 16, 16))
+            out = conv(x)
+            if out.shape == (2, 8, 16, 16):
+                capabilities["Conv2d forward works"] = True
+            
+            # Test 3: MaxPool2d exists
+            capabilities["MaxPool2d exists"] = True
+            
+            # Test 4: MaxPool2d forward
+            pool = MaxPool2d(kernel_size=2)
+            pooled = pool(out)
+            if pooled.shape == (2, 8, 8, 8):
+                capabilities["MaxPool2d forward works"] = True
+            
+            # Test 5: CNN architecture
+            from tinytorch.core.layers import Linear
+            fc = Linear(8 * 8 * 8, 10)
+            flat = Tensor(pooled.data.reshape(2, -1))
+            logits = fc(flat)
+            if logits.shape == (2, 10):
+                capabilities["CNN architecture works"] = True
+            
+            completed = sum(capabilities.values())
+            assert completed >= 4, f"Convolutions not ready: {capabilities}"
+            
+        except ImportError as e:
+            assert False, f"Module 09 import failed: {e}"

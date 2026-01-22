@@ -385,7 +385,7 @@ class ModuleWorkflowCommand(BaseCommand):
     def _get_milestone_for_module(self, module_num: int) -> Optional[tuple]:
         """Get the milestone this module contributes to."""
         milestones = [
-            ("01", "Perceptron (1957)", [1, 2, 3]),  # Forward pass only
+            ("01", "Perceptron (1958)", [1, 2, 3]),  # Forward pass only
             ("02", "XOR Crisis (1969)", [1, 2, 3]),  # Forward pass to show limits
             ("03", "MLP Revival (1986)", [1, 2, 3, 4, 5, 6, 7, 8]),  # Full training infrastructure
             ("04", "CNN Revolution (1998)", [1, 2, 3, 4, 5, 6, 7, 8, 9]),  # Full training + Convolutions
@@ -797,7 +797,16 @@ class ModuleWorkflowCommand(BaseCommand):
 
         # Run pytest with verbose output
         result = subprocess.run(
-            [sys.executable, "-m", "pytest", str(integration_test_file), "-v", "--tb=short"],
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                str(integration_test_file),
+                "-v",
+                "--tb=short",
+                "-o",
+                "addopts=",
+            ],
             capture_output=True,
             text=True,
             cwd=project_root
@@ -1296,7 +1305,7 @@ class ModuleWorkflowCommand(BaseCommand):
         import json
 
         milestones = [
-            ("01", "Perceptron (1957)", [1, 2, 3]),
+            ("01", "Perceptron (1958)", [1, 2, 3]),
             ("02", "XOR Crisis (1969)", [1, 2, 3]),
             ("03", "MLP Revival (1986)", [1, 2, 3, 4, 5, 6]),
             ("04", "CNN Revolution (1998)", [1, 2, 3, 4, 5, 6, 8, 9]),

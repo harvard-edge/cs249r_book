@@ -70,7 +70,7 @@ TinyTorch combines inspiration from these projects into a comprehensive ML syste
 
 - **Comprehensive Scope**: Only educational framework covering Foundation → Architecture → Optimization
 - **Systems Thinking**: Every module includes profiling, complexity analysis, production context
-- **Historical Validation**: Milestone system proving implementations through ML history (1957 → 2018)
+- **Historical Validation**: Milestone system proving implementations through ML history (1958 → 2018)
 - **Pedagogical Scaffolding**: Progressive disclosure, Build → Use → Reflect methodology
 - **Production Context**: Direct connections to PyTorch, TensorFlow, and industry practices
 

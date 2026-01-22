@@ -1,6 +1,7 @@
 # tito/commands/login.py
 import time
 from argparse import ArgumentParser, Namespace
+from rich.panel import Panel
 from rich.prompt import Confirm
 from tito.commands.base import BaseCommand
 from tito.core.auth import AuthReceiver, save_credentials, delete_credentials, ENDPOINTS, is_logged_in
@@ -27,7 +28,14 @@ class LoginCommand(BaseCommand):
         # Check if already logged in (unless force was used)
         if is_logged_in():
             self.console.print("[green]You are already logged in.[/green]")
-            if Confirm.ask("[bold yellow]Do you want to force re-login?[/bold yellow]", default=False):
+            self.console.print()
+            self.console.print(Panel(
+                "[bold yellow]⚠️  This will clear your existing credentials[/bold yellow]",
+                title="Warning",
+                border_style="yellow"
+            ))
+            self.console.print()
+            if Confirm.ask("[yellow]Force re-login?[/yellow]", default=False):
                 delete_credentials()
                 self.console.print("Cleared existing credentials. Proceeding with new login...")
             else:
@@ -62,7 +70,7 @@ class LoginCommand(BaseCommand):
                 # Wait for tokens without stopping the server yet
                 import time
                 start_time = time.time()
-                timeout = 120
+                timeout = 300
                 while getattr(receiver.server, "auth_data", None) is None:
                     if time.time() - start_time > timeout:
                         break
@@ -79,6 +87,8 @@ class LoginCommand(BaseCommand):
                 return 0
             else:
                 self.console.print("[red]Login timed out.[/red]")
+                self.console.print("\n[yellow]💡 If the browser didn't open or authentication failed, you can try again manually with:[/yellow]")
+                self.console.print("   [bold green]tito community login[/bold green]\n")
                 return 1
         except Exception as e:
             self.console.print(f"[red]Error: {e}[/red]")
@@ -122,7 +132,7 @@ class LogoutCommand(BaseCommand):
                 # Wait for logout signal without stopping the server yet
                 import time
                 start_time = time.time()
-                timeout = 30
+                timeout = 60
                 while not getattr(receiver.server, "logout_requested", False):
                     if time.time() - start_time > timeout:
                         break

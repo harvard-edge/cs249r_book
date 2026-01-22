@@ -857,7 +857,7 @@ def enable_kv_cache(model):
         cache: KVCache object for this model
 
     EXAMPLE:
-    >>> from tinytorch.core.transformer import GPT
+    >>> from tinytorch.core.transformers import GPT
     >>> model = GPT(vocab_size=100, embed_dim=128, num_layers=4, num_heads=4)
     >>> cache = enable_kv_cache(model)
     >>> hasattr(model, '_kv_cache')  # True
@@ -1624,9 +1624,9 @@ This optimization is THE technique that transformed language models from researc
 
 ### Ready for Next Steps
 Your KV caching implementation demonstrates the principle: "spend memory to save time"!
-Export with: `tito module complete 17`
+Export with: `tito module complete 18`
 
-**Next**: Module 16 (Quantization) will use the opposite trade-off: "sacrifice precision to save memory"!
+**Next**: Module 19 (Benchmarking) will teach you how to measure and compare these optimizations quantitatively!
 
 ### What You Just Built Powers
 - **ChatGPT, Claude, GPT-4**: All production LLMs use KV caching

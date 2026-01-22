@@ -41,20 +41,19 @@ Let's get started!
 """
 
 # %%
-#| default_exp core.transformer
+#| default_exp core.transformers
 
 # %%
 #| export
 import numpy as np
-import math
-from typing import Optional, List
+
+from tinytorch.core.activations import GELU
+from tinytorch.core.attention import MultiHeadAttention
+from tinytorch.core.embeddings import EmbeddingLayer
+from tinytorch.core.layers import Linear
 
 # Import from previous modules - following proper dependency chain
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear
-from tinytorch.core.attention import MultiHeadAttention
-from tinytorch.core.activations import GELU
-from tinytorch.core.embeddings import Embedding, PositionalEncoding
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
@@ -84,7 +83,7 @@ def create_causal_mask(seq_len: int) -> Tensor:
          [1, 1, 1, 1]]
 
     Usage:
-        >>> from tinytorch.core.transformer import create_causal_mask
+        >>> from tinytorch.core.transformers import create_causal_mask
         >>> mask = create_causal_mask(seq_len=10)
         >>> output = attention(x, mask=mask)
     """
@@ -98,11 +97,11 @@ def create_causal_mask(seq_len: int) -> Tensor:
 ## 📦 Where This Code Lives in the Final Package
 
 **Learning Side:** You work in `modules/13_transformers/transformers_dev.py`
-**Building Side:** Code exports to `tinytorch.core.transformer`
+**Building Side:** Code exports to `tinytorch.core.transformers`
 
 ```python
 # How to use this module:
-from tinytorch.core.transformer import TransformerBlock, GPT, LayerNorm, MLP
+from tinytorch.core.transformers import TransformerBlock, TinyGPT, LayerNorm, MLP
 ```
 
 **Why this matters:**
@@ -834,7 +833,7 @@ class TransformerBlock:
     Each block processes the input sequence and passes it to the next block.
     """
 
-    def __init__(self, embed_dim, num_heads, mlp_ratio=4, dropout_prob=0.1):
+    def __init__(self, embed_dim, num_heads, mlp_ratio=4, ff_dim=None, dropout_prob=0.1):
         """
         Initialize a complete transformer block.
 
@@ -843,7 +842,7 @@ class TransformerBlock:
         APPROACH:
         1. Multi-head self-attention for sequence modeling
         2. First layer normalization (pre-norm architecture)
-        3. MLP with specified expansion ratio
+        3. MLP with specified expansion ratio (or explicit ff_dim)
         4. Second layer normalization
 
         TRANSFORMER BLOCK ARCHITECTURE:
@@ -870,7 +869,11 @@ class TransformerBlock:
         self.ln2 = LayerNorm(embed_dim)  # Before MLP
 
         # Feed-forward network
-        hidden_dim = int(embed_dim * mlp_ratio)
+        # Support both mlp_ratio and explicit ff_dim for backward compatibility
+        if ff_dim is not None:
+            hidden_dim = ff_dim
+        else:
+            hidden_dim = int(embed_dim * mlp_ratio)
         self.mlp = MLP(embed_dim, hidden_dim)
         ### END SOLUTION
 
@@ -976,7 +979,7 @@ if __name__ == "__main__":
     test_unit_transformer_block()  # Moved after implementation
 
 # %% [markdown]
-"""
+r"""
 ### Understanding the Complete GPT Architecture
 
 GPT (Generative Pre-trained Transformer) is the complete language model that combines all our components into a text generation system. It's designed for **autoregressive** generation - predicting the next token based on all previous tokens.
@@ -999,41 +1002,47 @@ Result: "The cat sat on the mat"
 #### Complete GPT Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     GPT ARCHITECTURE            |
-│                                                 |
-│ Input: Token IDs [15496, 1917, ...]             |
-│                    │                            |
-│ ┌──────────────────┴──────────────────┐         |
-│ │          EMBEDDING LAYER            │         |
-│ │  ┌─────────────┐  ┌─────────────────┐│        |
-│ │  │Token Embed  │+│Position Embed   ││         |
-│ │  │vocab→vector ││ │sequence→vector  ││        |
-│ │  └─────────────┘  └─────────────────┘│        |
-│ └──────────────────┬──────────────────┘         |
-│                    │                            |
-│ ┌──────────────────┴──────────────────┐         │
-│ │        TRANSFORMER BLOCK 1          │         │
-│ │ ┌─────────┐  ┌─────────┐  ┌───────┐ │         │
-│ │ │LayerNorm│→│Attention│→│  +x   │ │           │
-│ │ └─────────┘  └─────────┘  └───┬───┘ │         │
-│ │                               │     │         │
-│ │ ┌─────────┐  ┌─────────┐  ┌───▼───┐ │         │
-│ │ │LayerNorm│→│   MLP   │→│  +x   │ │           │
-│ │ └─────────┘  └─────────┘  └───────┘ │         |
-│ └──────────────────┬──────────────────┘         │
-│                    │                            │
-│         ... (more transformer blocks) ...       │
-│                    │                            │
-│ ┌──────────────────┴──────────────────┐         │
-│ │         OUTPUT HEAD                 │         │
-│ │ ┌─────────┐  ┌─────────────────────┐ │        │
-│ │ │LayerNorm│→│Linear(embed→vocab)  │ │         │
-│ │ └─────────┘  └─────────────────────┘ │        │
-│ └──────────────────┬──────────────────┘         │
-│                    │                            │
-│ Output: Vocabulary Logits [0.1, 0.05, 0.8, ...] │
-└─────────────────────────────────────────────────┘
++-------------------------------------------------------------+
+|                      GPT ARCHITECTURE                       |
+|                                                             |
+|  Input: Token IDs [15496, 1917, ...]                        |
+|                       |                                     |
+|                       v                                     |
+|  +--------------------+--------------------+                |
+|  |           EMBEDDING LAYER               |                |
+|  |  +--------------+  +-----------------+  |                |
+|  |  | Token Embed  |  | Position Embed  |  |                |
+|  |  | vocab->vector|  | sequence->vector|  |                |
+|  |  +--------------+  +-----------------+  |                |
+|  |              \          /               |                |
+|  |               +--------+                |                |
+|  +--------------------+--------------------+                |
+|                       |                                     |
+|                       v                                     |
+|  +--------------------+--------------------+                |
+|  |        TRANSFORMER BLOCK 1              |                |
+|  |  +---------+    +---------+    +-----+  |                |
+|  |  |LayerNorm| -> |Attention| -> | +x  |  |                |
+|  |  +---------+    +---------+    +--+--+  |                |
+|  |                                   |     |                |
+|  |  +---------+    +---------+    +--v--+  |                |
+|  |  |LayerNorm| -> |   MLP   | -> | +x  |  |                |
+|  |  +---------+    +---------+    +-----+  |                |
+|  +--------------------+--------------------+                |
+|                       |                                     |
+|          ... (more transformer blocks) ...                  |
+|                       |                                     |
+|                       v                                     |
+|  +--------------------+--------------------+                |
+|  |            OUTPUT HEAD                  |                |
+|  |  +---------+    +--------------------+  |                |
+|  |  |LayerNorm| -> |Linear(embed->vocab)|  |                |
+|  |  +---------+    +--------------------+  |                |
+|  +--------------------+--------------------+                |
+|                       |                                     |
+|                       v                                     |
+|  Output: Vocabulary Logits [0.1, 0.05, 0.8, ...]            |
++-------------------------------------------------------------+
 ```
 
 #### Causal Masking for Autoregressive Training
@@ -1166,9 +1175,8 @@ class GPT:
         self.num_heads = num_heads
         self.max_seq_len = max_seq_len
 
-        # Token and positional embeddings
-        self.token_embedding = Embedding(vocab_size, embed_dim)
-        self.position_embedding = Embedding(max_seq_len, embed_dim)
+        # Embedding layer
+        self.embedding_layer = EmbeddingLayer(vocab_size, embed_dim, max_seq_len)
 
         # Stack of transformer blocks
         self.blocks = []
@@ -1207,15 +1215,8 @@ class GPT:
         ### BEGIN SOLUTION
         batch_size, seq_len = tokens.shape
 
-        # Token embeddings
-        token_emb = self.token_embedding.forward(tokens)
-
-        # Positional embeddings
-        positions = Tensor(np.arange(seq_len).reshape(1, seq_len))
-        pos_emb = self.position_embedding.forward(positions)
-
-        # Combine embeddings
-        x = token_emb + pos_emb
+        # Pass tokens to embedding layer to get token embeddings and positional embeddings
+        x = self.embedding_layer.forward(tokens)
 
         # Create causal mask for autoregressive generation
         mask = self._create_causal_mask(seq_len)
@@ -1300,8 +1301,7 @@ class GPT:
     def parameters(self):
         """Return all learnable parameters."""
         params = []
-        params.extend(self.token_embedding.parameters())
-        params.extend(self.position_embedding.parameters())
+        params.extend(self.embedding_layer.parameters())
 
         for block in self.blocks:
             params.extend(block.parameters())
@@ -1451,7 +1451,7 @@ def demonstrate_transformer_integration():
     prompt_tokens = [char_to_idx[char] for char in prompt_text]
     prompt = Tensor(np.array([prompt_tokens]))
 
-    print(f"\nGeneration demo:")
+    print("\nGeneration demo:")
     print(f"Prompt: '{prompt_text}'")
 
     generated = model.generate(prompt, max_new_tokens=8, temperature=1.0)
@@ -1513,31 +1513,31 @@ Memory Scaling by Component:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  ATTENTION MEMORY WALL: Why Long Context is Expensive          │
+│  ATTENTION MEMORY WALL: Why Long Context is Expensive           │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  MEMORY USAGE BY SEQUENCE LENGTH (Quadratic Growth):           │
+│  MEMORY USAGE BY SEQUENCE LENGTH (Quadratic Growth):            │
 │                                                                 │
-│  1K tokens:   [▓] 16 MB                ← Manageable            │
-│  2K tokens:   [▓▓▓▓] 64 MB             ← 4× memory (quadratic) │
-│  4K tokens:   [▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓] 256 MB   ← 16× memory        │
-│  8K tokens:   [████████████████████████████████] 1 GB          │
-│  16K tokens:  [████████████████████████████████████████] 4 GB  │
-│  32K tokens:  [████████████████████████████████████████████] → │
-│               ← extends to 16 GB (off the chart!)              │
+│  1K tokens:   [▓] 16 MB                ← Manageable             │
+│  2K tokens:   [▓▓▓▓] 64 MB             ← 4× memory (quadratic)  │
+│  4K tokens:   [▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓] 256 MB   ← 16× memory          │
+│  8K tokens:   [████████████████████████████████] 1 GB           │
+│  16K tokens:  [████████████████████████████████████████] 4 GB   │
+│  32K tokens:  [████████████████████████████████████████████] →  │
+│               ← extends to 16 GB (off the chart!)               │
 │                                                                 │
-│  REAL-WORLD CONTEXT LIMITS:                                    │
-│  ┌───────────────────────────────────────────────────────────┐ │
-│  │ GPT-3:     2K tokens  (limited by memory)                 │ │
-│  │ GPT-4:     8K tokens  (32K with optimizations)            │ │
-│  │ Claude-3:  200K tokens (special techniques required!)     │ │
-│  │ GPT-4o:    128K tokens (efficient attention)              │ │
-│  └───────────────────────────────────────────────────────────┘ │
+│  REAL-WORLD CONTEXT LIMITS:                                     │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │ GPT-3:     2K tokens  (limited by memory)                 │  │
+│  │ GPT-4:     8K tokens  (32K with optimizations)            │  │
+│  │ Claude-3:  200K tokens (special techniques required!)     │  │
+│  │ GPT-4o:    128K tokens (efficient attention)              │  │
+│  └───────────────────────────────────────────────────────────┘  │
 │                                                                 │
-│  MATHEMATICAL SCALING:                                         │
-│  Memory = batch_size × num_heads × seq_len² × 4 bytes          │
-│                                   ↑                            │
-│                          This is the killer!                   │
+│  MATHEMATICAL SCALING:                                          │
+│  Memory = batch_size × num_heads × seq_len² × 4 bytes           │
+│                                   ↑                             │
+│                          This is the killer!                    │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -1767,15 +1767,15 @@ def demo_transformers():
     # Verify transformation occurred (values changed)
     input_sum = np.sum(x.data)
     output_sum = np.sum(output.data)
-    print(f"\nData transformation:")
+    print("\nData transformation:")
     print(f"  Input sum:  {input_sum:.1f}  (initial values: all 1s)")
     print(f"  Output sum: {output_sum:.1f}  (after attention + MLP)")
 
-    print(f"\nTransformerBlock architecture:")
+    print("\nTransformerBlock architecture:")
     print(f"  • Multi-head attention ({num_heads} heads)")
-    print(f"  • Layer normalization (before operations)")
+    print("  • Layer normalization (before operations)")
     print(f"  • MLP ({embed_dim} → {4*embed_dim} → {embed_dim} with GELU)")
-    print(f"  • Residual connections (preserve information flow)")
+    print("  • Residual connections (preserve information flow)")
 
     print("\n✨ The building block of GPT, Claude, and modern language models!")
 
@@ -1784,6 +1784,11 @@ if __name__ == "__main__":
     test_module()
     print("\n")
     demo_transformers()
+
+# %%
+#| export
+# Alias for backward compatibility with tests
+TinyGPT = GPT
 
 # %% [markdown]
 """
@@ -1805,3 +1810,8 @@ Export with: `tito module complete 13`
 
 **Next**: Module 14 will add profiling and optimization techniques to make your transformers production-ready!
 """
+
+# %%
+#| export
+# Alias for backward compatibility with tests
+TinyGPT = GPT

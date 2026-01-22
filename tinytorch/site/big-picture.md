@@ -108,7 +108,7 @@ graph LR
 
 As you progress through modules, you'll unlock historical milestones—moments when your code can do something that once made headlines:
 
-1. **1957 Perceptron**: Your first learning algorithm with automatic weight updates (Rosenblatt)
+1. **1958 Perceptron**: Your first learning algorithm with automatic weight updates (Rosenblatt)
 2. **1969 XOR**: Your MLP solves the problem that stumped single-layer networks (Minsky & Papert → Rumelhart)
 3. **1986 MLP**: Your network recognizes handwritten digits on real data
 4. **1998 CNN**: Your convolutional network classifies images with spatial understanding (LeCun's LeNet-5)
@@ -125,7 +125,7 @@ Concrete outcomes at each major checkpoint:
 
 | After Module | You'll Have Built | Historical Context |
 |--------------|-------------------|-------------------|
-| **01-04** | Working Perceptron classifier | Rosenblatt 1957 |
+| **01-04** | Working Perceptron classifier | Rosenblatt 1958 |
 | **01-08** | MLP solving XOR + complete training pipeline | AI Winter breakthrough 1969→1986 |
 | **01-09** | CNN with convolutions and pooling | LeNet-5 (1998) |
 | **01-13** | GPT model with autoregressive generation | "Attention Is All You Need" (2017) |

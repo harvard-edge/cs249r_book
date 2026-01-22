@@ -112,7 +112,7 @@ class TestQuickVerification:
         code, stdout, stderr = run_tito(["milestones", "list", "--simple"])
         assert code == 0, f"milestones list failed: {stderr}"
         # Should show milestone names
-        assert "Perceptron" in stdout or "1957" in stdout
+        assert "Perceptron" in stdout or "1958" in stdout
 
     @pytest.mark.quick
     def test_modules_directory_exists(self):
@@ -132,7 +132,7 @@ class TestQuickVerification:
         assert milestones_dir.exists(), "milestones/ directory missing"
 
         # Check milestone directories
-        assert (milestones_dir / "01_1957_perceptron").exists(), "Milestone 01 missing"
+        assert (milestones_dir / "01_1958_perceptron").exists(), "Milestone 01 missing"
 
     @pytest.mark.quick
     def test_tinytorch_package_importable(self):
@@ -268,7 +268,7 @@ class TestMilestoneFlow:
         """'tito milestones info 01' shows milestone details."""
         code, stdout, stderr = run_tito(["milestones", "info", "01"])
         assert code == 0
-        assert "Perceptron" in stdout or "1957" in stdout
+        assert "Perceptron" in stdout or "1958" in stdout
 
     @pytest.mark.milestone_flow
     def test_milestone_status_works(self):
@@ -279,7 +279,7 @@ class TestMilestoneFlow:
     @pytest.mark.milestone_flow
     def test_milestone_01_script_exists(self):
         """Milestone 01 script file exists."""
-        script_path = PROJECT_ROOT / "milestones" / "01_1957_perceptron" / "02_rosenblatt_trained.py"
+        script_path = PROJECT_ROOT / "milestones" / "01_1958_perceptron" / "02_rosenblatt_trained.py"
         assert script_path.exists(), f"Milestone script missing: {script_path}"
 
     @pytest.mark.milestone_flow
@@ -364,7 +364,7 @@ print('OK')
             pytest.skip("Cannot import required modules")
 
         # Run milestone 01 with skip-checks (we verified prereqs above)
-        script_path = PROJECT_ROOT / "milestones" / "01_1957_perceptron" / "02_rosenblatt_trained.py"
+        script_path = PROJECT_ROOT / "milestones" / "01_1958_perceptron" / "02_rosenblatt_trained.py"
         if not script_path.exists():
             pytest.skip("Milestone script not found")
 

@@ -130,47 +130,64 @@ export function renderLayout() {
 
         <!-- Profile Modal (for logged-in users) -->
         <div class="profile-overlay" id="profileOverlay">
-            <div class="profile-modal">
+            <div class="profile-modal" style="max-width: 850px; width: 95%;">
                 <button class="profile-close" id="profileClose">&times;</button>
-                <h2 class="profile-title">Your Profile</h2>
-                <form id="profileForm">
-                    <div class="profile-form-group">
-                        <label for="profileDisplayName" class="profile-label">Display Name:</label>
-                        <input type="text" class="profile-input" id="profileDisplayName" placeholder="Display Name">
-                    </div>
+                <div style="display: flex; gap: 30px; align-items: stretch;">
+                    <div style="flex: 1;">
+                        <h2 class="profile-title">Your Profile</h2>
+                        <form id="profileForm">
+                            <div class="profile-form-group">
+                                <label for="profileDisplayName" class="profile-label">Display Name:</label>
+                                <input type="text" class="profile-input" id="profileDisplayName" placeholder="Display Name">
+                            </div>
 
-                    <div class="profile-form-group">
-                        <label for="profileFullName" class="profile-label">Full Name:</label>
-                        <input type="text" class="profile-input" id="profileFullName" placeholder="Your Full Name">
-                    </div>
-                    <div class="profile-form-group">
-                        <label for="profileSummary" class="profile-label">Summary:</label>
-                        <textarea class="profile-textarea" id="profileSummary" placeholder="A brief summary about yourself"></textarea>
-                    </div>
-                    <div class="profile-form-group">
-                        <label for="profileLocation" class="profile-label">Location:</label>
-                        <input type="text" class="profile-input" id="profileLocation" placeholder="City, Country">
-                        <input type="hidden" id="profileLatitude">
-                        <input type="hidden" id="profileLongitude">
-                    </div>
-                    <div class="profile-form-group">
-                        <label for="profileInstitution" class="profile-label">Institution (comma-separated):</label>
-                        <input type="text" class="profile-input" id="profileInstitution" placeholder="University, Company">
-                    </div>
-                    <div class="profile-form-group">
-                        <label for="profileWebsites" class="profile-label">Websites (comma-separated URLs):</label>
-                        <input type="text" class="profile-input" id="profileWebsites" placeholder="https://site1.com, https://site2.com">
-                    </div>
+                            <div class="profile-form-group">
+                                <label for="profileFullName" class="profile-label">Full Name:</label>
+                                <input type="text" class="profile-input" id="profileFullName" placeholder="Your Full Name">
+                            </div>
+                            <div class="profile-form-group">
+                                <label for="profileSummary" class="profile-label">Summary:</label>
+                                <textarea class="profile-textarea" id="profileSummary" placeholder="A brief summary about yourself"></textarea>
+                            </div>
+                            <div class="profile-form-group">
+                                <label for="profileRole" class="profile-label">Role:</label>
+                                <select class="profile-input" id="profileRole">
+                                    <option value="student" selected>Student</option>
+                                    <option value="educator">Educator</option>
+                                    <option value="industry">Industry</option>
+                                </select>
+                            </div>
+                            <div class="profile-form-group">
+                                <label for="profileLocation" class="profile-label">Location:</label>
+                                <input type="text" class="profile-input" id="profileLocation" placeholder="City, Country">
+                                <input type="hidden" id="profileLatitude">
+                                <input type="hidden" id="profileLongitude">
+                            </div>
+                            <div class="profile-form-group">
+                                <label for="profileInstitution" class="profile-label">Institution (comma-separated):</label>
+                                <input type="text" class="profile-input" id="profileInstitution" placeholder="University, Company">
+                            </div>
+                            <div class="profile-form-group">
+                                <label for="profileWebsites" class="profile-label">Websites (comma-separated URLs):</label>
+                                <input type="text" class="profile-input" id="profileWebsites" placeholder="https://site1.com, https://site2.com">
+                            </div>
 
-                    <div class="profile-form-group" style="display: flex; align-items: center; gap: 10px;">
-                        <input type="checkbox" id="profileMailingList" checked style="width: auto;">
-                        <label for="profileMailingList" class="profile-label" style="margin: 0; font-weight: normal;">Subscribe to our mailing list</label>
+                            <div class="profile-form-group" style="display: flex; align-items: center; gap: 10px;">
+                                <input type="checkbox" id="profileMailingList" checked style="width: auto;">
+                                <label for="profileMailingList" class="profile-label" style="margin: 0; font-weight: normal;">Subscribe to our mailing list</label>
+                            </div>
+
+
+                            <button type="submit" class="profile-submit" id="profileSubmit">Update Profile</button>
+                            <button type="button" class="profile-logout-btn" id="profileLogoutBtn">Logout</button>
+                        </form>
                     </div>
-
-
-                    <button type="submit" class="profile-submit" id="profileSubmit">Update Profile</button>
-                    <button type="button" class="profile-logout-btn" id="profileLogoutBtn">Logout</button>
-                </form>
+                    
+                    <!-- Flame Side -->
+                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 180px; border-left: 1px solid #f0f0f0; background: rgba(252, 252, 252, 0.5);">
+                         <canvas id="profileCandleCanvas" width="16" height="24" style="width: 150px; height: auto; image-rendering: pixelated; filter: drop-shadow(4px 4px 0px rgba(0,0,0,0.05));"></canvas>
+                    </div>
+                </div>
             </div>
         </div>
 

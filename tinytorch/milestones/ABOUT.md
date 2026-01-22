@@ -16,7 +16,7 @@ This isn't a demo - it's proof that you understand ML systems engineering from t
 
 | Year | Milestone | What You'll Build | Unlocked After |
 |------|-----------|-------------------|----------------|
-| **1957** | Perceptron | Binary classification with gradient descent | Module 04 |
+| **1958** | Perceptron | Binary classification with gradient descent | Module 04 |
 | **1969** | XOR Crisis | Hidden layers solve non-linear problems | Module 08 |
 | **1986** | MLP Revival | Multi-class vision (95%+ MNIST) | Module 08 |
 | **1998** | CNN Revolution | Convolutions (70%+ CIFAR-10) | Module 09 |
@@ -41,7 +41,7 @@ tito module status
 tito milestone run 01
 
 # Or run directly
-cd milestones/01_1957_perceptron
+cd milestones/01_1958_perceptron
 python 02_rosenblatt_trained.py
 ```
 

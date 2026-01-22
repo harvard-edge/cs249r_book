@@ -720,7 +720,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## Integration - Bringing It Together
+## 🔧 Integration - Bringing It Together
 
 Now let's build the complete embedding system that combines token and positional embeddings into a production-ready component used in modern transformers and language models.
 

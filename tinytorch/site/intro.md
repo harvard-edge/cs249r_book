@@ -113,7 +113,7 @@ Walk through ML history by rebuilding its greatest breakthroughs with YOUR TinyT
     <div class="ml-timeline-item left perceptron">
         <div class="ml-timeline-dot"></div>
         <div class="ml-timeline-content">
-            <div class="ml-timeline-year">1957</div>
+            <div class="ml-timeline-year">1958</div>
             <div class="ml-timeline-title">The Perceptron</div>
             <div class="ml-timeline-desc">The first trainable neural network</div>
             <div class="ml-timeline-tech">Input → Linear → Sigmoid → Output</div>

@@ -42,7 +42,7 @@ tito milestone info 05
 
 ```
 milestones/
-├── 01_1957_perceptron/     # Milestone 01: Rosenblatt's Perceptron
+├── 01_1958_perceptron/     # Milestone 01: Rosenblatt's Perceptron
 ├── 02_1969_xor/            # Milestone 02: XOR Problem
 ├── 03_1986_mlp/            # Milestone 03: Backpropagation MLP
 ├── 04_1998_cnn/            # Milestone 04: LeNet CNN

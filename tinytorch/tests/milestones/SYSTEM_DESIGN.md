@@ -45,7 +45,7 @@ The milestone system is now **self-contained** with **zero code duplication**.
 │                  Student sees notification                  │
 │                                                             │
 │  🔓 MILESTONE UNLOCKED!                                     │
-│  1957 - The Perceptron                                      │
+│  1958 - The Perceptron                                      │
 │  Run: tito milestone run perceptron                         │
 └─────────────────────────────────────────────────────────────┘
                             │
@@ -193,7 +193,7 @@ Milestone Tracker:
     ↓
 Student sees:
   🔓 MILESTONE UNLOCKED!
-  1957 - The Perceptron
+  1958 - The Perceptron
   Run: tito milestone run perceptron
 ```
 

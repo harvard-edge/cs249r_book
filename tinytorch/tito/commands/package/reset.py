@@ -119,8 +119,14 @@ class ResetCommand(BaseCommand):
 
         # Ask for confirmation unless --force is used
         if not args.force:
-            console.print("\n[yellow]This will remove all exported Python files from the tinytorch package.[/yellow]")
-            console.print("[yellow]Notebooks in modules/ will be preserved.[/yellow]\n")
+            console.print()
+            console.print(Panel(
+                "[yellow]This will remove all exported Python files from the tinytorch package.[/yellow]\n"
+                "[yellow]Notebooks in modules will be preserved.[/yellow]",
+                title="Warning",
+                border_style="yellow"
+            ))
+            console.print()
 
             try:
                 response = input("Are you sure you want to reset? (y/N): ").strip().lower()
@@ -191,12 +197,18 @@ class ResetCommand(BaseCommand):
 
         # Ask for confirmation
         if not args.force:
-            console.print("\n[bold red]⚠️  Warning: This will reset ALL progress[/bold red]\n")
-            console.print("[yellow]This will clear:[/yellow]")
-            console.print("  • Module completion tracking")
-            console.print("  • Milestone achievements")
-            console.print("  • Configuration settings\n")
-            console.print("[dim]Your code in modules/ will NOT be deleted.[/dim]\n")
+            console.print()
+            console.print(Panel(
+                "[bold red]⚠️  This will reset all progress[/bold red]\n\n"
+                "[yellow]This will clear:[/yellow]\n"
+                "  • Module completion tracking\n"
+                "  • Milestone achievements\n"
+                "  • Configuration settings\n\n"
+                "[dim]Your code in modules will not be deleted.[/dim]",
+                title="Warning",
+                border_style="red"
+            ))
+            console.print()
 
             try:
                 response = input("Continue? (y/N): ").strip().lower()
@@ -255,8 +267,14 @@ class ResetCommand(BaseCommand):
 
         # Ask for confirmation
         if not args.force:
-            console.print("\n[bold yellow]⚠️  This will reset module completion tracking[/bold yellow]\n")
-            console.print("[dim]Milestone achievements will be preserved.[/dim]\n")
+            console.print()
+            console.print(Panel(
+                "[bold yellow]⚠️  This will reset module completion tracking[/bold yellow]\n\n"
+                "[dim]Milestone achievements will be preserved.[/dim]",
+                title="Warning",
+                border_style="yellow"
+            ))
+            console.print()
 
             try:
                 response = input("Continue? (y/N): ").strip().lower()
@@ -300,8 +318,14 @@ class ResetCommand(BaseCommand):
 
         # Ask for confirmation
         if not args.force:
-            console.print("\n[bold yellow]⚠️  This will reset milestone achievements[/bold yellow]\n")
-            console.print("[dim]Module completion will be preserved.[/dim]\n")
+            console.print()
+            console.print(Panel(
+                "[bold yellow]⚠️  This will reset milestone achievements[/bold yellow]\n\n"
+                "[dim]Module completion will be preserved.[/dim]",
+                title="Warning",
+                border_style="yellow"
+            ))
+            console.print()
 
             try:
                 response = input("Continue? (y/N): ").strip().lower()
@@ -345,7 +369,13 @@ class ResetCommand(BaseCommand):
 
         # Ask for confirmation
         if not args.force:
-            console.print("\n[bold yellow]⚠️  This will reset configuration to defaults[/bold yellow]\n")
+            console.print()
+            console.print(Panel(
+                "[bold yellow]⚠️  This will reset configuration to defaults[/bold yellow]",
+                title="Warning",
+                border_style="yellow"
+            ))
+            console.print()
 
             try:
                 response = input("Continue? (y/N): ").strip().lower()

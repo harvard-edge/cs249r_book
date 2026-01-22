@@ -15,11 +15,10 @@
 #| default_exp core.tokenization
 #| export
 
+from collections import Counter
+from typing import Dict, List, Optional, Set, Tuple
+
 import numpy as np
-from typing import List, Dict, Tuple, Optional, Set
-import json
-import re
-from collections import defaultdict, Counter
 
 # %% [markdown]
 """
@@ -85,14 +84,8 @@ from tinytorch.core.tokenization import Tokenizer, CharTokenizer, BPETokenizer
 
 # %%
 #| export
-import numpy as np
-from typing import List, Dict, Tuple, Optional, Set
-import json
-import re
-from collections import defaultdict, Counter
 # Import from TinyTorch package (Module 01 must be completed before Module 10)
 # Note: Tokenization primarily works with Python lists, but Tensor is available for advanced features
-from tinytorch.core.tensor import Tensor
 
 # Constants for memory calculations
 KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
@@ -453,7 +446,7 @@ class CharTokenizer(Tokenizer):
             all_chars.update(text)
 
         # Sort for consistent ordering
-        unique_chars = sorted(list(all_chars))
+        unique_chars = sorted(all_chars)
 
         # Rebuild vocabulary with <UNK> token first
         self.vocab = ['<UNK>'] + unique_chars
@@ -735,7 +728,7 @@ class BPETokenizer(Tokenizer):
         return pairs
         ### END SOLUTION
 
-    def train(self, corpus: List[str], vocab_size: int = None) -> None:
+    def train(self, corpus: List[str], vocab_size: int) -> None:
         """
         Train BPE on corpus to learn merge rules.
 
@@ -777,10 +770,10 @@ class BPETokenizer(Tokenizer):
             vocab.update(tokens)
 
         # Convert to sorted list for consistency
-        self.vocab = sorted(list(vocab))
+        self.vocab = sorted(vocab)
 
         # Add special tokens
-        if '<UNK>' not in self.vocab:
+        if '<UNK>' not in vocab:
             self.vocab = ['<UNK>'] + self.vocab
 
         # Learn merges

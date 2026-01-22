@@ -54,7 +54,26 @@ export async function refreshToken() {
 
 export async function verifySession() {
     const { token } = getSession();
+    const refreshTokenStr = localStorage.getItem("tinytorch_refresh_token");
+    
     if (!token) return;
+
+    // 1. Ensure Supabase Client is synced
+    // If the page reloaded, the Supabase client might not have initialized the session 
+    // from its own storage yet, or persistence might have failed.
+    // We check if it knows about the session.
+    const { data: { session: sbSession } } = await supabase.auth.getSession();
+    
+    // If Supabase client is empty but we have tokens (from Direct Email login), restore it.
+    if (!sbSession && refreshTokenStr) {
+        const { error } = await supabase.auth.setSession({
+            access_token: token,
+            refresh_token: refreshTokenStr
+        });
+        if (error) {
+            console.warn("Auto-sync setSession failed:", error);
+        }
+    }
 
     try {
         // Use a lightweight call to check validity. 
@@ -242,6 +261,18 @@ export async function handleAuth(e) {
                     localStorage.setItem("tinytorch_token", data.access_token);
                     if (data.refresh_token) localStorage.setItem("tinytorch_refresh_token", data.refresh_token);
                     localStorage.setItem("tinytorch_user", JSON.stringify(data.user));
+
+                    // Sync Supabase Client so it doesn't trigger SIGNED_OUT
+                    if (data.refresh_token) {
+                        const { error: sessionError } = await supabase.auth.setSession({
+                            access_token: data.access_token,
+                            refresh_token: data.refresh_token
+                        });
+                        if (sessionError) {
+                            console.error("Supabase setSession error during login:", sessionError);
+                        }
+                    }
+
                     updateNavState();
 
                     // Check Profile Completeness immediately

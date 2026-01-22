@@ -542,7 +542,7 @@ A batch of 32 RGB images (224×224 pixels) stored as float32. How much memory?
 ```{admonition} Answer
 :class: dropdown
 
-32 × 3 × 224 × 224 × 4 = **77,070,336 bytes ≈ 77 MB**
+32 × 3 × 224 × 224 × 4 = **19,267,584 bytes ≈ 19.3 MB**
 
 This is why batch size matters - double the batch, double the memory!
 ```

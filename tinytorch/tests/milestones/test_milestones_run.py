@@ -7,7 +7,7 @@ WHY: Milestones are the key student checkpoints - they MUST work reliably.
 
 STUDENT LEARNING:
 These tests ensure the 6 historical milestones are always working:
-1. Perceptron (1957) - First neural network
+1. Perceptron (1958) - First neural network
 2. XOR Crisis (1969) - Multi-layer networks
 3. MLP Revival (1986) - Backpropagation
 4. CNN Revolution (1998) - Spatial networks
@@ -25,14 +25,14 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 
 class TestMilestone01Perceptron:
-    """Test Milestone 01: Perceptron (1957)"""
+    """Test Milestone 01: Perceptron (1958)"""
 
     def test_perceptron_forward_runs(self):
         """
         WHAT: Verify the perceptron forward pass demo runs.
         WHY: This is the first milestone - it must work to build confidence.
         """
-        script = PROJECT_ROOT / "milestones" / "01_1957_perceptron" / "01_rosenblatt_forward.py"
+        script = PROJECT_ROOT / "milestones" / "01_1958_perceptron" / "01_rosenblatt_forward.py"
         if not script.exists():
             pytest.skip(f"Script not found: {script}")
 
@@ -51,7 +51,7 @@ class TestMilestone01Perceptron:
         WHAT: Verify the trained perceptron demo runs.
         WHY: This proves the full training loop works.
         """
-        script = PROJECT_ROOT / "milestones" / "01_1957_perceptron" / "02_rosenblatt_trained.py"
+        script = PROJECT_ROOT / "milestones" / "01_1958_perceptron" / "02_rosenblatt_trained.py"
         if not script.exists():
             pytest.skip(f"Script not found: {script}")
 

@@ -447,27 +447,27 @@ Training Loop Structure:
 
 for epoch in range(num_epochs):
     ┌─────────────────── TRAINING PHASE ───────────────────┐
-    │                                                       │
-    │  for batch in dataloader:                             │
-    │      ┌─── Forward Pass ───────┐                       │
-    │      │ 1. input → model       │                       │
-    │      │ 2. predictions         │                       │
-    │      └────────────────────────┘                       │
-    │               ↓                                       │
-    │      ┌─── Loss Computation ───┐                       │
-    │      │ 3. loss = loss_fn()    │                       │
-    │      └────────────────────────┘                       │
-    │               ↓                                       │
-    │      ┌─── Backward Pass ──────┐                       │
-    │      │ 4. loss.backward()     │                       │
-    │      │ 5. gradients           │                       │
-    │      └────────────────────────┘                       │
-    │               ↓                                       │
-    │      ┌─── Parameter Update ───┐                       │
-    │      │ 6. optimizer.step()    │                       │
-    │      │ 7. zero gradients      │                       │
-    │      └────────────────────────┘                       │
-    └───────────────────────────────────────────────────────┘
+    │                                                      │
+    │  for batch in dataloader:                            │
+    │      ┌─── Forward Pass ───────┐                      │
+    │      │ 1. input → model       │                      │
+    │      │ 2. predictions         │                      │
+    │      └────────────────────────┘                      │
+    │               ↓                                      │
+    │      ┌─── Loss Computation ───┐                      │
+    │      │ 3. loss = loss_fn()    │                      │
+    │      └────────────────────────┘                      │
+    │               ↓                                      │
+    │      ┌─── Backward Pass ──────┐                      │
+    │      │ 4. loss.backward()     │                      │
+    │      │ 5. gradients           │                      │
+    │      └────────────────────────┘                      │
+    │               ↓                                      │
+    │      ┌─── Parameter Update ───┐                      │
+    │      │ 6. optimizer.step()    │                      │
+    │      │ 7. zero gradients      │                      │
+    │      └────────────────────────┘                      │
+    └──────────────────────────────────────────────────────┘
              ↓
     ┌─── Learning Rate Update ───┐
     │ 8. scheduler.step()        │
@@ -577,8 +577,9 @@ class Trainer:
             scaled_loss = loss.data / accumulation_steps
             accumulated_loss += scaled_loss
 
-            # Backward pass
-            loss.backward()
+            # Backward pass with scaled gradient
+            scaled_gradient = np.ones_like(loss.data) / accumulation_steps
+            loss.backward(scaled_gradient)
 
             # Update parameters every accumulation_steps
             if (batch_idx + 1) % accumulation_steps == 0:
@@ -636,6 +637,7 @@ class Trainer:
         total_loss = 0.0
         correct = 0
         total = 0
+        num_batches = 0
 
         for inputs, targets in dataloader:
             # Forward pass only
@@ -643,6 +645,7 @@ class Trainer:
             loss = self.loss_fn.forward(outputs, targets)
 
             total_loss += loss.data
+            num_batches += 1
 
             # Calculate accuracy (for classification)
             # Trust that Tensors have .data attribute
@@ -654,7 +657,7 @@ class Trainer:
                     correct += np.sum(predictions == np.argmax(targets.data, axis=1))
                 total += len(predictions)
 
-        avg_loss = total_loss / len(dataloader) if len(dataloader) > 0 else 0.0
+        avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
         accuracy = correct / total if total > 0 else 0.0
 
         self.history['eval_loss'].append(avg_loss)
@@ -1247,7 +1250,7 @@ def test_module():
 
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
-    print("Run: tito module complete 07")
+    print("Run: tito module complete 08")
 
 if __name__ == "__main__":
     test_module()
@@ -1369,7 +1372,7 @@ Your training infrastructure mirrors production ML systems:
 ### Ready for Next Steps
 Your training implementation enables sophisticated model training with proper scheduling, stability controls, and state management.
 
-**Export with:** `tito module complete 07`
+**Export with:** `tito module complete 08`
 
 **Next**: Module 09 (Convolutions) will add spatial neural network operations, enabling CNN architectures for computer vision!
 

@@ -63,12 +63,13 @@ from tinytorch.core.dataloader import download_mnist, download_cifar10
 # %%
 #| export
 # Essential imports for data loading
-import numpy as np
 import random
-import time
 import sys
-from typing import Iterator, Tuple, List, Optional, Union
+import time
 from abc import ABC, abstractmethod
+from typing import Iterator, List, Tuple
+
+import numpy as np
 
 # Import real Tensor class from tinytorch package
 from tinytorch.core.tensor import Tensor
@@ -778,16 +779,32 @@ class RandomHorizontalFlip:
         >>> img = np.array([[1, 2, 3], [4, 5, 6]])  # 2x3 image
         >>> # 50% chance output is [[3, 2, 1], [6, 5, 4]]
 
-        HINT: Use np.flip(x, axis=-1) to flip along width axis
+        HINT: Think about all the possible position of the width axis to flip
         """
         ### BEGIN SOLUTION
         if np.random.random() < self.p:
-            # Flip along the width axis (last axis for HW format, second-to-last for HWC)
-            # Using axis=-1 works for both (..., H, W) and (..., H, W, C)
-            if isinstance(x, Tensor):
-                return Tensor(np.flip(x.data, axis=-1).copy())
+            is_tensor = isinstance(x, Tensor)
+            data = x.data if is_tensor else x
+
+            # Determine width axis for HW/HWC/CHW (and batched variants)
+            if data.ndim == 2:
+                # (H, W)
+                axis = -1
+            elif data.ndim >= 3:
+                if data.shape[-1] <= 4:
+                    # Channels-last: (..., H, W, C)
+                    axis = -2
+                elif data.shape[-3] <= 4:
+                    # Channels-first: (..., C, H, W)
+                    axis = -1
+                else:
+                    # Fallback to width as last axis
+                    axis = -1
             else:
-                return np.flip(x, axis=-1).copy()
+                raise ValueError(f"Expected 2D+ input, got shape {data.shape}")
+
+            flipped = np.flip(data, axis=axis).copy()
+            return Tensor(flipped) if is_tensor else flipped
         return x
         ### END SOLUTION
 
@@ -1430,10 +1447,10 @@ def analyze_memory_usage():
     small_total = sys.getsizeof(tensor_small.data) + sys.getsizeof(tensor_small)
     large_total = sys.getsizeof(tensor_large.data) + sys.getsizeof(tensor_large)
 
-    print(f"  Small batch (32×784):")
+    print("  Small batch (32×784):")
     print(f"    - Data only: {small_bytes / 1024:.1f} KB")
     print(f"    - With object overhead: {small_total / 1024:.1f} KB")
-    print(f"  Large batch (512×784):")
+    print("  Large batch (512×784):")
     print(f"    - Data only: {large_bytes / 1024:.1f} KB")
     print(f"    - With object overhead: {large_total / 1024:.1f} KB")
     print(f"  Ratio: {large_bytes / small_bytes:.1f}× (data scales linearly)")
@@ -1622,7 +1639,7 @@ def test_training_integration():
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    print(f"📊 Dataset splits:")
+    print("📊 Dataset splits:")
     print(f"  Training: {len(train_dataset)} samples, {len(train_loader)} batches")
     print(f"  Validation: {len(val_dataset)} samples, {len(val_loader)} batches")
 
@@ -1717,7 +1734,7 @@ def test_module():
 
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
-    print("Run: tito module complete 08")
+    print("Run: tito module complete 05")
 
 # %% [markdown]
 """
@@ -1935,7 +1952,7 @@ def demo_dataloader():
     loader = DataLoader(dataset, batch_size=32, shuffle=True)
 
     print(f"Dataset: {len(dataset)} samples")
-    print(f"Batch size: 32")
+    print("Batch size: 32")
     print(f"Number of batches: {len(loader)}")
 
     print("\nBatches:")

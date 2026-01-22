@@ -26,7 +26,7 @@ from tinytorch import Tensor, Linear, ReLU, Sigmoid, SGD, BinaryCrossEntropyLoss
 from tinytorch.core.spatial import Conv2d, MaxPool2d
 from tinytorch.text.embeddings import Embedding, PositionalEncoding
 from tinytorch.core.attention import MultiHeadAttention
-from tinytorch.core.transformer import LayerNorm
+from tinytorch.core.transformers import LayerNorm
 from tinytorch.data.loader import TensorDataset, DataLoader
 
 # Rich for beautiful output
@@ -1037,7 +1037,7 @@ def run_all_learning_tests():
 
     # Test each milestone
     tests = [
-        ("1957 Perceptron", test_perceptron_learning),
+        ("1958 Perceptron", test_perceptron_learning),
         ("1969 XOR (MLP)", test_xor_learning),
         ("1986 MLP Digits", test_mlp_digits_learning),
         ("1998 CNN", test_cnn_learning),

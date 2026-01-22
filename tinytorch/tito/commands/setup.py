@@ -234,7 +234,15 @@ class SetupCommand(BaseCommand):
                 return True
 
             # Force mode - ask before destroying
-            if not Confirm.ask(f"[yellow]Recreate virtual environment at {venv_path}?[/yellow] This will delete the existing one"):
+            self.console.print()
+            self.console.print(Panel(
+                "[bold yellow]⚠️  This will delete the existing virtual environment[/bold yellow]\n\n"
+                f"[dim]Path: {venv_path}[/dim]",
+                title="Warning",
+                border_style="yellow"
+            ))
+            self.console.print()
+            if not Confirm.ask("[yellow]Recreate virtual environment?[/yellow]"):
                 self.console.print("[green]✅ Keeping existing virtual environment[/green]")
                 return True
 
@@ -506,7 +514,8 @@ class SetupCommand(BaseCommand):
                         self.console.print("[dim]Opening profile editor...[/dim]")
                         open_url("https://mlsysbook.ai/tinytorch/community/?action=profile&community=true", self.console, show_manual_fallback=True)
                 else:
-                    self.console.print("[yellow]⚠️  Community connection failed or was cancelled. You can try again later with 'tito login'.[/yellow]")
+                    self.console.print("[yellow]⚠️  Community connection timed out or was cancelled.[/yellow]")
+                    self.console.print("[yellow]💡 You can complete this anytime with:[/yellow] [bold green]tito community login[/bold green]")
             except Exception as e:
                  self.console.print(f"[yellow]⚠️  Error during login: {e}[/yellow]")
         else:
@@ -528,7 +537,8 @@ class SetupCommand(BaseCommand):
                 if login_result == 0:
                     self.console.print("[green]✅ Successfully connected to the TinyTorch community![/green]")
                 else:
-                    self.console.print("[yellow]⚠️  Community connection failed or was cancelled. You can try again later with 'tito community login'.[/yellow]")
+                    self.console.print("[yellow]⚠️  Community connection timed out or was cancelled.[/yellow]")
+                    self.console.print("[yellow]💡 You can complete this anytime with:[/yellow] [bold green]tito community login[/bold green]")
             except Exception as e:
                  self.console.print(f"[yellow]⚠️  Error during login: {e}[/yellow]")
         else:

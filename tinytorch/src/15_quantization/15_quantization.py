@@ -625,7 +625,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ QuantizedLinear - The Heart of Efficient Networks
+## QuantizedLinear - The Heart of Efficient Networks
 
 ### Why We Need Quantized Layers
 
@@ -752,10 +752,18 @@ class QuantizedLinear:
         3. Store original layer reference for forward pass
         4. Store quantization parameters for dequantization
 
-        IMPLEMENTATION STRATEGY:
-        - Store quantized weights, scales, and zero points
-        - Implement forward pass using dequantized computation (educational approach)
-        - Production: Would use INT8 matrix multiplication libraries
+        EXAMPLE:
+        >>> original_layer = Linear(128, 64)
+        >>> original_layer.weight = Tensor(np.random.randn(128, 64) * 0.1)
+        >>> original_layer.bias = Tensor(np.random.randn(64) * 0.01)
+        >>> quantized_layer = QuantizedLinear(original_layer)
+        >>> print(quantized_layer.q_weight.data.dtype)
+        int8
+
+        HINTS:
+        - Use quantize_int8() to convert weight and bias tensors
+        - Store all quantization parameters (scale, zero_point) for later dequantization
+        - Initialize input_scale and input_zero_point to None (set during calibration)
         """
         ### BEGIN SOLUTION
         self.original_layer = linear_layer
@@ -786,6 +794,18 @@ class QuantizedLinear:
         1. Collect statistics from sample inputs
         2. Calculate optimal scale and zero_point for inputs
         3. Store for use in forward pass
+
+        EXAMPLE:
+        >>> layer = QuantizedLinear(Linear(64, 32))
+        >>> sample_data = [Tensor(np.random.randn(1, 64)) for _ in range(10)]
+        >>> layer.calibrate(sample_data)
+        >>> print(layer.input_scale is not None)
+        True
+
+        HINTS:
+        - Flatten all sample inputs and find global min/max values
+        - Use the same scale/zero_point formula as quantize_int8()
+        - Handle edge case where all inputs have the same value (constant tensor)
         """
         ### BEGIN SOLUTION
         # Collect all input values
@@ -819,6 +839,18 @@ class QuantizedLinear:
         2. Dequantize weights and input for computation (educational approach)
         3. Perform matrix multiplication
         4. Return FP32 result
+
+        EXAMPLE:
+        >>> layer = QuantizedLinear(Linear(4, 3))
+        >>> x = Tensor(np.array([[1.0, 2.0, 3.0, 4.0]]))
+        >>> output = layer.forward(x)
+        >>> print(output.shape)
+        (1, 3)
+
+        HINTS:
+        - Use dequantize_int8() to restore weights to FP32 before computation
+        - Use x.matmul() for matrix multiplication
+        - Add bias after matmul if it exists (dequantize bias first)
 
         NOTE: Production quantization uses INT8 GEMM libraries for speed
         """
@@ -1317,6 +1349,97 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
+## Consolidated Quantization Classes for Export
+
+Now that we've implemented all quantization components, let's create consolidated classes
+for export to the tinytorch package. This allows milestones to use the complete quantization system.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "quantization_export", "solution": true}
+#| export
+class Quantizer:
+    """
+    Complete quantization system for milestone use.
+
+    Provides INT8 quantization with calibration for 4× memory reduction.
+
+    This class delegates to the standalone functions (quantize_int8, dequantize_int8)
+    that students implement, providing a clean OOP interface for milestones.
+
+    Two APIs exist for different use cases:
+    - Standalone quantize_model(): Modifies model in-place (for learning/testing)
+    - Quantizer.quantize_model(): Returns stats dict (for milestones/benchmarking)
+    """
+
+    @staticmethod
+    def quantize_tensor(tensor: Tensor) -> Tuple[Tensor, float, int]:
+        """Quantize FP32 tensor to INT8. Delegates to quantize_int8()."""
+        return quantize_int8(tensor)
+
+    @staticmethod
+    def dequantize_tensor(q_tensor: Tensor, scale: float, zero_point: int) -> Tensor:
+        """Dequantize INT8 tensor back to FP32. Delegates to dequantize_int8()."""
+        return dequantize_int8(q_tensor, scale, zero_point)
+
+    @staticmethod
+    def quantize_model(model, calibration_data: Optional[List[Tensor]] = None) -> Dict[str, any]:
+        """
+        Quantize all Linear layers in a model and return stats.
+
+        Unlike the standalone quantize_model() which modifies in-place,
+        this returns a dictionary with quantization info for benchmarking.
+
+        Returns:
+            Dict with quantized_layers, original_size_mb, quantized_size_mb, compression_ratio
+        """
+        quantized_layers = {}
+        original_size = 0
+        total_elements = 0
+        param_idx = 0
+
+        # Iterate through model parameters
+        for layer in model.layers:
+            for param in layer.parameters():
+                param_size = param.data.nbytes
+                original_size += param_size
+                total_elements += param.data.size
+
+                # Quantize parameter using the standalone function
+                q_param, scale, zp = quantize_int8(param)
+
+                quantized_layers[f'param_{param_idx}'] = {
+                    'quantized': q_param,
+                    'scale': scale,
+                    'zero_point': zp,
+                    'original_shape': param.data.shape
+                }
+                param_idx += 1
+
+        # INT8 uses 1 byte per element
+        quantized_size = total_elements
+
+        return {
+            'quantized_layers': quantized_layers,
+            'original_size_mb': original_size / MB_TO_BYTES,
+            'quantized_size_mb': quantized_size / MB_TO_BYTES,
+            'compression_ratio': original_size / quantized_size if quantized_size > 0 else 1.0
+        }
+
+    @staticmethod
+    def compare_models(original_model, quantized_info: Dict) -> Dict[str, float]:
+        """Compare memory usage between original and quantized models."""
+        return {
+            'original_mb': quantized_info['original_size_mb'],
+            'quantized_mb': quantized_info['quantized_size_mb'],
+            'compression_ratio': quantized_info['compression_ratio'],
+            'memory_saved_mb': quantized_info['original_size_mb'] - quantized_info['quantized_size_mb']
+        }
+
+# Note: quantize_int8, dequantize_int8, and quantize_model are defined earlier in this module.
+# The Quantizer class above delegates to those functions, providing an OOP interface for milestones.
+
+# %% [markdown]
+"""
 ## 📊 Systems Analysis - Quantization in Production
 
 Now let's measure the real-world impact of quantization through systematic analysis.
@@ -1549,7 +1672,7 @@ This analysis reveals which strategies work best for different deployment scenar
 
 # %% [markdown]
 """
-## 📊 Measuring Quantization Savings with Profiler
+## Measuring Quantization Savings with Profiler
 
 Now let's use the **Profiler** tool from Module 14 to measure the actual memory savings from quantization. This demonstrates end-to-end workflow: profile baseline (M14) → apply quantization (M15) → measure savings (M14+M15).
 
@@ -1626,7 +1749,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Verification: Prove Quantization Works
+## Verification: Prove Quantization Works
 
 Before running the full integration test, let's create a verification function that
 proves quantization actually reduces memory using real `.nbytes` measurements.
@@ -1815,106 +1938,11 @@ def test_module():
     print(f"   • Production-ready INT8 quantization")
     print("Run: tito module complete 15")
 
-# Call the comprehensive test
-if __name__ == "__main__":
-    test_module()
-
 # %%
 if __name__ == "__main__":
     print("🚀 Running Quantization module...")
     test_module()
     print("✅ Module validation complete!")
-
-# %% [markdown]
-"""
-## 🔧 Consolidated Quantization Classes for Export
-
-Now that we've implemented all quantization components, let's create consolidated classes
-for export to the tinytorch package. This allows milestones to use the complete quantization system.
-"""
-
-# %% nbgrader={"grade": false, "grade_id": "quantization_export", "solution": true}
-#| export
-class Quantizer:
-    """
-    Complete quantization system for milestone use.
-
-    Provides INT8 quantization with calibration for 4× memory reduction.
-
-    This class delegates to the standalone functions (quantize_int8, dequantize_int8)
-    that students implement, providing a clean OOP interface for milestones.
-
-    Two APIs exist for different use cases:
-    - Standalone quantize_model(): Modifies model in-place (for learning/testing)
-    - Quantizer.quantize_model(): Returns stats dict (for milestones/benchmarking)
-    """
-
-    @staticmethod
-    def quantize_tensor(tensor: Tensor) -> Tuple[Tensor, float, int]:
-        """Quantize FP32 tensor to INT8. Delegates to quantize_int8()."""
-        return quantize_int8(tensor)
-
-    @staticmethod
-    def dequantize_tensor(q_tensor: Tensor, scale: float, zero_point: int) -> Tensor:
-        """Dequantize INT8 tensor back to FP32. Delegates to dequantize_int8()."""
-        return dequantize_int8(q_tensor, scale, zero_point)
-
-    @staticmethod
-    def quantize_model(model, calibration_data: Optional[List[Tensor]] = None) -> Dict[str, any]:
-        """
-        Quantize all Linear layers in a model and return stats.
-
-        Unlike the standalone quantize_model() which modifies in-place,
-        this returns a dictionary with quantization info for benchmarking.
-
-        Returns:
-            Dict with quantized_layers, original_size_mb, quantized_size_mb, compression_ratio
-        """
-        quantized_layers = {}
-        original_size = 0
-        total_elements = 0
-        param_idx = 0
-
-        # Iterate through model parameters
-        for layer in model.layers:
-            for param in layer.parameters():
-                param_size = param.data.nbytes
-                original_size += param_size
-                total_elements += param.data.size
-
-                # Quantize parameter using the standalone function
-                q_param, scale, zp = quantize_int8(param)
-
-                quantized_layers[f'param_{param_idx}'] = {
-                    'quantized': q_param,
-                    'scale': scale,
-                    'zero_point': zp,
-                    'original_shape': param.data.shape
-                }
-                param_idx += 1
-
-        # INT8 uses 1 byte per element
-        quantized_size = total_elements
-
-        return {
-            'quantized_layers': quantized_layers,
-            'original_size_mb': original_size / MB_TO_BYTES,
-            'quantized_size_mb': quantized_size / MB_TO_BYTES,
-            'compression_ratio': original_size / quantized_size if quantized_size > 0 else 1.0
-        }
-
-    @staticmethod
-    def compare_models(original_model, quantized_info: Dict) -> Dict[str, float]:
-        """Compare memory usage between original and quantized models."""
-        return {
-            'original_mb': quantized_info['original_size_mb'],
-            'quantized_mb': quantized_info['quantized_size_mb'],
-            'compression_ratio': quantized_info['compression_ratio'],
-            'memory_saved_mb': quantized_info['original_size_mb'] - quantized_info['quantized_size_mb']
-        }
-
-# Note: quantize_int8, dequantize_int8, and quantize_model are defined earlier in this module.
-# The Quantizer class above delegates to those functions, providing an OOP interface for milestones.
 
 # %% [markdown]
 """

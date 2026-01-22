@@ -14,6 +14,7 @@ from rich.panel import Panel
 from ..base import BaseCommand
 from .preflight import PreflightCommand
 from .export import DevExportCommand
+from .validate import ValidateCommand
 
 
 class DevCommand(BaseCommand):
@@ -50,6 +51,14 @@ class DevCommand(BaseCommand):
         export_cmd = DevExportCommand(self.config)
         export_cmd.add_arguments(export_parser)
 
+        # Validate subcommand (release validation)
+        validate_parser = subparsers.add_parser(
+            'validate',
+            help='Simulate student journey for release validation'
+        )
+        validate_cmd = ValidateCommand(self.config)
+        validate_cmd.add_arguments(validate_parser)
+
     def run(self, args: Namespace) -> int:
         console = self.console
 
@@ -59,7 +68,8 @@ class DevCommand(BaseCommand):
                 "[bold]For developers and instructors - not for students.[/bold]\n\n"
                 "Available subcommands:\n"
                 "  • [bold]export[/bold]     - Rebuild curriculum from src/*.py files\n"
-                "  • [bold]preflight[/bold]  - Run verification checks before commit/release\n\n"
+                "  • [bold]preflight[/bold]  - Run verification checks before commit/release\n"
+                "  • [bold]validate[/bold]   - Simulate student journey for release validation\n\n"
                 "[bold cyan]Export (Rebuild Curriculum):[/bold cyan]\n"
                 "  [dim]tito dev export 01[/dim]           Export specific module\n"
                 "  [dim]tito dev export 01 02 03[/dim]     Export multiple modules\n"
@@ -70,6 +80,10 @@ class DevCommand(BaseCommand):
                 "  [dim]tito dev preflight --quick[/dim]   Quick checks only (~10s)\n"
                 "  [dim]tito dev preflight --full[/dim]    Full validation (~2-5min)\n"
                 "  [dim]tito dev preflight --release[/dim] Release validation (~10-30min)\n\n"
+                "[bold cyan]Validate (Release Testing):[/bold cyan]\n"
+                "  [dim]tito dev validate[/dim]            Full student journey simulation\n"
+                "  [dim]tito dev validate --module 08[/dim] Validate through module 08\n"
+                "  [dim]tito dev validate --ci[/dim]       CI mode with JSON output\n\n"
                 "[bold cyan]CI/CD Integration:[/bold cyan]\n"
                 "  [dim]tito dev preflight --ci[/dim]      Non-interactive, exit codes\n"
                 "  [dim]tito dev preflight --json[/dim]    JSON output for automation",
@@ -84,6 +98,9 @@ class DevCommand(BaseCommand):
             return cmd.execute(args)
         elif args.dev_command == 'export':
             cmd = DevExportCommand(self.config)
+            return cmd.run(args)
+        elif args.dev_command == 'validate':
+            cmd = ValidateCommand(self.config)
             return cmd.run(args)
         else:
             console.print(Panel(

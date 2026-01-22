@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.autograd import enable_autograd
-from tinytorch.core.transformer import GPT, MultiHeadAttention, LayerNorm, MLP
+from tinytorch.core.transformers import GPT, MultiHeadAttention, LayerNorm, MLP
 from tinytorch.core.losses import CrossEntropyLoss
 
 

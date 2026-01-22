@@ -3,7 +3,7 @@
 This document traces the key innovations in neural network history, showing how each breakthrough solved a specific problem left by its predecessor. We're not just listing milestones—we're showing how they connect.
 
 ```
-1957: PERCEPTRON
+1958: PERCEPTRON
 ┌─────────────────┐
 │   Input (x)     │
 │       ↓         │
@@ -217,7 +217,7 @@ loss.backward()
 
 ## Learning Verification: What We Test
 
-### 1. **Perceptron** (1957)
+### 1. **Perceptron** (1958)
 - ✅ Loss decreases (optimization works)
 - ✅ Accuracy >90% (learns linear boundary)
 - ✅ Gradients flow to w, b
@@ -276,7 +276,7 @@ updates = 25 × (1000 ÷ 32) = 775 gradient updates
 ## The Big Picture
 
 ```
-PERCEPTRON (1957)
+PERCEPTRON (1958)
     ↓ Add hidden layers + non-linearity
 BACKPROPAGATION (1986)
     ↓ Scale to real data + deeper networks
@@ -308,7 +308,7 @@ MODERN DEEP LEARNING (2020s)
    - Fair comparisons require matched training budgets
 
 4. **Building blocks compound**
-   - Transformer uses: Linear (1957), ReLU (1989), Embeddings (2013)
+   - Transformer uses: Linear (1958), ReLU (1989), Embeddings (2013)
    - Each milestone stands on previous work
    - Modern systems combine all these ideas
 

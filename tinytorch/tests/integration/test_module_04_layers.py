@@ -98,7 +98,7 @@ def test_layers_integration():
     print("✅ All Module 04 integration tests passed!")
     print()
     print("🎯 CAPABILITY UNLOCKED: Network Architecture Construction")
-    print("📚 You can now run: python examples/perceptron_1957/rosenblatt_perceptron.py")
+    print("📚 You can now run: python examples/perceptron_1958/rosenblatt_perceptron.py")
     print()
     return True
 

@@ -72,7 +72,7 @@ class SubmissionHandler:
 
         # You might want a lookup map for real names
         milestone_names = {
-            "01": "1957: Perceptron",
+            "01": "1958: Perceptron",
             "02": "1969: XOR Problem",
             "03": "1986: MLP Revival",
             "04": "1998: CNN Revolution",

@@ -17,10 +17,11 @@ WHAT STUDENTS LEARN:
 3. Feed-forward: process each position independently
 """
 
-import numpy as np
-import pytest
 import sys
 from pathlib import Path
+
+import numpy as np
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -40,8 +41,8 @@ class TestTransformerBlock:
         output = output + ffn(norm(output))
         """
         try:
-            from tinytorch.nn import TransformerBlock
             from tinytorch.core.tensor import Tensor
+            from tinytorch.core.transformers import TransformerBlock
 
             block = TransformerBlock(embed_dim=256, num_heads=8)
 
@@ -69,8 +70,8 @@ class TestTransformerBlock:
         But also harder to train (vanishing gradients).
         """
         try:
-            from tinytorch.nn import TransformerBlock
             from tinytorch.core.tensor import Tensor
+            from tinytorch.core.transformers import TransformerBlock
 
             # Stack of 4 blocks
             blocks = [TransformerBlock(embed_dim=128, num_heads=4) for _ in range(4)]
@@ -103,9 +104,9 @@ class TestTransformerGradients:
         d_output/d_x = 1 + df/dx (always ≥ 1!)
         """
         try:
-            from tinytorch.nn import TransformerBlock
-            from tinytorch.core.tensor import Tensor
             from tinytorch.core.autograd import enable_autograd
+            from tinytorch.core.tensor import Tensor
+            from tinytorch.core.transformers import TransformerBlock
 
             enable_autograd()
 
