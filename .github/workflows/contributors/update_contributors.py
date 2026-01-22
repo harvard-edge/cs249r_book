@@ -1,3 +1,27 @@
+#!/usr/bin/env python3
+"""
+Update contributors from GitHub API.
+
+This script queries the GitHub API to find all contributors to the repository
+and updates the root .all-contributorsrc file with their information.
+
+Features:
+- Fetches contributors from GitHub commit history
+- Resolves email addresses to GitHub usernames
+- Generates gravatar URLs for contributors without GitHub avatars
+- Excludes bots and specified users
+- Merges new contributors with existing ones
+
+Usage:
+    python update_contributors.py
+
+Environment variables:
+    GITHUB_TOKEN: Required. GitHub personal access token for API access.
+
+Note: This script updates the ROOT .all-contributorsrc file only.
+For per-project configs, use scan_contributors.py instead.
+"""
+
 import os
 import json
 import random
