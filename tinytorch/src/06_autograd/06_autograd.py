@@ -309,6 +309,196 @@ Each operation stores the inputs it needs for computing gradients.
 
 # %% [markdown]
 """
+### 🔍 Understanding Broadcasting in Gradients
+
+Before implementing gradient operations, we need to understand a critical challenge:
+**Broadcasting in Forward Pass vs. Gradient Reduction in Backward Pass**
+
+#### The Broadcasting Problem
+
+NumPy automatically broadcasts tensors of different shapes during forward operations:
+
+```
+Forward Pass (Broadcasting):
+┌─────────────────────────────────────────────────────────────┐
+│ Example: Adding bias to batched data                        │
+│                                                              │
+│ x:    (32, 128)  ← Batch of 32 samples, 128 features        │
+│ bias: (128,)     ← Just 128 features (no batch dimension)   │
+│                                                              │
+│ Forward: y = x + bias                                        │
+│          NumPy broadcasts bias from (128,) to (32, 128)     │
+│          Result shape: (32, 128)                             │
+└─────────────────────────────────────────────────────────────┘
+
+Backward Pass (Gradient Reduction):
+┌─────────────────────────────────────────────────────────────┐
+│ grad_output: (32, 128)  ← Gradient from upstream            │
+│                                                              │
+│ grad_x:    (32, 128)    ← Same shape as x ✓                 │
+│ grad_bias: (128,)       ← Must match bias shape!            │
+│                                                              │
+│ Problem: grad_output is (32, 128) but bias is (128,)        │
+│ Solution: Sum gradients over batch dimension                │
+│           grad_bias = grad_output.sum(axis=0)               │
+│           Result: (128,) ✓                                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Why Gradient Reduction is Necessary
+
+**Mathematical Intuition:**
+When bias broadcasts to multiple samples, it contributes to each sample's loss.
+The total gradient w.r.t. bias is the SUM of gradients from all samples.
+
+**Concrete Example:**
+```
+x = [[1, 2],      bias = [0.1, 0.2]
+     [3, 4]]
+
+Forward:
+  y[0] = [1, 2] + [0.1, 0.2] = [1.1, 2.2]  ← bias[0]=0.1 affects sample 0
+  y[1] = [3, 4] + [0.1, 0.2] = [3.1, 4.2]  ← bias[0]=0.1 affects sample 1
+
+Backward:
+  grad_output = [[1, 1],   ← ∂Loss/∂y[0]
+                 [1, 1]]   ← ∂Loss/∂y[1]
+  
+  grad_bias[0] = ∂Loss/∂bias[0] 
+               = ∂Loss/∂y[0,0] + ∂Loss/∂y[1,0]  ← Chain rule: sum contributions
+               = 1 + 1 = 2
+  
+  grad_bias = [2, 2]  ← Sum over batch dimension
+```
+
+#### Broadcasting Scenarios to Handle
+
+```
+Scenario 1: Batch Dimension Broadcasting
+  x:    (32, 128)  +  bias: (128,)    →  y: (32, 128)
+  grad: (32, 128)  →  grad_bias = sum(grad, axis=0) → (128,)
+
+Scenario 2: Multiple Dimension Broadcasting  
+  x:    (32, 10, 5)  +  y: (10, 1)    →  z: (32, 10, 5)
+  grad: (32, 10, 5)  →  
+    1. Sum over extra dim: sum(grad, axis=0) → (10, 5)
+    2. Sum over singleton: sum(grad, axis=2, keepdims=True) → (10, 1)
+
+Scenario 3: Scalar Broadcasting
+  x:    (32, 128)  +  scalar: ()      →  y: (32, 128)
+  grad: (32, 128)  →  grad_scalar = sum(grad) → scalar
+```
+
+#### The General Algorithm
+
+To reduce gradient back to original input shape:
+1. **Remove extra dimensions**: Sum over leading dimensions that weren't in input
+2. **Collapse singleton dimensions**: Sum over dimensions where input had size 1
+3. **Preserve shape**: Use keepdims=True when collapsing to maintain dimensionality
+
+This ensures gradients flow correctly regardless of broadcasting patterns!
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "broadcast-grad-helper", "solution": true}
+#| export
+def _reduce_broadcast_grad(grad, original_shape):
+    """
+    Reduce gradient to match original tensor shape after broadcasting.
+    
+    This is a critical operation for correct gradient computation when
+    tensors of different shapes are combined via broadcasting.
+    
+    Args:
+        grad: Gradient array (may be larger due to broadcasting)
+        original_shape: Target shape (original tensor's shape)
+    
+    Returns:
+        Reduced gradient matching original_shape
+    
+    Algorithm:
+    1. Remove leading dimensions that were broadcast
+    2. Sum over dimensions where original had size 1
+    3. Maintain shape consistency with keepdims
+    
+    Examples:
+        >>> # Bias case: (32, 128) → (128,)
+        >>> grad = np.ones((32, 128))
+        >>> reduced = _reduce_broadcast_grad(grad, (128,))
+        >>> reduced.shape  # (128,)
+        
+        >>> # Singleton case: (32, 10, 5) → (10, 1)
+        >>> grad = np.ones((32, 10, 5))
+        >>> reduced = _reduce_broadcast_grad(grad, (10, 1))
+        >>> reduced.shape  # (10, 1)
+    """
+    ### BEGIN SOLUTION
+    # Step 1: Remove leading dimensions that weren't in original tensor
+    # Example: grad (32, 128) with original (128,) → sum over axis 0
+    while grad.ndim > len(original_shape):
+        grad = grad.sum(axis=0)
+    
+    # Step 2: Collapse dimensions where original had size 1
+    # Example: grad (10, 5) with original (10, 1) → sum over axis 1 with keepdims
+    for i in range(len(original_shape)):
+        if original_shape[i] == 1 and grad.shape[i] > 1:
+            grad = grad.sum(axis=i, keepdims=True)
+    
+    return grad
+    ### END SOLUTION
+
+# %% nbgrader={"grade": true, "grade_id": "test-reduce-broadcast-grad", "locked": true, "points": 5}
+def test_unit_reduce_broadcast_grad():
+    """🔬 Test _reduce_broadcast_grad helper function."""
+    print("🔬 Unit Test: _reduce_broadcast_grad...")
+    
+    # Test 1: Remove leading dimension
+    grad = np.ones((32, 128))
+    original_shape = (128,)
+    reduced = _reduce_broadcast_grad(grad, original_shape)
+    assert reduced.shape == (128,), f"Expected (128,), got {reduced.shape}"
+    assert np.allclose(reduced, np.ones(128) * 32), "Should sum over batch dimension"
+    print("  ✓ Leading dimension reduction works")
+    
+    # Test 2: Collapse singleton dimension
+    grad = np.ones((10, 5))
+    original_shape = (10, 1)
+    reduced = _reduce_broadcast_grad(grad, original_shape)
+    assert reduced.shape == (10, 1), f"Expected (10, 1), got {reduced.shape}"
+    assert np.allclose(reduced, np.ones((10, 1)) * 5), "Should sum over singleton axis"
+    print("  ✓ Singleton dimension reduction works")
+    
+    # Test 3: Both operations
+    grad = np.ones((32, 10, 5))
+    original_shape = (10, 1)
+    reduced = _reduce_broadcast_grad(grad, original_shape)
+    assert reduced.shape == (10, 1), f"Expected (10, 1), got {reduced.shape}"
+    expected = np.ones((10, 1)) * 32 * 5  # Sum over batch and last dim
+    assert np.allclose(reduced, expected), "Should handle multiple reductions"
+    print("  ✓ Multiple dimension reduction works")
+    
+    # Test 4: No broadcasting (should return unchanged)
+    grad = np.ones((10, 5))
+    original_shape = (10, 5)
+    reduced = _reduce_broadcast_grad(grad, original_shape)
+    assert reduced.shape == (10, 5), f"Expected (10, 5), got {reduced.shape}"
+    assert np.allclose(reduced, grad), "Should return unchanged when shapes match"
+    print("  ✓ No-op case works")
+    
+    # Test 5: Scalar case (reduce to scalar)
+    grad = np.ones((32, 128))
+    original_shape = ()
+    reduced = _reduce_broadcast_grad(grad, original_shape)
+    assert reduced.shape == (), f"Expected scalar, got {reduced.shape}"
+    assert np.allclose(reduced, 32 * 128), "Should sum to scalar"
+    print("  ✓ Scalar reduction works")
+    
+    print("✅ _reduce_broadcast_grad works correctly!")
+
+if __name__ == "__main__":
+    test_unit_reduce_broadcast_grad()
+
+# %% [markdown]
+"""
 ### AddBackward - Gradient Rules for Addition
 
 Addition is the simplest gradient operation: gradients flow unchanged to both inputs.
@@ -363,19 +553,32 @@ class AddBackward(Function):
         APPROACH:
         1. Extract input tensors from self.saved_tensors
         2. Initialize grad_a and grad_b to None
-        3. For first input (a): if it requires gradients, set grad_a = grad_output
-        4. For second input (b): if it requires gradients, set grad_b = grad_output
+        3. For first input (a): if it requires gradients:
+           - Set grad_a = grad_output
+           - Use _reduce_broadcast_grad() to handle shape mismatch if needed
+        4. For second input (b): if it requires gradients:
+           - Set grad_b = grad_output
+           - Use _reduce_broadcast_grad() to handle shape mismatch if needed
         5. Return tuple (grad_a, grad_b)
 
-        EXAMPLE:
+        EXAMPLE (Same Shape):
         >>> a = Tensor([1, 2, 3], requires_grad=True)
         >>> b = Tensor([4, 5, 6], requires_grad=True)
         >>> z = a + b  # z = [5, 7, 9]
         >>> # During backward: grad_output = [1, 1, 1]
         >>> # Result: grad_a = [1, 1, 1], grad_b = [1, 1, 1]
 
+        EXAMPLE (Broadcasting):
+        >>> x = Tensor(np.ones((32, 128)), requires_grad=True)
+        >>> bias = Tensor(np.zeros(128), requires_grad=True)
+        >>> y = x + bias  # bias broadcasts to (32, 128)
+        >>> # During backward: grad_output shape (32, 128)
+        >>> # grad_bias must be reduced to (128,) by summing over batch
+        >>> # Result: grad_x shape (32, 128), grad_bias shape (128,)
+
         HINTS:
         - Addition distributes gradients equally (derivative of a+b w.r.t. both is 1)
+        - Use _reduce_broadcast_grad(grad, tensor.data.shape) to handle broadcasting
         - Check isinstance(tensor, Tensor) and tensor.requires_grad before computing
         - Return None for inputs that don't require gradients
         """
@@ -386,10 +589,14 @@ class AddBackward(Function):
         # Gradient for first input
         if isinstance(a, Tensor) and a.requires_grad:
             grad_a = grad_output
+            # Handle broadcasting: reduce gradient to match original shape
+            grad_a = _reduce_broadcast_grad(grad_a, a.data.shape)
 
         # Gradient for second input
         if isinstance(b, Tensor) and b.requires_grad:
             grad_b = grad_output
+            # Handle broadcasting: reduce gradient to match original shape
+            grad_b = _reduce_broadcast_grad(grad_b, b.data.shape)
 
         return grad_a, grad_b
         ### END SOLUTION
@@ -454,8 +661,12 @@ class MulBackward(Function):
         APPROACH:
         1. Extract input tensors a, b from self.saved_tensors
         2. Initialize grad_a and grad_b to None
-        3. For first input (a): if requires_grad, compute grad_a = grad_output * b
-        4. For second input (b): if requires_grad, compute grad_b = grad_output * a
+        3. For first input (a): if requires_grad:
+           - Compute grad_a = grad_output * b
+           - Use _reduce_broadcast_grad() to handle shape mismatch
+        4. For second input (b): if requires_grad:
+           - Compute grad_b = grad_output * a
+           - Use _reduce_broadcast_grad() to handle shape mismatch
         5. Handle both Tensor and scalar cases for b
         6. Return tuple (grad_a, grad_b)
 
@@ -469,6 +680,7 @@ class MulBackward(Function):
 
         HINTS:
         - Product rule: each input's gradient equals grad_output times the OTHER input
+        - Use _reduce_broadcast_grad() to handle broadcasting correctly
         - Check if b is a Tensor or scalar before accessing .data
         - Use b.data if Tensor, or b directly if scalar
         """
@@ -482,10 +694,14 @@ class MulBackward(Function):
                 grad_a = grad_output * b.data
             else:
                 grad_a = grad_output * b
+            # Handle broadcasting: reduce gradient to match original shape
+            grad_a = _reduce_broadcast_grad(grad_a, a.data.shape)
 
         # Gradient for second input: grad_output * a
         if isinstance(b, Tensor) and b.requires_grad:
             grad_b = grad_output * a.data
+            # Handle broadcasting: reduce gradient to match original shape
+            grad_b = _reduce_broadcast_grad(grad_b, b.data.shape)
 
         return grad_a, grad_b
         ### END SOLUTION
@@ -528,8 +744,12 @@ class SubBackward(Function):
         APPROACH:
         1. Extract input tensors from self.saved_tensors
         2. Initialize grad_a and grad_b to None
-        3. For first input (a): if requires_grad, set grad_a = grad_output
-        4. For second input (b): if requires_grad, set grad_b = -grad_output (note the negative!)
+        3. For first input (a): if requires_grad:
+           - Set grad_a = grad_output
+           - Use _reduce_broadcast_grad() to handle shape mismatch
+        4. For second input (b): if requires_grad:
+           - Set grad_b = -grad_output (note the negative!)
+           - Use _reduce_broadcast_grad() to handle shape mismatch
         5. Return tuple (grad_a, grad_b)
 
         EXAMPLE:
@@ -542,6 +762,7 @@ class SubBackward(Function):
         HINTS:
         - ∂(a-b)/∂a = 1 (gradient flows unchanged to first operand)
         - ∂(a-b)/∂b = -1 (gradient is negated for second operand)
+        - Use _reduce_broadcast_grad() to handle broadcasting correctly
         - The negative sign is crucial for correct gradient flow
         """
         ### BEGIN SOLUTION
@@ -550,9 +771,13 @@ class SubBackward(Function):
 
         if isinstance(a, Tensor) and a.requires_grad:
             grad_a = grad_output  # ∂(a-b)/∂a = 1
+            # Handle broadcasting: reduce gradient to match original shape
+            grad_a = _reduce_broadcast_grad(grad_a, a.data.shape)
 
         if isinstance(b, Tensor) and b.requires_grad:
             grad_b = -grad_output  # ∂(a-b)/∂b = -1 (note the negative!)
+            # Handle broadcasting: reduce gradient to match original shape
+            grad_b = _reduce_broadcast_grad(grad_b, b.data.shape)
 
         return grad_a, grad_b
         ### END SOLUTION
@@ -596,8 +821,12 @@ class DivBackward(Function):
         APPROACH:
         1. Extract input tensors from self.saved_tensors
         2. Initialize grad_a and grad_b to None
-        3. For first input (a): if requires_grad, compute grad_a = grad_output / b
-        4. For second input (b): if requires_grad, compute grad_b = -grad_output * a / (b²)
+        3. For first input (a): if requires_grad:
+           - Compute grad_a = grad_output / b
+           - Use _reduce_broadcast_grad() to handle shape mismatch
+        4. For second input (b): if requires_grad:
+           - Compute grad_b = -grad_output * a / (b²)
+           - Use _reduce_broadcast_grad() to handle shape mismatch
         5. Handle both Tensor and scalar cases for b
         6. Return tuple (grad_a, grad_b)
 
@@ -611,6 +840,7 @@ class DivBackward(Function):
 
         HINTS:
         - Quotient rule: ∂(a/b)/∂a = 1/b, ∂(a/b)/∂b = -a/b²
+        - Use _reduce_broadcast_grad() to handle broadcasting correctly
         - Use b.data if Tensor, or b directly if scalar
         - b² means b.data ** 2 for tensors
         """
@@ -624,10 +854,14 @@ class DivBackward(Function):
                 grad_a = grad_output / b.data
             else:
                 grad_a = grad_output / b
+            # Handle broadcasting: reduce gradient to match original shape
+            grad_a = _reduce_broadcast_grad(grad_a, a.data.shape)
 
         if isinstance(b, Tensor) and b.requires_grad:
             # ∂(a/b)/∂b = -a/b²
             grad_b = -grad_output * a.data / (b.data ** 2)
+            # Handle broadcasting: reduce gradient to match original shape
+            grad_b = _reduce_broadcast_grad(grad_b, b.data.shape)
 
         return grad_a, grad_b
         ### END SOLUTION
@@ -1274,6 +1508,131 @@ def test_unit_function_classes():
 
 if __name__ == "__main__":
     test_unit_function_classes()
+
+# %% [markdown]
+"""
+### 🔬 Unit Test: Broadcasting in Gradients
+This test validates that gradient reduction works correctly when operations
+involve broadcasting. This is crucial for real-world training where bias terms,
+normalization parameters, and other operations broadcast over batches.
+
+**What we're testing**: Gradient shape correctness with broadcasting
+**Why it matters**: Without proper reduction, bias gradients would have wrong shapes
+**Expected**: Gradients match original tensor shapes after reduction
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-broadcast-gradients", "locked": true, "points": 10}
+def test_unit_broadcast_gradients():
+    """🔬 Test gradient broadcasting reduction."""
+    print("🔬 Unit Test: Broadcasting in Gradients...")
+    
+    # Scenario 1: Bias-like broadcasting (most common case)
+    # Shape: (batch, features) + (features,) → (batch, features)
+    x = Tensor(np.random.randn(4, 3), requires_grad=True)
+    bias = Tensor(np.ones(3), requires_grad=True)
+    
+    add_func = AddBackward(x, bias)
+    grad_output = np.ones((4, 3))
+    grad_x, grad_bias = add_func.apply(grad_output)
+    
+    # Check shapes
+    assert grad_x.shape == x.data.shape, \
+        f"Expected grad_x shape {x.data.shape}, got {grad_x.shape}"
+    assert grad_bias.shape == bias.data.shape, \
+        f"Expected grad_bias shape {bias.data.shape}, got {grad_bias.shape}"
+    
+    # Check values: bias gradient should sum over batch dimension
+    expected_bias_grad = np.ones(3) * 4  # Sum of 4 ones = 4
+    assert np.allclose(grad_bias, expected_bias_grad), \
+        f"Expected bias grad {expected_bias_grad}, got {grad_bias}"
+    
+    print("  ✓ Bias-like broadcasting works")
+    
+    # Scenario 2: Scalar broadcasting
+    # Shape: (3, 4) + scalar → (3, 4)
+    x = Tensor(np.random.randn(3, 4), requires_grad=True)
+    scalar_val = 5.0
+    
+    add_func = AddBackward(x, scalar_val)
+    grad_output = np.ones((3, 4))
+    grad_x, grad_scalar = add_func.apply(grad_output)
+    
+    assert grad_x.shape == x.data.shape, \
+        f"Expected grad_x shape {x.data.shape}, got {grad_x.shape}"
+    # Scalar gradients don't get reduced (not a Tensor)
+    
+    print("  ✓ Scalar broadcasting works")
+    
+    # Scenario 3: Multiple dimension broadcasting
+    # Shape: (32, 10, 5) + (10, 1) → (32, 10, 5)
+    x = Tensor(np.random.randn(32, 10, 5), requires_grad=True)
+    y = Tensor(np.random.randn(10, 1), requires_grad=True)
+    
+    mul_func = MulBackward(x, y)
+    grad_output = np.ones((32, 10, 5))
+    grad_x, grad_y = mul_func.apply(grad_output)
+    
+    assert grad_x.shape == x.data.shape, \
+        f"Expected grad_x shape {x.data.shape}, got {grad_x.shape}"
+    assert grad_y.shape == y.data.shape, \
+        f"Expected grad_y shape {y.data.shape}, got {grad_y.shape}"
+    
+    print("  ✓ Multi-dimension broadcasting works")
+    
+    # Scenario 4: Test all operations (Add, Mul, Sub, Div)
+    a = Tensor(np.random.randn(8, 16), requires_grad=True)
+    b = Tensor(np.random.randn(16), requires_grad=True)
+    
+    # Test Addition
+    add_func = AddBackward(a, b)
+    grad_a, grad_b = add_func.apply(np.ones((8, 16)))
+    assert grad_b.shape == (16,), f"AddBackward: Expected (16,), got {grad_b.shape}"
+    
+    # Test Multiplication
+    mul_func = MulBackward(a, b)
+    grad_a, grad_b = mul_func.apply(np.ones((8, 16)))
+    assert grad_b.shape == (16,), f"MulBackward: Expected (16,), got {grad_b.shape}"
+    
+    # Test Subtraction
+    sub_func = SubBackward(a, b)
+    grad_a, grad_b = sub_func.apply(np.ones((8, 16)))
+    assert grad_b.shape == (16,), f"SubBackward: Expected (16,), got {grad_b.shape}"
+    
+    # Test Division
+    div_func = DivBackward(a, b)
+    grad_a, grad_b = div_func.apply(np.ones((8, 16)))
+    assert grad_b.shape == (16,), f"DivBackward: Expected (16,), got {grad_b.shape}"
+    
+    print("  ✓ All operations handle broadcasting correctly")
+    
+    # Scenario 5: Real-world case - Linear layer gradient
+    # Simulates: output = input @ weight + bias
+    # where bias is (out_features,) and output is (batch, out_features)
+    batch_size, out_features = 32, 128
+    output_grad = np.random.randn(batch_size, out_features)
+    bias = Tensor(np.zeros(out_features), requires_grad=True)
+    
+    # In real Linear layer, bias gradient comes from output gradient
+    add_func = AddBackward(
+        Tensor(np.zeros((batch_size, out_features)), requires_grad=True),
+        bias
+    )
+    _, grad_bias = add_func.apply(output_grad)
+    
+    assert grad_bias.shape == (out_features,), \
+        f"Linear layer bias: Expected ({out_features},), got {grad_bias.shape}"
+    
+    # Verify gradient is sum over batch
+    expected = output_grad.sum(axis=0)
+    assert np.allclose(grad_bias, expected), \
+        "Bias gradient should equal sum over batch dimension"
+    
+    print("  ✓ Real-world Linear layer scenario works")
+    
+    print("✅ Broadcasting gradient tests pass!")
+
+if __name__ == "__main__":
+    test_unit_broadcast_gradients()
 
 # %% [markdown]
 """
