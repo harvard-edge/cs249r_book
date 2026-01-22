@@ -42,19 +42,43 @@ jobs:
           script: |
             const body = context.payload.comment.body;
 
-            // Pattern: @all-contributors please add @username for type1, type2
-            // Also support: @all-contributors add @username for type1, type2
-            const pattern = /@all-contributors\s+(?:please\s+)?add\s+@(\w+)\s+for\s+(.+)/i;
-            const match = body.match(pattern);
+            // Valid projects
+            const validProjects = ['book', 'tinytorch', 'kits', 'labs'];
 
-            if (!match) {
-              console.log('No valid add command found');
-              core.setOutput('should_run', 'false');
-              return;
+            // Valid contribution types
+            const validTypes = [
+              'bug', 'code', 'doc', 'design', 'ideas', 'review', 'test',
+              'tool', 'tutorial', 'maintenance', 'infra', 'platform',
+              'research', 'translation', 'video', 'question', 'talk',
+              'promotion', 'example', 'content', 'data', 'security',
+              'financial', 'fundingfinding', 'eventorganizing', 'usertesting'
+            ];
+
+            // Pattern 1: Explicit project - @all-contributors please add @user for bug in tinytorch
+            // Pattern 2: No project - @all-contributors please add @user for bug, code
+            const patternWithProject = /@all-contributors\s+(?:please\s+)?add\s+@(\w+)\s+for\s+(.+?)\s+in\s+(book|tinytorch|kits|labs)/i;
+            const patternBasic = /@all-contributors\s+(?:please\s+)?add\s+@(\w+)\s+for\s+(.+)/i;
+
+            let username, typesRaw, explicitProject;
+
+            const matchWithProject = body.match(patternWithProject);
+            if (matchWithProject) {
+              username = matchWithProject[1];
+              typesRaw = matchWithProject[2];
+              explicitProject = matchWithProject[3].toLowerCase();
+              console.log('Matched pattern with explicit project');
+            } else {
+              const matchBasic = body.match(patternBasic);
+              if (!matchBasic) {
+                console.log('No valid add command found');
+                core.setOutput('should_run', 'false');
+                return;
+              }
+              username = matchBasic[1];
+              typesRaw = matchBasic[2];
+              explicitProject = null;
+              console.log('Matched basic pattern, will auto-detect project');
             }
-
-            const username = match[1];
-            const typesRaw = match[2];
 
             // Parse contribution types (comma or "and" separated)
             const types = typesRaw
@@ -64,46 +88,44 @@ jobs:
               .map(t => t.trim().replace(/[^a-z]/g, ''))
               .filter(t => t.length > 0);
 
-            // Valid contribution types
-            const validTypes = [
-              'bug', 'code', 'doc', 'design', 'ideas', 'review', 'test',
-              'tool', 'tutorial', 'maintenance', 'infra', 'platform',
-              'research', 'translation', 'video', 'question', 'talk',
-              'promotion', 'example', 'content', 'data', 'security',
-              'financial', 'fundingFinding', 'eventOrganizing', 'userTesting'
-            ];
-
             const filteredTypes = types.filter(t => validTypes.includes(t));
 
             if (filteredTypes.length === 0) {
-              console.log(`No valid contribution types found in: ${typesRaw}`);
+              console.log('No valid contribution types found in: ' + typesRaw);
               core.setOutput('should_run', 'false');
               return;
             }
 
-            // Determine project from labels or title
-            const issue = context.payload.issue;
-            const labels = issue.labels.map(l => l.name.toLowerCase());
-            const title = issue.title.toLowerCase();
-            const bodyText = issue.body ? issue.body.toLowerCase() : '';
-
+            // Determine project: explicit > labels > title > body > default
             let project = 'book';  // default
 
-            if (labels.some(l => l.includes('tinytorch')) ||
-                title.includes('tinytorch') || title.includes('tito') ||
-                bodyText.includes('tinytorch/')) {
-              project = 'tinytorch';
-            } else if (labels.some(l => l.includes('kits')) ||
-                       title.includes('kits') || bodyText.includes('kits/')) {
-              project = 'kits';
-            } else if (labels.some(l => l.includes('labs')) ||
-                       title.includes('labs') || bodyText.includes('labs/')) {
-              project = 'labs';
+            if (explicitProject && validProjects.includes(explicitProject)) {
+              project = explicitProject;
+              console.log('Using explicit project from command: ' + project);
+            } else {
+              // Auto-detect from issue context
+              const issue = context.payload.issue;
+              const labels = issue.labels.map(l => l.name.toLowerCase());
+              const title = issue.title.toLowerCase();
+              const bodyText = issue.body ? issue.body.toLowerCase() : '';
+
+              if (labels.some(l => l.includes('tinytorch')) ||
+                  title.includes('tinytorch') || title.includes('tito') ||
+                  bodyText.includes('tinytorch/')) {
+                project = 'tinytorch';
+              } else if (labels.some(l => l.includes('kits')) ||
+                         title.includes('kits') || bodyText.includes('kits/')) {
+                project = 'kits';
+              } else if (labels.some(l => l.includes('labs')) ||
+                         title.includes('labs') || bodyText.includes('labs/')) {
+                project = 'labs';
+              }
+              console.log('Auto-detected project: ' + project);
             }
 
-            console.log(`Username: ${username}`);
-            console.log(`Types: ${filteredTypes.join(', ')}`);
-            console.log(`Project: ${project}`);
+            console.log('Username: ' + username);
+            console.log('Types: ' + filteredTypes.join(', '));
+            console.log('Project: ' + project);
 
             core.setOutput('should_run', 'true');
             core.setOutput('username', username);
@@ -298,16 +320,19 @@ jobs:
               "**Usage:**",
               "```",
               "@all-contributors please add @username for bug, code, doc",
+              "@all-contributors please add @username for bug in tinytorch",
               "```",
               "",
               "**Valid contribution types:**",
               "bug, code, doc, design, ideas, review, test, tool, tutorial, maintenance, infra, platform, research",
               "",
-              "**Project detection:**",
-              "- Add `tinytorch` label or mention tinytorch in the issue",
-              "- Add `kits` label or mention kits in the issue",
-              "- Add `labs` label or mention labs in the issue",
-              "- Otherwise defaults to `book`"
+              "**Projects:** book, tinytorch, kits, labs",
+              "",
+              "**Auto-detection (if no project specified):**",
+              "- Issue has `tinytorch` label or title mentions tinytorch -> tinytorch",
+              "- Issue has `kits` label or title mentions kits -> kits",
+              "- Issue has `labs` label or title mentions labs -> labs",
+              "- Otherwise -> book (default)"
             ].join('\n');
 
             await github.rest.issues.createComment({
