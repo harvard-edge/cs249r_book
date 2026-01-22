@@ -1,0 +1,128 @@
+# =============================================================================
+# AUTO-LABEL WORKFLOW (LLM-Powered)
+# =============================================================================
+# Automatically labels issues and PRs based on content analysis using Ollama.
+#
+# When an issue or PR is created, this workflow:
+#   1. Analyzes the title and body with a small LLM
+#   2. Determines which project(s) it relates to (book, tinytorch, kits, labs)
+#   3. Identifies the type (bug, feature, docs, question)
+#   4. Applies the appropriate labels automatically
+#
+# This enables the all-contributors workflow to auto-detect projects correctly.
+# =============================================================================
+
+name: '🏷️ Auto Label'
+
+on:
+  issues:
+    types: [opened]
+  pull_request:
+    types: [opened]
+
+jobs:
+  auto-label:
+    name: Auto Label with LLM
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+
+      - name: Analyze with LLM
+        uses: ai-action/ollama-action@v2
+        id: llm
+        with:
+          model: llama3.2:1b
+          prompt: |
+            Analyze this GitHub issue/PR and return ONLY a JSON object (no other text).
+
+            Title: ${{ github.event.issue.title || github.event.pull_request.title }}
+            Body: ${{ github.event.issue.body || github.event.pull_request.body }}
+
+            Determine:
+            1. project: Which project does this relate to? Options: "book", "tinytorch", "kits", "labs", or "general"
+               - book: ML Systems textbook content, chapters, Quarto files
+               - tinytorch: TinyTorch framework, tito CLI, modules, tensors, autograd
+               - kits: Hardware kits, Arduino, sensors, embedded
+               - labs: Lab exercises, assignments
+               - general: Repository-wide, CI/CD, or unclear
+
+            2. type: What type of issue is this? Options: "bug", "feature", "docs", "question", "enhancement"
+
+            Return ONLY valid JSON like: {"project": "tinytorch", "type": "bug"}
+
+      - name: Parse LLM response
+        id: parse
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const response = `${{ steps.llm.outputs.response }}`;
+            console.log('LLM response:', response);
+
+            // Try to extract JSON from response
+            let result = { project: 'book', type: 'enhancement' };
+
+            try {
+              // Find JSON in response (LLM might add extra text)
+              const jsonMatch = response.match(/\{[^}]+\}/);
+              if (jsonMatch) {
+                result = JSON.parse(jsonMatch[0]);
+              }
+            } catch (e) {
+              console.log('Failed to parse JSON, using defaults:', e.message);
+            }
+
+            // Validate project
+            const validProjects = ['book', 'tinytorch', 'kits', 'labs', 'general'];
+            if (!validProjects.includes(result.project)) {
+              result.project = 'book';
+            }
+
+            // Validate type
+            const validTypes = ['bug', 'feature', 'docs', 'question', 'enhancement'];
+            if (!validTypes.includes(result.type)) {
+              result.type = 'enhancement';
+            }
+
+            console.log('Parsed result:', result);
+            core.setOutput('project', result.project);
+            core.setOutput('type', result.type);
+
+      - name: Apply labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const project = '${{ steps.parse.outputs.project }}';
+            const type = '${{ steps.parse.outputs.type }}';
+            const isIssue = '${{ github.event_name }}' === 'issues';
+            const number = isIssue
+              ? context.payload.issue.number
+              : context.payload.pull_request.number;
+
+            const labels = [];
+
+            // Add project label (skip if general)
+            if (project !== 'general') {
+              labels.push(project);
+            }
+
+            // Add type label
+            labels.push(type);
+
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: number,
+                labels: labels
+              });
+              console.log(`Applied labels: ${labels.join(', ')}`);
+            }

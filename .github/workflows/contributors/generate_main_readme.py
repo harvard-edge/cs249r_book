@@ -27,7 +27,7 @@ CONTRIBUTION_EMOJIS = {
     "content": "🖋",         # Content Creator
     "data": "🗄️",           # Data Wrangler
     "design": "🎨",          # Design Artist
-    "doc": "✍️",             # Documentation Hero
+    "doc": "✍️",             # Word Wizard
     "eventOrganizing": "🎪", # Event Organizer
     "example": "💡",         # Example Creator
     "financial": "💰",       # Financial Supporter
@@ -57,7 +57,7 @@ CONTRIBUTION_EMOJIS = {
 CONTRIBUTION_LEGEND = {
     "bug": ("🪲", "Bug Hunter"),
     "code": ("🧑‍💻", "Code Contributor"),
-    "doc": ("✍️", "Documentation Hero"),
+    "doc": ("✍️", "Word Wizard"),
     "design": ("🎨", "Design Artist"),
     "ideas": ("🧠", "Idea Generator"),
     "review": ("🔎", "Code Reviewer"),

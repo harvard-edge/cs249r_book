@@ -33,7 +33,7 @@ EMOJI_KEY = {
     "content": "🖋",         # Content Creator
     "data": "🗄️",           # Data Wrangler
     "design": "🎨",          # Design Artist
-    "doc": "✍️",             # Documentation Hero
+    "doc": "✍️",             # Word Wizard
     "eventOrganizing": "🎪", # Event Organizer
     "example": "💡",         # Example Creator
     "financial": "💰",       # Financial Supporter
