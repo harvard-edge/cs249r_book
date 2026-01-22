@@ -78,7 +78,7 @@ def load_config(path: Path) -> dict:
         return json.load(f)
 
 
-def generate_contributor_cell(contributor: dict, show_badges: bool = True) -> str:
+def generate_contributor_cell(contributor: dict, show_badges: bool = True, image_size: int = 50, width_pct: str = "11.11%") -> str:
     """Generate HTML for a single contributor cell."""
     login = contributor.get("login", "")
     name = contributor.get("name", login)
@@ -92,11 +92,18 @@ def generate_contributor_cell(contributor: dict, show_badges: bool = True) -> st
         badges = " ".join(CONTRIBUTION_EMOJIS.get(c, "") for c in contributions)
         badges = f"<br />{badges}" if badges.strip() else ""
 
-    return f'''      <td align="center" valign="top" width="14.28%"><a href="{profile}"><img src="{avatar_url}?v=4?s=80" width="80px;" alt="{name}"/><br /><sub><b>{name}</b></sub></a>{badges}</td>'''
+    return f'''      <td align="center" valign="top" width="{width_pct}"><a href="{profile}"><img src="{avatar_url}?v=4?s={image_size}" width="{image_size}px;" alt="{name}"/><br /><sub><b>{name}</b></sub></a>{badges}</td>'''
 
 
-def generate_contributor_table(contributors: list, show_badges: bool = True) -> str:
-    """Generate an HTML table for contributors."""
+def generate_contributor_table(contributors: list, show_badges: bool = True, cols: int = 9, image_size: int = 50) -> str:
+    """Generate an HTML table for contributors.
+
+    Args:
+        contributors: List of contributor dicts
+        show_badges: Whether to show contribution badges
+        cols: Number of columns per row (default 9 for compact display)
+        image_size: Size of avatar images in pixels (default 50 for compact display)
+    """
     if not contributors:
         return "<p><em>Coming soon!</em></p>"
 
@@ -107,14 +114,17 @@ def generate_contributor_table(contributors: list, show_badges: bool = True) -> 
         reverse=True
     )
 
+    # Calculate width percentage based on columns
+    width_pct = f"{100/cols:.2f}%"
+
     rows = []
     row_cells = []
 
     for i, contributor in enumerate(sorted_contributors):
-        row_cells.append(generate_contributor_cell(contributor, show_badges))
+        row_cells.append(generate_contributor_cell(contributor, show_badges, image_size, width_pct))
 
-        # 7 contributors per row
-        if len(row_cells) == 7:
+        # Dynamic columns per row
+        if len(row_cells) == cols:
             rows.append("    <tr>\n" + "\n".join(row_cells) + "\n    </tr>")
             row_cells = []
 
