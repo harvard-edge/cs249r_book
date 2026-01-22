@@ -151,14 +151,18 @@ def main():
     parser.add_argument("--project", choices=list(PROJECTS.keys()), help="Process specific project")
     parser.add_argument("--update", action="store_true", help="Update README files")
     args = parser.parse_args()
-    
+
+    # Find repo root (this script is in .github/workflows/contributors/)
+    script_dir = Path(__file__).parent
+    repo_root = script_dir.parent.parent.parent
+
     if args.project:
         projects = {args.project: PROJECTS[args.project]}
     else:
         projects = PROJECTS
-    
-    for name, path in projects.items():
-        process_project(name, path, args.update)
+
+    for name, rel_path in projects.items():
+        process_project(name, str(repo_root / rel_path), args.update)
 
 
 if __name__ == "__main__":
