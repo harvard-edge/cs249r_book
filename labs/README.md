@@ -67,6 +67,33 @@ Labs are under active development. To be notified when they launch:
 
 ---
 
+## Contributors
+
+Thanks to these wonderful people who helped build the labs ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />💻 🎨 📖</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+**Recognize a contributor:** Comment on any issue or PR:
+```
+@all-contributors please add @username for code, tutorial, test, or doc
+```
+
+---
+
 <div align="center">
 
 **Read. Explore. Build.** *(Labs coming soon)*
