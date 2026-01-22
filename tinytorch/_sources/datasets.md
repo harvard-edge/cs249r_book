@@ -46,7 +46,7 @@ TinyTorch uses a two-tier dataset approach:
 
 ### TinyDigits - Handwritten Digit Recognition
 
-<div style="background: #fff5f5; border-left: 4px solid #e74c3c; padding: 1.5rem; margin: 1.5rem 0;">
+<div style="background: #fff5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #e74c3c; margin: 1.5rem 0;">
 
 **Location**: `datasets/tinydigits/`
 **Size**: ~310 KB
@@ -79,7 +79,7 @@ X_train, y_train, X_test, y_test = load_tinydigits()
 
 ### TinyTalks - Conversational Q&A Dataset
 
-<div style="background: #f0fff4; border-left: 4px solid #22c55e; padding: 1.5rem; margin: 1.5rem 0;">
+<div style="background: #f0fff4; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #22c55e; margin: 1.5rem 0;">
 
 **Location**: `datasets/tinytalks/`
 **Size**: ~40 KB
@@ -127,7 +127,7 @@ These standard benchmarks download automatically when you run relevant milestone
 
 ### MNIST - Handwritten Digit Classification
 
-<div style="background: #fffbeb; border-left: 4px solid #f59e0b; padding: 1.5rem; margin: 1.5rem 0;">
+<div style="background: #fffbeb; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
 
 **Downloads to**: `milestones/datasets/mnist/`
 **Size**: ~10 MB (compressed)
@@ -153,7 +153,7 @@ These standard benchmarks download automatically when you run relevant milestone
 
 ### CIFAR-10 - Natural Image Classification
 
-<div style="background: #fdf2f8; border-left: 4px solid #ec4899; padding: 1.5rem; margin: 1.5rem 0;">
+<div style="background: #fdf2f8; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #ec4899; margin: 1.5rem 0;">
 
 **Downloads to**: `milestones/datasets/cifar-10/`
 **Size**: ~170 MB (compressed)
