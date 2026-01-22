@@ -268,6 +268,38 @@ Your commits will be included in the next release with appropriate version bump.
 
 ---
 
+## 🏆 Contributor Recognition
+
+We use [All Contributors](https://allcontributors.org) to recognize everyone who helps improve TinyTorch.
+
+### How to Recognize a Contributor
+
+After merging a PR or resolving an issue, comment:
+
+```
+@all-contributors please add @username for TYPE
+```
+
+### Contribution Types
+
+| Type | Emoji | Use For |
+|------|-------|---------|
+| `bug` | 🐛 | Found a bug or issue |
+| `code` | 💻 | Submitted code |
+| `doc` | 📖 | Improved documentation |
+| `ideas` | 💡 | Suggested improvements |
+| `test` | 🧪 | Added tests |
+| `review` | 👀 | Reviewed PRs |
+
+### Examples
+
+```
+@all-contributors please add @AmirAlasady for bug
+@all-contributors please add @student123 for code, doc
+```
+
+---
+
 **Remember**: TinyTorch is about teaching students to understand ML systems by building them. Every contribution should enhance that educational mission! 🎓🔥
 
 **Questions?** Check the docs or open a GitHub Discussion.

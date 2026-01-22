@@ -88,3 +88,32 @@ Opening an early PR is encouraged. This will allow us to provide feedback on you
 
 For a more detailed guide on the CS249r documentation process and peer review,
 check [here](https://docs.google.com/document/d/1izDoWwFLnV8XK2FYCl23_9KYL_7EQ5OWLo-PCNUGle0).
+
+## Contributor Recognition
+
+We use [All Contributors](https://allcontributors.org) to recognize everyone who helps improve the book.
+
+### How to Recognize a Contributor
+
+After merging a PR or resolving an issue, comment:
+
+```
+@all-contributors please add @username for TYPE
+```
+
+### Contribution Types
+
+| Type | Emoji | Use For |
+|------|-------|---------|
+| `doc` | 📖 | Wrote or improved content |
+| `review` | 👀 | Reviewed chapters or PRs |
+| `translation` | 🌍 | Translated content |
+| `design` | 🎨 | Created diagrams or figures |
+| `bug` | 🐛 | Found errors or typos |
+| `ideas` | 💡 | Suggested improvements |
+
+### Example
+
+```
+@all-contributors please add @contributor for doc, review
+```
