@@ -144,20 +144,9 @@ The workflow will automatically:
 
 ## Contribution Types
 
-| Type | Emoji | Description |
-|------|-------|-------------|
-| bug | 🐛 | Bug reports |
-| code | 💻 | Code contributions |
-| doc | 📖 | Documentation |
-| design | 🎨 | Design work |
-| ideas | 💡 | Ideas and suggestions |
-| review | 👀 | Code review |
-| test | 🧪 | Testing |
-| tool | 🔧 | Tools and infrastructure |
-| tutorial | ✅ | Tutorials |
-| maintenance | 🚧 | Maintenance |
+We use the standard [All Contributors emoji key](https://allcontributors.org/docs/en/emoji-key).
 
-See [All Contributors emoji key](https://allcontributors.org/docs/en/emoji-key) for full list.
+Common types: `bug`, `code`, `doc`, `design`, `ideas`, `review`, `test`, `tool`, `tutorial`, `maintenance`, `infra`, `research`
 
 ## File Structure
 

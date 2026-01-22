@@ -22,6 +22,7 @@ PROJECTS = {
 }
 
 # Emoji mapping for contribution types
+# See: https://allcontributors.org/docs/en/emoji-key
 EMOJI_KEY = {
     "bug": "🐛",
     "code": "💻",
@@ -29,7 +30,7 @@ EMOJI_KEY = {
     "design": "🎨",
     "ideas": "💡",
     "review": "👀",
-    "test": "🧪",
+    "test": "⚠️",
     "tool": "🔧",
     "translation": "🌍",
     "tutorial": "✅",
@@ -40,6 +41,16 @@ EMOJI_KEY = {
     "platform": "📦",
     "projectManagement": "📆",
     "research": "🔬",
+    "talk": "📢",
+    "promotion": "📣",
+    "example": "💡",
+    "content": "🖋",
+    "data": "🔣",
+    "security": "🛡️",
+    "financial": "💵",
+    "fundingFinding": "🔍",
+    "eventOrganizing": "📋",
+    "userTesting": "📓",
 }
 
 
