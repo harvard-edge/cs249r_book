@@ -38,7 +38,7 @@ class TestHelpConsistency:
 
     def test_all_command_helps_mention_tito(self):
         """Verify all help texts mention 'tito' command."""
-        commands = ['setup', 'system', 'module', 'checkpoint', 'milestones']
+        commands = ['setup', 'system', 'module', 'milestone']
 
         for cmd in commands:
             help_text = self.get_command_help(cmd)
@@ -68,7 +68,7 @@ class TestHelpConsistency:
         help_output = help_result.stdout
 
         # Should both mention key commands
-        for cmd in ['module', 'milestones', 'setup']:
+        for cmd in ['module', 'milestone', 'setup']:
             assert cmd in bare_output, f"'{cmd}' missing from bare tito"
             assert cmd in help_output, f"'{cmd}' missing from tito -h"
 
@@ -207,8 +207,8 @@ class TestCommandDocumentation:
             f"Add them to welcome screen or help text"
         )
 
-    def test_milestones_properly_documented(self):
-        """Specifically test that milestones command is documented."""
+    def test_milestone_properly_documented(self):
+        """Specifically test that milestone command is documented."""
         # This addresses the user's concern about progress tracking
         welcome_result = subprocess.run(
             [sys.executable, '-m', 'tito.main'],
@@ -226,21 +226,21 @@ class TestCommandDocumentation:
 
         combined = welcome_result.stdout + help_result.stdout
 
-        assert 'milestones' in combined.lower(), \
-            "milestones command should be documented"
+        assert 'milestone' in combined.lower(), \
+            "milestone command should be documented"
 
         # Check it has a description
-        milestones_help = subprocess.run(
-            [sys.executable, '-m', 'tito.main', 'milestones', '-h'],
+        milestone_help = subprocess.run(
+            [sys.executable, '-m', 'tito.main', 'milestone', '-h'],
             cwd=self.project_root,
             capture_output=True,
             text=True
         )
 
-        assert 'progress' in milestones_help.stdout.lower() or \
-               'track' in milestones_help.stdout.lower() or \
-               'milestone' in milestones_help.stdout.lower(), \
-            "milestones help should explain its purpose"
+        assert 'progress' in milestone_help.stdout.lower() or \
+               'track' in milestone_help.stdout.lower() or \
+               'milestone' in milestone_help.stdout.lower(), \
+            "milestone help should explain its purpose"
 
 
 if __name__ == '__main__':
