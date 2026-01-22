@@ -142,6 +142,7 @@ Thanks to these wonderful people who helped improve the hardware kits ([emoji ke
 <table>
   <tbody>
     <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Mjrovai"><img src="https://avatars.githubusercontent.com/Mjrovai?v=4?s=80" width="80px;" alt="Marcelo Rovai"/><br /><sub><b>Marcelo Rovai</b></sub></a><br />📖 💻 🎨 ✅</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🐛 💻 🎨 📖 🧪 🔧</td>
     </tr>
   </tbody>
@@ -156,13 +157,6 @@ Thanks to these wonderful people who helped improve the hardware kits ([emoji ke
 ```
 @all-contributors please add @username for tool, test, video, or doc
 ```
-
----
-
-## Authors
-
-- **Marcelo Rovai** - Primary author
-- **Vijay Janapa Reddi** - Harvard University
 
 ---
 

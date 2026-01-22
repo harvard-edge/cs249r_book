@@ -1,0 +1,106 @@
+name: '👥 Update Contributors'
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+# =============================================================================
+# CONTRIBUTOR UPDATE WORKFLOW
+# =============================================================================
+# Updates contributor lists across all projects:
+# - Root .all-contributorsrc (from GitHub commit history)
+# - Main README.md (sectioned by project: Book, TinyTorch, Kits, Labs)
+# - Per-project README.md files (book/, tinytorch/, kits/, labs/)
+#
+# Each project has its own .all-contributorsrc that feeds into the main README.
+# =============================================================================
+
+jobs:
+  update-contributors:
+    name: Update Contributors List
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ${{ vars.BOOK_DEPS }}/requirements.txt
+          pip install PyGithub>=1.55
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update root contributors config
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python ${{ github.workspace }}/.github/workflows/contributors/update_contributors.py
+
+      - name: Generate sectioned main README
+        run: python ${{ github.workspace }}/.github/workflows/contributors/generate_main_readme.py
+
+      - name: Generate per-project README tables
+        run: |
+          # Generate tables for each project README from their configs
+          python ${{ github.workspace }}/.github/workflows/contributors/generate_readme_tables.py --update 2>/dev/null || true
+
+      - name: Check for changes
+        id: update
+        run: |
+          FILES_TO_CHECK=(
+            ".all-contributorsrc"
+            "README.md"
+            "book/.all-contributorsrc"
+            "book/README.md"
+            "tinytorch/.all-contributorsrc"
+            "tinytorch/README.md"
+            "kits/.all-contributorsrc"
+            "kits/README.md"
+            "labs/.all-contributorsrc"
+            "labs/README.md"
+            "${{ vars.BOOK_QUARTO }}/contents/frontmatter/acknowledgements/acknowledgements.qmd"
+          )
+          
+          if git status "${FILES_TO_CHECK[@]}" --porcelain 2>/dev/null | grep .; then
+            echo "changes_made=true" >> $GITHUB_OUTPUT
+          else
+            echo "changes_made=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit Changes
+        if: steps.update.outputs.changes_made == 'true'
+        run: |
+          BRANCH_NAME=${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD)}
+
+          # Add all contributor-related files
+          git add -A .all-contributorsrc README.md \
+            book/.all-contributorsrc book/README.md \
+            tinytorch/.all-contributorsrc tinytorch/README.md \
+            kits/.all-contributorsrc kits/README.md \
+            labs/.all-contributorsrc labs/README.md \
+            ${{ vars.BOOK_QUARTO }}/contents/frontmatter/acknowledgements/acknowledgements.qmd \
+            2>/dev/null || true
+          
+          git commit -m "Update contributors list [skip ci]"
+          git pull --rebase origin "$BRANCH_NAME"
+          git push origin "$BRANCH_NAME"
+
+      - name: Report Status
+        run: |
+          if [ "${{ steps.update.outputs.changes_made }}" = "true" ]; then
+            echo "✅ Contributors list has been updated"
+          else
+            echo "ℹ️ No changes were needed for contributors list"
+          fi
