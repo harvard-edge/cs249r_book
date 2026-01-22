@@ -9,6 +9,7 @@ import ssl
 import time
 import socket
 import webbrowser
+import uuid
 from pathlib import Path
 from typing import Optional, Dict
 from urllib.parse import urlparse, parse_qs
@@ -58,7 +59,8 @@ def save_credentials(data: Dict[str, str]) -> None:
     from tito.core.console import get_console
     _ensure_dir()
     p = _credentials_path()
-    tmp = p.with_suffix(".tmp")
+    # Use a unique temporary file to prevent race conditions (e.g. during login callback)
+    tmp = p.parent / f"credentials_{uuid.uuid4().hex}.tmp"
     with tmp.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
         f.flush()

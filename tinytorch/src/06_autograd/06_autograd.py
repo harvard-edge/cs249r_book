@@ -240,7 +240,6 @@ class Function:
     **Key Concepts:**
     - **saved_tensors**: Store inputs needed for backward pass
     - **apply()**: Compute gradients using chain rule
-    - **next_functions**: Track computation graph connections
 
     **Example Usage:**
     ```python
@@ -259,15 +258,6 @@ class Function:
             *tensors: Input tensors that will be saved for backward pass
         """
         self.saved_tensors = tensors
-        self.next_functions = []
-
-        # Build computation graph connections
-        for t in tensors:
-            if isinstance(t, Tensor) and t.requires_grad:
-                # Check if this tensor was created by another operation
-                # _grad_fn is only present if autograd is enabled and tensor came from an operation
-                if getattr(t, '_grad_fn', None) is not None:
-                    self.next_functions.append(t._grad_fn)
 
     def apply(self, grad_output):
         """

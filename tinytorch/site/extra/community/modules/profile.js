@@ -1,5 +1,6 @@
 import { SUPABASE_URL, NETLIFY_URL, getBasePath } from './config.js';
 import { forceLogin } from './state.js?v=2';
+import { initCandle } from './candle.js';
 
 export async function geocodeAndSetCoordinates(location) {
     const latInput = document.getElementById('profileLatitude');
@@ -33,10 +34,19 @@ export async function geocodeAndSetCoordinates(location) {
     }
 }
 
+let candleInitialized = false;
+
 export function openProfileModal() {
     const profileOverlay = document.getElementById('profileOverlay');
     profileOverlay.classList.add('active');
     fetchUserProfile();
+
+    if (!candleInitialized) {
+        setTimeout(() => {
+            initCandle('profileCandleCanvas');
+            candleInitialized = true;
+        }, 100);
+    }
 }
 
 export function closeProfileModal() {
@@ -225,6 +235,7 @@ function populateProfileForm(data) {
     const profileSummaryTextarea = document.getElementById('profileSummary');
     const profileLocationInput = document.getElementById('profileLocation');
     const profileInstitutionInput = document.getElementById('profileInstitution');
+    const profileRoleInput = document.getElementById('profileRole');
     const profileWebsitesInput = document.getElementById('profileWebsites');
     const profileMailingList = document.getElementById('profileMailingList');
     const profileLatitude = document.getElementById('profileLatitude');
@@ -237,6 +248,10 @@ function populateProfileForm(data) {
     profileLocationInput.value = data.location || '';
     if (profileLatitude) profileLatitude.value = data.latitude || '';
     if (profileLongitude) profileLongitude.value = data.longitude || '';
+    
+    if (profileRoleInput) {
+        profileRoleInput.value = data.role || 'student';
+    }
 
     profileInstitutionInput.value = Array.isArray(data.institution) ? data.institution.join(', ') : (data.institution || '');
 
@@ -261,6 +276,7 @@ export async function handleProfileUpdate(e) {
     const profileFullNameInput = document.getElementById('profileFullName');
     const profileSummaryTextarea = document.getElementById('profileSummary');
     const profileLocationInput = document.getElementById('profileLocation');
+    const profileRoleInput = document.getElementById('profileRole');
     const profileInstitutionInput = document.getElementById('profileInstitution');
     const profileWebsitesInput = document.getElementById('profileWebsites');
     const profileMailingList = document.getElementById('profileMailingList');
@@ -271,6 +287,7 @@ export async function handleProfileUpdate(e) {
         display_name: profileDisplayNameInput.value,
         full_name: profileFullNameInput.value,
         summary: profileSummaryTextarea.value,
+        role: profileRoleInput ? profileRoleInput.value : 'student',
         location: profileLocationInput.value,
         institution: profileInstitutionInput.value.split(',').map(s => s.trim()).filter(s => s),
         website: profileWebsitesInput.value.split(',').map(s => s.trim()).filter(s => s),
