@@ -499,16 +499,10 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 ---
 
-**Recognize a contributor:** Comment on any issue or PR:
-```
-@all-contributors please add @username for doc, code, bug, or ideas
-```
----
-
 <div align="center">
 
 **[⭐ Star us on GitHub](https://github.com/harvard-edge/cs249r_book#support-this-work) • [✉️ Subscribe](https://buttondown.email/mlsysbook) • [💬 Join discussions](https://github.com/harvard-edge/cs249r_book/discussions) • [🌐 Visit mlsysbook.ai](https://mlsysbook.ai)**
 
-*Built with dedication by the MLSysBook community.*
+**Made with ❤️ for AI learners worldwide**
 
 </div>

@@ -227,14 +227,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
-<!-- LABS-CONTRIBUTORS-END -->
-
----
-
-**Recognize a contributor:** Comment on any issue or PR:
-```
-@all-contributors please add @username for doc, code, bug, or ideas
-```'''
+<!-- LABS-CONTRIBUTORS-END -->'''
 
 
 def update_readme(repo_root: Path, dry_run: bool = False) -> bool:
