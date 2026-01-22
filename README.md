@@ -289,9 +289,9 @@ The textbook content (chapters, figures, explanations) is educational material t
 
 Thanks goes to these wonderful people who have contributed to making this resource better for everyone!
 
-**Legend:** 🪲 Bug Hunter · 🧑‍💻 Code Contributor · ✍️ Documentation Hero · 🎨 Design Artist · 🧠 Idea Generator · 🔎 Code Reviewer · 🧪 Test Engineer · 🛠️ Tool Builder · 🏗️ Infrastructure Builder · 🔩 Maintenance Master · 🔬 Researcher · 📖 Tutorial Author
+**Legend:** 🪲 Bug Hunter · 🧑‍💻 Code Contributor · ✍️ Word Wizard · 🎨 Design Artist · 🧠 Idea Generator · 🔎 Code Reviewer · 🧪 Test Engineer · 🛠️ Tool Builder · 🏗️ Infrastructure Builder · 🔩 Maintenance Master · 🔬 Researcher · 📖 Tutorial Author
 
-### 📖 Textbook Contributors (102)
+### 📖 Textbook Contributors
 
 <!-- BOOK-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
@@ -439,7 +439,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 ---
 
-### 🔥 TinyTorch Contributors (9)
+### 🔥 TinyTorch Contributors
 
 <!-- TINYTORCH-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
@@ -468,7 +468,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 ---
 
-### 🛠️ Hardware Kits Contributors (2)
+### 🛠️ Hardware Kits Contributors
 
 <!-- KITS-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
@@ -488,7 +488,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 ---
 
-### 🧪 Labs Contributors (1)
+### 🧪 Labs Contributors
 
 <!-- LABS-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
