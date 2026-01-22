@@ -180,19 +180,32 @@ jobs:
 
       - name: Parse and apply labels
         uses: actions/github-script@v7
+        env:
+          LLM_RESPONSE: ${{ steps.llm.outputs.response }}
+          ALL_LABELS_JSON: ${{ steps.fetch-labels.outputs.all_labels_json }}
+          DEFAULT_AREA: ${{ steps.fetch-labels.outputs.default_area }}
+          DEFAULT_TYPE: ${{ steps.fetch-labels.outputs.default_type }}
+          ISSUE_NUMBER: ${{ steps.get-details.outputs.number }}
         with:
           script: |
-            const response = `${{ steps.llm.outputs.response }}`;
+            const response = process.env.LLM_RESPONSE || '';
             console.log('LLM response:', response);
 
             // Get all valid labels from the fetch step
-            const allValidLabels = JSON.parse('${{ steps.fetch-labels.outputs.all_labels_json }}');
-            const defaultArea = '${{ steps.fetch-labels.outputs.default_area }}';
-            const defaultType = '${{ steps.fetch-labels.outputs.default_type }}';
+            const allValidLabels = JSON.parse(process.env.ALL_LABELS_JSON || '[]');
+            const defaultArea = process.env.DEFAULT_AREA || '';
+            const defaultType = process.env.DEFAULT_TYPE || '';
 
             console.log(`Valid labels: ${allValidLabels.length}`);
             console.log(`Default area: ${defaultArea}`);
             console.log(`Default type: ${defaultType}`);
+
+            // Helper to normalize label (add space after colon if missing)
+            const normalizeLabel = (label) => {
+              if (!label) return label;
+              // If label has "prefix:value" without space, add space
+              return label.replace(/^(area|type|format):(?! )/, '$1: ');
+            };
 
             // Parse LLM response
             let result = { area: defaultArea, type: defaultType, other: [] };
@@ -202,9 +215,9 @@ jobs:
               const jsonMatch = response.match(/\{[\s\S]*?\}/);
               if (jsonMatch) {
                 const parsed = JSON.parse(jsonMatch[0]);
-                if (parsed.area) result.area = parsed.area;
-                if (parsed.type) result.type = parsed.type;
-                if (parsed.other) result.other = parsed.other;
+                if (parsed.area) result.area = normalizeLabel(parsed.area);
+                if (parsed.type) result.type = normalizeLabel(parsed.type);
+                if (parsed.other) result.other = parsed.other.map(normalizeLabel);
               }
             } catch (e) {
               console.log('Failed to parse JSON, using defaults:', e.message);
@@ -241,7 +254,7 @@ jobs:
             }
 
             // Apply labels
-            const number = ${{ steps.get-details.outputs.number }};
+            const number = parseInt(process.env.ISSUE_NUMBER, 10);
 
             if (labels.length > 0) {
               console.log(`Applying labels to #${number}: ${labels.join(', ')}`);
