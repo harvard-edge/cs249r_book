@@ -31,13 +31,17 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 def run_tito(args: list, cwd: Optional[Path] = None, timeout: int = 60) -> Tuple[int, str, str]:
     """Run a tito command and return (exit_code, stdout, stderr)."""
+    import os
     cmd = [sys.executable, "-m", "tito.main"] + args
+    env = os.environ.copy()
+    env["TITO_ALLOW_SYSTEM"] = "1"  # Allow running outside venv for tests
     result = subprocess.run(
         cmd,
         cwd=cwd or PROJECT_ROOT,
         capture_output=True,
         text=True,
-        timeout=timeout
+        timeout=timeout,
+        env=env
     )
     return result.returncode, result.stdout, result.stderr
 
@@ -88,8 +92,8 @@ class TestQuickVerification:
 
     @pytest.mark.quick
     def test_milestone_command_help(self):
-        """'tito milestones' shows milestone help."""
-        code, stdout, stderr = run_tito(["milestones"])
+        """'tito milestone' shows milestone help."""
+        code, stdout, stderr = run_tito(["milestone"])
         assert code == 0
         # Should show milestone subcommands
         assert "list" in stdout or "run" in stdout or "status" in stdout
@@ -109,8 +113,8 @@ class TestQuickVerification:
     @pytest.mark.quick
     def test_milestone_list_works(self):
         """'tito milestones list' shows available milestones."""
-        code, stdout, stderr = run_tito(["milestones", "list", "--simple"])
-        assert code == 0, f"milestones list failed: {stderr}"
+        code, stdout, stderr = run_tito(["milestone", "list", "--simple"])
+        assert code == 0, f"milestone list failed: {stderr}"
         # Should show milestone names
         assert "Perceptron" in stdout or "1958" in stdout
 
@@ -255,7 +259,7 @@ class TestMilestoneFlow:
     @pytest.mark.milestone_flow
     def test_milestone_list_shows_all(self):
         """Milestone list shows all available milestones."""
-        code, stdout, stderr = run_tito(["milestones", "list"])
+        code, stdout, stderr = run_tito(["milestone", "list"])
         assert code == 0
 
         # Check for expected milestones
@@ -266,14 +270,14 @@ class TestMilestoneFlow:
     @pytest.mark.milestone_flow
     def test_milestone_info_works(self):
         """'tito milestones info 01' shows milestone details."""
-        code, stdout, stderr = run_tito(["milestones", "info", "01"])
+        code, stdout, stderr = run_tito(["milestone", "info", "01"])
         assert code == 0
         assert "Perceptron" in stdout or "1958" in stdout
 
     @pytest.mark.milestone_flow
     def test_milestone_status_works(self):
         """'tito milestones status' shows progress."""
-        code, stdout, stderr = run_tito(["milestones", "status"])
+        code, stdout, stderr = run_tito(["milestone", "status"])
         assert code == 0
 
     @pytest.mark.milestone_flow
@@ -294,7 +298,7 @@ class TestMilestoneFlow:
         }))
 
         # Try to run milestone 03 (requires many modules)
-        code, stdout, stderr = run_tito(["milestones", "run", "03", "--skip-checks"], timeout=5)
+        code, stdout, stderr = run_tito(["milestone", "run", "03", "--skip-checks"], timeout=5)
 
         # With --skip-checks it might try to run; without it should check prereqs
         # Either way, the command should not crash
@@ -397,7 +401,7 @@ class TestErrorHandling:
     @pytest.mark.quick
     def test_invalid_milestone_handled(self):
         """Invalid milestone IDs are handled gracefully."""
-        code, stdout, stderr = run_tito(["milestones", "info", "99"])
+        code, stdout, stderr = run_tito(["milestone", "info", "99"])
         assert code != 0
         combined = stdout + stderr
         assert "invalid" in combined.lower() or "not found" in combined.lower()
