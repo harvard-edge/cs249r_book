@@ -615,12 +615,15 @@ def train_mlp():
         box=box.DOUBLE
     ))
 
-    # Optional: Batch size experiment
+    # Optional: Batch size experiment (skip in non-interactive mode)
     console.print("\n")
-    run_experiment = input("\n🔬 Run batch size experiment? (y/n): ").lower().strip() == 'y'
-
-    if run_experiment:
-        compare_batch_sizes(train_images, train_labels, test_images, test_labels)
+    try:
+        run_experiment = input("\n🔬 Run batch size experiment? (y/n): ").lower().strip() == 'y'
+        if run_experiment:
+            compare_batch_sizes(train_images, train_labels, test_images, test_labels)
+    except EOFError:
+        # Non-interactive mode (e.g., tito milestone run) - skip experiment
+        pass
 
 
 if __name__ == "__main__":

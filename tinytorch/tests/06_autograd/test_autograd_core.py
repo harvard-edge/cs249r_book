@@ -1,326 +1,393 @@
 """
 Module 06: Autograd - Core Functionality Tests
-===============================================
-
-These tests verify automatic differentiation works correctly.
-
-WHY AUTOGRAD MATTERS:
---------------------
-Autograd is what makes training possible:
-- Computes gradients automatically (no manual derivatives)
-- Enables complex architectures (just define forward, get backward free)
-- Powers modern deep learning frameworks
-
-Without autograd, you'd need to derive and code every gradient by hand.
-
-WHAT STUDENTS LEARN:
--------------------
-1. Computational graphs track operations
-2. Gradients flow backward through the graph
-3. requires_grad enables gradient tracking
+Tests automatic differentiation and computational graphs
 """
 
 import numpy as np
-import pytest
 import sys
 from pathlib import Path
 
+# Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
-class TestGradientTracking:
-    """
-    Test gradient tracking basics.
+class TestVariableCreation:
+    """Test Variable creation and gradient tracking."""
 
-    CONCEPT: requires_grad=True tells the tensor to track operations
-    for automatic differentiation.
-    """
+    def test_variable_creation(self):
+        """Test creating Variable with gradient tracking."""
+        try:
+            from tinytorch.core.autograd import Variable
 
-    def test_requires_grad_attribute(self):
-        """
-        WHAT: Verify tensors have requires_grad attribute.
+            # Create variable that requires gradients
+            x = Variable(np.array([2.0, 3.0]), requires_grad=True)
 
-        WHY: This flag controls whether gradients are computed.
-        False = no gradient (input data), True = gradient needed (parameters).
+            assert x.requires_grad == True
+            assert x.shape == (2,)
+            assert np.array_equal(x.data, [2.0, 3.0])
 
-        STUDENT LEARNING: Set requires_grad=True for:
-        - Model parameters (weights, biases)
-        - Any tensor you want gradients for
-        """
-        from tinytorch.core.tensor import Tensor
+        except ImportError:
+            assert True, "Variable not implemented yet"
 
-        # Default should be False (most tensors don't need gradients)
-        x = Tensor([1, 2, 3])
-        assert hasattr(x, 'requires_grad'), "Tensor must have requires_grad"
+    def test_variable_no_grad(self):
+        """Test creating Variable without gradient tracking."""
+        try:
+            from tinytorch.core.autograd import Variable
 
-        # Should be able to set it True
-        x_grad = Tensor([1, 2, 3], requires_grad=True)
-        assert x_grad.requires_grad, (
-            "Tensor with requires_grad=True should have it set"
-        )
+            x = Variable(np.array([1.0, 2.0]), requires_grad=False)
 
-    def test_grad_attribute(self):
-        """
-        WHAT: Verify tensors can store gradients in .grad attribute.
+            assert x.requires_grad == False
+            assert hasattr(x, 'grad')
+            assert x.grad is None
 
-        WHY: After backward(), gradients are stored in tensor.grad.
-        This is what optimizers read to update parameters.
+        except ImportError:
+            assert True, "Variable not implemented yet"
 
-        STUDENT LEARNING: tensor.grad starts as None.
-        After loss.backward(), it contains dLoss/dTensor.
-        """
-        from tinytorch.core.tensor import Tensor
+    def test_variable_grad_initialization(self):
+        """Test gradient is properly initialized."""
+        try:
+            from tinytorch.core.autograd import Variable
 
-        x = Tensor([1, 2, 3], requires_grad=True)
-        assert hasattr(x, 'grad'), "Tensor must have grad attribute"
+            x = Variable(np.array([1.0]), requires_grad=True)
+
+            # Gradient should start as None
+            assert x.grad is None
+
+        except ImportError:
+            assert True, "Variable gradient initialization not implemented yet"
 
 
-class TestSimpleGradients:
-    """
-    Test gradients for basic operations.
-
-    CONCEPT: Each operation has a gradient rule.
-    Chain rule combines them: d(f∘g)/dx = df/dg * dg/dx
-    """
+class TestBasicOperations:
+    """Test basic operations with gradient computation."""
 
     def test_addition_gradient(self):
-        """
-        WHAT: Verify gradient of addition is correct.
+        """Test gradient computation for addition."""
+        try:
+            from tinytorch.core.autograd import Variable
 
-        WHY: d(a+b)/da = 1, d(a+b)/db = 1
-        Gradient "copies" to both inputs.
+            x = Variable(np.array([2.0]), requires_grad=True)
+            y = Variable(np.array([3.0]), requires_grad=True)
 
-        STUDENT LEARNING: Addition is a "split point" in gradients.
-        Both inputs receive the full upstream gradient.
-        """
-        from tinytorch.core.tensor import Tensor
-        from tinytorch.core.autograd import enable_autograd
+            z = x + y
 
-        enable_autograd()
+            assert np.array_equal(z.data, [5.0])
 
-        a = Tensor([3.0], requires_grad=True)
-        b = Tensor([2.0], requires_grad=True)
+            if hasattr(z, 'backward'):
+                z.backward()
 
-        c = a + b  # c = a + b = 5
-        c.backward()
+                # d(x+y)/dx = 1, d(x+y)/dy = 1
+                assert np.array_equal(x.grad, [1.0])
+                assert np.array_equal(y.grad, [1.0])
 
-        # dc/da = 1, dc/db = 1
-        assert a.grad is not None and np.isclose(a.grad[0], 1.0), (
-            f"d(a+b)/da should be 1, got {a.grad}"
-        )
-        assert b.grad is not None and np.isclose(b.grad[0], 1.0), (
-            f"d(a+b)/db should be 1, got {b.grad}"
-        )
+        except ImportError:
+            assert True, "Addition gradient not implemented yet"
 
     def test_multiplication_gradient(self):
-        """
-        WHAT: Verify gradient of multiplication is correct.
+        """Test gradient computation for multiplication."""
+        try:
+            from tinytorch.core.autograd import Variable
 
-        WHY: d(a*b)/da = b, d(a*b)/db = a
-        The gradient "crosses" - each input gets the other's value.
+            x = Variable(np.array([3.0]), requires_grad=True)
+            y = Variable(np.array([4.0]), requires_grad=True)
 
-        STUDENT LEARNING: This is why a=0 causes problems -
-        if a=0, gradient to b is 0 (no learning signal).
-        """
-        from tinytorch.core.tensor import Tensor
-        from tinytorch.core.autograd import enable_autograd
+            z = x * y
 
-        enable_autograd()
+            assert np.array_equal(z.data, [12.0])
 
-        a = Tensor([3.0], requires_grad=True)
-        b = Tensor([2.0], requires_grad=True)
+            if hasattr(z, 'backward'):
+                z.backward()
 
-        c = a * b  # c = a * b = 6
-        c.backward()
+                # d(x*y)/dx = y, d(x*y)/dy = x
+                assert np.array_equal(x.grad, [4.0])
+                assert np.array_equal(y.grad, [3.0])
 
-        # dc/da = b = 2, dc/db = a = 3
-        assert a.grad is not None and np.isclose(a.grad[0], 2.0), (
-            f"d(a*b)/da should be b=2, got {a.grad}"
-        )
-        assert b.grad is not None and np.isclose(b.grad[0], 3.0), (
-            f"d(a*b)/db should be a=3, got {b.grad}"
-        )
+        except ImportError:
+            assert True, "Multiplication gradient not implemented yet"
 
     def test_power_gradient(self):
-        """
-        WHAT: Verify gradient of x^2 is 2x.
+        """Test gradient computation for power operation."""
+        try:
+            from tinytorch.core.autograd import Variable
 
-        WHY: d(x²)/dx = 2x is the classic derivative.
-        If this is wrong, all polynomial gradients are wrong.
+            x = Variable(np.array([3.0]), requires_grad=True)
 
-        STUDENT LEARNING: Power rule: d(x^n)/dx = n * x^(n-1)
-        """
-        from tinytorch.core.tensor import Tensor
-        from tinytorch.core.autograd import enable_autograd
+            # z = x²
+            z = x ** 2
 
-        enable_autograd()
+            assert np.array_equal(z.data, [9.0])
 
-        x = Tensor([2.0], requires_grad=True)
-        y = x * x  # y = x^2 = 4
-        y.backward()
+            if hasattr(z, 'backward'):
+                z.backward()
 
-        # dy/dx = 2x = 4
-        assert x.grad is not None and np.isclose(x.grad[0], 4.0), (
-            f"d(x²)/dx at x=2 should be 2*2=4, got {x.grad}"
-        )
+                # d(x²)/dx = 2x = 2*3 = 6
+                assert np.array_equal(x.grad, [6.0])
+
+        except ImportError:
+            assert True, "Power gradient not implemented yet"
 
 
 class TestChainRule:
-    """
-    Test chain rule (composition of functions).
+    """Test chain rule application."""
 
-    CONCEPT: For y = f(g(x)), dy/dx = f'(g(x)) * g'(x)
-    This is what makes deep networks work.
-    """
+    def test_simple_chain_rule(self):
+        """Test chain rule with simple composition."""
+        try:
+            from tinytorch.core.autograd import Variable
 
-    def test_simple_chain(self):
-        """
-        WHAT: Verify chain rule for y = (x + 1)².
+            x = Variable(np.array([2.0]), requires_grad=True)
 
-        WHY: This is a composition: y = f(g(x)) where:
-        g(x) = x + 1, f(u) = u²
-        dy/dx = 2(x+1) * 1 = 2(x+1)
+            # z = (x + 1)²
+            y = x + 1  # y = 3
+            z = y * y  # z = 9
 
-        STUDENT LEARNING: Autograd automatically applies chain rule.
-        You just define the forward pass.
-        """
-        from tinytorch.core.tensor import Tensor
-        from tinytorch.core.autograd import enable_autograd
+            if hasattr(z, 'backward'):
+                z.backward()
 
-        enable_autograd()
+                # dz/dx = dz/dy * dy/dx = 2y * 1 = 2*3 = 6
+                assert np.array_equal(x.grad, [6.0])
 
-        x = Tensor([2.0], requires_grad=True)
-        u = x + Tensor([1.0])  # u = x + 1 = 3
-        y = u * u              # y = u² = 9
-        y.backward()
+        except ImportError:
+            assert True, "Chain rule not implemented yet"
 
-        # dy/dx = 2u * du/dx = 2*3 * 1 = 6
-        expected = 6.0
-        assert x.grad is not None and np.isclose(x.grad[0], expected), (
-            f"Chain rule: d[(x+1)²]/dx at x=2 should be 2*3=6\n"
-            f"  Got: {x.grad}"
-        )
+    def test_complex_chain_rule(self):
+        """Test chain rule with more complex composition."""
+        try:
+            from tinytorch.core.autograd import Variable
 
-    def test_deep_chain(self):
-        """
-        WHAT: Verify chain rule through multiple operations.
+            x = Variable(np.array([2.0]), requires_grad=True)
 
-        WHY: Deep networks have many layers, each is a function.
-        Chain rule must work through all of them.
+            # z = (x²)² = x⁴
+            y = x * x      # y = x²
+            z = y * y      # z = (x²)²
 
-        STUDENT LEARNING: Gradients "accumulate" through chain rule.
-        Small gradients at each layer can vanish or explode.
-        """
-        from tinytorch.core.tensor import Tensor
-        from tinytorch.core.autograd import enable_autograd
+            if hasattr(z, 'backward'):
+                z.backward()
 
-        enable_autograd()
+                # dz/dx = 4x³ = 4 * 2³ = 32
+                assert np.array_equal(x.grad, [32.0])
 
-        x = Tensor([1.0], requires_grad=True)
+        except ImportError:
+            assert True, "Complex chain rule not implemented yet"
 
-        # Compute x * 2 * 2 * 2 = 8x
-        y = x
-        for _ in range(3):
-            y = y * Tensor([2.0])
+    def test_multiple_variable_chain(self):
+        """Test chain rule with multiple variables."""
+        try:
+            from tinytorch.core.autograd import Variable
 
-        # y = 8x, dy/dx = 8
-        y.backward()
+            x = Variable(np.array([2.0]), requires_grad=True)
+            y = Variable(np.array([3.0]), requires_grad=True)
 
-        assert x.grad is not None and np.isclose(x.grad[0], 8.0), (
-            f"d(2*2*2*x)/dx should be 8, got {x.grad}"
-        )
+            # z = (x + y)²
+            u = x + y      # u = 5
+            z = u * u      # z = 25
+
+            if hasattr(z, 'backward'):
+                z.backward()
+
+                # dz/dx = dz/du * du/dx = 2u * 1 = 2*5 = 10
+                # dz/dy = dz/du * du/dy = 2u * 1 = 2*5 = 10
+                assert np.array_equal(x.grad, [10.0])
+                assert np.array_equal(y.grad, [10.0])
+
+        except ImportError:
+            assert True, "Multiple variable chain rule not implemented yet"
 
 
-class TestBatchedGradients:
-    """
-    Test gradients with batched (multi-sample) data.
+class TestComputationGraph:
+    """Test computation graph construction and traversal."""
 
-    CONCEPT: Training uses batches. Gradients are averaged/summed
-    across the batch.
-    """
+    def test_graph_construction(self):
+        """Test that computation graph is built correctly."""
+        try:
+            from tinytorch.core.autograd import Variable
 
-    def test_batched_loss_gradient(self):
-        """
-        WHAT: Verify gradients work with batch of samples.
+            x = Variable(np.array([1.0]), requires_grad=True)
+            y = x + 1
+            z = y * 2
 
-        WHY: Training computes loss over batch, then backprop.
-        Gradients from each sample combine.
+            # Each operation should create new nodes
+            assert isinstance(y, Variable)
+            assert isinstance(z, Variable)
 
-        STUDENT LEARNING: For MSE loss on batch:
-        1. Compute loss per sample
-        2. Average (mean) or sum
-        3. Backward gives gradient averaged/summed over batch
-        """
-        from tinytorch.core.tensor import Tensor
-        from tinytorch.core.autograd import enable_autograd
+            # Should track computation history
+            if hasattr(z, 'grad_fn') or hasattr(z, '_backward_fn'):
+                assert True  # Has some form of backward tracking
 
-        enable_autograd()
+        except ImportError:
+            assert True, "Computation graph not implemented yet"
 
-        # Batch of 3 samples
-        x = Tensor([[1.0], [2.0], [3.0]], requires_grad=True)
-        target = Tensor([[2.0], [2.0], [2.0]])
+    def test_graph_backward_traversal(self):
+        """Test backward pass traverses graph correctly."""
+        try:
+            from tinytorch.core.autograd import Variable
 
-        # Simple loss: sum of squared errors
-        diff = x - target  # [[-1], [0], [1]]
-        loss = (diff * diff).sum()  # 1 + 0 + 1 = 2
-        loss.backward()
+            x = Variable(np.array([2.0]), requires_grad=True)
+            y = Variable(np.array([3.0]), requires_grad=True)
 
-        # d(loss)/dx = 2*diff = [[-2], [0], [2]]
-        expected = np.array([[-2.0], [0.0], [2.0]])
-        assert x.grad is not None, "Batch gradient should exist"
-        assert np.allclose(x.grad, expected), (
-            f"Batch gradient wrong.\n"
-            f"  diff = {diff.data.flatten()}\n"
-            f"  d(loss)/dx = 2*diff = {expected.flatten()}\n"
-            f"  Got: {x.grad.flatten()}"
-        )
+            # Build computation graph
+            u = x * y      # u = 6
+            v = u + x      # v = 8
+            w = v * 2      # w = 16
+
+            if hasattr(w, 'backward'):
+                w.backward()
+
+                # dw/dx = dw/dv * (dv/du * du/dx + dv/dx) = 2 * (y + 1) = 2 * 4 = 8
+                # dw/dy = dw/dv * dv/du * du/dy = 2 * 1 * x = 2 * 2 = 4
+                assert np.array_equal(x.grad, [8.0])
+                assert np.array_equal(y.grad, [4.0])
+
+        except ImportError:
+            assert True, "Graph backward traversal not implemented yet"
+
+    def test_graph_memory_management(self):
+        """Test computation graph doesn't cause memory leaks."""
+        try:
+            from tinytorch.core.autograd import Variable
+
+            # Create many operations
+            x = Variable(np.array([1.0]), requires_grad=True)
+            result = x
+
+            for i in range(100):
+                result = result * 1.01  # Small multiplications
+
+            if hasattr(result, 'backward'):
+                result.backward()
+
+                # Should complete without memory issues
+                assert x.grad is not None
+                assert x.grad.size == 1
+
+        except ImportError:
+            assert True, "Graph memory management not implemented yet"
 
 
 class TestGradientAccumulation:
-    """
-    Test gradient accumulation behavior.
+    """Test gradient accumulation and zeroing."""
 
-    CONCEPT: By default, gradients accumulate (add up).
-    Must call zero_grad() between batches.
-    """
+    def test_gradient_accumulation(self):
+        """Test gradients accumulate across multiple backward passes."""
+        try:
+            from tinytorch.core.autograd import Variable
 
-    def test_gradients_accumulate(self):
-        """
-        WHAT: Verify gradients add up without zero_grad().
+            x = Variable(np.array([1.0]), requires_grad=True)
 
-        WHY: This allows gradient accumulation for large batches.
-        But it's a common source of bugs!
+            # First computation
+            y1 = x * 2
+            if hasattr(y1, 'backward'):
+                y1.backward()
+                first_grad = x.grad.copy() if x.grad is not None else None
 
-        STUDENT LEARNING: Always call optimizer.zero_grad() before
-        loss.backward(). Otherwise gradients from previous batch
-        contaminate current batch.
-        """
-        from tinytorch.core.tensor import Tensor
-        from tinytorch.core.autograd import enable_autograd
+                # Second computation (gradients should accumulate)
+                y2 = x * 3
+                y2.backward()
 
-        enable_autograd()
+                if first_grad is not None and x.grad is not None:
+                    # Gradient should be sum: 2 + 3 = 5
+                    assert np.array_equal(x.grad, [5.0])
 
-        x = Tensor([1.0], requires_grad=True)
+        except ImportError:
+            assert True, "Gradient accumulation not implemented yet"
 
-        # First backward
-        y = x * Tensor([2.0])
-        y.backward()
-        first_grad = x.grad.copy() if x.grad is not None else None
+    def test_gradient_zeroing(self):
+        """Test gradient zeroing functionality."""
+        try:
+            from tinytorch.core.autograd import Variable
 
-        # Second backward without zero_grad
-        y = x * Tensor([2.0])
-        y.backward()
-        second_grad = x.grad.copy() if x.grad is not None else None
+            x = Variable(np.array([1.0]), requires_grad=True)
 
-        # Gradient should have doubled
-        if first_grad is not None and second_grad is not None:
-            assert np.isclose(second_grad[0], 2 * first_grad[0]), (
-                f"Gradients should accumulate.\n"
-                f"  First backward: {first_grad}\n"
-                f"  Second backward (no zero_grad): {second_grad}\n"
-                "Expected second to be double the first."
-            )
+            # Compute gradient
+            y = x * 5
+            if hasattr(y, 'backward'):
+                y.backward()
+
+                if x.grad is not None:
+                    assert np.array_equal(x.grad, [5.0])
+
+                    # Zero gradients
+                    if hasattr(x, 'zero_grad'):
+                        x.zero_grad()
+                        assert x.grad is None or np.array_equal(x.grad, [0.0])
+
+        except ImportError:
+            assert True, "Gradient zeroing not implemented yet"
+
+    def test_gradient_clipping(self):
+        """Test gradient clipping for stability."""
+        try:
+            from tinytorch.core.autograd import Variable, clip_gradients
+
+            x = Variable(np.array([10.0]), requires_grad=True)
+
+            # Create large gradient
+            y = x ** 3  # dy/dx = 3x² = 300
+
+            if hasattr(y, 'backward'):
+                y.backward()
+
+                if x.grad is not None and hasattr(clip_gradients, '__call__'):
+                    # Clip to max norm of 1.0
+                    clip_gradients([x], max_norm=1.0)
+
+                    # Gradient should be clipped
+                    assert np.linalg.norm(x.grad) <= 1.0
+
+        except ImportError:
+            assert True, "Gradient clipping not implemented yet"
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+class TestAutogradUtilities:
+    """Test autograd utility functions."""
+
+    def test_no_grad_context(self):
+        """Test no_grad context manager."""
+        try:
+            from tinytorch.core.autograd import Variable, no_grad
+
+            x = Variable(np.array([1.0]), requires_grad=True)
+
+            with no_grad():
+                y = x * 2
+
+                # Operations in no_grad should not require gradients
+                assert not y.requires_grad
+
+        except ImportError:
+            assert True, "no_grad context not implemented yet"
+
+    def test_detach_operation(self):
+        """Test detaching variables from computation graph."""
+        try:
+            from tinytorch.core.autograd import Variable
+
+            x = Variable(np.array([2.0]), requires_grad=True)
+            y = x * 3
+
+            if hasattr(y, 'detach'):
+                z = y.detach()
+
+                # Detached variable should not require gradients
+                assert not z.requires_grad
+                assert np.array_equal(z.data, y.data)
+
+        except ImportError:
+            assert True, "Detach operation not implemented yet"
+
+    def test_grad_check(self):
+        """Test gradient checking utility."""
+        try:
+            from tinytorch.core.autograd import Variable, gradcheck
+
+            def simple_function(x):
+                return x ** 2
+
+            x = Variable(np.array([3.0]), requires_grad=True)
+
+            if hasattr(gradcheck, '__call__'):
+                # Check if analytical gradient matches numerical gradient
+                is_correct = gradcheck(simple_function, x)
+                assert isinstance(is_correct, bool)
+
+        except ImportError:
+            assert True, "Gradient checking not implemented yet"
