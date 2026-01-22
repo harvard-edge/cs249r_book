@@ -21,42 +21,42 @@ PROJECTS = {
     "tinytorch": "tinytorch/",
 }
 
-# Emoji mapping for contribution types
-# See: https://allcontributors.org/docs/en/emoji-key
+# Fun emoji mapping for contribution types
+# Custom icons chosen to be more distinctive and student-friendly
 EMOJI_KEY = {
-    "a11y": "♿️",
-    "audio": "🔊",
-    "blog": "📝",
-    "bug": "🐛",
-    "business": "💼",
-    "code": "💻",
-    "content": "🖋",
-    "data": "🔣",
-    "design": "🎨",
-    "doc": "📖",
-    "eventOrganizing": "📋",
-    "example": "💡",
-    "financial": "💵",
-    "fundingFinding": "🔍",
-    "ideas": "🤔",
-    "infra": "🚇",
-    "maintenance": "🚧",
-    "mentoring": "🧑‍🏫",
-    "platform": "📦",
-    "plugin": "🔌",
-    "projectManagement": "📆",
-    "promotion": "📣",
-    "question": "💬",
-    "research": "🔬",
-    "review": "👀",
-    "security": "🛡️",
-    "talk": "📢",
-    "test": "⚠️",
-    "tool": "🔧",
-    "translation": "🌍",
-    "tutorial": "✅",
-    "userTesting": "📓",
-    "video": "📹",
+    "a11y": "♿️",           # Accessibility Champion
+    "audio": "🎧",           # Audio Wizard
+    "blog": "✍️",            # Blog Writer
+    "bug": "🪲",             # Bug Hunter
+    "business": "💼",        # Business Strategist
+    "code": "🧑‍💻",            # Code Contributor
+    "content": "🖋",         # Content Creator
+    "data": "🗄️",           # Data Wrangler
+    "design": "🎨",          # Design Artist
+    "doc": "✍️",             # Documentation Hero
+    "eventOrganizing": "🎪", # Event Organizer
+    "example": "💡",         # Example Creator
+    "financial": "💰",       # Financial Supporter
+    "fundingFinding": "🔍",  # Funding Finder
+    "ideas": "🧠",           # Idea Generator
+    "infra": "🏗️",          # Infrastructure Builder
+    "maintenance": "🔩",     # Maintenance Master
+    "mentoring": "🧑‍🏫",      # Mentor
+    "platform": "📦",        # Platform Support
+    "plugin": "🔌",          # Plugin Developer
+    "projectManagement": "📋", # Project Manager
+    "promotion": "📣",       # Promoter
+    "question": "💬",        # Q&A Helper
+    "research": "🔬",        # Researcher
+    "review": "🔎",          # Code Reviewer
+    "security": "🛡️",       # Security Guardian
+    "talk": "🎤",            # Speaker
+    "test": "🧪",            # Test Engineer
+    "tool": "🛠️",           # Tool Builder
+    "translation": "🌐",     # Translator
+    "tutorial": "📖",        # Tutorial Author
+    "userTesting": "🧑‍💻",    # User Tester
+    "video": "🎬",           # Video Creator
 }
 
 
@@ -145,12 +145,19 @@ def process_project(project_name: str, project_path: str, update: bool = False) 
     contributors = rc_data.get('contributors', [])
     per_line = rc_data.get('contributorsPerLine', 7)
     image_size = rc_data.get('imageSize', 80)
-    
+
     if not contributors:
         print(f"{project_name}: No contributors to display")
         return
-    
-    table_html = generate_table(contributors, per_line, image_size)
+
+    # Sort contributors by number of contributions (descending)
+    sorted_contributors = sorted(
+        contributors,
+        key=lambda c: len(c.get('contributions', [])),
+        reverse=True
+    )
+
+    table_html = generate_table(sorted_contributors, per_line, image_size)
     
     print(f"\n=== {project_name} ({len(contributors)} contributors) ===")
     
