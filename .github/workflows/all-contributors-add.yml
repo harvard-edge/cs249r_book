@@ -1,0 +1,344 @@
+# =============================================================================
+# ALL-CONTRIBUTORS AUTO-ADD WORKFLOW
+# =============================================================================
+# Automatically adds contributors when someone comments:
+#   @all-contributors please add @username for bug, code, doc, etc.
+#
+# This workflow:
+#   1. Parses the comment to extract username and contribution types
+#   2. Determines which project based on issue labels or path mentions
+#   3. Updates the appropriate .all-contributorsrc file
+#   4. Regenerates README tables
+#   5. Commits directly (no PR needed)
+#
+# Supported contribution types:
+#   bug, code, doc, design, ideas, review, test, tool, tutorial,
+#   maintenance, infra, platform, research, translation, video, question
+# =============================================================================
+
+name: '🤖 All Contributors Add'
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  add-contributor:
+    name: Add Contributor
+    # Only run if comment contains the trigger phrase
+    if: contains(github.event.comment.body, '@all-contributors')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Check for add command
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.comment.body;
+
+            // Valid projects
+            const validProjects = ['book', 'tinytorch', 'kits', 'labs'];
+
+            // Valid contribution types (from https://allcontributors.org/docs/en/emoji-key)
+            const validTypes = [
+              'a11y', 'audio', 'blog', 'bug', 'business', 'code', 'content',
+              'data', 'design', 'doc', 'eventorganizing', 'example', 'financial',
+              'fundingfinding', 'ideas', 'infra', 'maintenance', 'mentoring',
+              'platform', 'plugin', 'projectmanagement', 'promotion', 'question',
+              'research', 'review', 'security', 'talk', 'test', 'tool',
+              'translation', 'tutorial', 'usertesting', 'video'
+            ];
+
+            // Pattern 1: Explicit project - @all-contributors please add @user for bug in tinytorch
+            // Pattern 2: No project - @all-contributors please add @user for bug, code
+            const patternWithProject = /@all-contributors\s+(?:please\s+)?add\s+@(\w+)\s+for\s+(.+?)\s+in\s+(book|tinytorch|kits|labs)/i;
+            const patternBasic = /@all-contributors\s+(?:please\s+)?add\s+@(\w+)\s+for\s+(.+)/i;
+
+            let username, typesRaw, explicitProject;
+
+            const matchWithProject = body.match(patternWithProject);
+            if (matchWithProject) {
+              username = matchWithProject[1];
+              typesRaw = matchWithProject[2];
+              explicitProject = matchWithProject[3].toLowerCase();
+              console.log('Matched pattern with explicit project');
+            } else {
+              const matchBasic = body.match(patternBasic);
+              if (!matchBasic) {
+                console.log('No valid add command found');
+                core.setOutput('should_run', 'false');
+                return;
+              }
+              username = matchBasic[1];
+              typesRaw = matchBasic[2];
+              explicitProject = null;
+              console.log('Matched basic pattern, will auto-detect project');
+            }
+
+            // Parse contribution types (comma or "and" separated)
+            const types = typesRaw
+              .toLowerCase()
+              .replace(/\s+and\s+/g, ',')
+              .split(/[,\s]+/)
+              .map(t => t.trim().replace(/[^a-z]/g, ''))
+              .filter(t => t.length > 0);
+
+            const filteredTypes = types.filter(t => validTypes.includes(t));
+
+            if (filteredTypes.length === 0) {
+              console.log('No valid contribution types found in: ' + typesRaw);
+              core.setOutput('should_run', 'false');
+              return;
+            }
+
+            // Determine project: explicit > labels > title > body > default
+            let project = 'book';  // default
+
+            if (explicitProject && validProjects.includes(explicitProject)) {
+              project = explicitProject;
+              console.log('Using explicit project from command: ' + project);
+            } else {
+              // Auto-detect from issue context
+              const issue = context.payload.issue;
+              const labels = issue.labels.map(l => l.name.toLowerCase());
+              const title = issue.title.toLowerCase();
+              const bodyText = issue.body ? issue.body.toLowerCase() : '';
+
+              if (labels.some(l => l.includes('tinytorch')) ||
+                  title.includes('tinytorch') || title.includes('tito') ||
+                  bodyText.includes('tinytorch/')) {
+                project = 'tinytorch';
+              } else if (labels.some(l => l.includes('kits')) ||
+                         title.includes('kits') || bodyText.includes('kits/')) {
+                project = 'kits';
+              } else if (labels.some(l => l.includes('labs')) ||
+                         title.includes('labs') || bodyText.includes('labs/')) {
+                project = 'labs';
+              }
+              console.log('Auto-detected project: ' + project);
+            }
+
+            console.log('Username: ' + username);
+            console.log('Types: ' + filteredTypes.join(', '));
+            console.log('Project: ' + project);
+
+            core.setOutput('should_run', 'true');
+            core.setOutput('username', username);
+            core.setOutput('types', JSON.stringify(filteredTypes));
+            core.setOutput('project', project);
+
+      - name: Checkout repository
+        if: steps.check.outputs.should_run == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Setup Python
+        if: steps.check.outputs.should_run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Get user info from GitHub
+        if: steps.check.outputs.should_run == 'true'
+        id: userinfo
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const username = '${{ steps.check.outputs.username }}';
+
+            try {
+              const { data: user } = await github.rest.users.getByUsername({
+                username: username
+              });
+
+              core.setOutput('name', user.name || username);
+              core.setOutput('avatar_url', user.avatar_url);
+              core.setOutput('profile', user.html_url);
+              core.setOutput('found', 'true');
+            } catch (error) {
+              console.log(`User ${username} not found, using defaults`);
+              core.setOutput('name', username);
+              core.setOutput('avatar_url', `https://avatars.githubusercontent.com/${username}`);
+              core.setOutput('profile', `https://github.com/${username}`);
+              core.setOutput('found', 'false');
+            }
+
+      - name: Update contributor config
+        if: steps.check.outputs.should_run == 'true'
+        run: |
+          python3 << 'EOF'
+          import json
+          import os
+
+          project = "${{ steps.check.outputs.project }}"
+          username = "${{ steps.check.outputs.username }}"
+          types = json.loads('${{ steps.check.outputs.types }}')
+          name = "${{ steps.userinfo.outputs.name }}"
+          avatar_url = "${{ steps.userinfo.outputs.avatar_url }}"
+          profile = "${{ steps.userinfo.outputs.profile }}"
+
+          # Map project to config path
+          config_paths = {
+              'book': 'book/.all-contributorsrc',
+              'tinytorch': 'tinytorch/.all-contributorsrc',
+              'kits': 'kits/.all-contributorsrc',
+              'labs': 'labs/.all-contributorsrc',
+          }
+
+          config_path = config_paths[project]
+
+          # Read existing config
+          with open(config_path, 'r') as f:
+              config = json.load(f)
+
+          contributors = config.get('contributors', [])
+
+          # Check if user already exists
+          existing = None
+          for i, c in enumerate(contributors):
+              if c.get('login', '').lower() == username.lower():
+                  existing = i
+                  break
+
+          if existing is not None:
+              # Merge contribution types
+              existing_types = set(contributors[existing].get('contributions', []))
+              new_types = existing_types | set(types)
+              contributors[existing]['contributions'] = sorted(list(new_types))
+              print(f"Updated existing contributor {username} with types: {sorted(list(new_types))}")
+          else:
+              # Add new contributor
+              new_contributor = {
+                  'login': username,
+                  'name': name,
+                  'avatar_url': avatar_url,
+                  'profile': profile,
+                  'contributions': sorted(types)
+              }
+              contributors.append(new_contributor)
+              print(f"Added new contributor {username} with types: {sorted(types)}")
+
+          config['contributors'] = contributors
+
+          # Write updated config
+          with open(config_path, 'w') as f:
+              json.dump(config, f, indent=4)
+              f.write('\n')
+
+          print(f"Updated {config_path}")
+
+          # Save info for later steps
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"config_path={config_path}\n")
+          EOF
+
+      - name: Generate README tables
+        if: steps.check.outputs.should_run == 'true'
+        run: |
+          # Generate tables for the specific project
+          python3 ${{ github.workspace }}/.github/workflows/contributors/generate_readme_tables.py --project ${{ steps.check.outputs.project }} --update
+
+          # Also regenerate the main README
+          python3 ${{ github.workspace }}/.github/workflows/contributors/generate_main_readme.py
+
+      - name: Configure Git
+        if: steps.check.outputs.should_run == 'true'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and push changes
+        if: steps.check.outputs.should_run == 'true'
+        run: |
+          PROJECT="${{ steps.check.outputs.project }}"
+          USERNAME="${{ steps.check.outputs.username }}"
+          TYPES=$(echo '${{ steps.check.outputs.types }}' | python3 -c "import sys,json; print(', '.join(json.load(sys.stdin)))")
+
+          # Stage contributor files
+          git add "${PROJECT}/.all-contributorsrc" "${PROJECT}/README.md" README.md 2>/dev/null || true
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "docs: add @${USERNAME} as ${PROJECT} contributor for ${TYPES}"
+            git push origin dev
+            echo "Changes committed and pushed!"
+          fi
+
+      - name: React to comment
+        if: steps.check.outputs.should_run == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Add reaction to the comment
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: '+1'
+            });
+
+            // Post a reply
+            const username = '${{ steps.check.outputs.username }}';
+            const project = '${{ steps.check.outputs.project }}';
+            const types = JSON.parse('${{ steps.check.outputs.types }}');
+
+            const body = [
+              "I've added @" + username + " as a contributor to **" + project + "** for " + types.join(', ') + "! :tada:",
+              "",
+              "The contributor list has been updated in:",
+              "- `" + project + "/.all-contributorsrc`",
+              "- `" + project + "/README.md`",
+              "- Main `README.md`",
+              "",
+              "Thanks for helping recognize contributors! :heart:"
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+      - name: Handle invalid command
+        if: steps.check.outputs.should_run == 'false' && contains(github.event.comment.body, '@all-contributors')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = [
+              "I couldn't understand that command. :thinking:",
+              "",
+              "**Usage:**",
+              "```",
+              "@all-contributors please add @username for bug, code, doc",
+              "@all-contributors please add @username for bug in tinytorch",
+              "```",
+              "",
+              "**Valid contribution types:**",
+              "bug, code, doc, design, ideas, review, test, tool, tutorial, maintenance, infra, platform, research",
+              "",
+              "**Projects:** book, tinytorch, kits, labs",
+              "",
+              "**Auto-detection (if no project specified):**",
+              "- Issue has `tinytorch` label or title mentions tinytorch -> tinytorch",
+              "- Issue has `kits` label or title mentions kits -> kits",
+              "- Issue has `labs` label or title mentions labs -> labs",
+              "- Otherwise -> book (default)"
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });

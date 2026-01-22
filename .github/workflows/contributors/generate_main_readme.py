@@ -15,40 +15,58 @@ import re
 import sys
 from pathlib import Path
 
-# Contribution type to emoji mapping
+# Fun emoji mapping for contribution types (synced with generate_readme_tables.py)
+# Custom icons chosen to be more distinctive and student-friendly
 CONTRIBUTION_EMOJIS = {
-    "bug": "🐛",
-    "code": "💻",
-    "design": "🎨",
-    "doc": "📖",
-    "ideas": "💡",
-    "review": "👀",
-    "test": "🧪",
-    "tool": "🔧",
-    "tutorial": "✅",
-    "maintenance": "🚧",
-    "infra": "🚇",
-    "question": "💬",
-    "translation": "🌍",
-    "content": "🖋",
-    "example": "💡",
-    "security": "🔐",
-    "financial": "💵",
-    "fundingFinding": "🔍",
-    "eventOrganizing": "📋",
-    "talk": "📢",
-    "video": "📹",
-    "audio": "🔊",
-    "data": "🔣",
-    "platform": "📦",
-    "projectManagement": "📆",
-    "mentoring": "🧑‍🏫",
-    "plugin": "🔌",
-    "userTesting": "📓",
-    "a11y": "♿️",
-    "business": "💼",
-    "research": "🔬",
-    "promotion": "📣",
+    "a11y": "♿️",           # Accessibility Champion
+    "audio": "🎧",           # Audio Wizard
+    "blog": "✍️",            # Blog Writer
+    "bug": "🪲",             # Bug Hunter
+    "business": "💼",        # Business Strategist
+    "code": "🧑‍💻",            # Code Contributor
+    "content": "🖋",         # Content Creator
+    "data": "🗄️",           # Data Wrangler
+    "design": "🎨",          # Design Artist
+    "doc": "✍️",             # Word Wizard
+    "eventOrganizing": "🎪", # Event Organizer
+    "example": "💡",         # Example Creator
+    "financial": "💰",       # Financial Supporter
+    "fundingFinding": "🔍",  # Funding Finder
+    "ideas": "🧠",           # Idea Generator
+    "infra": "🏗️",          # Infrastructure Builder
+    "maintenance": "🔩",     # Maintenance Master
+    "mentoring": "🧑‍🏫",      # Mentor
+    "platform": "📦",        # Platform Support
+    "plugin": "🔌",          # Plugin Developer
+    "projectManagement": "📋", # Project Manager
+    "promotion": "📣",       # Promoter
+    "question": "💬",        # Q&A Helper
+    "research": "🔬",        # Researcher
+    "review": "🔎",          # Code Reviewer
+    "security": "🛡️",       # Security Guardian
+    "talk": "🎤",            # Speaker
+    "test": "🧪",            # Test Engineer
+    "tool": "🛠️",           # Tool Builder
+    "translation": "🌐",     # Translator
+    "tutorial": "📖",        # Tutorial Author
+    "userTesting": "🧑‍💻",    # User Tester
+    "video": "🎬",           # Video Creator
+}
+
+# Legend for common contribution types (shown in README)
+CONTRIBUTION_LEGEND = {
+    "bug": ("🪲", "Bug Hunter"),
+    "code": ("🧑‍💻", "Code Contributor"),
+    "doc": ("✍️", "Word Wizard"),
+    "design": ("🎨", "Design Artist"),
+    "ideas": ("🧠", "Idea Generator"),
+    "review": ("🔎", "Code Reviewer"),
+    "test": ("🧪", "Test Engineer"),
+    "tool": ("🛠️", "Tool Builder"),
+    "infra": ("🏗️", "Infrastructure Builder"),
+    "maintenance": ("🔩", "Maintenance Master"),
+    "research": ("🔬", "Researcher"),
+    "tutorial": ("📖", "Tutorial Author"),
 }
 
 
@@ -82,10 +100,17 @@ def generate_contributor_table(contributors: list, show_badges: bool = True) -> 
     if not contributors:
         return "<p><em>Coming soon!</em></p>"
 
+    # Sort by contribution count (most contributions first)
+    sorted_contributors = sorted(
+        contributors,
+        key=lambda c: len(c.get("contributions", [])),
+        reverse=True
+    )
+
     rows = []
     row_cells = []
 
-    for i, contributor in enumerate(contributors):
+    for i, contributor in enumerate(sorted_contributors):
         row_cells.append(generate_contributor_cell(contributor, show_badges))
 
         # 7 contributors per row
@@ -102,6 +127,12 @@ def generate_contributor_table(contributors: list, show_badges: bool = True) -> 
 {chr(10).join(rows)}
   </tbody>
 </table>'''
+
+
+def generate_legend() -> str:
+    """Generate a compact legend for contribution types."""
+    items = [f"{emoji} {title}" for emoji, title in CONTRIBUTION_LEGEND.values()]
+    return " · ".join(items)
 
 
 def generate_sectioned_contributors(repo_root: Path) -> str:
@@ -129,11 +160,16 @@ def generate_sectioned_contributors(repo_root: Path) -> str:
     kits_table = generate_contributor_table(kits_contributors)
     labs_table = generate_contributor_table(labs_contributors)
 
+    # Generate legend
+    legend = generate_legend()
+
     return f'''## Contributors
 
-Thanks goes to these wonderful people who have contributed to making this resource better for everyone ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
+Thanks goes to these wonderful people who have contributed to making this resource better for everyone!
 
-### 📖 Textbook Contributors ({book_count})
+**Legend:** {legend}
+
+### 📖 Textbook Contributors
 
 <!-- BOOK-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
@@ -146,7 +182,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 ---
 
-### 🔥 TinyTorch Contributors ({tinytorch_count})
+### 🔥 TinyTorch Contributors
 
 <!-- TINYTORCH-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
@@ -159,7 +195,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 ---
 
-### 🛠️ Hardware Kits Contributors ({kits_count})
+### 🛠️ Hardware Kits Contributors
 
 <!-- KITS-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
@@ -172,7 +208,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 ---
 
-### 🧪 Labs Contributors ({labs_count})
+### 🧪 Labs Contributors
 
 <!-- LABS-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->

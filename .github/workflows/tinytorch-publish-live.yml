@@ -17,9 +17,8 @@ name: 🔥 TinyTorch Publish (Live)
 #      └─ Run tinytorch-ci.yml tests
 #
 #   3. update-version (if preflight passes)
-#      └─ Bump version in 6 files on dev branch:
-#         - tinytorch/__init__.py
-#         - pyproject.toml
+#      └─ Bump version in 5 files on dev branch:
+#         - pyproject.toml (single source of truth - __init__.py reads from this)
 #         - site/_static/version-badge.js
 #         - site/extra/install.sh
 #         - site/_static/announcement.json
@@ -34,8 +33,8 @@ name: 🔥 TinyTorch Publish (Live)
 #   6. build-and-deploy (if all previous succeed)
 #      └─ Build Jupyter Book, deploy to gh-pages/tinytorch/
 #
-#   7. create-tag (if deploy succeeds)
-#      └─ Create tinytorch-vX.Y.Z tag on main
+#   7. create-tag-and-release (if deploy succeeds)
+#      └─ Create tinytorch-vX.Y.Z tag and GitHub Release (draft)
 #
 #   8. summary
 #      └─ Show results in GitHub Actions UI
@@ -173,22 +172,7 @@ jobs:
           ref: dev
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 📝 Update version in tinytorch/__init__.py
-        run: |
-          echo "📝 Updating version in tinytorch/tinytorch/__init__.py..."
-          
-          # Extract just the version number (without tinytorch- prefix)
-          VERSION_NUM="${{ needs.validate-inputs.outputs.new_version }}"
-          VERSION_NUM=${VERSION_NUM#tinytorch-v}
-          
-          # Update __version__ in __init__.py
-          sed -i "s/__version__ = \".*\"/__version__ = \"$VERSION_NUM\"/" tinytorch/tinytorch/__init__.py
-          
-          echo "✅ Version updated to $VERSION_NUM"
-          cat tinytorch/tinytorch/__init__.py | grep "__version__"
-
-      - name: 📝 Update version in pyproject.toml
+      - name: 📝 Update version in pyproject.toml (single source of truth)
         run: |
           echo "📝 Updating version in tinytorch/pyproject.toml..."
           
@@ -272,7 +256,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          git add tinytorch/tinytorch/__init__.py tinytorch/pyproject.toml tinytorch/site/_static/version-badge.js tinytorch/site/extra/install.sh tinytorch/site/_static/announcement.json tinytorch/README.md
+          git add tinytorch/pyproject.toml tinytorch/site/_static/version-badge.js tinytorch/site/extra/install.sh tinytorch/site/_static/announcement.json tinytorch/README.md
           git commit -m "chore(tinytorch): bump version to ${{ needs.validate-inputs.outputs.new_version }}" || echo "No changes to commit"
           git push origin dev
 
@@ -389,7 +373,7 @@ jobs:
           commit_message: '🔥 Deploy TinyTorch ${{ needs.validate-inputs.outputs.new_version }} - ${{ github.sha }}'
 
   create-tag:
-    name: '🏷️ Create Release Tag'
+    name: '🏷️ Create Tag & Release'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [validate-inputs, build-and-deploy]
@@ -427,6 +411,45 @@ jobs:
           
           echo "✅ Tag $TAG created and pushed"
 
+
+      - name: 📦 Create GitHub Release (Draft)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.validate-inputs.outputs.new_version }}"
+          PREV_TAG="${{ needs.validate-inputs.outputs.previous_version }}"
+          VERSION_NUM=${TAG#tinytorch-v}
+
+          echo "📦 Creating GitHub Release for $TAG..."
+
+          # Generate changelog from commits since last tag
+          CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" -- tinytorch/ tito/ .github/workflows/tinytorch* 2>/dev/null | head -20)
+
+          # Build release notes using heredoc
+          cat > /tmp/release-notes.md << NOTES_EOF
+          ## TinyTorch v${VERSION_NUM}
+
+          ${{ github.event.inputs.description }}
+
+          ### Changes since ${PREV_TAG}
+
+          ${CHANGELOG}
+
+          ---
+
+          **Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}
+
+          **Website**: https://mlsysbook.ai/tinytorch/
+          NOTES_EOF
+
+          # Create the release as draft
+          gh release create "$TAG" \
+            --title "TinyTorch v${VERSION_NUM} - ${{ github.event.inputs.description }}" \
+            --notes-file /tmp/release-notes.md \
+            --draft
+
+          echo "✅ Draft release created"
+          echo "📝 Review and publish at: https://github.com/${{ github.repository }}/releases"
   summary:
     name: '📋 Publication Summary'
     runs-on: ubuntu-latest
@@ -447,7 +470,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🌐 Access:" >> $GITHUB_STEP_SUMMARY
           echo "- 📖 [TinyTorch Website](https://mlsysbook.ai/tinytorch/)" >> $GITHUB_STEP_SUMMARY
-          echo "- 🏷️ [Release Tag](https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate-inputs.outputs.new_version }})" >> $GITHUB_STEP_SUMMARY
+          echo "- 🏷️ [Release](https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate-inputs.outputs.new_version }})" >> $GITHUB_STEP_SUMMARY
 
   fail-validation:
     name: '❌ Validation Failed'
