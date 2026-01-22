@@ -4,11 +4,13 @@
 # Automatically labels issues and PRs using Ollama LLM analysis.
 #
 # When an issue or PR is created:
-#   1. Analyzes the title and body with a small LLM
-#   2. Selects appropriate labels from our predefined set
-#   3. Applies the labels automatically
+#   1. Fetches all labels from the repository dynamically
+#   2. Groups them by prefix (area:, type:, format:, etc.)
+#   3. Sends to LLM to analyze and pick appropriate labels
+#   4. Applies the selected labels
 #
-# This enables the all-contributors workflow to auto-detect projects correctly.
+# NO STATIC LABEL LISTS - everything is fetched from GitHub at runtime.
+# Just add/remove labels in GitHub and this workflow adapts automatically.
 # =============================================================================
 
 name: '🏷️ Auto Label'
@@ -18,35 +20,13 @@ on:
     types: [opened]
   pull_request:
     types: [opened]
-
-env:
-  # ==========================================================================
-  # AVAILABLE LABELS - Update these if you add/change labels in GitHub
-  # ==========================================================================
-
-  # Area labels (pick ONE that best matches)
-  AREA_LABELS: |
-    area: book - Textbook content (Vol I & II), chapters, Quarto files
-    area: tinytorch - TinyTorch framework, tito CLI, modules, tensors, autograd
-    area: kits - TinyTorch Kits/ML Kits, hardware, Arduino, sensors
-    area: collabs - Colab notebooks and collaborations
-    area: tools - Build tools, scripts, CI/CD, GitHub Actions
-    area: website - Website presentation and styling
-    area: socratiq - SocratiQ AI chatbot
-
-  # Type labels (pick ONE that best matches)
-  TYPE_LABELS: |
-    type: bug - Bug in rendering or code
-    type: errata - Error in textual content
-    type: improvement - Improve existing content
-    type: new - New course content
-    type: question - Further info is requested
-    type: code - Programming exercise content
-    type: citation - Citation or reference to include
-
-  # Special labels (optional, add if applicable)
-  SPECIAL_LABELS: |
-    good first issue - Good starter issue for newbies
+  # Manual trigger for testing on existing issues/PRs
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue or PR number to label'
+        required: true
+        type: number
 
 jobs:
   auto-label:
@@ -57,6 +37,114 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: Get issue/PR details
+        id: get-details
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Determine which issue/PR to label
+            let number, title, body;
+
+            if (context.eventName === 'workflow_dispatch') {
+              // Manual trigger - fetch the specified issue/PR
+              number = ${{ inputs.issue_number || 0 }};
+              if (!number) {
+                core.setFailed('No issue_number provided for manual trigger');
+                return;
+              }
+
+              try {
+                const { data: issue } = await github.rest.issues.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: number
+                });
+                title = issue.title;
+                body = issue.body || '';
+                console.log(`Manual trigger for #${number}: ${title}`);
+              } catch (e) {
+                core.setFailed(`Could not fetch issue/PR #${number}: ${e.message}`);
+                return;
+              }
+            } else if (context.eventName === 'issues') {
+              number = context.payload.issue.number;
+              title = context.payload.issue.title;
+              body = context.payload.issue.body || '';
+            } else {
+              number = context.payload.pull_request.number;
+              title = context.payload.pull_request.title;
+              body = context.payload.pull_request.body || '';
+            }
+
+            core.setOutput('number', number);
+            core.setOutput('title', title);
+            core.setOutput('body', body);
+
+      - name: Fetch labels from GitHub
+        id: fetch-labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Fetch all labels from the repository
+            const { data: labels } = await github.rest.issues.listLabelsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+
+            console.log(`Found ${labels.length} labels in repository`);
+
+            // Group labels by prefix
+            const grouped = {
+              area: [],
+              type: [],
+              format: [],
+              other: []
+            };
+
+            for (const label of labels) {
+              const name = label.name;
+              const desc = label.description || '';
+
+              if (name.startsWith('area:')) {
+                grouped.area.push({ name, description: desc });
+              } else if (name.startsWith('type:')) {
+                grouped.type.push({ name, description: desc });
+              } else if (name.startsWith('format:')) {
+                grouped.format.push({ name, description: desc });
+              } else {
+                grouped.other.push({ name, description: desc });
+              }
+            }
+
+            // Format for LLM prompt
+            const formatGroup = (items) => items
+              .map(l => `${l.name} - ${l.description}`)
+              .join('\n');
+
+            const areaLabels = formatGroup(grouped.area);
+            const typeLabels = formatGroup(grouped.type);
+            const otherLabels = formatGroup(grouped.other);
+
+            // Store all valid label names for validation
+            const allLabelNames = labels.map(l => l.name);
+
+            // Set outputs
+            core.setOutput('area_labels', areaLabels);
+            core.setOutput('type_labels', typeLabels);
+            core.setOutput('other_labels', otherLabels);
+            core.setOutput('all_labels_json', JSON.stringify(allLabelNames));
+
+            // Find defaults (first of each type, or fallback)
+            const defaultArea = grouped.area[0]?.name || '';
+            const defaultType = grouped.type[0]?.name || '';
+            core.setOutput('default_area', defaultArea);
+            core.setOutput('default_type', defaultType);
+
+            console.log('Area labels:', grouped.area.length);
+            console.log('Type labels:', grouped.type.length);
+            console.log('Other labels:', grouped.other.length);
+
       - name: Analyze with LLM
         uses: ai-action/ollama-action@v2
         id: llm
@@ -65,30 +153,30 @@ jobs:
           prompt: |
             You are a GitHub issue labeler. Analyze this issue/PR and select the most appropriate labels.
 
-            TITLE: ${{ github.event.issue.title || github.event.pull_request.title }}
+            TITLE: ${{ steps.get-details.outputs.title }}
 
-            BODY: ${{ github.event.issue.body || github.event.pull_request.body }}
+            BODY: ${{ steps.get-details.outputs.body }}
 
-            AVAILABLE AREA LABELS (pick exactly ONE):
-            ${{ env.AREA_LABELS }}
+            AVAILABLE AREA LABELS (pick exactly ONE - these indicate which part of the project):
+            ${{ steps.fetch-labels.outputs.area_labels }}
 
-            AVAILABLE TYPE LABELS (pick exactly ONE):
-            ${{ env.TYPE_LABELS }}
+            AVAILABLE TYPE LABELS (pick exactly ONE - these indicate what kind of issue):
+            ${{ steps.fetch-labels.outputs.type_labels }}
 
-            SPECIAL LABELS (add only if clearly applicable):
-            ${{ env.SPECIAL_LABELS }}
+            OTHER LABELS (pick any that clearly apply, or none):
+            ${{ steps.fetch-labels.outputs.other_labels }}
 
             Instructions:
             - Pick ONE area label based on which project/component this relates to
             - Pick ONE type label based on what kind of issue this is
-            - Only add "good first issue" if it's clearly a simple, well-defined task
-            - If unsure about area, default to "area: book"
-            - If unsure about type, default to "type: improvement"
+            - Only add other labels if they clearly and obviously apply
+            - If unsure about area, use "${{ steps.fetch-labels.outputs.default_area }}"
+            - If unsure about type, use "${{ steps.fetch-labels.outputs.default_type }}"
 
             Return ONLY a JSON object with this exact format (no other text):
-            {"area": "area: book", "type": "type: bug", "special": []}
+            {"area": "area: book", "type": "type: bug", "other": []}
 
-            The "special" array should be empty [] or contain "good first issue" if applicable.
+            The "other" array should be empty [] or contain label names that apply.
 
       - name: Parse and apply labels
         uses: actions/github-script@v7
@@ -97,85 +185,73 @@ jobs:
             const response = `${{ steps.llm.outputs.response }}`;
             console.log('LLM response:', response);
 
-            // Valid labels from our GitHub repo
-            const validAreaLabels = [
-              'area: book',
-              'area: tinytorch',
-              'area: kits',
-              'area: collabs',
-              'area: tools',
-              'area: website',
-              'area: socratiq'
-            ];
+            // Get all valid labels from the fetch step
+            const allValidLabels = JSON.parse('${{ steps.fetch-labels.outputs.all_labels_json }}');
+            const defaultArea = '${{ steps.fetch-labels.outputs.default_area }}';
+            const defaultType = '${{ steps.fetch-labels.outputs.default_type }}';
 
-            const validTypeLabels = [
-              'type: bug',
-              'type: errata',
-              'type: improvement',
-              'type: new',
-              'type: question',
-              'type: code',
-              'type: citation'
-            ];
-
-            const validSpecialLabels = [
-              'good first issue'
-            ];
+            console.log(`Valid labels: ${allValidLabels.length}`);
+            console.log(`Default area: ${defaultArea}`);
+            console.log(`Default type: ${defaultType}`);
 
             // Parse LLM response
-            let result = { area: 'area: book', type: 'type: improvement', special: [] };
+            let result = { area: defaultArea, type: defaultType, other: [] };
 
             try {
-              const jsonMatch = response.match(/\{[^}]+\}/);
+              // Find JSON in response (LLM might add extra text)
+              const jsonMatch = response.match(/\{[\s\S]*?\}/);
               if (jsonMatch) {
                 const parsed = JSON.parse(jsonMatch[0]);
                 if (parsed.area) result.area = parsed.area;
                 if (parsed.type) result.type = parsed.type;
-                if (parsed.special) result.special = parsed.special;
+                if (parsed.other) result.other = parsed.other;
               }
             } catch (e) {
               console.log('Failed to parse JSON, using defaults:', e.message);
             }
 
-            // Validate and collect labels
+            // Validate and collect labels (only allow labels that exist in repo)
             const labels = [];
 
             // Validate area label
-            if (validAreaLabels.includes(result.area)) {
+            if (allValidLabels.includes(result.area)) {
               labels.push(result.area);
-            } else {
-              console.log(`Invalid area label "${result.area}", defaulting to "area: book"`);
-              labels.push('area: book');
+            } else if (defaultArea) {
+              console.log(`Invalid area label "${result.area}", using default "${defaultArea}"`);
+              labels.push(defaultArea);
             }
 
             // Validate type label
-            if (validTypeLabels.includes(result.type)) {
+            if (allValidLabels.includes(result.type)) {
               labels.push(result.type);
-            } else {
-              console.log(`Invalid type label "${result.type}", defaulting to "type: improvement"`);
-              labels.push('type: improvement');
+            } else if (defaultType) {
+              console.log(`Invalid type label "${result.type}", using default "${defaultType}"`);
+              labels.push(defaultType);
             }
 
-            // Validate special labels
-            if (Array.isArray(result.special)) {
-              for (const label of result.special) {
-                if (validSpecialLabels.includes(label)) {
+            // Validate other labels
+            if (Array.isArray(result.other)) {
+              for (const label of result.other) {
+                if (allValidLabels.includes(label)) {
                   labels.push(label);
+                } else {
+                  console.log(`Ignoring invalid label: "${label}"`);
                 }
               }
             }
 
             // Apply labels
-            const isIssue = '${{ github.event_name }}' === 'issues';
-            const number = isIssue
-              ? context.payload.issue.number
-              : context.payload.pull_request.number;
+            const number = ${{ steps.get-details.outputs.number }};
 
-            console.log(`Applying labels to #${number}: ${labels.join(', ')}`);
+            if (labels.length > 0) {
+              console.log(`Applying labels to #${number}: ${labels.join(', ')}`);
 
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: number,
-              labels: labels
-            });
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: number,
+                labels: labels
+              });
+            } else {
+              console.log('No valid labels to apply');
+            }
