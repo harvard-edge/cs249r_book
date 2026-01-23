@@ -3,15 +3,19 @@
 # =============================================================================
 # Automatically adds contributors when someone comments with @all-contributors.
 #
-# Uses natural language processing via Ollama LLM to understand contributions:
+# Uses Ollama LLM to parse natural language and extract:
+#   - GitHub username (with or without @)
+#   - Contribution type(s)
+#   - Target project (optional, defaults based on issue context)
+#
+# Flexible formats - all of these work:
 #   @all-contributors @username helped verify the fix worked
-#   @all-contributors @username found a bug in the dataloader
-#   @all-contributors @username reviewed the PR and suggested improvements
+#   @all-contributors please add @jane-doe for documentation
+#   @all-contributors @user123 fixed typos in the book
+#   @all-contributors @dev42 implemented feature and wrote tests in tinytorch
 #
-# The LLM maps natural descriptions to contribution types:
-#   bug, code, doc, design, ideas, review, test, tool
-#
-# Project is auto-detected from issue labels/title, or defaults to 'book'.
+# Contribution types: bug, code, doc, design, ideas, review, test, tool
+# Projects: book (default), tinytorch, kits, labs
 # =============================================================================
 
 name: '🤖 All Contributors Add'
@@ -33,7 +37,7 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Extract trigger line and username
+      - name: Extract trigger line and context
         id: extract
         uses: actions/github-script@v7
         with:
@@ -52,60 +56,36 @@ jobs:
 
             console.log('Trigger line:', triggerLine);
 
-            // Extract username - look for @username pattern after @all-contributors
-            const usernameMatch = triggerLine.match(/@all-contributors\s+@(\w+)/i);
-            if (!usernameMatch) {
-              console.log('No username found in trigger line');
-              core.setOutput('should_run', 'false');
-              return;
-            }
-
-            const username = usernameMatch[1];
-            console.log('Username:', username);
-
-            // Get the description (everything after @username)
-            const afterUsername = triggerLine.substring(triggerLine.indexOf('@' + username) + username.length + 1).trim();
-            console.log('Description:', afterUsername);
-
-            // Auto-detect project from issue context
+            // Get issue context for project detection
             const issue = context.payload.issue;
             const labels = issue.labels.map(l => l.name.toLowerCase());
             const title = issue.title.toLowerCase();
             const issueBody = issue.body ? issue.body.toLowerCase() : '';
 
-            let project = 'book';  // default
-            if (labels.some(l => l.includes('tinytorch')) ||
-                title.includes('tinytorch') || title.includes('tito') ||
-                issueBody.includes('tinytorch/')) {
-              project = 'tinytorch';
-            } else if (labels.some(l => l.includes('kits')) ||
-                       title.includes('kits') || issueBody.includes('kits/')) {
-              project = 'kits';
-            } else if (labels.some(l => l.includes('labs')) ||
-                       title.includes('labs') || issueBody.includes('labs/')) {
-              project = 'labs';
-            }
-
-            console.log('Project:', project);
+            // Build context string for LLM
+            const issueContext = `Issue title: ${issue.title}\nLabels: ${labels.join(', ') || 'none'}`;
 
             core.setOutput('should_run', 'true');
-            core.setOutput('username', username);
-            core.setOutput('description', afterUsername);
             core.setOutput('trigger_line', triggerLine);
-            core.setOutput('project', project);
+            core.setOutput('issue_context', issueContext);
 
-      - name: Analyze with LLM
+      - name: Parse with LLM
         if: steps.extract.outputs.should_run == 'true'
         uses: ai-action/ollama-action@v2
         id: llm
         with:
           model: llama3.1:8b
           prompt: |
-            You are parsing a contributor recognition comment. Extract the contribution type(s) from this description.
+            Parse this contributor recognition comment and extract the required information.
 
-            DESCRIPTION: ${{ steps.extract.outputs.description }}
+            COMMENT: ${{ steps.extract.outputs.trigger_line }}
 
-            AVAILABLE CONTRIBUTION TYPES (pick one or more that apply):
+            ISSUE CONTEXT:
+            ${{ steps.extract.outputs.issue_context }}
+
+            TASK: Extract the GitHub username and contribution type(s) from the comment.
+
+            CONTRIBUTION TYPES (pick one or more):
             - bug: Found or reported a bug, identified issues
             - code: Wrote code, implemented features, fixed bugs
             - doc: Wrote documentation, improved docs, fixed typos
@@ -115,19 +95,17 @@ jobs:
             - test: Tested features, verified fixes, QA testing
             - tool: Built tools, scripts, automation, CLI utilities
 
-            Instructions:
-            - Pick the type(s) that best match what the person did
-            - If they "verified a fix" or "confirmed it works" -> test
-            - If they "found a bug" or "reported an issue" -> bug
-            - If they "reviewed" or "gave feedback on code" -> review
-            - If they "wrote docs" or "fixed typos" -> doc
-            - If they "implemented" or "coded" or "fixed" -> code
-            - If unsure, pick the closest match
+            PROJECT OPTIONS: book, tinytorch, kits, labs
+            - Default to "book" unless the comment or issue context mentions another project
 
-            Return ONLY a JSON object with this exact format (no other text):
-            {"types": ["test"]}
+            EXAMPLES:
+            - "@all-contributors @jane-doe fixed typos" -> username: "jane-doe", types: ["doc"]
+            - "@all-contributors please add @john_smith for documentation in book" -> username: "john_smith", types: ["doc"], project: "book"
+            - "@all-contributors @user123 helped verify the fix worked" -> username: "user123", types: ["test"]
+            - "@all-contributors @dev42 implemented the new feature and wrote tests" -> username: "dev42", types: ["code", "test"]
 
-            The "types" array should contain one or more contribution types.
+            Return ONLY a JSON object (no other text):
+            {"username": "the-username", "types": ["doc"], "project": "book"}
 
       - name: Parse LLM response
         if: steps.extract.outputs.should_run == 'true'
@@ -135,46 +113,90 @@ jobs:
         uses: actions/github-script@v7
         env:
           LLM_RESPONSE: ${{ steps.llm.outputs.response }}
+          TRIGGER_LINE: ${{ steps.extract.outputs.trigger_line }}
+          ISSUE_CONTEXT: ${{ steps.extract.outputs.issue_context }}
         with:
           script: |
             const response = process.env.LLM_RESPONSE || '';
+            const triggerLine = process.env.TRIGGER_LINE || '';
+            const issueContext = process.env.ISSUE_CONTEXT || '';
             console.log('LLM response:', response);
 
             const validTypes = ['bug', 'code', 'doc', 'design', 'ideas', 'review', 'test', 'tool'];
+            const validProjects = ['book', 'tinytorch', 'kits', 'labs'];
+
+            let username = null;
             let types = [];
+            let project = 'book';
 
             try {
               // Find JSON in response (LLM might add extra text)
               const jsonMatch = response.match(/\{[\s\S]*?\}/);
               if (jsonMatch) {
                 const parsed = JSON.parse(jsonMatch[0]);
+
+                // Extract username
+                if (parsed.username && typeof parsed.username === 'string') {
+                  username = parsed.username.replace(/^@/, '');  // Remove @ if present
+                }
+
+                // Extract types
                 if (parsed.types && Array.isArray(parsed.types)) {
                   types = parsed.types.filter(t => validTypes.includes(t.toLowerCase())).map(t => t.toLowerCase());
+                }
+
+                // Extract project
+                if (parsed.project && validProjects.includes(parsed.project.toLowerCase())) {
+                  project = parsed.project.toLowerCase();
                 }
               }
             } catch (e) {
               console.log('Failed to parse JSON:', e.message);
             }
 
-            // Fallback: if no types found, try to extract from raw response
-            if (types.length === 0) {
-              for (const t of validTypes) {
-                if (response.toLowerCase().includes(t)) {
-                  types.push(t);
-                  break;  // Just take the first match as fallback
-                }
+            // Fallback: try to extract username from trigger line if LLM failed
+            if (!username) {
+              const usernameMatch = triggerLine.match(/@(\w[-\w]*)/g);
+              if (usernameMatch && usernameMatch.length > 1) {
+                // Skip @all-contributors, take the next @mention
+                username = usernameMatch[1].replace(/^@/, '');
               }
+            }
+
+            // Fallback: detect project from issue context if not in LLM response
+            if (project === 'book') {
+              const contextLower = issueContext.toLowerCase();
+              if (contextLower.includes('tinytorch') || contextLower.includes('tito')) {
+                project = 'tinytorch';
+              } else if (contextLower.includes('kits')) {
+                project = 'kits';
+              } else if (contextLower.includes('labs')) {
+                project = 'labs';
+              }
+            }
+
+            console.log('Username:', username);
+            console.log('Types:', types);
+            console.log('Project:', project);
+
+            if (!username) {
+              console.log('Could not determine username');
+              core.setOutput('success', 'false');
+              core.setOutput('error', 'no_username');
+              return;
             }
 
             if (types.length === 0) {
               console.log('Could not determine contribution type');
               core.setOutput('success', 'false');
+              core.setOutput('error', 'no_types');
               return;
             }
 
-            console.log('Parsed types:', types);
             core.setOutput('success', 'true');
+            core.setOutput('username', username);
             core.setOutput('types', JSON.stringify(types));
+            core.setOutput('project', project);
 
       - name: Checkout repository
         if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
@@ -195,7 +217,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const username = '${{ steps.extract.outputs.username }}';
+            const username = '${{ steps.parse.outputs.username }}';
 
             try {
               const { data: user } = await github.rest.users.getByUsername({
@@ -221,8 +243,8 @@ jobs:
           import json
           import os
 
-          project = "${{ steps.extract.outputs.project }}"
-          username = "${{ steps.extract.outputs.username }}"
+          project = "${{ steps.parse.outputs.project }}"
+          username = "${{ steps.parse.outputs.username }}"
           types = json.loads('${{ steps.parse.outputs.types }}')
           name = "${{ steps.userinfo.outputs.name }}"
           avatar_url = "${{ steps.userinfo.outputs.avatar_url }}"
@@ -287,7 +309,7 @@ jobs:
         if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
         run: |
           # Generate tables for the specific project
-          python3 ${{ github.workspace }}/.github/workflows/contributors/generate_readme_tables.py --project ${{ steps.extract.outputs.project }} --update
+          python3 ${{ github.workspace }}/.github/workflows/contributors/generate_readme_tables.py --project ${{ steps.parse.outputs.project }} --update
 
           # Also regenerate the main README
           python3 ${{ github.workspace }}/.github/workflows/contributors/generate_main_readme.py
@@ -301,8 +323,8 @@ jobs:
       - name: Commit and push changes
         if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
         run: |
-          PROJECT="${{ steps.extract.outputs.project }}"
-          USERNAME="${{ steps.extract.outputs.username }}"
+          PROJECT="${{ steps.parse.outputs.project }}"
+          USERNAME="${{ steps.parse.outputs.username }}"
           TYPES=$(echo '${{ steps.parse.outputs.types }}' | python3 -c "import sys,json; print(', '.join(json.load(sys.stdin)))")
 
           # Stage contributor files
@@ -331,16 +353,16 @@ jobs:
             });
 
             // Post a reply
-            const username = '${{ steps.extract.outputs.username }}';
-            const project = '${{ steps.extract.outputs.project }}';
+            const username = '${{ steps.parse.outputs.username }}';
+            const project = '${{ steps.parse.outputs.project }}';
             const types = JSON.parse('${{ steps.parse.outputs.types }}');
-            const description = '${{ steps.extract.outputs.description }}';
+            const triggerLine = `${{ steps.extract.outputs.trigger_line }}`;
 
             const body = [
               "I've added @" + username + " as a contributor to **" + project + "**! :tada:",
               "",
               "**Recognized for:** " + types.join(', '),
-              "**Based on:** " + (description || "(trigger comment)"),
+              "**Based on:** " + triggerLine,
               "",
               "The contributor list has been updated in:",
               "- `" + project + "/.all-contributorsrc`",
@@ -357,21 +379,32 @@ jobs:
               body: body
             });
 
-      - name: Handle failed parsing
+      - name: Handle parsing failure
         if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'false'
         uses: actions/github-script@v7
         with:
           script: |
+            const error = '${{ steps.parse.outputs.error }}';
+            const triggerLine = `${{ steps.extract.outputs.trigger_line }}`;
+
+            let errorMsg = "I couldn't parse that comment.";
+            if (error === 'no_username') {
+              errorMsg = "I couldn't find a GitHub username in that comment.";
+            } else if (error === 'no_types') {
+              errorMsg = "I couldn't determine the contribution type.";
+            }
+
             const body = [
-              "I couldn't understand what type of contribution to recognize. :thinking:",
+              errorMsg + " :thinking:",
               "",
-              "**Usage examples:**",
+              "**Your comment:** " + triggerLine,
+              "",
+              "**Example formats that work:**",
               "```",
-              "@all-contributors @username helped verify the fix worked",
-              "@all-contributors @username found a bug in the dataloader",
-              "@all-contributors @username reviewed the PR",
-              "@all-contributors @username wrote documentation for the API",
-              "@all-contributors @username implemented the new feature",
+              "@all-contributors @jane-doe fixed typos in the documentation",
+              "@all-contributors please add @john_smith for reviewing the PR",
+              "@all-contributors @user123 helped verify the fix worked",
+              "@all-contributors @dev42 implemented the new caching feature",
               "```",
               "",
               "**Contribution types I understand:**",
@@ -384,34 +417,7 @@ jobs:
               "- test (testing, verification)",
               "- tool (built tools, automation)",
               "",
-              "**Project** is auto-detected from issue labels."
-            ].join('\n');
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: body
-            });
-
-      - name: Handle missing username
-        if: steps.extract.outputs.should_run == 'false' && contains(github.event.comment.body, '@all-contributors')
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const body = [
-              "I need a username to add as a contributor. :thinking:",
-              "",
-              "**Usage:**",
-              "```",
-              "@all-contributors @username <description of what they did>",
-              "```",
-              "",
-              "**Examples:**",
-              "```",
-              "@all-contributors @ngbolin helped verify the fix worked",
-              "@all-contributors @user123 found and reported a bug",
-              "```"
+              "**Project** is auto-detected from issue context, or you can mention it (e.g., 'in tinytorch')."
             ].join('\n');
 
             await github.rest.issues.createComment({
