@@ -494,6 +494,13 @@ class DevTestCommand(BaseCommand):
                         print(f"  ERROR {line[6:]}")
                     elif line.startswith('FAILED'):
                         print(f"  {line}")
+                    elif 'ImportError' in line or 'ModuleNotFoundError' in line or 'No module named' in line:
+                        # Show import errors for debugging
+                        print(f"  >>> {line}")
+                    elif line.startswith('E ') or line.startswith('    '):
+                        # Show traceback lines (E prefix or indented)
+                        if 'import' in line.lower() or 'module' in line.lower() or 'not found' in line.lower():
+                            print(f"  >>> {line}")
 
                 process.wait(timeout=timeout)
 
