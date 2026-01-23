@@ -193,7 +193,7 @@ class DevTestCommand(BaseCommand):
                 # Milestone tests require full package - always rebuild
                 if not args.ci:
                     console.print("  [dim]Milestone tests require full package export...[/dim]")
-                result = self._build_package(project_root, args.verbose)
+                result = self._build_package(project_root, args.verbose, args.ci)
                 results.append(result)
                 if not args.ci:
                     self._print_result(result)
@@ -206,7 +206,7 @@ class DevTestCommand(BaseCommand):
                     if not args.ci:
                         console.print("  [green]✓[/green] Package already built")
                 else:
-                    result = self._build_package(project_root, args.verbose)
+                    result = self._build_package(project_root, args.verbose, args.ci)
                     results.append(result)
                     if not args.ci:
                         self._print_result(result)
@@ -314,31 +314,69 @@ class DevTestCommand(BaseCommand):
         except Exception:
             return False
 
-    def _build_package(self, project_root: Path, verbose: bool) -> TestResult:
-        """Build package by completing all modules.
+    def _build_package(self, project_root: Path, verbose: bool, ci_mode: bool = False) -> TestResult:
+        """Build package by exporting all modules from src/.
 
-        This runs 'tito module complete --all' which:
-        1. Exports notebooks from src/ to modules/
-        2. Runs inline tests in each module
-        3. Exports code to tinytorch/core/
+        This runs 'tito dev export --all' which:
+        1. Converts src/*.py → modules/*.ipynb (jupytext)
+        2. Runs nbdev_export to copy code to tinytorch/core/
 
         This ensures the full tinytorch package is available for testing.
+        Note: This does NOT run inline tests - use --inline for that.
         """
         start = time.time()
 
-        try:
-            # Use 'module complete --all' to fully build the package
-            # This exports AND tests all modules, copying code to tinytorch/core/
-            cmd = [sys.executable, str(project_root / "bin" / "tito"), "module", "complete", "--all"]
-            result = subprocess.run(
-                cmd,
-                cwd=project_root,
-                capture_output=True,
-                text=True,
-                timeout=600  # 10 minutes for full build
-            )
+        if ci_mode:
+            print(f"\n{'='*60}")
+            print("  BUILD PACKAGE")
+            print("  Command: tito dev export --all")
+            print(f"{'='*60}")
 
-            if result.returncode == 0:
+        try:
+            # Use 'dev export --all' to build the package from src/
+            # This creates notebooks and exports to tinytorch/core/
+            cmd = [sys.executable, str(project_root / "bin" / "tito"), "dev", "export", "--all"]
+
+            if ci_mode:
+                # Stream output in CI mode
+                process = subprocess.Popen(
+                    cmd,
+                    cwd=project_root,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1
+                )
+
+                for line in process.stdout:
+                    line = line.rstrip()
+                    # Show key progress lines
+                    if any(x in line for x in ['Converting', 'Exported', '✅', '❌', 'Module']):
+                        print(f"  {line}")
+
+                process.wait(timeout=600)
+                returncode = process.returncode
+                stderr = ""
+            else:
+                result = subprocess.run(
+                    cmd,
+                    cwd=project_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=600  # 10 minutes for full build
+                )
+                returncode = result.returncode
+                stderr = result.stderr if hasattr(result, 'stderr') else ""
+
+            if ci_mode:
+                print(f"{'='*60}")
+                if returncode == 0:
+                    print("  RESULT: BUILD SUCCESS")
+                else:
+                    print("  RESULT: BUILD FAILED")
+                print(f"{'='*60}\n")
+
+            if returncode == 0:
                 return TestResult(
                     name="Build package",
                     passed=True,
@@ -349,7 +387,7 @@ class DevTestCommand(BaseCommand):
                     name="Build package",
                     passed=False,
                     duration=time.time() - start,
-                    message=result.stderr[:200] if result.stderr else "Build failed"
+                    message=stderr[:200] if stderr else "Build failed"
                 )
         except subprocess.TimeoutExpired:
             return TestResult(
