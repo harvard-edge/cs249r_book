@@ -62,7 +62,7 @@ It includes the textbook source, TinyTorch, hardware kits, and upcoming co-labs 
 
 Choose a path based on your goal.
 
-**READ** Start with the [textbook](https://mlsysbook.ai). Try [Chapter 1](https://www.mlsysbook.ai/contents/core/introduction/introduction.html) and the [Benchmarking chapter](https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html).
+**READ** Start with the [textbook](https://mlsysbook.ai). Try [Chapter 1](https://www.mlsysbook.ai/book/contents/core/introduction/introduction.html) and the [Benchmarking chapter](https://mlsysbook.ai/book/contents/core/benchmarking/benchmarking.html).
 
 **BUILD** Start TinyTorch with the [getting started guide](https://mlsysbook.ai/tinytorch/getting-started.html). Begin with Module 01 and work up from CNNs to transformers and the MLPerf benchmarks.
 
