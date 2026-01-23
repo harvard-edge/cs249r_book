@@ -1,6 +1,6 @@
 """Developer command group for TinyTorch CLI."""
 
 from .dev import DevCommand
-from .preflight import PreflightCommand
+from .test import DevTestCommand
 
-__all__ = ['DevCommand', 'PreflightCommand']
+__all__ = ['DevCommand', 'DevTestCommand']
