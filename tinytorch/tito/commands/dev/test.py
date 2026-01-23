@@ -236,7 +236,7 @@ class DevTestCommand(BaseCommand):
         if run_unit:
             if not args.ci:
                 console.print("[bold]Running: Unit Tests[/bold]")
-            result = self._run_unit_tests(project_root, args.module, args.verbose)
+            result = self._run_unit_tests(project_root, args.module, args.verbose, args.ci)
             results.append(result)
             if not args.ci:
                 self._print_result(result)
@@ -245,7 +245,7 @@ class DevTestCommand(BaseCommand):
         if run_cli:
             if not args.ci:
                 console.print("[bold]Running: CLI Tests[/bold]")
-            result = self._run_cli_tests(project_root, args.verbose)
+            result = self._run_cli_tests(project_root, args.verbose, args.ci)
             results.append(result)
             if not args.ci:
                 self._print_result(result)
@@ -254,7 +254,7 @@ class DevTestCommand(BaseCommand):
         if run_integration:
             if not args.ci:
                 console.print("[bold]Running: Integration Tests[/bold]")
-            result = self._run_integration_tests(project_root, args.verbose)
+            result = self._run_integration_tests(project_root, args.verbose, args.ci)
             results.append(result)
             if not args.ci:
                 self._print_result(result)
@@ -263,7 +263,7 @@ class DevTestCommand(BaseCommand):
         if run_e2e:
             if not args.ci:
                 console.print("[bold]Running: E2E Tests[/bold]")
-            result = self._run_e2e_tests(project_root, args.verbose)
+            result = self._run_e2e_tests(project_root, args.verbose, args.ci)
             results.append(result)
             if not args.ci:
                 self._print_result(result)
@@ -272,7 +272,7 @@ class DevTestCommand(BaseCommand):
         if run_milestone:
             if not args.ci:
                 console.print("[bold]Running: Milestone Tests[/bold]")
-            result = self._run_milestone_tests(project_root, args.verbose)
+            result = self._run_milestone_tests(project_root, args.verbose, args.ci)
             results.append(result)
             if not args.ci:
                 self._print_result(result)
@@ -357,8 +357,10 @@ class DevTestCommand(BaseCommand):
             )
 
     def _run_pytest(self, project_root: Path, test_path: str, name: str,
-                    verbose: bool, timeout: int = 300, extra_args: List[str] = None) -> TestResult:
+                    verbose: bool, timeout: int = 300, extra_args: List[str] = None,
+                    ci_mode: bool = False) -> TestResult:
         """Run pytest on a path and return result."""
+        import re
         start = time.time()
         full_path = project_root / test_path
 
@@ -371,57 +373,131 @@ class DevTestCommand(BaseCommand):
             )
 
         try:
+            # In CI mode, use verbose output for better visibility
             cmd = [
                 sys.executable, "-m", "pytest",
                 str(full_path),
-                "-v" if verbose else "-q",
+                "-v",  # Always verbose in CI for visibility
                 "--tb=short",
                 "--no-cov",
             ]
             if extra_args:
                 cmd.extend(extra_args)
 
-            result = subprocess.run(
-                cmd,
-                cwd=project_root,
-                capture_output=True,
-                text=True,
-                timeout=timeout
-            )
+            if ci_mode:
+                # Print header for CI visibility
+                print(f"\n{'='*60}")
+                print(f"  {name.upper()}")
+                print(f"  Path: {test_path}")
+                print(f"{'='*60}")
 
-            # Count tests from output
-            test_count = 0
-            summary = ""
-            for line in result.stdout.split('\n'):
-                if 'passed' in line:
-                    summary = line.strip()
-                    # Try to extract count
-                    import re
-                    match = re.search(r'(\d+) passed', line)
-                    if match:
-                        test_count = int(match.group(1))
-                    break
-
-            if result.returncode == 0:
-                return TestResult(
-                    name=name,
-                    passed=True,
-                    duration=time.time() - start,
-                    test_count=test_count,
-                    message=summary
+                # Stream output in CI mode
+                process = subprocess.Popen(
+                    cmd,
+                    cwd=project_root,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1
                 )
+
+                output_lines = []
+                test_count = 0
+                passed_count = 0
+                failed_count = 0
+
+                for line in process.stdout:
+                    line = line.rstrip()
+                    output_lines.append(line)
+
+                    # Print test results as they happen
+                    if '::' in line and (' PASSED' in line or ' FAILED' in line or ' ERROR' in line or ' SKIPPED' in line):
+                        # Extract test name and status
+                        if ' PASSED' in line:
+                            passed_count += 1
+                            status = '✓'
+                        elif ' FAILED' in line:
+                            failed_count += 1
+                            status = '✗'
+                        elif ' ERROR' in line:
+                            failed_count += 1
+                            status = '!'
+                        else:
+                            status = '-'
+                        # Extract just the test name
+                        test_name = line.split('::')[-1].split()[0] if '::' in line else line
+                        print(f"  {status} {test_name}")
+                        test_count += 1
+                    elif line.startswith('FAILED') or line.startswith('ERROR'):
+                        print(f"  {line}")
+
+                process.wait(timeout=timeout)
+
+                # Print summary
+                print(f"{'='*60}")
+                if process.returncode == 0:
+                    print(f"  RESULT: {passed_count} tests PASSED")
+                else:
+                    print(f"  RESULT: {failed_count} FAILED, {passed_count} passed")
+                print(f"{'='*60}\n")
+
+                if process.returncode == 0:
+                    return TestResult(
+                        name=name,
+                        passed=True,
+                        duration=time.time() - start,
+                        test_count=test_count,
+                        message=f"{passed_count} passed"
+                    )
+                else:
+                    return TestResult(
+                        name=name,
+                        passed=False,
+                        duration=time.time() - start,
+                        test_count=test_count,
+                        message=f"{failed_count} failed, {passed_count} passed"
+                    )
             else:
-                # Extract failure info
-                for line in result.stdout.split('\n'):
-                    if 'failed' in line.lower() or 'error' in line.lower():
-                        summary = line.strip()[:80]
-                        break
-                return TestResult(
-                    name=name,
-                    passed=False,
-                    duration=time.time() - start,
-                    message=summary or "Tests failed"
+                # Non-CI mode: capture output
+                result = subprocess.run(
+                    cmd,
+                    cwd=project_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout
                 )
+
+                # Count tests from output
+                test_count = 0
+                summary = ""
+                for line in result.stdout.split('\n'):
+                    if 'passed' in line:
+                        summary = line.strip()
+                        match = re.search(r'(\d+) passed', line)
+                        if match:
+                            test_count = int(match.group(1))
+                        break
+
+                if result.returncode == 0:
+                    return TestResult(
+                        name=name,
+                        passed=True,
+                        duration=time.time() - start,
+                        test_count=test_count,
+                        message=summary
+                    )
+                else:
+                    # Extract failure info
+                    for line in result.stdout.split('\n'):
+                        if 'failed' in line.lower() or 'error' in line.lower():
+                            summary = line.strip()[:80]
+                            break
+                    return TestResult(
+                        name=name,
+                        passed=False,
+                        duration=time.time() - start,
+                        message=summary or "Tests failed"
+                    )
         except subprocess.TimeoutExpired:
             return TestResult(
                 name=name,
@@ -560,7 +636,7 @@ class DevTestCommand(BaseCommand):
                 message=f"{passed_modules}/{len(module_nums)} modules passed"
             )
 
-    def _run_unit_tests(self, project_root: Path, module: Optional[str], verbose: bool) -> TestResult:
+    def _run_unit_tests(self, project_root: Path, module: Optional[str], verbose: bool, ci_mode: bool = False) -> TestResult:
         """Run unit tests."""
         if module:
             module_num = module.zfill(2)
@@ -580,25 +656,26 @@ class DevTestCommand(BaseCommand):
 
         return self._run_pytest(
             project_root, test_path, name, verbose,
-            extra_args=["--ignore=tests/e2e/", "--ignore=tests/integration/", "--ignore=tests/cli/"]
+            extra_args=["--ignore=tests/e2e/", "--ignore=tests/integration/", "--ignore=tests/cli/"],
+            ci_mode=ci_mode
         )
 
-    def _run_cli_tests(self, project_root: Path, verbose: bool) -> TestResult:
+    def _run_cli_tests(self, project_root: Path, verbose: bool, ci_mode: bool = False) -> TestResult:
         """Run CLI tests."""
-        return self._run_pytest(project_root, "tests/cli", "CLI tests", verbose, timeout=120)
+        return self._run_pytest(project_root, "tests/cli", "CLI tests", verbose, timeout=120, ci_mode=ci_mode)
 
-    def _run_integration_tests(self, project_root: Path, verbose: bool) -> TestResult:
+    def _run_integration_tests(self, project_root: Path, verbose: bool, ci_mode: bool = False) -> TestResult:
         """Run integration tests."""
-        return self._run_pytest(project_root, "tests/integration", "Integration tests", verbose)
+        return self._run_pytest(project_root, "tests/integration", "Integration tests", verbose, ci_mode=ci_mode)
 
-    def _run_e2e_tests(self, project_root: Path, verbose: bool) -> TestResult:
+    def _run_e2e_tests(self, project_root: Path, verbose: bool, ci_mode: bool = False) -> TestResult:
         """Run E2E tests."""
         return self._run_pytest(
             project_root, "tests/e2e", "E2E tests", verbose,
-            timeout=600, extra_args=["-m", "quick"]
+            timeout=600, extra_args=["-m", "quick"], ci_mode=ci_mode
         )
 
-    def _run_milestone_tests(self, project_root: Path, verbose: bool) -> TestResult:
+    def _run_milestone_tests(self, project_root: Path, verbose: bool, ci_mode: bool = False) -> TestResult:
         """Run milestone tests from tests/milestones/ directory.
 
         These are pytest-based tests that verify milestone scripts execute correctly.
@@ -606,7 +683,7 @@ class DevTestCommand(BaseCommand):
         """
         return self._run_pytest(
             project_root, "tests/milestones", "Milestone tests", verbose,
-            timeout=900  # 15 min for all milestones
+            timeout=900, ci_mode=ci_mode  # 15 min for all milestones
         )
 
     def _run_release_validation(self, project_root: Path, args: Namespace) -> TestResult:
