@@ -1012,7 +1012,7 @@ class MilestoneCommand(BaseCommand):
             all_script_configs = milestone["scripts"]
             all_scripts = [(s["name"], s["script"], s.get("description", "")) for s in all_script_configs]
 
-            # Handle --part flag for multi-part milestones
+            # Handle --part flag for multipart milestones
             if args.part is not None:
                 if args.part < 1 or args.part > len(all_scripts):
                     console.print(Panel(
