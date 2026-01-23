@@ -101,20 +101,21 @@ tito nbgrader feedback 01
 # src/01_tensor/01_tensor.py
 
 # Export to notebooks & package
-tito src export 01_tensor
-tito src export --all
+tito dev export 01
+tito dev export --all
 
 # Test implementations
-tito src test 01_tensor
+tito dev test --unit
+tito dev test --inline --module 01
 
-# Validate changes
-tito milestone run 03
+# Before merging
+tito dev test --all
 ```
 
 **Key Commands:**
-- `tito src` - Developer workflow
-- `tito module` - Test as student
-- `tito milestone` - Validate
+- `tito dev test` - Run tests
+- `tito dev export` - Rebuild curriculum
+- `tito milestone` - Validate with history
 
 </div>
 
@@ -204,8 +205,8 @@ tito milestone run 03
 
 | Command | Description | Use Case |
 |---------|-------------|----------|
-| `tito src export <module>` | Export src/ → modules/ → tinytorch/ | After editing source files |
-| `tito src export --all` | Export all modules | After major refactoring |
+| `tito dev export <module>` | Export src/ → modules/ → tinytorch/ | After editing source files |
+| `tito dev export --all` | Export all modules | After major refactoring |
 | `tito dev test` | Run unit tests (default) | Quick validation |
 | `tito dev test --inline` | Run inline tests from src/ | After editing modules |
 | `tito dev test --unit` | Run pytest unit tests | Component validation |
@@ -215,7 +216,6 @@ tito milestone run 03
 | `tito dev test --milestone` | Run milestone tests | Full package validation |
 | `tito dev test --all` | Run all test types | Before PRs |
 | `tito dev test --release` | Full release validation (destructive) | Before releases only |
-| `tito dev export` | Rebuild full curriculum pipeline | After major refactoring |
 
 **Note**: These commands work with `src/XX_name/XX_name.py` files and are for TinyTorch contributors/developers.
 **Students** use `tito module` commands to work with generated notebooks.
@@ -266,7 +266,7 @@ tito module status
 vim src/01_tensor/01_tensor.py
 
 # Export to notebooks + package
-tito src export 01_tensor
+tito dev export 01
 
 # Run tests
 tito dev test --unit           # Quick validation
