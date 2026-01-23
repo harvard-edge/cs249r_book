@@ -16,8 +16,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.autograd import enable_autograd
 from tinytorch.core.activations import GELU
-# Import transformer to ensure mean/sqrt monkey-patches are applied
-from tinytorch.core import transformer
+# Try to import transformer for mean/sqrt monkey-patches (Module 13)
+# This is optional - tests will skip if not available
+try:
+    from tinytorch.core import transformer
+except ImportError:
+    transformer = None  # Transformer module not yet available
 
 
 def test_arithmetic_gradient_flow():

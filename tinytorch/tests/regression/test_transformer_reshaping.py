@@ -42,7 +42,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
-from tinytorch.nn import TransformerBlock, Embedding, PositionalEncoding, MultiHeadAttention
+from tinytorch.core.transformers import TransformerBlock, LayerNorm
+from tinytorch.core.embeddings import Embedding, PositionalEncoding
+from tinytorch.core.attention import MultiHeadAttention
 
 
 def test_transformer_to_linear_3d_to_2d():
@@ -243,7 +245,7 @@ if __name__ == "__main__":
 
     # Import required modules for testing
     try:
-        from tinytorch.nn import MultiHeadAttention
+        from tinytorch.core.attention import MultiHeadAttention
     except ImportError:
         # Create a simple mock if not available
         class MultiHeadAttention:

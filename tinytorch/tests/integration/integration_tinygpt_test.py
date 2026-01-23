@@ -63,9 +63,9 @@ class SimpleTinyGPT:
         # Transformer layers
         if TRANSFORMERS_AVAILABLE and ATTENTION_AVAILABLE:
             self.layers = []
-            hidden_dim = embed_dim * 4
+            ff_dim = embed_dim * 4
             for _ in range(num_layers):
-                block = TransformerBlock(embed_dim, num_heads, hidden_dim)
+                block = TransformerBlock(embed_dim, num_heads, ff_dim=ff_dim)
                 self.layers.append(block)
 
             # Output
@@ -174,14 +174,14 @@ def test_transformer_components():
     # Test transformer blocks
     if TRANSFORMERS_AVAILABLE and ATTENTION_AVAILABLE:
         print("  ✓ Testing Transformer Block")
-        block = TransformerBlock(embed_dim=32, num_heads=4, hidden_dim=128)
+        block = TransformerBlock(embed_dim=32, num_heads=4, ff_dim=128)
         x = Tensor(np.random.randn(2, 5, 32))
         block_out = block(x)
         assert block_out.shape == x.shape, f"Transformer block should preserve shape"
         print(f"    Transformer block: {x.shape} -> {block_out.shape}")
 
         print("  ✓ Testing Layer Normalization")
-        ln = LayerNorm(embed_dim=32)
+        ln = LayerNorm(normalized_shape=32)
         ln_out = ln(x)
         assert ln_out.shape == x.shape, "LayerNorm should preserve shape"
         print(f"    LayerNorm: {x.shape} -> {ln_out.shape}")

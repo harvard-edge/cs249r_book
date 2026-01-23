@@ -50,7 +50,7 @@ def load_config(path: Path) -> dict:
         return json.load(f)
 
 
-def generate_contributor_cell(contributor: dict, show_badges: bool = True, image_size: int = 50) -> str:
+def generate_contributor_cell(contributor: dict, show_badges: bool = True, image_size: int = 50, width_pct: str = "11.11%") -> str:
     """Generate HTML for a single contributor cell."""
     login = contributor.get("login", "")
     name = contributor.get("name", login)
@@ -64,8 +64,7 @@ def generate_contributor_cell(contributor: dict, show_badges: bool = True, image
         badges = " ".join(CONTRIBUTION_EMOJIS.get(c, "") for c in contributions)
         badges = f"<br />{badges}" if badges.strip() else ""
 
-    # Calculate width percentage based on columns (9 columns = ~11.11%)
-    return f'''      <td align="center" valign="top" width="11.11%"><a href="{profile}"><img src="{avatar_url}?v=4?s={image_size}" width="{image_size}px;" alt="{name}"/><br /><sub><b>{name}</b></sub></a>{badges}</td>'''
+    return f'''      <td align="center" valign="top" width="{width_pct}"><a href="{profile}"><img src="{avatar_url}?v=4?s={image_size}" width="{image_size}px;" alt="{name}"/><br /><sub><b>{name}</b></sub></a>{badges}</td>'''
 
 
 def generate_contributor_table(contributors: list, show_badges: bool = True, cols: int = 9, image_size: int = 50) -> str:
@@ -87,11 +86,14 @@ def generate_contributor_table(contributors: list, show_badges: bool = True, col
         reverse=True
     )
 
+    # Calculate width percentage based on columns
+    width_pct = f"{100/cols:.2f}%"
+
     rows = []
     row_cells = []
 
     for i, contributor in enumerate(sorted_contributors):
-        row_cells.append(generate_contributor_cell(contributor, show_badges, image_size))
+        row_cells.append(generate_contributor_cell(contributor, show_badges, image_size, width_pct))
 
         # Dynamic columns per row
         if len(row_cells) == cols:
@@ -197,14 +199,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
-<!-- LABS-CONTRIBUTORS-END -->
-
----
-
-**Recognize a contributor:** Comment on any issue or PR:
-```
-@all-contributors please add @username for doc, code, bug, or ideas
-```'''
+<!-- LABS-CONTRIBUTORS-END -->'''
 
 
 def update_readme(repo_root: Path, dry_run: bool = False) -> bool:

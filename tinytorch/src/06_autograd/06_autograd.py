@@ -1272,8 +1272,9 @@ def test_unit_function_classes():
 
     print("✅ Function classes work correctly!")
 
-if __name__ == "__main__":
-    test_unit_function_classes()
+# NOTE: test_unit_function_classes() is called from test_module() which runs AFTER
+# enable_autograd(). Do NOT call it here - Tensor class doesn't have requires_grad yet!
+# See GitHub issue #1128 for details.
 
 # %% [markdown]
 """
