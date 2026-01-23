@@ -26,10 +26,45 @@ sys.path.insert(0, project_root)
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU, Sigmoid
-from tinytorch.core.training import MeanSquaredError, CrossEntropyLoss
+from tinytorch.core.losses import MSELoss as MeanSquaredError, CrossEntropyLoss
 from tinytorch.core.optimizers import SGD, Adam
-from tinytorch.nn import Sequential, Conv2d
-import tinytorch.nn.functional as F
+from tinytorch.core.spatial import Conv2d
+
+class Sequential:
+    """Simple sequential container for testing."""
+    def __init__(self, layers):
+        self.layers = layers
+    def __call__(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+    def parameters(self):
+        params = []
+        for layer in self.layers:
+            if hasattr(layer, 'parameters'):
+                params.extend(layer.parameters())
+        return params
+
+class F:
+    """Functional interface for testing."""
+    @staticmethod
+    def relu(x):
+        from tinytorch.core.activations import ReLU
+        return ReLU()(x)
+    @staticmethod
+    def sigmoid(x):
+        from tinytorch.core.activations import Sigmoid
+        return Sigmoid()(x)
+    @staticmethod
+    def max_pool2d(x, kernel_size):
+        from tinytorch.core.spatial import MaxPool2d
+        return MaxPool2d(kernel_size)(x)
+    @staticmethod
+    def flatten(x, start_dim=1):
+        import numpy as np
+        shape = x.shape
+        new_shape = shape[:start_dim] + (np.prod(shape[start_dim:]),)
+        return x.reshape(*new_shape)
 
 
 # ============== Complete Training Loop Tests ==============
@@ -48,7 +83,7 @@ def test_basic_training_loop():
     ])
 
     # Setup training
-    optimizer = SGD(model.parameters(), learning_rate=0.01)
+    optimizer = SGD(model.parameters(), lr=0.01)
     criterion = MeanSquaredError()
 
     # Training loop
@@ -96,7 +131,7 @@ def test_minibatch_training():
         Linear(20, 5)
     ])
 
-    optimizer = Adam(model.parameters(), learning_rate=0.001)
+    optimizer = Adam(model.parameters(), lr=0.001)
     criterion = MeanSquaredError()
 
     # Mini-batch training
@@ -147,7 +182,7 @@ def test_classification_training():
         Linear(20, n_classes)
     ])
 
-    optimizer = Adam(model.parameters(), learning_rate=0.01)
+    optimizer = Adam(model.parameters(), lr=0.01)
     criterion = CrossEntropyLoss()
 
     # Training
@@ -296,7 +331,7 @@ def test_checkpoint_resume_training():
     """Save checkpoint and resume training."""
     # Initial training
     model = Linear(10, 5)
-    optimizer = SGD(model.parameters(), learning_rate=0.01)
+    optimizer = SGD(model.parameters(), lr=0.01)
 
     X = Tensor(np.random.randn(20, 10))
     y = Tensor(np.random.randn(20, 5))
@@ -391,7 +426,7 @@ def test_cnn_to_fc_integration():
     y_true = Tensor(np.random.randint(0, 10, 8))
     loss = CrossEntropyLoss()(output, y_true)
 
-    optimizer = Adam(model.parameters(), learning_rate=0.001)
+    optimizer = Adam(model.parameters(), lr=0.001)
     try:
         optimizer.zero_grad()
         loss.backward()
@@ -443,7 +478,7 @@ def test_encoder_decoder_integration():
 
     # Test training
     loss = MeanSquaredError()(reconstruction, x)
-    optimizer = Adam(model.parameters(), learning_rate=0.001)
+    optimizer = Adam(model.parameters(), lr=0.001)
 
     try:
         optimizer.zero_grad()
@@ -476,7 +511,7 @@ def test_multi_loss_training():
             return params
 
     model = MultiOutputModel()
-    optimizer = Adam(model.parameters(), learning_rate=0.001)
+    optimizer = Adam(model.parameters(), lr=0.001)
 
     # Data
     X = Tensor(np.random.randn(32, 10))
@@ -518,7 +553,7 @@ def test_mnist_pipeline():
         Linear(128, 10)
     ])
 
-    optimizer = Adam(model.parameters(), learning_rate=0.001)
+    optimizer = Adam(model.parameters(), lr=0.001)
     criterion = CrossEntropyLoss()
 
     # Training
@@ -578,7 +613,7 @@ def test_cifar10_pipeline():
             return params
 
     model = SimpleCIFARNet()
-    optimizer = SGD(model.parameters(), learning_rate=0.01)
+    optimizer = SGD(model.parameters(), lr=0.01)
     criterion = CrossEntropyLoss()
 
     # Quick training

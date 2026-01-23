@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.autograd import enable_autograd
-from tinytorch.text.embeddings import Embedding
+from tinytorch.core.embeddings import Embedding
 
 
 def test_embedding_has_backward_function():

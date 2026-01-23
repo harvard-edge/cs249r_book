@@ -22,7 +22,7 @@ def test_checkpoint_11_regularization():
         from tinytorch.core.layers import Linear
         from tinytorch.core.activations import ReLU
         from tinytorch.core.regularization import Dropout, L1Regularization, L2Regularization
-        from tinytorch.core.losses import MeanSquaredError
+        from tinytorch.core.losses import MSELoss as MeanSquaredError
         from tinytorch.core.optimizers import Adam
     except ImportError as e:
         pytest.fail(f"❌ Cannot import required classes - complete Modules 2-12 first: {e}")

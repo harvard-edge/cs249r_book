@@ -27,8 +27,40 @@ from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU, Sigmoid, Tanh
 from tinytorch.core.losses import MSELoss, CrossEntropyLoss
 from tinytorch.core.optimizers import SGD, Adam
-from tinytorch.nn import Conv2d, TransformerBlock, Sequential
-import tinytorch.nn.functional as F
+from tinytorch.core.spatial import Conv2d
+from tinytorch.core.transformers import TransformerBlock
+
+class Sequential:
+    """Simple sequential container for testing."""
+    def __init__(self, layers):
+        self.layers = layers
+    def __call__(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+    def parameters(self):
+        params = []
+        for layer in self.layers:
+            if hasattr(layer, 'parameters'):
+                params.extend(layer.parameters())
+        return params
+
+class F:
+    """Functional interface for testing."""
+    @staticmethod
+    def relu(x):
+        from tinytorch.core.activations import ReLU
+        return ReLU()(x)
+    @staticmethod
+    def max_pool2d(x, kernel_size):
+        from tinytorch.core.spatial import MaxPool2d
+        return MaxPool2d(kernel_size)(x)
+    @staticmethod
+    def flatten(x, start_dim=1):
+        import numpy as np
+        shape = x.shape
+        new_shape = shape[:start_dim] + (np.prod(shape[start_dim:]),)
+        return x.reshape(*new_shape)
 
 
 # ============== Gradient Existence Tests ==============
@@ -260,7 +292,7 @@ def test_chain_rule_multiple_paths():
 def test_gradient_accumulation():
     """Gradients accumulate correctly over multiple backward passes."""
     model = Linear(5, 3)
-    optimizer = SGD(model.parameters(), learning_rate=0.01)
+    optimizer = SGD(model.parameters(), lr=0.01)
 
     x1 = Tensor(np.random.randn(2, 5))
     y1 = Tensor(np.random.randn(2, 3))
@@ -290,7 +322,7 @@ def test_gradient_accumulation():
 def test_zero_grad():
     """zero_grad() correctly resets gradients."""
     model = Linear(5, 3)
-    optimizer = SGD(model.parameters(), learning_rate=0.01)
+    optimizer = SGD(model.parameters(), lr=0.01)
 
     x = Tensor(np.random.randn(2, 5))
     y = Tensor(np.random.randn(2, 3))
@@ -317,7 +349,7 @@ def test_zero_grad():
 def test_sgd_updates_parameters():
     """SGD optimizer updates parameters in correct direction."""
     model = Linear(5, 3)
-    optimizer = SGD(model.parameters(), learning_rate=0.1)
+    optimizer = SGD(model.parameters(), lr=0.1)
 
     # Save initial weights
     initial_weights = model.weight.data.copy()
@@ -349,7 +381,7 @@ def test_sgd_updates_parameters():
 def test_adam_updates_parameters():
     """Adam optimizer updates parameters with momentum."""
     model = Linear(5, 3)
-    optimizer = Adam(model.parameters(), learning_rate=0.01)
+    optimizer = Adam(model.parameters(), lr=0.01)
 
     initial_weights = model.weight.data.copy()
 

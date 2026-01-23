@@ -21,7 +21,7 @@ def test_checkpoint_10_training():
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.layers import Linear
         from tinytorch.core.activations import ReLU, Sigmoid
-        from tinytorch.core.losses import MeanSquaredError, BinaryCrossEntropy
+        from tinytorch.core.losses import MSELoss as MeanSquaredError, BinaryCrossEntropyLoss as BinaryCrossEntropy
         from tinytorch.core.optimizers import Adam, SGD
         from tinytorch.core.training import Trainer, DataLoader
     except ImportError as e:

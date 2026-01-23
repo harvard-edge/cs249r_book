@@ -22,13 +22,61 @@ import pytest
 
 # Test imports - these MUST work for examples to succeed
 try:
-    import tinytorch.nn as nn
-    import tinytorch.nn.functional as F
-    import tinytorch.optim as optim
     from tinytorch.core.tensor import Tensor
     from tinytorch.core.autograd import Variable
-    from tinytorch.core.training import CrossEntropyLoss, MeanSquaredError as MSELoss
+    from tinytorch.core.losses import CrossEntropyLoss, MSELoss
+    from tinytorch.core.layers import Linear
+    from tinytorch.core.activations import ReLU
+    from tinytorch.core.optimizers import SGD, Adam
     from tinytorch.core.dataloader import DataLoader
+    from tinytorch.core.spatial import Conv2d
+
+    class _Module:
+        """Base module class for testing."""
+        def __init__(self):
+            self._modules = {}
+        def __setattr__(self, name, value):
+            if hasattr(value, 'parameters'):
+                if '_modules' not in self.__dict__:
+                    self.__dict__['_modules'] = {}
+                self.__dict__['_modules'][name] = value
+            super().__setattr__(name, value)
+        def __call__(self, x):
+            return self.forward(x)
+        def parameters(self):
+            params = []
+            for mod in getattr(self, '_modules', {}).values():
+                if hasattr(mod, 'parameters'):
+                    params.extend(mod.parameters())
+            return params
+
+    class nn:
+        """Mock nn module for testing."""
+        Module = _Module
+        Linear = Linear
+        Conv2d = Conv2d
+
+    class F:
+        """Functional interface for testing."""
+        @staticmethod
+        def relu(x):
+            return ReLU()(x)
+        @staticmethod
+        def flatten(x, start_dim=1):
+            import numpy as np
+            shape = x.shape
+            new_shape = shape[:start_dim] + (int(np.prod(shape[start_dim:])),)
+            return x.reshape(*new_shape)
+        @staticmethod
+        def max_pool2d(x, kernel_size):
+            from tinytorch.core.spatial import MaxPool2d
+            return MaxPool2d(kernel_size)(x)
+
+    class optim:
+        """Mock optim module for testing."""
+        SGD = SGD
+        Adam = Adam
+
     IMPORTS_AVAILABLE = True
 except ImportError as e:
     print(f"❌ Import failed: {e}")
@@ -107,7 +155,7 @@ class TestXORIntegration:
 
         # Components that MUST work together
         model = XORNet()
-        optimizer = optim.SGD(model.parameters(), learning_rate=0.1)
+        optimizer = optim.SGD(model.parameters(), lr=0.1)
         criterion = MSELoss()
 
         # XOR dataset
@@ -152,7 +200,7 @@ class TestMNISTIntegration:
 
         # This MUST work for MNIST example to succeed
         model = SimpleMLP()
-        optimizer = optim.Adam(model.parameters(), learning_rate=0.001)
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
         criterion = CrossEntropyLoss()
 
         assert len(list(model.parameters())) > 0, "Model must have parameters"
@@ -205,7 +253,7 @@ class TestMNISTIntegration:
                 return x
 
         model = SimpleMLP()
-        optimizer = optim.Adam(model.parameters(), learning_rate=0.001)
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
         criterion = CrossEntropyLoss()
 
         # Sample data
@@ -351,8 +399,8 @@ class TestModernAPIComponents:
         model = SimpleModel()
 
         # Both optimizers must work with model.parameters()
-        adam_opt = optim.Adam(model.parameters(), learning_rate=0.001)
-        sgd_opt = optim.SGD(model.parameters(), learning_rate=0.01)
+        adam_opt = optim.Adam(model.parameters(), lr=0.001)
+        sgd_opt = optim.SGD(model.parameters(), lr=0.01)
 
         # Test optimizer functionality
         assert hasattr(adam_opt, 'step'), "Optimizer must have step() method"

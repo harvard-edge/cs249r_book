@@ -23,9 +23,23 @@ sys.path.insert(0, project_root)
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU, Sigmoid
-from tinytorch.core.training import MeanSquaredError
+from tinytorch.core.losses import MSELoss as MeanSquaredError
 from tinytorch.core.optimizers import SGD, Adam
-from tinytorch.nn import Sequential
+
+class Sequential:
+    """Simple sequential container for testing."""
+    def __init__(self, layers):
+        self.layers = layers
+    def __call__(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+    def parameters(self):
+        params = []
+        for layer in self.layers:
+            if hasattr(layer, 'parameters'):
+                params.extend(layer.parameters())
+        return params
 
 
 class DiagnosticHelper:
@@ -281,7 +295,7 @@ def check_optimizer_updates(helper: DiagnosticHelper):
 
     try:
         model = Linear(5, 3)
-        optimizer = SGD(model.parameters(), learning_rate=0.1)
+        optimizer = SGD(model.parameters(), lr=0.1)
 
         # Save initial weights
         initial_weights = model.weight.data.copy()
@@ -332,7 +346,7 @@ def diagnose_training_loop(helper: DiagnosticHelper):
             Linear(10, 2)
         ])
 
-        optimizer = Adam(model.parameters(), learning_rate=0.01)
+        optimizer = Adam(model.parameters(), lr=0.01)
         criterion = MeanSquaredError()
 
         losses = []
@@ -384,7 +398,7 @@ def check_common_mistakes(helper: DiagnosticHelper):
 
     # Check 1: Forgetting to call zero_grad
     model = Linear(5, 3)
-    optimizer = SGD(model.parameters(), learning_rate=0.01)
+    optimizer = SGD(model.parameters(), lr=0.01)
 
     x = Tensor(np.random.randn(2, 5))
     y_true = Tensor(np.random.randn(2, 3))

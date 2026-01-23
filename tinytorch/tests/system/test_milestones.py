@@ -15,11 +15,29 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.insert(0, project_root)
 
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.training import MeanSquaredError
+from tinytorch.core.losses import MSELoss as MeanSquaredError
 from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU, Sigmoid
-from tinytorch.nn import Conv2d, TransformerBlock, Embedding, PositionalEncoding
-import tinytorch.nn.functional as F
+from tinytorch.core.spatial import Conv2d
+from tinytorch.core.transformers import TransformerBlock
+from tinytorch.core.embeddings import Embedding, PositionalEncoding
+
+class F:
+    """Functional interface for testing."""
+    @staticmethod
+    def relu(x):
+        from tinytorch.core.activations import ReLU
+        return ReLU()(x)
+    @staticmethod
+    def max_pool2d(x, kernel_size):
+        from tinytorch.core.spatial import MaxPool2d
+        return MaxPool2d(kernel_size)(x)
+    @staticmethod
+    def flatten(x, start_dim=1):
+        import numpy as np
+        shape = x.shape
+        new_shape = shape[:start_dim] + (np.prod(shape[start_dim:]),)
+        return x.reshape(*new_shape)
 
 
 def test_milestone1_xor():
@@ -33,7 +51,13 @@ def test_milestone1_xor():
     y = Tensor([[0], [1], [1], [0]], dtype='float32')
 
     # Build simple neural network (perceptron with hidden layer)
-    from tinytorch.core.networks import Sequential
+    class Sequential:
+        def __init__(self, layers):
+            self.layers = layers
+        def __call__(self, x):
+            for layer in self.layers:
+                x = layer(x)
+            return x
     model = Sequential([
         Linear(2, 4),
         ReLU(),

@@ -28,10 +28,41 @@ sys.path.insert(0, project_root)
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU
-from tinytorch.core.training import MeanSquaredError
+from tinytorch.core.losses import MSELoss as MeanSquaredError
 from tinytorch.core.optimizers import SGD, Adam
-from tinytorch.nn import Conv2d, Sequential
-import tinytorch.nn.functional as F
+from tinytorch.core.spatial import Conv2d
+
+class Sequential:
+    """Simple sequential container for testing."""
+    def __init__(self, layers):
+        self.layers = layers
+    def __call__(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+    def parameters(self):
+        params = []
+        for layer in self.layers:
+            if hasattr(layer, 'parameters'):
+                params.extend(layer.parameters())
+        return params
+
+class F:
+    """Functional interface for testing."""
+    @staticmethod
+    def relu(x):
+        from tinytorch.core.activations import ReLU
+        return ReLU()(x)
+    @staticmethod
+    def max_pool2d(x, kernel_size):
+        from tinytorch.core.spatial import MaxPool2d
+        return MaxPool2d(kernel_size)(x)
+    @staticmethod
+    def flatten(x, start_dim=1):
+        import numpy as np
+        shape = x.shape
+        new_shape = shape[:start_dim] + (np.prod(shape[start_dim:]),)
+        return x.reshape(*new_shape)
 
 
 # ============== Memory Usage Tests ==============
@@ -112,7 +143,7 @@ def test_optimizer_memory_overhead():
     snapshot1 = tracemalloc.take_snapshot()
 
     # SGD should have minimal overhead
-    sgd = SGD(model.parameters(), learning_rate=0.01)
+    sgd = SGD(model.parameters(), lr=0.01)
 
     snapshot2 = tracemalloc.take_snapshot()
     stats = snapshot2.compare_to(snapshot1, 'lineno')
@@ -123,7 +154,7 @@ def test_optimizer_memory_overhead():
         f"SGD has too much overhead: {sgd_overhead / param_memory:.1f}x parameters"
 
     # Adam needs momentum buffers (2x parameter memory)
-    adam = Adam(model.parameters(), learning_rate=0.01)
+    adam = Adam(model.parameters(), lr=0.01)
 
     snapshot3 = tracemalloc.take_snapshot()
     stats = snapshot3.compare_to(snapshot2, 'lineno')
@@ -140,7 +171,7 @@ def test_optimizer_memory_overhead():
 def test_no_memory_leak_training():
     """Training loop doesn't leak memory."""
     model = Linear(10, 5)
-    optimizer = SGD(model.parameters(), learning_rate=0.01)
+    optimizer = SGD(model.parameters(), lr=0.01)
     criterion = MeanSquaredError()
 
     X = Tensor(np.random.randn(100, 10))

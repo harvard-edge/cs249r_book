@@ -260,6 +260,56 @@ def create_test_data(size: int = 1000) -> Tuple[np.ndarray, np.ndarray]:
     return X, y
 
 
+# ============================================================================
+# Aliases for backward compatibility with test files
+# ============================================================================
+
+class PerformanceTestSuite(PerformanceTester):
+    """Alias for PerformanceTester for backward compatibility."""
+    pass
+
+
+class PerformanceComparator:
+    """Utility for comparing performance between implementations."""
+
+    def __init__(self):
+        self.tester = PerformanceTester()
+
+    def compare(self, baseline_func: Callable, optimized_func: Callable,
+                args: Tuple = (), name: str = "Comparison") -> Dict[str, Any]:
+        """Compare two implementations."""
+        return self.tester.compare_performance(baseline_func, optimized_func, args, test_name=name)
+
+    def validate_speedup(self, results: Dict[str, Any], min_speedup: float = 1.0) -> bool:
+        """Check if speedup meets minimum threshold."""
+        return results['comparison']['speedup'] >= min_speedup
+
+
+class WorkloadGenerator:
+    """Generate standard workloads for performance testing."""
+
+    def __init__(self, seed: int = 42):
+        np.random.seed(seed)
+
+    def generate_matrix(self, size: int = 100) -> np.ndarray:
+        """Generate a random matrix."""
+        return np.random.randn(size, size).astype(np.float32)
+
+    def generate_batch(self, batch_size: int = 32, feature_size: int = 100) -> np.ndarray:
+        """Generate a batch of samples."""
+        return np.random.randn(batch_size, feature_size).astype(np.float32)
+
+    def generate_conv_input(self, batch: int = 4, channels: int = 3,
+                           height: int = 32, width: int = 32) -> np.ndarray:
+        """Generate convolution input (NCHW format)."""
+        return np.random.randn(batch, channels, height, width).astype(np.float32)
+
+    def generate_sequence(self, batch: int = 2, seq_len: int = 128,
+                         embed_dim: int = 64) -> np.ndarray:
+        """Generate sequence data for transformers."""
+        return np.random.randn(batch, seq_len, embed_dim).astype(np.float32)
+
+
 if __name__ == "__main__":
     # Demo of the framework
     print("🧪 TinyTorch Performance Testing Framework")

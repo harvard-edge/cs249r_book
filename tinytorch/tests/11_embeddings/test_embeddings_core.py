@@ -38,7 +38,7 @@ class TestEmbeddingLayer:
         embedding_matrix[token_id] → vector
         """
         try:
-            from tinytorch.nn import Embedding
+            from tinytorch.core.embeddings import Embedding
             from tinytorch.core.tensor import Tensor
 
             vocab_size = 100
@@ -73,7 +73,7 @@ class TestEmbeddingLayer:
         Output: (batch, seq_len, embed_dim) of floats
         """
         try:
-            from tinytorch.nn import Embedding
+            from tinytorch.core.embeddings import Embedding
             from tinytorch.core.tensor import Tensor
 
             embed = Embedding(vocab_size=100, embed_dim=32)
@@ -108,7 +108,7 @@ class TestPositionalEncoding:
         final_embedding = token_embedding + position_encoding
         """
         try:
-            from tinytorch.nn import PositionalEncoding
+            from tinytorch.core.embeddings import PositionalEncoding
             from tinytorch.core.tensor import Tensor
 
             max_len = 100

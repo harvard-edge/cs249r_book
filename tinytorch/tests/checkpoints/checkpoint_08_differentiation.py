@@ -21,7 +21,7 @@ def test_checkpoint_08_differentiation():
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.layers import Linear
         from tinytorch.core.activations import ReLU, Sigmoid
-        from tinytorch.core.losses import MeanSquaredError
+        from tinytorch.core.losses import MSELoss as MeanSquaredError
     except ImportError as e:
         pytest.fail(f"❌ Cannot import required classes - complete Modules 2-9 first: {e}")
 
