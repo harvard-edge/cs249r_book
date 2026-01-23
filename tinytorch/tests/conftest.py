@@ -4,6 +4,10 @@ Pytest configuration for TinyTorch tests.
 This file is automatically loaded by pytest and sets up the test environment.
 It also provides a Rich-based educational test output that helps students
 understand what each test does and why it matters.
+
+CRITICAL: This conftest validates that the tinytorch package is properly
+exported before any tests run. If exports are missing, tests fail fast
+with a clear error message.
 """
 
 import sys
@@ -26,6 +30,98 @@ if str(project_root) not in sys.path:
 
 # Set quiet mode for tinytorch imports during tests
 os.environ['TINYTORCH_QUIET'] = '1'
+
+
+# =============================================================================
+# CRITICAL: Package Export Validation
+# =============================================================================
+# This runs BEFORE any tests to ensure the package is properly built.
+# Without this, tests would silently pass because imports return None.
+
+def _validate_package_exported():
+    """
+    Validate that tinytorch package is properly exported.
+
+    This prevents a critical bug where tests pass because:
+    1. tinytorch/__init__.py uses try/except for imports
+    2. Missing exports result in Tensor = None (not ImportError)
+    3. Tests import None and may pass vacuously
+
+    Returns tuple: (is_valid, error_message)
+    """
+    errors = []
+
+    # Check 1: Core module files exist
+    core_dir = project_root / "tinytorch" / "core"
+    required_modules = [
+        "tensor.py",
+        "activations.py",
+        "layers.py",
+        "losses.py",
+    ]
+
+    for module in required_modules:
+        module_path = core_dir / module
+        if not module_path.exists():
+            errors.append(f"Missing: tinytorch/core/{module}")
+
+    # Check 2: Tensor class is actually importable (not None)
+    try:
+        from tinytorch import Tensor
+        if Tensor is None:
+            errors.append("Tensor is None (import failed silently)")
+    except ImportError as e:
+        errors.append(f"Cannot import Tensor: {e}")
+
+    # Check 3: Verify Tensor is actually the class, not a stub
+    try:
+        from tinytorch import Tensor
+        if Tensor is not None:
+            # Try to instantiate - this catches incomplete implementations
+            t = Tensor([1, 2, 3])
+            if not hasattr(t, 'data'):
+                errors.append("Tensor missing 'data' attribute")
+            if not hasattr(t, 'shape'):
+                errors.append("Tensor missing 'shape' attribute")
+    except Exception as e:
+        errors.append(f"Tensor instantiation failed: {e}")
+
+    if errors:
+        return False, errors
+    return True, []
+
+
+def pytest_configure(config):
+    """Configure pytest with TinyTorch-specific settings."""
+    # Register custom markers
+    config.addinivalue_line(
+        "markers", "module(name): mark test as belonging to a specific module"
+    )
+    config.addinivalue_line(
+        "markers", "slow: mark test as slow running"
+    )
+    config.addinivalue_line(
+        "markers", "integration: mark test as integration test"
+    )
+
+    # CRITICAL: Validate package is exported before running tests
+    # Skip validation if explicitly disabled (e.g., for export tests)
+    if os.environ.get('TINYTORCH_SKIP_EXPORT_CHECK') != '1':
+        is_valid, errors = _validate_package_exported()
+        if not is_valid:
+            error_msg = "\n".join(f"  • {e}" for e in errors)
+            raise pytest.UsageError(
+                f"\n\n"
+                f"{'='*70}\n"
+                f"❌ TINYTORCH PACKAGE NOT EXPORTED\n"
+                f"{'='*70}\n\n"
+                f"The tinytorch package is not properly built. Tests cannot run.\n\n"
+                f"Errors found:\n{error_msg}\n\n"
+                f"To fix this, run:\n\n"
+                f"    tito dev export --all\n\n"
+                f"This exports all module notebooks to the tinytorch package.\n"
+                f"{'='*70}\n"
+            )
 
 # Import test utilities to make them available
 try:
@@ -178,20 +274,6 @@ _reporter = TinyTorchTestReporter()
 # =============================================================================
 # Pytest Hooks
 # =============================================================================
-
-def pytest_configure(config):
-    """Configure pytest with TinyTorch-specific settings."""
-    # Register custom markers
-    config.addinivalue_line(
-        "markers", "module(name): mark test as belonging to a specific module"
-    )
-    config.addinivalue_line(
-        "markers", "slow: mark test as slow running"
-    )
-    config.addinivalue_line(
-        "markers", "integration: mark test as integration test"
-    )
-
 
 def pytest_collection_modifyitems(session, config, items):
     """Modify test collection to add educational metadata."""

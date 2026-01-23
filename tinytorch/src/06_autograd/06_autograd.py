@@ -1246,9 +1246,15 @@ def test_unit_function_classes():
     """🔬 Test Function classes."""
     print("🔬 Unit Test: Function Classes...")
 
+    # Note: We manually set requires_grad here because enable_autograd() hasn't been
+    # called yet. This tests the Backward classes in isolation before the full
+    # autograd system is enabled.
+
     # Test AddBackward
-    a = Tensor([1, 2, 3], requires_grad=True)
-    b = Tensor([4, 5, 6], requires_grad=True)
+    a = Tensor([1, 2, 3])
+    a.requires_grad = True  # Set manually (enable_autograd not called yet)
+    b = Tensor([4, 5, 6])
+    b.requires_grad = True
     add_func = AddBackward(a, b)
     grad_output = np.array([1, 1, 1])
     grad_a, grad_b = add_func.apply(grad_output)
@@ -1262,8 +1268,10 @@ def test_unit_function_classes():
     assert np.allclose(grad_b, a.data), f"MulBackward grad_b failed: {grad_b}"
 
     # Test MatmulBackward
-    a_mat = Tensor([[1, 2], [3, 4]], requires_grad=True)
-    b_mat = Tensor([[5, 6], [7, 8]], requires_grad=True)
+    a_mat = Tensor([[1, 2], [3, 4]])
+    a_mat.requires_grad = True
+    b_mat = Tensor([[5, 6], [7, 8]])
+    b_mat.requires_grad = True
     matmul_func = MatmulBackward(a_mat, b_mat)
     grad_output = np.ones((2, 2))
     grad_a, grad_b = matmul_func.apply(grad_output)

@@ -429,7 +429,8 @@ class PreflightCommand(BaseCommand):
 
         imports = [
             ("import tinytorch", "tinytorch package"),
-            ("from tinytorch import Tensor", "Tensor class"),
+            # Check Tensor is actually available (not None from failed import)
+            ("from tinytorch import Tensor; assert Tensor is not None, 'Tensor not exported - run: tito dev export --all'", "Tensor class"),
             ("from tito.main import TinyTorchCLI", "CLI class"),
         ]
 
@@ -451,16 +452,19 @@ class PreflightCommand(BaseCommand):
                 if verbose:
                     self.console.print(f"    [green]✓[/green] {name}")
             else:
+                # Tensor class is critical - fail if not available
+                is_critical = "Tensor" in name
                 category.checks.append(CheckResult(
                     name=name,
-                    status=CheckStatus.WARN,
-                    message="Import failed (may need export)",
+                    status=CheckStatus.FAIL if is_critical else CheckStatus.WARN,
+                    message="Import failed - run: tito dev export --all" if is_critical else "Import failed (may need export)",
                     duration_ms=duration,
                     command=import_stmt,
                     stderr=stderr[:500]
                 ))
                 if verbose:
-                    self.console.print(f"    [yellow]⚠[/yellow] {name} - {stderr[:100] if stderr else 'failed'}")
+                    symbol = "[red]✗[/red]" if is_critical else "[yellow]⚠[/yellow]"
+                    self.console.print(f"    {symbol} {name} - {stderr[:100] if stderr else 'failed'}")
 
         return category
 

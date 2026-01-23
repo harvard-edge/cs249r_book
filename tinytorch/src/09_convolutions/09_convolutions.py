@@ -66,6 +66,10 @@ import time
 
 from tinytorch.core.tensor import Tensor
 
+# Enable autograd for gradient tracking (required for BatchNorm2d learnable parameters)
+from tinytorch.core.autograd import enable_autograd
+enable_autograd()
+
 # Constants for convolution defaults
 DEFAULT_KERNEL_SIZE = 3  # Default kernel size for convolutions
 DEFAULT_STRIDE = 1  # Default stride for convolutions
