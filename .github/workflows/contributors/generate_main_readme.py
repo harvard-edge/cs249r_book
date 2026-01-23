@@ -15,45 +15,21 @@ import re
 import sys
 from pathlib import Path
 
-# Fun emoji mapping for contribution types (synced with generate_readme_tables.py)
-# Custom icons chosen to be more distinctive and student-friendly
+# Emoji mapping for contribution types (only types actually in use)
+# Synced with generate_readme_tables.py
 CONTRIBUTION_EMOJIS = {
-    "a11y": "♿️",           # Accessibility Champion
-    "audio": "🎧",           # Audio Wizard
-    "blog": "✍️",            # Blog Writer
     "bug": "🪲",             # Bug Hunter
-    "business": "💼",        # Business Strategist
     "code": "🧑‍💻",            # Code Contributor
-    "content": "🖋",         # Content Creator
-    "data": "🗄️",           # Data Wrangler
     "design": "🎨",          # Design Artist
     "doc": "✍️",             # Word Wizard
-    "eventOrganizing": "🎪", # Event Organizer
-    "example": "💡",         # Example Creator
-    "financial": "💰",       # Financial Supporter
-    "fundingFinding": "🔍",  # Funding Finder
     "ideas": "🧠",           # Idea Generator
-    "infra": "🏗️",          # Infrastructure Builder
-    "maintenance": "🔩",     # Maintenance Master
-    "mentoring": "🧑‍🏫",      # Mentor
-    "platform": "📦",        # Platform Support
-    "plugin": "🔌",          # Plugin Developer
-    "projectManagement": "📋", # Project Manager
-    "promotion": "📣",       # Promoter
-    "question": "💬",        # Q&A Helper
-    "research": "🔬",        # Researcher
     "review": "🔎",          # Code Reviewer
-    "security": "🛡️",       # Security Guardian
-    "talk": "🎤",            # Speaker
     "test": "🧪",            # Test Engineer
     "tool": "🛠️",           # Tool Builder
-    "translation": "🌐",     # Translator
-    "tutorial": "📖",        # Tutorial Author
-    "userTesting": "🧑‍💻",    # User Tester
-    "video": "🎬",           # Video Creator
 }
 
-# Legend for common contribution types (shown in README)
+# Legend for contribution types (shown in README)
+# Only includes types currently in use across all projects
 CONTRIBUTION_LEGEND = {
     "bug": ("🪲", "Bug Hunter"),
     "code": ("🧑‍💻", "Code Contributor"),
@@ -63,10 +39,6 @@ CONTRIBUTION_LEGEND = {
     "review": ("🔎", "Code Reviewer"),
     "test": ("🧪", "Test Engineer"),
     "tool": ("🛠️", "Tool Builder"),
-    "infra": ("🏗️", "Infrastructure Builder"),
-    "maintenance": ("🔩", "Maintenance Master"),
-    "research": ("🔬", "Researcher"),
-    "tutorial": ("📖", "Tutorial Author"),
 }
 
 
@@ -78,7 +50,7 @@ def load_config(path: Path) -> dict:
         return json.load(f)
 
 
-def generate_contributor_cell(contributor: dict, show_badges: bool = True) -> str:
+def generate_contributor_cell(contributor: dict, show_badges: bool = True, image_size: int = 50, width_pct: str = "11.11%") -> str:
     """Generate HTML for a single contributor cell."""
     login = contributor.get("login", "")
     name = contributor.get("name", login)
@@ -92,11 +64,18 @@ def generate_contributor_cell(contributor: dict, show_badges: bool = True) -> st
         badges = " ".join(CONTRIBUTION_EMOJIS.get(c, "") for c in contributions)
         badges = f"<br />{badges}" if badges.strip() else ""
 
-    return f'''      <td align="center" valign="top" width="14.28%"><a href="{profile}"><img src="{avatar_url}?v=4?s=80" width="80px;" alt="{name}"/><br /><sub><b>{name}</b></sub></a>{badges}</td>'''
+    return f'''      <td align="center" valign="top" width="{width_pct}"><a href="{profile}"><img src="{avatar_url}?v=4?s={image_size}" width="{image_size}px;" alt="{name}"/><br /><sub><b>{name}</b></sub></a>{badges}</td>'''
 
 
-def generate_contributor_table(contributors: list, show_badges: bool = True) -> str:
-    """Generate an HTML table for contributors."""
+def generate_contributor_table(contributors: list, show_badges: bool = True, cols: int = 9, image_size: int = 50) -> str:
+    """Generate an HTML table for contributors.
+
+    Args:
+        contributors: List of contributor dicts
+        show_badges: Whether to show contribution badges
+        cols: Number of columns per row (default 9 for compact display)
+        image_size: Size of avatar images in pixels (default 50 for compact display)
+    """
     if not contributors:
         return "<p><em>Coming soon!</em></p>"
 
@@ -107,14 +86,21 @@ def generate_contributor_table(contributors: list, show_badges: bool = True) -> 
         reverse=True
     )
 
+    # Calculate width percentage based on columns
+    width_pct = f"{100/cols:.2f}%"
+
     rows = []
     row_cells = []
 
     for i, contributor in enumerate(sorted_contributors):
-        row_cells.append(generate_contributor_cell(contributor, show_badges))
+<<<<<<< HEAD
+        row_cells.append(generate_contributor_cell(contributor, show_badges, image_size, width_pct))
+=======
+        row_cells.append(generate_contributor_cell(contributor, show_badges, image_size))
+>>>>>>> fa04485cb (feat(workflow): LLM-powered all-contributors with natural language)
 
-        # 7 contributors per row
-        if len(row_cells) == 7:
+        # Dynamic columns per row
+        if len(row_cells) == cols:
             rows.append("    <tr>\n" + "\n".join(row_cells) + "\n    </tr>")
             row_cells = []
 
@@ -217,14 +203,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
-<!-- LABS-CONTRIBUTORS-END -->
-
----
-
-**Recognize a contributor:** Comment on any issue or PR:
-```
-@all-contributors please add @username for doc, code, bug, or ideas
-```'''
+<!-- LABS-CONTRIBUTORS-END -->'''
 
 
 def update_readme(repo_root: Path, dry_run: bool = False) -> bool:

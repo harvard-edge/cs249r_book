@@ -21,42 +21,17 @@ PROJECTS = {
     "tinytorch": "tinytorch/",
 }
 
-# Fun emoji mapping for contribution types
-# Custom icons chosen to be more distinctive and student-friendly
+# Emoji mapping for contribution types (only types actually in use)
+# Synced with generate_main_readme.py
 EMOJI_KEY = {
-    "a11y": "♿️",           # Accessibility Champion
-    "audio": "🎧",           # Audio Wizard
-    "blog": "✍️",            # Blog Writer
     "bug": "🪲",             # Bug Hunter
-    "business": "💼",        # Business Strategist
     "code": "🧑‍💻",            # Code Contributor
-    "content": "🖋",         # Content Creator
-    "data": "🗄️",           # Data Wrangler
     "design": "🎨",          # Design Artist
     "doc": "✍️",             # Word Wizard
-    "eventOrganizing": "🎪", # Event Organizer
-    "example": "💡",         # Example Creator
-    "financial": "💰",       # Financial Supporter
-    "fundingFinding": "🔍",  # Funding Finder
     "ideas": "🧠",           # Idea Generator
-    "infra": "🏗️",          # Infrastructure Builder
-    "maintenance": "🔩",     # Maintenance Master
-    "mentoring": "🧑‍🏫",      # Mentor
-    "platform": "📦",        # Platform Support
-    "plugin": "🔌",          # Plugin Developer
-    "projectManagement": "📋", # Project Manager
-    "promotion": "📣",       # Promoter
-    "question": "💬",        # Q&A Helper
-    "research": "🔬",        # Researcher
     "review": "🔎",          # Code Reviewer
-    "security": "🛡️",       # Security Guardian
-    "talk": "🎤",            # Speaker
     "test": "🧪",            # Test Engineer
     "tool": "🛠️",           # Tool Builder
-    "translation": "🌐",     # Translator
-    "tutorial": "📖",        # Tutorial Author
-    "userTesting": "🧑‍💻",    # User Tester
-    "video": "🎬",           # Video Creator
 }
 
 
