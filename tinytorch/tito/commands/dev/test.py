@@ -409,6 +409,7 @@ class DevTestCommand(BaseCommand):
                     ci_mode: bool = False) -> TestResult:
         """Run pytest on a path and return result."""
         import re
+        import os
         start = time.time()
         full_path = project_root / test_path
 
@@ -419,6 +420,15 @@ class DevTestCommand(BaseCommand):
                 duration=0,
                 message="No tests found"
             )
+
+        # Set up environment with project root in PYTHONPATH
+        # This allows tests to import from tinytorch.core.*
+        env = os.environ.copy()
+        pythonpath = env.get('PYTHONPATH', '')
+        if pythonpath:
+            env['PYTHONPATH'] = f"{project_root}:{pythonpath}"
+        else:
+            env['PYTHONPATH'] = str(project_root)
 
         try:
             # In CI mode, use verbose output for better visibility
@@ -443,6 +453,7 @@ class DevTestCommand(BaseCommand):
                 process = subprocess.Popen(
                     cmd,
                     cwd=project_root,
+                    env=env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
@@ -523,6 +534,7 @@ class DevTestCommand(BaseCommand):
                 result = subprocess.run(
                     cmd,
                     cwd=project_root,
+                    env=env,
                     capture_output=True,
                     text=True,
                     timeout=timeout
