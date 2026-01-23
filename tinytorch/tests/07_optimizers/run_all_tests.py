@@ -24,8 +24,8 @@ def run_module_tests() -> Dict:
     console = Console()
 
     # Update module number and name
-    MODULE_NUMBER = "06"
-    MODULE_NAME = "Spatial/CNN"
+    MODULE_NUMBER = "07"
+    MODULE_NAME = "Optimizers"
 
     # Header
     console.print(Panel(f"[bold blue]Module {MODULE_NUMBER}: {MODULE_NAME} - Test Suite[/bold blue]",

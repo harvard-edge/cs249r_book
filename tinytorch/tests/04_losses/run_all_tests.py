@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run all tests for Module 04: Dense/Networks
+Run all tests for Module 04: Losses
 """
 
 import sys
@@ -23,7 +23,7 @@ def run_module_tests() -> Dict:
     console = Console()
 
     # Header
-    console.print(Panel("[bold blue]Module 04: Dense/Networks - Test Suite[/bold blue]",
+    console.print(Panel("[bold blue]Module 04: Losses - Test Suite[/bold blue]",
                        expand=False))
 
     # Find all test files in this module
