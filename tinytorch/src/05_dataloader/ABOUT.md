@@ -324,7 +324,7 @@ The generator also enables infinite datasets. If your dataset generates samples 
 
 The combination of Dataset abstraction and DataLoader iteration creates a memory-efficient pipeline regardless of dataset size.
 
-For in-memory datasets like TensorDataset, all data is pre-loaded, but DataLoader still provides memory benefits by controlling how much data is active at once. Your training loop processes one batch, computes gradients, updates weights, then discards that batch before loading the next. Peak memory is `batch_size × sample_size`, not `dataset_size × sample_size`.
+For in-memory datasets like TensorDataset, all data is preloaded, but DataLoader still provides memory benefits by controlling how much data is active at once. Your training loop processes one batch, computes gradients, updates weights, then discards that batch before loading the next. Peak memory is `batch_size × sample_size`, not `dataset_size × sample_size`.
 
 For disk-backed datasets, the benefits are dramatic. Consider an ImageDataset that loads JPEGs on-demand:
 

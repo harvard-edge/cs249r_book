@@ -454,7 +454,7 @@ outputs = model.generate(
 
 Let's examine each approach to understand the similarities and differences:
 
-- **Line 1-2 (Imports)**: TinyTorch uses an explicit `enable_kv_cache()` function to opt-in to caching. PyTorch's Transformers library integrates caching directly into the model architecture.
+- **Line 1-2 (Imports)**: TinyTorch uses an explicit `enable_kv_cache()` function to opt in to caching. PyTorch's Transformers library integrates caching directly into the model architecture.
 - **Line 4-5 (Setup)**: TinyTorch requires manually enabling the cache and storing the reference. PyTorch handles this transparently when you call `generate()`.
 - **Line 7-12 (Generation)**: TinyTorch's loop explicitly manages token generation with the cache working behind the scenes. PyTorch's `generate()` method encapsulates the entire loop and automatically uses caching when `use_cache=True`.
 - **Line 14-15 (Reset)**: TinyTorch requires manual cache reset between sequences. PyTorch automatically resets the cache at the start of each `generate()` call.
