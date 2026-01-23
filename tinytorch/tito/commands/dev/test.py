@@ -315,17 +315,27 @@ class DevTestCommand(BaseCommand):
             return False
 
     def _build_package(self, project_root: Path, verbose: bool) -> TestResult:
-        """Build package by exporting all modules."""
+        """Build package by completing all modules.
+
+        This runs 'tito module complete --all' which:
+        1. Exports notebooks from src/ to modules/
+        2. Runs inline tests in each module
+        3. Exports code to tinytorch/core/
+
+        This ensures the full tinytorch package is available for testing.
+        """
         start = time.time()
 
         try:
-            cmd = [sys.executable, str(project_root / "bin" / "tito"), "dev", "export", "--all"]
+            # Use 'module complete --all' to fully build the package
+            # This exports AND tests all modules, copying code to tinytorch/core/
+            cmd = [sys.executable, str(project_root / "bin" / "tito"), "module", "complete", "--all"]
             result = subprocess.run(
                 cmd,
                 cwd=project_root,
                 capture_output=True,
                 text=True,
-                timeout=300
+                timeout=600  # 10 minutes for full build
             )
 
             if result.returncode == 0:
@@ -339,14 +349,14 @@ class DevTestCommand(BaseCommand):
                     name="Build package",
                     passed=False,
                     duration=time.time() - start,
-                    message=result.stderr[:200] if result.stderr else "Export failed"
+                    message=result.stderr[:200] if result.stderr else "Build failed"
                 )
         except subprocess.TimeoutExpired:
             return TestResult(
                 name="Build package",
                 passed=False,
                 duration=time.time() - start,
-                message="Timed out after 5 minutes"
+                message="Timed out after 10 minutes"
             )
         except Exception as e:
             return TestResult(
