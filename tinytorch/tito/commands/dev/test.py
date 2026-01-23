@@ -406,6 +406,7 @@ class DevTestCommand(BaseCommand):
                 passed_count = 0
                 failed_count = 0
 
+                error_count = 0
                 for line in process.stdout:
                     line = line.rstrip()
                     output_lines.append(line)
@@ -428,7 +429,11 @@ class DevTestCommand(BaseCommand):
                         test_name = line.split('::')[-1].split()[0] if '::' in line else line
                         print(f"  {status} {test_name}")
                         test_count += 1
-                    elif line.startswith('FAILED') or line.startswith('ERROR'):
+                    elif line.startswith('ERROR '):
+                        # Collection errors (no :: in the line)
+                        error_count += 1
+                        print(f"  ERROR {line[6:]}")
+                    elif line.startswith('FAILED'):
                         print(f"  {line}")
 
                 process.wait(timeout=timeout)
@@ -438,7 +443,13 @@ class DevTestCommand(BaseCommand):
                 if process.returncode == 0:
                     print(f"  RESULT: {passed_count} tests PASSED")
                 else:
-                    print(f"  RESULT: {failed_count} FAILED, {passed_count} passed")
+                    parts = []
+                    if error_count > 0:
+                        parts.append(f"{error_count} errors")
+                    if failed_count > 0:
+                        parts.append(f"{failed_count} failed")
+                    parts.append(f"{passed_count} passed")
+                    print(f"  RESULT: {', '.join(parts)}")
                 print(f"{'='*60}\n")
 
                 if process.returncode == 0:
@@ -450,12 +461,14 @@ class DevTestCommand(BaseCommand):
                         message=f"{passed_count} passed"
                     )
                 else:
+                    # Include errors in the failure message
+                    total_failures = failed_count + error_count
                     return TestResult(
                         name=name,
                         passed=False,
                         duration=time.time() - start,
                         test_count=test_count,
-                        message=f"{failed_count} failed, {passed_count} passed"
+                        message=f"{total_failures} failed/errors, {passed_count} passed"
                     )
             else:
                 # Non-CI mode: capture output
