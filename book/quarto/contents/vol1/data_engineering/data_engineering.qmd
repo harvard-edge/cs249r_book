@@ -2605,15 +2605,24 @@ ML storage requirements differ fundamentally from transactional systems that pow
 
 ### ML Storage Systems Architecture Options {#sec-data-engineering-ml-storage-systems-architecture-options-0aaa}
 
-Storage system selection represents a critical architectural decision that affects all aspects of the ML lifecycle from development through production operations. The choice between databases, data warehouses, and data lakes determines not just where data resides but how quickly teams can iterate during development, how models access training data, and how serving systems retrieve features in production. Understanding these trade-offs requires examining both fundamental storage characteristics and the specific access patterns of different ML tasks.
+Storage system selection extends beyond capacity planning. The goal is minimizing the **Data Term** ($\frac{\text{Data}}{\text{Bandwidth}}$) in the Iron Law of ML Systems. Every storage medium imposes physical constraints on bandwidth that determine the maximum speed of your training and serving pipelines.
 
-The key insight is that different ML workloads have distinct storage requirements based on their access patterns and latency needs:
+Optimizing this term requires understanding two fundamental storage performance metrics:
 
-- **Databases (OLTP)**: Excel for online feature serving where you need low-latency, random access to individual records. A recommendation system looking up a user's profile during real-time inference exemplifies this pattern: millisecond lookups of specific user features (age, location, preferences) to generate personalized recommendations.
+1.  **IOPS (Input/Output Operations Per Second)**: The number of distinct read/write requests a device can handle per second. This limits performance for **random access** workloads (e.g., fetching small batches of images or individual user profiles).
+2.  **Throughput (Bandwidth)**: The volume of data transferred per second, typically $\text{IOPS} \times \text{Block Size}$. This limits performance for **sequential access** workloads (e.g., scanning a Parquet file for training).
 
-- **Data warehouses (OLAP)**: Optimize for model training on structured data where you need high-throughput, sequential scans over large, clean tables. Training a fraud detection model that processes millions of transactions with hundreds of features per transaction benefits from columnar storage that reads only relevant features efficiently.
+The choice between databases, data warehouses, and data lakes is fundamentally a choice about which of these metrics to optimize:
 
-- **Data lakes**: Handle exploratory data analysis and training on unstructured data (images, audio, text) where you need flexibility and low-cost storage for massive volumes. A computer vision system storing terabytes of raw images alongside metadata, annotations, and intermediate processing results requires the schema flexibility and cost efficiency that only data lakes provide.
+-   **Databases (OLTP)**: Optimize for high IOPS with small block sizes (random access). Suited for serving individual feature vectors in real-time where per-request latency dominates.
+-   **Data Warehouses (OLAP)**: Optimize for high Throughput with large block sizes (sequential access). Ideal for feature engineering and batch analytics.
+-   **Data Lakes**: Prioritize capacity and throughput for unstructured data. Essential for training jobs where the "Data" numerator is measured in petabytes and aggregate bandwidth must scale to thousands of GPUs.
+
+Each storage architecture exhibits distinct strengths when applied to specific ML tasks. For online feature serving, the high-IOPS characteristics of databases enable millisecond lookups of individual records. A recommendation system looking up a user's profile during real-time inference exemplifies this pattern: fetching specific user features (age, location, preferences) to generate personalized recommendations requires random access optimized for per-request latency.
+
+For model training on structured data, the throughput-optimized design of data warehouses enables high-speed sequential scans over large, clean tables. Training a fraud detection model that processes millions of transactions with hundreds of features per transaction benefits from columnar storage that reads only relevant features efficiently, directly reducing the Data Term by minimizing bytes transferred.
+
+For exploratory analysis and training on unstructured data (images, audio, text), data lakes provide the flexibility and low-cost storage needed for massive volumes. A computer vision system storing terabytes of raw images alongside metadata, annotations, and intermediate processing results requires the schema flexibility and cost efficiency that only data lakes provide, where the sheer scale of the Data numerator demands the highest aggregate bandwidth.
 
 Databases excel at operational and transactional purposes, maintaining product catalogs, user profiles, or transaction histories with strong consistency guarantees and low-latency point lookups. For ML workflows, databases serve specific roles well: storing feature metadata that changes frequently, managing experiment tracking where transactional consistency matters, or maintaining model registries that require atomic updates. A PostgreSQL database handling structured user attributes—user_id, age, country, preferences—provides millisecond lookups for serving systems that need individual user features in real-time. However, databases struggle when ML training requires scanning millions of records repeatedly across multiple epochs. The row-oriented storage that optimizes transactional lookups becomes inefficient when training needs only 20 of 100 columns from each record but must read entire rows to extract those columns.
 
@@ -2687,7 +2696,7 @@ Beyond the functional differences between storage systems, cost and performance 
 
 : **Storage Cost-Performance Trade-offs**: Different storage tiers provide distinct cost-performance characteristics that determine their suitability for specific ML workloads. Training data loading requires high-throughput sequential access, online serving needs low-latency random reads, while archival storage prioritizes cost over access speed for compliance and historical data. {#tbl-storage-performance}
 
-@tbl-storage-performance reveals why ML systems employ tiered storage architectures. Consider the economics of storing our KWS training dataset (736 GB): object storage costs $15-18/month, enabling affordable long-term retention of raw audio, while maintaining working datasets on NVMe for active training costs $74-220/month but provides 50x faster data loading. The performance difference directly impacts iteration velocity—training that loads data at 5 GB/s completes dataset loading in 150 seconds, compared to 7,360 seconds at typical object storage speeds, a 50x difference that determines whether teams can iterate multiple times daily or must wait hours between experiments.
+@tbl-storage-performance reveals why ML systems employ tiered storage architectures. Consider the economics of storing our KWS training dataset (736 GB): object storage costs $15–18/month, enabling affordable long-term retention of raw audio, while maintaining working datasets on NVMe for active training costs $74–220/month but provides 50$\times$ faster data loading. The performance difference directly impacts iteration velocity. Training that loads data at 5 GB/s completes dataset loading in 150 seconds, compared to 7,360 seconds at typical object storage speeds. This 50$\times$ difference determines whether teams can iterate multiple times daily or must wait hours between experiments.
 
 To build engineering judgment, practitioners must internalize the orders of magnitude separating these tiers. @tbl-ml-latencies translates these disparities into human-scale analogies: if a CPU cycle were one second, fetching from local SSD would take two days, while a cross-country network request would span six years. These are the "numbers every ML systems engineer should know."
 
@@ -3486,7 +3495,8 @@ Debugging the model before verifying data consistency wastes engineering cycles 
 
 Data engineering involves managing complex distributed systems where statistical properties dominate correctness more than traditional software guarantees. The scale and stochastic nature of ML data pipelines create counterintuitive failure modes that differ fundamentally from conventional software systems. Engineers transferring intuition from traditional backend development encounter misconceptions about data quality, pipeline reliability, and distribution stability. These fallacies lead to systematic underinvestment in data infrastructure, resulting in silent model degradation, failed production deployments, and wasted compute resources on training with corrupted data.
 
-::: {.callout-warning title="Anti-Patterns: Don't Do This"}
+**Anti-Patterns: Don't Do This**
+
 **Anti-Pattern 1: The "Throw Data at It" Strategy**
 ```
 # DON'T: Assume more data fixes accuracy problems
@@ -3531,7 +3541,6 @@ user_age = int(record["age"])  # Works until upstream sends "25 years"
 # Result: Pipeline crash at 3am, manual recovery, lost training day
 ```
 **Do instead**: Schema contracts (Great Expectations/Pandera), dead letter queues, graceful degradation.
-:::
 
 **Fallacy:** _More data always leads to better model performance._
 
