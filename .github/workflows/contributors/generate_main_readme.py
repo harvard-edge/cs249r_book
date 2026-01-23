@@ -93,11 +93,7 @@ def generate_contributor_table(contributors: list, show_badges: bool = True, col
     row_cells = []
 
     for i, contributor in enumerate(sorted_contributors):
-<<<<<<< HEAD
         row_cells.append(generate_contributor_cell(contributor, show_badges, image_size, width_pct))
-=======
-        row_cells.append(generate_contributor_cell(contributor, show_badges, image_size))
->>>>>>> fa04485cb (feat(workflow): LLM-powered all-contributors with natural language)
 
         # Dynamic columns per row
         if len(row_cells) == cols:
