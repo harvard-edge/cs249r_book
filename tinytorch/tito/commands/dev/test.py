@@ -473,10 +473,19 @@ class DevTestCommand(BaseCommand):
         passed_modules = 0
         failed_module = None
 
+        # Print header for CI visibility
+        if ci_mode:
+            print(f"\n{'='*60}")
+            print(f"  INLINE TESTS: Testing {len(module_nums)} modules progressively")
+            print(f"{'='*60}")
+
         for module_num in module_nums:
             module_name = module_mapping[module_num]
 
-            if not ci_mode:
+            # Always show module progress (important for CI visibility)
+            if ci_mode:
+                print(f"  [{passed_modules + 1}/{len(module_nums)}] Module {module_num}: {module_name}...", end=" ", flush=True)
+            else:
                 console.print(f"  [dim]Module {module_num} ({module_name})...[/dim]")
 
             # Run tito module complete (tests + export)
@@ -492,13 +501,21 @@ class DevTestCommand(BaseCommand):
 
                 if result.returncode == 0:
                     passed_modules += 1
-                    if not ci_mode:
+                    if ci_mode:
+                        print("✓ PASSED")
+                    else:
                         console.print(f"    [green]✓[/green] Passed")
                 else:
                     failed_module = f"{module_num}:{module_name}"
-                    if not ci_mode:
+                    if ci_mode:
+                        print("✗ FAILED")
+                        # Show error details in CI
+                        print(f"      Error output:")
+                        for line in result.stdout.split('\n')[-15:]:
+                            if line.strip():
+                                print(f"        {line}")
+                    else:
                         console.print(f"    [red]✗[/red] Failed")
-                        # Show error summary
                         for line in result.stdout.split('\n')[-10:]:
                             if line.strip():
                                 console.print(f"      [dim red]{line}[/dim red]")
@@ -506,10 +523,23 @@ class DevTestCommand(BaseCommand):
 
             except subprocess.TimeoutExpired:
                 failed_module = f"{module_num}:timeout"
+                if ci_mode:
+                    print("✗ TIMEOUT (>5min)")
                 break
             except Exception as e:
                 failed_module = f"{module_num}:{str(e)[:30]}"
+                if ci_mode:
+                    print(f"✗ ERROR: {str(e)[:50]}")
                 break
+
+        # Print summary for CI
+        if ci_mode:
+            print(f"{'='*60}")
+            if failed_module:
+                print(f"  RESULT: FAILED at {failed_module}")
+            else:
+                print(f"  RESULT: ALL {passed_modules} MODULES PASSED")
+            print(f"{'='*60}\n")
 
         duration = time.time() - start
 
