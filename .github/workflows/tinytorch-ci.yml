@@ -1,23 +1,49 @@
 name: 🔥 TinyTorch CI
 
 # =============================================================================
-# TinyTorch CI - Unified Testing Workflow
+# TinyTorch CI - Comprehensive Testing Workflow
 # =============================================================================
-# Uses the unified `tito dev test` command for all testing.
-# Required vars: TINYTORCH_ROOT
 #
-# Test Types:
-#   --inline      Inline tests from src/ (progressive module build)
-#   --unit        Pytest unit tests (fast, default on push)
-#   --cli         CLI command tests (fast, default on push)
-#   --integration Cross-module integration tests
-#   --e2e         End-to-end user journey tests
-#   --milestone   Milestone script tests (requires full package)
-#   --all         All of the above
-#   --release     Full release validation (destructive, resets modules)
+# Test Progression (sequential, fail-fast):
+#
+#   Stage 1: INLINE BUILD
+#     └─ Build package from src/ modules (if this fails, nothing works)
+#
+#   Stage 2: UNIT TESTS
+#     └─ Test individual module functions
+#
+#   Stage 3: INTEGRATION TESTS
+#     └─ Cross-module validation
+#
+#   Stage 4: CLI TESTS
+#     └─ Verify CLI commands work correctly
+#
+#   Stage 5: E2E TESTS
+#     └─ Full user journey validation
+#
+#   Stage 6: MILESTONE TESTS
+#     └─ Historical ML recreations (Perceptron, MLP, etc.)
+#
+#   Stage 7: RELEASE VALIDATION (manual only)
+#     └─ Destructive full journey test
+#
+# Triggers:
+#   - Push to dev: ALL tests (dev must be rock solid)
+#   - Push to main: ALL tests (production ready)
+#   - PR: Standard tests (stages 1-5)
+#   - Feature branches: Quick tests (unit + cli only)
+#   - Manual: Any test type
+#   - Called by publish: all (pre-release gate)
+#
+# =============================================================================
 
 on:
   push:
+    branches: [main, dev]
+    paths:
+      - 'tinytorch/**'
+      - '.github/workflows/tinytorch-*.yml'
+  pull_request:
     branches: [main, dev]
     paths:
       - 'tinytorch/**'
@@ -27,7 +53,7 @@ on:
       test_type:
         description: 'Test type to run'
         required: false
-        default: 'quick'
+        default: 'all'
         type: string
   workflow_dispatch:
     inputs:
@@ -37,30 +63,126 @@ on:
         default: 'quick'
         type: choice
         options:
-          - quick
-          - inline
-          - unit
-          - cli
-          - integration
-          - e2e
-          - milestone
-          - all
-          - release
+          - quick       # unit + cli (fast feedback, no build)
+          - standard    # stages 1-5 (no milestones)
+          - all         # stages 1-6 (everything except release)
+          - release     # destructive full validation
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: tinytorch-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TITO_ALLOW_SYSTEM: "1"
+  TINYTORCH_QUIET: "1"
 
 jobs:
-  test:
-    name: Run Tests
+  # ===========================================================================
+  # Configuration: Determine what tests to run
+  # ===========================================================================
+  configure:
+    name: 📋 Configure
     runs-on: ubuntu-latest
+    outputs:
+      test_type: ${{ steps.config.outputs.test_type }}
+      run_inline: ${{ steps.config.outputs.run_inline }}
+      run_unit: ${{ steps.config.outputs.run_unit }}
+      run_integration: ${{ steps.config.outputs.run_integration }}
+      run_cli: ${{ steps.config.outputs.run_cli }}
+      run_e2e: ${{ steps.config.outputs.run_e2e }}
+      run_milestone: ${{ steps.config.outputs.run_milestone }}
+      run_release: ${{ steps.config.outputs.run_release }}
 
-    env:
-      TITO_ALLOW_SYSTEM: "1"
+    steps:
+      - name: Determine test configuration
+        id: config
+        run: |
+          # Determine test type based on trigger
+          if [ "${{ github.event_name }}" = "workflow_call" ]; then
+            TEST_TYPE="${{ inputs.test_type }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TEST_TYPE="${{ github.event.inputs.test_type }}"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            TEST_TYPE="standard"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            TEST_TYPE="all"
+          elif [ "${{ github.ref }}" = "refs/heads/dev" ]; then
+            # dev must be rock solid - run everything
+            TEST_TYPE="all"
+          else
+            # feature branches get quick feedback
+            TEST_TYPE="quick"
+          fi
+
+          echo "test_type=$TEST_TYPE" >> $GITHUB_OUTPUT
+
+          # Set flags based on test type
+          # Sequential order: inline → unit → integration → cli → e2e → milestone → release
+          case "$TEST_TYPE" in
+            quick)
+              # Fast feedback: skip inline build, just unit + cli
+              echo "run_inline=false" >> $GITHUB_OUTPUT
+              echo "run_unit=true" >> $GITHUB_OUTPUT
+              echo "run_integration=false" >> $GITHUB_OUTPUT
+              echo "run_cli=true" >> $GITHUB_OUTPUT
+              echo "run_e2e=false" >> $GITHUB_OUTPUT
+              echo "run_milestone=false" >> $GITHUB_OUTPUT
+              echo "run_release=false" >> $GITHUB_OUTPUT
+              ;;
+            standard)
+              # Stages 1-5 (no milestones)
+              echo "run_inline=true" >> $GITHUB_OUTPUT
+              echo "run_unit=true" >> $GITHUB_OUTPUT
+              echo "run_integration=true" >> $GITHUB_OUTPUT
+              echo "run_cli=true" >> $GITHUB_OUTPUT
+              echo "run_e2e=true" >> $GITHUB_OUTPUT
+              echo "run_milestone=false" >> $GITHUB_OUTPUT
+              echo "run_release=false" >> $GITHUB_OUTPUT
+              ;;
+            all)
+              # Stages 1-6 (everything except release)
+              echo "run_inline=true" >> $GITHUB_OUTPUT
+              echo "run_unit=true" >> $GITHUB_OUTPUT
+              echo "run_integration=true" >> $GITHUB_OUTPUT
+              echo "run_cli=true" >> $GITHUB_OUTPUT
+              echo "run_e2e=true" >> $GITHUB_OUTPUT
+              echo "run_milestone=true" >> $GITHUB_OUTPUT
+              echo "run_release=false" >> $GITHUB_OUTPUT
+              ;;
+            release)
+              # Destructive full validation only
+              echo "run_inline=false" >> $GITHUB_OUTPUT
+              echo "run_unit=false" >> $GITHUB_OUTPUT
+              echo "run_integration=false" >> $GITHUB_OUTPUT
+              echo "run_cli=false" >> $GITHUB_OUTPUT
+              echo "run_e2e=false" >> $GITHUB_OUTPUT
+              echo "run_milestone=false" >> $GITHUB_OUTPUT
+              echo "run_release=true" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+          echo "📋 Test configuration: $TEST_TYPE"
+
+  # ===========================================================================
+  # STAGE 1: INLINE BUILD - Build package from src/
+  # ===========================================================================
+  stage-1-inline:
+    name: 📝 Stage 1 · Inline Build
+    runs-on: ubuntu-latest
+    needs: configure
+    if: needs.configure.outputs.run_inline == 'true'
+    timeout-minutes: 30
 
     defaults:
       run:
-        working-directory: ${{ vars.TINYTORCH_ROOT }}
+        working-directory: tinytorch
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -68,49 +190,381 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
-          cache-dependency-path: '${{ vars.TINYTORCH_ROOT }}/requirements.txt'
+          cache-dependency-path: 'tinytorch/requirements.txt'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Quick tests: unit + cli (default on push and quick dispatch)
-      - name: Run Quick Tests (Unit + CLI)
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.test_type == 'quick')
-        run: ./bin/tito dev test --unit --cli --ci
+      - name: Run Inline Tests (Progressive Build)
+        run: |
+          echo "📝 Building package from src/ modules..."
+          echo "   Tests each module exports correctly in sequence."
+          ./bin/tito dev test --inline --ci
 
-      # Individual test types (manual trigger)
-      - name: Run Inline Tests (Progressive Module Build)
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.test_type == 'inline'
-        run: ./bin/tito dev test --inline --ci
+  # ===========================================================================
+  # STAGE 2: UNIT TESTS - Test individual module functions
+  # ===========================================================================
+  stage-2-unit:
+    name: 🧪 Stage 2 · Unit Tests
+    runs-on: ubuntu-latest
+    needs: [configure, stage-1-inline]
+    if: |
+      always() &&
+      needs.configure.outputs.run_unit == 'true' &&
+      (needs.stage-1-inline.result == 'success' || needs.stage-1-inline.result == 'skipped')
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: tinytorch
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'tinytorch/requirements.txt'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Run Unit Tests
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.test_type == 'unit'
-        run: ./bin/tito dev test --unit --ci
+        run: |
+          ./bin/tito dev test --unit --ci
 
-      - name: Run CLI Tests
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.test_type == 'cli'
-        run: ./bin/tito dev test --cli --ci
+  # ===========================================================================
+  # STAGE 3: INTEGRATION TESTS - Cross-module validation
+  # ===========================================================================
+  stage-3-integration:
+    name: 🔗 Stage 3 · Integration
+    runs-on: ubuntu-latest
+    needs: [configure, stage-2-unit]
+    if: |
+      always() &&
+      needs.configure.outputs.run_integration == 'true' &&
+      (needs.stage-2-unit.result == 'success' || needs.stage-2-unit.result == 'skipped')
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: tinytorch
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'tinytorch/requirements.txt'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Run Integration Tests
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.test_type == 'integration'
-        run: ./bin/tito dev test --integration --ci
+        run: |
+          ./bin/tito dev test --integration --ci
+
+  # ===========================================================================
+  # STAGE 4: CLI TESTS - Verify CLI commands work
+  # ===========================================================================
+  stage-4-cli:
+    name: 💻 Stage 4 · CLI Tests
+    runs-on: ubuntu-latest
+    needs: [configure, stage-3-integration]
+    if: |
+      always() &&
+      needs.configure.outputs.run_cli == 'true' &&
+      (needs.stage-3-integration.result == 'success' || needs.stage-3-integration.result == 'skipped')
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: tinytorch
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'tinytorch/requirements.txt'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run CLI Tests
+        run: |
+          ./bin/tito dev test --cli --ci
+
+  # ===========================================================================
+  # STAGE 5: E2E TESTS - Full user journey validation
+  # ===========================================================================
+  stage-5-e2e:
+    name: 🌐 Stage 5 · E2E Tests
+    runs-on: ubuntu-latest
+    needs: [configure, stage-4-cli]
+    if: |
+      always() &&
+      needs.configure.outputs.run_e2e == 'true' &&
+      (needs.stage-4-cli.result == 'success' || needs.stage-4-cli.result == 'skipped')
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: tinytorch
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'tinytorch/requirements.txt'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Run E2E Tests
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.test_type == 'e2e'
-        run: ./bin/tito dev test --e2e --ci
+        run: |
+          ./bin/tito dev test --e2e --ci
+
+  # ===========================================================================
+  # STAGE 6: MILESTONE TESTS - Historical ML recreations
+  # ===========================================================================
+  stage-6-milestone:
+    name: 🏆 Stage 6 · Milestones
+    runs-on: ubuntu-latest
+    needs: [configure, stage-5-e2e]
+    if: |
+      always() &&
+      needs.configure.outputs.run_milestone == 'true' &&
+      (needs.stage-5-e2e.result == 'success' || needs.stage-5-e2e.result == 'skipped')
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: tinytorch
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'tinytorch/requirements.txt'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Run Milestone Tests
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.test_type == 'milestone'
-        run: ./bin/tito dev test --milestone --ci
+        run: |
+          ./bin/tito dev test --milestone --ci
 
-      # All tests (manual trigger)
-      - name: Run All Tests
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.test_type == 'all'
-        run: ./bin/tito dev test --all --ci
+  # ===========================================================================
+  # STAGE 7: RELEASE VALIDATION - Destructive full journey (manual only)
+  # ===========================================================================
+  stage-7-release:
+    name: 🚀 Stage 7 · Release
+    runs-on: ubuntu-latest
+    needs: configure
+    if: needs.configure.outputs.run_release == 'true'
+    timeout-minutes: 45
 
-      # Release validation (manual trigger, destructive)
+    defaults:
+      run:
+        working-directory: tinytorch
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'tinytorch/requirements.txt'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
       - name: Run Release Validation
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.test_type == 'release'
-        run: ./bin/tito dev test --release --ci
+        run: |
+          echo "🚀 Running DESTRUCTIVE release validation..."
+          echo "   This resets all modules and runs the full student journey."
+          ./bin/tito dev test --release --ci
+
+  # ===========================================================================
+  # Summary: Collect and report all results
+  # ===========================================================================
+  summary:
+    name: 📊 Summary
+    runs-on: ubuntu-latest
+    needs: [configure, stage-1-inline, stage-2-unit, stage-3-integration, stage-4-cli, stage-5-e2e, stage-6-milestone, stage-7-release]
+    if: always()
+
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "## 🔥 TinyTorch CI Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Test Type** | \`${{ needs.configure.outputs.test_type }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Trigger** | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Test Progression (Sequential)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Test | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          # Stage 1: Inline
+          if [ "${{ needs.configure.outputs.run_inline }}" = "true" ]; then
+            case "${{ needs.stage-1-inline.result }}" in
+              success) echo "| 1 | 📝 Inline Build | ✅ Passed |" >> $GITHUB_STEP_SUMMARY ;;
+              failure) echo "| 1 | 📝 Inline Build | ❌ Failed |" >> $GITHUB_STEP_SUMMARY ;;
+              *) echo "| 1 | 📝 Inline Build | ⏭️ ${{ needs.stage-1-inline.result }} |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          else
+            echo "| 1 | 📝 Inline Build | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Stage 2: Unit
+          if [ "${{ needs.configure.outputs.run_unit }}" = "true" ]; then
+            case "${{ needs.stage-2-unit.result }}" in
+              success) echo "| 2 | 🧪 Unit Tests | ✅ Passed |" >> $GITHUB_STEP_SUMMARY ;;
+              failure) echo "| 2 | 🧪 Unit Tests | ❌ Failed |" >> $GITHUB_STEP_SUMMARY ;;
+              *) echo "| 2 | 🧪 Unit Tests | ⏭️ ${{ needs.stage-2-unit.result }} |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          else
+            echo "| 2 | 🧪 Unit Tests | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Stage 3: Integration
+          if [ "${{ needs.configure.outputs.run_integration }}" = "true" ]; then
+            case "${{ needs.stage-3-integration.result }}" in
+              success) echo "| 3 | 🔗 Integration | ✅ Passed |" >> $GITHUB_STEP_SUMMARY ;;
+              failure) echo "| 3 | 🔗 Integration | ❌ Failed |" >> $GITHUB_STEP_SUMMARY ;;
+              *) echo "| 3 | 🔗 Integration | ⏭️ ${{ needs.stage-3-integration.result }} |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          else
+            echo "| 3 | 🔗 Integration | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Stage 4: CLI
+          if [ "${{ needs.configure.outputs.run_cli }}" = "true" ]; then
+            case "${{ needs.stage-4-cli.result }}" in
+              success) echo "| 4 | 💻 CLI Tests | ✅ Passed |" >> $GITHUB_STEP_SUMMARY ;;
+              failure) echo "| 4 | 💻 CLI Tests | ❌ Failed |" >> $GITHUB_STEP_SUMMARY ;;
+              *) echo "| 4 | 💻 CLI Tests | ⏭️ ${{ needs.stage-4-cli.result }} |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          else
+            echo "| 4 | 💻 CLI Tests | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Stage 5: E2E
+          if [ "${{ needs.configure.outputs.run_e2e }}" = "true" ]; then
+            case "${{ needs.stage-5-e2e.result }}" in
+              success) echo "| 5 | 🌐 E2E Tests | ✅ Passed |" >> $GITHUB_STEP_SUMMARY ;;
+              failure) echo "| 5 | 🌐 E2E Tests | ❌ Failed |" >> $GITHUB_STEP_SUMMARY ;;
+              *) echo "| 5 | 🌐 E2E Tests | ⏭️ ${{ needs.stage-5-e2e.result }} |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          else
+            echo "| 5 | 🌐 E2E Tests | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Stage 6: Milestone
+          if [ "${{ needs.configure.outputs.run_milestone }}" = "true" ]; then
+            case "${{ needs.stage-6-milestone.result }}" in
+              success) echo "| 6 | 🏆 Milestones | ✅ Passed |" >> $GITHUB_STEP_SUMMARY ;;
+              failure) echo "| 6 | 🏆 Milestones | ❌ Failed |" >> $GITHUB_STEP_SUMMARY ;;
+              *) echo "| 6 | 🏆 Milestones | ⏭️ ${{ needs.stage-6-milestone.result }} |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          else
+            echo "| 6 | 🏆 Milestones | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Stage 7: Release
+          if [ "${{ needs.configure.outputs.run_release }}" = "true" ]; then
+            case "${{ needs.stage-7-release.result }}" in
+              success) echo "| 7 | 🚀 Release | ✅ Passed |" >> $GITHUB_STEP_SUMMARY ;;
+              failure) echo "| 7 | 🚀 Release | ❌ Failed |" >> $GITHUB_STEP_SUMMARY ;;
+              *) echo "| 7 | 🚀 Release | ⏭️ ${{ needs.stage-7-release.result }} |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          else
+            echo "| 7 | 🚀 Release | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Check for failures
+        run: |
+          FAILED=false
+
+          # Check each enabled test
+          if [ "${{ needs.configure.outputs.run_inline }}" = "true" ] && [ "${{ needs.stage-1-inline.result }}" = "failure" ]; then
+            echo "❌ Stage 1 (Inline Build) failed"
+            FAILED=true
+          fi
+          if [ "${{ needs.configure.outputs.run_unit }}" = "true" ] && [ "${{ needs.stage-2-unit.result }}" = "failure" ]; then
+            echo "❌ Stage 2 (Unit Tests) failed"
+            FAILED=true
+          fi
+          if [ "${{ needs.configure.outputs.run_integration }}" = "true" ] && [ "${{ needs.stage-3-integration.result }}" = "failure" ]; then
+            echo "❌ Stage 3 (Integration) failed"
+            FAILED=true
+          fi
+          if [ "${{ needs.configure.outputs.run_cli }}" = "true" ] && [ "${{ needs.stage-4-cli.result }}" = "failure" ]; then
+            echo "❌ Stage 4 (CLI Tests) failed"
+            FAILED=true
+          fi
+          if [ "${{ needs.configure.outputs.run_e2e }}" = "true" ] && [ "${{ needs.stage-5-e2e.result }}" = "failure" ]; then
+            echo "❌ Stage 5 (E2E Tests) failed"
+            FAILED=true
+          fi
+          if [ "${{ needs.configure.outputs.run_milestone }}" = "true" ] && [ "${{ needs.stage-6-milestone.result }}" = "failure" ]; then
+            echo "❌ Stage 6 (Milestones) failed"
+            FAILED=true
+          fi
+          if [ "${{ needs.configure.outputs.run_release }}" = "true" ] && [ "${{ needs.stage-7-release.result }}" = "failure" ]; then
+            echo "❌ Stage 7 (Release) failed"
+            FAILED=true
+          fi
+
+          if [ "$FAILED" = "true" ]; then
+            echo ""
+            echo "❌ CI FAILED - See above for details"
+            exit 1
+          else
+            echo "✅ All enabled tests passed"
+          fi
