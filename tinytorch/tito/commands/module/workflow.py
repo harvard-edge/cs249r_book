@@ -7,6 +7,7 @@ Implements the natural workflow:
 3. tito module complete 01 → Tests, exports, updates progress
 """
 
+import os
 import subprocess
 import sys
 from argparse import ArgumentParser, Namespace
@@ -835,12 +836,22 @@ class ModuleWorkflowCommand(BaseCommand):
                 self.console.print(f"   [dim yellow]No source file found: {dev_file}[/dim yellow]")
             return {'passed': 0, 'failed': 0, 'tests': [], 'returncode': 0}
 
+        # Set up environment with project root in PYTHONPATH
+        # This allows src files to import from tinytorch.core.*
+        env = os.environ.copy()
+        pythonpath = env.get('PYTHONPATH', '')
+        if pythonpath:
+            env['PYTHONPATH'] = f"{project_root}:{pythonpath}"
+        else:
+            env['PYTHONPATH'] = str(project_root)
+
         # Run the module file (which triggers if __name__ == "__main__" tests)
         result = subprocess.run(
             [sys.executable, str(dev_file.absolute())],
             capture_output=True,
             text=True,
-            cwd=project_root
+            cwd=project_root,
+            env=env
         )
 
         # Parse output to extract individual test results
