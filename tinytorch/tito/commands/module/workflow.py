@@ -633,6 +633,118 @@ class ModuleWorkflowCommand(BaseCommand):
 
         return 0 if success else 1
 
+    def complete_all_modules(self, skip_tests: bool = False, skip_export: bool = False) -> int:
+        """Complete all modules in sequence.
+
+        This iterates through all modules in order (01 → 20) and runs
+        complete_module on each one. Useful for:
+        - CI validation of all modules
+        - Students who want to export everything they've built
+        - Rebuilding the full package from existing notebooks
+
+        Note: This expects notebooks to exist in modules/. For rebuilding
+        from src/, use 'tito dev export --all' instead.
+        """
+        from rich import box
+
+        module_mapping = get_module_mapping()
+        module_nums = sorted(module_mapping.keys(), key=lambda x: int(x))
+
+        console = self.console
+        console.print(Panel(
+            f"[bold cyan]Completing All Modules ({len(module_nums)} total)[/bold cyan]\n\n"
+            "This will test and export each module in sequence.\n"
+            "[dim]Modules without notebooks will be skipped.[/dim]",
+            title="🔄 Complete All Modules",
+            border_style="cyan",
+            box=box.ROUNDED
+        ))
+        console.print()
+
+        passed = 0
+        failed = 0
+        skipped = 0
+
+        for module_num in module_nums:
+            module_name = module_mapping[module_num]
+
+            # Check if notebook exists
+            short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+            notebook_path = self.config.project_root / "modules" / module_name / f"{short_name}.ipynb"
+
+            if not notebook_path.exists():
+                console.print(f"  [dim]⏭️  Module {module_num}: {module_name} (no notebook)[/dim]")
+                skipped += 1
+                continue
+
+            console.print(f"  [cyan]▶[/cyan] Module {module_num}: {module_name}...", end=" ")
+
+            # Temporarily suppress the elaborate complete_module output
+            # by calling the core logic directly
+            result = self._complete_module_quiet(module_num, module_name, skip_tests, skip_export)
+
+            if result == 0:
+                passed += 1
+                console.print("[green]✓[/green]")
+            else:
+                failed += 1
+                console.print("[red]✗[/red]")
+                # Stop on first failure
+                console.print(f"\n[red]❌ Failed at module {module_num}[/red]")
+                break
+
+        console.print()
+
+        if failed == 0:
+            console.print(Panel(
+                f"[bold green]✅ All modules completed![/bold green]\n\n"
+                f"Passed: {passed}  Skipped: {skipped}",
+                title="🎉 Success",
+                border_style="green",
+                box=box.ROUNDED
+            ))
+            return 0
+        else:
+            console.print(Panel(
+                f"[bold red]❌ Module completion failed[/bold red]\n\n"
+                f"Passed: {passed}  Failed: {failed}  Skipped: {skipped}",
+                title="⚠️ Failure",
+                border_style="red",
+                box=box.ROUNDED
+            ))
+            return 1
+
+    def _complete_module_quiet(self, module_num: str, module_name: str,
+                                skip_tests: bool, skip_export: bool) -> int:
+        """Complete a single module without verbose output.
+
+        Core logic extracted from complete_module for use in batch operations.
+        Returns 0 on success, 1 on failure.
+        """
+        # Run unit tests
+        if not skip_tests:
+            unit_result = self._run_inline_unit_tests(module_name, verbose=False)
+            if unit_result['failed'] > 0:
+                return 1
+
+        # Export to package
+        if not skip_export:
+            export_result = self.export_module(module_name)
+            if export_result != 0:
+                return 1
+
+        # Run integration tests (after export)
+        if not skip_tests:
+            integration_result = self._run_integration_tests(module_name, verbose=False)
+            if integration_result['failed'] > 0:
+                return 1
+
+        # Update progress
+        progress = self.get_progress_data()
+        self.update_progress(module_num, module_name)
+
+        return 0
+
     def _trigger_submission(self):
         """Asks the user to submit their progress if they are logged in."""
         self.console.print()  # Add a blank line for spacing
@@ -1324,6 +1436,12 @@ class ModuleWorkflowCommand(BaseCommand):
             elif args.module_command == 'resume':
                 return self.resume_module(getattr(args, 'module_number', None))
             elif args.module_command == 'complete':
+                # Check for --all flag
+                if getattr(args, 'all', False):
+                    return self.complete_all_modules(
+                        getattr(args, 'skip_tests', False),
+                        getattr(args, 'skip_export', False)
+                    )
                 return self.complete_module(
                     getattr(args, 'module_number', None),
                     getattr(args, 'skip_tests', False),
