@@ -587,7 +587,29 @@ class DevTestCommand(BaseCommand):
             else:
                 console.print(f"  [dim]Module {module_num} ({module_name})...[/dim]")
 
-            # Run tito module complete (tests + export)
+            # Step 1: Export notebook from src/ to modules/
+            try:
+                export_result = subprocess.run(
+                    [sys.executable, str(project_root / "bin" / "tito"),
+                     "dev", "export", module_num],
+                    capture_output=True,
+                    text=True,
+                    cwd=project_root,
+                    timeout=120  # 2 min for export
+                )
+                if export_result.returncode != 0:
+                    failed_module = f"{module_num}:export"
+                    if ci_mode:
+                        print("✗ EXPORT FAILED")
+                        print(f"      Error: {export_result.stderr[:100] if export_result.stderr else 'Export failed'}")
+                    break
+            except subprocess.TimeoutExpired:
+                failed_module = f"{module_num}:export_timeout"
+                if ci_mode:
+                    print("✗ EXPORT TIMEOUT")
+                break
+
+            # Step 2: Run module complete (tests + copy to tinytorch/core/)
             try:
                 result = subprocess.run(
                     [sys.executable, str(project_root / "bin" / "tito"),
