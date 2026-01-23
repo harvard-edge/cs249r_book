@@ -15,45 +15,21 @@ import re
 import sys
 from pathlib import Path
 
-# Fun emoji mapping for contribution types (synced with generate_readme_tables.py)
-# Custom icons chosen to be more distinctive and student-friendly
+# Emoji mapping for contribution types (only types actually in use)
+# Synced with generate_readme_tables.py
 CONTRIBUTION_EMOJIS = {
-    "a11y": "♿️",           # Accessibility Champion
-    "audio": "🎧",           # Audio Wizard
-    "blog": "✍️",            # Blog Writer
     "bug": "🪲",             # Bug Hunter
-    "business": "💼",        # Business Strategist
     "code": "🧑‍💻",            # Code Contributor
-    "content": "🖋",         # Content Creator
-    "data": "🗄️",           # Data Wrangler
     "design": "🎨",          # Design Artist
     "doc": "✍️",             # Word Wizard
-    "eventOrganizing": "🎪", # Event Organizer
-    "example": "💡",         # Example Creator
-    "financial": "💰",       # Financial Supporter
-    "fundingFinding": "🔍",  # Funding Finder
     "ideas": "🧠",           # Idea Generator
-    "infra": "🏗️",          # Infrastructure Builder
-    "maintenance": "🔩",     # Maintenance Master
-    "mentoring": "🧑‍🏫",      # Mentor
-    "platform": "📦",        # Platform Support
-    "plugin": "🔌",          # Plugin Developer
-    "projectManagement": "📋", # Project Manager
-    "promotion": "📣",       # Promoter
-    "question": "💬",        # Q&A Helper
-    "research": "🔬",        # Researcher
     "review": "🔎",          # Code Reviewer
-    "security": "🛡️",       # Security Guardian
-    "talk": "🎤",            # Speaker
     "test": "🧪",            # Test Engineer
     "tool": "🛠️",           # Tool Builder
-    "translation": "🌐",     # Translator
-    "tutorial": "📖",        # Tutorial Author
-    "userTesting": "🧑‍💻",    # User Tester
-    "video": "🎬",           # Video Creator
 }
 
-# Legend for common contribution types (shown in README)
+# Legend for contribution types (shown in README)
+# Only includes types currently in use across all projects
 CONTRIBUTION_LEGEND = {
     "bug": ("🪲", "Bug Hunter"),
     "code": ("🧑‍💻", "Code Contributor"),
@@ -63,10 +39,6 @@ CONTRIBUTION_LEGEND = {
     "review": ("🔎", "Code Reviewer"),
     "test": ("🧪", "Test Engineer"),
     "tool": ("🛠️", "Tool Builder"),
-    "infra": ("🏗️", "Infrastructure Builder"),
-    "maintenance": ("🔩", "Maintenance Master"),
-    "research": ("🔬", "Researcher"),
-    "tutorial": ("📖", "Tutorial Author"),
 }
 
 
@@ -121,7 +93,11 @@ def generate_contributor_table(contributors: list, show_badges: bool = True, col
     row_cells = []
 
     for i, contributor in enumerate(sorted_contributors):
+<<<<<<< HEAD
         row_cells.append(generate_contributor_cell(contributor, show_badges, image_size, width_pct))
+=======
+        row_cells.append(generate_contributor_cell(contributor, show_badges, image_size))
+>>>>>>> fa04485cb (feat(workflow): LLM-powered all-contributors with natural language)
 
         # Dynamic columns per row
         if len(row_cells) == cols:
