@@ -52,19 +52,6 @@ The previous chapters established how to express neural network computations: @s
 
 Training workloads exhibit three distinguishing characteristics that separate them from general-purpose computing: extreme computational intensity from iterative gradient computations across massive models, substantial memory pressure from storing parameters, activations, and optimizer states simultaneously, and complex data dependencies requiring synchronized parameter updates. Large language model training requires approximately $10^{23}$ floating-point operations [@brown2020language], memory footprints reaching terabytes when including activation storage, and coordination across many devices. This multiplicative cost structure explains why training systems engineering evolved as a distinct discipline.
 
-::: {.callout-note title="Historical Perspective: Four Decades of Training Systems Evolution"}
-
-The progression from 1986 to today illustrates how training systems co-evolved with hardware capabilities:
-
-- **1986**: Backpropagation algorithm formalized [@rumelhart1986learning]. Training a 3-layer network on toy datasets required days on CPU workstations.
-- **2012**: AlexNet demonstrated GPU training [@krizhevsky2012imagenet]. Two GTX 580 GPUs reduced ImageNet training from weeks to days—a 10× improvement that launched the deep learning era.
-- **2017**: Transformers introduced attention mechanisms [@vaswani2017attention]. NVIDIA Volta GPUs with Tensor Cores enabled mixed-precision training, delivering 5× speedup over previous generation.
-- **2020**: GPT-3 training required 1,024 A100 GPUs for months, consuming an estimated $4.6M in compute [@brown2020language]. This scale made training efficiency economically critical.
-- **2023**: Training efficiency improved 10× through the techniques examined in this chapter. FlashAttention, gradient checkpointing, and ZeRO optimization enable training models previously requiring clusters on single machines.
-
-Each generation's constraints drove the next generation's innovations. Memory limits motivated gradient checkpointing; bandwidth limits motivated FlashAttention; cost limits motivated mixed precision. Understanding this progression contextualizes why the techniques in this chapter exist.
-:::
-
 ### The Iron Law of Training Performance {#sec-ai-training-iron-law}
 
 Frameworks provide abstractions for expressing training algorithms, but training systems engineering determines whether those algorithms can execute within physical resource limits. The Iron Law provides the organizing framework for understanding how every optimization technique improves training time.
@@ -98,6 +85,19 @@ This equation reveals three levers for improvement: reduce total operations thro
 
 : Optimization techniques mapped to Iron Law terms. Understanding which term a technique affects guides optimization strategy selection. {#tbl-iron-law-mapping}
 
+:::
+
+::: {.callout-note title="Historical Perspective: Four Decades of Training Systems Evolution"}
+
+The Iron Law framework illuminates how training systems co-evolved with hardware capabilities. Each generation faced different bottlenecks, and each generation's constraints drove the next generation's innovations:
+
+- **1986**: Backpropagation algorithm formalized [@rumelhart1986learning]. Training a 3-layer network on toy datasets required days on CPU workstations. The bottleneck was raw compute throughput (Peak Throughput in Iron Law terms).
+- **2012**: AlexNet demonstrated GPU training [@krizhevsky2012imagenet]. Two GTX 580 GPUs reduced ImageNet training from weeks to days—a 10× improvement that launched the deep learning era. GPUs increased Peak Throughput dramatically.
+- **2017**: Transformers introduced attention mechanisms [@vaswani2017attention]. NVIDIA Volta GPUs with Tensor Cores enabled mixed-precision training, delivering 5× speedup over previous generation. Tensor Cores further increased Peak Throughput for specific operations.
+- **2020**: GPT-3 training required 1,024 A100 GPUs for months, consuming an estimated $4.6M in compute [@brown2020language]. At this scale, Utilization became critical—idle GPUs wasted thousands of dollars per hour.
+- **2023**: Training efficiency improved 10× through the techniques examined in this chapter. FlashAttention reduces Total Operations while improving Utilization; gradient checkpointing trades Operations for memory capacity; ZeRO optimization maximizes Utilization across distributed systems.
+
+Memory limits motivated gradient checkpointing; bandwidth limits motivated FlashAttention; cost limits motivated mixed precision. The Iron Law explains *why* each technique matters: they each pull different levers in the fundamental performance equation.
 :::
 
 ### Running Example: Training GPT-2 {#sec-ai-training-gpt2-case-study}
@@ -2373,17 +2373,7 @@ Flash Attention decomposes this computation by partitioning queries into $B_q$ b
 
 No $n \times n$ matrix ever exists in HBM. The largest intermediate tensor is $b \times b$ (typically $b = 128$), requiring only 64 KB for a $128 \times 128$ FP32 matrix compared to 64 MB for the full $4096 \times 4096$ matrix.
 
-The online softmax algorithm enables this decomposition. Traditional softmax requires knowing all inputs before computing any output: $\text{softmax}(x)_i = e^{x_i} / \sum_j e^{x_j}$. Flash Attention uses an incremental formulation that updates softmax statistics as new blocks arrive, maintaining numerical stability through rescaling:
-
-$$
-\begin{aligned}
-m_{\text{new}} &= \max(m_{\text{old}}, m_{\text{block}}) \\
-l_{\text{new}} &= e^{m_{\text{old}} - m_{\text{new}}} l_{\text{old}} + e^{m_{\text{block}} - m_{\text{new}}} \sum_j e^{s_j - m_{\text{block}}} \\
-O_{\text{new}} &= \frac{e^{m_{\text{old}} - m_{\text{new}}} O_{\text{old}} + e^{m_{\text{block}} - m_{\text{new}}} \text{softmax}_{\text{block}} V_j}{l_{\text{new}}}
-\end{aligned}
-$$
-
-where $m$ tracks the maximum score seen so far (for numerical stability) and $l$ maintains the softmax denominator.
+The online softmax algorithm enables this decomposition. Traditional softmax requires knowing all inputs before computing any output: $\text{softmax}(x)_i = e^{x_i} / \sum_j e^{x_j}$. Flash Attention uses an incremental formulation that updates softmax statistics as new blocks arrive, tracking the running maximum $m$ (for numerical stability) and denominator $l$ as each block is processed, then rescaling accumulated outputs accordingly.
 
 #### Memory and IO Complexity Analysis {#sec-ai-training-flash-attention-complexity}
 
@@ -2465,21 +2455,7 @@ Training a GPT-2 style transformer (12 layers, 768 hidden dim, 12 heads) with va
 
 Standard attention runs out of memory beyond 2048 tokens on a 40 GB A100, while Flash Attention trains sequences up to 8192 tokens. Even at 2048 tokens where both fit, Flash Attention achieves 3× forward pass speedup and 3.4× backward pass speedup.
 
-**Flash Attention 2 and 3 Improvements:**
-
-Flash Attention 2 (2023) introduced further optimizations:
-
-- Improved parallelism across attention heads and batch dimension
-- Reduced shared memory usage through better register allocation
-- Optimized for Ampere and Hopper architectures (A100, H100)
-- 1.5-2× faster than Flash Attention 1
-
-Flash Attention 3 (2024) targets Hopper GPUs specifically:
-
-- Exploits FP8 tensor cores for 2× higher throughput
-- Asynchronous tensor memory acceleration (TMA) overlap
-- Warp specialization for concurrent memory and compute
-- Achieves 740 TFLOPs on H100 (75% of theoretical peak)
+Subsequent versions have continued improving performance: Flash Attention 2 (2023) achieved 1.5-2× additional speedup through better parallelism and register allocation, while Flash Attention 3 (2024) exploits FP8 tensor cores and asynchronous memory operations on Hopper GPUs to reach 740 TFLOPs on H100 (75% of theoretical peak).
 
 #### When to Use Flash Attention {#sec-ai-training-flash-attention-usage}
 
