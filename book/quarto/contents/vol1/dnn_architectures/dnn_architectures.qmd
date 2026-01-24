@@ -133,6 +133,16 @@ Keyword Spotting models (like those detecting "Hey Siri" or "Ok Google") represe
 
 : **Lighthouse Model Comparison**: Quantitative characteristics of the five canonical workloads. Parameters and memory represent model weights at FP32 precision. FLOPs measured per single inference. Arithmetic intensity indicates compute-to-memory-access ratio, determining whether workloads are compute-bound (high) or memory-bound (low). These values serve as reference points for systems analysis throughout subsequent chapters. {#tbl-lighthouse-comparison}
 
+::: {.callout-perspective title="The Arithmetic Intensity Spectrum"}
+Architecture selection is ultimately an engineering trade-off between **Math** ($Ops$) and **Memory Movement** ($D$). We quantify this using **Arithmetic Intensity**: the ratio of operations performed per byte of data moved.
+
+-   **ResNet-50 (Compute-Bound)**: High intensity ($\approx 100$ $Ops/Byte$). ResNet reuses each weight many times across the image. Its performance is limited by how fast the hardware can do math.
+-   **GPT-2 (Bandwidth-Bound)**: Low intensity ($\approx 1$ $Ops/Byte$). GPT-2 must load massive weights from memory just to perform a single token’s math. Its performance is limited by how fast memory can move bits.
+-   **MobileNet (Memory-Bound on GPUs)**: Low intensity ($\approx 10$ $Ops/Byte$). MobileNet is optimized to reduce total $Ops$, but it moves more data relative to that work. It fits mobile hardware perfectly but often "starves" high-end GPUs.
+
+This spectrum determines whether you need a faster processor or faster memory to improve performance.
+:::
+
 With these quantitative reference points established, we now examine each architectural family in detail, beginning with the foundational Multi-Layer Perceptron and progressing through increasingly specialized designs.
 
 ## Multi-Layer Perceptrons: Dense Pattern Processing {#sec-dnn-architectures-multilayer-perceptrons-dense-pattern-processing-259f}
@@ -148,6 +158,8 @@ Multi-Layer Perceptrons (MLPs) represent the fully-connected architectures intro
 :::
 
 In practice, the UAT explains why MLPs succeed across diverse tasks while revealing the gap between theoretical capability and practical implementation. The theorem guarantees that *some* MLP can approximate any function, yet provides no guidance on requisite network size or weight determination. This gap becomes critical in real-world applications: while MLPs can theoretically solve any pattern recognition problem, achieving this capability may require impractically large networks or extensive computation. This theoretical power drives the selection of MLPs for tabular data, recommendation systems, and problems where input relationships are unknown, while these practical limitations motivated the development of specialized architectures that exploit data structure for computational efficiency, as detailed in @sec-dnn-architectures-architectural-principles-engineering-tradeoffs-89de.
+
+This tension between theoretical capability and practical feasibility reveals a fundamental distinction that shapes all architecture selection decisions.
 
 #### The Learnability Gap: Why Universal Approximation Is Not Enough {#sec-dnn-architectures-learnability-gap-c8e9}
 
@@ -198,9 +210,9 @@ Both architectures can *represent* the digit classification function (UAT guaran
 
 **No Free Lunch**: The bias that helps one task may hurt another. CNN's translation invariance aids image classification but hurts tasks where absolute position matters. Architecture selection fundamentally matches inductive bias to data structure.
 
-**Systems Implications**: The representation vs. learnability distinction directly informs systems decisions. Appropriate biases reduce parameter counts (enabling edge deployment), accelerate convergence (reducing training costs), and produce structured computation patterns that map efficiently to specialized hardware (@sec-ai-acceleration). A 20M-parameter MLP infeasible for edge deployment becomes a 100K-parameter CNN that fits comfortably—200× reduction from matching architecture to data structure.
+These theoretical insights translate directly into engineering decisions. **Systems Implications**: The representation vs. learnability distinction directly informs systems decisions. Appropriate biases reduce parameter counts (enabling edge deployment), accelerate convergence (reducing training costs), and produce structured computation patterns that map efficiently to specialized hardware (@sec-ai-acceleration). A 20M-parameter MLP infeasible for edge deployment becomes a 100K-parameter CNN that fits comfortably—200× reduction from matching architecture to data structure.
 
-When applied to the MNIST handwritten digit recognition challenge[^fn-mnist-dataset], an MLP demonstrates its computational approach by transforming a $28\times 28$ pixel image into digit classification.
+When applied to the MNIST handwritten digit recognition challenge[^fn-mnist-dataset], an MLP demonstrates its computational approach by transforming a $28\times 28$ pixel image into digit classification. To understand how MLPs accomplish this task, we must examine the specific pattern processing requirements that dense architectures address.
 
 [^fn-mnist-dataset]: **MNIST Dataset**: Created by Yann LeCun, Corinna Cortes, and Chris Burges in 1998 [@lecun1998gradient] from NIST's database of handwritten digits, MNIST's 60,000 training images became the "fruit fly" of machine learning research. Despite human-level accuracy of 99.77% being achieved by various models, MNIST remains valuable for education because its simplicity allows students to focus on architectural concepts without data complexity distractions.
 
@@ -216,7 +228,7 @@ This requirement for unrestricted connectivity leads directly to the mathematica
 
 ### Algorithmic Structure {#sec-dnn-architectures-algorithmic-structure-c012}
 
-MLPs enable unrestricted feature interactions through a direct algorithmic solution: complete connectivity between all nodes. This connectivity requirement manifests through a series of fully-connected layers, where each neuron connects to every neuron in adjacent layers, the "dense" connectivity pattern introduced in @sec-dl-primer.
+The pattern processing needs established above demand an architecture capable of relating any input to any output. MLPs address this through a direct algorithmic solution: complete connectivity between all nodes. This connectivity requirement manifests through a series of fully-connected layers, where each neuron connects to every neuron in adjacent layers, the "dense" connectivity pattern introduced in @sec-dl-primer.
 
 This architectural principle translates the dense connectivity pattern into matrix multiplication operations[^fn-gemm], establishing the mathematical foundation that makes MLPs computationally tractable. @fig-mlp illustrates how each layer transforms its input through the fundamental operation introduced in @sec-dl-primer:
 
@@ -487,7 +499,7 @@ This analysis of MLP computational demands reveals a crucial insight: while dens
 
 ## CNNs: Spatial Pattern Processing {#sec-dnn-architectures-cnns-spatial-pattern-processing-f8ff}
 
-The computational intensity and parameter requirements of MLPs reveal a mismatch when applied to structured data. Building on the computational complexity considerations outlined in @sec-dnn-architectures-architectural-principles-engineering-tradeoffs-89de, this inefficiency motivated the development of architectural patterns that exploit inherent data structure.
+The inefficiencies of MLPs become particularly apparent when processing spatially structured data like images. Building on the computational complexity considerations outlined in @sec-dnn-architectures-architectural-principles-engineering-tradeoffs-89de, this mismatch motivated the development of architectural patterns that exploit inherent data structure.
 
 Convolutional Neural Networks emerged as the solution to this challenge [@lecun1998gradient; @krizhevsky2012imagenet], embodying a specific inductive bias: they assume spatial locality and translation invariance, where nearby pixels are related and patterns can appear anywhere. This architectural assumption produces two key innovations that enhance efficiency for spatially structured data. Parameter sharing allows the same feature detector to be applied across different spatial positions, reducing parameters from millions to thousands while improving generalization. Local connectivity restricts connections to spatially adjacent regions, reflecting the insight that spatial proximity correlates with feature relevance.
 
@@ -967,7 +979,7 @@ Modern networks accept these deviations as necessary trade-offs for computationa
 
 The choice of where to introduce invariance (via pooling, global averaging) vs. maintaining equivariance reflects task requirements and directly impacts architectural decisions.
 
-The choice of convolution reflects deeper principles about inductive bias in neural architecture design. By restricting connectivity to local neighborhoods and sharing parameters across spatial positions, CNNs encode prior knowledge about the structure of visual data: that important features are local and translation-invariant. This architectural constraint reduces the hypothesis space[^fn-hypothesis-space] that the network must search, enabling more efficient learning from limited data compared to fully connected networks.
+These task-specific requirements illustrate a deeper principle: the choice of convolution reflects fundamental assumptions about inductive bias in neural architecture design. By restricting connectivity to local neighborhoods and sharing parameters across spatial positions, CNNs encode prior knowledge about the structure of visual data: that important features are local and translation-invariant. This architectural constraint reduces the hypothesis space[^fn-hypothesis-space] that the network must search, enabling more efficient learning from limited data compared to fully connected networks.
 
 ::: {.callout-definition title="Inductive Bias"}
 
@@ -1175,7 +1187,7 @@ The inner three loops implement the actual convolution operation at each positio
 For our MNIST example with $3\times 3$ filters and 32 output channels, each output position requires only 9 multiply-accumulate operations per input channel, compared to the 784 operations needed in our MLP layer. This operation must be repeated for every spatial position
 $(28\times 28)$ and every output channel (32).
 
-While using fewer operations per output, the spatial structure creates different patterns of memory access and computation that systems must handle. These patterns influence system design, creating both challenges and opportunities for optimization.
+While using fewer operations per output, the spatial structure creates different patterns of memory access and computation that systems must handle. These patterns influence system design, creating both challenges and opportunities for optimization. Understanding these system-level implications reveals why CNNs dominate computer vision despite their apparent simplicity.
 
 ### System Implications {#sec-dnn-architectures-system-implications-f25d}
 
@@ -1203,7 +1215,7 @@ The predictable spatial access pattern enables strategic data movement optimizat
 
 ### Efficient Architectures: Keyword Spotting {#sec-dnn-architectures-efficient-kws}
 
-While standard CNNs achieve high accuracy, their computational cost ($O(N \times K^2 \times C_{in} \times C_{out})$) is often prohibitive for always-on edge devices. Keyword Spotting (KWS) applications, such as wake-word detection ("Hey Siri"), must operate on microcontrollers with only kilobytes of memory and milliwatt power budgets.
+The system implications discussed above assume standard CNN architectures with full convolutions. However, standard CNNs achieve high accuracy at a computational cost ($O(N \times K^2 \times C_{in} \times C_{out})$) that is often prohibitive for always-on edge devices. Keyword Spotting (KWS) applications, such as wake-word detection ("Hey Siri"), must operate on microcontrollers with only kilobytes of memory and milliwatt power budgets.
 
 To bridge this gap, efficient architectures like **Depthwise Separable CNNs (DS-CNN)** decompose the standard convolution into two cheaper operations:
 1.  **Depthwise Convolution:** Filters apply to each input channel independently ($K \times K \times C_{in}$ parameters).
@@ -1229,7 +1241,7 @@ This decomposition reduces parameter count and FLOPs by a factor of roughly $1/K
 
 ## RNNs: Sequential Pattern Processing {#sec-dnn-architectures-rnns-sequential-pattern-processing-ea14}
 
-Convolutional Neural Networks achieved efficiency gains by exploiting spatial locality, yet their architectural assumptions fail when patterns depend on temporal order rather than spatial proximity. While CNNs excel at recognizing \"what\" is present in data through shared feature detectors, they cannot capture \"when\" events occur or how they relate across time. This limitation manifests in domains such as natural language processing, where word meaning depends on sentential context, and time-series analysis, where future values depend on historical patterns.
+CNNs demonstrate how architectural constraints can transform computational challenges into efficiency gains for spatially structured data. Yet their core assumption, that nearby elements are most relevant, fails when patterns depend on temporal order rather than spatial proximity. While CNNs excel at recognizing \"what\" is present in data through shared feature detectors, they cannot capture \"when\" events occur or how they relate across time. This limitation manifests in domains such as natural language processing, where word meaning depends on sentential context, and time-series analysis, where future values depend on historical patterns.
 
 Sequential data presents a challenge distinct from spatial processing: patterns can span arbitrary temporal distances, rendering fixed-size kernels ineffective. While spatial convolution leverages the principle that nearby pixels are typically related, temporal relationships operate differently. Important connections may span hundreds or thousands of time steps with no correlation to proximity. Traditional feedforward architectures, including CNNs, process each input independently and cannot maintain the temporal context necessary for these long-range dependencies.
 
@@ -1251,11 +1263,11 @@ Sequential pattern processing addresses scenarios where current input interpreta
 
 The challenge in sequential processing lies in maintaining and updating relevant context over time. Human text comprehension does not restart with each word; rather, a running understanding evolves as new information is processed. Similarly, time-series data processing encounters patterns spanning different timescales, from immediate dependencies to long-term trends. This necessitates an architecture capable of both maintaining state over time and updating it based on new inputs.
 
-These requirements translate into specific architectural demands: the system must maintain internal state to capture temporal context, update this state based on new inputs, and learn which historical information is relevant for current predictions. Unlike MLPs and CNNs, which process fixed-size inputs, sequential processing must accommodate variable-length sequences while maintaining computational efficiency. These requirements culminate in the recurrent neural network (RNN) architecture.
+These requirements translate into specific architectural demands: the system must maintain internal state to capture temporal context, update this state based on new inputs, and learn which historical information is relevant for current predictions. Unlike MLPs and CNNs, which process fixed-size inputs, sequential processing must accommodate variable-length sequences while maintaining computational efficiency.
 
 ### Algorithmic Structure {#sec-dnn-architectures-algorithmic-structure-279b}
 
-RNNs address sequential processing through recurrent connections, distinguishing them from MLPs and CNNs. Rather than merely mapping inputs to outputs, RNNs maintain an internal state updated at each time step, creating a memory mechanism that propagates information forward in time. This temporal dependency modeling capability was first explored by @elman1990finding, who demonstrated RNN capacity to identify structure in time-dependent data. Basic RNNs suffer from the vanishing gradient problem[^fn-vanishing-gradient], constraining their ability to learn long-term dependencies.
+The pattern processing requirements above demand an architecture that maintains and updates state over time. RNNs address this through recurrent connections, distinguishing them from MLPs and CNNs. Rather than merely mapping inputs to outputs, RNNs maintain an internal state updated at each time step, creating a memory mechanism that propagates information forward in time. This temporal dependency modeling capability was first explored by @elman1990finding, who demonstrated RNN capacity to identify structure in time-dependent data. Basic RNNs suffer from the vanishing gradient problem[^fn-vanishing-gradient], constraining their ability to learn long-term dependencies.
 
 [^fn-vanishing-gradient]: **Vanishing Gradient Problem**: During backpropagation through time, gradients shrink exponentially as they propagate backward through RNN layers. When recurrent weights have magnitude < 1, gradients multiply by values < 1 at each time step, vanishing after 5-10 steps and preventing learning of long-term dependencies—a key limitation solved by LSTMs and attention mechanisms.
 
@@ -1441,7 +1453,7 @@ While RNNs established concepts for sequential processing, their architectural c
 
 ## Attention Mechanisms: Dynamic Pattern Processing {#sec-dnn-architectures-attention-mechanisms-dynamic-pattern-processing-566d}
 
-Recurrent Neural Networks successfully introduced memory to handle sequential dependencies, but their fixed sequential processing creates limitations. RNNs process information in temporal order, making it difficult to capture relationships between distant elements and difficult to parallelize computation across sequence positions in standard implementations. More critically, RNNs assume that temporal proximity correlates with importance—that nearby words or time steps are more relevant than distant ones. This assumption breaks down in many real-world scenarios.
+The limitations of RNNs, particularly their sequential processing bottleneck and fixed-capacity hidden states, demanded a fundamentally different approach to sequence modeling. RNNs process information in temporal order, making it difficult to capture relationships between distant elements and difficult to parallelize computation across sequence positions in standard implementations. More critically, RNNs assume that temporal proximity correlates with importance—that nearby words or time steps are more relevant than distant ones. This assumption breaks down in many real-world scenarios.
 
 Consider the sentence \"The cat, which was sitting by the window overlooking the garden, was sleeping.\" Here, \"cat\" and \"sleeping\" are separated by multiple intervening words, yet they form the core subject-predicate relationship. RNN architectures would process all the intervening elements sequentially, potentially losing this crucial connection in their fixed-capacity hidden state. This limitation revealed the need for architectures that could identify and weight relationships based on content rather than position.
 
@@ -1515,11 +1527,11 @@ Synthesizing these requirements, dynamic processing demands specific capabilitie
 
 ### Basic Attention Mechanism {#sec-dnn-architectures-basic-attention-mechanism-9500}
 
-Attention mechanisms represent a shift from fixed architectural connections to dynamic, content-based interactions between sequence elements. This section explores the mathematical foundations of attention, examining how query-key-value operations allow flexible pattern processing. We analyze the computational requirements, memory access patterns, and system implications that make attention both powerful and computationally demanding.
+Attention mechanisms represent a shift from fixed architectural connections to dynamic, content-based interactions between sequence elements. This section explores the mathematical foundations of attention, examining how query-key-value operations enable flexible pattern processing while analyzing the computational requirements that make attention both powerful and demanding.
 
 #### Algorithmic Structure {#sec-dnn-architectures-algorithmic-structure-1af4}
 
-Attention mechanisms form the foundation of dynamic pattern processing by computing weighted connections between elements based on their content [@bahdanau2014neural]. This approach processes relationships that are not fixed by architecture but instead emerge from the data itself. At the core of an attention mechanism lies an operation that can be expressed mathematically as:
+The pattern processing needs described above require computing relationships dynamically based on content. Attention mechanisms achieve this by computing weighted connections between elements based on their content [@bahdanau2014neural], processing relationships that emerge from the data itself rather than being fixed by architecture. At the core of an attention mechanism lies an operation that can be expressed mathematically as:
 
 $$
 \text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}
@@ -1882,7 +1894,7 @@ Computation needs in attention mechanisms center around two main phases: generat
 
 Data movement in attention mechanisms presents unique challenges. Each attention operation involves projecting and moving query, key, and value vectors for each position, storing and accessing the full attention weight matrix, and coordinating the movement of value vectors during the weighted combination phase. This creates a data movement pattern where intermediate attention weights become a major factor in system bandwidth requirements. Unlike the more predictable access patterns of CNNs or the sequential access of RNNs, attention operations require frequent movement of dynamically computed weights across the memory hierarchy.
 
-These distinctive characteristics of attention mechanisms in terms of memory, computation, and data movement have significant implications for system design and optimization, setting the stage for the development of more advanced architectures like Transformers.
+These distinctive characteristics of attention mechanisms in terms of memory, computation, and data movement have significant implications for system design and optimization. The natural question arises: if attention provides such powerful dynamic connectivity, could it replace other architectural components entirely?
 
 ### Transformers: Attention-Only Architecture {#sec-dnn-architectures-transformers-attentiononly-architecture-c4f0}
 
@@ -1933,7 +1945,7 @@ The softmax operation and quadratic attention scores create sensitivity to reduc
 
 The quadratic scaling with sequence length creates efficiency limitations that motivate architectural modifications. Sparse attention patterns and linear attention approximations that address these limitations are examined in @sec-model-compression.
 
-This information-theoretic interpretation reveals why attention is so effective for selective processing. The mechanism automatically balances two competing objectives: focusing on the most relevant information (minimizing entropy) while maintaining sufficient breadth to avoid missing important details (maximizing entropy). The attention pattern emerges as the optimal trade-off between these objectives, explaining why transformers can effectively handle long sequences and complex dependencies.
+Despite these computational costs, attention's effectiveness stems from its information-theoretic properties. This information-theoretic interpretation reveals why attention is so effective for selective processing. The mechanism automatically balances two competing objectives: focusing on the most relevant information (minimizing entropy) while maintaining sufficient breadth to avoid missing important details (maximizing entropy). The attention pattern emerges as the optimal trade-off between these objectives, explaining why transformers can effectively handle long sequences and complex dependencies.
 
 Self-attention learns dynamic activation patterns across the input sequence. Unlike CNNs which apply fixed filters or RNNs which use fixed recurrence patterns, attention learns which elements should activate together based on their content. This creates a form of adaptive connectivity where the effective network topology changes for each input. Recent research has shown that attention heads in trained models often specialize in detecting specific linguistic or semantic patterns [@clark2019what], suggesting that the mechanism naturally discovers interpretable structural regularities in data.
 
@@ -2093,9 +2105,11 @@ Fourth, the core computations in self-attention are dominated by large matrix mu
 
 Finally, self-attention generates memory-intensive intermediate results. The attention weights matrix $(N\times N)$ and the intermediate results for each attention head create large memory requirements, especially for long sequences. This can pose challenges for deployment on memory-constrained devices and necessitates careful memory management in implementations.
 
-These computational patterns create a unique profile for Transformer self-attention, distinct from previous architectures. The parallel nature of the computations makes Transformers well-suited for modern parallel processing hardware, but the quadratic complexity with sequence length poses challenges for processing long sequences. As a result, much research has focused on developing optimization techniques, such as sparse attention patterns or low-rank approximations, to address these challenges. Each of these optimizations presents its own trade-offs between computational efficiency and model expressiveness, a balance that must be carefully considered in practical applications.
+These computational characteristics have significant implications for system design and optimization.
 
-This examination of four architectural families—MLPs, CNNs, RNNs, and Transformers—reveals both their individual characteristics and their collective evolution. However, one critical architecture class remains: **sparse architectures** for recommendation systems, which dominate industrial AI workloads despite receiving less academic attention than their media-processing counterparts.
+The parallel nature of Transformers makes them well-suited for modern parallel processing hardware, but the quadratic complexity with sequence length poses challenges for processing long sequences. As a result, much research has focused on developing optimization techniques, such as sparse attention patterns or low-rank approximations, to address these challenges. Each of these optimizations presents its own trade-offs between computational efficiency and model expressiveness, a balance that must be carefully considered in practical applications.
+
+This examination of four architectural families—MLPs, CNNs, RNNs, and Transformers—reveals both their individual characteristics and their collective evolution. Each addresses distinct data types: spatial, sequential, and relational patterns. However, one critical architecture class remains that differs fundamentally from all four: **sparse architectures** for recommendation systems, which dominate industrial AI workloads despite receiving less academic attention than their media-processing counterparts.
 
 ### Sparse Architectures: Recommendation Systems {#sec-dnn-architectures-sparse-architectures-dlrm}
 
@@ -2143,7 +2157,7 @@ This creates an **All-to-All** communication pattern: every GPU must talk to eve
 
 Having examined five architectural paradigms—MLPs, CNNs, RNNs, Transformers, and DLRM—each optimized for different data types and system constraints, a natural question emerges: beneath this diversity, what computational foundations do these architectures share?
 
-Understanding shared building blocks serves two engineering purposes. First, it explains why certain optimizations transfer across architectures (matrix tiling benefits all dense operations) while others remain architecture-specific (FlashAttention targets transformer attention patterns). Second, it reveals the evolutionary relationships that produced modern designs, showing how each architecture innovated by recombining and refining existing primitives rather than starting from scratch. We now examine these common elements, beginning with the computational primitives that appear across all deep learning systems.
+Understanding shared building blocks serves two engineering purposes. First, it explains why certain optimizations transfer across architectures (matrix tiling benefits all dense operations) while others remain architecture-specific (FlashAttention targets transformer attention patterns). Second, it reveals the evolutionary relationships that produced modern designs, showing how each architecture innovated by recombining and refining existing primitives rather than starting from scratch.
 
 ## Architectural Building Blocks {#sec-dnn-architectures-architectural-building-blocks-a575}
 
@@ -2189,6 +2203,8 @@ The MLP paradigm also established the fundamental trade-off between model expres
 The development of CNNs marked an architectural innovation, specifically the realization that we could specialize the dense connectivity of MLPs for spatial patterns. While retaining the core concept of layer-wise processing, CNNs introduced several building blocks that would influence all future architectures.
 
 The first key innovation was the concept of parameter sharing. Unlike MLPs where each connection had its own weight, CNNs showed how the same parameters could be reused across different parts of the input. This not only made the networks more efficient but introduced the powerful idea that architectural structure could encode useful priors about the data [@lecun1998gradient].
+
+Yet parameter sharing alone could not solve the challenges of training deep networks. As practitioners attempted to build deeper CNNs for more complex tasks, they encountered a fundamental barrier.
 
 #### Gradient Flow and the Depth Problem {#sec-dnn-architectures-gradient-flow-depth-problem}
 
@@ -2344,7 +2360,7 @@ Perhaps even more influential was the introduction of skip connections through R
 
 [^fn-dnn-resnet]: **ResNet Revolution**: ResNet (2016) solved the "degradation problem" where deeper networks performed worse than shallow ones. The key insight: adding identity shortcuts ($\mathcal{F}(\mathbf{x}) + \mathbf{x}$) let networks learn residual mappings instead of full transformations, enabling training of 1000+ layer networks and winning ImageNet 2015.
 
-The gradient flow improvements from skip connections solved one fundamental training challenge, but revealed another: controlling activation distributions across layers. The following analysis of normalization techniques provides essential foundations for understanding why modern architectures universally include these components.
+The gradient flow improvements from skip connections solved one fundamental training challenge, but revealed another: controlling activation distributions across layers. Even with skip connections ensuring gradient flow, poorly conditioned activations can destabilize training. The following analysis of normalization techniques provides essential foundations for understanding why modern architectures universally include these components.
 
 #### Normalization Layers: Mathematical Foundations {#sec-normalization-layers}
 
@@ -2440,7 +2456,7 @@ The computational cost of computing mean and variance adds $O(m \times H)$ opera
 
 Operational differences between training versus inference require explicit mode switching for batch normalization, which exhibits different behavior between training (batch statistics) and inference (running statistics). Incorrect mode handling is a common source of training-serving skew. Layer normalization behaves identically in both modes, simplifying deployment.
 
-These innovations, including parameter sharing, skip connections, and normalization, transcended their origins in spatial processing to become essential building blocks in the deep learning toolkit.
+These innovations, including parameter sharing, skip connections, and normalization, transcended their origins in spatial processing to become essential building blocks in the deep learning toolkit. The same gradient flow and activation stability challenges that drove their development in CNNs reappear in every deep architecture.
 
 ### Evolution of Sequence Processing {#sec-dnn-architectures-evolution-sequence-processing-8a78}
 
@@ -2540,11 +2556,11 @@ Transformers uniquely combine matrix multiplication with attention mechanisms, r
 
 @tbl-primitive-comparison reveals how Transformers combine elements from previous architectures while introducing new patterns. They retain the core matrix multiplication operations common to all architectures but introduce more complex memory access patterns with their attention mechanism, blending the broadcast operations of MLPs with the gather operations reminiscent of more dynamic architectures.
 
-This synthesis of primitives in Transformers shows modern architectures innovating by recombining and refining existing building blocks from the architectural progression established in @sec-dnn-architectures-architectural-principles-engineering-tradeoffs-89de, rather than inventing entirely new computational paradigms. This evolutionary process guides the development of future architectures and helps design of efficient systems to support them.
+This synthesis of primitives in Transformers shows modern architectures innovating by recombining and refining existing building blocks from the architectural progression established in @sec-dnn-architectures-architectural-principles-engineering-tradeoffs-89de, rather than inventing entirely new computational paradigms. This evolutionary process guides the development of future architectures and helps design efficient systems to support them.
 
 ## System-Level Building Blocks {#sec-dnn-architectures-systemlevel-building-blocks-72f6}
 
-Having traced the evolutionary relationships between architectures and identified the computational primitives each employs, we now examine the computational substrate they share. Understanding these system-level building blocks is essential for practitioners because they determine how architectures map to hardware, where performance bottlenecks arise, and which optimizations prove most effective.
+The architectural evolution traced above reveals repeated patterns: matrix operations, memory access structures, and data movement requirements that appear across all designs. We now examine these computational primitives systematically. Understanding these system-level building blocks is essential for practitioners because they determine how architectures map to hardware, where performance bottlenecks arise, and which optimizations prove most effective.
 
 Examination of different deep learning architectures allows distillation of their system requirements into primitives that underpin both hardware and software implementations. These primitives represent operations that cannot be decomposed further while maintaining their essential characteristics. Just as complex molecules are built from basic atoms, sophisticated neural networks are constructed from these operations.
 
@@ -2681,7 +2697,7 @@ Dynamic computation, where the operation itself depends on the input data, emerg
 
 These primitives combine in sophisticated ways in modern architectures. A Transformer layer processing a sequence of 512 tokens demonstrates this clearly: it uses matrix multiplications for feature projections ($512\times 512$ operations implemented through tensor cores), may employ sliding windows for efficient attention over long sequences (using specialized memory access patterns for local regions), and requires dynamic computation for attention weights (computing $512\times 512$ attention patterns at runtime). The way these primitives interact creates specific demands on system design, ranging from memory hierarchy organization to computation scheduling.
 
-The building blocks we've discussed help explain why certain hardware features exist (like tensor cores for matrix multiplication) and why software frameworks organize computations in particular ways (like batching similar operations together). As we move from computational primitives to consider memory access and data movement patterns, recognizing how these operations shape the demands placed on memory systems becomes essential and data transfer mechanisms. The way computational primitives are implemented and combined has direct implications for how data needs to be stored, accessed, and moved within the system.
+The building blocks we've discussed help explain why certain hardware features exist (like tensor cores for matrix multiplication) and why software frameworks organize computations in particular ways (like batching similar operations together). Yet computational primitives tell only part of the story. The way these operations access memory often determines real-world performance more than the operations themselves.
 
 ### Memory Access Primitives {#sec-dnn-architectures-memory-access-primitives-4e2e}
 
@@ -2739,7 +2755,7 @@ Understanding these memory access patterns is essential as architectures evolve.
 
 ### Data Movement Primitives {#sec-dnn-architectures-data-movement-primitives-101a}
 
-While computational and memory access patterns define what operations occur where, data movement primitives characterize how information flows through the system. These patterns are key because data movement often consumes more time and energy than computation itself, as moving data from off-chip memory typically requires 100-1000$\times$ more energy than performing a floating-point operation.
+Memory access patterns describe where data resides, but a complementary question determines system performance: how does information flow between components? Data movement primitives characterize these flows. These patterns are key because data movement often consumes more time and energy than computation itself, as moving data from off-chip memory typically requires 100-1000$\times$ more energy than performing a floating-point operation.
 
 Four data movement patterns are prevalent in deep learning architectures: broadcast, scatter, gather, and reduction. @fig-collective-comm visualizes these fundamental patterns and their relationships, showing how data flows between processing elements in each case. Broadcast operations send the same data to multiple destinations simultaneously. In matrix multiplication with batch size 32, each weight must be broadcast to process different inputs in parallel. Modern hardware supports this through specialized interconnects and hardware multicast capabilities, with bandwidth on the order of hundreds of GB/s in high-end accelerator interconnects, while some accelerators also use dedicated on-chip broadcast fabrics. Software frameworks optimize broadcasts by restructuring computations (like matrix tiling) to maximize data reuse.
 
@@ -2990,7 +3006,7 @@ System designers must navigate trade-offs in supporting different primitives, ea
 
 Balancing these trade-offs requires consideration of the target workloads and deployment scenarios. Understanding the nature of each primitive guides the development of both hardware and software optimizations in ML systems, allowing designers to make informed decisions about system architecture and resource allocation.
 
-The analysis of architectural patterns, computational primitives, and system implications establishes the foundation for addressing a practical challenge: how do engineers systematically choose the right architecture for their specific problem? The diversity of neural network architectures, each optimized for different data patterns and computational constraints, requires a structured approach to architecture selection. This selection process must consider not only algorithmic performance but also deployment constraints covered in @sec-ml-systems and operational efficiency requirements detailed in @sec-ml-operations.
+The analysis of architectural patterns, computational primitives, and system implications provides the conceptual foundation for architecture selection. Yet practitioners face a practical challenge: how do engineers systematically choose the right architecture for their specific problem? The diversity of neural network architectures, each optimized for different data patterns and computational constraints, requires a structured approach. This selection process must consider not only algorithmic performance but also deployment constraints covered in @sec-ml-systems and operational efficiency requirements detailed in @sec-ml-operations.
 
 ## Architecture Selection Framework {#sec-dnn-architectures-architecture-selection-framework-7a37}
 
@@ -3096,7 +3112,7 @@ Recurrent Neural Networks optimize for memory efficiency at the cost of parallel
 
 Transformers achieve maximum flexibility through attention mechanisms but pay a steep price in memory usage. Their quadratic scaling with sequence length creates limits on the sequences they can process. Parameter count scales with model dimension but remains independent of sequence length. The $n^2$ term from attention computation dominates for long sequences, while the $n \times d^2$ term from feed-forward layers dominates for short sequences. Attention matrices create the primary memory bottleneck, as each attention head must store pairwise similarities between all sequence positions, leading to prohibitive memory usage for long sequences. While parallelization is excellent across sequence positions and attention heads, the quadratic memory requirement often forces smaller batch sizes, limiting effective parallelization.
 
-These complexity patterns define optimal domains for each architecture. MLPs excel when parameter efficiency is not critical, CNNs dominate for moderate-resolution spatial data, RNNs remain viable for very long sequences where memory is constrained, and Transformers excel for complex relational tasks where their computational cost is justified through superior performance.
+These complexity patterns define optimal domains for each architecture. MLPs excel when parameter efficiency is not critical, CNNs dominate for moderate-resolution spatial data, RNNs remain viable for very long sequences where memory is constrained, and Transformers excel for complex relational tasks where their computational cost is justified through superior performance. To make these patterns actionable, we synthesize them into a quantitative comparison framework.
 
 ### Architectural Comparison Summary {#sec-dnn-architectures-architectural-comparison-summary-f918}
 
@@ -3121,6 +3137,8 @@ The systematic analysis of each architectural family reveals distinct computatio
 : **Quantitative Architecture Comparison**: Computational complexity analysis across four major neural network architectures. Parameters scale with network dimensions (N=neurons, M=inputs, K=kernel size, C=channels, D=depth, H=hidden size, T=time steps, d=model dimension). Memory requirements reflect peak activation storage during training. Parallelism indicates amenability to parallel computation. Key bottlenecks represent primary performance limiting factors in typical deployments. {#tbl-architecture-comparison}
 
 This quantitative framework enables systematic architecture selection by explicitly revealing the scaling behaviors that determine computational feasibility. MLPs and CNNs achieve high parallelism but face memory bandwidth constraints as model size grows. RNNs maintain constant memory usage but sacrifice parallelism for sequential processing. Transformers achieve maximum expressivity but face quadratic memory scaling that limits sequence length. Understanding these trade-offs proves essential for matching architectural choices to deployment constraints.
+
+With this quantitative foundation established, we can now formalize the architecture selection process into a systematic decision framework.
 
 ### Decision Framework {#sec-dnn-architectures-decision-framework-dbe8}
 
@@ -3217,7 +3235,7 @@ The theoretical insights about representation learning have direct implications 
 
 Understanding architectures as embodying different inductive biases helps explain both their strengths and their systems requirements, providing a principled foundation for architecture selection and system optimization decisions.
 
-Yet theoretical understanding alone does not prevent practitioners from making poor architectural choices. The gap between knowing principles and applying them correctly is where engineering experience proves essential. Organizations regularly deploy transformers for problems where CNNs would suffice at 10x lower cost, or select RNNs without accounting for sequential bottlenecks that cripple throughput. These mistakes stem from specific misconceptions—fallacies about architecture performance that appear plausible but collapse under systems analysis.
+However, theoretical understanding alone does not prevent practitioners from making poor architectural choices. The gap between knowing principles and applying them correctly is where engineering experience proves essential. Organizations regularly deploy transformers for problems where CNNs would suffice at 10x lower cost, or select RNNs without accounting for sequential bottlenecks that cripple throughput. These mistakes stem from specific misconceptions—fallacies about architecture performance that appear plausible but collapse under systems analysis.
 
 The following section catalogs the most damaging misconceptions we have observed in production ML systems, each grounded in the architectural principles established throughout this chapter. Recognizing these pitfalls transforms theoretical knowledge into practical engineering judgment.
 
@@ -3363,9 +3381,7 @@ Despite their apparent diversity, these architectures share fundamental computat
 * **Systems constraints determine feasibility**: An architecture achieving 99% accuracy is useless if it exceeds your memory budget, latency requirements, or power envelope—validate against hardware constraints before accuracy optimization
 :::
 
-The architectural foundations established—computational patterns, memory access characteristics, and data movement primitives—directly inform the design of specialized hardware and optimization strategies explored in subsequent chapters. Understanding that CNNs exhibit spatial locality allows the development of systolic arrays optimized for convolution operations (@sec-ai-acceleration). Recognizing that Transformers demand quadratic memory scaling motivates attention-specific optimizations such as FlashAttention and sparse attention patterns (@sec-model-compression). The progression from architectural understanding to hardware design to algorithmic optimization represents a systematic approach to ML systems engineering.
-
-As architectures become more dynamic and sophisticated, the relationship between algorithmic innovation and systems optimization becomes increasingly critical for achieving practical performance gains in real-world deployments. Yet these architectures do not exist in isolation. Implementing and experimenting with CNNs, RNNs, Transformers, and their variants requires software frameworks that abstract the complexity of automatic differentiation, memory management, and hardware acceleration. The next chapter (@sec-ai-frameworks) examines these ML frameworks, revealing how software infrastructure transforms architectural concepts into practical implementations and how framework design choices shape what architectures practitioners can efficiently develop and deploy.
+The architectural foundations established—computational patterns, memory access characteristics, and data movement primitives—directly inform the design of specialized hardware and optimization strategies explored in subsequent chapters. We have established the blueprints for modern intelligence—from the spatial efficiency of CNNs to the relational power of Transformers. But a blueprint is not a building. To bring these architectures to life, we need a way to map these abstract layers onto physical silicon. **How do we translate this math into code that runs?** We turn next to the software substrate of ML: **Deep Learning Frameworks** (@sec-ai-frameworks).
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->
 ::: { .quiz-end }

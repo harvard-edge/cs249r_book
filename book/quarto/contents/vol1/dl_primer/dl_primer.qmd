@@ -1584,6 +1584,15 @@ Parameter count grows with network width and depth. For our MNIST example, consi
 
 **Key insight**: Training requires **3.4× more memory** than inference for the same batch size. For larger models, this ratio increases further because gradient and optimizer storage scale with parameter count, while activations scale with batch size × layer widths.
 
+::: {.callout-perspective title="Napkin Math: The Memory Explosion"}
+How does the scale of our Lighthouse Archetypes affect the **Data ($D$)** term of the Iron Law? Compare our MNIST classifier to **GPT-2**.
+
+-   **MNIST Archetype**: 100,000 parameters × 4 bytes (FP32) $\approx$ **400 KB**. This entire model fits inside the L2 cache of a modern processor.
+-   **GPT-2 Archetype**: 1,500,000,000 parameters × 4 bytes (FP32) $\approx$ **6 GB**. This requires dedicated GPU VRAM and high-speed memory bandwidth.
+
+**The Systems Conclusion**: Moving from 100K to 1.5B parameters is a **15,000× jump**. It is not just "more parameters"; it is a phase change in engineering. MNIST is a logic problem; GPT-2 is a **Data Movement** problem.
+:::
+
 :::
 
 ::: {.callout-tip title="Napkin Math: Quick Estimation for ML Engineers"}
@@ -1834,41 +1843,41 @@ $$ P(\text{digit } j) = \frac{e^{z_j}}{\sum_{k=1}^{10} e^{z_k}} $$
 
 For each image in the batch, this produces a probability distribution over the possible digits. The digit with the highest probability represents the network's prediction.
 
-::: {.callout-example title="Worked Example: Counting FLOPs in Forward Propagation"}
+::: {.callout-example title="Worked Example: Counting Ops in Forward Propagation"}
 
-**Problem**: Calculate the number of floating-point operations (FLOPs) required for one forward pass through our MNIST network (784→128→64→10) with batch size 32.
+**Problem**: Calculate the total arithmetic operations (**$Ops$**) required for one forward pass through our MNIST network (784→128→64→10) with batch size 32.
 
-**Background**: A matrix multiplication of dimensions $(M \times K) \times (K \times N)$ requires $2 \times M \times K \times N$ FLOPs (one multiply and one add per output element, summed over $K$ terms). Bias addition adds $M \times N$ FLOPs. ReLU activation adds $M \times N$ comparisons (typically counted as FLOPs).
+**Background**: A matrix multiplication of dimensions $(M \times K) \times (K \times N)$ requires $2 \times M \times K \times N$ operations (one multiply and one add per output element, summed over $K$ terms). Bias addition adds $M \times N$ $Ops$. ReLU activation adds $M \times N$ comparisons (counted as $Ops$).
 
 **Solution**:
 
-+-------------+----------------+----------------------+--------------------------------+
-| **Layer**   | **Operation**  | **Dimensions**       | **FLOPs**                      |
-+============:+:===============+=====================:+===============================:+
-| **Layer 1** | MatMul         | (32×784) × (784×128) | 2 × 32 × 784 × 128 = 6,422,528 |
-+-------------+----------------+----------------------+--------------------------------+
-| **Layer 1** | Bias + ReLU    | 32 × 128             | 2 × 4,096 = 8,192              |
-+-------------+----------------+----------------------+--------------------------------+
-| **Layer 2** | MatMul         | (32×128) × (128×64)  | 2 × 32 × 128 × 64 = 524,288    |
-+-------------+----------------+----------------------+--------------------------------+
-| **Layer 2** | Bias + ReLU    | 32 × 64              | 2 × 2,048 = 4,096              |
-+-------------+----------------+----------------------+--------------------------------+
-| **Layer 3** | MatMul         | (32×64) × (64×10)    | 2 × 32 × 64 × 10 = 40,960      |
-+-------------+----------------+----------------------+--------------------------------+
-| **Layer 3** | Bias + Softmax | 32 × 10              | ~640 (simplified)              |
-+-------------+----------------+----------------------+--------------------------------+
-| **Total**   |                |                      | **~7.0 MFLOPs**                |
-+-------------+----------------+----------------------+--------------------------------+
++-------------+----------------+----------------------+---------------------------------+
+| **Layer**   | **Operation**  | **Dimensions**       | **Ops**                         |
++============:+:===============+=====================:+================================:+
+| **Layer 1** | MatMul         | (32×784) × (784×128) | 2 × 32 × 784 × 128 = 6,422,528  |
++-------------+----------------+----------------------+---------------------------------+
+| **Layer 1** | Bias + ReLU    | 32 × 128             | 2 × 4,096 = 8,192               |
++-------------+----------------+----------------------+---------------------------------+
+| **Layer 2** | MatMul         | (32×128) × (128×64)  | 2 × 32 × 128 × 64 = 524,288     |
++-------------+----------------+----------------------+---------------------------------+
+| **Layer 2** | Bias + ReLU    | 32 × 64              | 2 × 2,048 = 4,096               |
++-------------+----------------+----------------------+---------------------------------+
+| **Layer 3** | MatMul         | (32×64) × (64×10)    | 2 × 32 × 64 × 10 = 40,960       |
++-------------+----------------+----------------------+---------------------------------+
+| **Layer 3** | Bias + Softmax | 32 × 10              | ~640 (simplified)               |
++-------------+----------------+----------------------+---------------------------------+
+| **Total**   |                |                      | **~7.0 MOps**                   |
++-------------+----------------+----------------------+---------------------------------+
 
-**Per-image cost**: 7.0 MFLOPs ÷ 32 = **~219 KFLOPs per image**
+**Per-image cost**: 7.0 MOps ÷ 32 = **~219 KOps per image**
 
 **Key insights**:
 
-1. **Layer 1 dominates**: The first layer accounts for 92% of all FLOPs because it processes the largest input (784 dimensions). This is why dimensionality reduction in early layers is so impactful.
+1. **Layer 1 dominates**: The first layer accounts for 92% of all $Ops$ because it processes the largest input (784 dimensions). This is why dimensionality reduction in early layers is so impactful.
 
-2. **Compute vs. Memory**: At 219 KFLOPs per image and ~564 KB memory, this network has an arithmetic intensity of ~0.4 FLOPs/byte—firmly in the **memory-bound** regime for most hardware. A modern GPU achieving 10 TFLOPS would process each image in ~22 nanoseconds of pure compute, but memory latency typically dominates actual inference time.
+2. **Compute vs. Memory**: At 219 KOps per image and ~564 KB memory, this network has an arithmetic intensity of ~0.4 $Ops$/byte—firmly in the **memory-bound** regime for most hardware. A modern GPU achieving 10 TFLOPS would process each image in ~22 nanoseconds of pure compute, but memory latency typically dominates actual inference time.
 
-3. **Scaling intuition**: Doubling the hidden layer widths (784→256→128→10) would increase FLOPs by ~4× to ~28 MFLOPs, demonstrating quadratic scaling with layer width.
+3. **Scaling intuition**: Doubling the hidden layer widths (784→256→128→10) would increase $Ops$ by ~4× to ~28 MOps, demonstrating quadratic scaling with layer width.
 
 :::
 
