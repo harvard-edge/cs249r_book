@@ -134,6 +134,8 @@ Latency constraints directly dictate infrastructure costs. Consider a GPU server
 
 Most production systems combine both approaches. Common queries hit a cache populated by batch inference while uncommon requests trigger dynamic computation. Understanding this spectrum is essential because it determines which subsequent optimization strategies apply. Static inference optimizes for throughput during batch computation and storage efficiency for serving. Dynamic inference optimizes for per-request latency under concurrent load, which requires understanding where time goes within each request.
 
+The static-versus-dynamic decision is just the first of several architectural choices that shape serving system design. Equally important is *where* the model executes, since deployment context fundamentally constrains every subsequent optimization.
+
 ### The Spectrum of Serving Architectures {#sec-model-serving-systems-spectrum-serving-architectures-8966}
 
 While "serving" often implies a networked server processing API requests, the architectural pattern varies fundamentally by deployment environment. Understanding this spectrum is essential for Volume I's focus on mastering the ML node, since the same model may require radically different serving strategies depending on where it executes.
@@ -226,6 +228,8 @@ For single-machine serving with multiple model instances, such as running severa
 
 **Impact on Queuing Analysis**: When capacity planning considers "the server" in this chapter, it means the single machine's model serving capacity. The queuing dynamics analyzed in @sec-model-serving-systems-queuing-theory-tail-latency-29a6 apply to understanding single-machine behavior and determining when scaling to multiple machines becomes necessary.
 
+While load balancers distribute requests across replicas, achieving predictable latency also requires controlling what happens *within* each machine. The operating system environment introduces its own sources of variability.
+
 ### Deterministic Latency and Resource Isolation {#sec-model-serving-systems-deterministic-latency-resource-isolation-4d1c}
 
 An inference server does not operate in isolation. On a single machine, the operating system manages multiple competing processes—logging agents, monitoring tools, and system interrupts—which can intermittently steal CPU cycles from the inference pipeline. These "noisy neighbors" are a primary source of **latency jitter**, where the time required to process identical requests varies significantly, causing the 99th percentile (P99) latency to spike even when the hardware is under-utilized.
@@ -240,7 +244,7 @@ Understanding these isolation principles transforms a simple "model script" into
 
 ## Serving System Architecture {#sec-model-serving-systems-serving-system-architecture-4879}
 
-Building a high-performance serving system requires orchestrating multiple software components to minimize overhead and maximize hardware utilization.
+The preceding section established the architectural spectrum from cloud to TinyML and the infrastructure layers that route requests to models. Building a high-performance serving system requires orchestrating multiple software components to minimize overhead and maximize hardware utilization. This section examines the internal architecture of inference servers and the protocols that connect them to clients.
 
 ### Anatomy of an Inference Server {#sec-model-serving-systems-anatomy-inference-server-f12e}
 
@@ -332,6 +336,8 @@ For a system processing 10,000 requests per second, switching to Protobuf saves 
 :::
 
 **System Choice**: Use REST for public APIs to maximize developer accessibility. Use gRPC for high-performance internal communication to minimize the serialization tax.
+
+The architectural components and protocols examined so far describe *how* serving systems are built. Understanding *why* certain configurations perform better requires analyzing what happens to individual requests as they traverse these components.
 
 ## The Request Lifecycle {#sec-model-serving-systems-request-lifecycle-d9c6}
 
@@ -438,6 +444,8 @@ Different deployment contexts have fundamentally different resolution requiremen
 
 Production systems can select resolution dynamically based on content. One approach runs a lightweight classifier at 128×128 to categorize content type, then selects task-appropriate resolution with documents at 512×512, landscapes at 224×224, and faces at 384×384. This achieves 1.4× throughput improvement with 99.2 percent accuracy retention versus fixed high resolution. This pattern trades preprocessing cost from running the lightweight classifier for inference savings on the main model.
 
+The latency analysis so far has focused on *sequential* processing: one request completing before the next begins. But the preprocessing, inference, and postprocessing stages use different hardware resources. This separation creates an opportunity to process multiple requests simultaneously.
+
 ### Utilization and Request Pipelining {#sec-model-serving-systems-utilization-request-pipelining-c61c}
 
 The preceding analysis examined where time goes within individual pipeline stages. But optimizing each stage in isolation misses a critical opportunity: the stages use different hardware resources. The latency budget analysis in @sec-model-serving-systems-latency-budget-ef40 reveals that model inference is only one component of the request lifecycle. From a hardware perspective, the primary goal of a serving system is to maximize the **duty cycle** of the accelerator—the percentage of time the GPU is performing useful computation.
@@ -541,7 +549,7 @@ Each step adds latency but improves response utility. Calibration in particular 
 
 Production systems rarely return raw predictions. Outputs must conform to API contracts, often requiring JSON serialization with specific schema, confidence score formatting and thresholding, error handling for edge cases such as no confident prediction or out-of-distribution input, and metadata attachment including model version, inference time, and feature attributions.
 
-The latency budget analysis reveals where time goes within a single request. But production systems do not process requests in isolation.
+The latency budget analysis reveals where time goes within a single request. But production systems do not process requests in isolation: they must handle hundreds or thousands of concurrent requests competing for finite resources. Understanding this concurrency requires a different analytical framework.
 
 ## Queuing Theory and Tail Latency {#sec-model-serving-systems-queuing-theory-tail-latency-29a6}
 
@@ -703,7 +711,7 @@ When traffic exceeds capacity, accepting all requests can trigger widespread SLO
 
 These techniques become essential at scale when fan-out amplification makes individual server tail latency visible to users. Single-machine serving systems can implement hedged and tied requests across GPU streams or model replicas. The queuing analysis here assumes FIFO processing, but production systems often implement priority scheduling such as deadline-aware or shortest-job-first approaches to further reduce tail latency for heterogeneous workloads [@harchol2013performance].
 
-The tail-tolerant techniques examined in this section optimize the flow of requests through a functioning serving system. But the queuing analysis assumes a critical precondition: that models are loaded, initialized, and producing correct predictions. In production, this assumption fails regularly during deployments, scaling events, and when preprocessing pipelines diverge from training. The next section examines these lifecycle challenges that must be solved before queuing optimization becomes relevant.
+The tail-tolerant techniques examined in this section optimize the flow of requests through a functioning serving system. But the queuing analysis assumes a critical precondition: that models are loaded, initialized, and producing correct predictions. In production, this assumption fails regularly: during deployments, new instances must load models from scratch; during scaling events, cold start latency affects the first requests to new replicas; and when preprocessing pipelines diverge from training, accuracy silently degrades. The next section examines these lifecycle challenges that must be solved before queuing optimization becomes relevant.
 
 ## Model Lifecycle Management {#sec-model-serving-systems-model-lifecycle-management-ff2e}
 
@@ -824,7 +832,7 @@ To mitigate this, systems use **Pinned Memory** (page-locked host memory). By de
 
 Pinning memory instructs the OS to keep that region permanently in physical RAM. The GPU's DMA engine can then transfer data directly from the pinned region at full PCIe bandwidth without CPU involvement. The trade-off is that pinned memory reduces the RAM available for other processes and cannot be reclaimed under memory pressure. For model serving, the performance gain (2-3× faster transfers) typically justifies pinning model weights and frequently-used input buffers, while leaving less critical memory pageable.
 
-The lifecycle management strategies examined so far ensure models are ready to serve. The next question is how to process the requests that arrive.
+The lifecycle management strategies examined so far ensure models are ready to serve: loaded into memory, warmed up, and producing predictions consistent with training. With these prerequisites satisfied, the queuing dynamics from @sec-model-serving-systems-queuing-theory-tail-latency-29a6 become relevant. The next optimization opportunity lies in how requests are grouped for processing, which directly affects both the throughput and latency terms in our queuing equations.
 
 ## Throughput Optimization {#sec-model-serving-systems-throughput-optimization-18d1}
 
@@ -1108,7 +1116,7 @@ These LLM-specific optimizations build directly on the foundations this chapter 
 
 :::
 
-While continuous batching represents the frontier for LLM serving, not all deployment scenarios benefit from batching at all. The sophistication of modern batching techniques should not obscure a fundamental question: when does batching hurt rather than help?
+While continuous batching represents the frontier for LLM serving, not all deployment scenarios benefit from batching at all. The sophisticated techniques examined so far, from dynamic batching windows to PagedAttention, optimize for high-throughput server workloads. But these techniques introduce complexity and latency overhead that may not be justified for all deployment contexts. A fundamental question remains: when does batching hurt rather than help?
 
 ### When Not to Batch {#sec-model-serving-systems-batch-a464}
 
@@ -1253,7 +1261,7 @@ These constraints make mobile serving optimization fundamentally different from 
 
 ## LLM Serving {#sec-model-serving-systems-llm-serving-b8bf}
 
-The traffic patterns and batching strategies examined in the previous section assume models produce a single output per request. Large language models break this assumption: they generate tokens incrementally over hundreds or thousands of iterations, creating a fundamentally different latency profile. The p50, p95, and p99 metrics that govern classification serving apply differently when a single request takes 2 to 3 seconds to complete but must feel responsive throughout. While the foundational principles of queuing theory, batching tradeoffs, and latency budgets apply universally, LLMs require additional metrics, different optimization strategies, and unique memory management techniques.
+The traffic patterns and batching strategies examined in the previous section share a common assumption: models produce a single output per request, whether a classification label, a bounding box, or an embedding vector. Large language models break this assumption fundamentally, generating tokens incrementally over hundreds or thousands of iterations and creating a fundamentally different latency profile. The p50, p95, and p99 metrics that govern classification serving apply differently when a single request takes 2 to 3 seconds to complete but must feel responsive throughout. While the foundational principles of queuing theory, batching tradeoffs, and latency budgets apply universally, LLMs require additional metrics, different optimization strategies, and unique memory management techniques.
 
 ### Performance Metrics: TTFT and TPOT {#sec-model-serving-systems-performance-metrics-ttft-tpot-b009}
 
@@ -1402,7 +1410,7 @@ Post-training quantization requires a calibration dataset to determine optimal s
 
 Advanced serving systems select precision per request based on runtime conditions. If the system is ahead of latency SLO, it uses higher precision for better accuracy. For low-confidence INT8 results, it recomputes at FP16. Different customer tiers may receive different precision levels. This pattern enables adaptive quality-latency tradeoffs while maximizing throughput during normal operation.
 
-The precision decision has direct infrastructure consequences: INT8 inference achieves roughly 3x higher throughput than FP32, meaning a workload requiring 30 GPUs at FP32 needs only 10 at INT8. This connection between model-level optimization and infrastructure economics is why precision selection cannot be treated as purely a model concern, and why the next section examines cost and capacity planning in detail.
+The precision decision has direct infrastructure consequences: INT8 inference achieves roughly 3x higher throughput than FP32, meaning a workload requiring 30 GPUs at FP32 needs only 10 at INT8. This 3x reduction in hardware translates directly to a 3x reduction in operating costs. The connection between model-level optimization and infrastructure economics is why precision selection cannot be treated as purely a model concern, and why the next section examines cost and capacity planning in detail.
 
 ## Economics and Capacity Planning {#sec-model-serving-systems-economics-capacity-planning-3e7e}
 
@@ -1503,7 +1511,7 @@ For an H100 instance costing \$3.00 per hour:
 
 This analysis highlights that for LLMs, **memory capacity** (the size of the KV cache) is the primary determinant of throughput and cost, while **memory bandwidth** is the primary determinant of latency.
 
-This case study synthesizes the core principles developed throughout this chapter: latency budgets decompose into prefill and decode phases, queuing theory governs batch sizing and capacity planning, and hardware constraints in the form of memory bandwidth and capacity determine achievable performance and cost. These principles, when misunderstood, lead to common mistakes that the next section addresses.
+This case study synthesizes the core principles developed throughout this chapter: latency budgets decompose into prefill and decode phases, queuing theory governs batch sizing and capacity planning, and hardware constraints in the form of memory bandwidth and capacity determine achievable performance and cost. The quantitative framework established here enables principled engineering decisions, but only when applied correctly. Common misconceptions cause even experienced engineers to misapply these principles in practice.
 
 ## Fallacies and Pitfalls {#sec-model-serving-systems-fallacies-pitfalls-336b}
 

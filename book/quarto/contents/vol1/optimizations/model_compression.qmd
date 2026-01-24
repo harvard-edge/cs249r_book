@@ -3298,6 +3298,8 @@ Quantization granularity determines how many parameters share the same clipping 
 
 Channelwise quantization has become the dominant approach, providing significant accuracy improvements over layerwise quantization with minimal computational overhead.
 
+With granularity determined, the next consideration is what to quantize. Neural networks contain two primary numerical components: the static weights learned during training and the dynamic activations computed during inference. Each presents distinct quantization challenges.
+
 ##### Weights vs. Activations {#sec-model-compression-weights-vs-activations-101f}
 
 Weight Quantization involves converting the continuous, high-precision weights of a model into lower-precision values, such as converting 32-bit floating-point (Float32) weights to 8-bit integer (INT8) weights. @fig-weight-activations-quantization illustrates how weight quantization occurs in the second step (red squares) during the multiplication of inputs. This process significantly reduces the model size, decreasing both the memory required to store the model and the computational resources needed for inference. For example, a weight matrix in a neural network layer with Float32 weights like $[0.215, -1.432, 0.902,\ldots]$ might be mapped to INT8 values such as $[27, -183, 115, \ldots]$, leading to a significant reduction in memory usage.
@@ -3372,7 +3374,7 @@ Static Quantization is the more commonly used approach. In static quantization, 
 
 In contrast, Dynamic Quantization dynamically calculates the range for each activation map during runtime. This approach allows the quantization process to adjust in real time based on the input, potentially yielding higher accuracy since the range is specifically calculated for each input activation. However, dynamic quantization incurs higher computational overhead because the range must be recalculated at each step. Although this often results in higher accuracy, the real-time computations can be expensive, particularly when deployed at scale.
 
-@tbl-quantization_methods compares post-training quantization, quantization-aware training, and dynamic quantization, each offering distinct strengths, limitations, and trade-offs. These methods are widely deployed across machine learning systems of varying scales, and understanding their pros and cons is important for selecting the appropriate approach for a given application.
+These timing and granularity decisions interact with the broader choice of quantization methodology. @tbl-quantization_methods compares post-training quantization, quantization-aware training, and dynamic quantization, each offering distinct strengths, limitations, and trade-offs. These methods are widely deployed across machine learning systems of varying scales, and understanding their pros and cons is important for selecting the appropriate approach for a given application.
 
 +-------------------------------+--------------------------------+---------------------------------+--------------------------+
 | **Aspect**                    | **Post Training Quantization** | **Quantization-Aware Training** | **Dynamic Quantization** |
@@ -3428,7 +3430,7 @@ PTQ is not always suitable for training purposes. Since PTQ applies quantization
 
 Post-training quantization provides the foundation for more advanced quantization methods. The core concepts of quantization workflows, numerical format trade-offs, and calibration methods remain essential throughout all precision optimization techniques. For rapid deployment scenarios with production deadlines under two weeks and acceptable accuracy loss of 1-2%, PTQ with min-max calibration often provides a complete solution. Extreme constraints like sub-1MB models or sub-10mW power budgets may require INT4 or binary quantization, accepting 5-20% accuracy degradation that necessitates architectural changes.
 
-When PTQ's accuracy preservation is insufficient, particularly for transformer-based models where attention mechanisms amplify small numerical differences, practitioners need a more powerful approach. Quantization-Aware Training addresses exactly this limitation by incorporating quantization effects during training, allowing the model to adapt its weight distributions to low-precision constraints before deployment.
+When PTQ's accuracy preservation is insufficient, particularly for transformer-based models where attention mechanisms amplify small numerical differences, practitioners need a more powerful approach. Rather than applying quantization as a post-hoc transformation, we can integrate precision constraints directly into the training process itself.
 
 #### Quantization-Aware Training {#sec-model-compression-quantizationaware-training-108e}
 
@@ -3721,9 +3723,11 @@ Integrating quantization into the training process preserves model accuracy more
 
 ##### PTQ vs. QAT {#sec-model-compression-ptq-vs-qat-c9f6}
 
-The choice between PTQ and QAT depends on trade-offs between accuracy, computational cost, and deployment constraints. PTQ provides computationally inexpensive optimization requiring only post-training conversion, making it ideal for rapid deployment. However, effectiveness varies by architecture—CNNs tolerate PTQ well while NLP and speech models may experience degradation due to reliance on precise numerical representations.
+Having examined both PTQ and QAT in detail, practitioners face a fundamental decision: when should each approach be used? The choice depends on trade-offs between accuracy, computational cost, and deployment constraints. PTQ provides computationally inexpensive optimization requiring only post-training conversion, making it ideal for rapid deployment. However, effectiveness varies by architecture—CNNs tolerate PTQ well while NLP and speech models may experience degradation due to reliance on precise numerical representations.
 
 QAT proves necessary when high accuracy retention is critical. Integrating quantization effects during training allows models to adapt to lower-precision arithmetic, reducing quantization errors [@Jacob2018]. While achieving higher low-precision accuracy, QAT requires additional training time and computational resources. In practice, a hybrid approach starting with PTQ and selectively applying QAT for accuracy-critical models provides optimal balance between efficiency and performance.
+
+The techniques discussed so far, PTQ and QAT, typically target 8-bit or 4-bit precision while maintaining near-original accuracy. However, some deployment scenarios demand even more aggressive compression, pushing precision to the absolute limits of what neural networks can tolerate.
 
 ### Extreme Quantization {#sec-model-compression-extreme-quantization-030c}
 
@@ -3775,9 +3779,11 @@ The principles in @tbl-hardware-efficient-design work synergistically: scaling o
 
 [^fn-depthwise-separable]: **Depthwise Separable Convolutions**: Factorizes standard convolution into depthwise (per-channel) and pointwise (1×1) operations, reducing computation by 8-9x. MobileNetV2 achieves 72% ImageNet accuracy with 300M FLOPs vs. ResNet-50's 76% with 4.1B FLOPs (13.7x fewer operations). Enables real-time inference on mobile devices.
 
+The following subsections examine each principle in detail, beginning with how to scale model dimensions effectively.
+
 #### Scaling Optimization {#sec-model-compression-scaling-optimization-2e3a}
 
-Scaling a model's architecture involves balancing accuracy with computational cost, and optimizing it to align with the capabilities of the target hardware. Each component of a model, whether its depth, width, or input resolution, impacts resource consumption. In hardware-aware design, these dimensions should not only be optimized for accuracy but also for efficiency in memory usage, processing power, and energy consumption, especially when the model is deployed on specific hardware like GPUs, TPUs, or edge devices.
+Scaling a model's architecture involves balancing accuracy with computational cost and aligning it with the capabilities of the target hardware. Each component of a model, whether its depth, width, or input resolution, impacts resource consumption. In hardware-aware design, these dimensions should not only be optimized for accuracy but also for efficiency in memory usage, processing power, and energy consumption, especially when the model is deployed on specific hardware like GPUs, TPUs, or edge devices.
 
 From a hardware-aware perspective, it is important to consider how different hardware platforms, such as GPUs, TPUs, or edge devices, interact with scaling dimensions. For instance, deeper models can capture more complex representations, but excessive depth can lead to increased inference latency, longer training times, and higher memory consumption, issues that are particularly problematic on resource-constrained platforms. Similarly, increasing the width of the model to process more parallel information may be beneficial for GPUs and TPUs with high parallelism, but it requires careful management of memory usage. In contrast, increasing the input resolution can provide finer details for tasks like image classification, but it exponentially increases computational costs, potentially overloading hardware memory or causing power inefficiencies on edge devices.
 
@@ -3812,6 +3818,8 @@ $$
 eliminating the $k^2$ factor from channel-mixing operations, achieving 5×-10× FLOP reduction. This directly translates to reduced memory bandwidth requirements and improved inference latency on mobile and edge devices.
 
 Complementary factorization techniques extend these benefits. Grouped convolutions (ResNeXt) partition feature maps into independent groups processed separately before merging, maintaining accuracy while reducing redundant operations. Bottleneck layers (ResNet) apply 1×1 convolutions to reduce feature dimensionality before expensive operations, concentrating computation where it provides maximum value. Combined with sparsity and hardware-aware scheduling, these techniques maximize accelerator utilization across GPUs, TPUs, and specialized edge processors.
+
+While reducing computation is essential, memory constraints often prove more limiting than compute capacity on resource-constrained devices. The next section addresses these memory bottlenecks directly.
 
 #### Memory Optimization {#sec-model-compression-memory-optimization-e6ac}
 
@@ -3852,6 +3860,8 @@ By reducing $C_{\text{in}}$ using $1\times 1$ convolutions, SqueezeNet[^fn-squee
 [^fn-squeezenet]: **SqueezeNet**: DeepScale/Berkeley architecture using fire modules (squeeze + expand layers) achieves AlexNet-level accuracy (57.5% top-1 ImageNet) with 50x fewer parameters (1.25M vs 60M). Model size drops from 240MB to 0.5MB uncompressed, enabling deployment on smartphones and embedded systems with limited storage.
 
 Feature reuse, activation checkpointing, and parameter reduction form key components of hardware-aware model design, allowing models to fit within memory limits of modern accelerators while reducing power consumption through fewer memory accesses. Specialized accelerators like TPUs and GPUs leverage memory hierarchies, caching, and high bandwidth memory to efficiently handle sparse or reduced-memory representations, enabling faster inference with minimal overhead.
+
+Beyond reducing what data must be stored, substantial efficiency gains emerge from optimizing how operations access memory. The next technique addresses this by combining multiple operations to reduce memory traffic.
 
 #### Operator Fusion {#sec-model-compression-operator-fusion-c1b4}
 

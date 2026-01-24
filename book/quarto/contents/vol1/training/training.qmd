@@ -52,6 +52,8 @@ The previous chapters established how to express neural network computations: @s
 
 Training workloads exhibit three distinguishing characteristics that separate them from general-purpose computing: extreme computational intensity from iterative gradient computations across massive models, substantial memory pressure from storing parameters, activations, and optimizer states simultaneously, and complex data dependencies requiring synchronized parameter updates. Large language model training requires approximately $10^{23}$ floating-point operations [@brown2020language], memory footprints reaching terabytes when including activation storage, and coordination across many devices. This multiplicative cost structure explains why training systems engineering evolved as a distinct discipline.
 
+These three characteristics create corresponding optimization opportunities. Computational intensity can be addressed through hardware acceleration and precision reduction. Memory pressure yields to techniques like gradient checkpointing and activation recomputation. Data dependencies motivate pipeline designs that overlap computation with data movement. The framework that follows provides the vocabulary for reasoning about which optimizations target which constraints.
+
 ### The Iron Law of Training Performance {#sec-ai-training-iron-law-training-performance-a53f}
 
 Frameworks provide abstractions for expressing training algorithms, but training systems engineering determines whether those algorithms can execute within physical resource limits. The Iron Law provides the organizing framework for understanding how every optimization technique improves training time.
@@ -250,13 +252,15 @@ Recognizing the limitations of matrix-vector operations, the introduction of bat
 
 [^fn-batching-transformation]: **Batching in Neural Networks**: Unlike traditional programming where data is processed one item at a time, ML systems process multiple examples simultaneously to maximize GPU utilization. A single example might achieve only 5-10% GPU utilization, while batches of 32-256 can reach 80-95%. This shift from scalar to tensor operations explains why ML systems require different programming patterns and hardware optimizations than traditional applications.
 
-Hardware accelerators like Google's TPU [@jouppi2017tpu] reflect this evolution, incorporating specialized matrix units and memory hierarchies for these diverse multiplication patterns. These hardware adaptations enable training of large-scale models like GPT-3 [@brown2020language] through efficient handling of varied matrix operations.
+The progression from matrix-vector to batched matrix-matrix operations explains the hardware design choices in modern accelerators. Hardware accelerators like Google's TPU [@jouppi2017tpu] reflect this evolution, incorporating specialized matrix units and memory hierarchies optimized for batched operations. These hardware adaptations enable training of large-scale models like GPT-3 [@brown2020language] through efficient handling of the matrix-matrix multiplication patterns that batching produces.
 
 ::: {.callout-perspective title="Why GPUs Dominate Training" collapse="false"}
 The matrix operations described above directly explain modern training hardware architecture. GPUs dominate training for three reasons. First, matrix multiplication's independent element calculations map perfectly to thousands of GPU cores (NVIDIA A100 has 6,912 CUDA cores). Second, specialized hardware units like Tensor Cores accelerate matrix operations by 10–20× through dedicated hardware for the dominant workload. Third, blocked matrix computation patterns enable efficient use of GPU memory hierarchy (L1/L2 cache, shared memory, global memory).
 
-When GPT-2 examples later show why V100 GPUs achieve 2.4× speedup with mixed precision, this acceleration comes from Tensor Cores executing the matrix multiplications we just analyzed. Matrix operation characteristics are prerequisite for appreciating why pipeline optimizations like mixed-precision training provide such substantial benefits.
+When GPT-2 examples later show why V100 GPUs achieve 2.4x speedup with mixed precision, this acceleration comes from Tensor Cores executing the matrix multiplications we just analyzed. Matrix operation characteristics are prerequisite for appreciating why pipeline optimizations like mixed-precision training provide such substantial benefits.
 :::
+
+Matrix multiplications dominate training compute, but neural networks require more than linear transformations. Between each layer's matrix operations, activation functions introduce the nonlinearity that enables networks to learn complex patterns. These functions appear computationally trivial compared to matrix multiplication, yet their implementation characteristics affect training efficiency in ways that matter at scale.
 
 #### Activation Functions {#sec-ai-training-activation-functions-faa7}
 
@@ -383,13 +387,15 @@ This approximation reduces computational cost to approximately 1.5$\times$ ReLU 
 
 :::
 
-The GELU approximation highlights a broader pattern: compute cost is not always the dominant concern. For activation functions, the real bottleneck is often memory bandwidth rather than arithmetic operations. This distinction has important implications for optimization priorities.
+The GELU approximation highlights a broader pattern: compute cost is not always the dominant concern. For activation functions, the real bottleneck is often memory bandwidth rather than arithmetic operations. This distinction between compute-bound and memory-bound operations has important implications for optimization priorities and will recur throughout our analysis of training bottlenecks.
 
 ::: {.callout-perspective title="Memory Bandwidth Bottlenecks" collapse="false"}
 Activation functions reveal a critical systems principle: not all operations are compute-bound. While matrix multiplications saturate GPU compute units, activation functions often become memory-bandwidth-bound for three reasons. First, element-wise operations perform few calculations per memory access (ReLU performs 1 operation per load). Second, simple operations complete faster than memory transfer time, limiting parallelism benefits. Third, modern GPUs have 10–100× more compute throughput than memory bandwidth.
 
-This explains why activation function choice matters less than expected. ReLU versus sigmoid shows only 2–3× difference despite vastly different computational complexity, because both are bottlenecked by memory access. The forward pass must carefully manage activation storage to prevent memory bandwidth from limiting overall training throughput.
+This explains why activation function choice matters less than expected. ReLU versus sigmoid shows only 2-3x difference despite vastly different computational complexity, because both are bottlenecked by memory access. The forward pass must carefully manage activation storage to prevent memory bandwidth from limiting overall training throughput.
 :::
+
+Having examined forward pass operations and their computational characteristics, we now turn to how training systems update model parameters based on computed predictions. The forward pass produces a loss value; optimization algorithms determine how to translate that loss into parameter adjustments that improve future predictions.
 
 ### Optimization Algorithms {#sec-ai-training-optimization-algorithms-c6a9}
 
@@ -713,6 +719,8 @@ for epoch in range(num_epochs):
 
 This composition pattern allows practitioners to combine base optimization algorithms (SGD, Adam) with scheduling strategies (cosine annealing, linear warmup) without modifying the core mathematical implementations.
 
+The optimization algorithms above specify *how* to update parameters given gradients. But the gradients themselves must be computed, and that computation introduces its own substantial costs. We now examine backpropagation, the algorithm that traces error signals backward through the network to attribute responsibility and compute the gradients that optimizers consume.
+
 ### Backpropagation Mechanics {#sec-ai-training-backpropagation-mechanics-0b64}
 
 The optimization algorithms above specify how to update parameters given gradients, but where do those gradients come from, and what does computing them cost? The backpropagation algorithm answers the first question; its memory and computational requirements answer the second, revealing why training systems face such substantial resource constraints.
@@ -805,7 +813,7 @@ These hardware considerations naturally guide the implementation of backpropagat
 
 The mathematical operations we have examined—forward propagation, gradient computation, and parameter updates—define what training systems must compute. These operations in mathematical terms provide essential knowledge, but implementing them in practical training systems requires translating mathematical abstractions into orchestrated computational workflows. This translation introduces distinct challenges centered on resource coordination, timing, and data movement.
 
-Efficiently executing training requires coordinating these mathematical operations with data loading pipelines, preprocessing workflows, hardware accelerators, and monitoring systems. The matrix multiplications that dominate forward and backward passes must be scheduled to overlap with data transfer operations to prevent GPU idle time. Activation storage requirements from forward propagation influence batch size selection and memory allocation strategies. The sequential dependencies imposed by backpropagation constrain parallelization opportunities and shape distributed training architectures. These system-level considerations transform mathematical operations into concrete computational pipelines.
+Before examining pipeline architecture in detail, one more analytical tool proves essential: understanding whether operations are limited by compute throughput or memory bandwidth. This distinction, captured by arithmetic intensity, determines which optimization strategies will prove effective.
 
 ### Arithmetic Intensity and Training Bottlenecks {#sec-ai-training-arithmetic-intensity-training-bottlenecks-4446}
 
@@ -2546,6 +2554,8 @@ Flash Attention's impact on practical model training capabilities is substantial
 For a 7B parameter model training on A100 GPUs, Flash Attention transforms training from infeasible (OOM at 2K context) to practical (8K context with room for batch size 32), representing the difference between a model that cannot be trained and one deployed in production.
 
 The technique demonstrates that algorithmic innovation at the systems level, exploiting hardware characteristics like memory hierarchy, can provide order-of-magnitude improvements that no amount of hardware scaling alone would achieve. This systems-aware algorithm design philosophy, treating memory bandwidth as the primary constraint and compute as abundant, will increasingly define performance optimization in modern ML systems.
+
+Flash Attention addresses memory bandwidth bottlenecks during computation, but another class of memory constraints exists: the sheer capacity required to store activations and optimizer states simultaneously. When models or batch sizes exceed GPU memory capacity, two complementary techniques trade computation for memory.
 
 ### Gradient Accumulation and Checkpointing {#sec-ai-training-gradient-accumulation-checkpointing-0c47}
 
