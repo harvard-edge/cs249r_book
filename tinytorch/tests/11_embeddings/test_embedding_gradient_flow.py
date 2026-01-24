@@ -26,6 +26,7 @@ def test_embedding_has_backward_function():
     print("Testing Embedding _grad_fn attachment...")
 
     embed = Embedding(vocab_size=20, embed_dim=8)
+    embed.weight.requires_grad = True  # Enable gradient tracking
     indices = Tensor(np.array([[0, 1, 2], [3, 4, 5]]))
 
     # Forward pass
@@ -164,6 +165,7 @@ def test_embedding_data_bypass_detection():
     print("Testing Embedding .data bypass detection...")
 
     embed = Embedding(vocab_size=20, embed_dim=8)
+    embed.weight.requires_grad = True  # Enable gradient tracking
     indices = Tensor(np.array([[0, 1, 2]]))
 
     # Correct way (should have _grad_fn)
