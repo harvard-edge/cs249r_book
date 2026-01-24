@@ -19,7 +19,7 @@
 Welcome to Module 14! You'll build professional profiling tools to measure model performance and uncover optimization opportunities.
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Complete ML stack from tensors to transformers
+**You've Built**: Complete ML stack from tensors to transformers (Modules 01-13)
 **You'll Build**: Comprehensive profiling system for parameters, FLOPs, memory, and latency
 **You'll Enable**: Data-driven optimization decisions and performance analysis
 
@@ -28,14 +28,6 @@ Welcome to Module 14! You'll build professional profiling tools to measure model
 All Modules (01-13) → Profiling (14) → Optimization Techniques (15-18)
 (implementations)     (measurement)     (targeted fixes)
 ```
-
-**Before starting this module, verify:**
-- [ ] Module 01 (Tensor): Core tensor operations
-- [ ] Module 03 (Layers): Linear layer implementation
-- [ ] Module 09 (Spatial): Convolutional operations
-
-This module can work standalone with minimal Tensor implementation, but
-full functionality requires previous modules for realistic profiling scenarios
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
@@ -48,18 +40,18 @@ Let's build the measurement foundation for ML systems optimization!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/14_profiling/profiling_dev.py`
-**Building Side:** Code exports to `tinytorch.profiling.profiler`
+**Learning Side:** You work in modules/14_profiling/profiling_dev.py
+**Building Side:** Code exports to tinytorch.perf.profiling
 
 ```python
-# How to use this module:
+# Final package structure:
 from tinytorch.perf.profiling import Profiler, profile_forward_pass, profile_backward_pass
 ```
 
 **Why this matters:**
 - **Learning:** Complete profiling system for understanding model performance characteristics
 - **Production:** Professional measurement tools like those used in PyTorch, TensorFlow
-- **Consistency:** All profiling and measurement tools in profiling.profiler
+- **Consistency:** All profiling and measurement tools in perf.profiling
 - **Integration:** Works with any model built using TinyTorch components
 """
 
@@ -85,6 +77,34 @@ from tinytorch.core.spatial import Conv2d
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
 KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
 MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
+
+# %% [markdown]
+"""
+## 📋 Module Dependencies
+
+**Prerequisites**: Modules 01-13 (Complete ML stack)
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+- `time` (for latency measurement)
+- `tracemalloc` (for memory tracking)
+- `gc` (for garbage collection control)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor` (Tensor class from Module 01)
+- `tinytorch.core.layers` (Linear layer from Module 03)
+- `tinytorch.core.spatial` (Conv2d from Module 09)
+
+**Dependency Flow**:
+```
+Modules 01-13 → Module 14 (Profiling) → Modules 15-18 (Optimization)
+     ↓                   ↓                       ↓
+ Implementations    Measurement tools     Data-driven optimization
+```
+
+Students completing this module will have built the measurement foundation
+that enables all optimization decisions in subsequent modules.
+"""
 
 # %% [markdown]
 """
@@ -119,30 +139,31 @@ Model → Profiler → Measurements → Analysis → Optimization Decision
 
 # %% [markdown]
 """
-### 🔗 From Implementation to Optimization: The Profiling Foundation
+### From Implementation to Optimization: The Profiling Foundation
 
 **In this module (14)**, you'll build the measurement tools to discover optimization opportunities.
 **In later modules (15+)**, you'll use these profiling insights to implement optimizations like KV caching.
 
 **The Real ML Engineering Workflow**:
+
 ```
-Step 1: Measure (This Module!)          Step 2: Analyze
-  ↓                                       ↓
-Profile baseline → Find bottleneck → Understand cause
-40 tok/s          80% in attention    O(n²) recomputation
-                                       ↓
-Step 4: Validate                      Step 3: Optimize (Future Modules)
-  ↓                                       ↓
-Profile optimized ← Verify speedup ← Implement optimization
-500 tok/s (12.5x)   Measure impact    Design solution
+┌────────────────────────────────────────────────────────────────┐
+│ Step 1: Measure (This Module!)    Step 2: Analyze              │
+│   ↓                                 ↓                          │
+│ Profile baseline → Find bottleneck → Understand cause          │
+│ 40 tok/s          80% in attention    O(n^2) recomputation     │
+│                                       ↓                        │
+│ Step 4: Validate                    Step 3: Optimize (Future)  │
+│   ↓                                   ↓                        │
+│ Profile optimized ← Verify speedup ← Implement optimization    │
+│ 500 tok/s (12.5x)   Measure impact    Design solution          │
+└────────────────────────────────────────────────────────────────┘
 ```
 
 **Without profiling**: You'd never know WHERE to optimize!
 **Without measurement**: You couldn't verify improvements!
 
-This module teaches the measurement and analysis skills that enable
-optimization breakthroughs. You'll profile real models and discover
-bottlenecks just like production ML teams do.
+This module teaches the measurement and analysis skills that enable optimization breakthroughs. You'll profile real models and discover bottlenecks just like production ML teams do.
 """
 
 # %% [markdown]
@@ -151,7 +172,7 @@ bottlenecks just like production ML teams do.
 
 Before we build our profiler, let's understand what we're measuring and why each metric matters.
 
-### Parameter Counting - Model Size Detective Work
+### Parameter Counting: Model Size Detective Work
 
 Parameters determine your model's memory footprint and storage requirements. Every parameter is typically a 32-bit float (4 bytes), so counting them precisely predicts memory usage.
 
@@ -165,27 +186,28 @@ Example: Linear(768, 3072) → (768 × 3072) + 3072 = 2,362,368 parameters
 Memory: 2,362,368 × 4 bytes = 9.45 MB
 ```
 
-### FLOP Counting - Computational Cost Analysis
+### FLOP Counting: Computational Cost Analysis
 
 FLOPs (Floating Point Operations) measure computational work. Unlike wall-clock time, FLOPs are hardware-independent and predict compute costs across different systems.
 
 **FLOP Formulas for Key Operations:**
+
 ```
 Matrix Multiplication (M,K) @ (K,N):
-   FLOPs = M × N × K × 2
+   FLOPs = M x N x K x 2
            ↑   ↑   ↑   ↑
         Rows Cols Inner Multiply+Add
 
 Linear Layer Forward:
-   FLOPs = batch_size × input_features × output_features × 2
+   FLOPs = batch_size x input_features x output_features x 2
                       ↑                  ↑                 ↑
                   Matmul cost        Bias add        Operations
 
 Convolution (simplified):
-   FLOPs = output_H × output_W × kernel_H × kernel_W × in_channels × out_channels × 2
+   FLOPs = output_H x output_W x kernel_H x kernel_W x in_channels x out_channels x 2
 ```
 
-### Memory Profiling - The Three Types of Memory
+### Memory Profiling: The Three Types of Memory
 
 ML models use memory in three distinct ways, each with different optimization strategies:
 
@@ -204,44 +226,53 @@ Adam state:  1,000 MB (momentum + velocity)
 Total:      2,200 MB (4.4× parameter memory!)
 ```
 
-### Latency Measurement - Dealing with Reality
+### Latency Measurement: Dealing with Reality
 
 Latency measurement is tricky because systems have variance, warmup effects, and measurement overhead. Professional profiling requires statistical rigor.
 
 **Latency Measurement Best Practices:**
+
 ```
 Measurement Protocol:
-1. Warmup runs (10+) → CPU/GPU caches warm up
-2. Timed runs (100+) → Statistical significance
-3. Outlier handling → Use median, not mean
-4. Memory cleanup → Prevent contamination
+┌────────────────────────────────────────────────────────────────┐
+│ 1. Warmup runs (10+)  → CPU/GPU caches warm up                │
+│ 2. Timed runs (100+)  → Statistical significance              │
+│ 3. Outlier handling   → Use median, not mean                  │
+│ 4. Memory cleanup     → Prevent contamination                 │
+└────────────────────────────────────────────────────────────────┘
 
 Timeline:
-Warmup: [run][run][run]...[run] ← Don't time these
-Timing: [⏱run⏱][⏱run⏱]...[⏱run⏱] ← Time these
-Result: median(all_times) ← Robust to outliers
+Warmup: [run][run][run]...[run]     <- Don't time these
+Timing: [run][run]...[run]          <- Time these
+Result: median(all_times)           <- Robust to outliers
 ```
 """
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Building the Core Profiler Class
+## 🏗️ Implementation: Building the Profiler Class
 
 Now let's implement our profiler step by step. We'll start with the foundation and build up to comprehensive analysis.
 
 ### The Profiler Architecture
-```
-Profiler Class
-├── count_parameters() → Model size analysis
-├── count_flops() → Computational cost estimation
-├── measure_memory() → Memory usage tracking
-├── measure_latency() → Performance timing
-├── profile_layer() → Layer-wise analysis
-├── profile_forward_pass() → Complete forward analysis
-└── profile_backward_pass() → Training analysis
 
-Integration:
-All methods work together to provide comprehensive performance insights
+```
+Profiler Class Structure:
+┌─────────────────────────────────────────────────────────────┐
+│ Core Measurement Methods:                                   │
+│ • count_parameters() → Model size analysis                 │
+│ • count_flops() → Computational cost estimation            │
+│ • measure_memory() → Memory usage tracking                 │
+│ • measure_latency() → Performance timing                   │
+├─────────────────────────────────────────────────────────────┤
+│ Advanced Profiling Methods:                                 │
+│ • profile_layer() → Layer-wise analysis                    │
+│ • profile_forward_pass() → Complete forward analysis       │
+│ • profile_backward_pass() → Training analysis              │
+├─────────────────────────────────────────────────────────────┤
+│ Integration:                                                 │
+│ All methods work together for comprehensive insights        │
+└─────────────────────────────────────────────────────────────┘
 ```
 """
 
@@ -733,22 +764,18 @@ class Profiler:
 
 # %% [markdown]
 """
-## 🏗️ Helper Functions - Quick Profiling Utilities
+## 🏗️ Helper Functions: Quick Profiling Utilities
 
-These helper functions provide simplified interfaces for common profiling tasks.
-They make it easy to quickly profile models and analyze characteristics without
-manually calling multiple profiler methods.
+These helper functions provide simplified interfaces for common profiling tasks. They make it easy to quickly profile models and analyze characteristics without manually calling multiple profiler methods.
 
 ### Why Helper Functions Matter
 
-In production ML engineering, you often need quick insights without setting up
-full profiling workflows. These utilities provide:
+In production ML engineering, you often need quick insights without setting up full profiling workflows. These utilities provide:
 - **Quick profiling**: One-line model analysis with formatted output
 - **Weight analysis**: Understanding parameter distributions for compression
 - **Student-friendly output**: Clear, formatted results for learning
 
-These functions wrap our core Profiler class with convenience interfaces used
-in real ML workflows for rapid iteration and debugging.
+These functions wrap our core Profiler class with convenience interfaces used in real ML workflows for rapid iteration and debugging.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "helper_quick_profile", "solution": true}
@@ -846,14 +873,16 @@ def analyze_weight_distribution(model, percentiles=[10, 25, 50, 75, 90]):
 
 # %% [markdown]
 """
-### 🧪 Unit Test: Helper Functions
+### 🔬 Unit Test: Helper Functions
+
 This test validates our helper utilities work correctly and provide useful output.
+
 **What we're testing**: Quick profiling and weight distribution analysis
 **Why it matters**: These utilities are used daily in production ML workflows
 **Expected**: Correct profiles with formatted output
 """
 
-# %% nbgrader={"grade": true, "grade_id": "test_helper_functions", "locked": true, "points": 5}
+# %% nbgrader={"grade": true, "grade_id": "test-helper-functions", "locked": true, "points": 5}
 def test_unit_helper_functions():
     """🔬 Test helper function implementations."""
     print("🔬 Unit Test: Helper Functions...")
@@ -901,11 +930,12 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Parameter Counting - Model Size Analysis
+## 🏗️ Parameter Counting: Model Size Analysis
 
 Parameter counting is the foundation of model profiling. Every parameter contributes to memory usage, training time, and model complexity. Let's validate our implementation.
 
 ### Why Parameter Counting Matters
+
 ```
 Model Deployment Pipeline:
 Parameters → Memory → Hardware → Cost
@@ -913,23 +943,27 @@ Parameters → Memory → Hardware → Cost
   125M    500MB     8GB GPU   $200/month
 
 Parameter Growth Examples:
-Small:   GPT-2 Small (124M parameters)   → 500MB memory
-Medium:  GPT-2 Medium (350M parameters) → 1.4GB memory
-Large:   GPT-2 Large (774M parameters)  → 3.1GB memory
-XL:      GPT-2 XL (1.5B parameters)     → 6.0GB memory
+┌──────────────────────────────────────────────────┐
+│ Small:   GPT-2 Small (124M parameters)  → 500MB  │
+│ Medium:  GPT-2 Medium (350M parameters) → 1.4GB  │
+│ Large:   GPT-2 Large (774M parameters)  → 3.1GB  │
+│ XL:      GPT-2 XL (1.5B parameters)     → 6.0GB  │
+└──────────────────────────────────────────────────┘
 ```
 """
 
 # %% [markdown]
 """
-### 🧪 Unit Test: Parameter Counting
+### 🔬 Unit Test: Parameter Counting
+
 This test validates our parameter counting works correctly for different model types.
+
 **What we're testing**: Parameter counting accuracy for various architectures
 **Why it matters**: Accurate parameter counts predict memory usage and model complexity
 **Expected**: Correct counts for known model configurations
 """
 
-# %% nbgrader={"grade": true, "grade_id": "test_parameter_counting", "locked": true, "points": 10}
+# %% nbgrader={"grade": true, "grade_id": "test-parameter-counting", "locked": true, "points": 10}
 def test_unit_parameter_counting():
     """🔬 Test parameter counting implementation."""
     print("🔬 Unit Test: Parameter Counting...")
@@ -974,45 +1008,53 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ FLOP Counting - Computational Cost Estimation
+## 🏗️ FLOP Counting: Computational Cost Estimation
 
 FLOPs measure the computational work required for model operations. Unlike latency, FLOPs are hardware-independent and help predict compute costs across different systems.
 
 ### FLOP Counting Visualization
+
 ```
 Linear Layer FLOP Breakdown:
-Input (batch=32, features=768) × Weight (768, 3072) + Bias (3072)
-                    ↓
-Matrix Multiplication: 32 × 768 × 3072 × 2 = 150,994,944 FLOPs
-Bias Addition:         32 × 3072 × 1      =     98,304 FLOPs
-                    ↓
-Total FLOPs:                               151,093,248 FLOPs
+┌────────────────────────────────────────────────────────────────┐
+│ Input (batch=32, features=768) × Weight (768, 3072) + Bias     │
+│                         ↓                                       │
+│ Matrix Multiplication: 32 × 768 × 3072 × 2 = 150,994,944 FLOPs │
+│ Bias Addition:         32 × 3072 × 1      =      98,304 FLOPs  │
+│                         ↓                                       │
+│ Total FLOPs:                                 151,093,248 FLOPs │
+└────────────────────────────────────────────────────────────────┘
 
 Convolution FLOP Breakdown:
-Input (batch=1, channels=3, H=224, W=224)
-Kernel (out=64, in=3, kH=7, kW=7)
-                    ↓
-Output size: (224×224) → (112×112) with stride=2
-FLOPs = 112 × 112 × 7 × 7 × 3 × 64 × 2 = 235,012,096 FLOPs
+┌────────────────────────────────────────────────────────────────┐
+│ Input (batch=1, channels=3, H=224, W=224)                      │
+│ Kernel (out=64, in=3, kH=7, kW=7)                             │
+│                         ↓                                       │
+│ Output size: (224×224) → (112×112) with stride=2              │
+│ FLOPs = 112 × 112 × 7 × 7 × 3 × 64 × 2 = 235,012,096 FLOPs    │
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ### FLOP Counting Strategy
+
 Different operations require different FLOP calculations:
-- **Matrix operations**: M × N × K × 2 (multiply + add)
-- **Convolutions**: Output spatial × kernel spatial × channels
+- **Matrix operations**: M x N x K x 2 (multiply + add)
+- **Convolutions**: Output spatial x kernel spatial x channels
 - **Activations**: Usually 1 FLOP per element
 """
 
 # %% [markdown]
 """
-### 🧪 Unit Test: FLOP Counting
+### 🔬 Unit Test: FLOP Counting
+
 This test validates our FLOP counting for different operations and architectures.
+
 **What we're testing**: FLOP calculation accuracy for various layer types
 **Why it matters**: FLOPs predict computational cost and energy usage
 **Expected**: Correct FLOP counts for known operation types
 """
 
-# %% nbgrader={"grade": true, "grade_id": "test_flop_counting", "locked": true, "points": 10}
+# %% nbgrader={"grade": true, "grade_id": "test-flop-counting", "locked": true, "points": 10}
 def test_unit_flop_counting():
     """🔬 Test FLOP counting implementation."""
     print("🔬 Unit Test: FLOP Counting...")
@@ -1051,11 +1093,12 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Memory Profiling - Understanding Memory Usage Patterns
+## 🏗️ Memory Profiling: Understanding Memory Usage Patterns
 
-Memory profiling reveals how much RAM your model consumes during training and inference. This is critical for deployment planning and perf.
+Memory profiling reveals how much RAM your model consumes during training and inference. This is critical for deployment planning and performance optimization.
 
 ### Memory Usage Breakdown
+
 ```
 ML Model Memory Components:
 ┌───────────────────────────────────────────────────┐
@@ -1064,31 +1107,36 @@ ML Model Memory Components:
 │   Parameters    │   Activations   │  Gradients    │
 │   (persistent)  │  (per forward)  │ (per backward)│
 ├─────────────────┼─────────────────┼───────────────┤
-│ Linear weights  │ Hidden states   │ ∂L/∂W         │
-│ Conv filters    │ Attention maps  │ ∂L/∂b         │
+│ Linear weights  │ Hidden states   │ dL/dW         │
+│ Conv filters    │ Attention maps  │ dL/db         │
 │ Embeddings      │ Residual cache  │ Optimizer     │
 └─────────────────┴─────────────────┴───────────────┘
 
 Memory Scaling:
-Batch Size → Activation Memory (linear scaling)
-Model Size → Parameter + Gradient Memory (linear scaling)
-Sequence Length → Attention Memory (quadratic scaling!)
+┌────────────────────────────────────────────────────┐
+│ Batch Size      → Activation Memory (linear)       │
+│ Model Size      → Parameter + Gradient (linear)    │
+│ Sequence Length → Attention Memory (quadratic!)    │
+└────────────────────────────────────────────────────┘
 ```
 
 ### Memory Measurement Strategy
+
 We use Python's `tracemalloc` to track memory allocations during model execution. This gives us precise measurements of memory usage patterns.
 """
 
 # %% [markdown]
 """
-### 🧪 Unit Test: Memory Measurement
+### 🔬 Unit Test: Memory Measurement
+
 This test validates our memory tracking works correctly and provides useful metrics.
+
 **What we're testing**: Memory usage measurement and calculation accuracy
 **Why it matters**: Memory constraints often limit model deployment
 **Expected**: Reasonable memory measurements with proper components
 """
 
-# %% nbgrader={"grade": true, "grade_id": "test_memory_measurement", "locked": true, "points": 10}
+# %% nbgrader={"grade": true, "grade_id": "test-memory-measurement", "locked": true, "points": 10}
 def test_unit_memory_measurement():
     """🔬 Test memory measurement implementation."""
     print("🔬 Unit Test: Memory Measurement...")
@@ -1139,11 +1187,12 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Latency Measurement - Accurate Performance Timing
+## 🏗️ Latency Measurement: Accurate Performance Timing
 
 Latency measurement is the most challenging part of profiling because it's affected by system state, caching, and measurement overhead. We need statistical rigor to get reliable results.
 
 ### Latency Measurement Challenges
+
 ```
 Timing Challenges:
 ┌─────────────────────────────────────────────────┐
@@ -1163,6 +1212,7 @@ Warmup → Multiple measurements → Robust statistics (median)
 ```
 
 ### Measurement Protocol
+
 Our latency measurement follows professional benchmarking practices:
 1. **Warmup runs** to stabilize system state
 2. **Multiple measurements** for statistical significance
@@ -1172,14 +1222,16 @@ Our latency measurement follows professional benchmarking practices:
 
 # %% [markdown]
 """
-### 🧪 Unit Test: Latency Measurement
+### 🔬 Unit Test: Latency Measurement
+
 This test validates our latency measurement provides consistent and reasonable results.
+
 **What we're testing**: Timing accuracy and statistical robustness
 **Why it matters**: Latency determines real-world deployment feasibility
 **Expected**: Consistent timing measurements with proper statistical handling
 """
 
-# %% nbgrader={"grade": true, "grade_id": "test_latency_measurement", "locked": true, "points": 10}
+# %% nbgrader={"grade": true, "grade_id": "test-latency-measurement", "locked": true, "points": 10}
 def test_unit_latency_measurement():
     """🔬 Test latency measurement implementation."""
     print("🔬 Unit Test: Latency Measurement...")
@@ -1232,6 +1284,7 @@ if __name__ == "__main__":
 Now let's validate our higher-level profiling functions that combine core measurements into comprehensive analysis tools.
 
 ### Advanced Profiling Architecture
+
 ```
 Core Profiler Methods → Advanced Analysis Functions → Optimization Insights
         ↓                         ↓                         ↓
@@ -1241,46 +1294,53 @@ measure_memory()       profile_layer()              "Focus on bandwidth"
 measure_latency()      benchmark_efficiency()       "Use quantization"
 ```
 
-### Forward Pass Profiling - Complete Performance Picture
+### Forward Pass Profiling: Complete Performance Picture
 
 A forward pass profile combines all our measurements to understand model behavior comprehensively. This is essential for optimization decisions.
 """
 
 # %% [markdown]
 """
-### Backward Pass Profiling - Training Analysis
+### Backward Pass Profiling: Training Analysis
 
-Training requires both forward and backward passes. The backward pass typically uses 2× the compute and adds gradient memory. Understanding this is crucial for training perf.
+Training requires both forward and backward passes. The backward pass typically uses 2x the compute and adds gradient memory. Understanding this is crucial for training performance.
 
 ### Training Memory Visualization
+
 ```
 Training Memory Timeline:
-Forward Pass:   [Parameters] + [Activations]
-                     ↓
-Backward Pass:  [Parameters] + [Activations] + [Gradients]
-                     ↓
-Optimizer:      [Parameters] + [Gradients] + [Optimizer State]
+┌────────────────────────────────────────────────────────────────┐
+│ Forward Pass:   [Parameters] + [Activations]                   │
+│                      ↓                                          │
+│ Backward Pass:  [Parameters] + [Activations] + [Gradients]     │
+│                      ↓                                          │
+│ Optimizer:      [Parameters] + [Gradients] + [Optimizer State] │
+└────────────────────────────────────────────────────────────────┘
 
 Memory Examples:
 Model: 125M parameters (500MB)
-Forward:  500MB params + 100MB activations = 600MB
-Backward: 500MB params + 100MB activations + 500MB gradients = 1,100MB
-Adam:     500MB params + 500MB gradients + 1,000MB momentum/velocity = 2,000MB
+┌────────────────────────────────────────────────────────────────┐
+│ Forward:  500MB params + 100MB activations = 600MB             │
+│ Backward: 500MB params + 100MB acts + 500MB grads = 1,100MB    │
+│ Adam:     500MB params + 500MB grads + 1,000MB state = 2,000MB │
+└────────────────────────────────────────────────────────────────┘
 
-Total Training Memory: 4× parameter memory!
+Total Training Memory: 4x parameter memory!
 ```
 """
 
 # %% [markdown]
 """
-### 🧪 Unit Test: Advanced Profiling Functions
+### 🔬 Unit Test: Advanced Profiling Functions
+
 This test validates our advanced profiling functions provide comprehensive analysis.
+
 **What we're testing**: Forward and backward pass profiling completeness
 **Why it matters**: Training optimization requires understanding both passes
 **Expected**: Complete profiles with all required metrics and relationships
 """
 
-# %% nbgrader={"grade": true, "grade_id": "test_advanced_profiling", "locked": true, "points": 15}
+# %% nbgrader={"grade": true, "grade_id": "test-advanced-profiling", "locked": true, "points": 15}
 def test_unit_advanced_profiling():
     """🔬 Test advanced profiling functions."""
     print("🔬 Unit Test: Advanced Profiling Functions...")
@@ -1348,16 +1408,19 @@ if __name__ == "__main__":
 Let's analyze how different model characteristics affect performance. This analysis guides optimization decisions and helps identify bottlenecks.
 
 ### Performance Analysis Workflow
+
 ```
 Model Scaling Analysis:
-Size → Memory → Latency → Throughput → Bottleneck Identification
- ↓      ↓        ↓         ↓            ↓
-64    1MB     0.1ms    10K ops/s    Memory bound
-128   4MB     0.2ms    8K ops/s     Memory bound
-256   16MB    0.5ms    4K ops/s     Memory bound
-512   64MB    2.0ms    1K ops/s     Memory bound
+┌─────────────────────────────────────────────────────────────────┐
+│ Size → Memory → Latency → Throughput → Bottleneck Identification│
+│  ↓      ↓        ↓         ↓            ↓                       │
+│ 64    1MB     0.1ms    10K ops/s    Memory bound                │
+│ 128   4MB     0.2ms    8K ops/s     Memory bound                │
+│ 256   16MB    0.5ms    4K ops/s     Memory bound                │
+│ 512   64MB    2.0ms    1K ops/s     Memory bound                │
+└─────────────────────────────────────────────────────────────────┘
 
-Insight: This workload is memory-bound → Optimize data movement, not compute!
+Insight: This workload is memory-bound -> Optimize data movement, not compute!
 ```
 """
 
@@ -1470,6 +1533,7 @@ if __name__ == "__main__":
 Understanding profiling results helps guide optimization decisions. Let's analyze different operation types and measurement overhead.
 
 ### Operation Efficiency Analysis
+
 ```
 Operation Types and Their Characteristics:
 ┌─────────────────┬──────────────────┬──────────────────┬─────────────────┐
@@ -1482,10 +1546,12 @@ Operation Types and Their Characteristics:
 └─────────────────┴──────────────────┴──────────────────┴─────────────────┘
 
 Optimization Strategy:
-1. Profile first → Identify bottlenecks
-2. Focus on compute-bound ops → Algorithmic improvements
-3. Focus on memory-bound ops → Data movement optimization
-4. Measure again → Verify improvements
+┌────────────────────────────────────────────────────────────────┐
+│ 1. Profile first      → Identify bottlenecks                  │
+│ 2. Compute-bound ops  → Algorithmic improvements              │
+│ 3. Memory-bound ops   → Data movement optimization            │
+│ 4. Measure again      → Verify improvements                   │
+└────────────────────────────────────────────────────────────────┘
 ```
 """
 
@@ -1636,7 +1702,7 @@ if __name__ == "__main__":
 Final validation that everything works together correctly.
 """
 
-# %% nbgrader={"grade": true, "grade_id": "test_module", "locked": true, "points": 20}
+# %% nbgrader={"grade": true, "grade_id": "module-integration", "locked": true, "points": 20}
 def test_module():
     """🧪 Module Test: Complete Integration
 
@@ -1735,49 +1801,62 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 14")
 
-# Call before module summary
+# Run comprehensive module test
 if __name__ == "__main__":
     test_module()
 
 # %% [markdown]
 """
-## 🤔 ML Systems Thinking: Performance Measurement
+## 🤔 ML Systems Reflection Questions
 
-### Question 1: FLOP Analysis
-You implemented a profiler that counts FLOPs for different operations.
-For a Linear layer with 1000 input features and 500 output features:
-- How many FLOPs are required for one forward pass? _____ FLOPs
-- If you process a batch of 32 samples, how does this change the per-sample FLOPs? _____
+Answer these to deepen your understanding of profiling operations and their systems implications:
 
-### Question 2: Memory Scaling
-Your profiler measures memory usage for models and activations.
-A transformer model has 125M parameters (500MB at FP32).
-During training with batch size 16:
-- What's the minimum memory for gradients? _____ MB
-- With Adam optimizer, what's the total memory requirement? _____ MB
+### 1. FLOP Analysis
+**Question**: You implemented a profiler that counts FLOPs for different operations. For a Linear layer with 1000 input features and 500 output features:
 
-### Question 3: Performance Bottlenecks
-You built tools to identify compute vs memory bottlenecks.
-A model achieves 10 GFLOP/s on hardware with 100 GFLOP/s peak:
-- What's the computational efficiency? _____%
-- If doubling batch size doesn't improve GFLOP/s, the bottleneck is likely _____
+**Consider**:
+- How many FLOPs are required for one forward pass?
+- If you process a batch of 32 samples, how does this change the per-sample FLOPs?
+- How does the FLOP count help you predict compute costs across different hardware?
 
-### Question 4: Profiling Trade-offs
-Your profiler adds measurement overhead to understand performance.
-If profiling adds 5× overhead but reveals a 50% speedup opportunity:
-- Is the profiling cost justified for development? _____
-- When should you disable profiling in production? _____
+---
+
+### 2. Memory Scaling
+**Question**: Your profiler measures memory usage for models and activations. A transformer model has 125M parameters (500MB at FP32). During training with batch size 16:
+
+**Calculate**:
+- What's the minimum memory for gradients?
+- With Adam optimizer, what's the total memory requirement?
+- How would mixed precision (FP16) change these numbers?
+
+---
+
+### 3. Performance Bottlenecks
+**Question**: You built tools to identify compute vs memory bottlenecks. A model achieves 10 GFLOP/s on hardware with 100 GFLOP/s peak.
+
+**Think about**:
+- What's the computational efficiency?
+- If doubling batch size doesn't improve GFLOP/s, the bottleneck is likely...
+- How would you use profiling data to guide optimization strategy?
+
+---
+
+### 4. Profiling Trade-offs
+**Question**: Your profiler adds measurement overhead to understand performance. If profiling adds 5x overhead but reveals a 50% speedup opportunity:
+
+**Consider**:
+- Is the profiling cost justified for development?
+- When should you disable profiling in production?
+- How does the cost of profiling compare to the cost of optimizing the wrong thing?
 """
 
 # %% [markdown]
 """
 ## ⭐ Aha Moment: Know Your Model
 
-**What you built:** A profiler that measures parameters, FLOPs, memory, and latency.
+**What you built:** A complete profiler that measures parameters, FLOPs, memory, and latency.
 
-**Why it matters:** You can't optimize what you can't measure! Before making a model faster
-or smaller, you need to know where the time and memory go. Your profiler reveals these secrets,
-telling you exactly what your model costs in compute and memory.
+**Why it matters:** You can't optimize what you can't measure! Before making a model faster or smaller, you need to know where the time and memory go. Your profiler reveals these secrets, telling you exactly what your model costs in compute and memory.
 
 In the next modules, you'll use profiling to guide quantization and compression decisions.
 """
@@ -1820,26 +1899,20 @@ if __name__ == "__main__":
 Congratulations! You've built a comprehensive profiling system for ML performance analysis!
 
 ### Key Accomplishments
-- Built complete Profiler class with parameter, FLOP, memory, and latency measurement
-- Implemented advanced profiling functions for forward and backward pass analysis
-- Discovered performance characteristics through scaling and efficiency analysis
-- Created production-quality measurement tools for optimization guidance
-- All tests pass ✅ (validated by `test_module()`)
+- **Built complete Profiler class** with parameter, FLOP, memory, and latency measurement
+- **Implemented advanced profiling functions** for forward and backward pass analysis
+- **Discovered performance characteristics** through scaling and efficiency analysis
+- **Created production-quality measurement tools** for optimization guidance
+- **All tests pass** (validated by `test_module()`)
 
-### Systems Insights Gained
+### Systems Insights Discovered
 - **FLOPs vs Reality**: Theoretical operations don't always predict actual performance
 - **Memory Bottlenecks**: Many ML operations are limited by memory bandwidth, not compute
 - **Batch Size Effects**: Larger batches improve throughput but increase memory requirements
 - **Profiling Overhead**: Measurement tools have costs but enable data-driven optimization
 
-### Production Skills Developed
-- **Performance Detective Work**: Use data, not guesses, to identify bottlenecks
-- **Optimization Prioritization**: Focus efforts on actual bottlenecks, not assumptions
-- **Resource Planning**: Predict memory and compute requirements for deployment
-- **Statistical Rigor**: Handle measurement variance with proper methodology
-
 ### Ready for Next Steps
-Your profiling implementation enables optimization modules (15-18) to make data-driven optimization decisions.
+Your profiling implementation enables optimization modules (15-18) to make data-driven decisions.
 Export with: `tito module complete 14`
 
 **Next**: Module 15 (Quantization) will use profiling data to guide precision reduction for efficient inference!

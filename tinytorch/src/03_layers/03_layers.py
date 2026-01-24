@@ -29,33 +29,6 @@ Tensor → Activations → Layers → Networks
 (data)   (intelligence) (building blocks) (architectures)
 ```
 
-## 📋 Module Dependencies
-
-**Prerequisites**: Modules 01 (Tensor) and 02 (Activations) must be completed
-
-**External Dependencies**:
-- `numpy` (for numerical operations)
-
-**TinyTorch Dependencies**:
-- **Module 01 (Tensor)**: Foundation for all layer computations
-  - Used for: Weight storage, input/output data structures, shape operations
-  - Required: Yes - layers operate on Tensor objects
-- **Module 02 (Activations)**: Activation functions for testing layer integration
-  - Used for: ReLU, Sigmoid for testing layer compositions
-  - Required: Yes - layers are tested with activations
-
-**Dependency Flow**:
-```
-Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers) → Module 04 (Losses)
-     ↓                      ↓                         ↓                    ↓
-  Foundation          Nonlinearity              Architecture        Error Measurement
-```
-
-**Import Strategy**:
-This module imports directly from the TinyTorch package (`from tinytorch.core.*`).
-**Assumption**: Modules 01 (Tensor) and 02 (Activations) have been completed and exported to the package.
-If you see import errors, ensure you've run `tito export` after completing previous modules.
-
 ## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement Linear layers with proper weight initialization
@@ -101,6 +74,33 @@ HE_SCALE_FACTOR = 2.0  # He initialization uses sqrt(2/fan_in) for ReLU
 # Constants for dropout
 DROPOUT_MIN_PROB = 0.0  # Minimum dropout probability (no dropout)
 DROPOUT_MAX_PROB = 1.0  # Maximum dropout probability (drop everything)
+
+# %% [markdown]
+"""
+## 📋 Module Dependencies
+
+**Prerequisites**: Modules 01 (Tensor) and 02 (Activations) must be completed
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor.Tensor` (Module 01)
+- `tinytorch.core.activations.ReLU, Sigmoid` (Module 02)
+
+**Important**: This module depends on Tensor and Activations.
+Ensure previous modules are completed and exported.
+
+**Dependency Flow**:
+```
+Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers)
+     ↓                      ↓                         ↓
+  Foundation          Nonlinearity              Architecture
+```
+
+Students completing this module will have built the neural network
+layers that enable multi-layer architectures.
+"""
 
 # %% [markdown]
 """
@@ -387,7 +387,9 @@ class Linear(Layer):
 # %% [markdown]
 """
 ### 🔬 Unit Test: Linear Layer
+
 This test validates our Linear layer implementation works correctly.
+
 **What we're testing**: Weight initialization, forward pass, parameter management
 **Why it matters**: Foundation for all neural network architectures
 **Expected**: Proper shapes, Xavier scaling, parameter counting
@@ -437,14 +439,15 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🔬 Edge Case Tests: Linear Layer
+### 🧪 Edge Case Tests: Linear Layer
+
 Additional tests for edge cases and error handling.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-linear-edge-cases", "locked": true, "points": 5}
 def test_edge_cases_linear():
     """🔬 Test Linear layer edge cases."""
-    print("🔬 Edge Case Tests: Linear Layer...")
+    print("🧪 Edge Case Tests: Linear Layer...")
 
     layer = Linear(10, 5)
 
@@ -479,14 +482,15 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🔬 Parameter Collection Tests: Linear Layer
+### 🧪 Parameter Collection Tests: Linear Layer
+
 Tests to ensure Linear layer parameters can be collected for optimization.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-linear-params", "locked": true, "points": 5}
 def test_parameter_collection_linear():
     """🔬 Test Linear layer parameter collection."""
-    print("🔬 Parameter Collection Test: Linear Layer...")
+    print("🧪 Parameter Collection Test: Linear Layer...")
 
     layer = Linear(10, 5)
 
@@ -735,7 +739,9 @@ class Sequential:
 # %% [markdown]
 """
 ### 🔬 Unit Test: Dropout Layer
+
 This test validates our Dropout layer implementation works correctly.
+
 **What we're testing**: Training vs inference behavior, probability scaling, randomness
 **Why it matters**: Essential for preventing overfitting in neural networks
 **Expected**: Correct masking during training, passthrough during inference
@@ -954,7 +960,9 @@ def analyze_layer_memory():
 
         print(f"Hidden={hidden_size:4d}: {total_params:7,} params = {memory_mb:5.1f} MB")
 
-# Analysis will be run in main block
+# Run the analysis
+if __name__ == "__main__":
+    analyze_layer_memory()
 
 # %% nbgrader={"grade": false, "grade_id": "analyze-layer-performance", "solution": true}
 def analyze_layer_performance():
@@ -1008,7 +1016,9 @@ def analyze_layer_performance():
     print("🚀 Dropout adds minimal computational overhead (element-wise operations)")
     print("🚀 Larger batches amortize overhead, improving throughput efficiency")
 
-# Analysis will be run in main block
+# Run the analysis
+if __name__ == "__main__":
+    analyze_layer_performance()
 
 # %% [markdown]
 """
@@ -1042,7 +1052,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test realistic neural network construction with manual composition
-    print("🔬 Integration Test: Multi-layer Network...")
+    print("🧪 Integration Test: Multi-layer Network...")
 
     # Use ReLU imported from package at module level
     ReLU_class = ReLU
@@ -1092,73 +1102,94 @@ def test_module():
 
 # %% [markdown]
 """
-## 🤔 ML Systems Questions: Reflect on Your Learning
+## 🤔 ML Systems Reflection Questions
 
-Take a moment to reflect on what you've learned about layers and their systems implications. These questions help solidify your understanding and connect concepts to practical applications.
+Answer these to deepen your understanding of layer operations and their systems implications:
 
-### Parameter Management and Memory
+### 1. Parameter Scaling and Memory
+**Question**: Consider three different network architectures for MNIST (28x28 = 784 input features, 10 output classes):
+- Architecture A: 784 -> 128 -> 10
+- Architecture B: 784 -> 256 -> 10
+- Architecture C: 784 -> 512 -> 10
 
-**Question 1: Parameter Scaling**
-Consider three different network architectures for MNIST (28×28 = 784 input features, 10 output classes):
+**Consider**:
+- Without calculating exactly, which architecture has approximately 2x the parameters of Architecture A?
+- What does this tell you about how hidden layer size affects model capacity?
+- If a Linear(784, 256) layer uses ~800KB of memory, how does this scale?
 
-Architecture A: 784 → 128 → 10
-Architecture B: 784 → 256 → 10
-Architecture C: 784 → 512 → 10
+**Real-world context**: Parameter memory is just the beginning - activation memory during training can be 10-100x larger depending on batch size.
 
-Without calculating exactly, which architecture has approximately 2× the parameters of Architecture A? What does this tell you about how hidden layer size affects model capacity?
+---
 
-**Question 2: Memory Growth**
-If a Linear(784, 256) layer uses ~800KB of memory for parameters, and you add it to a network that already has 5MB of parameters:
-- What's the new total parameter memory?
-- If you're running on a device with 100MB of available memory, roughly how many similar-sized layers could you add before running out?
-- What happens to memory usage when you increase batch size from 32 to 128?
+### 2. Dropout Training vs Inference
+**Question**: You have a Dropout layer with p=0.5 in your network. During training, we scale surviving values by 1/(1-p) = 2.0.
 
-### Layer Composition Patterns
-
-**Question 3: Dropout Behavior**
-You have a Dropout layer with p=0.5 in your network:
-- During training, why do we scale surviving values by 1/(1-p) = 2.0?
+**Consider**:
+- Why do we scale by 2.0 during training?
 - During inference, dropout returns the input unchanged. Why don't we scale by 0.5?
-- If you see wildly different training vs test accuracy, what might dropout probability be telling you?
+- What mathematical property are we preserving with this scaling?
 
-**Question 4: Layer Ordering**
-In a typical layer block, we compose: Linear → Activation → Dropout
+**Think about**:
+- If training drops 50% of neurons and inference keeps all, outputs would differ by 2x
+- The scaling ensures expected values match between training and inference
+- This is called "inverted dropout" - scaling at train time instead of inference
 
-What happens if you change the order to: Linear → Dropout → Activation?
-- Does this affect what gets zeroed out?
-- When would each ordering make sense?
-- How does this composition pattern differ from having a "smart" Sequential container?
+---
 
-### Initialization and Training
+### 3. Xavier Initialization Trade-offs
+**Question**: We initialize weights with scale = sqrt(1/in_features). For Linear(1000, 10), how does this compare to Linear(10, 1000)?
 
-**Question 5: Xavier Initialization**
-We initialize weights with scale = sqrt(1/in_features).
-- For Linear(1000, 10), how does this compare to Linear(10, 1000)?
+**Calculate**:
+- Linear(1000, 10): scale = sqrt(1/1000) = ___________
+- Linear(10, 1000): scale = sqrt(1/10) = ___________
+
+**Trade-offs to consider**:
 - Why do we want smaller initial weights for layers with more inputs?
 - What would happen if we initialized all weights to 0? To 1?
+- How does initialization affect gradient flow in deep networks?
 
-**Question 6: Computational Bottlenecks**
-Looking at your timing analysis results:
-- Which operation dominates: matrix multiplication or bias addition?
-- How does batch size affect throughput (samples/sec)?
-- If you need to process 10,000 images quickly, is batch_size=1 or batch_size=128 better? Why?
+---
 
-### Production Deployment
+### 4. Layer Ordering Effects
+**Question**: In a typical layer block, we compose: Linear -> Activation -> Dropout. What happens if you change the order to: Linear -> Dropout -> Activation?
 
-**Question 7: Manual Composition**
-We deliberately built individual layers and composed them manually rather than using a Sequential container:
-- What did you see explicitly that a Sequential would hide?
-- How does manual composition help you understand data flow?
-- In production code, when would you want explicit composition vs containers?
+**Consider**:
+- Does this affect what gets zeroed out?
+- When would each ordering make sense?
+- How does dropout before vs after activation affect gradients?
 
-**Question 8: Memory Planning**
-You're deploying a 3-layer network (784→256→128→10) to a mobile device:
-- Parameters memory: ~235KB
-- With batch_size=1, what other memory do you need for activations?
-- If your device has 10MB free, can you increase batch size to 32? To 64?
+**Real-world implications**:
+- Most frameworks use Linear -> BatchNorm -> Activation -> Dropout
+- The order matters for training dynamics and final accuracy
+- ResNets famously debated pre-activation vs post-activation ordering
+
+---
+
+### 5. Production Deployment Memory
+**Question**: You're deploying a 3-layer network (784->256->128->10) to a mobile device with 10MB free memory.
+
+**Calculate**:
+- Parameters memory: 784*256 + 256 + 256*128 + 128 + 128*10 + 10 = ___________
+- With batch_size=1, activation memory per layer = ___________
+- Total memory needed = ___________
+
+**Real-world implications**:
+- Can you increase batch size to 32? To 64?
 - What's the trade-off between batch size and latency on mobile?
+- Why do mobile inference engines optimize for batch_size=1?
 
-**Reflection:** These questions don't have single "correct" answers - they're designed to make you think about trade-offs, scaling behavior, and practical implications. The goal is to build intuition about how layers behave in real systems!
+---
+
+### Bonus Challenge: Manual Composition Analysis
+
+**Question**: We deliberately built individual layers and composed them manually rather than using a Sequential container. What did you see explicitly that a Sequential would hide?
+
+**Consider**:
+1. Data shape transformations at each step
+2. Which operations create new tensors vs modify in-place
+3. How parameters flow through the network
+
+**Key insight**: Understanding explicit composition helps debug shape mismatches, memory issues, and gradient flow problems that containers obscure.
 """
 
 # %% [markdown]

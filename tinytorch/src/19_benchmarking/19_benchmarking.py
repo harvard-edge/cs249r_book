@@ -12,26 +12,13 @@
 #     name: python3
 # ---
 
-#| default_exp perf.benchmarking
-#| export
-
-# Constants for benchmarking defaults
-DEFAULT_WARMUP_RUNS = 5  # Default warmup runs for JIT compilation and cache warming
-DEFAULT_MEASUREMENT_RUNS = 10  # Default measurement runs for statistical significance
-
 # %% [markdown]
 """
 # Module 19: Benchmarking - TorchPerf Olympics Preparation
 
-**IMPORTANT - hasattr() Usage in This Module:**
-This module uses hasattr() throughout for duck-typing and polymorphic benchmarking.
-This is LEGITIMATE because:
-1. Benchmarking framework must work with ANY model type (PyTorch, TinyTorch, custom)
-2. Different frameworks use different method names (forward vs predict vs __call__)
-3. We need runtime introspection for maximum compatibility
-4. This is the CORRECT use of hasattr() for framework-agnostic tooling
+Welcome to Module 19! You'll build the benchmarking infrastructure that powers **TorchPerf Olympics** - the capstone competition framework.
 
-Welcome to the final implementation module! You've learned individual optimization techniques in Modules 14-18. Now you'll build the benchmarking infrastructure that powers **TorchPerf Olympics** - the capstone competition framework.
+**Note on hasattr() Usage:** This module uses hasattr() throughout for duck-typing and polymorphic benchmarking. This is legitimate because benchmarking frameworks must work with ANY model type (PyTorch, TinyTorch, custom) with different method names.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete ML framework with profiling, acceleration, quantization, and compression
@@ -44,15 +31,6 @@ Individual Optimizations (M14-18) → Benchmarking (M19) → TorchPerf Olympics 
 (techniques)                        (evaluation)         (competition)
 ```
 
-## 🏅 TorchPerf Olympics: The Capstone Framework
-
-The TorchPerf Olympics is your capstone competition! Choose your event:
-- 🏃 **Latency Sprint**: Minimize inference time (fastest model wins)
-- 🏋️ **Memory Challenge**: Minimize model size (smallest footprint wins)
-- 🎯 **Accuracy Contest**: Maximize accuracy within constraints
-- 🏋️‍♂️ **All-Around**: Best balanced performance across all metrics
-- 🚀 **Extreme Push**: Most aggressive optimization while staying viable
-
 ## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement professional benchmarking infrastructure with statistical rigor
@@ -60,19 +38,15 @@ By the end of this module, you will:
 3. Build the TorchPerf class - your standardized capstone submission framework
 4. Understand ablation studies and systematic performance evaluation
 
-🔥 Carry the torch. Optimize the model. Win the gold! 🏅
-"""
+Let's get started!
 
-# %% [markdown]
-"""
 ## 📦 Where This Code Lives in the Final Package
 
 **Learning Side:** You work in `modules/19_benchmarking/benchmarking_dev.py`
 **Building Side:** Code exports to `tinytorch.perf.benchmarking`
 
-**How to use this module (after running `tito module complete 19`):**
-
 ```python
+# Final package structure:
 from tinytorch.perf.benchmarking import Benchmark, OlympicEvent
 
 # For capstone submission:
@@ -88,9 +62,59 @@ results = benchmark.run_latency_benchmark()
 - **Integration:** Works seamlessly with optimization modules (M14-18) for complete systems evaluation
 """
 
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+#| default_exp perf.benchmarking
+#| export
+
+# Constants for benchmarking defaults
+DEFAULT_WARMUP_RUNS = 5  # Default warmup runs for JIT compilation and cache warming
+DEFAULT_MEASUREMENT_RUNS = 10  # Default measurement runs for statistical significance
+
 # %% [markdown]
 """
-## 💡 Introduction - What is Fair Benchmarking?
+## 📋 Module Dependencies
+
+**Prerequisites**: Modules 01-18 (Complete TinyTorch framework)
+
+**External Dependencies**:
+- `numpy` (for numerical operations)
+- `time`, `statistics` (for measurements)
+- `tracemalloc` (for memory profiling)
+- `matplotlib` (optional, for visualization)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor` (Tensor class)
+- `tinytorch.core.layers` (Linear layer)
+- `tinytorch.perf.profiling` (Profiler from Module 14)
+
+**Dependency Flow**:
+```
+Profiling (M14) → Benchmarking (M19)
+       ↓
+Capstone Competition Framework
+```
+
+Students completing this module will have built the final
+benchmarking infrastructure for the TorchPerf Olympics capstone.
+"""
+
+# %% [markdown]
+"""
+## 🏅 TorchPerf Olympics: The Capstone Framework
+
+The TorchPerf Olympics is your capstone competition! Choose your event:
+- **Latency Sprint**: Minimize inference time (fastest model wins)
+- **Memory Challenge**: Minimize model size (smallest footprint wins)
+- **Accuracy Contest**: Maximize accuracy within constraints
+- **All-Around**: Best balanced performance across all metrics
+- **Extreme Push**: Most aggressive optimization while staying viable
+
+Carry the torch. Optimize the model. Win the gold!
+"""
+
+# %% [markdown]
+"""
+## 💡 Introduction: What is Fair Benchmarking?
 
 Benchmarking in ML systems isn't just timing code - it's about making fair, reproducible comparisons that guide real optimization decisions. Think of it like standardized testing: everyone takes the same test under the same conditions.
 
@@ -98,7 +122,7 @@ Consider comparing three models: a base CNN, a quantized version, and a pruned v
 
 The challenge: ML models have multiple competing objectives (accuracy vs speed vs memory), measurements can be noisy, and "faster" depends on your hardware and use case.
 
-## 💡 Benchmarking as a Systems Engineering Discipline
+### Benchmarking as a Systems Engineering Discipline
 
 Professional ML benchmarking requires understanding measurement uncertainty and controlling for confounding factors:
 
@@ -121,11 +145,11 @@ This module builds infrastructure that addresses all these challenges while gene
 
 # %% [markdown]
 """
-## 📐 Mathematical Foundations - Statistics for Performance Engineering
+## 📐 Foundations: Statistics for Performance Engineering
 
 Benchmarking is applied statistics. We measure noisy processes (model inference) and need to extract reliable insights about their true performance characteristics.
 
-## Central Limit Theorem in Practice
+### Central Limit Theorem in Practice
 
 When you run a model many times, the distribution of measurements approaches normal (regardless of the underlying noise distribution). This lets us:
 - Compute confidence intervals for the true mean
@@ -138,24 +162,24 @@ Few measurements: Unreliable
 Many measurements: Statistical confidence
 ```
 
-## Multi-Objective Optimization Theory
+### Multi-Objective Optimization Theory
 
 ML systems exist on a **Pareto frontier** - you can't simultaneously maximize accuracy and minimize latency without trade-offs. Good benchmarks reveal this frontier:
 
 ```
 Accuracy
-    ↑
-    |  A ●     ← Model A: High accuracy, high latency
+    ^
+    |  A .     <- Model A: High accuracy, high latency
     |
-    |    B ●  ← Model B: Balanced trade-off
+    |    B .  <- Model B: Balanced trade-off
     |
-    |      C ●← Model C: Low accuracy, low latency
-    |__________→ Latency (lower is better)
+    |      C .<- Model C: Low accuracy, low latency
+    |__________> Latency (lower is better)
 ```
 
 The goal: Find the optimal operating point for your specific constraints.
 
-## Measurement Uncertainty and Error Propagation
+### Measurement Uncertainty and Error Propagation
 
 Every measurement has uncertainty. When combining metrics (like accuracy per joule), uncertainties compound:
 
@@ -248,21 +272,30 @@ class OlympicEvent(Enum):
 
 # %% [markdown]
 """
-## 🏗️ Implementation - Building Professional Benchmarking Infrastructure
+## 🏗️ Implementation: Building Professional Benchmarking Infrastructure
 
 We'll build a comprehensive benchmarking system that handles statistical analysis, multi-dimensional comparison, and automated reporting. Each component builds toward production-quality evaluation tools.
 
-The architecture follows a hierarchical design:
+### Benchmark Architecture Overview
+
 ```
-Profiler (Module 14) ← Base measurement tools
-       ↓
-BenchmarkResult ← Statistical container for measurements
-       ↓
-Benchmark ← Uses Profiler + adds multi-model comparison
-       ↓
-BenchmarkSuite ← Multi-metric comprehensive evaluation
-       ↓
-TinyMLPerf ← Standardized industry-style benchmarks
+Benchmark Architecture:
+┌─────────────────────────────────────────┐
+│ Profiler (Module 14)                    │
+│ • Base measurement tools                │
+├─────────────────────────────────────────┤
+│ BenchmarkResult                         │
+│ • Statistical container for measurements│
+├─────────────────────────────────────────┤
+│ Benchmark                               │
+│ • Uses Profiler + multi-model comparison│
+├─────────────────────────────────────────┤
+│ BenchmarkSuite                          │
+│ • Multi-metric comprehensive evaluation │
+├─────────────────────────────────────────┤
+│ TinyMLPerf                              │
+│ • Standardized industry-style benchmarks│
+└─────────────────────────────────────────┘
 ```
 
 **Key Architectural Decision**: The `Benchmark` class reuses `Profiler` from Module 14 for individual model measurements, then adds statistical comparison across multiple models. This demonstrates proper systems architecture - build once, reuse everywhere!
@@ -272,7 +305,7 @@ Each level adds capability while maintaining statistical rigor at the foundation
 
 # %% [markdown]
 """
-## 🏗️ BenchmarkResult - Statistical Analysis Container
+### BenchmarkResult - Statistical Analysis Container
 
 Before measuring anything, we need a robust container that stores measurements and computes statistical properties. This is the foundation of all our benchmarking.
 
@@ -379,6 +412,18 @@ class BenchmarkResult:
         return f"{self.metric_name}: {self.mean:.4f} ± {self.std:.4f} (n={self.count})"
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🔬 Unit Test: BenchmarkResult
+
+This test validates our BenchmarkResult class correctly computes statistical properties from measurements.
+
+**What we're testing**: Statistical calculations (mean, std, confidence intervals)
+**Why it matters**: Reliable statistics are the foundation of fair benchmarking
+**Expected**: Correct statistics and proper handling of edge cases
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-benchmark-result", "locked": true, "points": 10}
 def test_unit_benchmark_result():
     """🔬 Test BenchmarkResult statistical calculations."""
     print("🔬 Unit Test: BenchmarkResult...")
@@ -497,6 +542,18 @@ def precise_timer():
         timer.elapsed = time.perf_counter() - timer.start_time
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🔬 Unit Test: Precise Timer
+
+This test validates our timing context manager provides accurate measurements.
+
+**What we're testing**: High-precision timing with perf_counter
+**Why it matters**: Accurate timing is essential for reliable benchmarks
+**Expected**: Measurements close to actual sleep durations
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-precise-timer", "locked": true, "points": 5}
 def test_unit_precise_timer():
     """🔬 Test precise_timer context manager."""
     print("🔬 Unit Test: precise_timer...")
@@ -525,7 +582,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Benchmark Class - Core Measurement Engine
+### Benchmark Class - Core Measurement Engine
 
 The Benchmark class implements the core measurement logic for different metrics. It handles the complex orchestration of multiple models, datasets, and measurement protocols.
 
@@ -764,6 +821,18 @@ class Benchmark:
         return comparison_data
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🔬 Unit Test: Benchmark
+
+This test validates our Benchmark class measures latency, accuracy, and memory correctly.
+
+**What we're testing**: Multi-model benchmarking with different metrics
+**Why it matters**: Reliable comparisons guide optimization decisions
+**Expected**: Consistent results across multiple benchmark types
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-benchmark", "locked": true, "points": 15}
 def test_unit_benchmark():
     """🔬 Test Benchmark class functionality."""
     print("🔬 Unit Test: Benchmark...")
@@ -813,7 +882,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ BenchmarkSuite - Comprehensive Multi-Metric Evaluation
+### BenchmarkSuite - Comprehensive Multi-Metric Evaluation
 
 The BenchmarkSuite orchestrates multiple benchmark types and generates comprehensive reports. This is where individual measurements become actionable engineering insights.
 
@@ -1192,6 +1261,18 @@ class BenchmarkSuite:
         return report_text
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🔬 Unit Test: BenchmarkSuite
+
+This test validates our BenchmarkSuite runs comprehensive multi-metric evaluation.
+
+**What we're testing**: Full benchmark suite with report generation
+**Why it matters**: Comprehensive evaluation enables informed optimization decisions
+**Expected**: Complete results across all metrics with valid reports
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-benchmark-suite", "locked": true, "points": 15}
 def test_unit_benchmark_suite():
     """🔬 Test BenchmarkSuite comprehensive functionality."""
     print("🔬 Unit Test: BenchmarkSuite...")
@@ -1244,7 +1325,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ TinyMLPerf - Standardized Industry Benchmarking
+### TinyMLPerf - Standardized Industry Benchmarking
 
 TinyMLPerf provides standardized benchmarks that enable fair comparison across different systems, similar to how MLPerf works for larger models. This is crucial for reproducible research and industry adoption.
 
@@ -1623,6 +1704,18 @@ class TinyMLPerf:
         return summary_text
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🔬 Unit Test: TinyMLPerf
+
+This test validates our TinyMLPerf class provides standardized benchmarking.
+
+**What we're testing**: Industry-standard benchmark protocols and compliance reporting
+**Why it matters**: Standardized benchmarks enable fair cross-system comparison
+**Expected**: Proper metrics, compliance checking, and report generation
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-tinymlperf", "locked": true, "points": 10}
 def test_unit_tinymlperf():
     """🔬 Test TinyMLPerf standardized benchmarking."""
     print("🔬 Unit Test: TinyMLPerf...")
@@ -1679,13 +1772,13 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Integration - Building Complete Benchmark Workflows
+## 🔧 Integration: Building Complete Benchmark Workflows
 
 Now we'll integrate all our benchmarking components into complete workflows that demonstrate professional ML systems evaluation. This integration shows how to combine statistical rigor with practical insights.
 
 The integration layer connects individual measurements into actionable engineering insights. This is where benchmarking becomes a decision-making tool rather than just data collection.
 
-## 🔧 Workflow Architecture
+### Workflow Architecture
 
 ```
 Integration Workflow Pipeline:
@@ -1706,7 +1799,7 @@ This workflow helps answer questions like:
 
 # %% [markdown]
 """
-## 🏗️ Optimization Comparison Engine
+### Optimization Comparison Engine
 
 Before implementing the comparison function, let's understand what makes optimization comparison challenging and valuable.
 
@@ -1941,6 +2034,18 @@ def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any]
     return comparison_results
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🔬 Unit Test: Optimization Comparison
+
+This test validates our optimization comparison function generates useful recommendations.
+
+**What we're testing**: Multi-model comparison with recommendation generation
+**Why it matters**: Guides engineers to choose the right optimization for their use case
+**Expected**: Valid comparisons and actionable recommendations
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-optimization-comparison", "locked": true, "points": 10}
 def test_unit_optimization_comparison():
     """🔬 Test optimization comparison functionality."""
     print("🔬 Unit Test: analyze_optimization_techniques...")
@@ -1990,9 +2095,9 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Systems Analysis - Benchmark Variance and Optimization Trade-offs
+## 📊 Systems Analysis: Benchmark Variance and Optimization Trade-offs
 
-Understanding measurement variance and optimization trade-offs through systematic analysis.
+Let's understand the key systems concept of measurement variance and optimization trade-offs.
 """
 
 # %%
@@ -2296,35 +2401,37 @@ def test_module():
 
 # %% [markdown]
 """
-## 🤔 ML Systems Thinking: Benchmarking and Performance Engineering
+## 🤔 ML Systems Reflection Questions
 
-### Question 1: Statistical Confidence in Measurements
+Answer these to deepen your understanding of benchmarking and performance engineering:
+
+### 1. Statistical Confidence in Measurements
 You implemented BenchmarkResult with confidence intervals for measurements.
 If you run 20 trials and get mean latency 5.2ms with std dev 0.8ms:
 - What's the 95% confidence interval for the true mean? [_____ ms, _____ ms]
 - How many more trials would you need to halve the confidence interval width? _____ total trials
 
-### Question 2: Measurement Overhead Analysis
+### 2. Measurement Overhead Analysis
 Your precise_timer context manager has microsecond precision, but models run for milliseconds.
 For a model that takes 1ms to execute:
 - If timer overhead is 10μs, what's the relative error? _____%
 - At what model latency does timer overhead become negligible (<1%)? _____ ms
 
-### Question 3: Benchmark Configuration Trade-offs
+### 3. Benchmark Configuration Trade-offs
 Your optimize_benchmark_configuration() function tested different warmup/measurement combinations.
 For a CI/CD pipeline that runs 100 benchmarks per day:
 - Fast config (3s each): _____ minutes total daily
 - Accurate config (15s each): _____ minutes total daily
 - What's the key trade-off you're making? [accuracy/precision/development velocity]
 
-### Question 4: TinyMLPerf Compliance Metrics
+### 4. TinyMLPerf Compliance Metrics
 You implemented TinyMLPerf-style standardized benchmarks with target thresholds.
 If a model achieves 89% accuracy (target: 90%) and 120ms latency (target: <100ms):
 - Is it compliant? [Yes/No] _____
 - Which constraint is more critical for edge deployment? [accuracy/latency]
 - How would you prioritize optimization? [accuracy first/latency first/balanced]
 
-### Question 5: Optimization Comparison Analysis
+### 5. Optimization Comparison Analysis
 Your analyze_optimization_techniques() generates recommendations for different use cases.
 Given three optimized models:
 - Quantized: 0.8× memory, 2× speed, 0.95× accuracy

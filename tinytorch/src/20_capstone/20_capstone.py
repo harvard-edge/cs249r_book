@@ -31,14 +31,14 @@ Modules 01-13 → Optimization Suite (14-18) → Benchmarking (19) → Submissio
 
 ## 🎯 Learning Objectives
 By the end of this capstone, you will:
-1. **Use** Module 19's benchmarking tools to measure model performance comprehensively
-2. **Apply** optimization techniques from Modules 14-18 to improve baseline models
-3. **Generate** standardized JSON submissions following industry best practices
-4. **Validate** submissions against a schema for reproducibility
-5. **Compare** baseline vs. optimized models with quantitative metrics
-6. **Share** your results with the TinyTorch community in a professional format
+1. Use Module 19's benchmarking tools to measure model performance comprehensively
+2. Apply optimization techniques from Modules 14-18 to improve baseline models
+3. Generate standardized JSON submissions following industry best practices
+4. Validate submissions against a schema for reproducibility
+5. Compare baseline vs. optimized models with quantitative metrics
+6. Share your results with the TinyTorch community in a professional format
 
-**Key Insight**: This module teaches you the complete workflow from model to measurable results - the foundation of ML systems engineering. In production, reproducible benchmarking is what separates research experiments from deployable systems.
+Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
@@ -46,7 +46,7 @@ By the end of this capstone, you will:
 **Building Side:** Code exports to `tinytorch.olympics`
 
 ```python
-# How to use this module:
+# Final package structure:
 from tinytorch.olympics import generate_submission, BenchmarkReport
 
 # Benchmark your model
@@ -68,6 +68,35 @@ submission.save("my_submission.json")
 # %% nbgrader={"grade": false, "grade_id": "exports", "solution": true}
 #| default_exp olympics
 #| export
+
+# %% [markdown]
+"""
+## 📋 Module Dependencies
+
+**Prerequisites**: Modules 01-19 must be complete
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+- `time` (for latency measurements)
+- `json` (for submission serialization)
+- `pathlib` (for file path handling)
+- `platform` (for system information)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor` (Tensor class from Module 01)
+- `tinytorch.core.layers` (Linear layer from Module 03)
+- `tinytorch.core.activations` (ReLU from Module 02)
+- `tinytorch.core.losses` (CrossEntropyLoss from Module 04)
+- Optimization modules 14-18 (optional, for advanced workflows)
+
+**Dependency Flow**:
+```
+Modules 01-13 → Modules 14-18 → Module 19 → Module 20 (Capstone)
+(Framework)     (Optimization)   (Benchmark)  (Submission)
+```
+
+Students completing this module will demonstrate their complete framework's capabilities through reproducible benchmarking and professional submission generation.
+"""
 
 # %% [markdown]
 """
@@ -330,7 +359,7 @@ Now let's build it!
 
 # %% [markdown]
 """
-## 🏗️ Building a Simple Benchmark Model
+## 🏗️ Implementation: Building a Simple Benchmark Model
 
 For this capstone, we'll use a simple MLP model. This keeps the focus on the benchmarking workflow rather than model complexity.
 
@@ -467,7 +496,7 @@ This small model is perfect for demonstrating optimization impact without long b
 
 # %% [markdown]
 """
-## 🏗️ Benchmark Report Class
+## 🏗️ Implementation: Benchmark Report Class
 
 The BenchmarkReport class encapsulates all benchmark results and provides methods for comprehensive measurement and professional reporting.
 
@@ -684,7 +713,7 @@ This design decision makes our submissions JSON-compatible without custom encode
 
 # %% [markdown]
 """
-## 🏗️ Submission Generation
+## 🏗️ Implementation: Submission Generation
 
 The core function that generates a standardized JSON submission from benchmark results.
 
@@ -908,7 +937,7 @@ In production ML, schema validation is what makes benchmarks trustworthy and com
 
 # %% [markdown]
 """
-## 🔧 Complete Example Workflow
+## 🔧 Integration: Complete Example Workflow
 
 This section demonstrates the complete workflow from model to submission.
 Students can modify this to benchmark their own models!
@@ -1014,7 +1043,7 @@ Production ML Workflow:
 
 # %% [markdown]
 """
-## 🔧 Advanced Workflow - Using TinyTorch Optimization APIs
+## 🔧 Integration: Advanced Optimization Workflow
 
 This section demonstrates using the complete optimization pipeline from Modules 14-19:
 - Module 14 (Profiling): Measure baseline performance and identify bottlenecks
@@ -1209,7 +1238,7 @@ This tells other engineers EXACTLY what you did, so they can reproduce or build 
 
 # %% [markdown]
 """
-## 🧪 Module Testing
+## 🧪 Unit Tests
 
 Individual unit tests for each component, following TinyTorch testing patterns.
 
@@ -1222,7 +1251,18 @@ Individual unit tests for each component, following TinyTorch testing patterns.
 Each test validates one specific aspect and provides clear feedback.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "test-simple-mlp", "solution": true}
+# %% [markdown]
+"""
+### 🔬 Unit Test: SimpleMLP
+
+This test validates the SimpleMLP model works correctly for benchmarking demonstrations.
+
+**What we're testing**: Model creation, parameter counting, and forward pass
+**Why it matters**: The model must work correctly before we can benchmark it
+**Expected**: Correct output shapes and no NaN values
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-simple-mlp", "locked": true, "points": 10}
 def test_unit_simple_mlp():
     """🔬 Test SimpleMLP model creation and forward pass."""
     print("🔬 Unit Test: SimpleMLP...")
@@ -1253,7 +1293,18 @@ def test_unit_simple_mlp():
 if __name__ == "__main__":
     test_unit_simple_mlp()
 
-# %% nbgrader={"grade": false, "grade_id": "test-benchmark-report", "solution": true}
+# %% [markdown]
+"""
+### 🔬 Unit Test: BenchmarkReport
+
+This test validates the BenchmarkReport class captures all required metrics.
+
+**What we're testing**: Report initialization, metric collection, and value ranges
+**Why it matters**: Benchmarks must be comprehensive and accurate for reproducibility
+**Expected**: All required metrics present with valid types and ranges
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-benchmark-report", "locked": true, "points": 15}
 def test_unit_benchmark_report():
     """🔬 Test BenchmarkReport class functionality."""
     print("🔬 Unit Test: BenchmarkReport...")
@@ -1300,7 +1351,18 @@ def test_unit_benchmark_report():
 if __name__ == "__main__":
     test_unit_benchmark_report()
 
-# %% nbgrader={"grade": false, "grade_id": "test-submission-generation", "solution": true}
+# %% [markdown]
+"""
+### 🔬 Unit Test: Submission Generation
+
+This test validates the submission generation creates proper JSON structure.
+
+**What we're testing**: Submission structure, required fields, and optional fields
+**Why it matters**: Submissions must be schema-compliant for community sharing
+**Expected**: Valid JSON structure with all required fields
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-submission-generation", "locked": true, "points": 15}
 def test_unit_submission_generation():
     """🔬 Test generate_submission() function."""
     print("🔬 Unit Test: Submission Generation...")
@@ -1342,7 +1404,18 @@ def test_unit_submission_generation():
 if __name__ == "__main__":
     test_unit_submission_generation()
 
-# %% nbgrader={"grade": false, "grade_id": "test-submission-schema", "solution": true}
+# %% [markdown]
+"""
+### 🔬 Unit Test: Schema Validation
+
+This test validates submissions conform to the required schema.
+
+**What we're testing**: Required fields, type safety, value constraints
+**Why it matters**: Schema validation enables automated aggregation and comparison
+**Expected**: Valid submissions pass, invalid submissions fail with clear errors
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-submission-schema", "locked": true, "points": 10}
 def validate_submission_schema(submission: Dict[str, Any]) -> bool:
     """
     Validate submission JSON conforms to required schema.
@@ -1432,7 +1505,18 @@ def test_unit_submission_schema():
 if __name__ == "__main__":
     test_unit_submission_schema()
 
-# %% nbgrader={"grade": false, "grade_id": "test-submission-with-optimization", "solution": true}
+# %% [markdown]
+"""
+### 🔬 Unit Test: Submission with Optimization
+
+This test validates submissions with both baseline and optimized results.
+
+**What we're testing**: Optimized section, techniques list, improvements calculation
+**Why it matters**: Comparing baseline vs optimized is the core value of benchmarking
+**Expected**: Proper improvements calculation with speedup, compression, accuracy delta
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-submission-with-optimization", "locked": true, "points": 10}
 def test_unit_submission_with_optimization():
     """🔬 Test submission with baseline + optimized comparison."""
     print("🔬 Unit Test: Submission with Optimization...")
@@ -1486,7 +1570,18 @@ def test_unit_submission_with_optimization():
 if __name__ == "__main__":
     test_unit_submission_with_optimization()
 
-# %% nbgrader={"grade": false, "grade_id": "test-improvements-calculation", "solution": true}
+# %% [markdown]
+"""
+### 🔬 Unit Test: Improvements Calculation
+
+This test validates the mathematical correctness of improvement metrics.
+
+**What we're testing**: Speedup, compression ratio, accuracy delta formulas
+**Why it matters**: Incorrect calculations would invalidate all comparisons
+**Expected**: Exact match with manual calculations
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-improvements-calculation", "locked": true, "points": 10}
 def test_unit_improvements_calculation():
     """🔬 Test speedup/compression/accuracy calculations are correct."""
     print("🔬 Unit Test: Improvements Calculation...")
@@ -1538,7 +1633,18 @@ def test_unit_improvements_calculation():
 if __name__ == "__main__":
     test_unit_improvements_calculation()
 
-# %% nbgrader={"grade": false, "grade_id": "test-json-serialization", "solution": true}
+# %% [markdown]
+"""
+### 🔬 Unit Test: JSON Serialization
+
+This test validates save_submission() creates valid, round-trip compatible JSON.
+
+**What we're testing**: File creation, JSON validity, round-trip preservation
+**Why it matters**: Submissions must be loadable and shareable
+**Expected**: Valid JSON that loads with identical structure
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-json-serialization", "locked": true, "points": 10}
 def test_unit_json_serialization():
     """🔬 Test save_submission() creates valid JSON files."""
     print("🔬 Unit Test: JSON Serialization...")
@@ -1588,17 +1694,29 @@ def test_unit_json_serialization():
 if __name__ == "__main__":
     test_unit_json_serialization()
 
-# %% nbgrader={"grade": false, "grade_id": "test-module", "solution": true}
+# %% [markdown]
+"""
+## 🧪 Module Integration Test
+
+Final validation that everything works together correctly before module completion.
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "module-integration", "locked": true, "points": 20}
 def test_module():
-    """
-    🧪 Test Module 20: Capstone submission infrastructure.
+    """🧪 Module Test: Complete Integration
 
-    Runs all unit tests to validate complete functionality.
-    """
-    print("\n" + "="*70)
-    print("MODULE 20: CAPSTONE - UNIT TESTS")
-    print("="*70)
+    Comprehensive test of entire module functionality.
 
+    This final test runs before module summary to ensure:
+    - All unit tests pass
+    - Functions work together correctly
+    - Module is ready for integration with TinyTorch
+    """
+    print("🧪 RUNNING MODULE INTEGRATION TEST")
+    print("=" * 50)
+
+    # Run all unit tests
+    print("Running unit tests...")
     test_unit_simple_mlp()
     test_unit_benchmark_report()
     test_unit_submission_generation()
@@ -1607,18 +1725,36 @@ def test_module():
     test_unit_improvements_calculation()
     test_unit_json_serialization()
 
-    print("\n" + "="*70)
-    print("🎉 ALL TESTS PASSED!")
-    print("="*70)
-    print("\nModule 20 validation complete!")
+    print("\nRunning integration scenarios...")
+
+    # Test complete workflow
+    print("🧪 Integration Test: Complete Workflow...")
+    np.random.seed(42)
+    model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
+    X_test = Tensor(np.random.randn(50, 10))
+    y_test = np.random.randint(0, 3, 50)
+
+    report = BenchmarkReport(model_name="integration_test")
+    report.benchmark_model(model, X_test, y_test, num_runs=10)
+
+    submission = generate_submission(report, student_name="Integration Test")
+    assert validate_submission_schema(submission), "Submission should pass validation"
+
+    print("✅ Complete workflow works!")
+
+    print("\n" + "=" * 50)
+    print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 20")
 
+# Run comprehensive module test
 if __name__ == "__main__":
-    print("✅ Test module defined")
+    test_module()
 
 # %% [markdown]
 """
-## 🤔 ML Systems Thinking
+## 🤔 ML Systems Reflection Questions
+
+Answer these to deepen your understanding of benchmarking, reproducibility, and ML systems integration:
 
 ### Reflecting on the Complete ML Systems Journey
 
@@ -1954,13 +2090,6 @@ Congratulations! You've gone from implementing basic tensors to understanding en
 
 # %% [markdown]
 """
-## 🔧 Main Execution
-
-When run as a script, this demonstrates the complete workflow.
-"""
-
-# %% [markdown]
-"""
 ## ⭐ Aha Moment: You Built a Complete ML System
 
 **What you built:** A professional benchmarking and submission system for your TinyTorch models.
@@ -1969,7 +2098,7 @@ When run as a script, this demonstrates the complete workflow.
 together everything: models, training, optimization, profiling, and benchmarking. The
 submission format you created is how real ML competitions and production deployments work.
 
-Congratulations—you've built a deep learning framework from scratch!
+Congratulations - you've built a deep learning framework from scratch!
 """
 
 # %%
@@ -1978,24 +2107,24 @@ def demo_capstone():
     print("🎯 AHA MOMENT: You Built a Complete ML System")
     print("=" * 45)
 
-    print("📚 Your Tiny🔥Torch Journey:")
+    print("\n📚 Your TinyTorch Journey:")
     print()
     print("  Modules 01-08: Foundation")
-    print("    Tensor → Activations → Layers → Losses")
-    print("    → Autograd → Optimizers → Training → DataLoader")
+    print("    Tensor -> Activations -> Layers -> Losses")
+    print("    -> Autograd -> Optimizers -> Training -> DataLoader")
     print()
     print("  Modules 09-13: Neural Architectures")
-    print("    Conv2d → Tokenization → Embeddings")
-    print("    → Attention → Transformers")
+    print("    Conv2d -> Tokenization -> Embeddings")
+    print("    -> Attention -> Transformers")
     print()
     print("  Modules 14-19: Production Optimization")
-    print("    Profiling → Quantization → Compression")
-    print("    → KV Caching → Acceleration → Benchmarking")
+    print("    Profiling -> Quantization -> Compression")
+    print("    -> KV Caching -> Acceleration -> Benchmarking")
     print()
     print("  Module 20: Capstone")
     print("    Complete benchmarking and submission system")
-    print()
-    print("✨ From np.array to production ML—congratulations!")
+
+    print("\n✨ From np.array to production ML - congratulations!")
 
 # %%
 if __name__ == "__main__":
@@ -2010,76 +2139,39 @@ if __name__ == "__main__":
 Congratulations! You've completed the TinyTorch capstone by building a professional benchmarking and submission system!
 
 ### Key Accomplishments
+- **Built a complete BenchmarkReport class** with comprehensive performance measurement (accuracy, latency, throughput, memory)
+- **Implemented submission generation** with standardized JSON format and schema validation
+- **Created comparison infrastructure** for automatic calculation of speedup, compression, and accuracy delta
+- **Demonstrated complete workflows** from baseline to optimized models with reproducible results
+- **All tests pass** (validated by `test_module()`)
 
-**What You Built:**
-- ✅ **BenchmarkReport class** - Comprehensive performance measurement (accuracy, latency, throughput, memory)
-- ✅ **Submission generation** - Standardized JSON format with schema validation
-- ✅ **Comparison infrastructure** - Automatic calculation of speedup, compression, accuracy delta
-- ✅ **Complete workflows** - From baseline to optimized models with reproducible results
-
-**What You Learned:**
-- 📊 **Benchmarking science** - Repeatability, comparability, completeness principles
-- 📈 **Metrics that matter** - Latency vs throughput, mean vs variance, accuracy vs efficiency
-- 🔍 **Reproducibility** - System context, schema validation, standardized reporting
-- 🚀 **Production patterns** - How real ML systems measure and compare model performance
-
-**Technical Skills Gained:**
-- Measuring inference latency with statistical rigor (mean ± std over multiple runs)
-- Calculating model memory footprint (parameters × bytes per parameter)
-- Generating schema-compliant JSON for automated validation
-- Comparing baseline vs optimized models quantitatively
+### Systems Insights Discovered
+- **Benchmarking science**: Repeatability, comparability, and completeness principles
+- **Metrics that matter**: Latency vs throughput, mean vs variance, accuracy vs efficiency trade-offs
+- **Reproducibility requirements**: System context, schema validation, and standardized reporting
+- **Production patterns**: How real ML systems measure and compare model performance
 
 ### The Complete TinyTorch Journey
 
 ```
-Module 01: Tensor          → Built foundation
-Modules 02-13: Framework   → Implemented ML components
-Modules 14-18: Optimization → Learned performance techniques
-Module 19: Benchmarking    → Measured performance
-Module 20: Submission      → Proved it works! ✨
+Module 01: Tensor          -> Built foundation
+Modules 02-13: Framework   -> Implemented ML components
+Modules 14-18: Optimization -> Learned performance techniques
+Module 19: Benchmarking    -> Measured performance
+Module 20: Submission      -> Proved it works!
 ```
 
-### Real-World Impact
-
-The skills you practiced in this capstone are used daily in production ML:
-
-**Research Labs:**
-- Publishing papers with reproducible benchmarks
-- Comparing architectures on standardized leaderboards
-- Validating claims with measurable improvements
-
-**ML Engineering Teams:**
-- A/B testing model versions before deployment
-- Tracking latency/accuracy trade-offs across experiments
-- Documenting optimization wins for stakeholders
-
-**MLOps Platforms:**
-- Automated model evaluation pipelines
-- Performance regression detection
-- Multi-metric decision making (speed vs accuracy vs cost)
-
-### Next Steps
-
-1. **Benchmark milestone models** - Apply this workflow to your MNIST CNN, XOR network, etc.
-2. **Apply optimizations** - Use Modules 14-18 techniques and measure their impact
-3. **Share your results** - Submit your JSON to the TinyTorch community
-4. **Compare with others** - See how your optimizations stack up
-5. **Build production systems** - Use these patterns in real ML projects
-
-### Final Reflection
+### Ready for Next Steps
 
 You started Module 01 with a simple Tensor class. Now you have:
-- ✅ A complete ML framework
-- ✅ Advanced optimization techniques
-- ✅ Professional benchmarking infrastructure
-- ✅ Reproducible, shareable results
+- A complete ML framework
+- Advanced optimization techniques
+- Professional benchmarking infrastructure
+- Reproducible, shareable results
 
-**You didn't just learn ML systems - you BUILT one from scratch.** 🎉
+**You didn't just learn ML systems - you BUILT one from scratch.**
 
-Export your capstone module:
-```bash
-tito module complete 20
-```
+Export with: `tito module complete 20`
 
-Then share your submission with the community and celebrate your achievement! 🚀
+**Congratulations on completing TinyTorch!**
 """

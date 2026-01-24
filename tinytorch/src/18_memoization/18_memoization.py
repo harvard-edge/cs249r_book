@@ -56,7 +56,7 @@ from tinytorch.perf.memoization import KVCache, enable_kv_cache
 - **Integration:** Works seamlessly with transformers for complete inference optimization
 """
 
-# %%
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
 #| default_exp perf.memoization
 #| export
 
@@ -73,10 +73,49 @@ _MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
-## 💡 Motivation: Why Memoization Matters for Transformers
+## 📋 Module Dependencies
 
-Before we learn KV caching, let's profile transformer generation to understand
-the problem we're solving. We'll see O(n²) growth in latency as we generate text.
+**Prerequisites**: Modules 01-17 (Tensor, Autograd, Transformers, Profiling, Acceleration)
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+- `time` (for performance measurement)
+- `typing` (for type hints)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor` (Tensor class from Module 01)
+
+**Dependency Flow**:
+```
+Module 01 (Tensor) → Module 12 (Attention) → Module 13 (Transformers) → Module 18 (Memoization)
+     ↓                     ↓                        ↓                         ↓
+  Foundation          Attention Ops           Full Transformer        Cache Optimization
+```
+
+Students completing this module will have built efficient caching
+that makes production LLM serving economically viable.
+"""
+
+# %% [markdown]
+"""
+## 💡 Introduction: Why Memoization Matters for Transformers
+
+Before we learn KV caching, let's profile transformer generation to understand the problem we're solving. We'll see O(n²) growth in latency as we generate text.
+
+In machine learning systems, memoization is a fundamental optimization pattern: cache expensive computations so they don't need to be repeated. For transformers, this means caching the key-value pairs that attention computes, since they never change for already-processed tokens.
+
+```
+Memoization Pattern:
+┌─────────────────────────────────────────────────────────────┐
+│  Without Memoization (Naive):                               │
+│  f(x) called 100 times → 100 computations                  │
+│                                                             │
+│  With Memoization (Cached):                                │
+│  f(x) called 100 times → 1 computation + 99 cache lookups  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key Insight**: For transformers, K and V matrices for previous tokens NEVER change, yet naive generation recomputes them every step. This is the inefficiency we'll eliminate.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "motivation-profile", "locked": false}
@@ -161,7 +200,7 @@ def profile_naive_generation():
 
 # %% [markdown]
 """
-## 💡 Understanding the Autoregressive Generation Problem
+## 📐 Foundations: Understanding the Autoregressive Generation Problem
 
 ### The Core Inefficiency
 
@@ -213,7 +252,7 @@ This inefficiency makes production LLM serving economically impossible without o
 
 # %% [markdown]
 """
-## 📐 Part 2: The Key-Value Caching Insight
+## 📐 Foundations: The Key-Value Caching Insight
 
 ### Mathematical Foundation
 
@@ -281,7 +320,7 @@ Compute savings: 50x reduction in K,V computations
 
 # %% [markdown]
 """
-## 🏗️ Part 3: KVCache Class Implementation
+## 🏗️ Implementation: KVCache Class
 
 ### Core Requirements
 
@@ -626,11 +665,13 @@ class KVCache:
 
 # %% [markdown]
 """
-### 🧪 Unit Test: KVCache Implementation
+### 🔬 Unit Test: KVCache Implementation
 
-Let's test that our cache correctly stores and retrieves key-value pairs across multiple layers and sequence positions.
+This test validates that our cache correctly stores and retrieves key-value pairs across multiple layers and sequence positions.
 
-**This is a unit test** - it tests the KVCache class in isolation with simulated attention keys and values.
+**What we're testing**: KVCache initialization, update, get, and reset operations
+**Why it matters**: Cache must work correctly for generation to produce coherent output
+**Expected**: Cache stores and retrieves values correctly, tracks sequence position
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-kvcache", "locked": true, "points": 10}
@@ -710,7 +751,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Cache-Aware Generation
+## 🏗️ Implementation: Cache-Aware Generation
 
 ### Integration Strategy
 
@@ -750,7 +791,7 @@ for each new token:
 
 # %% [markdown]
 """
-## 🏗️ Non-Invasive Integration with Existing Models
+## 🔧 Integration: Non-Invasive Model Enhancement
 
 ### The Challenge
 
@@ -1168,11 +1209,13 @@ def disable_kv_cache(model):
 
 # %% [markdown]
 """
-### 🧪 Unit Test: Non-Invasive Cache Integration
+### 🔬 Unit Test: Non-Invasive Cache Integration
 
-Let's verify that `enable_kv_cache()` works without breaking the model!
+This test validates that `enable_kv_cache()` works without breaking the model.
 
-**This is an integration test** - it tests Module 18 enhancing Modules 12-13 without modification.
+**What we're testing**: Non-invasive cache integration with transformer models
+**Why it matters**: Must add caching without modifying existing modules (forward-only learning)
+**Expected**: Cache enables/disables cleanly, model forward pass still works
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-noninvasive", "locked": true, "points": 10}
@@ -1234,9 +1277,9 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Systems Analysis - KV Cache Performance
+## 📊 Systems Analysis: KV Cache Performance
 
-Now let's analyze the performance characteristics and trade-offs of KV caching.
+Let's analyze the performance characteristics and trade-offs of KV caching. Understanding these trade-offs is essential for making informed decisions about when and how to use caching in production systems.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "analyze-memory", "locked": false}
@@ -1370,11 +1413,10 @@ def analyze_kvcache_speedup():
     print("   • With caching: 100-token response takes ~0.1 seconds")
     print("   • This optimization makes conversational AI possible!")
 
-# Run analysis functions when module is executed directly
-# NOTE: Commented out to run tests. These functions should be called separately.
-# if __name__ == "__main__":
-#     analyze_kvcache_memory()
-#     analyze_kvcache_speedup()
+# Run analysis when developing this module
+if __name__ == "__main__":
+    analyze_kvcache_memory()
+    analyze_kvcache_speedup()
 
 
 # %% [markdown]
@@ -1451,9 +1493,9 @@ def test_module():
 
     print("=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
-    print("Run: tito module complete 17")
+    print("Run: tito module complete 18_memoization")
 
-# %%
+# Run comprehensive module test
 if __name__ == "__main__":
     test_module()
 
@@ -1624,75 +1666,8 @@ This optimization is THE technique that transformed language models from researc
 
 ### Ready for Next Steps
 Your KV caching implementation demonstrates the principle: "spend memory to save time"!
-Export with: `tito module complete 18`
 
 **Next**: Module 19 (Benchmarking) will teach you how to measure and compare these optimizations quantitatively!
 
-### What You Just Built Powers
-- **ChatGPT, Claude, GPT-4**: All production LLMs use KV caching
-- **Real-time chat**: Instant response generation
-- **Streaming output**: Efficient token-by-token generation
-- **Cost-effective inference**: 10× speedup = 10× more users per GPU
-
-The technique you implemented is mathematically identical to the caching in production language models - you've built a core optimization that enables modern AI!
-"""
-
-
-# %% [markdown]
-"""
-## 🎓 Module 18 Complete!
-
-You've implemented KV caching - the critical optimization that makes production language models economically viable!
-
-### What You Built
-
-✅ **KVCache Class**: Efficient memory management for key-value pairs across layers
-✅ **O(1) Updates**: Fast cache updates without data copying
-✅ **Memory Tracking**: Understanding cache size and memory trade-offs
-✅ **Non-Invasive Integration**: `enable_kv_cache()` adds optimization WITHOUT breaking modules
-✅ **Production Patterns**: Integration strategy for real transformer models
-
-### Key Systems Engineering Lesson
-
-**Module 18 doesn't modify Modules 12-13 - it ENHANCES them!**
-
-This teaches the critical principle: **Add capabilities forward, never break backward.**
-- Old code keeps working (Module 12 unchanged)
-- New code adds optimization (Module 18 layers on top)
-- Clean separation of concerns (caching is separate from attention logic)
-
-### Performance Impact
-
-```
-Without Cache: O(n²) complexity → slow, expensive, impractical
-With Cache:    O(n) complexity  → fast, cheap, production-ready
-
-Real Impact: 10-15x speedup for typical generation!
-```
-
-### What's Next
-
-**Module 16 (Quantization)**: Now that you've optimized compute through caching, learn how to optimize memory through reduced precision arithmetic.
-
-### Try It Yourself
-
-Run the chatbot milestone with and without caching:
-
-```bash
-# Without cache (slow - baseline)
-python milestones/05_2017_transformer/vaswani_chatgpt.py
-
-# With cache (fast - 10-15x speedup!)
-python milestones/05_2017_transformer/vaswani_chatgpt.py --use-cache
-```
-
-Watch the tokens/sec metric jump from ~40 to ~500! 🚀
-
----
-
-**Congratulations! You've completed Module 18: KV Caching (Memoization)!**
-
-You now understand the optimization that makes ChatGPT, Claude, and all production LLMs possible. This is THE technique that transformed language models from research toys into products used by millions of people every day.
-
-**From Theory to Practice**: You've gone from O(n²) naive generation to O(n) optimized generation. This is real ML engineering!
+Export with: `tito module complete 18_memoization`
 """

@@ -309,7 +309,9 @@ class Optimizer:
 # %% [markdown]
 """
 ### 🔬 Unit Test: Base Optimizer
+
 This test validates our base Optimizer class works correctly.
+
 **What we're testing**: Parameter validation and zero_grad functionality
 **Why it matters**: Foundation for all specific optimizer implementations
 **Expected**: Proper parameter storage and gradient clearing
@@ -587,7 +589,9 @@ class SGD(Optimizer):
 # %% [markdown]
 """
 ### 🔬 Unit Test: SGD Optimizer
+
 This test validates our SGD implementation works correctly.
+
 **What we're testing**: SGD updates with and without momentum
 **Why it matters**: Core optimization algorithm used in neural network training
 **Expected**: Correct parameter updates following SGD formulas
@@ -831,7 +835,9 @@ class Adam(Optimizer):
 # %% [markdown]
 """
 ### 🔬 Unit Test: Adam Optimizer
+
 This test validates our Adam implementation works correctly.
+
 **What we're testing**: Adam updates with adaptive learning rates and bias correction
 **Why it matters**: Most popular optimizer for modern neural networks
 **Expected**: Correct parameter updates following Adam formulas
@@ -1078,7 +1084,9 @@ class AdamW(Optimizer):
 # %% [markdown]
 """
 ### 🔬 Unit Test: AdamW Optimizer
+
 This test validates our AdamW implementation with decoupled weight decay.
+
 **What we're testing**: AdamW updates with proper weight decay decoupling
 **Why it matters**: State-of-the-art optimizer for transformer models
 **Expected**: Correct separation of gradient updates and weight decay
@@ -1348,7 +1356,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test realistic neural network optimization scenario
-    print("🔬 Integration Test: Multi-layer Network Optimization...")
+    print("🧪 Integration Test: Multi-layer Network Optimization...")
 
     # Import components from TinyTorch package (previous modules must be completed and exported)
     from tinytorch.core.layers import Linear
@@ -1435,7 +1443,7 @@ def test_module():
     print("✅ Multi-layer network optimization works!")
 
     # Test optimizer state management
-    print("🔬 Integration Test: Optimizer State Management...")
+    print("🧪 Integration Test: Optimizer State Management...")
 
     param = Tensor([1.0, 2.0], requires_grad=True)
     param.grad = Tensor([0.1, 0.2])
@@ -1462,73 +1470,100 @@ def test_module():
 
 # %% [markdown]
 """
-## 🤔 ML Systems Thinking
+## 🤔 ML Systems Reflection Questions
 
-Now that your optimizers work, let's explore the systems trade-offs between them. Every optimizer choice affects memory usage, convergence speed, and training stability.
+Answer these to deepen your understanding of optimizer operations and their systems implications:
 
-### Questions to Consider
+### 1. Memory vs Performance
+**Question**: You've implemented SGD (2x memory) and Adam (3x memory). For a model with 10 billion parameters at float32 (4 bytes each):
 
-**Q1: Memory vs Performance**
-You've implemented SGD (2× memory) and Adam (3× memory). For a model with 10 billion parameters at float32 (4 bytes each):
+**Consider**:
 - How much total memory does each optimizer require?
 - At what model size does Adam's extra 50% memory overhead become prohibitive?
 - What real-world constraints might force you to choose SGD over Adam?
 
-**Q2: Learning Rate Sensitivity**
-SGD uses a fixed learning rate for all parameters, while Adam adapts per-parameter:
+**Calculate**:
+- Parameters: 10 x 10^9
+- Bytes per float32: 4
+- SGD memory (2x): ___________GB
+- Adam memory (3x): ___________GB
+
+---
+
+### 2. Learning Rate Sensitivity
+**Question**: SGD uses a fixed learning rate for all parameters, while Adam adapts per-parameter.
+
+**Consider**:
 - Why might Adam converge faster on problems with parameters at different scales?
 - When might SGD's uniform learning rate actually be an advantage?
 - How does momentum in SGD relate to Adam's first moment estimation?
 
-**Q3: Optimizer State Management**
-Adam and AdamW maintain momentum buffers (m, v) that persist across training steps:
+**Real-world context**: Large language models often have embedding layers with very different gradient magnitudes than attention layers. Adam's adaptive rates help balance these naturally.
+
+---
+
+### 3. Optimizer State Management
+**Question**: Adam and AdamW maintain momentum buffers (m, v) that persist across training steps.
+
+**Consider**:
 - What happens to these buffers when you checkpoint during training?
 - If you resume training with different hyperparameters, should you restore the old buffers?
 - How does optimizer state affect distributed training across multiple GPUs?
 
-**Q4: Weight Decay Trade-offs**
-AdamW decouples weight decay from gradient updates:
+**Think about**:
+- Checkpoint size: Adam stores 2 additional tensors per parameter
+- Resume behavior: Warm vs cold restart implications
+- Distributed sync: How do you aggregate optimizer state across workers?
+
+---
+
+### 4. Weight Decay Trade-offs
+**Question**: AdamW decouples weight decay from gradient updates.
+
+**Consider**:
 - Why does Adam's coupled weight decay behave inconsistently?
 - In what scenarios would AdamW's consistent regularization matter most?
 - How does weight decay interact with learning rate schedules?
 
-### Systems Implications
+**Real-world context**: The AdamW paper showed that proper decoupling leads to better generalization on ImageNet and language models.
 
-**Memory Hierarchy:**
-```
-Model Size: 1B parameters (4GB)
-├─ SGD:     8GB total (4GB params + 4GB momentum)
-├─ Adam:    12GB total (4GB params + 4GB m + 4GB v)
-└─ Impact:  May not fit in GPU memory, forcing:
-            • Smaller batch sizes
-            • Model parallelism
-            • Optimizer state sharding (ZeRO optimization)
-```
+---
 
-**Convergence Patterns:**
-- **SGD + Momentum:** Steady progress, may need learning rate tuning
-- **Adam:** Fast initial convergence, may overfit without proper regularization
-- **AdamW:** Adam's speed + better generalization, standard for transformers
+### 5. Production Scale: Memory Requirements
+**Question**: For training a GPT-scale model with 1 billion parameters, calculate the memory requirements:
 
-**Production Considerations:**
-- **Training cost:** Adam's extra memory means fewer models per GPU
-- **Hyperparameter tuning:** SGD more sensitive to learning rate choice
-- **Model generalization:** AdamW often generalizes better than Adam
-- **Checkpoint size:** Adam checkpoints are 1.5× larger than SGD
+**Calculate**:
+- Parameters: 1 x 10^9
+- Bytes per float32: 4
+- Parameter memory: ___________GB
 
-### Performance Analysis
+**With Adam optimizer (3x memory)**:
+- Total: ___________GB
 
-Our earlier analysis functions revealed:
-- `analyze_optimizer_memory_usage()`: Adam requires exactly 1.5× SGD's memory
-- `analyze_optimizer_convergence_behavior()`: Adam often converges in fewer steps
+**With gradient checkpointing and mixed precision**:
+- How does this change the equation?
 
-**The Key Insight:**
-Optimizer choice is a systems trade-off between:
-- **Memory budget** (can you afford 3× parameter memory?)
-- **Convergence speed** (how many training steps can you afford?)
-- **Generalization quality** (does your model perform well on unseen data?)
+**Real-world implications**:
+- Why do we need multiple GPUs for training large models?
+- What is ZeRO optimization and how does it help?
+- When would you choose SGD over Adam despite slower convergence?
 
-There's no universally best optimizer—only the right choice for your constraints!
+---
+
+### Bonus Challenge: Optimization Analysis
+
+**Scenario**: You're training a transformer model and observing the following:
+- Loss decreases rapidly for first 1000 steps
+- Loss plateaus between steps 1000-5000
+- Loss suddenly increases at step 5000
+
+**Questions**:
+1. What might cause the plateau? How would momentum help?
+2. What might cause the sudden increase? Is this an optimizer issue?
+3. How would you diagnose whether this is a learning rate problem vs. data problem?
+4. Would switching from Adam to AdamW help in this scenario?
+
+**Key insight**: Optimization is not just about algorithms - it's about understanding the interaction between data, model architecture, and training dynamics.
 """
 
 # %% [markdown]
@@ -1579,11 +1614,17 @@ if __name__ == "__main__":
 Congratulations! You've built sophisticated optimization algorithms that power modern neural network training!
 
 ### Key Accomplishments
-- Built SGD optimizer with momentum for stable gradient descent and oscillation reduction
-- Implemented Adam optimizer with adaptive learning rates and bias correction for different parameter scales
-- Created AdamW optimizer with decoupled weight decay for proper regularization
-- Analyzed memory trade-offs: SGD (2×), Adam/AdamW (3× parameter memory)
-- All tests pass ✅ (validated by `test_module()`)
+- **Built SGD optimizer** with momentum for stable gradient descent and oscillation reduction
+- **Implemented Adam optimizer** with adaptive learning rates and bias correction for different parameter scales
+- **Created AdamW optimizer** with decoupled weight decay for proper regularization
+- **Analyzed memory trade-offs**: SGD (2x), Adam/AdamW (3x parameter memory)
+- **All tests pass** (validated by `test_module()`)
+
+### Systems Insights Discovered
+- **Memory scaling**: SGD needs 2x parameter memory (momentum), Adam needs 3x (two moment buffers)
+- **Adaptive learning**: Adam automatically adjusts step sizes per parameter for faster convergence
+- **Weight decay coupling**: AdamW fixes Adam's inconsistent regularization by decoupling weight decay
+- **State management**: Optimizer buffers must be checkpointed for training resume
 
 ### Ready for Next Steps
 Your optimizer implementations enable sophisticated neural network training! With gradients from Module 06 and optimizers from Module 07, you're ready to build complete training loops.

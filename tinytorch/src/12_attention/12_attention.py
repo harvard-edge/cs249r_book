@@ -59,8 +59,9 @@ from tinytorch.core.attention import scaled_dot_product_attention, MultiHeadAtte
 - **Integration:** Works seamlessly with embeddings for complete sequence processing pipelines
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
 #| export
+
 import numpy as np
 import math
 import time
@@ -73,6 +74,38 @@ from tinytorch.core.activations import Softmax
 
 # Constants for attention computation
 MASK_VALUE = -1e9  # Large negative value used for attention masking (becomes ~0 after softmax)
+
+# %% [markdown]
+"""
+## 📋 Module Dependencies
+
+**Prerequisites**: Modules 01-11 must be complete
+- Module 01: Tensor (core data structure)
+- Module 03: Layers (Linear for projections)
+- Module 04: Activations (Softmax for attention weights)
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+- `math` (for square root in scaling)
+- `time` (for performance analysis)
+- `typing` (for type hints)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor.Tensor` - Core tensor operations
+- `tinytorch.core.layers.Linear` - For Q, K, V projections
+- `tinytorch.core.activations.Softmax` - For attention weight normalization
+
+**Dependency Flow**:
+```
+Tensor → Layers → Activations → Attention
+   ↓                                  ↓
+Foundation for              Core mechanism for
+all operations             transformer models
+```
+
+Students completing this module will have built the attention mechanism
+that powers GPT, BERT, and all modern transformer architectures.
+"""
 
 # %% [markdown]
 """
@@ -384,9 +417,20 @@ def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor, mask: Optional
     return output, attention_weights
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🔬 Unit Test: Scaled Dot-Product Attention
+
+This test validates our core attention mechanism works correctly with proper shape handling and masking.
+
+**What we're testing**: Attention output shapes, probability normalization, and causal masking
+**Why it matters**: These properties are essential for transformer correctness
+**Expected**: Correct shapes, weights summing to 1, future positions masked to zero
+"""
+
 # %% nbgrader={"grade": true, "grade_id": "test-attention-basic", "locked": true, "points": 10}
 def test_unit_scaled_dot_product_attention():
-    """🔬 Unit Test: Scaled Dot-Product Attention"""
+    """🔬 Test scaled dot-product attention implementation."""
     print("🔬 Unit Test: Scaled Dot-Product Attention...")
 
     # Test basic functionality
@@ -418,21 +462,8 @@ def test_unit_scaled_dot_product_attention():
 
     print("✅ scaled_dot_product_attention works correctly!")
 
-# %% [markdown]
-"""
-### 🧪 Unit Test: Scaled Dot-Product Attention
-
-This test validates our core attention mechanism:
-- **Output shapes**: Ensures attention preserves sequence dimensions
-- **Probability constraint**: Attention weights must sum to 1 per query
-- **Causal masking**: Future positions should have zero attention weight
-
-**Why attention weights sum to 1**: Each query position creates a probability distribution over all key positions. This ensures the output is a proper weighted average of values.
-
-**Why causal masking matters**: In language modeling, positions shouldn't attend to future tokens (information they wouldn't have during generation).
-
-**The O(n²) complexity you just witnessed**: Our explicit loops show exactly why attention scales quadratically - every query position must compare with every key position.
-"""
+if __name__ == "__main__":
+    test_unit_scaled_dot_product_attention()
 
 # %% [markdown]
 """
@@ -703,9 +734,18 @@ class MultiHeadAttention:
         return params
         ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🔬 Unit Test: Multi-Head Attention
+
+**What we're testing**: Configuration, parameter counting, shape preservation, and masking support
+**Why it matters**: Multi-head attention must correctly split dimensions across heads and recombine them
+**Expected**: Proper head dimension calculation, 8 parameters (4 layers x 2), preserved output shapes
+"""
+
 # %% nbgrader={"grade": true, "grade_id": "test-multihead", "locked": true, "points": 15}
 def test_unit_multihead_attention():
-    """🔬 Unit Test: Multi-Head Attention"""
+    """🔬 Test multi-head attention implementation."""
     print("🔬 Unit Test: Multi-Head Attention...")
 
     # Test initialization
@@ -719,7 +759,7 @@ def test_unit_multihead_attention():
 
     # Test parameter counting (4 linear layers, each has weight + bias)
     params = mha.parameters()
-    assert len(params) == 8, f"Expected 8 parameters (4 layers × 2), got {len(params)}"
+    assert len(params) == 8, f"Expected 8 parameters (4 layers x 2), got {len(params)}"
 
     # Test forward pass
     batch_size, seq_len = 2, 6
@@ -743,26 +783,16 @@ def test_unit_multihead_attention():
 
     print("✅ MultiHeadAttention works correctly!")
 
-# %% [markdown]
-"""
-### 🧪 Unit Test: Multi-Head Attention
-
-This test validates our multi-head attention implementation:
-- **Configuration**: Correct head dimension calculation and parameter setup
-- **Parameter counting**: 4 linear layers × 2 parameters each = 8 total
-- **Shape preservation**: Output maintains input dimensions
-- **Masking support**: Causal masks work correctly with multiple heads
-
-**Why multi-head attention works**: Different heads can specialize in different types of relationships (syntactic, semantic, positional), providing richer representations than single-head attention.
-
-**Architecture insight**: The split → attend → concat pattern allows parallel processing of different representation subspaces, dramatically increasing the model's capacity to understand complex relationships.
-"""
+if __name__ == "__main__":
+    test_unit_multihead_attention()
 
 # %% [markdown]
 """
-## 📊 Systems Analysis - Attention's Computational Reality
+## 📊 Systems Analysis: Memory Layout and Performance
 
-Now let's analyze the computational and memory characteristics that make attention both powerful and challenging at scale.
+Let's understand ONE key systems concept: **attention's O(n^2) memory and compute scaling**.
+
+This single analysis reveals why attention becomes the bottleneck in modern transformers and drives research into efficient attention variants.
 
 ### Memory Complexity Visualization
 
@@ -771,29 +801,29 @@ Attention Memory Scaling (per layer):
 
 Sequence Length = 128:
 ┌────────────────────────────────┐
-│ Attention Matrix: 128×128      │ = 16K values
+│ Attention Matrix: 128x128      │ = 16K values
 │ Memory: 64 KB (float32)        │
 └────────────────────────────────┘
 
 Sequence Length = 512:
 ┌────────────────────────────────┐
-│ Attention Matrix: 512×512      │ = 262K values
-│ Memory: 1 MB (float32)         │ ← 16× larger!
+│ Attention Matrix: 512x512      │ = 262K values
+│ Memory: 1 MB (float32)         │ <- 16x larger!
 └────────────────────────────────┘
 
 Sequence Length = 2048 (GPT-3):
 ┌────────────────────────────────┐
-│ Attention Matrix: 2048×2048    │ = 4.2M values
-│ Memory: 16 MB (float32)        │ ← 256× larger than 128!
+│ Attention Matrix: 2048x2048    │ = 4.2M values
+│ Memory: 16 MB (float32)        │ <- 256x larger than 128!
 └────────────────────────────────┘
 
 For a 96-layer model (GPT-3):
-Total Attention Memory = 96 layers × 16 MB = 1.5 GB
+Total Attention Memory = 96 layers x 16 MB = 1.5 GB
 Just for attention matrices!
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "attention-complexity", "solution": true}
+# %%
 def analyze_attention_complexity():
     """📊 Analyze attention computational complexity and memory scaling."""
     print("📊 Analyzing Attention Complexity...")
@@ -818,10 +848,14 @@ def analyze_attention_complexity():
 
         print(f"{seq_len:7d} | {attention_matrix_size:14d} | {attention_memory_kb:10.2f} | {complexity:10.0f}")
 
-    print(f"\n💡 Attention memory scales as O(n²) with sequence length")
+    print(f"\n💡 KEY INSIGHT: Attention memory scales as O(n^2) with sequence length")
     print(f"🚀 For seq_len=1024, attention matrix alone needs {(1024*1024*4)/1024/1024:.1f} MB")
 
-# %% nbgrader={"grade": false, "grade_id": "attention-timing", "solution": true}
+# Run the analysis
+if __name__ == "__main__":
+    analyze_attention_complexity()
+
+# %%
 def analyze_attention_timing():
     """📊 Measure attention computation time vs sequence length."""
     print("\n📊 Analyzing Attention Timing...")
@@ -856,10 +890,14 @@ def analyze_attention_timing():
         print(f"{seq_len:7d} | {avg_time:8.2f} | {ops_per_sec:7.0f} | {scaling:6.2f}x")
         prev_time = avg_time
 
-    print(f"\n💡 Attention time scales roughly as O(n²) with sequence length")
+    print(f"\n💡 KEY INSIGHT: Attention time scales roughly as O(n^2) with sequence length")
     print(f"🚀 This is why efficient attention (FlashAttention) is crucial for long sequences")
 
-# %% nbgrader={"grade": false, "grade_id": "attention-memory-overhead", "solution": true}
+# Run the analysis
+if __name__ == "__main__":
+    analyze_attention_timing()
+
+# %%
 def analyze_attention_memory_overhead():
     """📊 Analyze memory overhead during training (forward + backward passes)."""
     print("\n📊 Analyzing Attention Memory Overhead During Training...")
@@ -883,24 +921,28 @@ def analyze_attention_memory_overhead():
 
         print(f"{seq_len:7d} | {attention_matrix_mb:6.2f}MB | {backward_memory_mb:10.2f}MB | {optimizer_memory_mb:10.2f}MB | {optimizer_memory_mb:11.2f}MB")
 
-    print(f"\n💡 Training requires 4× memory of inference (forward + grad + 2× optimizer state)")
+    print(f"\n💡 KEY INSIGHT: Training requires 4x memory of inference")
     print(f"🚀 For GPT-3 (96 layers, 2048 context): ~6GB just for attention gradients!")
+
+# Run the analysis
+if __name__ == "__main__":
+    analyze_attention_memory_overhead()
 
 # %% [markdown]
 """
-### 📊 Systems Analysis: The O(n²) Reality
+### Systems Insights: The O(n^2) Reality
 
 Our analysis reveals the fundamental challenge that drives modern attention research:
 
 **Memory Scaling Crisis:**
-- Attention matrix grows as n² with sequence length
+- Attention matrix grows as n^2 with sequence length
 - For GPT-3 context (2048 tokens): 16MB just for attention weights per layer
 - With 96 layers: 1.5GB just for attention matrices!
 - This excludes activations, gradients, and other tensors
 
 **Time Complexity Validation:**
 - Each sequence length doubling roughly quadruples computation time
-- This matches the theoretical O(n²) complexity we implemented with explicit loops
+- This matches the theoretical O(n^2) complexity we implemented
 - Real bottleneck shifts from computation to memory at scale
 
 **The Production Reality:**
@@ -908,13 +950,13 @@ Our analysis reveals the fundamental challenge that drives modern attention rese
 Model Scale Impact:
 
 Small Model (6 layers, 512 context):
-Attention Memory = 6 × 1MB = 6MB ✅ Manageable
+Attention Memory = 6 x 1MB = 6MB - Manageable
 
 GPT-3 Scale (96 layers, 2048 context):
-Attention Memory = 96 × 16MB = 1.5GB ⚠️ Significant
+Attention Memory = 96 x 16MB = 1.5GB - Significant
 
 GPT-4 Scale (hypothetical: 120 layers, 32K context):
-Attention Memory = 120 × 4GB = 480GB ❌ Impossible on single GPU!
+Attention Memory = 120 x 4GB = 480GB - Impossible on single GPU!
 ```
 
 **Why This Matters:**
@@ -962,7 +1004,7 @@ Example Attention Patterns in Language:
 Let's see these patterns emerge in our implementation.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "attention-scenarios", "solution": true}
+# %%
 def test_attention_scenarios():
     """Test attention mechanisms in realistic scenarios."""
     print("🔬 Testing Attention Scenarios...")
@@ -1046,35 +1088,6 @@ def test_attention_scenarios():
 
 # %% [markdown]
 """
-### 🧪 Integration Test: Attention Scenarios
-
-This comprehensive test validates attention in realistic use cases:
-
-**Transformer Setup**: Standard configuration matching real architectures
-- 128-dimensional embeddings with 8 attention heads
-- 16 dimensions per head (128 ÷ 8 = 16)
-- Proper parameter counting and shape preservation
-
-**Causal Language Modeling**: Essential for GPT-style models
-- Lower triangular mask ensures autoregressive property
-- Position i cannot attend to positions j > i (future tokens)
-- Critical for language generation and training stability
-
-**Attention Pattern Visualization**: Understanding what the model "sees"
-- Each row sums to 1.0 (valid probability distribution)
-- Patterns reveal which positions the model finds relevant
-- Causal masking creates structured sparsity in attention
-
-**Real-World Implications**:
-- These patterns are interpretable in trained models
-- Attention heads often specialize (syntax, semantics, position)
-- Visualization tools like BertViz use these matrices for model interpretation
-
-The attention matrices you see here are the foundation of model interpretability in transformers.
-"""
-
-# %% [markdown]
-"""
 ## 🧪 Module Integration Test
 
 Final validation that everything works together correctly.
@@ -1113,79 +1126,101 @@ def test_module():
 
 # %% [markdown]
 """
-## 🤔 ML Systems Thinking: Attention Mechanisms
+## 🤔 ML Systems Reflection Questions
 
-These questions help you connect your implementation to production ML systems and real-world trade-offs.
+Answer these to deepen your understanding of attention operations and their systems implications:
 
-### Question 1: Quadratic Complexity
-For sequence length 1024, how much memory does attention's O(n²) use? What about length 2048?
+### 1. Quadratic Complexity and Memory
+**Question**: For sequence length 1024, how much memory does attention's O(n^2) use? What about length 2048?
 
-**Context**: You implemented attention with explicit nested loops showing the quadratic scaling. For float32 (4 bytes per value), the attention matrix for seq_len=n requires n² × 4 bytes.
-
-**Think about**:
-- Memory for seq_len=1024: 1024² × 4 bytes = _____ MB
-- Memory for seq_len=2048: 2048² × 4 bytes = _____ MB
-- Scaling factor when doubling sequence length: _____×
+**Consider**:
+- For float32 (4 bytes per value), the attention matrix for seq_len=n requires n^2 x 4 bytes
+- Memory for seq_len=1024: 1024^2 x 4 bytes = _____ MB
+- Memory for seq_len=2048: 2048^2 x 4 bytes = _____ MB
+- Scaling factor when doubling sequence length: _____x
 - Why this limits transformer context lengths in production
 
-### Question 2: Attention Bottleneck
-In production transformers, attention is often the memory bottleneck, not the FFN (feed-forward network). Why?
+**Real-world context**: GPT-3's 2048 token context was chosen partly due to this memory constraint. Longer contexts require techniques like FlashAttention or sparse attention.
 
-**Context**: A typical transformer has attention + FFN layers. FFN parameters scale as O(n × d²) where d is embed_dim, while attention activations scale as O(n²).
+---
 
-**Think about**:
-- For short sequences (n << d): Which dominates, attention or FFN? _____
+### 2. Attention vs FFN Bottleneck
+**Question**: In production transformers, attention is often the memory bottleneck, not the FFN (feed-forward network). Why?
+
+**Consider**:
+- A typical transformer has attention + FFN layers
+- FFN parameters scale as O(n x d^2) where d is embed_dim
+- Attention activations scale as O(n^2)
+- For short sequences (n << d): Which dominates? _____
 - For long sequences (n >> d): Which dominates? _____
 - At what sequence length does attention become the bottleneck?
-- Why does this matter for models like GPT-3 (96 layers, 2048 context)?
-
-### Question 3: Multi-Head Trade-off
-8 attention heads vs 1 head with 8× dimensions - same parameters, different performance. What's the systems difference?
-
-**Context**: Your MultiHeadAttention splits embed_dim=512 into 8 heads of 64 dims each. Alternative: one head with full 512 dims.
 
 **Think about**:
-- Parameter count: 8 heads × 64 dims vs 1 head × 512 dims = _____ (same or different?)
+- Why does this matter for models like GPT-3 (96 layers, 2048 context)?
+- How does this inform architecture choices for different use cases?
+
+---
+
+### 3. Multi-Head Trade-offs
+**Question**: 8 attention heads vs 1 head with 8x dimensions - same parameters, different performance. What's the systems difference?
+
+**Consider**:
+- Your MultiHeadAttention splits embed_dim=512 into 8 heads of 64 dims each
+- Alternative: one head with full 512 dims
+- Parameter count: 8 heads x 64 dims vs 1 head x 512 dims = _____ (same or different?)
 - Memory access patterns: Multiple small heads vs one large head
 - Parallelization: Can heads run in parallel? _____
+
+**Think about**:
 - Specialization: Why might diverse small heads learn better than one large head?
 - Cache efficiency: Smaller head_dim vs larger single dimension
+- Why did the original Transformer paper choose multiple heads?
 
-### Question 4: Masking Cost
-Causal masking (for autoregressive models) zeros out half the attention matrix. Do we save computation or just correctness?
+---
 
-**Context**: You set masked positions to -∞ before softmax. In a seq_len=n causal mask, roughly n²/2 positions are masked (upper triangle).
+### 4. Masking Costs
+**Question**: Causal masking (for autoregressive models) zeros out half the attention matrix. Do we save computation or just correctness?
 
-**Think about**:
+**Consider**:
+- You set masked positions to -infinity before softmax
+- In a seq_len=n causal mask, roughly n^2/2 positions are masked (upper triangle)
 - Does your implementation skip computation for masked positions? _____
 - Does setting scores to -1e9 before softmax save compute? _____
-- What would you need to change to actually skip masked computation?
-- In production, does sparse attention (skipping masked positions) help? _____
-- Memory saved: Can we avoid storing masked attention weights?
-
-### Question 5: Flash Attention
-Modern systems use "flash attention" to reduce attention's memory from O(n²) to O(n). How might this work conceptually?
-
-**Context**: Your implementation computes full attention matrix (batch, seq_len, seq_len), then applies it to values. FlashAttention reformulates this to never materialize the full matrix.
 
 **Think about**:
-- Your implementation: stores (seq_len × seq_len) attention weights
+- What would you need to change to actually skip masked computation?
+- In production, does sparse attention (skipping masked positions) help?
+- Memory saved: Can we avoid storing masked attention weights?
+
+---
+
+### 5. Flash Attention Conceptually
+**Question**: Modern systems use "flash attention" to reduce attention's memory from O(n^2) to O(n). How might this work conceptually?
+
+**Consider**:
+- Your implementation computes full attention matrix (batch, seq_len, seq_len), then applies it to values
+- FlashAttention reformulates this to never materialize the full matrix
+- Your implementation: stores (seq_len x seq_len) attention weights
 - FlashAttention idea: Compute attention in _____? (blocks, tiles, chunks)
+
+**Think about**:
 - Recomputation trade-off: Save memory by _____ during backward pass
 - Why does this enable longer context windows?
 - Is this an algorithm change or just implementation optimization?
 
-### Question 6: Gradient Memory (Bonus)
-Training requires storing activations for backward pass. How much extra memory does backprop through attention need?
+---
 
-**Context**: Your forward pass creates attention matrices. Backward pass needs these for gradients.
+### Bonus: Training Memory Overhead
+**Question**: Training requires storing activations for backward pass. How much extra memory does backprop through attention need?
 
-**Think about**:
-- Forward memory: attention matrix = n² values
-- Backward memory: gradients also n² values
-- Total training memory: forward + backward = _____ × inference memory
-- With Adam optimizer (stores momentum + velocity): _____ × inference memory
+**Calculate**:
+- Forward memory: attention matrix = n^2 values
+- Backward memory: gradients also n^2 values
+- Total training memory: forward + backward = _____ x inference memory
+- With Adam optimizer (stores momentum + velocity): _____ x inference memory
 - For GPT-3 scale (96 layers, 2048 context): _____ GB just for attention gradients
+
+**Key insight**: Training requires 4x memory of inference (forward + grad + 2x optimizer state).
 """
 
 # %% [markdown]
@@ -1238,31 +1273,21 @@ if __name__ == "__main__":
 Congratulations! You've built the attention mechanism that revolutionized deep learning!
 
 ### Key Accomplishments
-- Built scaled dot-product attention with explicit O(n²) complexity demonstration
-- Implemented multi-head attention for parallel relationship learning
-- Experienced attention's quadratic memory scaling firsthand through analysis
-- Tested causal masking for language modeling applications
-- Visualized actual attention patterns and weight distributions
-- All tests pass ✅ (validated by `test_module()`)
+- **Built scaled dot-product attention** with O(n^2) complexity understanding
+- **Implemented multi-head attention** for parallel relationship learning
+- **Experienced quadratic memory scaling** firsthand through analysis functions
+- **Tested causal masking** for language modeling applications
+- **All tests pass** (validated by `test_module()`)
 
-### Systems Insights Gained
-- **Computational Complexity**: Witnessed O(n²) scaling in both memory and time through explicit loops
-- **Memory Bottlenecks**: Attention matrices dominate memory usage in transformers (1.5GB+ for GPT-3 scale)
-- **Parallel Processing**: Multi-head attention enables diverse relationship learning across representation subspaces
-- **Production Challenges**: Understanding why FlashAttention and efficient attention research are crucial
-- **Interpretability Foundation**: Attention matrices provide direct insight into model focus patterns
+### Systems Insights Discovered
+- **Quadratic scaling**: Attention memory grows as n^2, limiting context lengths
+- **Memory bottlenecks**: Attention matrices dominate memory in transformers (1.5GB+ for GPT-3)
+- **Multi-head parallelism**: Different heads can specialize in different relationship types
+- **Production challenges**: Understanding why FlashAttention research is crucial
 
 ### Ready for Next Steps
 Your attention implementation is the core mechanism that enables modern language models!
 Export with: `tito module complete 12`
 
 **Next**: Module 13 will combine attention with feed-forward layers to build complete transformer blocks!
-
-### What You Just Built Powers
-- **GPT models**: Your attention mechanism is the exact pattern used in ChatGPT and GPT-4
-- **BERT and variants**: Bidirectional attention for understanding tasks
-- **Vision Transformers**: The same attention applied to image patches
-- **Modern AI systems**: Nearly every state-of-the-art language and multimodal model
-
-The mechanism you just implemented with explicit loops is mathematically identical to the attention in production language models - you've built the foundation of modern AI!
 """

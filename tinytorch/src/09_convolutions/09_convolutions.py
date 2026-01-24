@@ -56,11 +56,9 @@ from tinytorch.core.spatial import Conv2d, MaxPool2d, AvgPool2d
 """
 
 # %% nbgrader={"grade": false, "grade_id": "spatial-setup", "solution": true}
-
-
 #| default_exp core.spatial
-
 #| export
+
 import numpy as np
 import time
 
@@ -75,11 +73,44 @@ DEFAULT_KERNEL_SIZE = 3  # Default kernel size for convolutions
 DEFAULT_STRIDE = 1  # Default stride for convolutions
 DEFAULT_PADDING = 0  # Default padding for convolutions
 
+# Constants for memory calculations
+BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
+KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
+MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
+
 # %% [markdown]
 """
-## 💡 Introduction - What are Spatial Operations?
+## 📋 Module Dependencies
 
-Spatial operations transform machine learning from working with simple vectors to understanding images and spatial patterns. When you look at a photo, your brain naturally processes spatial relationships - edges, textures, objects. Spatial operations give neural networks this same capability.
+**Prerequisites**: Modules 01-08 must be complete
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+- `time` (for performance measurements)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor` (Tensor class from Module 01)
+- `tinytorch.core.autograd` (gradient tracking from Module 06)
+
+**Important**: This module builds on the complete training pipeline.
+Spatial operations will integrate with your existing layers and training system.
+
+**Dependency Flow**:
+```
+Training Pipeline (Modules 01-08) → Spatial Operations (Module 09) → CNNs (Milestone 03)
+         ↓
+  Complete training system enables CNN development
+```
+
+Students completing this module will have built the spatial processing
+foundation that powers computer vision applications.
+"""
+
+# %% [markdown]
+"""
+## 💡 Introduction: What are Spatial Operations?
+
+Spatial operations transform machine learning from working with simple vectors to understanding images and spatial patterns. When you look at a photo, your brain naturally processes spatial relationships, including edges, textures, and objects. Spatial operations give neural networks this same capability.
 
 ### The Two Core Spatial Operations
 
@@ -472,8 +503,10 @@ class Conv2d:
 
 # %% [markdown]
 """
-### 🧪 Unit Test: Conv2d Implementation
+### 🔬 Unit Test: Conv2d Implementation
+
 This test validates our convolution implementation with different configurations.
+
 **What we're testing**: Shape preservation, padding, stride effects
 **Why it matters**: Convolution is the foundation of computer vision
 **Expected**: Correct output shapes and reasonable value ranges
@@ -1224,8 +1257,10 @@ class BatchNorm2d:
 
 # %% [markdown]
 """
-### 🧪 Unit Test: BatchNorm2d
+### 🔬 Unit Test: BatchNorm2d
+
 This test validates batch normalization implementation.
+
 **What we're testing**: Normalization behavior, train/eval mode, running statistics
 **Why it matters**: BatchNorm is essential for training deep CNNs effectively
 **Expected**: Normalized outputs with proper mean/variance characteristics
@@ -1315,8 +1350,10 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🧪 Unit Test: Pooling Operations
+### 🔬 Unit Test: Pooling Operations
+
 This test validates both max and average pooling implementations.
+
 **What we're testing**: Dimension reduction, aggregation correctness
 **Why it matters**: Pooling is essential for computational efficiency in CNNs
 **Expected**: Correct output shapes and proper value aggregation
@@ -1396,14 +1433,11 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Systems Analysis - Understanding Spatial Operation Performance
+## 📊 Systems Analysis: Spatial Operation Performance
 
-Now let's analyze the computational complexity and memory trade-offs of spatial operations. This analysis reveals why certain design choices matter for real-world performance.
+Let's understand ONE key systems concept: **computational complexity and memory trade-offs in spatial operations**.
 
-### Key Questions We'll Answer:
-1. How does convolution complexity scale with input size and kernel size?
-2. What's the memory vs computation trade-off in different approaches?
-3. How do modern optimizations (like im2col) change the performance characteristics?
+This single analysis reveals why certain design choices matter for real-world performance, and why modern CNNs use specific architectural patterns.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "spatial-analysis", "solution": true}
@@ -1462,7 +1496,9 @@ def analyze_convolution_complexity():
     print("🔸 Large kernels dramatically increase computational cost")
     print("🚀 This motivates depthwise separable convolutions and attention mechanisms")
 
-# Analysis will be called in main execution
+# Run the systems analysis
+if __name__ == "__main__":
+    analyze_convolution_complexity()
 
 # %% nbgrader={"grade": false, "grade_id": "pooling-analysis", "solution": true}
 
@@ -1508,7 +1544,9 @@ def analyze_pooling_effects():
     print("🔸 Larger pooling windows lose more spatial detail")
     print("🚀 Choice depends on task: classification vs detection vs segmentation")
 
-# Analysis will be called in main execution
+# Run the systems analysis
+if __name__ == "__main__":
+    analyze_pooling_effects()
 
 # %% [markdown]
 """
@@ -1782,8 +1820,10 @@ class SimpleCNN:
 
 # %% [markdown]
 """
-### 🧪 Unit Test: SimpleCNN Integration
+### 🔬 Unit Test: SimpleCNN Integration
+
 This test validates that spatial operations work together in a complete CNN architecture.
+
 **What we're testing**: End-to-end spatial processing pipeline
 **Why it matters**: Spatial operations must compose correctly for real CNNs
 **Expected**: Proper dimension reduction and feature extraction
@@ -1879,7 +1919,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test realistic CNN workflow with BatchNorm
-    print("🔬 Integration Test: Complete CNN pipeline with BatchNorm...")
+    print("🧪 Integration Test: Complete CNN pipeline with BatchNorm...")
 
     # Create a mini CNN for CIFAR-10 with BatchNorm (modern architecture)
     conv1 = Conv2d(3, 8, kernel_size=3, padding=1)
@@ -1925,7 +1965,7 @@ def test_module():
     assert len(all_params) == 8, f"Expected 8 parameter tensors total, got {len(all_params)}"
 
     # Test train/eval mode switching
-    print("🔬 Integration Test: Train/Eval mode switching...")
+    print("🧪 Integration Test: Train/Eval mode switching...")
     bn1.eval()
     bn2.eval()
 
@@ -1938,7 +1978,7 @@ def test_module():
     print("✅ CNN pipeline with BatchNorm works correctly!")
 
     # Test memory efficiency comparison
-    print("🔬 Integration Test: Memory efficiency analysis...")
+    print("🧪 Integration Test: Memory efficiency analysis...")
 
     # Compare different pooling strategies (reduced size for faster execution)
     input_data = Tensor(np.random.randn(1, 16, 32, 32))
@@ -1968,34 +2008,15 @@ def test_module():
 if __name__ == "__main__":
     test_module()
 
-# %% [markdown]
-"""
-## 🔧 Main Execution Block
-
-Running all module components including systems analysis and final validation.
-"""
-
-# %% nbgrader={"grade": false, "grade_id": "main-execution", "solution": true}
-
-if __name__ == "__main__":
-    print("=" * 70)
-    print("MODULE 09: SPATIAL OPERATIONS - TEST EXECUTION")
-    print("=" * 70)
-
-    test_module()
-
-    print("\n" + "="*70)
-    print("MODULE 09 TESTS COMPLETE!")
-    print("="*70)
 
 
 # %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
 
-Before completing this module, reflect on what you've learned about spatial operations and their systems implications:
+Answer these to deepen your understanding of spatial operations and their systems implications:
 
-### Question 1: Conv2d Memory Footprint
+### 1. Conv2d Memory Footprint
 A Conv2d layer with 64 filters (3×3) processes a (224×224×3) image.
 - Calculate the memory footprint during the forward pass
 - Consider: input activations, output activations, filter weights, and biases
@@ -2003,7 +2024,9 @@ A Conv2d layer with 64 filters (3×3) processes a (224×224×3) image.
 
 **Think about**: Why do modern vision models use techniques like gradient checkpointing?
 
-### Question 2: Spatial Locality and CPU Performance
+---
+
+### 2. Spatial Locality and CPU Performance
 Why are CNNs faster on CPUs than fully-connected networks of similar parameter count?
 
 **Consider**:
@@ -2013,7 +2036,9 @@ Why are CNNs faster on CPUs than fully-connected networks of similar parameter c
 
 **Hint**: Think about what happens when the same filter is applied across the image.
 
-### Question 3: Im2col Trade-off
+---
+
+### 3. Im2col Trade-off
 The im2col algorithm transforms convolution into matrix multiplication, using more memory but speeding up computation.
 
 **When is this trade-off worthwhile?**
@@ -2024,7 +2049,9 @@ The im2col algorithm transforms convolution into matrix multiplication, using mo
 
 **Think about**: Why don't mobile devices always use im2col?
 
-### Question 4: Pooling's Systems Benefits
+---
+
+### 4. Pooling's Systems Benefits
 MaxPool2d reduces spatial dimensions (e.g., 224×224 → 112×112).
 
 **What's the systems benefit beyond reducing parameters?**
@@ -2033,9 +2060,11 @@ MaxPool2d reduces spatial dimensions (e.g., 224×224 → 112×112).
 - Gradient memory during backpropagation
 - Cache efficiency in deeper layers
 
-**Calculate**: If 5 layers each use 2×2 pooling, what's the total memory reduction?
+**Calculate**: If 5 layers each use 2x2 pooling, what's the total memory reduction?
 
-### Question 5: Mobile ML Deployment
+---
+
+### 5. Mobile ML Deployment
 Why do mobile ML models prefer depthwise-separable convolutions over standard Conv2d?
 
 **Analyze the FLOPs**:
@@ -2048,10 +2077,6 @@ Why do mobile ML models prefer depthwise-separable convolutions over standard Co
 - Energy consumption vs accuracy
 
 **Real-world context**: This is why MobileNet and EfficientNet architectures exist.
-
----
-
-**These questions help you think like an ML systems engineer, not just an algorithm implementer.**
 """
 
 # %% [markdown]
@@ -2096,36 +2121,29 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 Module Summary
-
 ## 🚀 MODULE SUMMARY: Spatial Operations
 
 Congratulations! You've built the spatial processing foundation that powers computer vision!
 
 ### Key Accomplishments
-- Built Conv2d with explicit loops showing O(N²M²K²) complexity ✅
-- Implemented BatchNorm2d with train/eval mode and running statistics ✅
-- Implemented MaxPool2d and AvgPool2d for spatial dimension reduction ✅
-- Created SimpleCNN demonstrating spatial operation integration ✅
-- Analyzed computational complexity and memory trade-offs in spatial processing ✅
-- All tests pass including complete CNN pipeline validation ✅
+- **Built Conv2d** with explicit loops showing O(N^2 M^2 K^2) complexity
+- **Implemented BatchNorm2d** with train/eval mode and running statistics
+- **Implemented MaxPool2d and AvgPool2d** for spatial dimension reduction
+- **Created SimpleCNN** demonstrating spatial operation integration
+- **Analyzed computational complexity** and memory trade-offs in spatial processing
+- **All tests pass** (validated by `test_module()`)
 
 ### Systems Insights Discovered
-- **Convolution Complexity**: Quadratic scaling with spatial size, kernel size significantly impacts cost
-- **Batch Normalization**: Train vs eval mode is critical - batch stats during training, running stats during inference
-- **Memory Patterns**: Pooling provides 4× memory reduction while preserving important features
+- **Convolution Complexity**: Quadratic scaling with spatial size; kernel size significantly impacts cost
+- **Batch Normalization**: Train vs eval mode is critical (batch stats during training, running stats during inference)
+- **Memory Patterns**: Pooling provides 4x memory reduction while preserving important features
 - **Architecture Design**: Strategic spatial reduction enables parameter-efficient feature extraction
 - **Cache Performance**: Spatial locality in convolution benefits from optimal memory access patterns
 
 ### Ready for Next Steps
 Your spatial operations enable building complete CNNs for computer vision tasks!
-Export with: `tito module complete 09`
 
 **Next**: Milestone 03 will combine your spatial operations with training pipeline to build a CNN for CIFAR-10!
 
-Your implementation shows why:
-- Modern CNNs use small kernels (3×3) instead of large ones (computational efficiency)
-- Pooling layers are crucial for managing memory in deep networks (4× reduction per layer)
-- Explicit loops reveal the true computational cost hidden by optimized implementations
-- Spatial operations unlock computer vision - from MLPs processing vectors to CNNs understanding images!
+Export with: `tito module complete 09`
 """
