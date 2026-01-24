@@ -21,25 +21,17 @@ PROJECTS = {
     "tinytorch": "tinytorch/",
 }
 
-# Emoji mapping for contribution types
+# Emoji mapping for contribution types (only types actually in use)
+# Synced with generate_main_readme.py
 EMOJI_KEY = {
-    "bug": "🐛",
-    "code": "💻",
-    "doc": "📖",
-    "design": "🎨",
-    "ideas": "💡",
-    "review": "👀",
-    "test": "🧪",
-    "tool": "🔧",
-    "translation": "🌍",
-    "tutorial": "✅",
-    "video": "📹",
-    "question": "💬",
-    "maintenance": "🚧",
-    "infra": "🚇",
-    "platform": "📦",
-    "projectManagement": "📆",
-    "research": "🔬",
+    "bug": "🪲",             # Bug Hunter
+    "code": "🧑‍💻",            # Code Contributor
+    "design": "🎨",          # Design Artist
+    "doc": "✍️",             # Word Wizard
+    "ideas": "🧠",           # Idea Generator
+    "review": "🔎",          # Code Reviewer
+    "test": "🧪",            # Test Engineer
+    "tool": "🛠️",           # Tool Builder
 }
 
 
@@ -128,12 +120,19 @@ def process_project(project_name: str, project_path: str, update: bool = False) 
     contributors = rc_data.get('contributors', [])
     per_line = rc_data.get('contributorsPerLine', 7)
     image_size = rc_data.get('imageSize', 80)
-    
+
     if not contributors:
         print(f"{project_name}: No contributors to display")
         return
-    
-    table_html = generate_table(contributors, per_line, image_size)
+
+    # Sort contributors by number of contributions (descending)
+    sorted_contributors = sorted(
+        contributors,
+        key=lambda c: len(c.get('contributions', [])),
+        reverse=True
+    )
+
+    table_html = generate_table(sorted_contributors, per_line, image_size)
     
     print(f"\n=== {project_name} ({len(contributors)} contributors) ===")
     

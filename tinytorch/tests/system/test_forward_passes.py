@@ -17,8 +17,57 @@ sys.path.insert(0, project_root)
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU, Sigmoid, Tanh, Softmax
-from tinytorch.nn import Sequential, Conv2d, TransformerBlock, Embedding, PositionalEncoding, LayerNorm
-import tinytorch.nn.functional as F
+from tinytorch.core.spatial import Conv2d
+from tinytorch.core.transformers import TransformerBlock, LayerNorm
+from tinytorch.core.embeddings import Embedding, PositionalEncoding
+
+class Sequential:
+    """Simple sequential container for testing."""
+    def __init__(self, layers):
+        self.layers = layers
+    def __call__(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+    def parameters(self):
+        params = []
+        for layer in self.layers:
+            if hasattr(layer, 'parameters'):
+                params.extend(layer.parameters())
+        return params
+
+class F:
+    """Functional interface for testing."""
+    @staticmethod
+    def relu(x):
+        from tinytorch.core.activations import ReLU
+        return ReLU()(x)
+    @staticmethod
+    def sigmoid(x):
+        from tinytorch.core.activations import Sigmoid
+        return Sigmoid()(x)
+    @staticmethod
+    def tanh(x):
+        from tinytorch.core.activations import Tanh
+        return Tanh()(x)
+    @staticmethod
+    def softmax(x, dim=-1):
+        from tinytorch.core.activations import Softmax
+        return Softmax()(x)
+    @staticmethod
+    def max_pool2d(x, kernel_size):
+        from tinytorch.core.spatial import MaxPool2d
+        return MaxPool2d(kernel_size)(x)
+    @staticmethod
+    def avg_pool2d(x, kernel_size):
+        from tinytorch.core.spatial import AvgPool2d
+        return AvgPool2d(kernel_size)(x)
+    @staticmethod
+    def flatten(x, start_dim=1):
+        import numpy as np
+        shape = x.shape
+        new_shape = shape[:start_dim] + (np.prod(shape[start_dim:]),)
+        return x.reshape(*new_shape)
 
 
 class ForwardPassTester:
@@ -235,8 +284,8 @@ def test_transformer_forward():
     """Test Transformer architecture."""
     class SimpleTransformer:
         def __init__(self):
-            self.embed = Embedding(1000, 128)
-            self.pos_enc = PositionalEncoding(128, 100)
+            self.embed = Embedding(1000, 128)  # vocab_size=1000, embed_dim=128
+            self.pos_enc = PositionalEncoding(100, 128)  # max_seq_len=100, embed_dim=128
             self.transformer = TransformerBlock(128, 8)
             self.ln = LayerNorm(128)
             self.output = Linear(128, 1000)

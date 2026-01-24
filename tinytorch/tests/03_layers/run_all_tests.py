@@ -24,7 +24,7 @@ def run_module_tests() -> Dict:
     console = Console()
 
     # Update module number and name
-    MODULE_NUMBER = "04"
+    MODULE_NUMBER = "03"
     MODULE_NAME = "Layers"
 
     # Header

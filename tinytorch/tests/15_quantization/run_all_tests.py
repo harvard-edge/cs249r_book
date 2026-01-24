@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run all tests for Module 16: Quantization
+Run all tests for Module 15: Quantization
 """
 
 import sys
@@ -8,12 +8,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 def run_module_tests():
-    """Run all tests for Module 16: Quantization."""
+    """Run all tests for Module 15: Quantization."""
     from rich.console import Console
     from rich.panel import Panel
 
     console = Console()
-    console.print(Panel("[bold blue]Module 16: Quantization - Test Suite[/bold blue]", expand=False))
+    console.print(Panel("[bold blue]Module 15: Quantization - Test Suite[/bold blue]", expand=False))
 
     # Find test files
     test_files = list(Path(__file__).parent.glob("test_*.py"))

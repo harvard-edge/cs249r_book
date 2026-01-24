@@ -327,7 +327,7 @@ PE(pos, 2i)   = sin(pos / 10000^(2i/embed_dim))  # Even dimensions
 PE(pos, 2i+1) = cos(pos / 10000^(2i/embed_dim))  # Odd dimensions
 ```
 
-The `10000` base creates different wavelengths across dimensions. Dimension 0 oscillates rapidly (frequency ≈ 1), while dimension 510 changes extremely slowly (frequency ≈ 1/10000). This multi-scale structure gives each position a unique "fingerprint" and enables the model to learn relative position through simple vector arithmetic.
+The `10000` base creates different wavelengths across dimensions. Dimension 0 oscillates rapidly (frequency ≈ 1), while dimension 510 changes extremely slowly (frequency ≈ 1/10000). This multiscale structure gives each position a unique "fingerprint" and enables the model to learn relative position through simple vector arithmetic.
 
 At position 0, all sine terms equal 0 and all cosine terms equal 1: `[0, 1, 0, 1, 0, 1, ...]`. At position 1, the pattern shifts based on each dimension's frequency. The combination of many frequencies creates distinct encodings where nearby positions have similar (but not identical) vectors, providing smooth positional gradients.
 

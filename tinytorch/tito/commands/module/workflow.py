@@ -7,6 +7,7 @@ Implements the natural workflow:
 3. tito module complete 01 → Tests, exports, updates progress
 """
 
+import os
 import subprocess
 import sys
 from argparse import ArgumentParser, Namespace
@@ -179,32 +180,6 @@ class ModuleWorkflowCommand(BaseCommand):
         list_parser = subparsers.add_parser(
             'list',
             help='List all available modules'
-        )
-
-        # EXPORT command - export module code to tinytorch package
-        export_parser = subparsers.add_parser(
-            'export',
-            help='Export module code to tinytorch package'
-        )
-        export_parser.add_argument(
-            'modules',
-            nargs='*',
-            help='Module names to export (e.g., 01_tensor 02_activations)'
-        )
-        export_parser.add_argument(
-            '--all',
-            action='store_true',
-            help='Export all modules'
-        )
-        export_parser.add_argument(
-            '--from-release',
-            action='store_true',
-            help='Export from release directory (student version) instead of source'
-        )
-        export_parser.add_argument(
-            '--test-checkpoint',
-            action='store_true',
-            help='Run checkpoint test after successful export'
         )
 
     # Module mapping and normalization now imported from core.modules
@@ -659,6 +634,118 @@ class ModuleWorkflowCommand(BaseCommand):
 
         return 0 if success else 1
 
+    def complete_all_modules(self, skip_tests: bool = False, skip_export: bool = False) -> int:
+        """Complete all modules in sequence.
+
+        This iterates through all modules in order (01 → 20) and runs
+        complete_module on each one. Useful for:
+        - CI validation of all modules
+        - Students who want to export everything they've built
+        - Rebuilding the full package from existing notebooks
+
+        Note: This expects notebooks to exist in modules/. For rebuilding
+        from src/, use 'tito dev export --all' instead.
+        """
+        from rich import box
+
+        module_mapping = get_module_mapping()
+        module_nums = sorted(module_mapping.keys(), key=lambda x: int(x))
+
+        console = self.console
+        console.print(Panel(
+            f"[bold cyan]Completing All Modules ({len(module_nums)} total)[/bold cyan]\n\n"
+            "This will test and export each module in sequence.\n"
+            "[dim]Modules without notebooks will be skipped.[/dim]",
+            title="🔄 Complete All Modules",
+            border_style="cyan",
+            box=box.ROUNDED
+        ))
+        console.print()
+
+        passed = 0
+        failed = 0
+        skipped = 0
+
+        for module_num in module_nums:
+            module_name = module_mapping[module_num]
+
+            # Check if notebook exists
+            short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+            notebook_path = self.config.project_root / "modules" / module_name / f"{short_name}.ipynb"
+
+            if not notebook_path.exists():
+                console.print(f"  [dim]⏭️  Module {module_num}: {module_name} (no notebook)[/dim]")
+                skipped += 1
+                continue
+
+            console.print(f"  [cyan]▶[/cyan] Module {module_num}: {module_name}...", end=" ")
+
+            # Temporarily suppress the elaborate complete_module output
+            # by calling the core logic directly
+            result = self._complete_module_quiet(module_num, module_name, skip_tests, skip_export)
+
+            if result == 0:
+                passed += 1
+                console.print("[green]✓[/green]")
+            else:
+                failed += 1
+                console.print("[red]✗[/red]")
+                # Stop on first failure
+                console.print(f"\n[red]❌ Failed at module {module_num}[/red]")
+                break
+
+        console.print()
+
+        if failed == 0:
+            console.print(Panel(
+                f"[bold green]✅ All modules completed![/bold green]\n\n"
+                f"Passed: {passed}  Skipped: {skipped}",
+                title="🎉 Success",
+                border_style="green",
+                box=box.ROUNDED
+            ))
+            return 0
+        else:
+            console.print(Panel(
+                f"[bold red]❌ Module completion failed[/bold red]\n\n"
+                f"Passed: {passed}  Failed: {failed}  Skipped: {skipped}",
+                title="⚠️ Failure",
+                border_style="red",
+                box=box.ROUNDED
+            ))
+            return 1
+
+    def _complete_module_quiet(self, module_num: str, module_name: str,
+                                skip_tests: bool, skip_export: bool) -> int:
+        """Complete a single module without verbose output.
+
+        Core logic extracted from complete_module for use in batch operations.
+        Returns 0 on success, 1 on failure.
+        """
+        # Run unit tests
+        if not skip_tests:
+            unit_result = self._run_inline_unit_tests(module_name, verbose=False)
+            if unit_result['failed'] > 0:
+                return 1
+
+        # Export to package
+        if not skip_export:
+            export_result = self.export_module(module_name)
+            if export_result != 0:
+                return 1
+
+        # Run integration tests (after export)
+        if not skip_tests:
+            integration_result = self._run_integration_tests(module_name, verbose=False)
+            if integration_result['failed'] > 0:
+                return 1
+
+        # Update progress
+        progress = self.get_progress_data()
+        self.update_progress(module_num, module_name)
+
+        return 0
+
     def _trigger_submission(self):
         """Asks the user to submit their progress if they are logged in."""
         self.console.print()  # Add a blank line for spacing
@@ -749,12 +836,22 @@ class ModuleWorkflowCommand(BaseCommand):
                 self.console.print(f"   [dim yellow]No source file found: {dev_file}[/dim yellow]")
             return {'passed': 0, 'failed': 0, 'tests': [], 'returncode': 0}
 
+        # Set up environment with project root in PYTHONPATH
+        # This allows src files to import from tinytorch.core.*
+        env = os.environ.copy()
+        pythonpath = env.get('PYTHONPATH', '')
+        if pythonpath:
+            env['PYTHONPATH'] = f"{project_root}:{pythonpath}"
+        else:
+            env['PYTHONPATH'] = str(project_root)
+
         # Run the module file (which triggers if __name__ == "__main__" tests)
         result = subprocess.run(
             [sys.executable, str(dev_file.absolute())],
             capture_output=True,
             text=True,
-            cwd=project_root
+            cwd=project_root,
+            env=env
         )
 
         # Parse output to extract individual test results
@@ -1350,6 +1447,12 @@ class ModuleWorkflowCommand(BaseCommand):
             elif args.module_command == 'resume':
                 return self.resume_module(getattr(args, 'module_number', None))
             elif args.module_command == 'complete':
+                # Check for --all flag
+                if getattr(args, 'all', False):
+                    return self.complete_all_modules(
+                        getattr(args, 'skip_tests', False),
+                        getattr(args, 'skip_export', False)
+                    )
                 return self.complete_module(
                     getattr(args, 'module_number', None),
                     getattr(args, 'skip_tests', False),
@@ -1367,11 +1470,6 @@ class ModuleWorkflowCommand(BaseCommand):
                 return self.show_status()
             elif args.module_command == 'list':
                 return self.list_modules()
-            elif args.module_command == 'export':
-                # Delegate to ExportCommand
-                from ..export import ExportCommand
-                export_command = ExportCommand(self.config)
-                return export_command.run(args)
 
         # Show help if no valid command
         self.console.print(Panel(
@@ -1382,9 +1480,6 @@ class ModuleWorkflowCommand(BaseCommand):
             "  [bold green]tito module resume 01[/bold green]    - Resume working on Module 01 (continue)\n"
             "  [bold green]tito module complete 01[/bold green]  - Complete Module 01 (test + export)\n"
             "  [bold yellow]tito module reset 01[/bold yellow]    - Reset Module 01 to clean state (with backup)\n\n"
-            "[bold]Export:[/bold]\n"
-            "  [bold cyan]tito module export 01_tensor[/bold cyan]  - Export module to tinytorch package\n"
-            "  [bold cyan]tito module export --all[/bold cyan]      - Export all modules\n\n"
             "[bold]Smart Defaults:[/bold]\n"
             "  [bold]tito module resume[/bold]        - Resume last worked module\n"
             "  [bold]tito module complete[/bold]      - Complete current module\n"

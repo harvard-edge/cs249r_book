@@ -21,6 +21,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
+import pytest
 import numpy as np
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.autograd import enable_autograd
@@ -168,7 +169,7 @@ def test_regression_embedding_requires_grad():
     """
     print("Testing regression: Embedding requires_grad...")
 
-    from tinytorch.text.embeddings import Embedding
+    from tinytorch.core.embeddings import Embedding
 
     embed = Embedding(vocab_size=10, embed_dim=8)
     embed.weight.requires_grad = True

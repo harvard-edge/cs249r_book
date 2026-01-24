@@ -24,6 +24,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.autograd import enable_autograd
+from tinytorch.core.embeddings import Embedding
+from tinytorch.core.attention import MultiHeadAttention
+from tinytorch.core.transformers import TransformerBlock
+from tinytorch.core.layers import Linear
+from tinytorch.core.losses import CrossEntropyLoss
 
 # Enable autograd
 enable_autograd()
@@ -39,14 +44,8 @@ class TestEmbeddingGradientFlow:
     - Shape mismatches between embedding and attention
     """
 
-    @pytest.mark.skip(reason="Embedding gradient flow requires advanced autograd integration")
     def test_embedding_receives_gradients(self):
         """Embedding weights must receive gradients during training"""
-        try:
-            from tinytorch.core.embeddings import Embedding
-        except ImportError:
-            pytest.skip("Embedding module not yet implemented")
-
         vocab_size = 100
         embed_dim = 32
         embedding = Embedding(vocab_size, embed_dim)
@@ -73,14 +72,8 @@ class TestEmbeddingGradientFlow:
                 f"Token {token_id} embedding has zero gradient!"
             )
 
-    @pytest.mark.skip(reason="Embedding gradient flow requires advanced autograd integration")
     def test_repeated_tokens_accumulate_gradients(self):
         """Same token appearing twice should have accumulated gradient"""
-        try:
-            from tinytorch.core.embeddings import Embedding
-        except ImportError:
-            pytest.skip("Embedding module not yet implemented")
-
         vocab_size = 10
         embed_dim = 4
         embedding = Embedding(vocab_size, embed_dim)
@@ -119,11 +112,6 @@ class TestAttentionGradientFlow:
 
     def test_attention_all_projections_receive_gradients(self):
         """Q, K, V projections must all receive gradients"""
-        try:
-            from tinytorch.core.attention import MultiHeadAttention
-        except ImportError:
-            pytest.skip("Attention module not yet implemented")
-
         embed_dim = 32
         num_heads = 4
         seq_len = 8
@@ -156,11 +144,6 @@ class TestAttentionGradientFlow:
 
     def test_attention_input_receives_gradients(self):
         """Input to attention must receive gradients for residual connections"""
-        try:
-            from tinytorch.core.attention import MultiHeadAttention
-        except ImportError:
-            pytest.skip("Attention module not yet implemented")
-
         embed_dim = 16
         num_heads = 2
 
@@ -198,11 +181,6 @@ class TestTransformerGradientFlow:
 
     def test_transformer_block_gradient_flow(self):
         """Gradients must flow through a complete transformer block"""
-        try:
-            from tinytorch.core.transformers import TransformerBlock
-        except ImportError:
-            pytest.skip("Transformer module not yet implemented")
-
         embed_dim = 32
         num_heads = 4
         ff_dim = 64
@@ -231,11 +209,6 @@ class TestTransformerGradientFlow:
 
     def test_stacked_transformer_blocks(self):
         """Gradients must flow through multiple stacked blocks"""
-        try:
-            from tinytorch.core.transformers import TransformerBlock
-        except ImportError:
-            pytest.skip("Transformer module not yet implemented")
-
         embed_dim = 32
         num_heads = 4
         ff_dim = 64
@@ -276,17 +249,8 @@ class TestNLPPipelineEndToEnd:
     tokens → embedding → attention → linear → loss
     """
 
-    @pytest.mark.skip(reason="NLP pipeline gradient flow requires advanced autograd integration")
     def test_complete_nlp_forward_backward(self):
         """Complete NLP pipeline must work end-to-end"""
-        try:
-            from tinytorch.core.embeddings import Embedding
-            from tinytorch.core.attention import MultiHeadAttention
-            from tinytorch.core.layers import Linear
-            from tinytorch.core.losses import CrossEntropyLoss
-        except ImportError:
-            pytest.skip("NLP modules not yet implemented")
-
         vocab_size = 100
         embed_dim = 32
         num_heads = 4
@@ -336,12 +300,6 @@ class TestQuickNLPSmoke:
 
     def test_embedding_forward_works(self):
         """Embedding forward should not crash"""
-        try:
-            from tinytorch.core.embeddings import Embedding
-            from tinytorch.core.tensor import Tensor
-        except ImportError:
-            pytest.skip("Embedding module not yet implemented")
-
         embedding = Embedding(100, 32)
         indices = Tensor(np.array([1, 2, 3]))
         result = embedding.forward(indices)

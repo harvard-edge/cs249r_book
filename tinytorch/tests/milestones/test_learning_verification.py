@@ -24,10 +24,10 @@ sys.path.insert(0, str(project_root))
 
 from tinytorch import Tensor, Linear, ReLU, Sigmoid, SGD, BinaryCrossEntropyLoss, CrossEntropyLoss
 from tinytorch.core.spatial import Conv2d, MaxPool2d
-from tinytorch.text.embeddings import Embedding, PositionalEncoding
+from tinytorch.core.embeddings import Embedding, PositionalEncoding
 from tinytorch.core.attention import MultiHeadAttention
 from tinytorch.core.transformers import LayerNorm
-from tinytorch.data.loader import TensorDataset, DataLoader
+from tinytorch.core.dataloader import TensorDataset, DataLoader
 
 # Rich for beautiful output
 from rich.console import Console

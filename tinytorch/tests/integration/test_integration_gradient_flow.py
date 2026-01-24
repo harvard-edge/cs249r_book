@@ -16,6 +16,7 @@ This ensures backpropagation works correctly end-to-end.
 import sys
 import os
 import numpy as np
+import pytest
 
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

@@ -37,11 +37,24 @@ from .commands.community import CommunityCommand
 from .commands.dev import DevCommand
 from .commands.olympics import OlympicsCommand
 
-# Import version from tinytorch package
-try:
-    from tinytorch import __version__
-except ImportError:
-    __version__ = "unknown"
+# Get version from pyproject.toml (single source of truth)
+def _get_version() -> str:
+    """Read version from pyproject.toml."""
+    try:
+        # Try to find pyproject.toml relative to this file
+        tito_dir = Path(__file__).parent
+        pyproject_path = tito_dir.parent / "pyproject.toml"
+        if pyproject_path.exists():
+            content = pyproject_path.read_text()
+            for line in content.splitlines():
+                if line.strip().startswith("version"):
+                    # Parse: version = "0.1.4"
+                    return line.split("=")[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return "unknown"
+
+__version__ = _get_version()
 
 # Configure logging
 logging.basicConfig(
@@ -84,7 +97,7 @@ class TinyTorchCLI:
 
         # Command categorization for help display
         self.student_commands = ['module', 'milestone', 'community', 'benchmark', 'olympics']
-        self.developer_commands = ['dev', 'system', 'src', 'package', 'nbgrader']
+        self.developer_commands = ['dev', 'system', 'package', 'nbgrader']
 
         # Welcome screen sections (used for both tito and tito --help)
         self.welcome_sections = {

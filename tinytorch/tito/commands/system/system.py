@@ -11,6 +11,7 @@ from .health import HealthCommand
 from .jupyter import JupyterCommand
 from .update import UpdateCommand
 from .logo import LogoCommand
+from .reset import SystemResetCommand
 
 
 class SystemCommand(BaseCommand):
@@ -69,6 +70,14 @@ class SystemCommand(BaseCommand):
         logo_cmd = LogoCommand(self.config)
         logo_cmd.add_arguments(logo_parser)
 
+        # Reset subcommand
+        reset_parser = subparsers.add_parser(
+            'reset',
+            help='Reset TinyTorch to pristine state (clear modules and core)'
+        )
+        reset_cmd = SystemResetCommand(self.config)
+        reset_cmd.add_arguments(reset_parser)
+
     def run(self, args: Namespace) -> int:
         console = self.console
 
@@ -80,7 +89,8 @@ class SystemCommand(BaseCommand):
                 "  • [bold]health[/bold]  - Environment health check and validation\n"
                 "  • [bold]jupyter[/bold] - Start Jupyter notebook server\n"
                 "  • [bold]update[/bold]  - Check for and install updates\n"
-                "  • [bold]logo[/bold]    - Learn about the TinyTorch logo\n\n"
+                "  • [bold]logo[/bold]    - Learn about the TinyTorch logo\n"
+                "  • [bold]reset[/bold]   - Reset to pristine state (clear modules/core)\n\n"
                 "[dim]Example: tito system health[/dim]",
                 title="System Command Group",
                 border_style="bright_cyan"
@@ -102,6 +112,9 @@ class SystemCommand(BaseCommand):
             return cmd.execute(args)
         elif args.system_command == 'logo':
             cmd = LogoCommand(self.config)
+            return cmd.execute(args)
+        elif args.system_command == 'reset':
+            cmd = SystemResetCommand(self.config)
             return cmd.execute(args)
         else:
             console.print(Panel(

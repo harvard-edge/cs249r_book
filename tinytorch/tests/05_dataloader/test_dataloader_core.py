@@ -23,6 +23,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from tinytorch.core.dataloader import DataLoader
+
 
 class TestDataLoaderBasics:
     """Test basic DataLoader functionality."""
@@ -36,21 +38,15 @@ class TestDataLoaderBasics:
 
         STUDENT LEARNING: DataLoader is iterable - use it in for loops.
         """
-        try:
-            from tinytorch.core.dataloader import DataLoader
+        # Simple dataset
+        X = np.random.randn(100, 10)
+        y = np.random.randint(0, 2, 100)
 
-            # Simple dataset
-            X = np.random.randn(100, 10)
-            y = np.random.randint(0, 2, 100)
+        dataset = list(zip(X, y))
+        loader = DataLoader(dataset, batch_size=16)
 
-            dataset = list(zip(X, y))
-            loader = DataLoader(dataset, batch_size=16)
-
-            batches = list(loader)
-            assert len(batches) > 0, "DataLoader should yield batches"
-
-        except ImportError:
-            pytest.skip("DataLoader not implemented yet")
+        batches = list(loader)
+        assert len(batches) > 0, "DataLoader should yield batches"
 
     def test_batch_sizes(self):
         """
@@ -64,25 +60,19 @@ class TestDataLoaderBasics:
         STUDENT LEARNING: Common batch sizes: 16, 32, 64, 128.
         Start small if memory is limited.
         """
-        try:
-            from tinytorch.core.dataloader import DataLoader
+        X = np.random.randn(100, 10)
+        y = np.random.randint(0, 2, 100)
 
-            X = np.random.randn(100, 10)
-            y = np.random.randint(0, 2, 100)
+        dataset = list(zip(X, y))
+        loader = DataLoader(dataset, batch_size=32)
 
-            dataset = list(zip(X, y))
-            loader = DataLoader(dataset, batch_size=32)
+        first_batch = next(iter(loader))
+        batch_x, batch_y = first_batch
 
-            first_batch = next(iter(loader))
-            batch_x, batch_y = first_batch
-
-            assert batch_x.shape[0] == 32 or batch_x.shape[0] <= 32, (
-                f"Batch size should be 32 (or less for last batch)\n"
-                f"  Got: {batch_x.shape[0]}"
-            )
-
-        except ImportError:
-            pytest.skip("DataLoader batch_size not implemented yet")
+        assert batch_x.shape[0] == 32 or batch_x.shape[0] <= 32, (
+            f"Batch size should be 32 (or less for last batch)\n"
+            f"  Got: {batch_x.shape[0]}"
+        )
 
     def test_shuffling(self):
         """
@@ -95,28 +85,22 @@ class TestDataLoaderBasics:
         STUDENT LEARNING: Always shuffle=True for training,
         shuffle=False for evaluation (reproducibility).
         """
-        try:
-            from tinytorch.core.dataloader import DataLoader
+        # Data with clear order
+        X = np.arange(100).reshape(100, 1)
+        y = np.arange(100)
 
-            # Data with clear order
-            X = np.arange(100).reshape(100, 1)
-            y = np.arange(100)
+        # Two loaders with shuffle
+        dataset1 = list(zip(X, y))
+        dataset2 = list(zip(X, y))
+        loader1 = DataLoader(dataset1, batch_size=10, shuffle=True)
+        loader2 = DataLoader(dataset2, batch_size=10, shuffle=True)
 
-            # Two loaders with shuffle
-            dataset1 = list(zip(X, y))
-            dataset2 = list(zip(X, y))
-            loader1 = DataLoader(dataset1, batch_size=10, shuffle=True)
-            loader2 = DataLoader(dataset2, batch_size=10, shuffle=True)
+        # Get first batches
+        batch1 = next(iter(loader1))[0]
+        batch2 = next(iter(loader2))[0]
 
-            # Get first batches
-            batch1 = next(iter(loader1))[0]
-            batch2 = next(iter(loader2))[0]
-
-            # With shuffling, batches should differ
-            # (Note: there's a small chance they're the same by luck)
-
-        except ImportError:
-            pytest.skip("DataLoader shuffle not implemented yet")
+        # With shuffling, batches should differ
+        # (Note: there's a small chance they're the same by luck)
 
 
 if __name__ == "__main__":

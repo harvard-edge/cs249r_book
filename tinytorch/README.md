@@ -4,7 +4,7 @@
 
 ### Build Your Own ML Framework From Scratch
 
-[![Version](https://img.shields.io/badge/version-0.1.4-D4740C?logo=fireship&logoColor=white)](https://github.com/harvard-edge/cs249r_book/releases?q=tinytorch)
+[![Version](https://img.shields.io/github/v/tag/harvard-edge/cs249r_book?filter=tinytorch-v*&label=version&color=D4740C&logo=fireship&logoColor=white)](https://github.com/harvard-edge/cs249r_book/releases?q=tinytorch)
 [![Status](https://img.shields.io/badge/status-preview-orange?logo=github)](https://github.com/harvard-edge/cs249r_book/discussions/1076)
 [![Docs](https://img.shields.io/badge/docs-mlsysbook.ai-blue?logo=readthedocs)](https://mlsysbook.ai/tinytorch)
 [![Python](https://img.shields.io/badge/python-3.8+-3776ab?logo=python&logoColor=white)](https://python.org)
@@ -257,7 +257,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## Contributors
 
-Thanks to these wonderful people who helped improve TinyTorch ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
+Thanks to these wonderful people who helped improve TinyTorch!
+
+**Legend:** 🪲 Bug Hunter · ⚡ Code Warrior · 📚 Documentation Hero · 🎨 Design Artist · 🧠 Idea Generator · 🔎 Code Reviewer · 🧪 Test Engineer · 🛠️ Tool Builder
 
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
@@ -265,13 +267,19 @@ Thanks to these wonderful people who helped improve TinyTorch ([emoji key](https
 <table>
   <tbody>
     <tr>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/AmirAlasady"><img src="https://avatars.githubusercontent.com/AmirAlasady?v=4?s=80" width="80px;" alt="Amir Alasady"/><br /><sub><b>Amir Alasady</b></sub></a><br />🐛</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🐛 💻 🎨 📖 💡 👀 🧪 🔧</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/kai4avaya"><img src="https://avatars.githubusercontent.com/kai4avaya?v=4?s=80" width="80px;" alt="kai"/><br /><sub><b>kai</b></sub></a><br />🐛 💻 🎨 📖 🧪</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/minhdang26403"><img src="https://avatars.githubusercontent.com/minhdang26403?v=4?s=80" width="80px;" alt="Dang Truong"/><br /><sub><b>Dang Truong</b></sub></a><br />🐛 💻 📖 🧪</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/didier-durand"><img src="https://avatars.githubusercontent.com/didier-durand?v=4?s=80" width="80px;" alt="Didier Durand"/><br /><sub><b>Didier Durand</b></sub></a><br />🐛 💻 📖</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/karthikdani"><img src="https://avatars.githubusercontent.com/karthikdani?v=4?s=80" width="80px;" alt="Karthik Dani"/><br /><sub><b>Karthik Dani</b></sub></a><br />🐛 💻</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/jettythek"><img src="https://avatars.githubusercontent.com/jettythek?v=4?s=80" width="80px;" alt="jettythek"/><br /><sub><b>jettythek</b></sub></a><br />💻</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧠 🔎 🧪 🛠️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/kai4avaya"><img src="https://avatars.githubusercontent.com/kai4avaya?v=4?s=80" width="80px;" alt="kai"/><br /><sub><b>kai</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧪</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/minhdang26403"><img src="https://avatars.githubusercontent.com/minhdang26403?v=4?s=80" width="80px;" alt="Dang Truong"/><br /><sub><b>Dang Truong</b></sub></a><br />🪲 🧑‍💻 ✍️ 🧪</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/didier-durand"><img src="https://avatars.githubusercontent.com/didier-durand?v=4?s=80" width="80px;" alt="Didier Durand"/><br /><sub><b>Didier Durand</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/karthikdani"><img src="https://avatars.githubusercontent.com/karthikdani?v=4?s=80" width="80px;" alt="Karthik Dani"/><br /><sub><b>Karthik Dani</b></sub></a><br />🪲 🧑‍💻</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/avikde"><img src="https://avatars.githubusercontent.com/avikde?v=4?s=80" width="80px;" alt="Avik De"/><br /><sub><b>Avik De</b></sub></a><br />🪲 🧪</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/AmirAlasady"><img src="https://avatars.githubusercontent.com/AmirAlasady?v=4?s=80" width="80px;" alt="Amir Alasady"/><br /><sub><b>Amir Alasady</b></sub></a><br />🪲</td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/jettythek"><img src="https://avatars.githubusercontent.com/jettythek?v=4?s=80" width="80px;" alt="jettythek"/><br /><sub><b>jettythek</b></sub></a><br />🧑‍💻</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Takosaga"><img src="https://avatars.githubusercontent.com/Takosaga?v=4?s=80" width="80px;" alt="Takosaga"/><br /><sub><b>Takosaga</b></sub></a><br />🪲</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/wz1114841863"><img src="https://avatars.githubusercontent.com/wz1114841863?v=4?s=80" width="80px;" alt="wzz"/><br /><sub><b>wzz</b></sub></a><br />🪲</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/ngbolin"><img src="https://avatars.githubusercontent.com/u/9389997?v=4?v=4?s=80" width="80px;" alt="Ng Bo Lin"/><br /><sub><b>Ng Bo Lin</b></sub></a><br />🧪</td>
     </tr>
   </tbody>
 </table>

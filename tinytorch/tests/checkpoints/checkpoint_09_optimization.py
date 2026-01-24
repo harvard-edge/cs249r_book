@@ -21,7 +21,7 @@ def test_checkpoint_09_optimization():
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.layers import Linear
         from tinytorch.core.activations import ReLU
-        from tinytorch.core.losses import MeanSquaredError
+        from tinytorch.core.losses import MSELoss as MeanSquaredError
         from tinytorch.core.optimizers import SGD, Adam, RMSprop
     except ImportError as e:
         pytest.fail(f"❌ Cannot import required classes - complete Modules 2-10 first: {e}")

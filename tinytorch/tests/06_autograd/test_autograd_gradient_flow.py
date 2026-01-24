@@ -16,8 +16,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.autograd import enable_autograd
 from tinytorch.core.activations import GELU
-# Import transformer to ensure mean/sqrt monkey-patches are applied
-from tinytorch.core import transformer
+# Try to import transformer for mean/sqrt monkey-patches (Module 13)
+# This is optional - tests will skip if not available
+try:
+    from tinytorch.core import transformer
+except ImportError:
+    transformer = None  # Transformer module not yet available
 
 
 def test_arithmetic_gradient_flow():
@@ -126,9 +130,8 @@ def test_layernorm_operations():
     # Test sqrt (monkey-patched in transformer module)
     x = Tensor(np.array([4.0, 9.0, 16.0]), requires_grad=True)
 
-    # Check if sqrt is available (added in later modules)
-    if not hasattr(x, 'sqrt'):
-        pytest.skip("sqrt operation not yet implemented (requires transformer module)")
+    # sqrt should be available - if not, the test will fail (not skip)
+    assert hasattr(x, 'sqrt'), "sqrt operation not implemented - requires transformer module"
 
     sqrt_x = x.sqrt()
     assert sqrt_x.requires_grad, "Sqrt should preserve requires_grad"

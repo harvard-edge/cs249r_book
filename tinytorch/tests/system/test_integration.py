@@ -26,10 +26,46 @@ sys.path.insert(0, project_root)
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU, Sigmoid
-from tinytorch.core.training import MeanSquaredError, CrossEntropyLoss
+from tinytorch.core.losses import MSELoss as MeanSquaredError, CrossEntropyLoss
 from tinytorch.core.optimizers import SGD, Adam
-from tinytorch.nn import Sequential, Conv2d
-import tinytorch.nn.functional as F
+from tinytorch.core.spatial import Conv2d
+from tinytorch.core.dataloader import Dataset, DataLoader
+
+class Sequential:
+    """Simple sequential container for testing."""
+    def __init__(self, layers):
+        self.layers = layers
+    def __call__(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+    def parameters(self):
+        params = []
+        for layer in self.layers:
+            if hasattr(layer, 'parameters'):
+                params.extend(layer.parameters())
+        return params
+
+class F:
+    """Functional interface for testing."""
+    @staticmethod
+    def relu(x):
+        from tinytorch.core.activations import ReLU
+        return ReLU()(x)
+    @staticmethod
+    def sigmoid(x):
+        from tinytorch.core.activations import Sigmoid
+        return Sigmoid()(x)
+    @staticmethod
+    def max_pool2d(x, kernel_size):
+        from tinytorch.core.spatial import MaxPool2d
+        return MaxPool2d(kernel_size)(x)
+    @staticmethod
+    def flatten(x, start_dim=1):
+        import numpy as np
+        shape = x.shape
+        new_shape = shape[:start_dim] + (np.prod(shape[start_dim:]),)
+        return x.reshape(*new_shape)
 
 
 # ============== Complete Training Loop Tests ==============
@@ -48,7 +84,7 @@ def test_basic_training_loop():
     ])
 
     # Setup training
-    optimizer = SGD(model.parameters(), learning_rate=0.01)
+    optimizer = SGD(model.parameters(), lr=0.01)
     criterion = MeanSquaredError()
 
     # Training loop
@@ -96,7 +132,7 @@ def test_minibatch_training():
         Linear(20, 5)
     ])
 
-    optimizer = Adam(model.parameters(), learning_rate=0.001)
+    optimizer = Adam(model.parameters(), lr=0.001)
     criterion = MeanSquaredError()
 
     # Mini-batch training
@@ -147,7 +183,7 @@ def test_classification_training():
         Linear(20, n_classes)
     ])
 
-    optimizer = Adam(model.parameters(), learning_rate=0.01)
+    optimizer = Adam(model.parameters(), lr=0.01)
     criterion = CrossEntropyLoss()
 
     # Training
@@ -173,66 +209,54 @@ def test_classification_training():
 
 def test_dataset_iteration():
     """Dataset and DataLoader work together."""
-    try:
-        from tinytorch.core.dataloader import Dataset, DataLoader
+    class SimpleDataset(Dataset):
+        def __init__(self, size):
+            self.X = np.random.randn(size, 10)
+            self.y = np.random.randn(size, 5)
 
-        class SimpleDataset(Dataset):
-            def __init__(self, size):
-                self.X = np.random.randn(size, 10)
-                self.y = np.random.randn(size, 5)
+        def __len__(self):
+            return len(self.X)
 
-            def __len__(self):
-                return len(self.X)
+        def __getitem__(self, idx):
+            return Tensor(self.X[idx]), Tensor(self.y[idx])
 
-            def __getitem__(self, idx):
-                return Tensor(self.X[idx]), Tensor(self.y[idx])
+    dataset = SimpleDataset(100)
+    dataloader = DataLoader(dataset, batch_size=10, shuffle=True)
 
-        dataset = SimpleDataset(100)
-        dataloader = DataLoader(dataset, batch_size=10, shuffle=True)
+    # Iterate through dataloader
+    batch_count = 0
+    for X_batch, y_batch in dataloader:
+        assert X_batch.shape == (10, 10), f"Wrong batch shape: {X_batch.shape}"
+        assert y_batch.shape == (10, 5), f"Wrong target shape: {y_batch.shape}"
+        batch_count += 1
 
-        # Iterate through dataloader
-        batch_count = 0
-        for X_batch, y_batch in dataloader:
-            assert X_batch.shape == (10, 10), f"Wrong batch shape: {X_batch.shape}"
-            assert y_batch.shape == (10, 5), f"Wrong target shape: {y_batch.shape}"
-            batch_count += 1
-
-        assert batch_count == 10, f"Expected 10 batches, got {batch_count}"
-
-    except ImportError:
-        pytest.skip("DataLoader not implemented")
+    assert batch_count == 10, f"Expected 10 batches, got {batch_count}"
 
 
 def test_data_augmentation_pipeline():
     """Data augmentation in loading pipeline."""
-    try:
-        from tinytorch.core.dataloader import Dataset, DataLoader
+    class AugmentedDataset(Dataset):
+        def __init__(self, size):
+            self.X = np.random.randn(size, 3, 32, 32)
+            self.y = np.random.randint(0, 10, size)
 
-        class AugmentedDataset(Dataset):
-            def __init__(self, size):
-                self.X = np.random.randn(size, 3, 32, 32)
-                self.y = np.random.randint(0, 10, size)
+        def __len__(self):
+            return len(self.X)
 
-            def __len__(self):
-                return len(self.X)
+        def __getitem__(self, idx):
+            # Simple augmentation: random flip
+            x = self.X[idx]
+            if np.random.random() > 0.5:
+                x = np.flip(x, axis=-1)  # Horizontal flip
+            return Tensor(x), Tensor(self.y[idx])
 
-            def __getitem__(self, idx):
-                # Simple augmentation: random flip
-                x = self.X[idx]
-                if np.random.random() > 0.5:
-                    x = np.flip(x, axis=-1)  # Horizontal flip
-                return Tensor(x), Tensor(self.y[idx])
+    dataset = AugmentedDataset(50)
+    dataloader = DataLoader(dataset, batch_size=5, shuffle=False)
 
-        dataset = AugmentedDataset(50)
-        dataloader = DataLoader(dataset, batch_size=5, shuffle=False)
-
-        # Should handle augmented data
-        for X_batch, y_batch in dataloader:
-            assert X_batch.shape == (5, 3, 32, 32), "Augmented batch wrong shape"
-            break  # Just test first batch
-
-    except ImportError:
-        pytest.skip("DataLoader not implemented")
+    # Should handle augmented data
+    for X_batch, y_batch in dataloader:
+        assert X_batch.shape == (5, 3, 32, 32), "Augmented batch wrong shape"
+        break  # Just test first batch
 
 
 # ============== Model Save/Load Tests ==============
@@ -296,7 +320,7 @@ def test_checkpoint_resume_training():
     """Save checkpoint and resume training."""
     # Initial training
     model = Linear(10, 5)
-    optimizer = SGD(model.parameters(), learning_rate=0.01)
+    optimizer = SGD(model.parameters(), lr=0.01)
 
     X = Tensor(np.random.randn(20, 10))
     y = Tensor(np.random.randn(20, 5))
@@ -391,7 +415,7 @@ def test_cnn_to_fc_integration():
     y_true = Tensor(np.random.randint(0, 10, 8))
     loss = CrossEntropyLoss()(output, y_true)
 
-    optimizer = Adam(model.parameters(), learning_rate=0.001)
+    optimizer = Adam(model.parameters(), lr=0.001)
     try:
         optimizer.zero_grad()
         loss.backward()
@@ -443,7 +467,7 @@ def test_encoder_decoder_integration():
 
     # Test training
     loss = MeanSquaredError()(reconstruction, x)
-    optimizer = Adam(model.parameters(), learning_rate=0.001)
+    optimizer = Adam(model.parameters(), lr=0.001)
 
     try:
         optimizer.zero_grad()
@@ -476,7 +500,7 @@ def test_multi_loss_training():
             return params
 
     model = MultiOutputModel()
-    optimizer = Adam(model.parameters(), learning_rate=0.001)
+    optimizer = Adam(model.parameters(), lr=0.001)
 
     # Data
     X = Tensor(np.random.randn(32, 10))
@@ -518,7 +542,7 @@ def test_mnist_pipeline():
         Linear(128, 10)
     ])
 
-    optimizer = Adam(model.parameters(), learning_rate=0.001)
+    optimizer = Adam(model.parameters(), lr=0.001)
     criterion = CrossEntropyLoss()
 
     # Training
@@ -578,7 +602,7 @@ def test_cifar10_pipeline():
             return params
 
     model = SimpleCIFARNet()
-    optimizer = SGD(model.parameters(), learning_rate=0.01)
+    optimizer = SGD(model.parameters(), lr=0.01)
     criterion = CrossEntropyLoss()
 
     # Quick training

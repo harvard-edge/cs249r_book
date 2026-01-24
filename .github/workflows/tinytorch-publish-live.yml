@@ -17,9 +17,8 @@ name: 🔥 TinyTorch Publish (Live)
 #      └─ Run tinytorch-ci.yml tests
 #
 #   3. update-version (if preflight passes)
-#      └─ Bump version in 6 files on dev branch:
-#         - tinytorch/__init__.py
-#         - pyproject.toml
+#      └─ Bump version in 5 files on dev branch:
+#         - pyproject.toml (single source of truth - __init__.py reads from this)
 #         - site/_static/version-badge.js
 #         - site/extra/install.sh
 #         - site/_static/announcement.json
@@ -34,8 +33,8 @@ name: 🔥 TinyTorch Publish (Live)
 #   6. build-and-deploy (if all previous succeed)
 #      └─ Build Jupyter Book, deploy to gh-pages/tinytorch/
 #
-#   7. create-tag (if deploy succeeds)
-#      └─ Create tinytorch-vX.Y.Z tag on main
+#   7. create-tag-and-release (if deploy succeeds)
+#      └─ Create tinytorch-vX.Y.Z tag and GitHub Release (draft)
 #
 #   8. summary
 #      └─ Show results in GitHub Actions UI
@@ -105,7 +104,7 @@ jobs:
         id: version
         run: |
           echo "🔄 Getting latest TinyTorch version..."
-          
+
           # Get latest tinytorch-v* tag, default to v0.0.0 if none exist
           LATEST_VERSION=$(git tag -l "tinytorch-v*" | sort -V | tail -n1)
           if [ -z "$LATEST_VERSION" ]; then
@@ -114,18 +113,18 @@ jobs:
           else
             echo "📊 Latest TinyTorch tag: $LATEST_VERSION"
           fi
-          
+
           # Remove 'tinytorch-v' prefix for calculation
           VERSION_NUM=${LATEST_VERSION#tinytorch-v}
-          
+
           # Split version into components
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_NUM"
           MAJOR=${MAJOR:-0}
           MINOR=${MINOR:-0}
           PATCH=${PATCH:-0}
-          
+
           echo "📊 Previous version: $MAJOR.$MINOR.$PATCH"
-          
+
           # Calculate new version based on release type
           case "${{ github.event.inputs.release_type }}" in
             "major")
@@ -144,10 +143,10 @@ jobs:
               NEW_PATCH=$((PATCH + 1))
               ;;
           esac
-          
+
           NEW_VERSION="tinytorch-v$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
           echo "🎯 New version: $NEW_VERSION (${{ github.event.inputs.release_type }} release)"
-          
+
           # Export for other steps
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "previous_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
@@ -157,7 +156,7 @@ jobs:
     needs: validate-inputs
     uses: ./.github/workflows/tinytorch-ci.yml
     with:
-      preflight_level: 'standard'
+      test_type: 'all'
 
   update-version:
     name: '📝 Update Version in Code'
@@ -174,66 +173,52 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 📝 Update version in tinytorch/__init__.py
-        run: |
-          echo "📝 Updating version in tinytorch/tinytorch/__init__.py..."
-          
-          # Extract just the version number (without tinytorch- prefix)
-          VERSION_NUM="${{ needs.validate-inputs.outputs.new_version }}"
-          VERSION_NUM=${VERSION_NUM#tinytorch-v}
-          
-          # Update __version__ in __init__.py
-          sed -i "s/__version__ = \".*\"/__version__ = \"$VERSION_NUM\"/" tinytorch/tinytorch/__init__.py
-          
-          echo "✅ Version updated to $VERSION_NUM"
-          cat tinytorch/tinytorch/__init__.py | grep "__version__"
-
-      - name: 📝 Update version in pyproject.toml
+      - name: 📝 Update version in pyproject.toml (single source of truth)
         run: |
           echo "📝 Updating version in tinytorch/pyproject.toml..."
-          
+
           VERSION_NUM="${{ needs.validate-inputs.outputs.new_version }}"
           VERSION_NUM=${VERSION_NUM#tinytorch-v}
-          
+
           # Update version in pyproject.toml
           sed -i "s/^version = \".*\"/version = \"$VERSION_NUM\"/" tinytorch/pyproject.toml
-          
+
           echo "✅ pyproject.toml version updated"
           cat tinytorch/pyproject.toml | grep "^version"
 
       - name: 📝 Update version in website badge
         run: |
           echo "📝 Updating version in tinytorch/site/_static/version-badge.js..."
-          
+
           VERSION_NUM="${{ needs.validate-inputs.outputs.new_version }}"
           VERSION_NUM=${VERSION_NUM#tinytorch-v}
-          
+
           # Update version in version-badge.js
           sed -i "s/const version = versionMeta ? versionMeta.content : '[0-9.]*'/const version = versionMeta ? versionMeta.content : '$VERSION_NUM'/" tinytorch/site/_static/version-badge.js
-          
+
           echo "✅ version-badge.js updated"
           cat tinytorch/site/_static/version-badge.js | grep "const version"
 
       - name: 📝 Update version in installer
         run: |
           echo "📝 Updating version in tinytorch/site/extra/install.sh..."
-          
+
           VERSION_NUM="${{ needs.validate-inputs.outputs.new_version }}"
           VERSION_NUM=${VERSION_NUM#tinytorch-v}
-          
+
           # Update version in install.sh
           sed -i "s/TINYTORCH_VERSION=\"[0-9.]*\"/TINYTORCH_VERSION=\"$VERSION_NUM\"/" tinytorch/site/extra/install.sh
-          
+
           echo "✅ install.sh updated"
           cat tinytorch/site/extra/install.sh | grep "TINYTORCH_VERSION"
 
       - name: 📢 Update announcement bar
         run: |
           echo "📢 Updating announcement in tinytorch/site/_static/announcement.json..."
-          
+
           VERSION_NUM="${{ needs.validate-inputs.outputs.new_version }}"
           VERSION_NUM=${VERSION_NUM#tinytorch-v}
-          
+
           # Update announcement.json with new version
           # Link directly to the TinyTorch release tag
           cat > tinytorch/site/_static/announcement.json << EOF
@@ -250,20 +235,20 @@ jobs:
             ]
           }
           EOF
-          
+
           echo "✅ announcement.json updated"
           cat tinytorch/site/_static/announcement.json
 
       - name: 📝 Update README badge
         run: |
           echo "📝 Updating version badge in tinytorch/README.md..."
-          
+
           VERSION_NUM="${{ needs.validate-inputs.outputs.new_version }}"
           VERSION_NUM=${VERSION_NUM#tinytorch-v}
-          
+
           # Update version badge in README.md
           sed -i "s/version-[0-9.]*-D4740C/version-$VERSION_NUM-D4740C/" tinytorch/README.md
-          
+
           echo "✅ README.md badge updated"
           grep "version-" tinytorch/README.md | head -1
 
@@ -271,8 +256,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          git add tinytorch/tinytorch/__init__.py tinytorch/pyproject.toml tinytorch/site/_static/version-badge.js tinytorch/site/extra/install.sh tinytorch/site/_static/announcement.json tinytorch/README.md
+
+          git add tinytorch/pyproject.toml tinytorch/site/_static/version-badge.js tinytorch/site/extra/install.sh tinytorch/site/_static/announcement.json tinytorch/README.md
           git commit -m "chore(tinytorch): bump version to ${{ needs.validate-inputs.outputs.new_version }}" || echo "No changes to commit"
           git push origin dev
 
@@ -389,7 +374,7 @@ jobs:
           commit_message: '🔥 Deploy TinyTorch ${{ needs.validate-inputs.outputs.new_version }} - ${{ github.sha }}'
 
   create-tag:
-    name: '🏷️ Create Release Tag'
+    name: '🏷️ Create Tag & Release'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [validate-inputs, build-and-deploy]
@@ -407,25 +392,64 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
+
           # Fetch latest main (includes the merge commit)
           git fetch origin main
           git checkout main
           git pull origin main
-          
+
           TAG="${{ needs.validate-inputs.outputs.new_version }}"
-          
+
           echo "🏷️ Creating tag: $TAG on commit $(git rev-parse HEAD)"
-          
+
           # Delete existing tag if it exists
           git tag -d "$TAG" 2>/dev/null || true
           git push origin --delete "$TAG" 2>/dev/null || true
-          
+
           # Create annotated tag on current HEAD (latest main)
           git tag -a "$TAG" -m "TinyTorch $TAG: ${{ github.event.inputs.description }}"
           git push origin "$TAG"
-          
+
           echo "✅ Tag $TAG created and pushed"
+
+      - name: 📦 Create GitHub Release (Draft)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.validate-inputs.outputs.new_version }}"
+          PREV_TAG="${{ needs.validate-inputs.outputs.previous_version }}"
+          VERSION_NUM=${TAG#tinytorch-v}
+
+          echo "📦 Creating GitHub Release for $TAG..."
+
+          # Generate changelog from commits since last tag
+          CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" -- tinytorch/ tito/ .github/workflows/tinytorch* 2>/dev/null | head -20)
+
+          # Build release notes
+          cat > /tmp/release-notes.md << NOTES_EOF
+          ## TinyTorch v${VERSION_NUM}
+
+          ${{ github.event.inputs.description }}
+
+          ### Changes since ${PREV_TAG}
+
+          ${CHANGELOG}
+
+          ---
+
+          **Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}
+
+          **Website**: https://mlsysbook.ai/tinytorch/
+          NOTES_EOF
+
+          # Create the release as draft
+          gh release create "$TAG" \
+            --title "TinyTorch v${VERSION_NUM} - ${{ github.event.inputs.description }}" \
+            --notes-file /tmp/release-notes.md \
+            --draft
+
+          echo "✅ Draft release created"
+          echo "📝 Review and publish at: https://github.com/${{ github.repository }}/releases"
 
   summary:
     name: '📋 Publication Summary'
@@ -447,7 +471,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🌐 Access:" >> $GITHUB_STEP_SUMMARY
           echo "- 📖 [TinyTorch Website](https://mlsysbook.ai/tinytorch/)" >> $GITHUB_STEP_SUMMARY
-          echo "- 🏷️ [Release Tag](https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate-inputs.outputs.new_version }})" >> $GITHUB_STEP_SUMMARY
+          echo "- 🏷️ [Release](https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate-inputs.outputs.new_version }})" >> $GITHUB_STEP_SUMMARY
 
   fail-validation:
     name: '❌ Validation Failed'

@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
+from tinytorch.perf.benchmarking import Benchmark, TinyMLPerf
 
 
 class TestBenchmarkBasics:
@@ -35,30 +36,21 @@ class TestBenchmarkBasics:
 
     def test_benchmark_import(self):
         """Verify Benchmark can be imported."""
-        try:
-            from tinytorch.perf.benchmarking import Benchmark, TinyMLPerf
-            assert Benchmark is not None
-            assert TinyMLPerf is not None
-        except ImportError as e:
-            pytest.skip(f"Benchmark not yet exported: {e}")
+        assert Benchmark is not None
+        assert TinyMLPerf is not None
 
     def test_benchmark_can_instantiate(self):
         """Verify Benchmark can be created."""
-        try:
-            from tinytorch.perf.benchmarking import Benchmark
+        # Create simple dummy model
+        class DummyModel:
+            def forward(self, x):
+                return x
 
-            # Create simple dummy model
-            class DummyModel:
-                def forward(self, x):
-                    return x
+        models = [DummyModel()]
+        datasets = [[(Tensor(np.random.randn(10, 10)), Tensor(np.zeros(10)))]]
 
-            models = [DummyModel()]
-            datasets = [[(Tensor(np.random.randn(10, 10)), Tensor(np.zeros(10)))]]
-
-            bench = Benchmark(models, datasets)
-            assert bench is not None
-        except ImportError:
-            pytest.skip("Benchmark not yet exported")
+        bench = Benchmark(models, datasets)
+        assert bench is not None
 
     def test_measure_throughput(self):
         """
@@ -66,11 +58,6 @@ class TestBenchmarkBasics:
 
         WHY: Throughput (items/second) is a key performance metric.
         """
-        try:
-            from tinytorch.perf.benchmarking import Benchmark
-        except ImportError:
-            pytest.skip("Benchmark not yet exported")
-
         # Simple model
         class SimpleModel:
             def __init__(self):
@@ -102,11 +89,6 @@ class TestTinyMLPerf:
 
         WHY: This is the capstone benchmarking tool students build.
         """
-        try:
-            from tinytorch.perf.benchmarking import TinyMLPerf
-        except ImportError:
-            pytest.skip("TinyMLPerf not yet exported")
-
         # Create and run minimal benchmark
         mlperf = TinyMLPerf()
 
@@ -123,11 +105,6 @@ class TestBenchmarkMetrics:
 
     def test_latency_is_positive(self):
         """Latency must always be positive."""
-        try:
-            from tinytorch.perf.benchmarking import Benchmark
-        except ImportError:
-            pytest.skip("Benchmark not yet exported")
-
         class SimpleModel:
             def forward(self, x):
                 return x * 2
@@ -150,11 +127,6 @@ class TestBenchmarkMetrics:
         WHY: Benchmarks should be reproducible. Large variance
         means we can't trust the measurements.
         """
-        try:
-            from tinytorch.perf.benchmarking import Benchmark
-        except ImportError:
-            pytest.skip("Benchmark not yet exported")
-
         class SimpleModel:
             def __init__(self):
                 self.layer = Linear(10, 10)

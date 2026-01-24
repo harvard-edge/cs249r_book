@@ -1012,7 +1012,7 @@ class MilestoneCommand(BaseCommand):
             all_script_configs = milestone["scripts"]
             all_scripts = [(s["name"], s["script"], s.get("description", "")) for s in all_script_configs]
 
-            # Handle --part flag for multi-part milestones
+            # Handle --part flag for multipart milestones
             if args.part is not None:
                 if args.part < 1 or args.part > len(all_scripts):
                     console.print(Panel(
@@ -1412,10 +1412,14 @@ class MilestoneCommand(BaseCommand):
         # Check if user is logged in
         if auth.is_logged_in():
             console.print()
-            should_sync = Confirm.ask(
-                f"[cyan]Would you like to sync this achievement to your profile?[/cyan]",
-                default=True
-            )
+            try:
+                should_sync = Confirm.ask(
+                    f"[cyan]Would you like to sync this achievement to your profile?[/cyan]",
+                    default=True
+                )
+            except EOFError:
+                # Non-interactive mode - skip sync prompt
+                should_sync = False
 
             if should_sync:
                 try:

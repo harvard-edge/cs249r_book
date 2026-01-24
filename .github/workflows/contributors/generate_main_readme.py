@@ -15,40 +15,30 @@ import re
 import sys
 from pathlib import Path
 
-# Contribution type to emoji mapping
+# Emoji mapping for contribution types (only types actually in use)
+# Synced with generate_readme_tables.py
 CONTRIBUTION_EMOJIS = {
-    "bug": "🐛",
-    "code": "💻",
-    "design": "🎨",
-    "doc": "📖",
-    "ideas": "💡",
-    "review": "👀",
-    "test": "🧪",
-    "tool": "🔧",
-    "tutorial": "✅",
-    "maintenance": "🚧",
-    "infra": "🚇",
-    "question": "💬",
-    "translation": "🌍",
-    "content": "🖋",
-    "example": "💡",
-    "security": "🔐",
-    "financial": "💵",
-    "fundingFinding": "🔍",
-    "eventOrganizing": "📋",
-    "talk": "📢",
-    "video": "📹",
-    "audio": "🔊",
-    "data": "🔣",
-    "platform": "📦",
-    "projectManagement": "📆",
-    "mentoring": "🧑‍🏫",
-    "plugin": "🔌",
-    "userTesting": "📓",
-    "a11y": "♿️",
-    "business": "💼",
-    "research": "🔬",
-    "promotion": "📣",
+    "bug": "🪲",             # Bug Hunter
+    "code": "🧑‍💻",            # Code Contributor
+    "design": "🎨",          # Design Artist
+    "doc": "✍️",             # Word Wizard
+    "ideas": "🧠",           # Idea Generator
+    "review": "🔎",          # Code Reviewer
+    "test": "🧪",            # Test Engineer
+    "tool": "🛠️",           # Tool Builder
+}
+
+# Legend for contribution types (shown in README)
+# Only includes types currently in use across all projects
+CONTRIBUTION_LEGEND = {
+    "bug": ("🪲", "Bug Hunter"),
+    "code": ("🧑‍💻", "Code Contributor"),
+    "doc": ("✍️", "Word Wizard"),
+    "design": ("🎨", "Design Artist"),
+    "ideas": ("🧠", "Idea Generator"),
+    "review": ("🔎", "Code Reviewer"),
+    "test": ("🧪", "Test Engineer"),
+    "tool": ("🛠️", "Tool Builder"),
 }
 
 
@@ -60,7 +50,7 @@ def load_config(path: Path) -> dict:
         return json.load(f)
 
 
-def generate_contributor_cell(contributor: dict, show_badges: bool = True) -> str:
+def generate_contributor_cell(contributor: dict, show_badges: bool = True, image_size: int = 50, width_pct: str = "11.11%") -> str:
     """Generate HTML for a single contributor cell."""
     login = contributor.get("login", "")
     name = contributor.get("name", login)
@@ -74,22 +64,39 @@ def generate_contributor_cell(contributor: dict, show_badges: bool = True) -> st
         badges = " ".join(CONTRIBUTION_EMOJIS.get(c, "") for c in contributions)
         badges = f"<br />{badges}" if badges.strip() else ""
 
-    return f'''      <td align="center" valign="top" width="14.28%"><a href="{profile}"><img src="{avatar_url}?v=4?s=80" width="80px;" alt="{name}"/><br /><sub><b>{name}</b></sub></a>{badges}</td>'''
+    return f'''      <td align="center" valign="top" width="{width_pct}"><a href="{profile}"><img src="{avatar_url}?v=4?s={image_size}" width="{image_size}px;" alt="{name}"/><br /><sub><b>{name}</b></sub></a>{badges}</td>'''
 
 
-def generate_contributor_table(contributors: list, show_badges: bool = True) -> str:
-    """Generate an HTML table for contributors."""
+def generate_contributor_table(contributors: list, show_badges: bool = True, cols: int = 9, image_size: int = 50) -> str:
+    """Generate an HTML table for contributors.
+
+    Args:
+        contributors: List of contributor dicts
+        show_badges: Whether to show contribution badges
+        cols: Number of columns per row (default 9 for compact display)
+        image_size: Size of avatar images in pixels (default 50 for compact display)
+    """
     if not contributors:
         return "<p><em>Coming soon!</em></p>"
+
+    # Sort by contribution count (most contributions first)
+    sorted_contributors = sorted(
+        contributors,
+        key=lambda c: len(c.get("contributions", [])),
+        reverse=True
+    )
+
+    # Calculate width percentage based on columns
+    width_pct = f"{100/cols:.2f}%"
 
     rows = []
     row_cells = []
 
-    for i, contributor in enumerate(contributors):
-        row_cells.append(generate_contributor_cell(contributor, show_badges))
+    for i, contributor in enumerate(sorted_contributors):
+        row_cells.append(generate_contributor_cell(contributor, show_badges, image_size, width_pct))
 
-        # 7 contributors per row
-        if len(row_cells) == 7:
+        # Dynamic columns per row
+        if len(row_cells) == cols:
             rows.append("    <tr>\n" + "\n".join(row_cells) + "\n    </tr>")
             row_cells = []
 
@@ -102,6 +109,12 @@ def generate_contributor_table(contributors: list, show_badges: bool = True) -> 
 {chr(10).join(rows)}
   </tbody>
 </table>'''
+
+
+def generate_legend() -> str:
+    """Generate a compact legend for contribution types."""
+    items = [f"{emoji} {title}" for emoji, title in CONTRIBUTION_LEGEND.values()]
+    return " · ".join(items)
 
 
 def generate_sectioned_contributors(repo_root: Path) -> str:
@@ -129,11 +142,16 @@ def generate_sectioned_contributors(repo_root: Path) -> str:
     kits_table = generate_contributor_table(kits_contributors)
     labs_table = generate_contributor_table(labs_contributors)
 
+    # Generate legend
+    legend = generate_legend()
+
     return f'''## Contributors
 
-Thanks goes to these wonderful people who have contributed to making this resource better for everyone ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
+Thanks goes to these wonderful people who have contributed to making this resource better for everyone!
 
-### 📖 Textbook Contributors ({book_count})
+**Legend:** {legend}
+
+### 📖 Textbook Contributors
 
 <!-- BOOK-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
@@ -146,7 +164,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 ---
 
-### 🔥 TinyTorch Contributors ({tinytorch_count})
+### 🔥 TinyTorch Contributors
 
 <!-- TINYTORCH-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
@@ -159,7 +177,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 ---
 
-### 🛠️ Hardware Kits Contributors ({kits_count})
+### 🛠️ Hardware Kits Contributors
 
 <!-- KITS-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
@@ -172,7 +190,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 ---
 
-### 🧪 Labs Contributors ({labs_count})
+### 🧪 Labs Contributors
 
 <!-- LABS-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
@@ -181,14 +199,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
-<!-- LABS-CONTRIBUTORS-END -->
-
----
-
-**Recognize a contributor:** Comment on any issue or PR:
-```
-@all-contributors please add @username for doc, code, bug, or ideas
-```'''
+<!-- LABS-CONTRIBUTORS-END -->'''
 
 
 def update_readme(repo_root: Path, dry_run: bool = False) -> bool:

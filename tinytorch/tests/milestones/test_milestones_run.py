@@ -34,7 +34,7 @@ class TestMilestone01Perceptron:
         """
         script = PROJECT_ROOT / "milestones" / "01_1958_perceptron" / "01_rosenblatt_forward.py"
         if not script.exists():
-            pytest.skip(f"Script not found: {script}")
+            pytest.fail(f"Script not found: {script}")
 
         result = subprocess.run(
             [sys.executable, str(script)],
@@ -53,7 +53,7 @@ class TestMilestone01Perceptron:
         """
         script = PROJECT_ROOT / "milestones" / "01_1958_perceptron" / "02_rosenblatt_trained.py"
         if not script.exists():
-            pytest.skip(f"Script not found: {script}")
+            pytest.fail(f"Script not found: {script}")
 
         result = subprocess.run(
             [sys.executable, str(script)],
@@ -76,7 +76,7 @@ class TestMilestone02XOR:
         """
         script = PROJECT_ROOT / "milestones" / "02_1969_xor" / "01_xor_crisis.py"
         if not script.exists():
-            pytest.skip(f"Script not found: {script}")
+            pytest.fail(f"Script not found: {script}")
 
         result = subprocess.run(
             [sys.executable, str(script)],
@@ -95,7 +95,7 @@ class TestMilestone02XOR:
         """
         script = PROJECT_ROOT / "milestones" / "02_1969_xor" / "02_xor_solved.py"
         if not script.exists():
-            pytest.skip(f"Script not found: {script}")
+            pytest.fail(f"Script not found: {script}")
 
         result = subprocess.run(
             [sys.executable, str(script)],
@@ -118,7 +118,7 @@ class TestMilestone03MLP:
         """
         script = PROJECT_ROOT / "milestones" / "03_1986_mlp" / "01_rumelhart_tinydigits.py"
         if not script.exists():
-            pytest.skip(f"Script not found: {script}")
+            pytest.fail(f"Script not found: {script}")
 
         result = subprocess.run(
             [sys.executable, str(script)],
@@ -141,7 +141,7 @@ class TestMilestone04CNN:
         """
         script = PROJECT_ROOT / "milestones" / "04_1998_cnn" / "01_lecun_tinydigits.py"
         if not script.exists():
-            pytest.skip(f"Script not found: {script}")
+            pytest.fail(f"Script not found: {script}")
 
         result = subprocess.run(
             [sys.executable, str(script)],
@@ -164,7 +164,7 @@ class TestMilestone05Transformer:
         """
         script = PROJECT_ROOT / "milestones" / "05_2017_transformer" / "00_vaswani_attention_proof.py"
         if not script.exists():
-            pytest.skip(f"Script not found: {script}")
+            pytest.fail(f"Script not found: {script}")
 
         result = subprocess.run(
             [sys.executable, str(script)],
@@ -190,7 +190,7 @@ class TestMilestone06MLPerf:
         """
         script = PROJECT_ROOT / "milestones" / "06_2018_mlperf" / "01_optimization_olympics.py"
         if not script.exists():
-            pytest.skip(f"Script not found: {script}")
+            pytest.fail(f"Script not found: {script}")
 
         result = subprocess.run(
             [sys.executable, str(script)],

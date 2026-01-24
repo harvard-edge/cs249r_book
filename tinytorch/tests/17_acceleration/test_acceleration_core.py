@@ -20,6 +20,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
+from tinytorch.perf.acceleration import (
+    vectorized_matmul,
+    fused_gelu,
+    tiled_matmul
+)
 
 
 class TestAccelerationBasics:
@@ -27,17 +32,9 @@ class TestAccelerationBasics:
 
     def test_acceleration_import(self):
         """Verify acceleration module can be imported."""
-        try:
-            from tinytorch.perf.acceleration import (
-                vectorized_matmul,
-                fused_gelu,
-                tiled_matmul
-            )
-            assert vectorized_matmul is not None
-            assert fused_gelu is not None
-            assert tiled_matmul is not None
-        except ImportError as e:
-            pytest.skip(f"Acceleration functions not yet exported: {e}")
+        assert vectorized_matmul is not None
+        assert fused_gelu is not None
+        assert tiled_matmul is not None
 
     def test_vectorized_matmul_correctness(self):
         """
@@ -46,11 +43,6 @@ class TestAccelerationBasics:
         WHY: Optimization must not change results. Speed without
         correctness is useless.
         """
-        try:
-            from tinytorch.perf.acceleration import vectorized_matmul
-        except ImportError:
-            pytest.skip("vectorized_matmul not yet exported")
-
         A = Tensor(np.random.randn(32, 64).astype(np.float32))
         B = Tensor(np.random.randn(64, 32).astype(np.float32))
 
@@ -73,11 +65,6 @@ class TestAccelerationBasics:
 
         WHY: Kernel fusion must preserve numerical accuracy.
         """
-        try:
-            from tinytorch.perf.acceleration import fused_gelu
-        except ImportError:
-            pytest.skip("fused_gelu not yet exported")
-
         # Test basic properties
         x = Tensor(np.array([-2, -1, 0, 1, 2], dtype=np.float32))
         result = fused_gelu(x)
@@ -97,11 +84,6 @@ class TestAccelerationBasics:
 
         WHY: Cache-aware tiling must preserve numerical accuracy.
         """
-        try:
-            from tinytorch.perf.acceleration import tiled_matmul, vectorized_matmul
-        except ImportError:
-            pytest.skip("tiled_matmul not yet exported")
-
         A = Tensor(np.random.randn(128, 128).astype(np.float32))
         B = Tensor(np.random.randn(128, 128).astype(np.float32))
 

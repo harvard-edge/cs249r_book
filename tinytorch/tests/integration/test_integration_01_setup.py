@@ -28,10 +28,8 @@ from unittest.mock import patch, MagicMock
 MODULES_PATH = Path(__file__).parent.parent.parent / "modules" / "01_setup"
 sys.path.insert(0, str(MODULES_PATH))
 
-try:
-    from setup_dev import setup_environment, verify_environment, configure_and_display
-except ImportError as e:
-    pytest.skip(f"Cannot import setup module: {e}", allow_module_level=True)
+# Import directly - if this fails, the test should fail
+from setup_dev import setup_environment, verify_environment, configure_and_display
 
 
 class TestSetupEnvironmentIndividual:

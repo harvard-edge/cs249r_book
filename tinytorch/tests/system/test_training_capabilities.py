@@ -17,9 +17,22 @@ sys.path.insert(0, project_root)
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU, Sigmoid
-from tinytorch.core.training import MeanSquaredError, CrossEntropyLoss
+from tinytorch.core.losses import MSELoss as MeanSquaredError, CrossEntropyLoss
 from tinytorch.core.optimizers import SGD, Adam
-from tinytorch.nn import Sequential
+class Sequential:
+    """Simple sequential container for testing."""
+    def __init__(self, layers):
+        self.layers = layers
+    def __call__(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+    def parameters(self):
+        params = []
+        for layer in self.layers:
+            if hasattr(layer, 'parameters'):
+                params.extend(layer.parameters())
+        return params
 
 
 class TrainingTester:
@@ -69,7 +82,7 @@ def test_linear_regression():
 
     # Simple linear model
     model = Linear(1, 1)
-    optimizer = SGD(model.parameters(), learning_rate=0.01)
+    optimizer = SGD(model.parameters(), lr=0.01)
     criterion = MeanSquaredError()
 
     # Training loop
@@ -119,7 +132,7 @@ def test_xor_learning():
         Sigmoid()
     ])
 
-    optimizer = Adam(model.parameters(), learning_rate=0.1)
+    optimizer = Adam(model.parameters(), lr=0.1)
     criterion = MeanSquaredError()
 
     # Training
@@ -183,7 +196,7 @@ def test_multiclass_classification():
         Linear(8, n_classes)
     ])
 
-    optimizer = Adam(model.parameters(), learning_rate=0.01)
+    optimizer = Adam(model.parameters(), lr=0.01)
     criterion = CrossEntropyLoss()
 
     # Training
@@ -261,7 +274,7 @@ def test_gradient_flow():
 def test_optimizer_updates():
     """Test that optimizers actually update parameters."""
     model = Linear(5, 3)
-    optimizer = SGD(model.parameters(), learning_rate=0.1)
+    optimizer = SGD(model.parameters(), lr=0.1)
 
     # Get initial weights
     initial_weights = model.weight.data.copy()
@@ -293,7 +306,7 @@ def test_learning_rate_effect():
     """Test that learning rate affects convergence speed."""
     def train_with_lr(lr):
         model = Linear(1, 1)
-        optimizer = SGD(model.parameters(), learning_rate=lr)
+        optimizer = SGD(model.parameters(), lr=lr)
         criterion = MeanSquaredError()
 
         # Simple data
@@ -339,7 +352,7 @@ def test_adam_vs_sgd():
             Sigmoid()
         ])
 
-        optimizer = opt_class(model.parameters(), learning_rate=0.01)
+        optimizer = opt_class(model.parameters(), lr=0.01)
         criterion = MeanSquaredError()
 
         losses = []

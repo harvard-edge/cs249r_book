@@ -74,6 +74,10 @@ from tinytorch.core.layers import Linear
 from tinytorch.core.losses import MSELoss, CrossEntropyLoss
 from tinytorch.core.optimizers import SGD, AdamW
 
+# Enable autograd for gradient tracking (required for training)
+from tinytorch.core.autograd import enable_autograd
+enable_autograd()
+
 # Constants for learning rate scheduling defaults
 DEFAULT_MAX_LR = 0.1  # Default maximum learning rate for cosine schedule
 DEFAULT_MIN_LR = 0.01  # Default minimum learning rate for cosine schedule

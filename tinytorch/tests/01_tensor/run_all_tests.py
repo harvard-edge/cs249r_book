@@ -24,7 +24,7 @@ def run_module_tests() -> Dict:
     console = Console()
 
     # Update module number and name
-    MODULE_NUMBER = "02"
+    MODULE_NUMBER = "01"
     MODULE_NAME = "Tensor"
 
     # Header

@@ -82,7 +82,33 @@ python scan_contributors.py [--project PROJECT] [--output FORMAT] [--update]
 
 ## Workflow Integration
 
-The `update-contributors.yml` workflow runs these scripts automatically:
+There are two workflows that manage contributors:
+
+### 1. `all-contributors-add.yml` - Comment-Triggered (Recommended)
+
+Automatically adds contributors when you comment on any issue or PR:
+
+```
+@all-contributors please add @username for bug, code, doc
+```
+
+**How it works:**
+1. Parses the comment to extract username and contribution types
+2. Detects which project (book, tinytorch, kits, labs) from labels/title
+3. Updates the project's `.all-contributorsrc` file
+4. Regenerates README tables
+5. Commits and pushes directly (no PR needed!)
+6. Replies to confirm the addition
+
+**Project Detection:**
+- Add `tinytorch` label OR mention "tinytorch" in issue title → tinytorch project
+- Add `kits` label OR mention "kits" in issue title → kits project
+- Add `labs` label OR mention "labs" in issue title → labs project
+- Otherwise → book project (default)
+
+### 2. `update-contributors.yml` - Push-Triggered
+
+Runs when `.all-contributorsrc` files are manually edited and pushed:
 
 ```
 Trigger: Push to dev/main with .all-contributorsrc changes
@@ -97,41 +123,37 @@ Steps:
 
 ## Adding Contributors
 
-### Method 1: Bot Command (Recommended)
+### Method 1: Comment Command (Recommended)
 
 Comment on any issue or PR:
 ```
-@all-contributors please add @username for doc, code, bug, or ideas
+@all-contributors please add @username for bug, code, doc
 ```
+
+The workflow will automatically:
+- Look up the user's GitHub profile
+- Add them to the correct project's contributor list
+- Update all README files
+- Reply with confirmation
 
 ### Method 2: Manual Edit
 
 1. Edit the appropriate `.all-contributorsrc` file
 2. Add entry with: login, name, avatar_url, contributions
-3. Run the workflow or scripts manually
+3. Push to dev/main to trigger the update workflow
 
 ## Contribution Types
 
-| Type | Emoji | Description |
-|------|-------|-------------|
-| bug | 🐛 | Bug reports |
-| code | 💻 | Code contributions |
-| doc | 📖 | Documentation |
-| design | 🎨 | Design work |
-| ideas | 💡 | Ideas and suggestions |
-| review | 👀 | Code review |
-| test | 🧪 | Testing |
-| tool | 🔧 | Tools and infrastructure |
-| tutorial | ✅ | Tutorials |
-| maintenance | 🚧 | Maintenance |
+We use the standard [All Contributors emoji key](https://allcontributors.org/docs/en/emoji-key).
 
-See [All Contributors emoji key](https://allcontributors.org/docs/en/emoji-key) for full list.
+Common types: `bug`, `code`, `doc`, `design`, `ideas`, `review`, `test`, `tool`, `tutorial`, `maintenance`, `infra`, `research`
 
 ## File Structure
 
 ```
 .github/workflows/
-├── update-contributors.yml      # Workflow definition
+├── all-contributors-add.yml     # Comment-triggered workflow (main)
+├── update-contributors.yml      # Push-triggered workflow
 └── contributors/
     ├── README.md                 # This file
     ├── requirements.txt          # Python dependencies

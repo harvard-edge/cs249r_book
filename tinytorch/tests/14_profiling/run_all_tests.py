@@ -25,7 +25,7 @@ def run_module_tests() -> Dict:
 
     # Update module number and name
     MODULE_NUMBER = "14"
-    MODULE_NAME = "KV Caching"
+    MODULE_NAME = "Profiling"
 
     # Header
     console.print(Panel(f"[bold blue]Module {MODULE_NUMBER}: {MODULE_NAME} - Test Suite[/bold blue]",

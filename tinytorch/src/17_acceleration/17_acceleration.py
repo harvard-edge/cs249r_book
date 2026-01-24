@@ -277,7 +277,7 @@ def vectorized_matmul(a: Tensor, b: Tensor) -> Tensor:
     # This calls BLAS GEMM (General Matrix Multiply), which uses:
     # - SIMD vectorization for parallel arithmetic
     # - Cache blocking for memory efficiency
-    # - Multi-threading on multi-core systems
+    # - Multi-threading on multicore systems
     result_data = np.matmul(a.data, b.data)
 
     return Tensor(result_data)

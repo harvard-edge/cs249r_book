@@ -23,6 +23,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from tinytorch.core.tokenization import CharTokenizer
+
 
 class TestTokenizerBasics:
     """Test basic tokenization functionality."""
@@ -37,25 +39,19 @@ class TestTokenizerBasics:
         STUDENT LEARNING: Each token gets a unique integer ID.
         "hello" might be 156, "world" might be 234.
         """
-        try:
-            from tinytorch.core.tokenization import CharTokenizer
+        # Build vocab from test text
+        tokenizer = CharTokenizer()
+        tokenizer.build_vocab(["hello world"])
 
-            # Build vocab from test text
-            tokenizer = CharTokenizer()
-            tokenizer.build_vocab(["hello world"])
+        text = "hello world"
+        token_ids = tokenizer.encode(text)
 
-            text = "hello world"
-            token_ids = tokenizer.encode(text)
-
-            assert isinstance(token_ids, (list, np.ndarray)), (
-                "encode() should return list or array of IDs"
-            )
-            assert all(isinstance(id, (int, np.integer)) for id in token_ids), (
-                "Token IDs should be integers"
-            )
-
-        except ImportError:
-            pytest.skip("Tokenizer not implemented yet")
+        assert isinstance(token_ids, (list, np.ndarray)), (
+            "encode() should return list or array of IDs"
+        )
+        assert all(isinstance(id, (int, np.integer)) for id in token_ids), (
+            "Token IDs should be integers"
+        )
 
     def test_tokenizer_decode(self):
         """
@@ -67,25 +63,19 @@ class TestTokenizerBasics:
         STUDENT LEARNING: Tokenization should be (mostly) reversible.
         Some normalization may occur (case, whitespace).
         """
-        try:
-            from tinytorch.core.tokenization import CharTokenizer
+        # Build vocab from test text
+        tokenizer = CharTokenizer()
+        tokenizer.build_vocab(["hello world"])
 
-            # Build vocab from test text
-            tokenizer = CharTokenizer()
-            tokenizer.build_vocab(["hello world"])
+        text = "hello world"
+        token_ids = tokenizer.encode(text)
+        decoded = tokenizer.decode(token_ids)
 
-            text = "hello world"
-            token_ids = tokenizer.encode(text)
-            decoded = tokenizer.decode(token_ids)
-
-            assert "hello" in decoded.lower() and "world" in decoded.lower(), (
-                f"decode(encode(text)) should recover the text.\n"
-                f"  Original: '{text}'\n"
-                f"  Recovered: '{decoded}'"
-            )
-
-        except ImportError:
-            pytest.skip("Tokenizer decode not implemented yet")
+        assert "hello" in decoded.lower() and "world" in decoded.lower(), (
+            f"decode(encode(text)) should recover the text.\n"
+            f"  Original: '{text}'\n"
+            f"  Recovered: '{decoded}'"
+        )
 
     def test_vocabulary_size(self):
         """
@@ -97,19 +87,13 @@ class TestTokenizerBasics:
         STUDENT LEARNING: Larger vocab = more precise tokens but
         larger embedding matrix. Trade-off!
         """
-        try:
-            from tinytorch.core.tokenization import CharTokenizer
+        tokenizer = CharTokenizer()
+        tokenizer.build_vocab(["hello world"])
 
-            tokenizer = CharTokenizer()
-            tokenizer.build_vocab(["hello world"])
-
-            vocab_size = tokenizer.vocab_size
-            assert isinstance(vocab_size, int) and vocab_size > 0, (
-                "Tokenizer should have positive vocab_size"
-            )
-
-        except (ImportError, AttributeError):
-            pytest.skip("Tokenizer vocab_size not implemented yet")
+        vocab_size = tokenizer.vocab_size
+        assert isinstance(vocab_size, int) and vocab_size > 0, (
+            "Tokenizer should have positive vocab_size"
+        )
 
 
 if __name__ == "__main__":
