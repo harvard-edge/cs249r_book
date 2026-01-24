@@ -246,7 +246,7 @@ This historical progression reveals a crucial insight: each wave of hardware spe
 
 +-----------+------------------------------------+---------------------------------------------+----------------------------------------------+
 | **Era**   | **Computational Pattern**          | **Architecture Examples**                   | **Characteristics**                          |
-+==========:+:===================================+:============================================+:=============================================+
++:==========+:===================================+:============================================+:=============================================+
 | **1980s** | Floating-Point & Signal Processing | FPU, DSP                                    | <ul><li>Single-purpose engines</li>          |
 |           |                                    |                                             | <li>Focused instruction sets</li>            |
 |           |                                    |                                             | <li>Coprocessor interfaces</li></ul>         |
@@ -1143,7 +1143,7 @@ Modern AI processors exhibit a range of design trade-offs based on their intende
 
 +--------------------+----------------+------------------------+-------------------------+-----------------------+
 | **Processor**      | **SIMD Width** | **Tensor Core Size**   | **Processing Elements** | **Primary Workloads** |
-+===================:+===============:+=======================:+========================:+:======================+
++:===================+===============:+=======================:+========================:+:======================+
 | **NVIDIA A100**    | 1024-bit       | $4\times4\times4$ FP16 | 108 SMs                 | Training, HPC         |
 +--------------------+----------------+------------------------+-------------------------+-----------------------+
 | **Google TPUv4**   | 128-wide       | $128\times128$ BF16    | 2 cores/chip            | Training              |
@@ -1171,7 +1171,7 @@ These dynamics help explain the rapid adoption of newer accelerators despite hig
 
 +-------------------+----------------------+-----------------------+----------------------+-----------------------+
 | **Accelerator**   | **List Price (USD)** | **Peak FLOPS (FP16)** | **Memory Bandwidth** | **Price/Performance** |
-+==================:+=====================:+======================:+=====================:+======================:+
++:==================+=====================:+======================:+=====================:+======================:+
 | **NVIDIA V100**   | ~$9,000              | 125 TFLOPS            | 900 GB/s             | $72/TFLOP             |
 +-------------------+----------------------+-----------------------+----------------------+-----------------------+
 | **NVIDIA A100**   | ~$15,000             | 312 TFLOPS            | 1,935 GB/s           | $48/TFLOP             |
@@ -1740,7 +1740,7 @@ The roofline visualization shows performance (TFLOPS) on the vertical axis and a
 
 +--------------------------+---------------------------------------+------------------------------------------+-------------------------+
 | **Accelerator**          | **Peak FP16**                         | **Bandwidth**                            | **Ridge Point**         |
-+=========================:+======================================:+=========================================:+========================:+
++:=========================+======================================:+=========================================:+========================:+
 | **GPU (2017-era)**       | \(\sim 10^2\) TFLOPS                  | \(\sim 10^3\) GB/s                       | \(\sim 10^2\) FLOP/byte |
 +--------------------------+---------------------------------------+------------------------------------------+-------------------------+
 | **GPU (2020-era)**       | \(\sim 10^2\) TFLOPS                  | \(\sim 10^3\) GB/s to \(\sim 10^0\) TB/s | \(\sim 10^2\) FLOP/byte |
@@ -1841,6 +1841,10 @@ $$\text{AI} = \frac{59.2 \text{ GFLOPs}}{78.3 \text{ MB}} = 756 \text{ FLOP/byte
 This is **well above** A100's ridge point of 156 FLOP/byte, making this operation **compute-bound**. The layer will achieve near-peak performance of ~312 TFLOPS (FP16 with Tensor Cores).
 :::
 
+The convolutional layer's high arithmetic intensity arises from its weight reuse pattern: the same 3×3 kernel is applied across all spatial locations, amortizing the cost of loading weights across millions of output computations. This is the architectural pattern that makes CNNs so efficient on modern accelerators.
+
+However, not all layers in a neural network exhibit this favorable profile. The fully connected (dense) layers that typically appear at the end of classification networks, or as the projection layers in transformers, have fundamentally different arithmetic intensity characteristics. Understanding this contrast is essential for predicting where bottlenecks will occur in end-to-end model execution.
+
 ::: {.callout-notebook title="Worked Example: Dense Layer Analysis"}
 
 Consider a fully connected layer: input (batch=32, features=2048) → output (batch=32, features=2048) on the same A100:
@@ -1865,6 +1869,10 @@ $$P_{\text{attainable}} = 2000 \text{ GB/s} \times 31.5 \text{ FLOP/byte} = 63 \
 
 This is only 20% of peak compute capability, demonstrating the memory wall effect for small batch sizes.
 :::
+
+The dense layer's lower arithmetic intensity stems from limited weight reuse: each weight element is used only once per batch element, whereas convolutional weights are reused across spatial dimensions. This difference explains why transformer inference (dominated by dense projections) is typically memory-bound while CNN inference can be compute-bound.
+
+The situation becomes even more extreme for element-wise operations like normalization layers. These operations perform very little computation relative to the data they touch—each element is loaded, transformed by a simple formula, and written back. There is essentially no opportunity for data reuse.
 
 ::: {.callout-notebook title="Worked Example: LayerNorm Analysis"}
 
@@ -1930,6 +1938,10 @@ Example: Dense layer with M=N=2048
 
 This explains the 10-100× throughput improvement from batching in production inference systems, as the MLPerf scenarios in @sec-benchmarking-ai demonstrate.
 :::
+
+The batch size analysis reveals why inference serving systems are designed around batching: it fundamentally changes the arithmetic intensity regime of memory-bound workloads. However, batching introduces latency trade-offs—requests must wait in a queue until a batch forms. This tension between throughput (favoring large batches) and latency (favoring small batches) is a central challenge in ML serving systems, explored in depth in @sec-model-serving-systems.
+
+For workloads where batching is impractical—such as interactive LLM generation where users expect streaming responses—the arithmetic intensity remains fundamentally low. Understanding this ceiling is essential for setting realistic performance expectations.
 
 ::: {.callout-notebook title="Engineering Calculation: The Throughput Ceiling"}
 **The Problem:** Predict the maximum possible utilization of an NVIDIA A100 when running GPT-2 inference (batch size 1).
@@ -3274,7 +3286,7 @@ Before procuring accelerators, work through this decision framework:
 
 +-----------------------------------------------+-------------------------------+-----------------------------+
 | **If Your Workload Is...**                    | **Prioritize...**             | **Deprioritize...**         |
-+==============================================:+:==============================+:============================+
++:==============================================+:==============================+:============================+
 | ****Memory-bound** (AI &lt; 50 FLOP/byte)**   | Memory bandwidth (GB/s)       | Peak TFLOPS                 |
 +-----------------------------------------------+-------------------------------+-----------------------------+
 | ****Compute-bound** (AI &gt; 200 FLOP/byte)** | Peak TFLOPS, Tensor Cores     | Memory capacity             |

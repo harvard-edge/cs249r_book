@@ -264,6 +264,7 @@ def detect_column_alignments(header_rows: List[List[str]], data_rows: List[List[
     Detect optimal alignment for each column based on content.
 
     Rules:
+    - FIRST COLUMN: Always left-aligned (book style guide requirement)
     - Numeric columns (>70% numbers): right-aligned
     - Text columns: left-aligned
     - Mixed: left-aligned (default)
@@ -275,6 +276,11 @@ def detect_column_alignments(header_rows: List[List[str]], data_rows: List[List[
     alignments = []
 
     for col_idx in range(num_columns):
+        # RULE: First column is ALWAYS left-aligned (book style guide)
+        if col_idx == 0:
+            alignments.append('left')
+            continue
+
         # Collect all values in this column (skip empty cells)
         column_values = []
         for row in data_rows:
@@ -688,6 +694,10 @@ def validate_table(parser: GridTableParser, max_width: Optional[int] = None) -> 
         (is_valid, list_of_warnings)
     """
     warnings = []
+
+    # Check first column alignment (must ALWAYS be left-aligned per style guide)
+    if parser.alignments and parser.alignments[0] != 'left':
+        warnings.append(f"First column must be left-aligned (found: {parser.alignments[0]})")
 
     # Check header bolding (check ALL header rows for multiline headers)
     unbolded_headers = []

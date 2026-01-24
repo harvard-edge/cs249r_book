@@ -123,6 +123,8 @@ def convert_to_grid_table(headers: List[str], alignments: List[str], data_rows: 
 
     This creates the basic grid structure. The format_tables.py script will
     handle proper formatting, bolding, and alignment.
+
+    IMPORTANT: First column is ALWAYS left-aligned per book style guide.
     """
     # Calculate column widths (basic - formatter will refine)
     num_cols = len(headers)
@@ -133,6 +135,10 @@ def convert_to_grid_table(headers: List[str], alignments: List[str], data_rows: 
             if i < len(col_widths):
                 col_widths[i] = max(col_widths[i], len(cell))
 
+    # RULE: First column must ALWAYS be left-aligned (book style guide)
+    if alignments and alignments[0] != 'left':
+        alignments[0] = 'left'
+
     # Build border line
     def build_border():
         parts = ['-' * (w + 2) for w in col_widths]
@@ -141,7 +147,10 @@ def convert_to_grid_table(headers: List[str], alignments: List[str], data_rows: 
     # Build separator line (with alignment markers)
     def build_separator():
         parts = []
-        for width, align in zip(col_widths, alignments):
+        for idx, (width, align) in enumerate(zip(col_widths, alignments)):
+            # Enforce first column left-alignment
+            if idx == 0:
+                align = 'left'
             if align == 'center':
                 parts.append(':' + '=' * width + ':')
             elif align == 'left':

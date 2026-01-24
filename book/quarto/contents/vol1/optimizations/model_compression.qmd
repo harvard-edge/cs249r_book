@@ -85,32 +85,13 @@ Model optimization is not a single technique but a *framework* with three comple
 
 **2. Efficient Numerics Representation:** Optimizes how numerical values are stored and processed. **Quantization** and **mixed-precision** training reduce the bit-width of weights and activations (e.g., from 32-bit floating point to 8-bit integers), enabling faster execution and lower memory usage on specialized hardware.
 
-::: {.callout-perspective title="Napkin Math: The Cost of a Weight"}
+::: {.callout-perspective title="The Physics of Quantization"}
 Why do we obsess over quantization? Because in the physics of silicon, **bits represent energy**.
 
 According to the **Iron Law** ($L = \frac{D}{B} + \frac{Ops}{P \cdot \eta} + L_{fixed}$), reducing the bit-width of a weight has a quadratic effect on efficiency:
 
 1.  **Memory Energy ($D$)**: Fetching a 32-bit float from DRAM costs $\approx$ **640 pJ**. Fetching an 8-bit integer costs $\approx$ **160 pJ**.
 2.  **Compute Energy ($Ops$)**: A 32-bit FLOP costs $\approx$ **4 pJ**. An 8-bit integer OP costs $\approx$ **0.2 pJ**.
-
-**The Systems Conclusion**: Moving from FP32 to INT8 doesn't just save 4x memory; it can reduce the **energy per inference** by nearly **20x** if the hardware supports it. This is the difference between a battery lasting 1 hour or 20 hours.
-:::
-
-::: {.callout-perspective title="The Physics of Quantization"}
-**Why we trade precision for efficiency**: The motivation for quantization is grounded in the physics of silicon. The energy cost of an operation scales linearly with bit-width, but the cost of memory access dominates everything.
-
-#### Systems Context: Compression as a Communication Tool {#sec-compression-comm-tool}
-
-While quantization is often framed as a "deployment" tool for edge devices, it is equally critical for **Hyperscale Training**. In distributed systems, the primary bottleneck is often the **Network Serialization Tax**.
-
-**1. Reducing AllReduce Latency**:
-During distributed training, GPUs must synchronize gradients using an `AllReduce` operation. If your gradients are FP32, you are moving $4\times$ more data across the network than if they were FP8.
-$$ \text{Synchronization Delay} \propto \frac{\text{Model Size} \times \text{Bit-width}}{\text{Network Bandwidth}} $$
-
-**2. Quantization-Aware Communication**:
-Modern training frameworks use **FP8 or BF16** not just for compute, but to shrink the communication payload. By compressing gradients before they hit the network wire, we can often see a $2-3\times$ speedup in total training time for communication-bound models (like Large Language Models), even if the local compute speed stays the same.
-
-In this view, model compression is a **Bandwidth Multiplier** for the entire data center.
 
 +-------------------+---------------+---------------------+
 | **Operation**     | **Bit-Width** | **Relative Energy** |
@@ -122,8 +103,12 @@ In this view, model compression is a **Bandwidth Multiplier** for the entire dat
 | **Memory Access** | 64-bit        | **2000x**           |
 +-------------------+---------------+---------------------+
 
-Quantization (e.g., INT8) hits two birds with one stone: it reduces the **Compute Energy** by using cheaper integer math, and it reduces **Memory Energy** by fetching 4x more data per DRAM cycle.
+**For Inference**: Moving from FP32 to INT8 doesn't just save 4× memory; it can reduce the **energy per inference** by nearly **20×** if the hardware supports it. This is the difference between a battery lasting 1 hour or 20 hours.
+
+These same physics apply at datacenter scale: distributed training systems use reduced precision to cut gradient communication overhead, a topic covered in @sec-ai-training.
 :::
+
+These physics-level savings translate directly into deployment capabilities. A model that cannot fit on a device at full precision may run comfortably—and faster—when quantized. The following calculation demonstrates this for a concrete LLM deployment scenario.
 
 ::: {.callout-perspective title="Napkin Math: The Quantization Speedup"}
 **Problem**: You want to deploy a 7B parameter LLM on a device with 16GB RAM. The weights are FP16 (2 bytes).
@@ -2545,7 +2530,7 @@ However, reducing numerical precision introduces trade-offs. Lower-precision for
 
 +--------------------------------------------+---------------+---------------------------------+---------------------------------------------+-----------------------+-------------------------------------------------------------+
 | **Precision Format**                       | **Bit-Width** | **Storage Reduction (vs FP32)** | **Compute Speed (vs FP32)**                 | **Power Consumption** | **Use Cases**                                               |
-+===========================================:+==============:+================================:+============================================:+:======================+:============================================================+
++:===========================================+==============:+================================:+============================================:+:======================+:============================================================+
 | **FP32 (Single-Precision Floating Point)** | 32-bit        | Baseline (1×)                   | Baseline (1×)                               | High                  | Training & inference (general-purpose)                      |
 +--------------------------------------------+---------------+---------------------------------+---------------------------------------------+-----------------------+-------------------------------------------------------------+
 | **FP16 (Half-Precision Floating Point)**   | 16-bit        | 2× smaller                      | 2× faster on FP16-optimized hardware        | Lower                 | Accelerated training, inference (NVIDIA Tensor Cores, TPUs) |

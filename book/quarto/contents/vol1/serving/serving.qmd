@@ -12,7 +12,7 @@ glossary: serving_glossary.json
 :::
 
 \noindent
-![](images/png/cover_serving.png){width=80%}
+![](images/png/cover_serving.png)
 
 :::
 
@@ -110,17 +110,9 @@ The first architectural decision in any serving system is whether predictions ha
 
 **Dynamic inference** (also called online or real-time inference) computes predictions on demand when requests arrive. This handles any input, including rare edge cases and novel combinations, and immediately reflects model updates. The cost is strict latency requirements that may force simpler models and more intensive monitoring infrastructure.
 
-::: {.callout-note title="ResNet-50: Static vs Dynamic Tradeoffs"}
+For our ResNet-50 image classifier, consider two deployment scenarios. A **static approach** suits a photo organization app that pre-classifies all images in a user's library overnight—with 10,000 photos and 5ms inference each, batch processing takes ~50 seconds total, and users see instant classification when browsing. A **dynamic approach** suits a content moderation API that must classify user-uploaded images in real-time, with each image requiring the full preprocessing→inference→postprocessing pipeline and a 100ms latency budget. Most production image classification systems use a **hybrid approach**: frequently requested images (popular products, known memes) are pre-classified and cached, while novel uploads trigger dynamic inference.
 
-For our ResNet-50 image classifier, consider two deployment scenarios:
-
-**Static approach**: A photo organization app pre-classifies all images in a user's library overnight. With 10,000 photos and 5ms inference each, batch processing takes ~50 seconds total. Users see instant classification when browsing their library.
-
-**Dynamic approach**: A content moderation API must classify user-uploaded images in real-time. Each image requires the full preprocessing→inference→postprocessing pipeline, with a 100ms latency budget to meet user expectations.
-
-Most production image classification systems use a **hybrid approach**: frequently requested images (popular products, known memes) are pre-classified and cached, while novel uploads trigger dynamic inference. This reduces average latency while maintaining flexibility.
-
-:::
+The choice between static and dynamic serving has profound economic implications. Stricter latency requirements directly translate into higher infrastructure costs, creating a tradeoff that serving system architects must navigate carefully.
 
 ::: {.callout-notebook title="Engineering Economics: The Cost of Latency"}
 
@@ -284,9 +276,9 @@ Every request traverses a multi-stage pipeline designed to maximize hardware thr
   \draw[->, thick] (runtime) -- (gpu);
 
   % Labels
-  \node[right=0.2cm of queue, font=\scriptsize, text=gray] {Request Buffering};
-  \node[right=0.2cm of scheduler, font=\scriptsize, text=gray] {Throughput Opt.};
-  \node[right=0.2cm of runtime, font=\scriptsize, text=gray] {Execution Opt.};
+  \node[right=0.2cm of queue, font=\scriptsize\usefont{T1}{phv}{m}{n}, text=gray] {Request Buffering};
+  \node[right=0.2cm of scheduler, font=\scriptsize\usefont{T1}{phv}{m}{n}, text=gray] {Throughput Opt.};
+  \node[right=0.2cm of runtime, font=\scriptsize\usefont{T1}{phv}{m}{n}, text=gray] {Execution Opt.};
 
 \end{tikzpicture}
 ```
@@ -425,7 +417,7 @@ Doubling resolution from 224 to 448 theoretically yields 4x slowdown (measured: 
 
 +----------------+---------------------+----------------------+----------------+
 | **Resolution** | **Activation Size** | **Arith. Intensity** | **Bottleneck** |
-+===============:+====================:+=====================:+:===============+
++:===============+====================:+=====================:+:===============+
 | **224×224**    | 12.5MB              | 85 FLOPS/byte        | Compute        |
 | **384×384**    | 36.8MB              | 49 FLOPS/byte        | Transitional   |
 | **512×512**    | 65.5MB              | 28 FLOPS/byte        | Memory BW      |
@@ -577,7 +569,7 @@ This equation reveals why serving systems exhibit nonlinear behavior. At 50% uti
 
 +--------------------------+------------------------+---------------------------+
 | **Utilization ($\rho$)** | **Wait Time Multiple** | **Example (5ms service)** |
-+=========================:+=======================:+==========================:+
++:=========================+=======================:+==========================:+
 | 50%                      | 2.0×                   | 10ms                      |
 | 70%                      | 3.3×                   | 17ms                      |
 | 80%                      | 5.0×                   | 25ms                      |
@@ -842,7 +834,7 @@ The throughput-latency tradeoff for ResNet-50 on a V100 GPU illustrates the powe
 
 +----------------+---------------------+-----------------------+----------------+---------------+
 | **Batch Size** | **Inference Time*** | **Per-Image Compute** | **Throughput** | **GPU Util.** |
-+===============:+====================:+======================:+===============:+==============:+
++:===============+====================:+======================:+===============:+==============:+
 | 1              | 5.0ms               | 5.0ms                 | 200 img/s      | 15%           |
 | 4              | 7.2ms               | 1.8ms                 | 556 img/s      | 42%           |
 | 8              | 9.1ms               | 1.1ms                 | 879 img/s      | 65%           |
@@ -855,6 +847,8 @@ The throughput-latency tradeoff for ResNet-50 on a V100 GPU illustrates the powe
 **Key insight**: Batch size 32 achieves 6.4× higher throughput than batch size 1. However, user-perceived latency includes both queue wait and inference time. With a 10ms batching window and 25ms inference, total latency reaches 35ms versus 5ms at batch size 1.
 
 :::
+
+The table reveals the throughput-latency tradeoff in stark terms: larger batches dramatically improve hardware efficiency but increase per-request latency. In practice, the optimal batch size depends on both the latency Service Level Objective (SLO) and the arrival rate of requests. The following analysis shows how to find the sweet spot.
 
 ::: {.callout-perspective title="Napkin Math: The Batching Sweet Spot"}
 **Problem**: You are serving a ResNet-50 model. At batch=1, the GPU is mostly idle (15% utilization). You want to increase throughput to save money, but you have a **20 ms** latency budget.
@@ -924,7 +918,7 @@ $$P(\text{batch size} = k) = \frac{(\lambda T)^k e^{-\lambda T}}{k!}$$ {#eq-batc
 
 +------------------+----------------+-------------+----------------+---------------------+
 | **Arrival Rate** | **Mean Batch** | **Std Dev** | **P(batch=0)** | **P(batch≥2×mean)** |
-+=================:+===============:+============:+===============:+====================:+
++:=================+===============:+============:+===============:+====================:+
 | **50 QPS**       | 0.5            | 0.7         | 61%            | 1%                  |
 | **200 QPS**      | 2.0            | 1.4         | 14%            | 9%                  |
 | **500 QPS**      | 5.0            | 2.2         | 0.7%           | 12%                 |
@@ -945,7 +939,7 @@ For ResNet-50 on a V100 GPU, service time scales as $S(b) = 5\text{ms} + 0.6b$ (
 
 +----------------+------------------+-------------------+----------------+----------------+
 | **Batch Size** | **Service Time** | **Total Latency** | **Throughput** | **Efficiency** |
-+===============:+=================:+==================:+===============:+:===============+
++:===============+=================:+==================:+===============:+:===============+
 | 1              | 5.6ms            | 15.6ms            | 64 img/s       | Low            |
 | 4              | 7.4ms            | 17.4ms            | 230 img/s      | Moderate       |
 | 8              | 9.8ms            | 19.8ms            | 404 img/s      | Good           |
@@ -1048,7 +1042,7 @@ The batching configuration space forms a Pareto frontier where improving through
 
 +-----------------+---------------+-----------------+-----------------+----------------+----------------------+
 | **Window (ms)** | **Max Batch** | **Avg Latency** | **p99 Latency** | **Throughput** | **Configuration**    |
-+================:+==============:+================:+================:+===============:+:=====================+
++:================+==============:+================:+================:+===============:+:=====================+
 | 2               | 16            | 8ms             | 18ms            | 890 img/s      | Ultra-low latency    |
 | 5               | 32            | 10ms            | 22ms            | 1,140 img/s    | Balanced             |
 | 10              | 32            | 15ms            | 35ms            | 1,240 img/s    | Moderate latency     |
@@ -1132,7 +1126,7 @@ where $L$ is the latency SLO and $S$ is the service time. A counterintuitive res
 
 +------------------+--------------------+--------------------+-----------------+
 | **Arrival Rate** | **Optimal Window** | **Avg Batch Size** | **p99 Latency** |
-+=================:+===================:+===================:+================:+
++:=================+===================:+===================:+================:+
 | **100 QPS**      | 20ms               | 2.0                | 45ms            |
 | **500 QPS**      | 8ms                | 4.0                | 42ms            |
 | **1,000 QPS**    | 5ms                | 5.0                | 38ms            |
@@ -1153,7 +1147,7 @@ Consider a vehicle with 6 cameras capturing at 30 FPS, requiring spatial fusion:
 
 +----------+-----------------------------------+
 | **Time** | **Event**                         |
-+=========:+:==================================+
++:=========+:==================================+
 | T = 0ms  | Cameras begin capturing frame N   |
 | T = 8ms  | Camera 1 frame arrives            |
 | T = 10ms | Cameras 2-5 frames arrive         |
@@ -1250,6 +1244,8 @@ Generative models produce a stream of tokens rather than a single output tensor.
 **Time Per Output Token (TPOT)** measures the time to generate each subsequent token. This metric is governed by the memory-bandwidth-bound decode phase and determines the perceived fluidity of the generation.
 
 :::
+
+These two metrics—TTFT and TPOT—capture fundamentally different user experience aspects. A fast TTFT provides immediate responsiveness (the system starts answering quickly), while a fast TPOT provides fluid generation (the answer streams smoothly). Production systems must optimize both, typically with different techniques since they are governed by different hardware constraints.
 
 ::: {.callout-lighthouse title="Lighthouse Example: LLM Serving Latency Targets"}
 
@@ -1351,7 +1347,7 @@ In practice, GPU compute pipelines and Tensor Core alignment requirements limit 
 
 +----------------+-------------+------------+--------------+-----------------------+-----------------+
 | **Precision**  | **Latency** | **Memory** | **Accuracy** | **Tensor Core Util.** | **Calibration** |
-+===============:+============:+===========:+=============:+======================:+:================+
++:===============+============:+===========:+=============:+======================:+:================+
 | **FP32**       | 2.8ms       | 98MB       | 76.13%       | 0%                    | None            |
 | **FP16**       | 1.4ms       | 49MB       | 76.13%       | 85%                   | None            |
 | **INT8 (PTQ)** | 0.9ms       | 25MB       | 75.80%       | 92%                   | 1,000 samples   |
@@ -1398,7 +1394,7 @@ Consider serving ResNet-50 on AWS infrastructure:
 
 +---------------------------+---------------+----------------+------------------------+
 | **Instance Type**         | **Cost/Hour** | **Throughput** | **Cost per 1M Images** |
-+==========================:+==============:+===============:+=======================:+
++:==========================+==============:+===============:+=======================:+
 | **c5.xlarge (CPU)**       | $0.17         | 50 img/s       | $0.94                  |
 | **g4dn.xlarge (T4 GPU)**  | $0.53         | 400 img/s      | $0.37                  |
 | **p3.2xlarge (V100 GPU)** | $3.06         | 1,200 img/s    | $0.71                  |
