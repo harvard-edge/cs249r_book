@@ -23,6 +23,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from tinytorch.core.embeddings import Embedding, PositionalEncoding
+from tinytorch.core.tensor import Tensor
+
 
 class TestEmbeddingLayer:
     """Test Embedding layer functionality."""
@@ -37,29 +40,22 @@ class TestEmbeddingLayer:
         STUDENT LEARNING: Embedding is just:
         embedding_matrix[token_id] → vector
         """
-        try:
-            from tinytorch.core.embeddings import Embedding
-            from tinytorch.core.tensor import Tensor
+        vocab_size = 100
+        embed_dim = 64
 
-            vocab_size = 100
-            embed_dim = 64
+        embed = Embedding(vocab_size, embed_dim)
 
-            embed = Embedding(vocab_size, embed_dim)
+        # Token IDs
+        tokens = Tensor(np.array([3, 7, 2]))
 
-            # Token IDs
-            tokens = Tensor(np.array([3, 7, 2]))
+        output = embed(tokens)
 
-            output = embed(tokens)
-
-            assert output.shape == (3, 64), (
-                f"Embedding output shape wrong.\n"
-                f"  Input: 3 token IDs\n"
-                f"  Expected: (3, 64)\n"
-                f"  Got: {output.shape}"
-            )
-
-        except ImportError:
-            pytest.skip("Embedding not implemented yet")
+        assert output.shape == (3, 64), (
+            f"Embedding output shape wrong.\n"
+            f"  Input: 3 token IDs\n"
+            f"  Expected: (3, 64)\n"
+            f"  Got: {output.shape}"
+        )
 
     def test_embedding_batch(self):
         """
@@ -72,26 +68,19 @@ class TestEmbeddingLayer:
         Input: (batch, seq_len) of integers
         Output: (batch, seq_len, embed_dim) of floats
         """
-        try:
-            from tinytorch.core.embeddings import Embedding
-            from tinytorch.core.tensor import Tensor
+        embed = Embedding(vocab_size=100, embed_dim=32)
 
-            embed = Embedding(vocab_size=100, embed_dim=32)
+        # Batch of 4 sequences, each length 10
+        tokens = Tensor(np.random.randint(0, 100, (4, 10)))
 
-            # Batch of 4 sequences, each length 10
-            tokens = Tensor(np.random.randint(0, 100, (4, 10)))
+        output = embed(tokens)
 
-            output = embed(tokens)
-
-            assert output.shape == (4, 10, 32), (
-                f"Batched embedding shape wrong.\n"
-                f"  Input: (4, 10) token IDs\n"
-                f"  Expected: (4, 10, 32)\n"
-                f"  Got: {output.shape}"
-            )
-
-        except ImportError:
-            pytest.skip("Embedding batch not implemented yet")
+        assert output.shape == (4, 10, 32), (
+            f"Batched embedding shape wrong.\n"
+            f"  Input: (4, 10) token IDs\n"
+            f"  Expected: (4, 10, 32)\n"
+            f"  Got: {output.shape}"
+        )
 
 
 class TestPositionalEncoding:
@@ -107,26 +96,19 @@ class TestPositionalEncoding:
         Positional encoding adds position information:
         final_embedding = token_embedding + position_encoding
         """
-        try:
-            from tinytorch.core.embeddings import PositionalEncoding
-            from tinytorch.core.tensor import Tensor
+        max_len = 100
+        embed_dim = 64
 
-            max_len = 100
-            embed_dim = 64
+        pos_enc = PositionalEncoding(max_len, embed_dim)
 
-            pos_enc = PositionalEncoding(max_len, embed_dim)
+        # Sequence of embeddings
+        x = Tensor(np.random.randn(2, 50, 64))  # (batch, seq, embed)
 
-            # Sequence of embeddings
-            x = Tensor(np.random.randn(2, 50, 64))  # (batch, seq, embed)
+        output = pos_enc(x)
 
-            output = pos_enc(x)
-
-            assert output.shape == x.shape, (
-                "Positional encoding should preserve shape"
-            )
-
-        except ImportError:
-            pytest.skip("PositionalEncoding not implemented yet")
+        assert output.shape == x.shape, (
+            "Positional encoding should preserve shape"
+        )
 
 
 if __name__ == "__main__":

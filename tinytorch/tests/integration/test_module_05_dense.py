@@ -96,16 +96,8 @@ class TestNetworkComposition:
 
     def test_sequential_exists(self):
         """Test if Sequential is available for network composition."""
-        try:
-            from tinytorch.core.layers import Linear  # Sequential not available
-            assert Sequential is not None
-        except ImportError:
-            # Sequential might be in a different location
-            try:
-                from tinytorch.core.layers import Linear  # Sequential not available
-                assert Sequential is not None
-            except ImportError:
-                pytest.skip("Sequential not yet implemented")
+        from tinytorch.core.layers import Sequential
+        assert Sequential is not None, "Sequential should be importable from tinytorch.core.layers"
 
     def test_multi_layer_network(self):
         """Test building a multi-layer network."""

@@ -27,6 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
+from tinytorch.perf.memoization import KVCache
 
 
 class TestKVCacheBasics:
@@ -38,23 +39,15 @@ class TestKVCacheBasics:
 
         WHY: Basic sanity check.
         """
-        try:
-            from tinytorch.perf.memoization import KVCache
-            assert KVCache is not None
-        except ImportError as e:
-            pytest.skip(f"KVCache not yet exported: {e}")
+        assert KVCache is not None
 
     def test_kv_cache_can_instantiate(self):
         """
         WHAT: Verify KVCache can be created.
         """
-        try:
-            from tinytorch.perf.memoization import KVCache
-            # KVCache needs: batch_size, max_seq_len, num_layers, num_heads, head_dim
-            cache = KVCache(batch_size=1, max_seq_len=128, num_layers=2, num_heads=4, head_dim=16)
-            assert cache is not None
-        except ImportError:
-            pytest.skip("KVCache not yet exported")
+        # KVCache needs: batch_size, max_seq_len, num_layers, num_heads, head_dim
+        cache = KVCache(batch_size=1, max_seq_len=128, num_layers=2, num_heads=4, head_dim=16)
+        assert cache is not None
 
     def test_kv_cache_stores_and_retrieves(self):
         """
@@ -63,11 +56,6 @@ class TestKVCacheBasics:
         WHY: The whole point of the cache is to reuse computed values.
         If storage/retrieval doesn't work, there's no speedup.
         """
-        try:
-            from tinytorch.perf.memoization import KVCache
-        except ImportError:
-            pytest.skip("KVCache not yet exported")
-
         # Create cache with proper dimensions
         cache = KVCache(batch_size=1, max_seq_len=128, num_layers=2, num_heads=4, head_dim=16)
 
@@ -99,11 +87,6 @@ class TestKVCacheAdvanced:
         WHY: During generation, we add one token at a time. The cache must
         correctly accumulate all previous K,V pairs.
         """
-        try:
-            from tinytorch.perf.memoization import KVCache
-        except ImportError:
-            pytest.skip("KVCache not yet exported")
-
         cache = KVCache(batch_size=1, max_seq_len=10, num_layers=1, num_heads=2, head_dim=8)
 
         # Add 3 tokens
@@ -130,11 +113,6 @@ class TestKVCacheAdvanced:
 
         WHY: Real transformers have multiple layers, each with its own K,V cache.
         """
-        try:
-            from tinytorch.perf.memoization import KVCache
-        except ImportError:
-            pytest.skip("KVCache not yet exported")
-
         num_layers = 4
         cache = KVCache(batch_size=1, max_seq_len=10, num_layers=num_layers, num_heads=2, head_dim=8)
 
@@ -166,11 +144,6 @@ class TestKVCacheAdvanced:
         WHY: seq_pos determines where in the cache to write next and how
         much valid data to return. Incorrect tracking breaks generation.
         """
-        try:
-            from tinytorch.perf.memoization import KVCache
-        except ImportError:
-            pytest.skip("KVCache not yet exported")
-
         cache = KVCache(batch_size=1, max_seq_len=100, num_layers=1, num_heads=2, head_dim=8)
 
         # Initially at 0
@@ -193,11 +166,6 @@ class TestKVCacheAdvanced:
         WHY: Trying to access a non-existent layer is a programming error
         that should be caught early.
         """
-        try:
-            from tinytorch.perf.memoization import KVCache
-        except ImportError:
-            pytest.skip("KVCache not yet exported")
-
         cache = KVCache(batch_size=1, max_seq_len=10, num_layers=2, num_heads=2, head_dim=8)
 
         K = Tensor(np.zeros((1, 2, 1, 8)))

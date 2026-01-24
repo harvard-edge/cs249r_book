@@ -74,13 +74,9 @@ def test_gradient_exists_single_layer():
     y_pred = layer(x)
     loss = MSELoss()(y_pred, y_true)
 
-    try:
-        loss.backward()
-        assert layer.weight.grad is not None, "No gradient for weights"
-        assert layer.bias.grad is not None, "No gradient for bias"
-    except AttributeError:
-        # Autograd might not be implemented
-        pytest.skip("Autograd not implemented")
+    loss.backward()
+    assert layer.weight.grad is not None, "No gradient for weights"
+    assert layer.bias.grad is not None, "No gradient for bias"
 
 
 def test_gradient_exists_deep_network():
@@ -103,15 +99,12 @@ def test_gradient_exists_deep_network():
     y_pred = model(x)
     loss = MSELoss()(y_pred, y_true)
 
-    try:
-        loss.backward()
-        # Check first and last layers have gradients
-        first_layer = model.layers[0]
-        last_layer = model.layers[-1]
-        assert first_layer.weight.grad is not None, "No gradient in first layer"
-        assert last_layer.weight.grad is not None, "No gradient in last layer"
-    except AttributeError:
-        pytest.skip("Autograd not implemented")
+    loss.backward()
+    # Check first and last layers have gradients
+    first_layer = model.layers[0]
+    last_layer = model.layers[-1]
+    assert first_layer.weight.grad is not None, "No gradient in first layer"
+    assert last_layer.weight.grad is not None, "No gradient in last layer"
 
 
 def test_gradient_exists_cnn():
@@ -144,12 +137,9 @@ def test_gradient_exists_cnn():
     y_pred = model.forward(x)
     loss = MSELoss()(y_pred, y_true)
 
-    try:
-        loss.backward()
-        assert model.conv1.weight.grad is not None, "No gradient in conv1"
-        assert model.fc.weight.grad is not None, "No gradient in fc layer"
-    except (AttributeError, Exception):
-        pytest.skip("Autograd not fully implemented for CNN")
+    loss.backward()
+    assert model.conv1.weight.grad is not None, "No gradient in conv1"
+    assert model.fc.weight.grad is not None, "No gradient in fc layer"
 
 
 # ============== Gradient Magnitude Tests ==============
@@ -170,14 +160,11 @@ def test_gradient_not_vanishing():
     y_pred = model(x)
     loss = MSELoss()(y_pred, y_true)
 
-    try:
-        loss.backward()
-        first_layer = model.layers[0]
-        if first_layer.weight.grad is not None:
-            grad_magnitude = np.abs(first_layer.weight.grad.data).mean()
-            assert grad_magnitude > 1e-8, f"Gradient vanished: {grad_magnitude}"
-    except (AttributeError, Exception):
-        pytest.skip("Autograd not fully implemented")
+    loss.backward()
+    first_layer = model.layers[0]
+    assert first_layer.weight.grad is not None, "No gradient in first layer"
+    grad_magnitude = np.abs(first_layer.weight.grad.data).mean()
+    assert grad_magnitude > 1e-8, f"Gradient vanished: {grad_magnitude}"
 
 
 def test_gradient_not_exploding():
@@ -202,14 +189,11 @@ def test_gradient_not_exploding():
     y_pred = model(x)
     loss = MSELoss()(y_pred, y_true)
 
-    try:
-        loss.backward()
-        last_layer = model.layers[-1]
-        if last_layer.weight.grad is not None:
-            grad_magnitude = np.abs(last_layer.weight.grad.data).mean()
-            assert grad_magnitude < 1000, f"Gradient exploded: {grad_magnitude}"
-    except (AttributeError, Exception):
-        pytest.skip("Autograd not fully implemented")
+    loss.backward()
+    last_layer = model.layers[-1]
+    assert last_layer.weight.grad is not None, "No gradient in last layer"
+    grad_magnitude = np.abs(last_layer.weight.grad.data).mean()
+    assert grad_magnitude < 1000, f"Gradient exploded: {grad_magnitude}"
 
 
 def test_gradient_reasonable_magnitude():
@@ -226,15 +210,13 @@ def test_gradient_reasonable_magnitude():
     y_pred = model(x)
     loss = MSELoss()(y_pred, y_true)
 
-    try:
-        loss.backward()
-        for layer in model.layers:
-            if hasattr(layer, 'weight') and layer.weight.grad is not None:
-                grad_mag = np.abs(layer.weight.grad.data).mean()
-                # Reasonable range for gradients
-                assert 1e-6 < grad_mag < 100, f"Gradient magnitude out of range: {grad_mag}"
-    except (AttributeError, Exception):
-        pytest.skip("Autograd not fully implemented")
+    loss.backward()
+    for layer in model.layers:
+        if hasattr(layer, 'weight'):
+            assert layer.weight.grad is not None, f"No gradient for layer {layer}"
+            grad_mag = np.abs(layer.weight.grad.data).mean()
+            # Reasonable range for gradients
+            assert 1e-6 < grad_mag < 100, f"Gradient magnitude out of range: {grad_mag}"
 
 
 # ============== Chain Rule Tests ==============
@@ -250,17 +232,12 @@ def test_chain_rule_linear_relu():
     y = F.relu(z)
     loss = MSELoss()(y, y_true)
 
-    try:
-        loss.backward()
-        # ReLU should only backprop where input > 0
-        if hasattr(z, 'data'):
-            relu_mask = z.data > 0
-            # Gradient should be zero where ReLU blocked it
-            if linear.weight.grad is not None:
-                # This is a simplified check - full validation would be complex
-                assert linear.weight.grad is not None, "Chain rule broken"
-    except (AttributeError, Exception):
-        pytest.skip("Autograd not fully implemented")
+    loss.backward()
+    # ReLU should only backprop where input > 0
+    assert hasattr(z, 'data'), "z should have data attribute"
+    relu_mask = z.data > 0
+    # Gradient should exist
+    assert linear.weight.grad is not None, "Chain rule broken - no gradient"
 
 
 def test_chain_rule_multiple_paths():
@@ -278,13 +255,10 @@ def test_chain_rule_multiple_paths():
 
     loss = MSELoss()(y, y_true)
 
-    try:
-        loss.backward()
-        # Both paths should contribute to gradient
-        assert linear1.weight.grad is not None, "No gradient through residual path"
-        assert linear2.weight.grad is not None, "No gradient through main path"
-    except (AttributeError, Exception):
-        pytest.skip("Autograd not fully implemented")
+    loss.backward()
+    # Both paths should contribute to gradient
+    assert linear1.weight.grad is not None, "No gradient through residual path"
+    assert linear2.weight.grad is not None, "No gradient through main path"
 
 
 # ============== Gradient Accumulation Tests ==============
@@ -300,23 +274,20 @@ def test_gradient_accumulation():
     x2 = Tensor(np.random.randn(2, 5))
     y2 = Tensor(np.random.randn(2, 3))
 
-    try:
-        # First backward
-        loss1 = MSELoss()(model(x1), y1)
-        loss1.backward()
+    # First backward
+    loss1 = MSELoss()(model(x1), y1)
+    loss1.backward()
 
-        if model.weight.grad is not None:
-            grad1 = model.weight.grad.data.copy()
+    assert model.weight.grad is not None, "No gradient after first backward"
+    grad1 = model.weight.grad.data.copy()
 
-            # Second backward (should accumulate)
-            loss2 = MSELoss()(model(x2), y2)
-            loss2.backward()
+    # Second backward (should accumulate)
+    loss2 = MSELoss()(model(x2), y2)
+    loss2.backward()
 
-            grad2 = model.weight.grad.data
-            # Gradient should have changed (accumulated)
-            assert not np.allclose(grad1, grad2), "Gradients didn't accumulate"
-    except (AttributeError, Exception):
-        pytest.skip("Autograd not fully implemented")
+    grad2 = model.weight.grad.data
+    # Gradient should have changed (accumulated)
+    assert not np.allclose(grad1, grad2), "Gradients didn't accumulate"
 
 
 def test_zero_grad():
@@ -327,21 +298,18 @@ def test_zero_grad():
     x = Tensor(np.random.randn(2, 5))
     y = Tensor(np.random.randn(2, 3))
 
-    try:
-        # Accumulate gradient
-        loss = MSELoss()(model(x), y)
-        loss.backward()
+    # Accumulate gradient
+    loss = MSELoss()(model(x), y)
+    loss.backward()
 
-        if model.weight.grad is not None:
-            # Clear gradients
-            optimizer.zero_grad()
+    assert model.weight.grad is not None, "No gradient after backward"
 
-            # Check gradients are zeroed
-            if hasattr(model.weights, 'grad'):
-                if model.weight.grad is not None:
-                    assert np.allclose(model.weight.grad.data, 0), "Gradients not zeroed"
-    except (AttributeError, Exception):
-        pytest.skip("Autograd not fully implemented")
+    # Clear gradients
+    optimizer.zero_grad()
+
+    # Check gradients are zeroed
+    assert model.weight.grad is not None, "Gradient attribute removed instead of zeroed"
+    assert np.allclose(model.weight.grad.data, 0), "Gradients not zeroed"
 
 
 # ============== Optimizer Update Tests ==============
@@ -357,25 +325,22 @@ def test_sgd_updates_parameters():
     x = Tensor(np.random.randn(4, 5))
     y_true = Tensor(np.random.randn(4, 3))
 
-    try:
-        # Forward and backward
-        y_pred = model(x)
-        loss = MSELoss()(y_pred, y_true)
+    # Forward and backward
+    y_pred = model(x)
+    loss = MSELoss()(y_pred, y_true)
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
 
-        # Weights should have changed
-        assert not np.allclose(initial_weights, model.weight.data), "Weights didn't update"
+    # Weights should have changed
+    assert not np.allclose(initial_weights, model.weight.data), "Weights didn't update"
 
-        # Check update direction (gradient descent)
-        if model.weight.grad is not None:
-            expected_update = initial_weights - 0.1 * model.weight.grad.data
-            assert np.allclose(model.weight.data, expected_update, rtol=1e-5), \
-                "SGD update incorrect"
-    except (AttributeError, Exception):
-        pytest.skip("Optimizer not fully implemented")
+    # Check update direction (gradient descent)
+    assert model.weight.grad is not None, "No gradient after backward"
+    expected_update = initial_weights - 0.1 * model.weight.grad.data
+    assert np.allclose(model.weight.data, expected_update, rtol=1e-5), \
+        "SGD update incorrect"
 
 
 def test_adam_updates_parameters():
@@ -388,21 +353,18 @@ def test_adam_updates_parameters():
     x = Tensor(np.random.randn(4, 5))
     y_true = Tensor(np.random.randn(4, 3))
 
-    try:
-        # Multiple steps to see momentum effect
-        for _ in range(3):
-            y_pred = model(x)
-            loss = MSELoss()(y_pred, y_true)
+    # Multiple steps to see momentum effect
+    for _ in range(3):
+        y_pred = model(x)
+        loss = MSELoss()(y_pred, y_true)
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
-        # Weights should have changed
-        assert not np.allclose(initial_weights, model.weight.data), \
-            "Adam didn't update weights"
-    except (AttributeError, Exception):
-        pytest.skip("Adam optimizer not fully implemented")
+    # Weights should have changed
+    assert not np.allclose(initial_weights, model.weight.data), \
+        "Adam didn't update weights"
 
 
 # ============== Special Architecture Tests ==============
@@ -417,17 +379,14 @@ def test_transformer_gradient_flow():
     y_pred = block(x)
     loss = MSELoss()(y_pred, y_true)
 
-    try:
-        loss.backward()
-        # Check key components have gradients
-        params = block.parameters()
-        gradients_exist = any(
-            p.grad is not None for p in params
-            if hasattr(p, 'grad')
-        )
-        assert gradients_exist, "No gradients in transformer block"
-    except (AttributeError, Exception):
-        pytest.skip("Transformer gradients not fully implemented")
+    loss.backward()
+    # Check key components have gradients
+    params = block.parameters()
+    gradients_exist = any(
+        p.grad is not None for p in params
+        if hasattr(p, 'grad')
+    )
+    assert gradients_exist, "No gradients in transformer block"
 
 
 def test_loss_gradient_correctness():
@@ -446,14 +405,8 @@ def test_loss_gradient_correctness():
 
     loss = MSELoss()(y_pred, y_true)
 
-    try:
-        loss.backward()
-        if model.weight.grad is not None:
-            # Verify gradient is roughly correct
-            # This is simplified - exact validation would need careful calculation
-            assert model.weight.grad is not None, "No gradient from loss"
-    except (AttributeError, Exception):
-        pytest.skip("Loss gradient not implemented")
+    loss.backward()
+    assert model.weight.grad is not None, "No gradient from loss"
 
 
 # ============== Common Issues Detection ==============
@@ -477,15 +430,13 @@ def test_dead_relu_detection():
     y_pred = model(x)
     loss = MSELoss()(y_pred, y_true)
 
-    try:
-        loss.backward()
-        # With dead ReLUs, gradients might be very small or zero
-        if first_layer.weight.grad is not None:
-            grad_mag = np.abs(first_layer.weight.grad.data).mean()
-            if grad_mag < 1e-10:
-                pytest.warns(UserWarning, "Possible dead ReLU detected")
-    except (AttributeError, Exception):
-        pytest.skip("Dead ReLU detection not implemented")
+    loss.backward()
+    # With dead ReLUs, gradients might be very small or zero
+    assert first_layer.weight.grad is not None, "No gradient for first layer"
+    grad_mag = np.abs(first_layer.weight.grad.data).mean()
+    # Dead ReLU should still produce a gradient (even if small)
+    # This test validates gradient flow, not dead ReLU detection
+    assert grad_mag >= 0, "Invalid gradient magnitude"
 
 
 def test_gradient_clipping():
@@ -499,22 +450,20 @@ def test_gradient_clipping():
     y_pred = model(x)
     loss = MSELoss()(y_pred, y_true)
 
-    try:
-        loss.backward()
+    loss.backward()
 
-        # Clip gradients
-        max_norm = 1.0
-        for param in model.parameters():
-            if hasattr(param, 'grad') and param.grad is not None:
-                grad_norm = np.linalg.norm(param.grad.data)
-                if grad_norm > max_norm:
-                    param.grad.data = param.grad.data * (max_norm / grad_norm)
+    # Clip gradients
+    max_norm = 1.0
+    for param in model.parameters():
+        assert hasattr(param, 'grad'), "Parameter missing grad attribute"
+        assert param.grad is not None, "Parameter has no gradient"
+        grad_norm = np.linalg.norm(param.grad.data)
+        if grad_norm > max_norm:
+            param.grad.data = param.grad.data * (max_norm / grad_norm)
 
-                # Verify clipping worked
-                new_norm = np.linalg.norm(param.grad.data)
-                assert new_norm <= max_norm * 1.01, "Gradient clipping failed"
-    except (AttributeError, Exception):
-        pytest.skip("Gradient clipping not implemented")
+        # Verify clipping worked
+        new_norm = np.linalg.norm(param.grad.data)
+        assert new_norm <= max_norm * 1.01, "Gradient clipping failed"
 
 
 if __name__ == "__main__":

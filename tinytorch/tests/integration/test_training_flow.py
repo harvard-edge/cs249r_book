@@ -185,7 +185,6 @@ class TestGradientChainNotBroken:
     - Intermediate tensors breaking the chain
     """
 
-    @pytest.mark.skip(reason="Requires weight.requires_grad=True by default; use optimizer pattern instead")
     def test_deep_network_gradient_chain(self):
         """Gradients must flow through 5 layers"""
         # Use fixed seed for reproducibility - prevents flaky test due to
@@ -297,7 +296,6 @@ class TestBatchTraining:
     - Gradient scaling problems
     """
 
-    @pytest.mark.skip(reason="Requires weight.requires_grad=True by default; use optimizer pattern instead")
     def test_batch_gradients_are_averaged(self):
         """Gradients should be averaged over batch (not summed)"""
         layer = Linear(2, 1)

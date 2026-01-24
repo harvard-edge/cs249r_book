@@ -159,7 +159,6 @@ def test_regression_layernorm_gradient_flow():
     print("✅ LayerNorm gradient flow regression test passed")
 
 
-@pytest.mark.skip(reason="Requires weight.requires_grad=True by default; use optimizer pattern instead")
 def test_regression_embedding_requires_grad():
     """
     Regression test for Issue #6: Embedding didn't preserve requires_grad.

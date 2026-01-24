@@ -20,80 +20,69 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 import pytest
 
-# Test imports - these MUST work for examples to succeed
-try:
-    from tinytorch.core.tensor import Tensor
-    from tinytorch.core.autograd import Variable
-    from tinytorch.core.losses import CrossEntropyLoss, MSELoss
-    from tinytorch.core.layers import Linear
-    from tinytorch.core.activations import ReLU
-    from tinytorch.core.optimizers import SGD, Adam
-    from tinytorch.core.dataloader import DataLoader
-    from tinytorch.core.spatial import Conv2d
+# Core imports - these MUST work for examples to succeed
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.autograd import Variable
+from tinytorch.core.losses import CrossEntropyLoss, MSELoss
+from tinytorch.core.layers import Linear
+from tinytorch.core.activations import ReLU
+from tinytorch.core.optimizers import SGD, Adam
+from tinytorch.core.dataloader import DataLoader
+from tinytorch.core.spatial import Conv2d, MaxPool2d
 
-    class _Module:
-        """Base module class for testing."""
-        def __init__(self):
-            self._modules = {}
-        def __setattr__(self, name, value):
-            if hasattr(value, 'parameters'):
-                if '_modules' not in self.__dict__:
-                    self.__dict__['_modules'] = {}
-                self.__dict__['_modules'][name] = value
-            super().__setattr__(name, value)
-        def __call__(self, x):
-            return self.forward(x)
-        def parameters(self):
-            params = []
-            for mod in getattr(self, '_modules', {}).values():
-                if hasattr(mod, 'parameters'):
-                    params.extend(mod.parameters())
-            return params
 
-    class nn:
-        """Mock nn module for testing."""
-        Module = _Module
-        Linear = Linear
-        Conv2d = Conv2d
+class _Module:
+    """Base module class for testing."""
+    def __init__(self):
+        self._modules = {}
+    def __setattr__(self, name, value):
+        if hasattr(value, 'parameters'):
+            if '_modules' not in self.__dict__:
+                self.__dict__['_modules'] = {}
+            self.__dict__['_modules'][name] = value
+        super().__setattr__(name, value)
+    def __call__(self, x):
+        return self.forward(x)
+    def parameters(self):
+        params = []
+        for mod in getattr(self, '_modules', {}).values():
+            if hasattr(mod, 'parameters'):
+                params.extend(mod.parameters())
+        return params
 
-    class F:
-        """Functional interface for testing."""
-        @staticmethod
-        def relu(x):
-            return ReLU()(x)
-        @staticmethod
-        def flatten(x, start_dim=1):
-            import numpy as np
-            shape = x.shape
-            new_shape = shape[:start_dim] + (int(np.prod(shape[start_dim:])),)
-            return x.reshape(*new_shape)
-        @staticmethod
-        def max_pool2d(x, kernel_size):
-            from tinytorch.core.spatial import MaxPool2d
-            return MaxPool2d(kernel_size)(x)
 
-    class optim:
-        """Mock optim module for testing."""
-        SGD = SGD
-        Adam = Adam
+class nn:
+    """Mock nn module for testing."""
+    Module = _Module
+    Linear = Linear
+    Conv2d = Conv2d
 
-    IMPORTS_AVAILABLE = True
-except ImportError as e:
-    print(f"❌ Import failed: {e}")
-    IMPORTS_AVAILABLE = False
 
-def test_imports_available():
-    """Test that all required imports work."""
-    assert IMPORTS_AVAILABLE, "Required imports must work for examples to succeed"
+class F:
+    """Functional interface for testing."""
+    @staticmethod
+    def relu(x):
+        return ReLU()(x)
+    @staticmethod
+    def flatten(x, start_dim=1):
+        shape = x.shape
+        new_shape = shape[:start_dim] + (int(np.prod(shape[start_dim:])),)
+        return x.reshape(*new_shape)
+    @staticmethod
+    def max_pool2d(x, kernel_size):
+        return MaxPool2d(kernel_size)(x)
+
+
+class optim:
+    """Mock optim module for testing."""
+    SGD = SGD
+    Adam = Adam
 
 class TestXORIntegration:
     """Test XOR network integration - matches examples/xornet/train_xor_modern_api.py"""
 
     def test_xor_network_creation(self):
         """Test creating XOR network like in the example."""
-        if not IMPORTS_AVAILABLE:
-            pytest.skip("Imports not available")
-
         class XORNet(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -112,9 +101,6 @@ class TestXORIntegration:
 
     def test_xor_forward_pass(self):
         """Test XOR forward pass works."""
-        if not IMPORTS_AVAILABLE:
-            pytest.skip("Imports not available")
-
         class XORNet(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -139,9 +125,6 @@ class TestXORIntegration:
 
     def test_xor_training_loop(self):
         """Test XOR training loop components work together."""
-        if not IMPORTS_AVAILABLE:
-            pytest.skip("Imports not available")
-
         class XORNet(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -181,9 +164,6 @@ class TestMNISTIntegration:
 
     def test_mlp_creation(self):
         """Test creating MLP like in the example."""
-        if not IMPORTS_AVAILABLE:
-            pytest.skip("Imports not available")
-
         class SimpleMLP(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -207,9 +187,6 @@ class TestMNISTIntegration:
 
     def test_mlp_forward_pass(self):
         """Test MLP forward pass with flatten."""
-        if not IMPORTS_AVAILABLE:
-            pytest.skip("Imports not available")
-
         class SimpleMLP(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -237,9 +214,6 @@ class TestMNISTIntegration:
 
     def test_mlp_training_with_crossentropy(self):
         """Test MLP training with CrossEntropyLoss."""
-        if not IMPORTS_AVAILABLE:
-            pytest.skip("Imports not available")
-
         class SimpleMLP(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -278,9 +252,6 @@ class TestCIFAR10Integration:
 
     def test_cnn_creation(self):
         """Test creating CNN like in the example."""
-        if not IMPORTS_AVAILABLE:
-            pytest.skip("Imports not available")
-
         class ModernCNN(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -305,9 +276,6 @@ class TestCIFAR10Integration:
 
     def test_cnn_forward_pass(self):
         """Test CNN forward pass with convolution and pooling."""
-        if not IMPORTS_AVAILABLE:
-            pytest.skip("Imports not available")
-
         # Simplified CNN for testing
         class SimpleCNN(nn.Module):
             def __init__(self):
@@ -329,22 +297,14 @@ class TestCIFAR10Integration:
         inputs = Variable(Tensor(X), requires_grad=False)
 
         # This MUST work for CIFAR-10 example to succeed
-        try:
-            outputs = model(inputs)
-            assert outputs.data.shape == (batch_size, 10), f"Expected shape ({batch_size}, 10), got {outputs.data.shape}"
-        except Exception as e:
-            # If this fails, we know what needs to be fixed
-            print(f"❌ CNN forward pass failed: {e}")
-            assert False, f"CNN forward pass must work for CIFAR-10 example: {e}"
+        outputs = model(inputs)
+        assert outputs.data.shape == (batch_size, 10), f"Expected shape ({batch_size}, 10), got {outputs.data.shape}"
 
 class TestModernAPIComponents:
     """Test individual modern API components work correctly."""
 
     def test_nn_module_base_class(self):
         """Test nn.Module provides required functionality."""
-        if not IMPORTS_AVAILABLE:
-            pytest.skip("Imports not available")
-
         class TestModule(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -366,9 +326,6 @@ class TestModernAPIComponents:
 
     def test_functional_interface(self):
         """Test nn.functional components work."""
-        if not IMPORTS_AVAILABLE:
-            pytest.skip("Imports not available")
-
         # Test data
         X = np.array([[-1, 0, 1, 2]], dtype=np.float32)
         tensor_x = Variable(Tensor(X), requires_grad=False)
@@ -385,9 +342,6 @@ class TestModernAPIComponents:
 
     def test_optimizer_integration(self):
         """Test optimizers work with nn.Module."""
-        if not IMPORTS_AVAILABLE:
-            pytest.skip("Imports not available")
-
         class SimpleModel(nn.Module):
             def __init__(self):
                 super().__init__()

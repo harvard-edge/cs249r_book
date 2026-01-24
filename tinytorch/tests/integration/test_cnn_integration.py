@@ -191,7 +191,6 @@ class TestCNNGradientFlow:
     The educational Conv2d supports weight gradients but not input gradients.
     """
 
-    @pytest.mark.skip(reason="Conv2d input gradients not implemented in educational version")
     def test_conv2d_gradient_flow(self):
         """Verify that gradients flow through Conv2d layers correctly."""
         enable_autograd()
@@ -228,7 +227,6 @@ class TestCNNGradientFlow:
         print(f"   Weight grad norm: {np.linalg.norm(conv.weight.grad):.4f}")
         return True
 
-    @pytest.mark.skip(reason="Conv2d input gradients not implemented in educational version")
     def test_complete_cnn_forward_backward(self):
         """Test complete CNN forward and backward pass with Conv → Pool → Conv."""
         enable_autograd()

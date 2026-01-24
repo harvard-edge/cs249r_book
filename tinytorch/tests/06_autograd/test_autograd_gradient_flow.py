@@ -130,9 +130,8 @@ def test_layernorm_operations():
     # Test sqrt (monkey-patched in transformer module)
     x = Tensor(np.array([4.0, 9.0, 16.0]), requires_grad=True)
 
-    # Check if sqrt is available (added in later modules)
-    if not hasattr(x, 'sqrt'):
-        pytest.skip("sqrt operation not yet implemented (requires transformer module)")
+    # sqrt should be available - if not, the test will fail (not skip)
+    assert hasattr(x, 'sqrt'), "sqrt operation not implemented - requires transformer module"
 
     sqrt_x = x.sqrt()
     assert sqrt_x.requires_grad, "Sqrt should preserve requires_grad"

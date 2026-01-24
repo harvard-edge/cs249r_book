@@ -284,8 +284,8 @@ def test_transformer_forward():
     """Test Transformer architecture."""
     class SimpleTransformer:
         def __init__(self):
-            self.embed = Embedding(1000, 128)
-            self.pos_enc = PositionalEncoding(128, 100)
+            self.embed = Embedding(1000, 128)  # vocab_size=1000, embed_dim=128
+            self.pos_enc = PositionalEncoding(100, 128)  # max_seq_len=100, embed_dim=128
             self.transformer = TransformerBlock(128, 8)
             self.ln = LayerNorm(128)
             self.output = Linear(128, 1000)

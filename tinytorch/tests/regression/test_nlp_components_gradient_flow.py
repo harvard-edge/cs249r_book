@@ -56,7 +56,6 @@ def test_tokenization_basic():
     print("")
 
 
-@pytest.mark.skip(reason="Requires weight.requires_grad=True by default; use optimizer pattern instead")
 def test_embedding_gradient_flow():
     """
     Test Module 11: Embedding with gradient flow
@@ -282,7 +281,6 @@ def test_multi_head_attention_gradient_flow():
     print("")
 
 
-@pytest.mark.skip(reason="Requires weight.requires_grad=True by default; use optimizer pattern instead")
 def test_layernorm_gradient_flow():
     """
     Test Module 13: LayerNorm with gradient flow
@@ -448,7 +446,6 @@ def test_transformer_block_gradient_flow():
     print("")
 
 
-@pytest.mark.skip(reason="Requires weight.requires_grad=True by default; use optimizer pattern instead")
 def test_full_gpt_model_gradient_flow():
     """
     Test complete GPT model with gradient flow through all layers.

@@ -334,9 +334,11 @@ class TestFullJourney:
             text=True
         )
         # This tests that the package structure is correct
-        # May fail if module not exported yet - that's informative
-        if result.returncode != 0:
-            pytest.skip("Tensor not yet exported - run tito module complete 01 first")
+        # If Tensor is not exported, that's a test failure
+        assert result.returncode == 0, (
+            f"Tensor not exported from tinytorch. "
+            f"Run 'tito module complete 01' first. Error: {result.stderr}"
+        )
 
     @pytest.mark.full_journey
     @pytest.mark.slow
@@ -346,26 +348,24 @@ class TestFullJourney:
         Requires: Module 01-08 completed and exported.
         """
         # Check if prerequisite modules are available
-        try:
-            result = subprocess.run(
-                [sys.executable, "-c", """
+        result = subprocess.run(
+            [sys.executable, "-c", """
 from tinytorch import Tensor, ReLU, Linear
 print('OK')
 """],
-                cwd=PROJECT_ROOT,
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            if result.returncode != 0:
-                pytest.skip("Required modules not exported yet")
-        except Exception:
-            pytest.skip("Cannot import required modules")
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        assert result.returncode == 0, (
+            f"Required modules (Tensor, ReLU, Linear) not exported from tinytorch. "
+            f"Complete modules 01-08 first. Error: {result.stderr}"
+        )
 
         # Run milestone 01 with skip-checks (we verified prereqs above)
         script_path = PROJECT_ROOT / "milestones" / "01_1958_perceptron" / "01_rosenblatt_forward.py"
-        if not script_path.exists():
-            pytest.skip("Milestone script not found")
+        assert script_path.exists(), f"Milestone script not found at {script_path}"
 
         code, stdout, stderr = run_python_script(script_path, timeout=120)
 

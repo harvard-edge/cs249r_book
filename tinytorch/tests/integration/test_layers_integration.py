@@ -12,36 +12,33 @@ import os
 import numpy as np
 import pytest
 
-# Try to import from the package first, fall back to dev files
-try:
-    from tinytorch.core.tensor import Tensor
-    from tinytorch.core.layers import Linear
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.layers import Linear
 
-    class Sequential:
-        """Simple sequential container for testing."""
-        def __init__(self, layers=None):
-            self.layers = layers if layers else []
-        def add(self, layer):
-            self.layers.append(layer)
-        def __call__(self, x):
-            for layer in self.layers:
-                x = layer(x)
-            return x
-        def parameters(self):
-            params = []
-            for layer in self.layers:
-                if hasattr(layer, 'parameters'):
-                    params.extend(layer.parameters())
-            return params
 
-    class Flatten:
-        """Flatten layer for testing."""
-        def __call__(self, x):
-            import numpy as np
-            batch_size = x.shape[0]
-            return x.reshape(batch_size, -1)
-except ImportError:
-    pytest.skip("TinyTorch package not properly installed", allow_module_level=True)
+class Sequential:
+    """Simple sequential container for testing."""
+    def __init__(self, layers=None):
+        self.layers = layers if layers else []
+    def add(self, layer):
+        self.layers.append(layer)
+    def __call__(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+    def parameters(self):
+        params = []
+        for layer in self.layers:
+            if hasattr(layer, 'parameters'):
+                params.extend(layer.parameters())
+        return params
+
+
+class Flatten:
+    """Flatten layer for testing."""
+    def __call__(self, x):
+        batch_size = x.shape[0]
+        return x.reshape(batch_size, -1)
 
 
 def test_complete_neural_networks():

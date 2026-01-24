@@ -29,6 +29,7 @@ from tinytorch.core.activations import ReLU, Sigmoid
 from tinytorch.core.losses import MSELoss as MeanSquaredError, CrossEntropyLoss
 from tinytorch.core.optimizers import SGD, Adam
 from tinytorch.core.spatial import Conv2d
+from tinytorch.core.dataloader import Dataset, DataLoader
 
 class Sequential:
     """Simple sequential container for testing."""
@@ -208,66 +209,54 @@ def test_classification_training():
 
 def test_dataset_iteration():
     """Dataset and DataLoader work together."""
-    try:
-        from tinytorch.core.dataloader import Dataset, DataLoader
+    class SimpleDataset(Dataset):
+        def __init__(self, size):
+            self.X = np.random.randn(size, 10)
+            self.y = np.random.randn(size, 5)
 
-        class SimpleDataset(Dataset):
-            def __init__(self, size):
-                self.X = np.random.randn(size, 10)
-                self.y = np.random.randn(size, 5)
+        def __len__(self):
+            return len(self.X)
 
-            def __len__(self):
-                return len(self.X)
+        def __getitem__(self, idx):
+            return Tensor(self.X[idx]), Tensor(self.y[idx])
 
-            def __getitem__(self, idx):
-                return Tensor(self.X[idx]), Tensor(self.y[idx])
+    dataset = SimpleDataset(100)
+    dataloader = DataLoader(dataset, batch_size=10, shuffle=True)
 
-        dataset = SimpleDataset(100)
-        dataloader = DataLoader(dataset, batch_size=10, shuffle=True)
+    # Iterate through dataloader
+    batch_count = 0
+    for X_batch, y_batch in dataloader:
+        assert X_batch.shape == (10, 10), f"Wrong batch shape: {X_batch.shape}"
+        assert y_batch.shape == (10, 5), f"Wrong target shape: {y_batch.shape}"
+        batch_count += 1
 
-        # Iterate through dataloader
-        batch_count = 0
-        for X_batch, y_batch in dataloader:
-            assert X_batch.shape == (10, 10), f"Wrong batch shape: {X_batch.shape}"
-            assert y_batch.shape == (10, 5), f"Wrong target shape: {y_batch.shape}"
-            batch_count += 1
-
-        assert batch_count == 10, f"Expected 10 batches, got {batch_count}"
-
-    except ImportError:
-        pytest.skip("DataLoader not implemented")
+    assert batch_count == 10, f"Expected 10 batches, got {batch_count}"
 
 
 def test_data_augmentation_pipeline():
     """Data augmentation in loading pipeline."""
-    try:
-        from tinytorch.core.dataloader import Dataset, DataLoader
+    class AugmentedDataset(Dataset):
+        def __init__(self, size):
+            self.X = np.random.randn(size, 3, 32, 32)
+            self.y = np.random.randint(0, 10, size)
 
-        class AugmentedDataset(Dataset):
-            def __init__(self, size):
-                self.X = np.random.randn(size, 3, 32, 32)
-                self.y = np.random.randint(0, 10, size)
+        def __len__(self):
+            return len(self.X)
 
-            def __len__(self):
-                return len(self.X)
+        def __getitem__(self, idx):
+            # Simple augmentation: random flip
+            x = self.X[idx]
+            if np.random.random() > 0.5:
+                x = np.flip(x, axis=-1)  # Horizontal flip
+            return Tensor(x), Tensor(self.y[idx])
 
-            def __getitem__(self, idx):
-                # Simple augmentation: random flip
-                x = self.X[idx]
-                if np.random.random() > 0.5:
-                    x = np.flip(x, axis=-1)  # Horizontal flip
-                return Tensor(x), Tensor(self.y[idx])
+    dataset = AugmentedDataset(50)
+    dataloader = DataLoader(dataset, batch_size=5, shuffle=False)
 
-        dataset = AugmentedDataset(50)
-        dataloader = DataLoader(dataset, batch_size=5, shuffle=False)
-
-        # Should handle augmented data
-        for X_batch, y_batch in dataloader:
-            assert X_batch.shape == (5, 3, 32, 32), "Augmented batch wrong shape"
-            break  # Just test first batch
-
-    except ImportError:
-        pytest.skip("DataLoader not implemented")
+    # Should handle augmented data
+    for X_batch, y_batch in dataloader:
+        assert X_batch.shape == (5, 3, 32, 32), "Augmented batch wrong shape"
+        break  # Just test first batch
 
 
 # ============== Model Save/Load Tests ==============
