@@ -616,7 +616,9 @@ class ModuleWorkflowCommand(BaseCommand):
             if next_num in module_mapping:
                 next_module = module_mapping[next_num]
                 next_name = next_module.split('_', 1)[1].title()
-                celebration_text.append(f"💡 Next: [bold cyan]tito module start {next_num}[/bold cyan]\n", style="")
+                celebration_text.append("💡 Next: ", style="")
+                celebration_text.append(f"tito module start {next_num}", style="bold cyan")
+                celebration_text.append("\n", style="")
                 celebration_text.append(f"         Build {next_name}", style="dim")
 
             self.console.print(Panel(
