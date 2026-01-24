@@ -85,7 +85,9 @@ The complexity becomes apparent when considering specific implementation challen
 
 To understand why modern frameworks are designed as they are, we must trace how they evolved through decades of incremental abstraction, each generation solving problems that made the previous generation impractical. This evolution progressed through three distinct levels of abstraction:
 
-1. **Hardware Primitives (1979–1992)**: The **Basic Linear Algebra Subprograms (BLAS)** established standardized, hardware-optimized implementations of operations like matrix multiplication (`GEMM`) [@kung1979systolic]. **LAPACK** extended this with higher-level solvers. These libraries remain the hidden foundation of every modern ML system—vendors like Intel (MKL) and NVIDIA (cuBLAS) provide highly tuned versions for their silicon.
+1. **Hardware Primitives (1979–1992)**: The **Basic Linear Algebra Subprograms (BLAS)**[^fn-blas] established standardized, hardware-optimized implementations of operations like matrix multiplication (`GEMM`) [@kung1979systolic]. **LAPACK** extended this with higher-level solvers. These libraries remain the hidden foundation of every modern ML system—vendors like Intel (MKL) and NVIDIA (cuBLAS) provide highly tuned versions for their silicon.
+
+[^fn-blas]: **BLAS (Basic Linear Algebra Subprograms)**: A standardized specification (Level 1: vector operations; Level 2: matrix-vector; Level 3: matrix-matrix like GEMM) published in 1979 that defines portable APIs for dense linear algebra. Hardware vendors implement optimized BLAS libraries: Intel MKL achieves near-peak FLOPS on x86 CPUs through AVX-512 vectorization, while NVIDIA cuBLAS uses Tensor Cores for 312 TFLOPS on A100 GPUs. This 45-year-old interface remains the performance foundation of modern ML frameworks.
 
 2. **Vectorized Productivity (2006)**: **NumPy** made Python viable for numerical computing by delegating heavy computation to underlying C and Fortran BLAS libraries. This "vectorization" approach—writing code in high-level Python but executing it in low-level C—became the dominant pattern, drastically reducing the gap between research ideas and execution speed.
 
@@ -154,7 +156,9 @@ To understand why execution strategy matters so much, consider the **Memory Wall
 
 This creates a fundamental classification: operations are either **compute-bound** (limited by arithmetic throughput, like large matrix multiplications) or **memory-bound** (limited by data movement, like activation functions and normalization). Most neural network operations are memory-bound.
 
-The key optimization for memory-bound operations is **kernel fusion**—combining multiple operations into a single GPU function (called a *kernel*) to avoid intermediate memory traffic. Fusing `LayerNorm → Dropout → ReLU` into one kernel can yield 5× speedup. FlashAttention fuses the entire attention computation for 10-20× speedup.
+The key optimization for memory-bound operations is **kernel fusion**—combining multiple operations into a single GPU function (called a *kernel*) to avoid intermediate memory traffic. Fusing `LayerNorm → Dropout → ReLU` into one kernel can yield 5× speedup. FlashAttention[^fn-flashattention] fuses the entire attention computation for 10-20× speedup.
+
+[^fn-flashattention]: **FlashAttention**: Memory-efficient attention algorithm by Dao et al. (2022) that reduces attention's memory complexity from O(N^2) to O(N) by computing attention in tiles that fit in GPU SRAM, avoiding materialization of the full N x N attention matrix in HBM. Achieves 2-4x speedup and enables training with longer context lengths by reducing memory traffic between HBM (1.5 TB/s on A100) and SRAM (19 TB/s), demonstrating how algorithmic redesign can overcome the memory wall.
 
 **But here's the catch**: a framework can only fuse operations it can see together. If operations execute immediately one at a time (eager execution), the framework cannot fuse them. If operations are recorded first into a graph (deferred execution), the framework can analyze and optimize the entire computation. This is why execution strategy matters so much—it determines what optimizations are even possible.
 
@@ -705,7 +709,9 @@ To achieve this fusion automatically without requiring users to write custom CUD
 
 2. **FX Graph** (intermediate representation): Operations captured by TorchDynamo are converted to FX graph format, PyTorch's node-based directed acyclic graph where each node represents an operation (matrix multiplication, ReLU activation, addition) with explicit inputs and outputs. The FX graph serves as PyTorch's analog to LLVM IR: a standardized representation that separates frontend (Python code capture) from backend (hardware-specific code generation). This design allows different backends (TorchInductor, ONNX Runtime, TensorRT) to consume FX graphs and generate optimized code for their target platforms. The graph structure enables optimization passes: dead code elimination, constant folding, operation reordering, pattern matching for fusion opportunities.
 
-3. **TorchInductor** (code generation): The default backend that compiles FX graphs to optimized machine code. For CUDA GPUs, TorchInductor generates Triton kernels (a Python-based GPU kernel language that compiles to PTX). For CPUs, it generates C++ code with vectorization instructions (AVX2, AVX-512). Key optimizations include kernel fusion (combining multiple operations into single kernels to reduce memory traffic; for example, `(x * 2).relu()` becomes one fused kernel instead of two separate kernels), memory layout optimization (choosing optimal tensor layouts to minimize memory access overhead), and autotuning (for operations with multiple implementation strategies, measuring actual performance to select the fastest variant).
+3. **TorchInductor** (code generation): The default backend that compiles FX graphs to optimized machine code. For CUDA GPUs, TorchInductor generates Triton[^fn-triton] kernels (a Python-based GPU kernel language that compiles to PTX). For CPUs, it generates C++ code with vectorization instructions (AVX2, AVX-512). Key optimizations include kernel fusion (combining multiple operations into single kernels to reduce memory traffic; for example, `(x * 2).relu()` becomes one fused kernel instead of two separate kernels), memory layout optimization (choosing optimal tensor layouts to minimize memory access overhead), and autotuning (for operations with multiple implementation strategies, measuring actual performance to select the fastest variant).
+
+[^fn-triton]: **Triton**: Open-source GPU programming language developed by OpenAI that enables writing custom kernels in Python-like syntax without low-level CUDA knowledge. Triton compiles to PTX (NVIDIA's intermediate assembly) and handles memory coalescing, shared memory management, and thread synchronization automatically. Achieves 80-95% of hand-tuned CUDA performance while reducing kernel development time from weeks to hours, making custom GPU optimization accessible to ML researchers.
 
 The generated code is cached on disk (in `~/.triton/cache/` for Triton kernels). Subsequent runs with the same input shapes can skip compilation and directly execute cached code.
 
@@ -2371,7 +2377,9 @@ print(next(model.parameters()).device)  # cuda:0
 
 **Memory Transfer Overhead Quantification**
 
-The cost of device transfers varies dramatically with interconnect technology. @tbl-device-transfer-overhead quantifies this for a 1000x1000 float32 tensor (4 MB), revealing why the memory wall discussed earlier in this chapter makes device placement a primary optimization concern:
+The cost of device transfers varies dramatically with interconnect technology.[^fn-nvlink] @tbl-device-transfer-overhead quantifies this for a 1000x1000 float32 tensor (4 MB), revealing why the memory wall discussed earlier in this chapter makes device placement a primary optimization concern:
+
+[^fn-nvlink]: **NVLink**: NVIDIA's high-bandwidth interconnect for GPU-to-GPU communication, providing 600 GB/s bidirectional bandwidth (NVLink 3.0 on A100) compared to 64 GB/s for PCIe 4.0 x16. Critical for multi-GPU training where gradient synchronization requires moving gigabytes per iteration. NVSwitch extends NVLink to connect 8 GPUs in a fully-connected topology (DGX systems), enabling all-to-all communication without bottlenecks. The 10x bandwidth advantage over PCIe determines whether tensor parallelism is practical for a given model size.
 
 +------------------+------------------------+-------------------+-----------------------------+
 | **Interconnect** | **Bandwidth**          | **Transfer Time** | **Relative to Compute**     |
@@ -3577,9 +3585,11 @@ When `h = torch.relu(x @ W1 + b1)` executes, PyTorch's eager execution triggers 
 3. **Kernel Launch** (~5μs): The selected kernel is queued to the GPU's command buffer. The CPU continues immediately (asynchronous execution).
 
 4. **GPU Execution** (~15μs):
-   - Load W1 from HBM to L2 cache (~200GB/s effective bandwidth)
+   - Load W1 from HBM[^fn-hbm] to L2 cache (~200GB/s effective bandwidth)
    - Perform matrix multiply in tensor cores (if available)
    - Write result to HBM
+
+[^fn-hbm]: **HBM (High Bandwidth Memory)**: 3D-stacked DRAM technology providing 2-3 TB/s bandwidth on modern GPUs (A100: 2 TB/s, H100: 3.35 TB/s) compared to 50-100 GB/s for standard DDR memory. HBM stacks multiple DRAM dies vertically with through-silicon vias (TSVs), enabling thousands of parallel data paths. The 80GB HBM2e on an A100 is the primary bottleneck for large model training: model weights, activations, and gradients must fit in HBM, making memory capacity and bandwidth the practical limits on model size.
 
 5. **Autograd Recording**: Simultaneously, PyTorch's autograd engine records a `MmBackward` node on the tape, storing references to `x` and `W1` for gradient computation.
 

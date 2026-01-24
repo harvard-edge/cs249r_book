@@ -48,6 +48,10 @@ The Purpose section posed a deceptively simple question: why does moving data co
 
 The Model Compression chapter (@sec-model-compression) introduced techniques that reduce computational requirements through algorithmic means: quantization shrinks precision from FP32 to INT8, pruning removes unnecessary weights, and knowledge distillation trains smaller networks. But *why* does reducing precision from 32 bits to 8 bits yield 2-4× speedup? Why does structured pruning improve performance while unstructured pruning often doesn't? The answers lie in hardware architecture. Quantization works because accelerators pack 4× more INT8 operations into the same silicon. Structured pruning works because it preserves memory access patterns that hardware can optimize. This chapter explains the physical constraints that make algorithmic optimizations effective and reveals why some theoretically promising techniques fail to deliver real-world speedups.
 
+::: {.callout-definition title="Hardware Acceleration"}
+**Hardware Acceleration** refers to the use of _specialized computing hardware_—GPUs, TPUs, NPUs, and custom ASICs—designed to exploit the _regular computational patterns_ of machine learning workloads. By optimizing for dense matrix operations, reduced-precision arithmetic, and high memory bandwidth, accelerators achieve orders-of-magnitude improvements in _throughput_ and _energy efficiency_ compared to general-purpose processors, transforming ML from computationally prohibitive research into deployable systems.
+:::
+
 ::: {.callout-definition title="Hardware-Software Co-design"}
 
 **Hardware-Software Co-design** refers to the simultaneous and coordinated design of _machine learning algorithms_ and _computational hardware_ to optimize for performance, efficiency, and scalability, recognizing that neither can achieve peak potential in isolation.
@@ -284,7 +288,9 @@ Neural networks are characterized by three unique properties that drive this shi
 2. **Predictable Data Flow**: Data movement in deep learning is mathematically determined by the network's layers. This predictability enables hardware to "prefetch" data into local scratchpads, bypassing the expensive random-access cache hierarchies of CPUs.
 3. **Tolerance for Reduced Precision**: Neural networks typically remain robust even when using 8-bit or 4-bit integers instead of 64-bit floating-point numbers. This flexibility allows architects to fit 10$\times$ more compute units in the same silicon area.
 
-The primary engineering challenge is no longer "how fast can we calculate?" but "how close can we keep the data to the calculation?" In modern accelerators, accessing data from external memory (DRAM) can consume $100\times$ more energy than the actual arithmetic operation. This disparity drives the "Anatomy of an Accelerator" (@fig-accelerator-anatomy), prioritizing high-bandwidth memory (HBM) and large on-chip scratchpads to minimize data movement.
+The primary engineering challenge is no longer "how fast can we calculate?" but "how close can we keep the data to the calculation?" In modern accelerators, accessing data from external memory (DRAM) can consume $100\times$ more energy than the actual arithmetic operation. This disparity drives the "Anatomy of an Accelerator" (@fig-accelerator-anatomy), prioritizing high-bandwidth memory (HBM)[^fn-hbm] and large on-chip scratchpads to minimize data movement.
+
+[^fn-hbm]: **High-Bandwidth Memory (HBM)**: A 3D-stacked DRAM technology that places memory dies vertically on top of or adjacent to the processor die, connected via thousands of through-silicon vias (TSVs). First commercialized in 2015, HBM provides 2-10x higher bandwidth than traditional GDDR memory (e.g., 2-3 TB/s for HBM3 vs. 500-700 GB/s for GDDR6X) while consuming less power per bit transferred. The A100 GPU uses HBM2e to achieve 2 TB/s bandwidth, enabling memory-bound ML workloads to approach compute-bound performance. The trade-off is higher manufacturing cost and complexity, limiting HBM to high-end data center accelerators.
 
 The evolution from the Intel 8087 to the Google TPU reveals a consistent pattern: hardware evolves to fit the algorithm's dominant bottleneck. Where the 8087 addressed floating-point operations that consumed 80% of scientific computing time, modern AI accelerators address matrix operations that constitute over 95% of neural network computation. This concentration of demand explains why specialized AI silicon achieves 100-1000$\times$ performance improvements over general-purpose processors.
 
@@ -1593,7 +1599,9 @@ To optimize data movement, we must understand the physical topology of the compu
 **1. Device-Device Interconnect (NVLink / Infinity Fabric)**:
 Modern multi-GPU nodes use specialized high-speed bridges like NVLink to connect accelerators directly, bypassing the host CPU.
 *   **Bandwidth**: 600–900 GB/s (per GPU).
-*   **Use Case**: Gradient synchronization (AllReduce) during distributed training. This bandwidth is critical for scaling; without it, multi-GPU training often scales poorly.
+*   **Use Case**: Gradient synchronization (AllReduce)[^fn-allreduce] during distributed training. This bandwidth is critical for scaling; without it, multi-GPU training often scales poorly.
+
+[^fn-allreduce]: **AllReduce**: A collective communication operation that combines values from all processes and distributes the result back to all processes. In distributed ML training, AllReduce aggregates gradients computed independently on each GPU, then broadcasts the averaged gradients to all GPUs for the next training step. The operation's efficiency depends on the algorithm (ring AllReduce, tree AllReduce, or hierarchical variants) and network topology. For a model with 1 billion parameters using FP16 gradients (2 GB total), AllReduce on 8 GPUs via NVLink at 600 GB/s requires approximately 3.3 ms, representing potential overhead on each training step.
 
 **2. Host-Device Interconnect (PCIe)**:
 The link between the CPU and the Accelerator.
@@ -3169,7 +3177,11 @@ The most aggressive scaling approach treats an entire silicon wafer as a unified
 
 The transition from single-chip to multi-chip architectures introduces qualitatively different constraints that fundamentally transform system optimization.
 
-Communication overhead emerges as the primary limit on scaling efficiency. Amdahl's Law quantifies how communication during gradient synchronization creates sequential bottlenecks. For hundred-billion-parameter-scale models, AllReduce operations can require exchanging hundreds of gigabytes of gradients per training step. This communication overhead explains why scaling to very large accelerator counts can show diminishing returns without algorithmic innovations like gradient compression, overlap, or alternative parallelization strategies.
+Communication overhead emerges as the primary limit on scaling efficiency. Amdahl's Law[^fn-amdahls-law] quantifies how communication during gradient synchronization creates sequential bottlenecks. For hundred-billion-parameter-scale models, AllReduce operations can require exchanging hundreds of gigabytes of gradients per training step.
+
+[^fn-amdahls-law]: **Amdahl's Law**: Formulated by Gene Amdahl in 1967, this law quantifies the theoretical speedup when only part of a program can be parallelized. If a fraction $P$ of the workload is parallelizable, the maximum speedup with infinite processors is $1/(1-P)$. For distributed ML training, the "serial" portion includes gradient synchronization and any load imbalances. With 5% serial overhead from communication, maximum speedup is capped at $20\times$ regardless of GPU count, explaining why scaling efficiency degrades at large cluster sizes.
+
+This communication overhead explains why scaling to very large accelerator counts can show diminishing returns without algorithmic innovations like gradient compression, overlap, or alternative parallelization strategies.
 
 Memory coherence presents another challenge at scale. Ensuring all processors see consistent views of shared memory adds 10-50 ns latency per access in traditional coherence protocols. For AI accelerators with thousands of cores, this overhead becomes prohibitive, forcing explicit memory management where programmers control data placement and synchronization manually.
 
@@ -3351,20 +3363,24 @@ Building on these foundational concepts, the emergence of multi-chip and distrib
 
 The principles of hardware acceleration established here provide the foundation for understanding how benchmarking methodologies evaluate accelerator performance and how deployment strategies must account for hardware constraints and capabilities.
 
-::: {.callout-chapter-connection title="From Understanding to Measurement"}
+::: {.callout-chapter-connection title="From Hardware to Data: The Final Optimization Frontier"}
 
-This chapter has equipped you to analyze hardware architectures and predict performance characteristics. But analysis must be validated through measurement. Consider: if you've quantized a model from FP32 to INT8 (following @sec-model-compression) and deployed it on a GPU with Tensor Core support, how do you verify the expected 2-4× speedup actually materializes? How do you isolate whether a performance gap stems from memory bandwidth, kernel inefficiency, or suboptimal batch sizing?
+We have compressed the model (reducing parameters and precision) and accelerated the hardware (maximizing throughput per watt). These optimizations follow a historical pattern: first we made algorithms more efficient, then we made silicon faster. But a third frontier has emerged—and it may be the most impactful of all.
 
-@sec-benchmarking-ai provides the measurement discipline that transforms hardware understanding into validated engineering decisions:
+Consider the economics: GPU compute scales exponentially (roughly 10× every 3-4 years), but high-quality training data grows far slower (perhaps 2× per decade). The internet has been scraped. Domain experts cannot label faster. We are increasingly **compute-rich and data-poor**.
 
-- **Metrics selection**: Latency vs. throughput, TFLOPS vs. TOPS, energy efficiency—which metrics matter for your deployment scenario?
-- **Fair comparison**: How to evaluate accelerator options while controlling for confounding factors like different compiler stacks or memory configurations
-- **Bottleneck identification**: Using profiling tools to determine whether your workload hits the compute or memory roof
-- **Cost-performance analysis**: Translating hardware characteristics into dollars-per-inference or time-to-train metrics that drive procurement decisions
+This asymmetry inverts the optimization priority. When compute was scarce and data abundant, the winning strategy was hardware acceleration. Now that compute is abundant and quality data is scarce, the winning strategy is **data efficiency**—extracting maximum learning from every sample.
 
-The roofline analysis techniques introduced here will inform how you interpret benchmark results; the memory hierarchy understanding will help you diagnose unexpected performance gaps; and the dataflow concepts will guide optimization priorities when benchmarks reveal underutilization.
+@sec-data-efficiency addresses this newest optimization frontier:
 
-We have built the factory (the model) and tuned the engine (the hardware). Now, we must take it to the track. How do we know if our optimizations actually worked? In **Benchmarking** (@sec-benchmarking-ai), we move from theoretical peaks to empirical truth, learning to measure the speed, accuracy, and efficiency of our systems in the wild.
+- **Static data pruning**: Removing redundant samples before training begins—often cutting datasets by 30-50% with minimal accuracy impact
+- **Dynamic selection**: Curriculum learning and active learning to prioritize high-value samples during training
+- **Synthetic generation**: Creating targeted training examples to fill gaps the original dataset cannot cover
+- **Systems engineering**: Data loaders, distributed selection, and I/O optimization for efficient data pipelines
+
+The hardware understanding from this chapter directly enables data efficiency analysis. Memory bandwidth determines whether data loading or computation dominates training cost. Arithmetic intensity reveals whether a workload is compute-bound (benefit from better algorithms) or memory-bound (benefit from smarter data pipelines).
+
+We have optimized the math and the silicon. Now we optimize the input: **Data Efficiency** (@sec-data-efficiency) completes the optimization trilogy.
 
 :::
 

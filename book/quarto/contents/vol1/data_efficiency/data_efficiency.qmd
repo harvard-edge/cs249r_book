@@ -19,9 +19,9 @@ _DALL·E 3 Prompt: A futuristic digital illustration depicting the concept of da
 
 ## Purpose {.unnumbered}
 
-_How do we maximize the learning extracted from each training sample while minimizing the computational, storage, and labeling costs of the entire ML pipeline?_
+_Why does collecting more data often produce smaller improvements than expected, while smaller, curated datasets sometimes outperform massive ones?_
 
-Model compression reduces the cost of inference. Hardware acceleration increases throughput. But data efficiency operates upstream of both: it reduces the total computation required to *train* the model in the first place. A 50% reduction in dataset size—achieved through intelligent curation rather than random sampling—directly translates to 50% fewer training FLOPs, 50% less storage, and 50% lower energy consumption. This chapter examines data efficiency not as a statistical curiosity but as a first-class systems optimization, providing techniques to extract maximum information from minimum data.
+Naive scaling assumes data is homogeneous, that each sample contributes equally to learning. Reality differs dramatically: in typical large-scale datasets, a small fraction of examples provides most of the gradient signal, while the majority are redundant, noisy, or misaligned with the target distribution. This heterogeneity explains both the diminishing returns of brute-force data collection and the surprising effectiveness of intelligent curation. A carefully selected 10% subset can often match the accuracy of the full dataset while reducing training time by 90%. This is not a statistical curiosity but a systems optimization opportunity: data efficiency operates upstream of both model compression and hardware acceleration, reducing the total computation required to *train* models rather than accelerating predetermined workloads. The techniques in this chapter (coreset selection, deduplication, active learning, and curriculum design) transform data from a quantity to be accumulated into a resource to be engineered.
 
 ::: {.callout-tip title="Learning Objectives"}
 
@@ -41,10 +41,10 @@ Model compression reduces the cost of inference. Hardware acceleration increases
 
 :::
 
-To reason precisely about these techniques, we need a formal framework for measuring data efficiency—one that captures the relationship between data investment and model improvement.
+Before exploring techniques to improve data efficiency, we need a formal framework for measuring it. What exactly do we mean by "efficient" use of data?
 
 ::: {.callout-definition title="Data Efficiency"}
-**Data Efficiency** is the ratio of model capability gained to data resources consumed. A data-efficient system maximizes learning per sample, per byte stored, per label acquired, and per FLOP expended on data processing. Formally:
+**Data Efficiency** refers to the ratio of _model capability gained_ to _data resources consumed_, encompassing acquisition, labeling, storage, and compute costs. A data-efficient system maximizes learning per sample, per byte stored, per label acquired, and per FLOP expended on data processing. Formally:
 
 $$
 \text{Data Efficiency} = \frac{\Delta \text{Model Capability}}{\Delta \text{Data Cost}}
@@ -62,11 +62,11 @@ A perfectly efficient dataset would contain only samples that contribute unique 
 
 ## The Data Wall: Why Efficiency Matters Now {#sec-data-efficiency-data-wall-efficiency-matters-febc}
 
-For decades, the dominant strategy in machine learning was simple: **more data, better models**. This intuition, codified in scaling laws [@kaplan2020scaling; @hoffmann2022training], showed that model performance improves predictably with dataset size. Teams responded rationally—scrape more web pages, label more images, generate more synthetic examples. But this era is ending.
+For decades, the dominant strategy in machine learning was simple: **more data, better models**. This intuition, codified in scaling laws [@kaplan2020scaling; @hoffmann2022training], showed that model performance improves predictably with dataset size. Teams responded rationally by scraping more web pages, labeling more images, and generating more synthetic examples. But this era is ending, and a fundamental asymmetry has emerged: hardware acceleration has outpaced data availability.
 
-The machine learning field has hit what researchers call the **Data Wall** [@villalobos2022will]: the empirical observation that high-quality training data is growing far slower than compute capacity. While GPU FLOPS have increased roughly 10× every 3-4 years following Moore's Law extensions, the supply of novel, high-quality human-generated text and images grows at perhaps 2× per decade. The internet has already been scraped. Domain experts cannot label faster.
+The machine learning field has hit what researchers call the **Data Wall** [@villalobos2022will]: the empirical observation that high-quality training data is growing far slower than compute capacity. While GPU FLOPS have increased roughly 10$\times$ every 3–4 years following Moore's Law extensions, the supply of novel, high-quality human-generated text and images grows at perhaps 2$\times$ per decade. The internet has already been scraped. Domain experts cannot label faster.
 
-@fig-running-out-of-human-data illustrates this trajectory: foundation models are consuming the stock of human-generated text at an accelerating rate, with projections suggesting exhaustion of high-quality public data within the next few years. This is not a distant concern—it is shaping training strategies today.
+@fig-running-out-of-human-data illustrates this trajectory: foundation models are consuming the stock of human-generated text at an accelerating rate, with projections suggesting exhaustion of high-quality public data within the next few years. This is not a distant concern. It shapes training strategies today.
 
 ![**Dataset Growth Approaching Limits**: Foundation models are increasingly trained on vast datasets, approaching the total stock of human-generated text. Current projections suggest that high-quality public text data may be exhausted between 2026 and 2032, forcing a shift toward data efficiency, synthetic generation, and multimodal learning. Source: @villalobos_ho_sevilla_besiroglu_heim_hobbhahn_2024.](images/png/running_out_of_data.png){#fig-running-out-of-human-data}
 
@@ -87,26 +87,26 @@ The asymmetry is stark:
 | **Synthetic Data**      | Unbounded       | But bounded by generator quality (risk of model collapse) |
 +-------------------------+-----------------+-----------------------------------------------------------+
 
-**The Consequence**: In 2020, compute and data were roughly balanced for frontier models. By 2025, compute budgets can support training runs 10-100× larger than available high-quality data can fill. We are **compute-rich and data-poor**.
+**The Consequence**: In 2020, compute and data were roughly balanced for frontier models. By 2025, compute budgets can support training runs 10–100$\times$ larger than available high-quality data can fill. We are **compute-rich and data-poor**.
 :::
 
-This asymmetry inverts the optimization priority. When data was abundant and compute was scarce, the right strategy was algorithmic efficiency—squeeze more accuracy from limited GPU cycles. Now that compute is abundant and *quality data* is scarce, the winning strategy is **data efficiency**—squeeze more learning from each sample.
+This asymmetry inverts the optimization priority. When data was abundant and compute was scarce, the right strategy was algorithmic efficiency: squeeze more accuracy from limited GPU cycles. Now that compute is abundant and *quality data* is scarce, the winning strategy is **data efficiency**: squeeze more learning from each sample.
 
-**Concrete Example**: Consider training a model in the **GPT-2/Llama Lighthouse** family (@sec-dnn-architectures)—a 70B parameter language model:
+To make this concrete, consider training a model in the **GPT-2/Llama Lighthouse** family (@sec-dnn-architectures), a 70B parameter language model:
 
 - **Compute available**: 10,000 H100 GPUs for 3 months = ~$50M budget, capable of processing 15 trillion tokens
 - **High-quality data available**: ~5 trillion tokens of deduplicated, filtered web text
 - **The gap**: 3× more compute than data can utilize
 
-The team faces a choice: (1) train on the same data multiple epochs (diminishing returns after epoch 2-3), (2) lower quality thresholds to include more data (degrades model quality), or (3) invest in data efficiency—better filtering, curriculum design, and synthetic augmentation to extract more learning from each token. Option 3 is increasingly the winning strategy.
+The team faces a choice: (1) train on the same data multiple epochs (diminishing returns after epochs 2–3), (2) lower quality thresholds to include more data (degrades model quality), or (3) invest in data efficiency through better filtering, curriculum design, and synthetic augmentation to extract more learning from each token. Option 3 is increasingly the dominant approach.
 
-Unlike our compute-bound ResNet-50 Lighthouse, GPT-2/Llama models are **memory bandwidth-bound** during inference but still benefit enormously from data efficiency during training. Each token processed requires the same forward/backward pass cost regardless of model bottleneck—fewer tokens means fewer FLOPs.
+This data efficiency imperative applies across model architectures, though the bottlenecks differ. Unlike our compute-bound ResNet-50 Lighthouse, GPT-2/Llama models are **memory bandwidth-bound** during inference but still benefit enormously from data efficiency during training. Each token processed requires the same forward/backward pass cost regardless of model bottleneck, so fewer tokens means fewer FLOPs.
 
-The Data Wall explains why data efficiency has shifted from academic curiosity to industrial necessity. Companies training frontier models are no longer bottlenecked by GPU access—they are bottlenecked by the quality and diversity of their training corpora. The differentiator is not who has the most data, but who extracts the most *information* from their data.
+The Data Wall explains why data efficiency has shifted from academic curiosity to industrial necessity. Companies training frontier models are no longer bottlenecked by GPU access. They are bottlenecked by the quality and diversity of their training corpora. The differentiator is not who has the most data but who extracts the most *information* from their data.
 
 ## Data Efficiency as a Systems Problem {#sec-data-efficiency-data-efficiency-systems-problem-d857}
 
-Data efficiency is typically framed as a machine learning problem: *how do I achieve the same accuracy with fewer samples?* This framing focuses on statistical sample complexity and generalization theory. While valid, it misses the larger picture.
+Understanding the Data Wall establishes *why* data efficiency matters; the question becomes *how* to approach it. Data efficiency is typically framed as a machine learning problem: *how do I achieve the same accuracy with fewer samples?* This framing focuses on statistical sample complexity and generalization theory. While valid, it misses the larger picture.
 
 In this textbook, we adopt a **systems framing**: *how do I reduce the total cost of achieving target performance across the entire ML lifecycle?* This shifts attention from accuracy curves to resource consumption:
 
@@ -117,22 +117,17 @@ In this textbook, we adopt a **systems framing**: *how do I reduce the total cos
 | "Sample complexity bounds" | "End-to-end resource efficiency" |
 | "Learning theory" | "Cost engineering" |
 
-The systems framing reveals optimization opportunities invisible to the ML framing:
+The systems framing reveals optimization opportunities invisible to the ML framing.
 
-**1. Training Cost Reduction**
-A 50% reduction in dataset size doesn't just improve sample efficiency—it directly halves the number of forward passes, backward passes, and gradient updates. For a $100M training run, this translates to $50M in compute savings. The relationship is linear and immediate.
+Consider training cost reduction: a 50% reduction in dataset size does not just improve sample efficiency but directly halves the number of forward passes, backward passes, and gradient updates. For a $100M training run, this translates to $50M in compute savings. The relationship is linear and immediate.
 
-**2. Storage and I/O Costs**
-Large datasets consume petabytes of storage and saturate network bandwidth during distributed training. Data efficiency techniques like deduplication reduce storage costs and eliminate I/O bottlenecks that can idle expensive GPU clusters.
+These compute savings cascade into storage and I/O costs. Large datasets consume petabytes of storage and saturate network bandwidth during distributed training. Data efficiency techniques like deduplication reduce storage costs and eliminate I/O bottlenecks that can idle expensive GPU clusters.
 
-**3. Labeling Economics**
-Expert labeling costs ($5-100+ per sample in domains like medical imaging) often exceed compute costs. Active learning and semi-supervised methods aren't just "ML tricks"—they're cost engineering that can reduce labeling budgets by 10-100×.
+Perhaps most significantly, data efficiency transforms labeling economics. Expert labeling costs ($5–100+ per sample in domains like medical imaging) often exceed compute costs. Active learning and semi-supervised methods are not merely algorithmic techniques but cost engineering that can reduce labeling budgets by 10–100$\times$.
 
-**4. Energy and Sustainability**
-Training a large language model can emit hundreds of tons of CO₂. Data efficiency is the most direct lever for Green AI: halving the dataset halves training energy, with no accuracy trade-off if done correctly.
+The environmental implications are equally significant. Training a large language model can emit hundreds of tons of CO₂. Data efficiency is the most direct lever for Green AI: halving the dataset halves training energy, with no accuracy trade-off if done correctly.
 
-**5. Iteration Velocity**
-Smaller, curated datasets enable faster experimentation cycles. A team that can iterate in hours rather than days has a compounding advantage in model development.
+Finally, smaller and curated datasets enable faster iteration velocity. A team that can iterate in hours rather than days has a compounding advantage in model development.
 
 ::: {.callout-perspective title="The Systems Engineer's View of Data"}
 **The ML Researcher asks:** "What is the sample complexity of this learning problem?"
@@ -144,9 +139,9 @@ This chapter equips you with the systems engineer's toolkit: techniques to minim
 
 ## The Information-Compute Ratio {#sec-data-efficiency-informationcompute-ratio-8e9b}
 
-The Optimize Principles established that optimization is not a single objective but a search for the **Pareto Frontier**—the boundary where improving one metric (accuracy) necessarily degrades another (efficiency). We introduced three pillars of efficiency: data, model, and hardware. This chapter tackles the first and often most powerful lever.
+With the systems framing established, we need a quantitative metric to reason about data efficiency. The Optimize Principles introduced the **Pareto Frontier** as the boundary where improving one metric necessarily degrades another. We identified three pillars of efficiency: model, hardware, and data. Having covered how to compress models (@sec-model-compression) and accelerate hardware (@sec-ai-acceleration), we now tackle the third pillar with a central metric: the Information-Compute Ratio.
 
-While model compression (@sec-model-compression) and hardware acceleration (@sec-ai-acceleration) focus on the *execution* of the math, **Data Efficiency** reduces the *amount* of math required by optimizing what enters the training pipeline.
+While model compression and hardware acceleration focus on the *execution* of the math, **Data Efficiency** reduces the *amount* of math required by optimizing what enters the training pipeline.
 
 Data engineering (@sec-data-engineering-ml) ensures that data is clean, accessible, and correctly formatted. Data efficiency asks a different question: *how much information does each sample contribute to the model's learning per unit of computation?*
 
@@ -203,7 +198,7 @@ A random batch of raw data often has low ICR: it contains redundant examples, no
 - Compute: 640K × 8 GFLOPs = **5.1 × 10^15 FLOPs**
 - ICR_coreset = 4.5 / (5.1 × 10^15) = **8.8 × 10^-16 per FLOP**
 
-**Result**: The coreset achieves **1.8× higher ICR**—nearly twice the learning per FLOP—by eliminating low-information "easy" samples that contribute little to the decision boundary. The 0.5 percentage point accuracy difference is often acceptable given the 50% compute savings.
+**Result**: The coreset achieves **1.8$\times$ higher ICR**, nearly twice the learning per FLOP, by eliminating low-information "easy" samples that contribute little to the decision boundary. The 0.5 percentage point accuracy difference is often acceptable given the 50% compute savings.
 :::
 
 ::: {#fig-data-efficiency-pipeline fig-cap="**The Data Efficiency Pipeline**: A structured approach to increasing data value. Raw data is first pruned to remove redundancy (Static Pruning), then dynamically selected during training (Active Learning), and finally augmented to increase diversity (Synthesis). Each stage increases the Information-Compute Ratio (ICR)." fig-alt="A flow diagram showing the progression of data: Raw Data -> Static Pruning -> Dynamic Selection -> Synthetic Generation -> High Value Model. Arrows indicate the flow."}
@@ -240,42 +235,35 @@ This chapter explores three strategies to maximize this ratio:
 2.  **Dynamic Selection**: Selecting high-value samples during training (Curriculum Learning, Active Learning).
 3.  **Synthetic Generation**: Creating high-value samples on demand (Augmentation, Distillation).
 
-We begin with static pruning—the techniques that can reduce your dataset by 30-50% before you even start training.
+We begin with static pruning, the techniques that can reduce your dataset by 30 to 50 percent before you even start training.
 
 ## Static Data Pruning: Pre-Training Filtration {#sec-data-efficiency-static-data-pruning-pretraining-filtration-d6e6}
 
-Before a single gradient is computed, we can dramatically improve efficiency by removing low-value samples from the dataset. This "pre-training filtration" reduces the total computation required without affecting—and sometimes improving—final model accuracy.
+Before a single gradient is computed, we can dramatically improve efficiency by removing low-value samples from the dataset. This pre-training filtration reduces the total computation required without affecting, and sometimes improving, final model accuracy. The techniques in this section operate on the dataset itself, requiring no changes to the training loop or model architecture.
 
 ### The Case for Smaller Datasets {#sec-data-efficiency-case-smaller-datasets-0336}
 
-Machine learning models are often trained on large datasets under the assumption that increasing data volume improves performance. While this holds in many cases, it is not always necessary. Empirical studies on coreset selection and data pruning have consistently demonstrated significant redundancy in standard benchmarks:
+The most counterintuitive insight in data efficiency is that training on *less* data often produces models just as accurate as training on the full dataset. Machine learning practitioners have long operated under the assumption that more data yields better performance, and while this holds in many scenarios, it obscures a critical reality: typical large-scale datasets contain massive redundancy. Empirical studies on coreset selection and data pruning have consistently demonstrated this redundancy across standard benchmarks:
 
 - **ImageNet-1K**: Studies using gradient-based selection (EL2N, GraNd) [@paul2021deep] have shown that training on 50% of ImageNet with carefully selected samples achieves within 1% of full-dataset accuracy. The savings: 50% fewer training FLOPs.
-- **CIFAR-10**: Because CIFAR-10 is smaller and more redundant, aggressive pruning works even better. Experiments report that 10-30% of samples (selected by forgetting scores [@toneva2019empirical] or margin-based methods) can match 90%+ of original accuracy—a 3-10× reduction.
-- **Large Language Model Corpora**: Web-scraped datasets like The Pile and C4 contain substantial exact and near-duplicate content. Deduplication studies [@lee2022deduplicating] report 10-30% redundancy ratios, with deduplicated training yielding *better* downstream performance (less memorization, more generalization).
+- **CIFAR-10**: Because CIFAR-10 is smaller and more redundant, aggressive pruning works even better. Experiments report that 10–30% of samples (selected by forgetting scores [@toneva2019empirical] or margin-based methods) can match 90%+ of original accuracy, a 3–10$\times$ reduction.
+- **Large Language Model Corpora**: Web-scraped datasets like The Pile and C4 contain substantial exact and near-duplicate content. Deduplication studies [@lee2022deduplicating] report 10–30% redundancy ratios, with deduplicated training yielding *better* downstream performance (less memorization, more generalization).
 
 ::: {.callout-warning title="Caveat: Results Vary by Task and Model"}
 These numbers are benchmark-specific. Gains from pruning depend on the dataset's intrinsic redundancy, the selection algorithm, and the model architecture. Always validate on your specific task before deploying aggressive pruning in production.
 :::
 
-The key insight is that not all data points provide equal value for training. Some samples are highly informative—capturing decision boundaries or rare patterns—while others are repetitive or trivially easy. Training on redundant data wastes compute without improving the model.
+The key insight is that not all data points provide equal value for training. Some samples are highly informative, capturing decision boundaries or rare patterns, while others are repetitive or trivially easy. Training on redundant data wastes compute without improving the model. The practical question then becomes: how do we identify which samples to keep?
 
 ### Coreset Selection Algorithms {#sec-data-efficiency-coreset-selection-algorithms-a520}
 
-**Coreset selection** identifies a small subset of data that preserves the statistical properties of the entire dataset. The goal is to find a compact set of examples that allows a model to generalize as well as it would if trained on the full dataset. Several algorithmic approaches have proven effective:
+Coreset selection answers this question by identifying a small subset of data that preserves the statistical properties of the entire dataset. The goal is to find a compact set of examples that allows a model to generalize as well as it would if trained on the full dataset. Several algorithmic families have proven effective, each with distinct computational trade-offs.
 
-**Geometry-Based Methods** select samples that cover the data distribution:
+Geometry-based methods select samples that cover the data distribution without requiring any model training. The k-Center algorithm (also known as Facility Location) selects samples that minimize the maximum distance from any point to its nearest selected center, ensuring coverage of the entire data manifold. Herding takes a different approach, iteratively selecting samples whose features best approximate the mean of the full dataset, thereby maintaining distributional fidelity. These methods are computationally attractive because they operate purely on feature representations, but they ignore label information entirely.
 
-- **k-Center (Facility Location)**: Selects samples that minimize the maximum distance from any point to its nearest selected center. This ensures coverage of the entire data manifold.
-- **Herding**: Iteratively selects samples whose features best approximate the mean of the full dataset, maintaining distributional fidelity.
+Gradient-based methods offer higher selection quality by using training dynamics to identify important samples, though they require training a proxy model first. GraNd (Gradient Normed) scores samples by the norm of their gradients early in training; high-gradient samples lie near the decision boundary and are most informative for learning. Forgetting Events tracks how often a sample is "forgotten" (correctly classified, then later misclassified) during training, identifying harder and more valuable examples. EL2N (Error L2-Norm) ranks samples by prediction confidence after a few epochs, prioritizing samples the model is uncertain about. These gradient-based approaches generally outperform geometry-based methods in selection quality but incur the overhead of proxy model training.
 
-**Gradient-Based Methods** use training dynamics to identify important samples:
-
-- **GraNd (Gradient Normed)**: Scores samples by the norm of their gradients early in training. High-gradient samples are near the decision boundary and most informative.
-- **Forgetting Events**: Tracks how often a sample is "forgotten" (correctly classified, then misclassified) during training. Frequently forgotten samples are harder and more valuable.
-- **EL2N (Error L2-Norm)**: Ranks samples by prediction confidence after a few epochs. Samples the model is uncertain about are prioritized.
-
-@tbl-coreset-comparison summarizes the trade-offs between these approaches:
+@tbl-coreset-comparison quantifies the computational trade-offs between these approaches:
 
 +----------------+------------------+-----------------------+-----------------------+---------------------------+
 | **Method**     | **Compute Cost** | **Requires Training** | **Best For**          | **Limitation**            |
@@ -373,7 +361,7 @@ The key insight is that not all data points provide equal value for training. So
 ```
 :::
 
-**Practical Recommendation**: For most practitioners, **EL2N with a small proxy model** offers the best balance of selection quality and computational cost. Train a lightweight model (e.g., ResNet-18 instead of ResNet-50) for 5-10 epochs, compute scores, and select. The proxy doesn't need to be accurate—it only needs to identify which samples are "hard."
+Given these trade-offs, most practitioners find that EL2N with a small proxy model offers the best balance of selection quality and computational cost. The approach is straightforward: train a lightweight model (for example, ResNet-18 instead of ResNet-50) for 5 to 10 epochs, compute EL2N scores for all samples, then select the highest-scoring subset. The proxy does not need to be accurate; it only needs to identify which samples are hard. This upfront investment in proxy training typically yields substantial returns when the coreset reduces subsequent training by 50% or more.
 
 ::: {.callout-example title="Coreset Selection in Practice"}
 **Scenario**: You have 1 million training images and want to reduce to 100,000 (10%) for faster experimentation.
@@ -426,40 +414,35 @@ train_full_model(model, coreset)  # 10x faster training
 
 ### Data Deduplication {#sec-data-efficiency-data-deduplication-9035}
 
-Beyond selecting informative samples, removing **exact and near-duplicates** provides immediate efficiency gains with no accuracy penalty. Large web-scraped datasets contain substantial redundancy:
+While coreset selection identifies which samples to keep based on their informativeness, a complementary approach targets what to remove: exact and near-duplicates. Unlike coreset selection, deduplication provides immediate efficiency gains with no accuracy penalty and requires no model training whatsoever. This makes deduplication the most accessible optimization in data efficiency, offering guaranteed compute savings with zero risk of degrading model quality.
 
-**Exact Deduplication** uses hash-based methods:
+The simplest form of deduplication uses hash-based methods for exact matches. By computing a cryptographic hash (MD5 or SHA-256) for each sample and removing those with identical hashes, practitioners can eliminate byte-for-byte duplicates that inevitably accumulate in large web-scraped corpora. This process is computationally cheap, scaling linearly with dataset size, and can be parallelized trivially.
 
-- Compute a hash (MD5, SHA-256) of each sample
-- Remove samples with identical hashes
+Near-duplicate detection addresses the more subtle problem of semantically redundant content that differs at the byte level. For text, MinHash with Locality-Sensitive Hashing (LSH) approximates Jaccard similarity efficiently, detecting paraphrased or lightly edited content. For images, perceptual hashing produces signatures robust to minor transformations like resizing and compression, identifying visually identical images stored in different formats. Embedding-based similarity offers the most powerful detection by computing dense representations (CLIP for images, sentence transformers for text) and clustering similar items, though this approach incurs higher computational overhead.
 
-**Near-Duplicate Detection** uses similarity metrics:
-
-- **MinHash/LSH**: Approximate Jaccard similarity for text, detecting paraphrased content
-- **Embedding Similarity**: Compute embeddings (e.g., CLIP for images, sentence transformers for text) and cluster similar items
-- **Perceptual Hashing**: For images, hashes robust to minor transformations (resizing, compression)
-
-For foundation model pre-training, deduplication is now considered essential. Studies on GPT-3 and LLaMA training show that deduplicated data improves both training efficiency and downstream performance by preventing memorization of repeated content.
+For foundation model pre-training, deduplication has become essential rather than optional. Studies on GPT-3 and LLaMA training demonstrate that deduplicated data improves both training efficiency and downstream performance by preventing memorization of repeated content. The benefit is twofold: fewer wasted FLOPs on redundant samples, and better generalization because the model sees more diverse examples per training token.
 
 ::: {.callout-note title="Lighthouse Connection: DLRM and Embedding Deduplication"}
 Our **DLRM Lighthouse model** (@sec-dnn-architectures) presents a unique deduplication challenge. Recommendation systems are memory capacity-bound, with embedding tables consuming terabytes of storage for billions of user/item IDs. Much of this capacity is wasted on **cold embeddings**—IDs that appear rarely in training data.
 
-Data efficiency for DLRM focuses on **interaction deduplication** (removing redundant user-item pairs) and **embedding pruning** (removing or sharing cold embeddings). A 20% reduction in unique interactions can reduce embedding table size by 30-40%, directly addressing DLRM's primary bottleneck: memory capacity rather than compute.
+Data efficiency for DLRM focuses on **interaction deduplication** (removing redundant user-item pairs) and **embedding pruning** (removing or sharing cold embeddings). A 20% reduction in unique interactions can reduce embedding table size by 30–40%, directly addressing DLRM's primary bottleneck: memory capacity rather than compute.
 :::
 
 ### Data Pruning by Quality {#sec-data-efficiency-data-pruning-quality-72ea}
 
-**Data pruning** removes samples that do not contribute meaningfully to learning, going beyond deduplication to assess intrinsic quality:
+Deduplication removes redundant samples, but a third category of problematic data remains: samples that are actively harmful to learning. Quality-based pruning eliminates samples that either contribute no meaningful signal or introduce contradictory information that confuses the optimization process.
 
-- **Label Error Detection**: Tools like Cleanlab identify samples where the label is likely incorrect based on model confidence patterns. Removing or correcting these prevents learning contradictory signals.
-- **Outlier Removal**: Samples far from any cluster center may be noise or annotation errors rather than valuable edge cases.
-- **Low-Information Filtering**: For text, remove documents below a perplexity threshold or with low semantic coherence. For images, filter blurry or corrupted samples.
+Label error detection represents the most impactful form of quality pruning. Tools like Cleanlab identify samples where the assigned label is likely incorrect based on model confidence patterns across training. A sample that the model consistently predicts as class A but is labeled class B either represents a hard case near the decision boundary or, more commonly, an annotation mistake. Removing or correcting these mislabeled samples prevents the model from learning contradictory signals that degrade its decision boundary.
 
-These techniques—coreset selection, deduplication, and quality pruning—demonstrate that careful curation before training yields significant efficiency gains. The compute saved is multiplicative: a 50% dataset reduction means 50% fewer forward passes, backward passes, and gradient updates across all training epochs.
+Outlier removal addresses a different pathology: samples far from any cluster center in feature space. While outliers might represent valuable edge cases, they more often indicate noise, annotation errors, or data corruption. The key is distinguishing between informative outliers (rare but valid examples of a class) and noise (samples that do not belong to any class). Conservative thresholds help avoid discarding genuinely rare examples.
+
+Low-information filtering applies domain-specific heuristics to remove samples that lack sufficient signal for learning. For text corpora, this means removing documents below a perplexity threshold or with low semantic coherence, often indicative of machine-generated spam or garbled content. For image datasets, filtering targets blurry, corrupted, or near-uniform samples that provide little visual information.
+
+Together, these three static pruning techniques (coreset selection, deduplication, and quality filtering) demonstrate that careful curation before training yields significant efficiency gains. The compute savings are multiplicative across the entire training process: a 50% dataset reduction means 50% fewer forward passes, backward passes, and gradient updates across all training epochs. For a model trained for 100 epochs, this translates to 50 epochs worth of saved compute, representing substantial reductions in both training time and energy consumption.
 
 ## Dynamic Data Selection: Training-Time Optimization {#sec-data-efficiency-dynamic-data-selection-trainingtime-optimization-cd62}
 
-While static pruning happens before training begins, **dynamic selection** optimizes which samples to use *during* training. This allows the system to adapt its data diet based on the model's evolving state—focusing compute on samples that provide the most learning signal at each stage.
+Static pruning techniques commit to a fixed dataset before training begins, but this raises a fundamental question: what if the optimal training samples change as the model learns? Early in training, the model benefits from diverse coverage to build broad feature representations; later, it benefits from focusing on hard examples near the decision boundary to refine its predictions. Dynamic selection exploits this insight by optimizing which samples to use *during* training, adapting the data diet based on the model's evolving state.
 
 ### Curriculum Learning: Easy to Hard {#sec-data-efficiency-curriculum-learning-easy-hard-3428}
 
@@ -1885,7 +1868,9 @@ This chapter has applied data efficiency principles to all five Lighthouse model
 The common thread: **data efficiency is not a single technique but a systems optimization** tailored to whichever resource is most constrained.
 :::
 
-With a high-efficiency data pipeline in place, we have minimized the "math required to learn." But even a perfectly optimized dataset still trains a model that may be larger than necessary. A 7B parameter model trained on a coreset still has 7B parameters at inference time. Model compression (@sec-model-compression) addresses this: minimizing the "math required to represent" through techniques that reduce parameter counts, precision, and computational requirements while preserving accuracy.
+With data efficiency, we complete the optimization trilogy: model compression (@sec-model-compression) reduced the "math required to represent" through pruning, quantization, and distillation; hardware acceleration (@sec-ai-acceleration) maximized the "math per second" through specialized silicon; and now data efficiency has minimized the "math required to learn" by extracting more from every sample.
+
+But optimization without measurement is guesswork. How do you know whether a 30% dataset reduction actually translates to 30% training speedup, or whether I/O bottlenecks consume the gains? How do you compare the efficiency of different coreset algorithms, or validate that synthetic data maintains real-world accuracy? **Benchmarking** (@sec-benchmarking-ai) provides the measurement discipline that transforms these optimization techniques from theoretical claims into validated engineering decisions.
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->
 ::: { .quiz-end }

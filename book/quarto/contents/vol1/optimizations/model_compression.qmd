@@ -43,14 +43,14 @@ Research optimizes for accuracy on held-out test sets; production optimizes for 
 
 ## Model Optimization Fundamentals {#sec-model-compression-model-optimization-fundamentals-c0d7}
 
-The preceding chapter on data efficiency (@sec-data-efficiency) examined how to optimize the *inputs* to training—maximizing learning from each data sample. This chapter addresses the complementary challenge: optimizing the *outputs* of training by transforming the trained model into an efficient representation that meets deployment constraints.
+Part II established how to build ML systems—architectures, frameworks, and training pipelines that transform data into capable models. This chapter opens Part III by addressing what happens next: optimizing the *outputs* of training to transform capable models into deployable ones that meet real-world constraints.
 
-Think of it this way: data efficiency reduces the *number of gradient updates* needed to reach a target accuracy, while model optimization reduces the *cost per inference* once the model is deployed. Together, they form a complete efficiency strategy—one focused on training, the other on deployment.
+The models that win benchmarks rarely become the models that run in production. Model compression bridges this gap by systematically trading capabilities the deployment does not need for constraints the deployment cannot violate.
 
-As established in the **Silicon Contract** (@sec-principles-model-building-part-ii-roadmap-math-infrastructure-78fe), every model architecture makes assumptions about available hardware resources. Model optimization is the systematic process of renegotiating that contract—reducing memory footprint, computational cost, and energy consumption while preserving the model's ability to perform its task.
+As established in the **Silicon Contract** (@sec-principles-model-building-part-ii-roadmap-math-infrastructure-78fe), every model architecture makes assumptions about available hardware resources. Model compression is the systematic process of renegotiating that contract—reducing memory footprint, computational cost, and energy consumption while preserving the model's ability to perform its task.
 
-::: {.callout-definition title="Model Optimization"}
-**Model Optimization** refers to the systematic transformation of machine learning models to maximize _computational efficiency_ while preserving _task performance_, enabling deployment across _diverse hardware constraints_.
+::: {.callout-definition title="Model Compression"}
+**Model Compression** refers to the systematic reduction of a trained model's _size_, _computational requirements_, and _memory footprint_ while preserving acceptable _task performance_, enabling deployment on resource-constrained hardware. Compression techniques—including pruning, quantization, and knowledge distillation—transform research-scale models into production-ready artifacts by removing redundancy, reducing numerical precision, and transferring knowledge to more efficient architectures.
 :::
 
 ## Optimization Framework {#sec-model-compression-optimization-framework-9e21}
@@ -1785,7 +1785,9 @@ Low-Rank Matrix Factorization (LRMF) approximates weight matrices with lower-ran
 $$
 A \approx UV
 $$
-where $k \ll m, n$ is the approximation rank. This is typically computed via singular value decomposition (SVD), retaining only the top $k$ singular values.
+where $k \ll m, n$ is the approximation rank. This is typically computed via singular value decomposition (SVD)[^fn-svd], retaining only the top $k$ singular values.
+
+[^fn-svd]: **Singular Value Decomposition (SVD)**: Factorizes matrix $A = U \Sigma V^T$ where singular values in $\Sigma$ indicate importance. Truncating to top-k values minimizes Frobenius norm error (Eckart-Young theorem). For a 4096×4096 weight matrix, rank-128 SVD reduces storage from 64MB to 4MB while preserving 95% of spectral energy. GPU implementations achieve O(mn min(m,n)) complexity.
 
 ::: {.callout-perspective title="The Bandwidth-Compute Trade-off"}
 **Reducing the Memory Pressure**: Low-rank factorization illustrates a classic systems trade-off: **trading computation for bandwidth reduction**. Storing a $4096 \times 4096$ matrix requires 64MB (at FP32). Fetching this matrix for a single inference is a massive memory bandwidth hit, especially when limited by physical memory bandwidth constraints.
@@ -3340,7 +3342,9 @@ Box/.style={inner xsep=2pt,
 
 Activation Quantization refers to the process of quantizing the activation values, or outputs of the layers, during model inference. This quantization can reduce the computational resources required during inference, particularly when targeting hardware optimized for integer arithmetic. It introduces challenges related to maintaining model accuracy, as the precision of intermediate computations is reduced. For instance, in a CNN, the activation maps (or feature maps) produced by convolutional layers, originally represented in Float32, may be quantized to INT8 during inference. This can significantly accelerate computation on hardware capable of efficiently processing lower-precision integers.
 
-Recent advancements have explored **Activation-aware Weight Quantization (AWQ)** for the compression and acceleration of large language models (LLMs). This approach is particularly relevant for our **GPT-2 / Llama Lighthouse**, which is memory-bandwidth bound. By protecting only a small fraction of the most salient weights (approximately 1%) based on activation magnitude, AWQ enables effective 4-bit weight quantization. This reduces the memory traffic required to load the massive parameter set for every token generation, directly attacking the primary bottleneck of generative inference [@lin2023awq].
+Recent advancements have explored **Activation-aware Weight Quantization (AWQ)**[^fn-awq] for the compression and acceleration of large language models (LLMs). This approach is particularly relevant for our **GPT-2 / Llama Lighthouse**, which is memory-bandwidth bound. By protecting only a small fraction of the most salient weights (approximately 1%) based on activation magnitude, AWQ enables effective 4-bit weight quantization. This reduces the memory traffic required to load the massive parameter set for every token generation, directly attacking the primary bottleneck of generative inference [@lin2023awq].
+
+[^fn-awq]: **Activation-aware Weight Quantization (AWQ)**: Observes that only 0.1-1% of weights disproportionately affect accuracy based on activation patterns. By protecting these salient weights while aggressively quantizing others, AWQ achieves INT4 quantization of LLaMA-7B with <1% perplexity degradation. Delivers 3.2× speedup on A100 GPUs by reducing memory bandwidth requirements from 14GB to 3.5GB per inference.
 
 ##### Static vs. Dynamic Quantization {#sec-model-compression-static-vs-dynamic-quantization-ca12}
 
@@ -3931,7 +3935,9 @@ output = linear(attn_output)
 ```
 :::
 
-This fusion pattern achieves 2-4× speedup on long sequences by dramatically reducing memory bandwidth requirements, as detailed in @sec-ai-training-flash-attention-ioaware-attention-optimization-3da0.
+This fusion pattern[^fn-flashattention] achieves 2-4× speedup on long sequences by dramatically reducing memory bandwidth requirements, as detailed in @sec-ai-training-flash-attention-ioaware-attention-optimization-3da0.
+
+[^fn-flashattention]: **FlashAttention**: Memory-efficient attention algorithm that reduces HBM memory traffic from O(n^2) to O(n) by computing attention in tiles that fit in SRAM. Achieves 2-4× speedup on GPT-2 with 1K context and enables 64K context windows that would otherwise exceed memory capacity. The key insight is that attention matrices need not be fully materialized; intermediate results can be accumulated in fast on-chip memory.
 
 Memory bandwidth analysis quantifies fusion benefits. Consider a Conv-BN-ReLU sequence operating on a $28 \times 28 \times 256$ feature map (784 KB):
 
@@ -4102,7 +4108,9 @@ Gating mechanisms are typically implemented using binary or continuous gating fu
 
 A well-known example of this paradigm is the Dynamic Filter Network (DFN), which applies input-dependent filtering by selecting different convolutional kernels at runtime. DFN reduces unnecessary computation by avoiding uniform filter application across inputs, tailoring its computations based on input complexity [@jia2016dynamic].
 
-Another widely adopted strategy is the Mixture of Experts (MoE) framework. In this architecture, a gating network selects a subset of specialized expert subnetworks to process each input [@shazeer2017outrageously]. This allows only a small portion of the total model to be active for any given input, significantly improving computational efficiency without sacrificing model capacity. A notable instantiation of this idea is Google's Switch Transformer, which extends the transformer architecture with expert-based conditional computation [@fedus2021switch]. While we introduce MoE principles here for single-system context, large-scale MoE deployments involving distributed expert placement across multiple machines are explored in depth in Volume II.
+Another widely adopted strategy is the Mixture of Experts (MoE) framework. In this architecture, a gating network selects a subset of specialized expert subnetworks to process each input [@shazeer2017outrageously]. This allows only a small portion of the total model to be active for any given input, significantly improving computational efficiency without sacrificing model capacity. A notable instantiation of this idea is Google's Switch Transformer[^fn-switch-transformer], which extends the transformer architecture with expert-based conditional computation [@fedus2021switch]. While we introduce MoE principles here for single-system context, large-scale MoE deployments involving distributed expert placement across multiple machines are explored in depth in Volume II.
+
+[^fn-switch-transformer]: **Switch Transformer**: Scales to 1.6 trillion parameters while activating only 2 billion per token, achieving 7× faster pretraining than dense T5 at equivalent FLOPs. Routes each token to a single expert (vs. top-k), reducing communication overhead. Training instability from load imbalance requires auxiliary loss terms; production deployments use capacity factors of 1.25-2× to handle routing variance.
 
 ::: {#fig-switch-transformer fig-env="figure" fig-pos="htb" fig-cap="**Conditional Computation**: Switch transformers enhance efficiency by dynamically routing tokens to specialized expert subnetworks, enabling parallel processing and reducing the computational load per input. This architecture implements a form of mixture of experts where a gating network selects which experts process each token, allowing for increased model capacity without a proportional increase in computation. *Source: [@fedus2021switch]*." fig-alt="Two-part diagram. Left shows Switch Transformer block with self-attention, add-normalize, switching FFN layer, and add-normalize. Right shows expanded view with router selecting one of four FFN experts per token based on probability."}
 ```{.tikz}

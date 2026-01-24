@@ -244,7 +244,9 @@ Building a high-performance serving system requires orchestrating multiple softw
 
 ### Anatomy of an Inference Server {#sec-model-serving-systems-anatomy-inference-server-f12e}
 
-While model optimization focuses on the mathematical artifact, model serving requires a specialized software architecture to manage high-frequency request streams and hardware utilization. An inference server (such as NVIDIA Triton, TensorFlow Serving, or TorchServe) is not a simple wrapper around a model script; it is a high-performance scheduler that manages concurrency, memory, and data movement.
+While model optimization focuses on the mathematical artifact, model serving requires a specialized software architecture to manage high-frequency request streams and hardware utilization. An inference server[^fn-inference-server] (such as NVIDIA Triton, TensorFlow Serving, or TorchServe) is not a simple wrapper around a model script; it is a high-performance scheduler that manages concurrency, memory, and data movement.
+
+[^fn-inference-server]: **Inference Server**: Specialized software that manages the complete lifecycle of serving ML models, including model loading, request queuing, dynamic batching, and hardware orchestration. NVIDIA Triton, for example, can serve models from multiple frameworks simultaneously, automatically batching requests to improve GPU utilization by up to 70% compared to naive single-request serving. These servers implement the separation of concerns between model logic and serving infrastructure that enables production-grade deployments.
 
 Understanding the internal anatomy of these servers reveals how they bridge the gap between irregular user traffic and the highly regular, batch-oriented requirements of accelerators.
 
@@ -314,7 +316,9 @@ Two dominant paradigms define modern serving interfaces, each with distinct syst
 
 **REST (Representational State Transfer)** typically uses HTTP/1.1 and JSON. It is universally supported, human-readable, and stateless, making it the default choice for public-facing APIs. However, standard HTTP/1.1 requires a new TCP handshake for each request (unless keep-alive is carefully tuned), and JSON serialization adds significant latency for numerical data like tensors.
 
-**gRPC (gRPC Remote Procedure Call)** uses HTTP/2 and Protobuf. HTTP/2 enables multiplexing multiple requests over a single persistent TCP connection, eliminating handshake latency and allowing efficient binary streaming. Protobuf provides strict type safety and efficient binary serialization, making it the standard for internal service-to-service communication where latency is critical.
+**gRPC (gRPC Remote Procedure Call)**[^fn-grpc] uses HTTP/2 and Protobuf. HTTP/2 enables multiplexing multiple requests over a single persistent TCP connection, eliminating handshake latency and allowing efficient binary streaming. Protobuf provides strict type safety and efficient binary serialization, making it the standard for internal service-to-service communication where latency is critical.
+
+[^fn-grpc]: **gRPC**: Open-sourced by Google in February 2015, gRPC evolved from Stubby, Google's internal RPC framework that had been handling tens of billions of calls per second across their datacenters since approximately 2001. The combination of HTTP/2 multiplexing and Protocol Buffers binary serialization achieves roughly 10x lower serialization overhead than REST/JSON, making it the de facto standard for latency-sensitive ML inference APIs.
 
 ::: {.callout-note title="Benchmarks: JSON vs Protobuf Serialization"}
 
@@ -549,11 +553,13 @@ Two mathematical foundations govern serving system behavior: Little's Law, which
 
 ### Little's Law {#sec-model-serving-systems-littles-law-9352}
 
-The most fundamental result in queuing theory is Little's Law, which @eq-littles-law expresses as a simple relationship between three quantities in any stable system:
+The most fundamental result in queuing theory is Little's Law,[^fn-littles-law] which @eq-littles-law expresses as a simple relationship between three quantities in any stable system:
 
 $$L = \lambda \cdot W$$ {#eq-littles-law}
 
 where $L$ is the average number of requests in the system, $\lambda$ is the arrival rate (requests per second), and $W$ is the average time each request spends in the system. This relationship holds regardless of arrival distribution, service time distribution, or scheduling policy.
+
+[^fn-littles-law]: **Little's Law**: Proven by John D.C. Little in 1961, this theorem establishes that $L = \lambda W$ holds for any stable queuing system regardless of arrival patterns, service distributions, or scheduling policies. The remarkable generality makes it one of the most useful results in operations research. For serving systems, it enables capacity planning from observable metrics: measuring queue depth and arrival rate directly yields average latency without instrumenting individual requests.
 
 Little's Law has immediate practical implications. If your inference service averages 10ms per request ($W = 0.01$s) and you observe 50 concurrent requests in the system on average ($L = 50$), then your arrival rate must be $\lambda = L/W = 5000$ requests per second. Conversely, if you need to limit concurrent requests to 10 (perhaps due to GPU memory constraints), and your service time is 10ms, you can sustain at most 1000 requests per second.
 
@@ -1078,7 +1084,9 @@ Systems implementing continuous batching, such as vLLM and TensorRT-LLM, achieve
 
 Memory management adds complexity to continuous batching. As sequences enter and exit the batch, the key-value cache that stores attention context must be dynamically allocated and freed. Consider what happens when sequences of varying lengths share GPU memory: a 100-token sequence completes and releases its cache, but a new 150-token sequence cannot use that space because it needs a larger contiguous block. Over time, small unusable gaps accumulate between allocated regions, eventually preventing new sequences from starting even when total free memory appears sufficient. This *memory fragmentation* can waste 40 to 50 percent of available memory in naive implementations, severely limiting the concurrent batch size that determines throughput.
 
-**PagedAttention**, introduced in vLLM, solves this fragmentation problem by applying operating system virtual memory concepts to GPU memory [@kwon2023vllm]. Instead of allocating one contiguous block per sequence, PagedAttention divides the KV cache into fixed-size *pages* (typically 16 tokens each). A sequence's cache consists of pointers to non-contiguous pages scattered across GPU memory. When a sequence completes, its pages return to a free list and can be reused by any new sequence, regardless of length. This approach achieves near-zero fragmentation: vLLM reports memory utilization above 95% compared to 50-60% for contiguous allocation schemes. The overhead is modest (one pointer lookup per page during attention computation), making PagedAttention the standard for production LLM serving.
+**PagedAttention**,[^fn-pagedattention] introduced in vLLM, solves this fragmentation problem by applying operating system virtual memory concepts to GPU memory [@kwon2023vllm]. Instead of allocating one contiguous block per sequence, PagedAttention divides the KV cache into fixed-size *pages* (typically 16 tokens each). A sequence's cache consists of pointers to non-contiguous pages scattered across GPU memory. When a sequence completes, its pages return to a free list and can be reused by any new sequence, regardless of length. This approach achieves near-zero fragmentation: vLLM reports memory utilization above 95% compared to 50-60% for contiguous allocation schemes. The overhead is modest (one pointer lookup per page during attention computation), making PagedAttention the standard for production LLM serving.
+
+[^fn-pagedattention]: **PagedAttention**: Introduced by Kwon et al. at SOSP 2023, this algorithm directly applies operating system virtual memory concepts to GPU memory management for LLMs. Before PagedAttention, researchers found that existing systems wasted 60-80% of KV cache memory due to fragmentation and over-reservation. By borrowing paging and copy-on-write mechanisms from OS design, PagedAttention reduces waste to under 4%, enabling 2-4x higher throughput on the same hardware. This technique has become the de facto standard in production LLM serving systems.
 
 ::: {.callout-note title="LLM Serving: Beyond the Fundamentals"}
 
@@ -1112,7 +1120,9 @@ The optimal batching strategy depends critically on how requests arrive. Differe
 
 #### Server Traffic (Poisson Arrivals) {#sec-model-serving-systems-server-traffic-poisson-arrivals-d20b}
 
-Cloud APIs and web services typically receive requests following a Poisson process, where arrivals are independent and uniformly distributed over time. @eq-poisson-batch expresses the expected batch size for Poisson arrivals with rate $\lambda$ and batching window $T$:
+Cloud APIs and web services typically receive requests following a Poisson process,[^fn-poisson-process] where arrivals are independent and uniformly distributed over time. @eq-poisson-batch expresses the expected batch size for Poisson arrivals with rate $\lambda$ and batching window $T$:
+
+[^fn-poisson-process]: **Poisson Process**: A stochastic model where events occur continuously and independently at a constant average rate. Named after French mathematician Simeon Denis Poisson (1781-1840), this model accurately describes many real-world arrival patterns including web requests and API calls. The key property for serving systems is that inter-arrival times are exponentially distributed, meaning the probability of long gaps between requests decays exponentially, which is why batching windows can be tuned probabilistically.
 
 $$E[\text{batch size}] = \lambda \cdot T$$ {#eq-poisson-batch}
 
@@ -1298,7 +1308,9 @@ ONNX Runtime provides a hardware-agnostic optimization layer [@onnxruntime2024].
 
 ### Specialized Inference Engines {#sec-model-serving-systems-specialized-inference-engines-1924}
 
-TensorRT (NVIDIA GPUs), OpenVINO (Intel hardware), and similar engines optimize specifically for their target hardware [@nvidia2024tensorrt; @chen2018tvm]. They apply aggressive optimizations that framework-native runtimes cannot safely perform:
+TensorRT[^fn-tensorrt] (NVIDIA GPUs), OpenVINO (Intel hardware), and similar engines optimize specifically for their target hardware [@nvidia2024tensorrt; @chen2018tvm]. They apply aggressive optimizations that framework-native runtimes cannot safely perform:
+
+[^fn-tensorrt]: **TensorRT**: NVIDIA's inference optimization SDK that applies layer fusion, kernel auto-tuning, and precision calibration to neural networks. Unlike framework-native runtimes that preserve training-time graph structure, TensorRT rebuilds the computation graph for the specific target GPU during a build phase. This GPU-specific compilation means TensorRT engines are not portable across GPU architectures, requiring separate builds for V100, A100, and H100 deployments. The build phase can take minutes but produces engines that often achieve 2-5x speedup over PyTorch.
 
 **Layer fusion** combines multiple sequential operations into a single GPU kernel. Consider a common pattern: convolution → batch normalization → ReLU activation. Without fusion, this requires three kernel launches, three round-trips to GPU memory (write conv output, read for batchnorm, write batchnorm output, read for ReLU), and three sets of intermediate tensors. Fusion combines all three into one kernel that reads inputs once, computes the combined result in registers, and writes final outputs once. This eliminates kernel launch overhead (15-60μs saved per fusion) and reduces memory traffic by 2-3×. TensorRT automatically detects and fuses common patterns; a typical ResNet-50 reduces from ~50 kernels to ~15 after fusion.
 
