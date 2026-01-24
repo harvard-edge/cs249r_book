@@ -209,7 +209,6 @@ def test_mlp_training_updates():
     return True
 
 
-@pytest.mark.skip(reason="Conv2d uses numpy internally and lacks autograd backward function")
 def test_cnn_gradient_flow():
     """Test gradients flow through convolutional layers"""
     print("\n" + "="*70)

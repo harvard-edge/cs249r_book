@@ -113,7 +113,6 @@ def test_gradient_exists_deep_network():
     assert last_layer.weight.grad is not None, "No gradient in last layer"
 
 
-@pytest.mark.skip(reason="Conv2d uses numpy internally and lacks autograd backward function")
 def test_gradient_exists_cnn():
     """Gradients flow through CNN architecture."""
     class SimpleCNN:

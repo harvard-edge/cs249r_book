@@ -66,6 +66,10 @@ from typing import List, Optional, Tuple
 # Import from previous modules - following dependency chain
 from tinytorch.core.tensor import Tensor
 
+# Enable autograd for gradient tracking (required for learnable embeddings)
+from tinytorch.core.autograd import enable_autograd
+enable_autograd()
+
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
 KB_TO_BYTES = 1024  # Kilobytes to bytes conversion

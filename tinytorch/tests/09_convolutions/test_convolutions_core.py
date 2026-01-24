@@ -304,7 +304,6 @@ class TestConvGradientFlow:
     Gradients flow from output back to input AND kernel weights.
     """
 
-    @pytest.mark.skip(reason="Conv2d uses numpy internally and lacks autograd backward function")
     def test_conv2d_gradient_to_input(self):
         """
         WHAT: Verify input receives gradients through Conv2d.
@@ -330,7 +329,6 @@ class TestConvGradientFlow:
             "This means backprop through the conv is broken."
         )
 
-    @pytest.mark.skip(reason="Conv2d uses numpy internally and lacks autograd backward function")
     def test_conv2d_gradient_to_weights(self):
         """
         WHAT: Verify conv weights receive gradients.
