@@ -41,6 +41,10 @@ def test_simple_linear_gradient_flow():
     # Create simple network: Linear(2->1)
     layer = Linear(2, 1)
 
+    # Create optimizer - this enables requires_grad on layer parameters
+    # (reflects real usage: students always create optimizer before training)
+    optimizer = SGD(layer.parameters(), lr=0.01)
+
     # Input
     x = Tensor([[1.0, 2.0]], requires_grad=True)
     target = Tensor([[3.0]])
@@ -91,6 +95,9 @@ def test_mlp_gradient_flow():
     layer1 = Linear(4, 8)
     activation = ReLU()
     layer2 = Linear(8, 2)
+
+    # Create optimizer - this enables requires_grad on layer parameters
+    optimizer = SGD(layer1.parameters() + layer2.parameters(), lr=0.01)
 
     # Input and target
     x = Tensor(np.random.randn(3, 4), requires_grad=True)
@@ -230,6 +237,11 @@ def test_cnn_gradient_flow():
     flattened = activated.reshape(batch_size, flattened_size)
 
     linear = Linear(flattened_size, 2)
+
+    # Create optimizer - enables requires_grad on all layer parameters
+    all_params = [conv.weight, conv.bias, linear.weight, linear.bias]
+    optimizer = SGD(all_params, lr=0.01)
+
     output = linear.forward(flattened)
 
     print(f"Flattened shape: {flattened.shape}")
@@ -347,6 +359,9 @@ def test_gradient_accumulation():
     print("="*70)
 
     layer = Linear(2, 1)
+
+    # Create optimizer - enables requires_grad on layer parameters
+    optimizer = SGD(layer.parameters(), lr=0.01)
 
     # Two batches
     x1 = Tensor([[1.0, 2.0]], requires_grad=True)

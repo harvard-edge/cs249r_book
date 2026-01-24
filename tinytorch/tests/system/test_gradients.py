@@ -68,6 +68,9 @@ class F:
 def test_gradient_exists_single_layer():
     """Gradients exist after backward through single layer."""
     layer = Linear(10, 5)
+    # Create optimizer to enable requires_grad on layer parameters (real usage pattern)
+    optimizer = SGD(layer.parameters(), lr=0.01)
+
     x = Tensor(np.random.randn(3, 10))
     y_true = Tensor(np.random.randn(3, 5))
 
@@ -92,6 +95,9 @@ def test_gradient_exists_deep_network():
         ReLU(),
         Linear(20, 5)
     ])
+
+    # Create optimizer to enable requires_grad on layer parameters
+    optimizer = SGD(model.parameters(), lr=0.01)
 
     x = Tensor(np.random.randn(4, 10))
     y_true = Tensor(np.random.randn(4, 5))
@@ -131,6 +137,9 @@ def test_gradient_exists_cnn():
             return params
 
     model = SimpleCNN()
+    # Create optimizer to enable requires_grad on layer parameters
+    optimizer = SGD(model.parameters(), lr=0.01)
+
     x = Tensor(np.random.randn(2, 1, 28, 28))
     y_true = Tensor(np.random.randn(2, 10))
 
@@ -154,6 +163,9 @@ def test_gradient_not_vanishing():
     layers.append(Linear(20, 1))
 
     model = Sequential(layers)
+    # Create optimizer to enable requires_grad on layer parameters
+    optimizer = SGD(model.parameters(), lr=0.01)
+
     x = Tensor(np.random.randn(5, 20))
     y_true = Tensor(np.random.randn(5, 1))
 
@@ -177,6 +189,8 @@ def test_gradient_not_exploding():
     layers.append(Linear(20, 1))
 
     model = Sequential(layers)
+    # Create optimizer to enable requires_grad on layer parameters
+    optimizer = SGD(model.parameters(), lr=0.01)
 
     # Use larger initialization to potentially trigger explosion
     for layer in model.layers:
@@ -203,6 +217,8 @@ def test_gradient_reasonable_magnitude():
         ReLU(),
         Linear(20, 5)
     ])
+    # Create optimizer to enable requires_grad on layer parameters
+    optimizer = SGD(model.parameters(), lr=0.01)
 
     x = Tensor(np.random.randn(8, 10))
     y_true = Tensor(np.random.randn(8, 5))
@@ -224,6 +240,9 @@ def test_gradient_reasonable_magnitude():
 def test_chain_rule_linear_relu():
     """Chain rule works correctly through Linear→ReLU."""
     linear = Linear(5, 3)
+    # Create optimizer to enable requires_grad on layer parameters
+    optimizer = SGD(linear.parameters(), lr=0.01)
+
     x = Tensor(np.random.randn(2, 5))
     y_true = Tensor(np.random.randn(2, 3))
 
@@ -244,6 +263,8 @@ def test_chain_rule_multiple_paths():
     """Chain rule handles multiple paths (residual connection)."""
     linear1 = Linear(10, 10)
     linear2 = Linear(10, 10)
+    # Create optimizer to enable requires_grad on layer parameters
+    optimizer = SGD(linear1.parameters() + linear2.parameters(), lr=0.01)
 
     x = Tensor(np.random.randn(4, 10))
     y_true = Tensor(np.random.randn(4, 10))
@@ -372,6 +393,8 @@ def test_adam_updates_parameters():
 def test_transformer_gradient_flow():
     """Gradients flow through transformer architecture."""
     block = TransformerBlock(embed_dim=64, num_heads=4)
+    # Create optimizer to enable requires_grad on layer parameters
+    optimizer = SGD(block.parameters(), lr=0.01)
 
     x = Tensor(np.random.randn(2, 10, 64))  # (batch, seq, embed)
     y_true = Tensor(np.random.randn(2, 10, 64))
@@ -393,6 +416,8 @@ def test_loss_gradient_correctness():
     """Loss functions produce correct gradients."""
     # Simple case where we can verify gradient analytically
     model = Linear(2, 1, bias=False)
+    # Create optimizer to enable requires_grad on layer parameters
+    optimizer = SGD(model.parameters(), lr=0.01)
     model.weight.data = np.array([[1.0], [1.0]])  # Known weights
 
     x = Tensor(np.array([[1.0, 0.0], [0.0, 1.0]]))
@@ -418,6 +443,8 @@ def test_dead_relu_detection():
         ReLU(),
         Linear(20, 5)
     ])
+    # Create optimizer to enable requires_grad on layer parameters
+    optimizer = SGD(model.parameters(), lr=0.01)
 
     # Set very negative bias to kill ReLU
     first_layer = model.layers[0]
@@ -442,6 +469,8 @@ def test_dead_relu_detection():
 def test_gradient_clipping():
     """Test gradient clipping prevents explosion."""
     model = Linear(10, 10)
+    # Create optimizer to enable requires_grad on layer parameters
+    optimizer = SGD(model.parameters(), lr=0.01)
 
     # Create artificially large gradient scenario
     x = Tensor(np.random.randn(2, 10) * 100)
