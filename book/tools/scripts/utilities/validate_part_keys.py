@@ -19,41 +19,48 @@ from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
 def load_part_summaries() -> Dict:
-    """Load part summaries from YAML file."""
+    """Load part summaries from YAML file(s)."""
     # Try multiple possible paths to handle being run from root or book/
+    # Support both single-volume and two-volume structures
     possible_paths = [
         Path("quarto/contents/parts/summaries.yml"),
-        Path("book/quarto/contents/parts/summaries.yml")
+        Path("book/quarto/contents/parts/summaries.yml"),
+        Path("quarto/contents/vol1/parts/summaries.yml"),
+        Path("book/quarto/contents/vol1/parts/summaries.yml"),
+        Path("quarto/contents/vol2/parts/summaries.yml"),
+        Path("book/quarto/contents/vol2/parts/summaries.yml")
     ]
-    
-    yaml_path = None
-    for p in possible_paths:
-        if p.exists():
-            yaml_path = p
-            break
-            
-    if not yaml_path:
+
+    # Collect all existing paths (for two-volume structure)
+    found_paths = [p for p in possible_paths if p.exists()]
+
+    if not found_paths:
         print("❌ Error: summaries.yml not found in expected locations")
         return {}
 
-    try:
-        with open(yaml_path, 'r') as f:
-            data = yaml.safe_load(f)
-            if 'parts' not in data:
-                print("❌ Error: No 'parts' section in summaries.yml")
-                return {}
+    # Aggregate summaries from all found files
+    summaries = {}
+    for yaml_path in found_paths:
+        try:
+            with open(yaml_path, 'r') as f:
+                data = yaml.safe_load(f)
+                if 'parts' not in data:
+                    print(f"⚠️ Warning: No 'parts' section in {yaml_path}")
+                    continue
 
-            # Create a mapping of normalized keys to entries
-            summaries = {}
-            for part in data['parts']:
-                if 'key' in part:
-                    key = part['key'].lower().replace('_', '').replace('-', '')
-                    summaries[key] = part
+                # Create a mapping of normalized keys to entries
+                for part in data['parts']:
+                    if 'key' in part:
+                        key = part['key'].lower().replace('_', '').replace('-', '')
+                        summaries[key] = part
+        except Exception as e:
+            print(f"❌ Error loading {yaml_path}: {e}")
 
-            return summaries
-    except Exception as e:
-        print(f"❌ Error loading summaries.yml: {e}")
+    if not summaries:
+        print("❌ Error: No parts found in any summaries.yml")
         return {}
+
+    return summaries
 
 def find_qmd_files() -> List[Path]:
     """Find all .qmd files in the quarto directory."""
