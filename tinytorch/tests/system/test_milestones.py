@@ -47,8 +47,8 @@ def test_milestone1_xor():
     print("="*60)
 
     # XOR dataset
-    X = Tensor([[0, 0], [0, 1], [1, 0], [1, 1]], dtype='float32')
-    y = Tensor([[0], [1], [1], [0]], dtype='float32')
+    X = Tensor([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
+    y = Tensor([[0.0], [1.0], [1.0], [0.0]])
 
     # Build simple neural network (perceptron with hidden layer)
     class Sequential:
@@ -159,8 +159,8 @@ def test_milestone3_tinygpt():
     class SimpleGPT:
         def __init__(self):
             self.embedding = Embedding(vocab_size, embed_dim)
-            self.pos_encoding = PositionalEncoding(embed_dim, seq_length)
-            self.transformer = TransformerBlock(embed_dim, num_heads, hidden_dim=embed_dim * 4)
+            self.pos_encoding = PositionalEncoding(max_seq_len=seq_length, embed_dim=embed_dim)
+            self.transformer = TransformerBlock(embed_dim, num_heads, ff_dim=embed_dim * 4)
             self.output_proj = Linear(embed_dim, vocab_size)
 
         def forward(self, x):
