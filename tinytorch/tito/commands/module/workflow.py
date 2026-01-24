@@ -749,7 +749,15 @@ class ModuleWorkflowCommand(BaseCommand):
         return 0
 
     def _trigger_submission(self):
-        """Asks the user to submit their progress if they are logged in."""
+        """Asks the user to submit their progress if they are logged in.
+
+        In CI mode (non-interactive), skips the prompt entirely.
+        """
+        # Skip interactive prompts in CI/non-interactive mode
+        # Check for common CI environment indicators
+        if os.environ.get('CI') or os.environ.get('GITHUB_ACTIONS') or not sys.stdin.isatty():
+            return
+
         self.console.print()  # Add a blank line for spacing
 
         if auth.is_logged_in():
