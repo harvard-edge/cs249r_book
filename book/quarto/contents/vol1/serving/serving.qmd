@@ -246,7 +246,7 @@ Building a high-performance serving system requires orchestrating multiple softw
 
 While model optimization focuses on the mathematical artifact, model serving requires a specialized software architecture to manage high-frequency request streams and hardware utilization. An inference server[^fn-inference-server] (such as NVIDIA Triton, TensorFlow Serving, or TorchServe) is not a simple wrapper around a model script; it is a high-performance scheduler that manages concurrency, memory, and data movement.
 
-[^fn-inference-server]: **Inference Server**: Specialized software that manages the complete lifecycle of serving ML models, including model loading, request queuing, dynamic batching, and hardware orchestration. NVIDIA Triton, for example, can serve models from multiple frameworks simultaneously, automatically batching requests to improve GPU utilization by up to 70% compared to naive single-request serving. These servers implement the separation of concerns between model logic and serving infrastructure that enables production-grade deployments.
+[^fn-inference-server]: **Inference Server**: The concept emerged from Google's TensorFlow Serving (open-sourced February 2016), which pioneered the separation of model logic from serving infrastructure. NVIDIA's Triton (originally TensorRT Inference Server, released 2019) extended this to multi-framework support. These servers implement dynamic batching that can improve GPU utilization by up to 70% compared to naive single-request serving. The architecture mirrors the separation of concerns in traditional web servers like Apache (1995) and nginx (2004), applying decades of distributed systems knowledge to ML deployment.
 
 Understanding the internal anatomy of these servers reveals how they bridge the gap between irregular user traffic and the highly regular, batch-oriented requirements of accelerators.
 
@@ -339,7 +339,9 @@ With the serving architecture established, we now trace what happens to a single
 
 ### The Latency Budget {#sec-model-serving-systems-latency-budget-ef40}
 
-For dynamic inference systems, the fundamental difference from training lies in optimization objectives. Training optimizes throughput: maximizing samples processed per hour over days of computation. A training job that processes 1000 samples per second is successful regardless of how long any individual sample takes. Serving inverts this priority, optimizing latency per request under strict time constraints. A serving system with 1000ms per-request latency has failed, even if it achieves excellent throughput.
+For dynamic inference systems, the fundamental difference from training lies in optimization objectives. Training optimizes throughput: maximizing samples processed per hour over days of computation. A training job that processes 1000 samples per second is successful regardless of how long any individual sample takes. Serving inverts this priority, optimizing latency[^fn-latency-etymology] per request under strict time constraints. A serving system with 1000ms per-request latency has failed, even if it achieves excellent throughput.
+
+[^fn-latency-etymology]: **Latency**: From Latin "latere" meaning "to lie hidden." The term originally described the delay between a stimulus and its observable response in physiology and psychology. Computer scientists adopted it in the 1960s to describe the hidden time between requesting an operation and receiving results. In serving systems, latency is the time a request "hides" inside the system before emerging as a response.
 
 This mindset shift has concrete implications for system design [@gujarati2020serving]. The metrics that matter change from aggregate throughput to latency distributions. Mean latency tells you little about user experience; p50, p95, and p99 latencies reveal how the system performs across the full range of requests. If your mean latency is 50ms but p99 is 2 seconds, one in a hundred users waits 40 times longer than average. For consumer-facing applications, these tail latencies often determine user satisfaction and retention.[^fn-tail-latency]
 
@@ -489,7 +491,9 @@ In the "Quantitative Approach" to ML systems, we define the efficiency of a serv
 
 $$\text{System Efficiency} = \frac{\sum T_{\text{compute}}}{\text{Wall Clock Time} \times \text{Resource Count}}$$
 
-If a ResNet-50 request takes 10ms total (5ms GPU, 5ms CPU), a serial system achieves only 50% efficiency. By pipelining just two requests, efficiency approaches 100% (assuming the CPU can keep up with the GPU). If the CPU is too slow to feed the GPU, the system becomes **CPU-bound**, and further model optimization provides zero throughput gain—a direct application of Amdahl's Law to serving.
+If a ResNet-50 request takes 10ms total (5ms GPU, 5ms CPU), a serial system achieves only 50% efficiency. By pipelining just two requests, efficiency approaches 100% (assuming the CPU can keep up with the GPU). If the CPU is too slow to feed the GPU, the system becomes **CPU-bound**, and further model optimization provides zero throughput gain—a direct application of Amdahl's Law[^fn-amdahls-law] to serving.
+
+[^fn-amdahls-law]: **Amdahl's Law**: Formulated by computer architect Gene Amdahl in 1967, this principle states that the speedup from parallelizing part of a program is limited by the fraction that cannot be parallelized. If 50% of work is sequential, maximum speedup is 2x regardless of how many processors you add. For serving, this explains why optimizing only model inference (the "parallel" part) yields diminishing returns when preprocessing (the "sequential" part) dominates latency.
 
 ### Postprocessing {#sec-model-serving-systems-postprocessing-3b24}
 
@@ -587,7 +591,7 @@ This equation reveals why serving systems exhibit nonlinear behavior. At 50% uti
 
 The M/M/1 model assumes exponentially distributed service times, but ML inference typically has near-constant service time for fixed batch sizes, making the M/D/1 (deterministic service) model more accurate in practice. We use M/M/1 here because it yields closed-form solutions and produces conservative estimates. @tbl-utilization-latency reveals how average wait time grows rapidly as utilization approaches 100%. For M/D/1 queues, average wait time is approximately half of M/M/1 at the same utilization, which matters for capacity planning: M/M/1 analysis will slightly over-provision, erring on the side of meeting SLOs rather than violating them.[^fn-queuing-models]
 
-[^fn-queuing-models]: **Queuing Model Assumptions**: The M/M/1 model assumes Poisson arrivals and exponential service times. ML inference typically has near-constant service time for fixed batch sizes, making M/D/1 (deterministic service) more accurate. We use M/M/1 because it produces conservative estimates and closed-form solutions, erring on the side of meeting SLOs. For deeper treatment including multi-server models, see Harchol-Balter's *Performance Modeling and Design of Computer Systems* [@harchol2013performance].
+[^fn-queuing-models]: **Kendall Notation**: The M/M/1 notation was introduced by British statistician David Kendall in 1953 and follows the pattern A/S/c (Arrivals/Service/servers). "M" stands for "Markovian" (memoryless, meaning exponential distributions), honoring Russian mathematician Andrey Markov (1856-1922). "D" means deterministic. So M/M/1 describes a single server with exponential arrivals and service times, while M/D/1 has deterministic service. ML inference is closer to M/D/1 since inference time is nearly constant, but M/M/1 yields conservative estimates suitable for capacity planning.
 
 ### Multi-Server Considerations {#sec-model-serving-systems-multiserver-considerations-00fc}
 
@@ -605,7 +609,9 @@ For traffic exceeding single-node capacity, production systems deploy multiple r
 
 ### Tail Latency {#sec-model-serving-systems-tail-latency-5376}
 
-Production SLOs typically specify percentile targets (p95, p99) rather than averages because tail latency determines user experience for the slowest requests [@dean2013tail]. For an M/M/1 queue, the p99 latency follows:
+Production SLOs[^fn-slo-etymology] typically specify percentile targets (p95, p99) rather than averages because tail latency determines user experience for the slowest requests [@dean2013tail]. For an M/M/1 queue, the p99 latency follows:
+
+[^fn-slo-etymology]: **SLO (Service Level Objective)**: Emerged from telecommunications in the 1980s, formalized in ITIL (IT Infrastructure Library) standards in the 1990s. SLOs define measurable targets (e.g., "p99 latency < 100ms"), while SLAs (Service Level Agreements) are contractual commitments with penalties. Google's Site Reliability Engineering (SRE) practices, documented in their 2016 book, popularized "error budgets" derived from SLOs: if your SLO is 99.9% availability, you have a 0.1% error budget to spend on deployments and experiments.
 
 $$W_{p99} \approx \text{service time} \cdot \left(1 + \frac{\ln(100 \cdot \rho)}{1 - \rho}\right)$$ {#eq-p99-latency}
 
@@ -671,7 +677,9 @@ Rather than eliminating all sources of latency variability (often impractical), 
 
 #### Hedged Requests {#sec-model-serving-systems-hedged-requests-293b}
 
-When a request has not completed within the expected time, send a duplicate request to another server. The client uses whichever response arrives first and cancels the other. For ML serving, this means maintaining multiple model replicas and routing slow requests to alternative replicas. The overhead is modest: if you hedge at the 95th percentile, only 5% of requests generate duplicates, increasing load by just 5% while dramatically reducing tail latency.
+When a request has not completed within the expected time, send a duplicate request to another server.[^fn-hedging-etymology] The client uses whichever response arrives first and cancels the other. For ML serving, this means maintaining multiple model replicas and routing slow requests to alternative replicas. The overhead is modest: if you hedge at the 95th percentile, only 5% of requests generate duplicates, increasing load by just 5% while dramatically reducing tail latency.
+
+[^fn-hedging-etymology]: **Hedging**: Borrowed from finance, where "hedging" means reducing risk by making offsetting bets. The term derives from the literal hedge (a boundary of shrubs) that protects a garden. Financial hedging dates to the 1600s Dutch tulip markets. Google's Jeff Dean introduced "hedged requests" in his influential 2013 "Tail at Scale" paper, applying the financial concept to distributed systems: send redundant requests to protect against the risk of slow responses.
 
 **Cancellation Complexity**: A critical implementation detail is that CUDA kernels cannot be interrupted mid-execution. When a hedged request completes, the duplicate must be cancelled, but if inference has already begun on the GPU, cancellation approaches include checking a cancellation flag before launching inference, accepting wasted compute for the in-flight kernel, or using request prioritization to deprioritize the duplicate. Since hedging typically applies only to the slowest 5 percent of requests, the overhead from occasional wasted compute remains acceptable.
 
@@ -681,7 +689,9 @@ Send the request to multiple servers simultaneously, but include a tag allowing 
 
 #### Canary Requests {#sec-model-serving-systems-canary-requests-483c}
 
-For requests that fan out to many backends, first send the request to a small subset of 1 to 2 servers. If these return within expected time, send to the remainder. If the canary is slow, the system can take corrective action by retrying elsewhere or using cached results before committing to the full fan-out. This prevents a single slow backend from stalling an entire distributed inference request.
+For requests that fan out to many backends, first send the request to a small subset of 1 to 2 servers.[^fn-canary-etymology] If these return within expected time, send to the remainder. If the canary is slow, the system can take corrective action by retrying elsewhere or using cached results before committing to the full fan-out. This prevents a single slow backend from stalling an entire distributed inference request.
+
+[^fn-canary-etymology]: **Canary**: From the practice of using canary birds in coal mines from the early 1900s through the 1980s. Miners brought caged canaries underground because the birds' high metabolic rate made them sensitive to carbon monoxide and methane, dying before gas concentrations became lethal to humans. In software, "canary" describes any small-scale test that detects problems before they affect the full system, whether canary deployments, canary requests, or canary tests.
 
 #### Graceful Degradation {#sec-model-serving-systems-graceful-degradation-df79}
 
@@ -743,7 +753,9 @@ Understanding cold start dynamics is essential for designing systems that meet l
 
 ### Cold Start Anatomy {#sec-model-serving-systems-cold-start-anatomy-2924}
 
-Cold start latency compounds from multiple sources, each adding to the time between deployment and serving readiness. Weight loading reads model parameters from disk or network storage. Graph compilation performs just-in-time compilation of operations for the specific hardware. Memory allocation reserves GPU memory for activations and intermediate values. Warmup execution performs initial inferences that populate caches and trigger lazy initialization.
+Cold start latency compounds from multiple sources, each adding to the time between deployment and serving readiness. Weight loading reads model parameters from disk or network storage. Graph compilation performs just-in-time compilation of operations for the specific hardware. Memory allocation reserves GPU memory for activations and intermediate values. Warmup[^fn-warmup-etymology] execution performs initial inferences that populate caches and trigger lazy initialization.
+
+[^fn-warmup-etymology]: **Warmup**: The computing metaphor derives from physical warming, where engines and machines perform better after reaching operating temperature. In JIT-compiled systems like the JVM (1990s), "warmup" specifically refers to the period when the runtime gathers profiling data and compiles hot paths. For ML serving, warmup serves a dual purpose: triggering lazy memory allocation and populating CPU/GPU caches with frequently-accessed data, ensuring the first real user request does not pay these one-time costs.
 
 ::: {.callout-note title="ResNet-50: Cold Start Timeline"}
 
@@ -820,7 +832,9 @@ The lifecycle management strategies examined so far ensure models are ready to s
 
 ## Throughput Optimization {#sec-model-serving-systems-throughput-optimization-18d1}
 
-With models loaded, initialized, and ready to serve, the next optimization opportunity lies in how requests are grouped for processing. Batching differs fundamentally between training and serving [@crankshaw2017clipper]. Training batches maximize throughput, processing hundreds or thousands of samples together with no concern for individual sample latency. Serving batches must balance throughput against individual request latency, typically processing single digits of requests together while ensuring no request waits too long.
+With models loaded, initialized, and ready to serve, the next optimization opportunity lies in how requests are grouped for processing. Batching[^fn-batch-etymology] differs fundamentally between training and serving [@crankshaw2017clipper]. Training batches maximize throughput, processing hundreds or thousands of samples together with no concern for individual sample latency. Serving batches must balance throughput against individual request latency, typically processing single digits of requests together while ensuring no request waits too long.
+
+[^fn-batch-etymology]: **Batch**: From Old French "bache" (a quantity baked at one time), the term entered computing in the 1950s to describe jobs processed together without human interaction, as contrasted with interactive computing. IBM's batch processing systems of the 1960s would collect punch cards overnight and process them sequentially. The ML usage preserves this core meaning: group samples together for efficient processing, trading individual response time for aggregate throughput.
 
 ::: {.callout-definition title="Dynamic Batching"}
 
@@ -832,7 +846,9 @@ With models loaded, initialized, and ready to serve, the next optimization oppor
 
 Modern accelerators achieve peak efficiency only at sufficient batch sizes [@shen2019nexus]. A single inference request leaves most compute units idle because GPUs are designed for parallel execution across thousands of threads. Batching amortizes fixed costs across multiple requests and enables parallel execution across the batch dimension.
 
-Two fixed costs dominate at small batch sizes. **Kernel launch overhead** is the time for the CPU to prepare and submit work to the GPU. Each layer in a neural network typically requires a separate kernel launch: the CPU must assemble kernel parameters, copy them to GPU-accessible memory, and signal the GPU to begin execution. This overhead is typically 5-20μs per kernel, independent of batch size. ResNet-50 has approximately 50 layers, so kernel launch alone adds 250-1000μs per inference. At batch size 1, this overhead may exceed the actual compute time; at batch size 32, the same overhead is amortized across 32 images. **Weight loading** reads model parameters from GPU memory (VRAM) to the compute units. At batch size 1, the GPU reads all weights to process one image; at batch size 32, the same weight read processes 32 images, achieving 32× better memory efficiency.
+Two fixed costs dominate at small batch sizes. **Kernel launch overhead**[^fn-kernel-etymology] is the time for the CPU to prepare and submit work to the GPU. Each layer in a neural network typically requires a separate kernel launch: the CPU must assemble kernel parameters, copy them to GPU-accessible memory, and signal the GPU to begin execution. This overhead is typically 5-20μs per kernel, independent of batch size. ResNet-50 has approximately 50 layers, so kernel launch alone adds 250-1000μs per inference. At batch size 1, this overhead may exceed the actual compute time; at batch size 32, the same overhead is amortized across 32 images. **Weight loading** reads model parameters from GPU memory (VRAM) to the compute units. At batch size 1, the GPU reads all weights to process one image; at batch size 32, the same weight read processes 32 images, achieving 32× better memory efficiency.
+
+[^fn-kernel-etymology]: **Kernel**: From Old English "cyrnel" meaning seed or grain, the essential core of something. In operating systems (1960s), the kernel is the core that manages hardware resources. CUDA borrowed this term around 2007 for GPU functions because they represent the computational "core" of parallel algorithms. Unlike OS kernels that run continuously, GPU kernels are discrete units of parallel work launched by the CPU and executed across thousands of GPU threads simultaneously.
 
 ::: {.callout-notebook title="Worked Example: ResNet-50 Batching Efficiency" collapse="true"}
 

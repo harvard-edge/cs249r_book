@@ -89,7 +89,9 @@ To understand why modern frameworks are designed as they are, we must trace how 
 
 [^fn-blas]: **BLAS (Basic Linear Algebra Subprograms)**: A standardized specification (Level 1: vector operations; Level 2: matrix-vector; Level 3: matrix-matrix like GEMM) published in 1979 that defines portable APIs for dense linear algebra. Hardware vendors implement optimized BLAS libraries: Intel MKL achieves near-peak FLOPS on x86 CPUs through AVX-512 vectorization, while NVIDIA cuBLAS uses Tensor Cores for 312 TFLOPS on A100 GPUs. This 45-year-old interface remains the performance foundation of modern ML frameworks.
 
-2. **Vectorized Productivity (2006)**: **NumPy** made Python viable for numerical computing by delegating heavy computation to underlying C and Fortran BLAS libraries. This "vectorization" approach—writing code in high-level Python but executing it in low-level C—became the dominant pattern, drastically reducing the gap between research ideas and execution speed.
+2. **Vectorized Productivity (2006)**: **NumPy**[^fn-numpy] made Python viable for numerical computing by delegating heavy computation to underlying C and Fortran BLAS libraries. This "vectorization" approach—writing code in high-level Python but executing it in low-level C—became the dominant pattern, drastically reducing the gap between research ideas and execution speed.
+
+[^fn-numpy]: **NumPy**: Contraction of "Numerical Python," created by Travis Oliphant in 2005 by merging two earlier projects (Numeric and Numarray). Released publicly in 2006, NumPy established the n-dimensional array as Python's standard numerical container. Its array-oriented computing model, borrowed from APL and MATLAB, remains the conceptual foundation for PyTorch tensors and TensorFlow arrays.
 
 3. **Automatic Differentiation (2015–present)**: While NumPy required engineers to manually derive and code gradients, modern frameworks like **TensorFlow** and **PyTorch** automated this through the **computational graph**. This architectural shift—separating the *definition* of the model from the *computation* of its derivatives—enabled the scaling of deep learning.
 
@@ -156,7 +158,9 @@ To understand why execution strategy matters so much, consider the **Memory Wall
 
 This creates a fundamental classification: operations are either **compute-bound** (limited by arithmetic throughput, like large matrix multiplications) or **memory-bound** (limited by data movement, like activation functions and normalization). Most neural network operations are memory-bound.
 
-The key optimization for memory-bound operations is **kernel fusion**—combining multiple operations into a single GPU function (called a *kernel*) to avoid intermediate memory traffic. Fusing `LayerNorm → Dropout → ReLU` into one kernel can yield 5× speedup. FlashAttention[^fn-flashattention] fuses the entire attention computation for 10-20× speedup.
+The key optimization for memory-bound operations is **kernel fusion**—combining multiple operations into a single GPU function (called a *kernel*)[^fn-kernel] to avoid intermediate memory traffic. Fusing `LayerNorm → Dropout → ReLU` into one kernel can yield 5× speedup. FlashAttention[^fn-flashattention] fuses the entire attention computation for 10-20× speedup.
+
+[^fn-kernel]: **Kernel**: From German "Kern" (core/nucleus), borrowed from operating systems where it denotes the core program with full hardware access. In GPU programming, a kernel is the function that executes in parallel across thousands of threads. The metaphor extends: just as an OS kernel mediates between software and hardware, a GPU kernel is the fundamental unit where algorithms meet silicon.
 
 [^fn-flashattention]: FlashAttention (introduced in @sec-dnn-architectures) exemplifies kernel fusion taken to its logical extreme. By fusing the entire attention computation into a single kernel that tiles data to fit in SRAM, it reduces HBM traffic by orders of magnitude. The 10-20x speedup demonstrates that frameworks enabling such fusions can transform memory-bound operations into compute-bound ones.
 
@@ -711,7 +715,7 @@ To achieve this fusion automatically without requiring users to write custom CUD
 
 3. **TorchInductor** (code generation): The default backend that compiles FX graphs to optimized machine code. For CUDA GPUs, TorchInductor generates Triton[^fn-triton] kernels (a Python-based GPU kernel language that compiles to PTX). For CPUs, it generates C++ code with vectorization instructions (AVX2, AVX-512). Key optimizations include kernel fusion (combining multiple operations into single kernels to reduce memory traffic; for example, `(x * 2).relu()` becomes one fused kernel instead of two separate kernels), memory layout optimization (choosing optimal tensor layouts to minimize memory access overhead), and autotuning (for operations with multiple implementation strategies, measuring actual performance to select the fastest variant).
 
-[^fn-triton]: **Triton**: Open-source GPU programming language developed by OpenAI that enables writing custom kernels in Python-like syntax without low-level CUDA knowledge. Triton compiles to PTX (NVIDIA's intermediate assembly) and handles memory coalescing, shared memory management, and thread synchronization automatically. Achieves 80-95% of hand-tuned CUDA performance while reducing kernel development time from weeks to hours, making custom GPU optimization accessible to ML researchers.
+[^fn-triton]: **Triton**: Named after the Greek god of the sea (son of Poseidon), evoking mastery over waves of parallel threads. OpenAI released this GPU programming language in 2021 to enable writing custom kernels in Python-like syntax without low-level CUDA knowledge. Triton compiles to PTX (NVIDIA's intermediate assembly), handling memory coalescing and thread synchronization automatically. Achieves 80-95% of hand-tuned CUDA performance while reducing development time from weeks to hours.
 
 The generated code is cached on disk (in `~/.triton/cache/` for Triton kernels). Subsequent runs with the same input shapes can skip compilation and directly execute cached code.
 
@@ -1038,7 +1042,9 @@ The execution problem determines *when* computation happens. But neural network 
 
 ## The Differentiation Problem {#sec-ai-frameworks-differentiation-problem-8b8a}
 
-The second fundamental problem is computing gradients automatically. Neural network training requires derivatives of a loss function with respect to millions or billions of parameters. Manual differentiation is error-prone and impractical at this scale. Frameworks must implement **automatic differentiation** (AD) systems that compute exact gradients for arbitrary compositions of operations [@baydin2018].
+The second fundamental problem is computing gradients[^fn-gradient] automatically. Neural network training requires derivatives of a loss function with respect to millions or billions of parameters. Manual differentiation is error-prone and impractical at this scale. Frameworks must implement **automatic differentiation** (AD) systems that compute exact gradients for arbitrary compositions of operations [@baydin2018].
+
+[^fn-gradient]: **Gradient**: From Latin "gradiens" (stepping/walking), related to "gradus" (step). The gradient points in the direction of steepest ascent, as if climbing steps up a hill. The term was introduced by Sylvester in 1854 for the vector of partial derivatives. In ML, we descend this slope toward lower loss, hence "gradient descent" as the algorithm that takes steps downhill.
 
 Building on the backpropagation fundamentals established in @sec-deep-learning-systems-foundations, this section examines how frameworks *implement* automatic differentiation. While @sec-deep-learning-systems-foundations introduced backpropagation as the algorithm for computing gradients via the chain rule, here we focus on the systems engineering: how frameworks represent computation graphs, manage memory for gradient computation, and optimize differentiation across diverse hardware.
 
@@ -1917,7 +1923,9 @@ Design choices in data structures significantly influence framework capabilities
 
 :::
 
-Machine learning frameworks process and store numerical data as tensors. Every computation in a neural network, from processing input data to updating model weights, operates on tensors. Training batches of images, activation maps in convolutional networks, and parameter gradients during backpropagation all take the form of tensors. This unified representation allows frameworks to implement consistent interfaces for data manipulation and optimize operations across different hardware architectures.
+Machine learning frameworks process and store numerical data as tensors.[^fn-tensor] Every computation in a neural network, from processing input data to updating model weights, operates on tensors. Training batches of images, activation maps in convolutional networks, and parameter gradients during backpropagation all take the form of tensors. This unified representation allows frameworks to implement consistent interfaces for data manipulation and optimize operations across different hardware architectures.
+
+[^fn-tensor]: **Tensor**: From Latin "tendere" (to stretch), originally describing stress distributions in elastic materials. Mathematicians Ricci and Levi-Civita formalized tensor calculus in 1900 for Einstein's general relativity, where tensors describe how spacetime curves. In ML, the term emphasizes that these arrays transform predictably under coordinate changes, though practitioners primarily use them as n-dimensional arrays with hardware-optimized operations.
 
 ::: {.callout-perspective title="Napkin Math: The Administrative Tax"}
 **Problem**: Why does your GPU utilization drop when training small models?
@@ -3293,9 +3301,9 @@ JAX takes a fundamentally different approach, embracing functional programming p
 
 [^pure-function]: **Pure Function**: Has no side effects and always returns the same output for the same inputs. Pure functions enable mathematical reasoning about code behavior and safe program transformations.
 
-[^fn-xla]: **XLA (Accelerated Linear Algebra)**: Google's domain-specific compiler optimizing tensor operations across CPUs, GPUs, and TPUs. Achieves 3–10$\times$ speedups through operation fusion (reducing memory traffic), layout optimization (matching hardware preferences), and hardware-specific codegen. Powers JAX compilation and TensorFlow's tf.function, demonstrating that ML benefits from specialized compiler infrastructure.
+[^fn-xla]: **XLA (Accelerated Linear Algebra)**: Google's domain-specific compiler released in March 2017, optimizing tensor operations across CPUs, GPUs, and TPUs. The name emphasizes that linear algebra operations (matrix multiplies, convolutions) dominate ML computation. Achieves 3-10x speedups through operation fusion and hardware-specific codegen. Now part of OpenXLA (2022), a cross-industry effort including Google, Meta, NVIDIA, and Apple.
 
-[^fn-onnx]: **ONNX (Open Neural Network Exchange)**: Industry standard for representing ML models that enables interoperability between frameworks. Supported by Microsoft, Facebook, AWS, and others, ONNX allows models trained in PyTorch to be deployed in TensorFlow Serving or optimized with TensorRT, solving the framework fragmentation problem.
+[^fn-onnx]: **ONNX (Open Neural Network Exchange)**: Launched September 2017 by Facebook and Microsoft to solve framework fragmentation. Originally named "Toffee" internally at Facebook, the name change emphasized its role as an exchange format. Became a Linux Foundation project in 2019. Enables training in PyTorch and deploying via TensorFlow Lite or TensorRT without manual conversion.
 
 ### Framework Design Philosophy {#sec-ai-frameworks-framework-design-philosophy-d87f}
 

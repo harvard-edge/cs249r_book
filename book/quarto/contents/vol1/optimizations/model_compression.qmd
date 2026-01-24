@@ -177,7 +177,7 @@ We begin with the first dimension of our optimization framework: **Efficient Mod
 
 The optimization challenge lies in balancing competing constraints[^fn-pareto-frontier]. Aggressive compression risks accuracy degradation that renders models unreliable for production use, while insufficient optimization leaves models too large or slow for target deployment environments. Selecting appropriate techniques requires understanding trade-offs between model size, computational complexity, and generalization performance.
 
-[^fn-pareto-frontier]: **Pareto Frontier**: Curve of non-dominated solutions where improving one objective (speed) requires sacrificing another (accuracy). EfficientNet family traces optimal accuracy-FLOPs tradeoffs: B0 (77.1%, 390M FLOPs) to B7 (84.4%, 37B FLOPs). Multi-objective NAS explicitly optimizes for Pareto frontiers, discovering architectures dominating manual designs across all metrics.
+[^fn-pareto-frontier]: **Pareto Frontier**: Named after Italian economist Vilfredo Pareto (1848-1923), who observed that 80% of Italian land was owned by 20% of the population. In optimization, the Pareto frontier represents solutions where improving one objective (speed) requires sacrificing another (accuracy). EfficientNet traces this frontier: B0 (77.1%, 390M FLOPs) to B7 (84.4%, 37B FLOPs). Multi-objective NAS explicitly optimizes for Pareto-optimal architectures.
 
 Three key techniques address this challenge: pruning eliminates low-impact parameters, knowledge distillation transfers capabilities to smaller models, and NAS automates architecture design for specific constraints. Each technique offers distinct optimization pathways while maintaining model performance.
 
@@ -185,7 +185,9 @@ These three techniques represent distinct but complementary approaches within ou
 
 ### Pruning {#sec-model-compression-pruning-2b06}
 
-Pruning directly addresses memory efficiency constraints by eliminating redundant parameters. Modern neural networks are heavily overparameterized, often containing far more weights than are strictly necessary to solve a task. This redundancy allows us to remove a significant fraction of weights without substantial performance degradation. As we will explore in @sec-ai-acceleration, specialized hardware can further exploit these sparse structures.
+Pruning[^fn-pruning-etymology] directly addresses memory efficiency constraints by eliminating redundant parameters. Modern neural networks are heavily overparameterized, often containing far more weights than are strictly necessary to solve a task. This redundancy allows us to remove a significant fraction of weights without substantial performance degradation. As we will explore in @sec-ai-acceleration, specialized hardware can further exploit these sparse structures.
+
+[^fn-pruning-etymology]: **Pruning**: Borrowed from horticulture, where gardeners prune branches to improve plant health and growth. The ML metaphor fits precisely: just as removing unproductive branches redirects resources to productive growth, removing low-magnitude weights redirects computational resources to parameters that matter. The technique dates to optimal brain damage (LeCun, 1990), which formalized the gardener's intuition with second-derivative analysis.
 
 ::: {.callout-definition title="Pruning"}
 **Pruning** refers to a model optimization technique that removes _redundant parameters_ from neural networks while preserving _performance_, reducing _model size_ and _computational cost_ for efficient deployment.
@@ -197,7 +199,11 @@ $$
 \min_{\hat{W}} \mathcal{L}(\hat{W}) \quad \text{subject to} \quad \|\hat{W}\|_0 \leq k
 $$
 
-where $\|\hat{W}\|_0$ is the **L0-norm** (the count of non-zero parameters). Since minimizing the L0-norm is NP-hard, we use heuristics like **magnitude-based pruning**. @lst-pruning_example demonstrates this approach, removing weights with small absolute values to transform a dense weight matrix into the sparse representation shown in @fig-sparse-matrix.
+where $\|\hat{W}\|_0$ is the **L0-norm** (the count of non-zero parameters). Since minimizing the L0-norm is NP-hard[^fn-np-hard], we use heuristics[^fn-heuristic] like **magnitude-based pruning**. @lst-pruning_example demonstrates this approach, removing weights with small absolute values to transform a dense weight matrix into the sparse representation shown in @fig-sparse-matrix.
+
+[^fn-np-hard]: **NP-hard**: From computational complexity theory, "NP" stands for "nondeterministic polynomial time." A problem is NP-hard if solving it in polynomial time would imply P=NP, widely believed false. Finding the optimal sparse subnetwork requires examining exponentially many subsets, making exact solutions infeasible for networks with millions of parameters.
+
+[^fn-heuristic]: **Heuristic**: From Greek "heuriskein" (to discover or find), the same root as "eureka." Heuristics are practical methods that find good solutions without guarantees of optimality. Magnitude-based pruning assumes larger weights are more important, a reasonable heuristic that works well empirically even though counterexamples exist.
 
 ::: {#lst-pruning_example lst-cap="**Magnitude-Based Pruning**: Removes weights below a threshold to create sparse matrices, reducing the number of nonzero parameters from 9 to 4 ($k=4$)."}
 ```{.python}
@@ -1286,7 +1292,7 @@ Pruning is widely used to reduce the size and computational cost of neural netwo
 
 This perspective leads to the Lottery Ticket Hypothesis[^fn-lottery-ticket] (LTH), which challenges conventional pruning workflows by proposing that within large neural networks, there exist small, well-initialized subnetworks, referred to as 'winning tickets', that can achieve comparable accuracy to the full model when trained in isolation. Rather than viewing pruning as just a post-training compression step, LTH suggests it can serve as a discovery mechanism to identify these efficient subnetworks early in training.
 
-[^fn-lottery-ticket]: **Lottery Ticket Hypothesis**: The lottery ticket hypothesis [@frankle2018lottery] demonstrates that ResNet-18 subnetworks at 10-20% original size achieve 93.2% accuracy vs. 94.1% for full model on CIFAR-10. BERT-base winning tickets retain 97% performance with 90% fewer parameters, requiring 5-8x less training time to converge.
+[^fn-lottery-ticket]: **Lottery Ticket Hypothesis**: Named for the intuition that training a large network is like buying many lottery tickets: most lose, but a few "winning tickets" (sparse subnetworks with lucky initializations) can win (train to full accuracy) on their own. Frankle and Carlin (2019) showed ResNet-18 subnetworks at 10-20% original size achieve 93.2% vs. 94.1% accuracy. BERT-base winning tickets retain 97% performance with 90% fewer parameters.
 
 LTH is validated through an iterative pruning process, illustrated in @fig-winning-ticket. A large network is first trained to convergence. The lowest-magnitude weights are then pruned, and the remaining weights are reset to their original initialization rather than being re-randomized. This process is repeated iteratively, gradually reducing the network's size while preserving performance. After multiple iterations, the remaining subnetwork, referred to as the 'winning ticket', proves capable of training to the same or higher accuracy as the original full model.
 
@@ -1556,7 +1562,9 @@ This leads us to **knowledge distillation**, a fundamentally different approach.
 
 ### Knowledge Distillation {#sec-model-compression-knowledge-distillation-e02e}
 
-Knowledge distillation trains a smaller **student** model using guidance from a larger, pre-trained **teacher** model. The core insight is that a well-trained teacher provides a richer learning signal than simple ground-truth labels. While a hard label is binary (e.g., $[1, 0, 0]$ for cat), a teacher's probability distribution (e.g., $[0.85, 0.10, 0.05]$) reveals **inter-class similarity**—that a cat shares more features with a dog than a fox. @fig-kd-targets visualizes how this "dark knowledge" embedded in the teacher's learned representations guides the student to generalize better.
+Knowledge distillation[^fn-distillation-etymology] trains a smaller **student** model using guidance from a larger, pre-trained **teacher** model. The core insight is that a well-trained teacher provides a richer learning signal than simple ground-truth labels. While a hard label is binary (e.g., $[1, 0, 0]$ for cat), a teacher's probability distribution (e.g., $[0.85, 0.10, 0.05]$) reveals **inter-class similarity**—that a cat shares more features with a dog than a fox. @fig-kd-targets visualizes how this "dark knowledge" embedded in the teacher's learned representations guides the student to generalize better.
+
+[^fn-distillation-etymology]: **Distillation**: Borrowed from chemistry, where distillation separates mixtures by selective evaporation and condensation, extracting the essence while leaving impurities behind. Hinton et al. (2015) chose this metaphor deliberately: the teacher's "dark knowledge" about class relationships is the essence being extracted, while the massive parameter count is the impurity left behind. The temperature parameter $T$ in the softmax even mirrors the literal temperature control in chemical distillation.
 
 ::: {#fig-kd-targets fig-env="figure" fig-pos="htb" fig-cap="**Soft Target Distribution**: The teacher's relative confidence levels indicate which classes are semantically similar (e.g., cat vs. dog), providing a much richer supervision signal than a binary \"correct\" label." fig-alt="Bar chart showing probability distribution across three animal classes: Cat at 85 percent, Dog at 10 percent, Fox at 5 percent. Demonstrates how soft labels capture inter-class similarity."}
 ```{.tikz}
@@ -1616,8 +1624,10 @@ nodes near coords={\pgfmathprintnumber{\pgfplotspointmeta}\%},
 
 @fig-kd-overview illustrates the distillation workflow, which trains the student model to minimize a combination of two loss functions:
 
-1.  **Distillation Loss**: Typically the Kullback-Leibler (KL) divergence between the teacher's softened output distribution and the student's distribution.
+1.  **Distillation Loss**: Typically the Kullback-Leibler (KL) divergence[^fn-kl-divergence] between the teacher's softened output distribution and the student's distribution.
 2.  **Student Loss**: Standard cross-entropy loss against the ground-truth hard labels.
+
+[^fn-kl-divergence]: **Kullback-Leibler Divergence**: Named after Solomon Kullback and Richard Leibler, who introduced it at the National Security Agency in 1951 for cryptanalysis. Measures how one probability distribution differs from a reference distribution. In information theory, KL(P||Q) quantifies the extra bits needed to encode samples from P using a code optimized for Q. Zero when distributions match; always non-negative.
 
 ::: {#fig-kd-overview fig-env="figure" fig-pos="htb" fig-cap="**Knowledge Distillation Workflow**: The student model inherits the teacher's generalization capabilities by matching its softened probability distributions. This dual-loss training enables the student to absorb complex class relationships that are absent from binary labels." fig-alt="Block diagram showing knowledge distillation. Input flows to both teacher and student models. Teacher outputs soft labels via temperature-scaled softmax. Student outputs feed into distillation loss and student loss functions."}
 ```{.tikz}
@@ -1703,7 +1713,9 @@ anchor=north]{Teacher model};
 
 #### Distillation Mathematics {#sec-model-compression-distillation-mathematics-fc81}
 
-To reveal the inter-class similarity information, we use a **temperature parameter** $T$ to soften the probability distribution. The softmax output for class $i$ becomes:
+To reveal the inter-class similarity information, we use a **temperature parameter**[^fn-temperature-softmax] $T$ to soften the probability distribution. The softmax output for class $i$ becomes:
+
+[^fn-temperature-softmax]: **Temperature in Softmax**: Borrowed from statistical mechanics, where the Boltzmann distribution $p_i \propto \exp(-E_i/kT)$ describes particle states at temperature $T$. Higher temperature means more uniform distribution across states. Hinton adopted this analogy for neural networks: temperature $T$ in softmax controls how "soft" the probability distribution becomes. At $T=1$ (standard softmax), peaks are sharp; at $T \to \infty$, the distribution becomes uniform.
 
 $$
 p_i(T) = \frac{\exp(z_i / T)}{\sum_j \exp(z_j / T)}
@@ -1832,7 +1844,9 @@ LRMF applies to fully connected layers (large weight matrices) and convolutional
 
 #### Tensor Decomposition {#sec-model-compression-tensor-decomposition-89ef}
 
-Tensor decomposition extends factorization to multi-dimensional tensors common in convolutional layers and attention mechanisms.
+Tensor decomposition[^fn-tensor-etymology] extends factorization to multi-dimensional tensors common in convolutional layers and attention mechanisms.
+
+[^fn-tensor-etymology]: **Tensor**: From Latin "tensus" (stretched), originally describing stress in materials. Mathematicians generalized it to multi-dimensional arrays that transform according to specific rules under coordinate changes. In ML, "tensor" simply means n-dimensional array: scalars (0D), vectors (1D), matrices (2D), and higher. TensorFlow and PyTorch use the term to emphasize that neural network computations generalize beyond matrices to arbitrary dimensions.
 
 ::: {#fig-tensor-decomposition fig-env="figure" fig-pos="htb" fig-cap="**Tensor Decomposition**: Multi-dimensional tensors enable compact representations of high-dimensional data by factorizing them into lower-rank components, reducing computational costs and memory requirements compared to direct manipulation of the original tensor. This technique extends matrix factorization to handle the multi-way interactions common in modern machine learning models like convolutional neural networks. Source: [@xinyu]." fig-alt="3D tensor cube with dimensions M, N, T decomposed into sum of three factor matrices U, V, W of reduced dimensions. Small highlighted element shows how single tensor entry decomposes into factor products."}
 ```{.tikz}
@@ -2288,7 +2302,11 @@ Quantization is arguably the single most impactful optimization technique for de
 
 :::
 
-Every neural network weight and activation is stored at some numerical precision: FP32 (32 bits), FP16 (16 bits), INT8 (8 bits), or lower. This choice directly impacts three system properties:
+Quantization[^fn-quantization-etymology] affects every neural network weight and activation stored at some numerical precision: FP32 (32 bits), FP16 (16 bits), INT8 (8 bits), or lower.
+
+[^fn-quantization-etymology]: **Quantization**: From Latin "quantus" (how much), via quantum physics where it describes discrete energy levels. In signal processing (1940s-1960s), quantization meant mapping continuous values to discrete levels, introducing "quantization error." ML borrowed this term directly: converting FP32 weights to INT8 maps continuous values to 256 discrete levels, trading precision for efficiency. The error analysis parallels signal processing exactly.
+
+This choice directly impacts three system properties:
 
 - **Memory**: An INT8 model is 4× smaller than FP32, enabling deployment on smaller devices
 - **Bandwidth**: Loading INT8 weights requires 4× less memory bandwidth, directly accelerating bandwidth-bound inference
@@ -4460,7 +4478,11 @@ Despite these challenges, dynamic computation remains promising for efficiency o
 
 ### Sparsity Exploitation {#sec-model-compression-sparsity-exploitation-5abb}
 
-Dynamic computation decides *whether* to perform certain operations, but many computations still involve multiplying by zero, a waste that sparsity exploitation directly addresses. Sparsity in machine learning refers to the condition where a significant portion of the elements within a tensor, such as weight matrices or activation tensors, are zero or nearly zero. More formally, for a tensor $T \in \mathbb{R}^{m \times n}$ (or higher dimensions), the sparsity $S$ can be expressed as:
+Dynamic computation decides *whether* to perform certain operations, but many computations still involve multiplying by zero, a waste that sparsity exploitation directly addresses. Sparsity[^fn-sparsity-etymology] in machine learning refers to the condition where a significant portion of the elements within a tensor, such as weight matrices or activation tensors, are zero or nearly zero.
+
+[^fn-sparsity-etymology]: **Sparsity**: From Latin "sparsus" (scattered, spread out), past participle of "spargere" (to scatter). The mathematical sense dates to the 1950s-1960s when researchers studying linear systems noticed that many real-world matrices had mostly zero entries. In ML, sparsity became central with the development of L1 regularization (LASSO, 1996), which induces exact zeros in weights rather than just small values.
+
+More formally, for a tensor $T \in \mathbb{R}^{m \times n}$ (or higher dimensions), the sparsity $S$ can be expressed as:
 $$
 S = \frac{\Vert \mathbf{1}_{\{T_{ij} = 0\}} \Vert_0}{m \times n}
 $$
