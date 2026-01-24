@@ -148,7 +148,7 @@ These dimensions are interdependent. Pruning reduces complexity but may require 
 
 ## Deployment Context {#sec-model-compression-deployment-context-c1b0}
 
-Optimization requirements vary dramatically across deployment contexts—what matters for cloud inference differs fundamentally from mobile or embedded systems.
+Optimization requirements vary dramatically across deployment contexts—what matters for cloud inference differs fundamentally from mobile or embedded systems. @tbl-deployment-scenarios summarizes the key constraints across deployment environments.
 
 ### Deployment Scenarios {#sec-model-compression-practical-deployment-6148}
 
@@ -1803,12 +1803,14 @@ $$
 where $k \ll m, n$ is the approximation rank. This is typically computed via singular value decomposition (SVD), retaining only the top $k$ singular values.
 
 ::: {.callout-perspective title="The Bandwidth-Compute Trade-off"}
-**Reducing the Memory Pressure**: Low-rank factorization illustrates a classic systems trade-off: **trading computation for bandwidth reduction**. Storing a $4096 \times 4096$ matrix requires 64MB (at FP32). Fetching this matrix for a single inference is a massive memory bandwidth hit, especially when limited by physical memory bandwidth constraints.[^fn-memory-wall-preview]
-
-[^fn-memory-wall-preview]: **Memory Wall**: The growing disparity between processor speed and memory access speed, where memory bandwidth becomes the dominant bottleneck. We explore this constraint in depth in @sec-ai-acceleration.
+**Reducing the Memory Pressure**: Low-rank factorization illustrates a classic systems trade-off: **trading computation for bandwidth reduction**. Storing a $4096 \times 4096$ matrix requires 64MB (at FP32). Fetching this matrix for a single inference is a massive memory bandwidth hit, especially when limited by physical memory bandwidth constraints.
 
 If we factorize it with rank $k=128$, we store two matrices ($4096 \times 128$ and $128 \times 4096$), totaling only 4MB—a **16× reduction in data movement**. While the number of floating-point operations (FLOPs) actually *increases* slightly because we perform two smaller matrix multiplies instead of one large one, the system speedup is often dramatic. By reducing data movement by 16×, we allow the processor to spend more time computing and less time waiting for memory.
 :::
+
+This bandwidth-compute trade-off reflects the broader memory wall[^fn-memory-wall-preview] phenomenon where memory access becomes the dominant bottleneck.
+
+[^fn-memory-wall-preview]: **Memory Wall**: The growing disparity between processor speed and memory access speed, where memory bandwidth becomes the dominant bottleneck. We explore this constraint in depth in @sec-ai-acceleration.
 
 @fig-matrix-factorization illustrates the decrease in parameterization enabled by low-rank matrix factorization. Observe how the matrix $M$ can be approximated by the product of matrices $L_k$ and $R_k^T$. For intuition, most fully connected layers in networks are stored as a projection matrix $M$, which requires $m \times n$ parameters to be loaded during computation. However, by decomposing and approximating it as the product of two lower-rank matrices, we only need to store $m \times k + k \times n$ parameters in terms of storage while incurring an additional compute cost of the matrix multiplication. So long as $k < n/2$, this factorization has fewer total parameters to store while adding a computation of runtime $O(mkn)$ [@gu2023deep].
 
@@ -2525,8 +2527,17 @@ However, reducing numerical precision introduces trade-offs. Lower-precision for
 
 @fig-quantization reveals how the quantization error distribution differs across numerical formats, with each format introducing varying levels of quantization noise that directly influence model accuracy and stability.
 
-::: {.callout-perspective title="Napkin Math: The Quantization Speedup"}
+::: {.callout-perspective title="Napkin Math: The Quantization Speedup (Compute-Bound)"}
 **Problem**: You have a compute-bound matrix multiplication (e.g., in a Transformer MLP block). You switch from FP16 to INT8. What is the expected speedup?
+
+**The Math**: On modern hardware with dedicated INT8 units:
+
+1. **Tensor Core Throughput**: NVIDIA A100 delivers 312 TFLOPS for FP16 vs 624 TOPS for INT8—a 2× peak throughput increase.
+2. **Memory Bandwidth**: INT8 weights are half the size, so loading them from memory takes half the time.
+3. **Combined Effect**: For compute-bound operations, the speedup is primarily from compute throughput: **~2× speedup**.
+
+**The Systems Insight**: The speedup from quantization depends on the bottleneck. Compute-bound operations (large batch sizes, high arithmetic intensity) see ~2× from faster INT8 units. Memory-bound operations (small batches, attention) see up to ~4× because both bandwidth and compute improve. The earlier Napkin Math on LLM inference shows the memory-bound case.
+:::
 
 ### Numerical Format Comparison {#sec-model-compression-numerical-format-comparison-e4ad}
 

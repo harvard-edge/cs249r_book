@@ -44,17 +44,30 @@ class ForbiddenFootnoteChecker:
             print(f"⚠️  Error reading {filepath}: {e}")
             return file_errors
 
-        in_div_block = False
+        div_depth = 0
         div_start_line = 0
+        div_stack = []  # Track the start line of each div level
 
         for line_num, line in enumerate(lines, 1):
-            # Track div blocks
-            if line.strip().startswith(':::'):
-                if not in_div_block:
-                    in_div_block = True
+            stripped = line.strip()
+
+            # Track div blocks with proper nesting
+            # Quarto uses ::: for divs and :::: for nested divs
+            # Opening div: starts with ::: or :::: followed by { or text
+            if re.match(r'^:{3,4}\s*\{', stripped) or (re.match(r'^:{3,4}\s+\w', stripped)):
+                div_depth += 1
+                div_stack.append(line_num)
+                if div_depth == 1:
                     div_start_line = line_num
-                else:
-                    in_div_block = False
+            # Closing div: exactly ::: or :::: (with optional whitespace)
+            elif re.match(r'^:{3,4}\s*$', stripped):
+                if div_depth > 0:
+                    div_depth -= 1
+                    div_stack.pop() if div_stack else None
+                    if div_depth == 0:
+                        div_start_line = 0
+
+            in_div_block = div_depth > 0
 
             # Check 0: Inline footnotes (^[...]) - should use proper references instead
             # This check runs independently of other checks
