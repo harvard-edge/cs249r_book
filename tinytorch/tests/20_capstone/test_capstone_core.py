@@ -39,8 +39,17 @@ class TestBenchmarkSuite:
         assert BenchmarkSuite is not None
 
     def test_benchmark_suite_can_instantiate(self):
-        """Verify BenchmarkSuite can be created."""
-        suite = BenchmarkSuite("capstone_test")
+        """Verify BenchmarkSuite can be created with models and datasets."""
+        # BenchmarkSuite requires models and datasets lists
+        class MockModel:
+            def __init__(self, name):
+                self.name = name
+            def forward(self, x):
+                return x
+
+        models = [MockModel("test_model")]
+        datasets = [{"name": "test", "data": np.random.randn(10, 4)}]
+        suite = BenchmarkSuite(models=models, datasets=datasets)
         assert suite is not None
 
     def test_benchmark_result_import(self):

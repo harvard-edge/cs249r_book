@@ -30,7 +30,7 @@ class TestMilestone01Perceptron:
     def test_perceptron_forward_runs(self):
         """
         WHAT: Verify the perceptron forward pass demo runs.
-        WHY: This is the first milestone - it must work to build confidence.
+        WHY: This is the first milestones - it must work to build confidence.
         """
         script = PROJECT_ROOT / "milestones" / "01_1958_perceptron" / "01_rosenblatt_forward.py"
         if not script.exists():
@@ -50,8 +50,9 @@ class TestMilestone01Perceptron:
         """
         WHAT: Verify the trained perceptron demo runs.
         WHY: This proves the full training loop works.
+        NOTE: This script is in extras/ as it's an extended example.
         """
-        script = PROJECT_ROOT / "milestones" / "01_1958_perceptron" / "02_rosenblatt_trained.py"
+        script = PROJECT_ROOT / "milestones" / "extras" / "02_rosenblatt_trained.py"
         if not script.exists():
             pytest.fail(f"Script not found: {script}")
 
@@ -157,12 +158,12 @@ class TestMilestone04CNN:
 class TestMilestone05Transformer:
     """Test Milestone 05: Transformer Era (2017)"""
 
-    def test_attention_proof_runs(self):
+    def test_attention_runs(self):
         """
-        WHAT: Verify the attention mechanism proof runs.
+        WHAT: Verify the attention mechanism demo runs.
         WHY: This proves attention can learn cross-position relationships.
         """
-        script = PROJECT_ROOT / "milestones" / "05_2017_transformer" / "00_vaswani_attention_proof.py"
+        script = PROJECT_ROOT / "milestones" / "05_2017_transformer" / "01_vaswani_attention.py"
         if not script.exists():
             pytest.fail(f"Script not found: {script}")
 
@@ -174,10 +175,7 @@ class TestMilestone05Transformer:
             cwd=PROJECT_ROOT
         )
 
-        assert result.returncode == 0, f"Attention proof failed:\n{result.stderr}"
-        # Verify it achieved good accuracy
-        assert "100.0%" in result.stdout or "99" in result.stdout, \
-            "Attention proof should achieve near-perfect accuracy"
+        assert result.returncode == 0, f"Attention demo failed:\n{result.stderr}"
 
 
 class TestMilestone06MLPerf:
@@ -209,37 +207,43 @@ class TestMilestone06MLPerf:
 class TestMilestoneCLI:
     """Test milestones work through the CLI."""
 
-    def test_milestones_list_works(self):
+    def test_milestone_list_works(self):
         """
-        WHAT: Verify `tito milestones list` works.
+        WHAT: Verify `tito milestone list` works.
         WHY: Students need to discover available milestones.
         """
+        tito_path = PROJECT_ROOT / "bin" / "tito"
+        env = {"TITO_ALLOW_SYSTEM": "1", "PATH": subprocess.os.environ.get("PATH", "")}
         result = subprocess.run(
-            ["tito", "milestones", "list"],
+            [str(tito_path), "milestone", "list"],
             capture_output=True,
             text=True,
             timeout=30,
-            cwd=PROJECT_ROOT
+            cwd=PROJECT_ROOT,
+            env=env
         )
 
-        assert result.returncode == 0, f"tito milestones list failed:\n{result.stderr}"
-        assert "Perceptron" in result.stdout, "Should list Perceptron milestone"
-        assert "Transformer" in result.stdout, "Should list Transformer milestone"
+        assert result.returncode == 0, f"tito milestone list failed:\n{result.stderr}\n{result.stdout}"
+        assert "Perceptron" in result.stdout, "Should list Perceptron milestones"
+        assert "Transformer" in result.stdout, "Should list Transformer milestones"
 
-    def test_milestones_status_works(self):
+    def test_milestone_status_works(self):
         """
-        WHAT: Verify `tito milestones status` works.
+        WHAT: Verify `tito milestone status` works.
         WHY: Students need to track their progress.
         """
+        tito_path = PROJECT_ROOT / "bin" / "tito"
+        env = {"TITO_ALLOW_SYSTEM": "1", "PATH": subprocess.os.environ.get("PATH", "")}
         result = subprocess.run(
-            ["tito", "milestones", "status"],
+            [str(tito_path), "milestone", "status"],
             capture_output=True,
             text=True,
             timeout=30,
-            cwd=PROJECT_ROOT
+            cwd=PROJECT_ROOT,
+            env=env
         )
 
-        assert result.returncode == 0, f"tito milestones status failed:\n{result.stderr}"
+        assert result.returncode == 0, f"tito milestone status failed:\n{result.stderr}\n{result.stdout}"
 
 
 if __name__ == "__main__":

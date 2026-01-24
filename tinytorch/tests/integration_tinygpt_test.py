@@ -153,7 +153,7 @@ def test_transformer_components():
         print(f"    Embedding: {tokens.shape} -> {embedded.shape}")
 
         print("  ✓ Testing Positional Encoding")
-        pos_enc = PositionalEncoding(embed_dim=32, max_length=10)
+        pos_enc = PositionalEncoding(max_seq_len=10, embed_dim=32)
         pos_embedded = pos_enc(embedded)
         assert pos_embedded.shape == embedded.shape, "Positional encoding should preserve shape"
         print(f"    Pos encoding: {embedded.shape} -> {pos_embedded.shape}")
@@ -174,14 +174,14 @@ def test_transformer_components():
     # Test transformer blocks
     if TRANSFORMERS_AVAILABLE and ATTENTION_AVAILABLE:
         print("  ✓ Testing Transformer Block")
-        block = TransformerBlock(embed_dim=32, num_heads=4, hidden_dim=128)
+        block = TransformerBlock(embed_dim=32, num_heads=4, ff_dim=128)
         x = Tensor(np.random.randn(2, 5, 32))
         block_out = block(x)
         assert block_out.shape == x.shape, f"Transformer block should preserve shape"
         print(f"    Transformer block: {x.shape} -> {block_out.shape}")
 
         print("  ✓ Testing Layer Normalization")
-        ln = LayerNorm(embed_dim=32)
+        ln = LayerNorm(normalized_shape=32)
         ln_out = ln(x)
         assert ln_out.shape == x.shape, "LayerNorm should preserve shape"
         print(f"    LayerNorm: {x.shape} -> {ln_out.shape}")

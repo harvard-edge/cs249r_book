@@ -83,8 +83,8 @@ def test_dense_layer_basic():
     print(f"  ✓ Dense layer forward pass successful")
     print(f"    Input shape: {x.shape}")
     print(f"    Output shape: {output.shape}")
-    print(f"    Weights shape: {linear.weight.shape}")
-    print(f"    Bias shape: {linear.bias.shape}")
+    print(f"    Weights shape: {dense.weight.shape}")
+    print(f"    Bias shape: {dense.bias.shape}")
 
     # Check output shape is correct
     assert output.shape == (1, 2), f"Expected output shape (1, 2), got {output.shape}"
