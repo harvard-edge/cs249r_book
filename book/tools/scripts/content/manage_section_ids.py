@@ -924,14 +924,22 @@ def update_quiz_json(file_path, id_map):
     changes = []
     modified = False
 
-    # First, update section_id fields in the structure
-    for section in quiz_data.get('sections', []):
-        old_section_id = section.get('section_id')
-        if old_section_id and old_section_id in id_map:
-            new_section_id = id_map[old_section_id]
-            section['section_id'] = new_section_id
-            changes.append((old_section_id, new_section_id))
-            modified = True
+    # Handle different JSON structures - quiz_data could be a list or dict
+    if isinstance(quiz_data, dict):
+        # First, update section_id fields in the structure
+        for section in quiz_data.get('sections', []):
+            old_section_id = section.get('section_id')
+            if old_section_id:
+                # Strip leading # if present for comparison
+                old_id_clean = old_section_id.lstrip('#')
+                if old_id_clean in id_map:
+                    new_section_id = '#' + id_map[old_id_clean] if old_section_id.startswith('#') else id_map[old_id_clean]
+                    section['section_id'] = new_section_id
+                    changes.append((old_section_id, new_section_id))
+                    modified = True
+    elif isinstance(quiz_data, list):
+        # Empty list or list-based structure - nothing to update in structure
+        pass
 
     # Then, search for any other occurrences of old IDs in the entire JSON content
     # Convert to string, replace, then parse back
@@ -1108,25 +1116,62 @@ MODE EXAMPLES:
                     for quiz_file in file_dir.glob("*_quizzes.json"):
                         update_cross_references(str(quiz_file), id_replacements)
         elif args.directory:
-            # Process all files with summary
-            process_directory(args.directory, args.yes, args.force, args.dry_run, args.repair, args.remove, args.backup)
+            if args.repair:
+                # Two-pass approach for repair mode to ensure all cross-references are updated
+                logging.info("\n" + "="*60)
+                logging.info("🔍 PHASE 1: Collecting all section ID mappings...")
+                logging.info("="*60)
 
-            # Then update cross-references if we have replacements
-            if not args.dry_run and id_replacements:
-                logging.info("\n📝 Found the following ID replacements:")
-                for old_id, new_id in id_replacements.items():
-                    logging.info(f"  {old_id} → {new_id}")
+                # First pass: collect all mappings without writing
+                all_files = list(glob.glob(os.path.join(args.directory, "**/*.qmd"), recursive=True))
+                for filepath in all_files:
+                    # Process in dry-run mode to collect mappings
+                    process_markdown_file(filepath, auto_yes=True, force=True, dry_run=True, repair_mode=True, remove_mode=False, backup_mode=False)
 
-                if args.yes or args.force or input("\n🔄 Would you like to update cross-references with these new IDs? [Y/n]: ").lower() != 'n':
-                    logging.info("\n🔍 Searching for cross-references...")
-                    # Update all files in the directory
-                    for filepath in glob.glob(os.path.join(args.directory, "**/*.qmd"), recursive=True):
+                if id_replacements:
+                    logging.info(f"\n📝 Collected {len(id_replacements)} ID mappings")
+
+                    logging.info("\n" + "="*60)
+                    logging.info("🔍 PHASE 2: Updating all cross-references FIRST...")
+                    logging.info("="*60)
+
+                    # Update cross-references in ALL files before changing headers
+                    for filepath in all_files:
                         update_cross_references(filepath, id_replacements)
 
-                    # Update all quiz JSON files in the directory
+                    # Update all quiz JSON files
                     logging.info("\n📝 Updating quiz JSON files...")
                     for quiz_file in glob.glob(os.path.join(args.directory, "**/*_quizzes.json"), recursive=True):
                         update_cross_references(quiz_file, id_replacements)
+
+                    logging.info("\n" + "="*60)
+                    logging.info("🔍 PHASE 3: Updating section headers...")
+                    logging.info("="*60)
+
+                    # Now update the actual section headers
+                    process_directory(args.directory, args.yes, args.force, args.dry_run, args.repair, args.remove, args.backup)
+                else:
+                    logging.info("\n✓ No ID changes needed")
+            else:
+                # Normal mode: process files directly
+                process_directory(args.directory, args.yes, args.force, args.dry_run, args.repair, args.remove, args.backup)
+
+                # Then update cross-references if we have replacements
+                if not args.dry_run and id_replacements:
+                    logging.info("\n📝 Found the following ID replacements:")
+                    for old_id, new_id in id_replacements.items():
+                        logging.info(f"  {old_id} → {new_id}")
+
+                    if args.yes or args.force or input("\n🔄 Would you like to update cross-references with these new IDs? [Y/n]: ").lower() != 'n':
+                        logging.info("\n🔍 Searching for cross-references...")
+                        # Update all files in the directory
+                        for filepath in glob.glob(os.path.join(args.directory, "**/*.qmd"), recursive=True):
+                            update_cross_references(filepath, id_replacements)
+
+                        # Update all quiz JSON files in the directory
+                        logging.info("\n📝 Updating quiz JSON files...")
+                        for quiz_file in glob.glob(os.path.join(args.directory, "**/*_quizzes.json"), recursive=True):
+                            update_cross_references(quiz_file, id_replacements)
         else:
             parser.error("Either --file or --directory is required")
 
