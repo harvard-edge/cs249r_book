@@ -446,11 +446,11 @@ Static pruning techniques commit to a fixed dataset before training begins, but 
 
 ### Curriculum Learning: Easy to Hard {#sec-data-efficiency-curriculum-learning-easy-hard-3428}
 
-**Curriculum learning** [@bengio2009curriculum; @soviany2022curriculum] structures the order in which data is presented to the model. Instead of random shuffling, it starts with simpler examples and gradually introduces more complex ones—mirroring how humans learn by mastering fundamentals before advanced topics.
+The first dynamic selection technique, **curriculum learning** [@bengio2009curriculum; @soviany2022curriculum], structures the order in which data is presented to the model. Instead of random shuffling, it starts with simpler examples and gradually introduces more complex ones, mirroring how humans learn by mastering fundamentals before advancing to harder material.
 
-**Why It Works**: Neural networks benefit from a smooth loss landscape early in training. Easy examples provide clear, consistent gradients that establish good feature representations. Hard examples introduced too early produce noisy gradient signals that slow convergence or cause the model to memorize outliers rather than learn general patterns.
+The effectiveness of curriculum learning stems from how neural networks respond to gradient signals at different training stages. Easy examples provide clear, consistent gradients that establish good feature representations early in training when the loss landscape is highly irregular. Hard examples introduced too early produce noisy gradient signals that slow convergence or cause the model to memorize outliers rather than learn general patterns. By sequencing examples from easy to hard, curriculum learning smooths the optimization trajectory.
 
-**The Pacing Function**: A curriculum is defined by two components: (1) a **difficulty scorer** that ranks samples, and (2) a **pacing function** that controls how quickly hard samples are introduced. A common choice is linear pacing:
+Implementing a curriculum requires two components: a difficulty scorer that ranks samples, and a pacing function that controls how quickly hard samples are introduced. A common choice is linear pacing:
 
 $$
 \text{samples}_t = \text{sort\_by\_difficulty}[:N \cdot \min(1, t/T_{warmup})]
@@ -458,7 +458,7 @@ $$
 
 where $t$ is the current epoch and $T_{warmup}$ is the epoch at which the full dataset becomes available. Early epochs train on the easiest $N \cdot (t/T_{warmup})$ fraction; after warmup, training proceeds on the full dataset.
 
-**Curriculum Design Strategies**:
+The difficulty scorer can be designed in several ways, each with different computational requirements and applicability.
 
 +-----------------------+-------------------------------------------+---------------------------------------------+
 | **Strategy**          | **Difficulty Score**                      | **Best For**                                |
@@ -472,7 +472,7 @@ where $t$ is the current epoch and $T_{warmup}$ is the epoch at which the full d
 | **Self-Paced**        | Current model's loss (updated each epoch) | Adaptive; no probe needed                   |
 +-----------------------+-------------------------------------------+---------------------------------------------+
 
-**Efficiency Gains**: Curriculum learning improves convergence by reducing wasted updates on samples the model cannot yet learn from. The ICR is higher in early training because easy samples provide strong learning signal relative to their compute cost.
+From a systems perspective, curriculum learning improves convergence by reducing wasted gradient updates on samples the model cannot yet learn from. The Information-Compute Ratio is higher in early training because easy samples provide strong learning signal relative to their compute cost. The efficiency gains manifest as faster convergence to target accuracy, not higher final accuracy.
 
 @tbl-curriculum-benchmarks summarizes measured speedups from curriculum learning across standard benchmarks:
 
@@ -498,14 +498,9 @@ The optimal ordering is task-dependent. **Anti-curriculum** (hard examples first
 
 ### Active Learning: Human-in-the-Loop {#sec-data-efficiency-active-learning-humanintheloop-a9fa}
 
-In specialized fields such as medical diagnosis, autonomous driving, and scientific research, labeling requires domain expertise and can cost $5–100+ per sample. Rather than labeling everything upfront, **active learning** [@settles2009active; @ren2021survey] lets the model identify which unlabeled examples would be most valuable to label next (@fig-active-learning-loop).
+Curriculum learning optimizes the order in which samples are presented, but it assumes all samples are already labeled. This assumption breaks down in specialized fields such as medical diagnosis, autonomous driving, and scientific research, where labeling requires domain expertise and can cost \$5 to \$100 or more per sample. Rather than labeling everything upfront, **active learning** [@settles2009active; @ren2021survey] shifts the optimization target: instead of choosing which labeled samples to train on, it chooses which unlabeled samples are worth labeling at all (@fig-active-learning-loop).
 
-**Query Strategies** determine which samples to send to the oracle:
-
-- **Uncertainty Sampling**: Select samples where the model is least confident (e.g., prediction probability near 0.5 for binary classification). Simple and effective.
-- **Query-by-Committee**: Train multiple models; select samples where they disagree most. Better captures epistemic uncertainty.
-- **Expected Model Change**: Select samples that would cause the largest gradient update. Computationally expensive but theoretically motivated.
-- **Diversity Sampling**: Select samples dissimilar from currently labeled data, ensuring coverage of the input space.
+The effectiveness of active learning depends critically on the query strategy used to select samples for annotation. The simplest approach, uncertainty sampling, selects samples where the model is least confident, such as predictions near 0.5 probability for binary classification. This strategy is computationally cheap and often surprisingly effective. Query-by-committee extends this idea by training multiple models and selecting samples where they disagree most, capturing epistemic uncertainty that a single model might miss. For practitioners willing to invest more compute, expected model change selects samples that would cause the largest gradient update if labeled, providing a theoretically grounded but expensive alternative. Finally, diversity sampling complements uncertainty-based methods by selecting samples dissimilar from currently labeled data, ensuring the labeled set covers the full input space rather than clustering around a few ambiguous regions.
 
 ::: {#fig-active-learning-loop fig-cap="**Active Learning Loop**: Instead of labeling all data, the model selects the most 'confusing' or informative samples from an unlabeled pool. These samples are sent to an Oracle (human annotator) and added to the training set. The model is retrained, and the cycle repeats, creating a feedback loop that maximizes data efficiency." fig-alt="A cycle diagram: Unlabeled Pool -> Selection Strategy -> Oracle -> Labeled Set -> Model Training -> back to Selection Strategy."}
 ```{.tikz}
@@ -533,7 +528,7 @@ In specialized fields such as medical diagnosis, autonomous driving, and scienti
 
 Active learning is particularly valuable in domains where labeling requires expertise. In medical imaging, for instance, an AI system diagnosing diseases from X-rays may be confident on common conditions but uncertain about rarer cases. By focusing human annotation on these ambiguous cases, active learning optimizes the use of expensive expert time while accelerating model improvement.
 
-The economic implications are substantial. In production settings, labeling costs often dwarf compute costs—a specialist's time is far more expensive than GPU hours:
+The economic implications are substantial. In production settings, labeling costs often dwarf compute costs because a specialist's time is far more expensive than GPU hours.
 
 ::: {.callout-perspective title="Napkin Math: The Active Learning ROI"}
 **Problem**: You are building a medical diagnostic AI. You have a pool of **1 Million unlabeled scans**. A specialist doctor charges **$5.00** to label one scan. You have a budget of **$500,000** and a deadline of **1 month**.
@@ -554,19 +549,13 @@ The economic implications are substantial. In production settings, labeling cost
 
 ### Semi-Supervised Learning: Leveraging Unlabeled Data {#sec-data-efficiency-semisupervised-learning-leveraging-unlabeled-data-53b7}
 
-When some labeled data is available but insufficient for fully supervised learning, **semi-supervised learning** offers a middle ground. It leverages a small set of labeled examples to guide learning on a much larger unlabeled pool—typically achieving 80-95% of fully-supervised accuracy with only 10-20% of the labels.
+Active learning optimizes which samples to label, but it still requires human annotation for every selected example. A more aggressive approach asks: can we extract learning signal from unlabeled data directly? When some labeled data is available but insufficient for fully supervised learning, **semi-supervised learning** offers exactly this capability. It leverages a small set of labeled examples to guide learning on a much larger unlabeled pool, typically achieving 80 to 95 percent of fully supervised accuracy with only 10 to 20 percent of the labels.
 
-**The Core Insight**: Unlabeled data contains structural information about the input distribution $P(X)$. While it cannot directly teach the mapping $P(Y|X)$, it constrains the hypothesis space. A decision boundary that cuts through dense regions of $P(X)$ is unlikely to generalize well; semi-supervised methods use unlabeled data to push boundaries toward low-density regions.
+The core insight behind semi-supervised learning is that unlabeled data, while it cannot directly teach the mapping from inputs to outputs, contains structural information about the input distribution $P(X)$ that constrains the hypothesis space. A decision boundary that cuts through dense regions of $P(X)$ is unlikely to generalize well because it would assign different labels to similar inputs. Semi-supervised methods use unlabeled data to push decision boundaries toward low-density regions, where class transitions are more likely to occur naturally.
 
-**Key Techniques**:
+Three main techniques implement this insight. Pseudo-labeling takes the most direct approach: train on labeled data, use the model to generate "pseudo-labels" for high-confidence unlabeled predictions, then train on both. The confidence threshold is critical because setting it too low introduces label noise that degrades learning, while setting it too high wastes potentially useful data. Consistency regularization takes a different angle by enforcing that the model produces similar predictions for augmented versions of the same input. The intuition is that a robust classifier should be invariant to realistic perturbations like cropping, rotation, or color shifts. Methods like FixMatch combine both approaches, only assigning pseudo-labels to samples where the unaugmented prediction is confident but training the model to predict these labels on strongly augmented versions of the same images. Label propagation offers a third paradigm through graph-based reasoning: construct a similarity graph over all samples and propagate labels from labeled nodes to their neighbors. This approach works particularly well when the feature space exhibits clear cluster structure.
 
-- **Pseudo-Labeling**: Train on labeled data, use the model to generate "pseudo-labels" for high-confidence unlabeled predictions, then train on both. The threshold for "high confidence" (e.g., >0.95 probability) is critical—too low introduces noise, too high wastes data.
-
-- **Consistency Regularization**: Enforce that the model produces similar predictions for augmented versions of the same input. The intuition: a robust classifier should be invariant to realistic perturbations. Methods like **FixMatch** combine this with pseudo-labeling, only assigning pseudo-labels to samples where the unaugmented prediction is confident but training on strongly-augmented versions.
-
-- **Label Propagation**: In graph-based approaches, construct a similarity graph over all samples (labeled and unlabeled), then propagate labels from labeled nodes to neighbors. Works well when the feature space has clear cluster structure.
-
-**Efficiency Gains**: Semi-supervised learning typically achieves the same accuracy as fully supervised training with **5-10× fewer labels**. The compute cost increases (training on more total samples), but the labeling cost—often the dominant expense—drops dramatically.
+The systems trade-off in semi-supervised learning is straightforward: it typically achieves the same accuracy as fully supervised training with 5 to 10 times fewer labels, but requires more compute because training processes both labeled and unlabeled samples. Since labeling costs often dominate compute costs in production settings, this trade-off is usually favorable.
 
 ::: {.callout-example title="Quantitative Benchmark: FixMatch on CIFAR-10"}
 **FixMatch** [@sohn2020fixmatch] combines pseudo-labeling with consistency regularization to achieve remarkable label efficiency:
@@ -600,11 +589,11 @@ Semi-supervised learning assumes that the unlabeled data comes from the same dis
 Always validate on a held-out set with true labels to catch distribution mismatch.
 :::
 
-Semi-supervised learning reduces label requirements by 5-10× while maintaining accuracy. But notice what we haven't questioned: the assumption that we need *any* task-specific labels at all. What if the structure of data itself—the fact that cat images resemble other cat images, that coherent sentences follow grammatical patterns—could provide the supervision signal?
+Semi-supervised learning reduces label requirements by 5–10$\times$ while maintaining accuracy. But notice what we have not questioned: the assumption that we need *any* task-specific labels at all. What if the structure of data itself, the fact that cat images resemble other cat images, that coherent sentences follow grammatical patterns, could provide the supervision signal?
 
 ## Self-Supervised Learning: Eliminating the Label Bottleneck {#sec-data-efficiency-selfsupervised-learning-eliminating-label-bottleneck-1005}
 
-Active learning reduces labeling cost by 10×. Semi-supervised learning reduces it by another 5-10×. But the most dramatic gain comes from **self-supervised learning**, which removes the human annotation bottleneck entirely by learning from data structure rather than human labels—a fundamental paradigm shift in how we think about supervision.
+Active learning reduces labeling cost by 10$\times$. Semi-supervised learning reduces it by another 5–10$\times$. But the most dramatic gain comes from **self-supervised learning**, which removes the human annotation bottleneck entirely by learning from data structure rather than human labels. This represents a fundamental paradigm shift in how we think about supervision.
 
 ### The Paradigm Shift: Labels from Structure {#sec-data-efficiency-paradigm-shift-labels-structure-e9cc}
 
