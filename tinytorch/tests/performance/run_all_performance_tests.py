@@ -19,16 +19,11 @@ import traceback
 # Add current directory to path for imports
 sys.path.append(str(Path(__file__).parent))
 
-# Import all test modules
+# Import performance test framework
 try:
-    from test_module_15_profiling import run_module_15_performance_tests
-    from test_module_16_acceleration import run_module_16_performance_tests
-    from test_module_17_quantization import run_module_17_performance_tests
-    from test_module_19_caching import run_module_19_performance_tests
-    from test_module_20_benchmarking import run_module_20_performance_tests
-    from performance_test_framework import PerformanceTestSuite
+    from performance_test_framework import PerformanceTester
 except ImportError as e:
-    print(f"❌ Error importing test modules: {e}")
+    print(f"❌ Error importing performance test framework: {e}")
     sys.exit(1)
 
 class TinyTorchPerformanceValidator:
@@ -42,10 +37,10 @@ class TinyTorchPerformanceValidator:
     def __init__(self):
         self.results = {}
         self.start_time = time.time()
-        self.test_suite = PerformanceTestSuite("validation_results")
+        self.test_suite = PerformanceTester("validation_results")
 
     def run_all_tests(self):
-        """Run performance tests for all optimization modules."""
+        """Run performance tests for all optimization modules via pytest."""
         print("🧪 TINYTORCH OPTIMIZATION MODULES - PERFORMANCE VALIDATION")
         print("=" * 80)
         print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -53,47 +48,61 @@ class TinyTorchPerformanceValidator:
         print("This validation tests whether optimization modules actually deliver")
         print("their claimed performance improvements with real measurements.")
         print()
+        print("Running tests from module-specific directories...")
+        print()
 
-        # Define all test modules
-        test_modules = [
-            ("Module 15: Profiling", run_module_15_performance_tests),
-            ("Module 16: Acceleration", run_module_16_performance_tests),
-            ("Module 17: Quantization", run_module_17_performance_tests),
-            ("Module 19: KV Caching", run_module_19_performance_tests),
-            ("Module 20: Benchmarking", run_module_20_benchmarking_tests)
+        # Run tests via pytest for each optimization module directory
+        import subprocess
+        test_dirs = [
+            ("Module 14: Profiling", "14_profiling"),
+            ("Module 15: Quantization", "15_quantization"),
+            ("Module 17: Acceleration", "17_acceleration"),
+            ("Module 18: Memoization", "18_memoization"),
+            ("Module 19: Benchmarking", "19_benchmarking"),
         ]
 
-        # Run each test module
-        for module_name, test_function in test_modules:
+        tests_root = Path(__file__).parent.parent
+
+        for module_name, test_dir in test_dirs:
             print(f"\n{'='*80}")
             print(f"TESTING {module_name.upper()}")
             print('='*80)
 
+            test_path = tests_root / test_dir
+            if not test_path.exists():
+                print(f"⚠️  Test directory not found: {test_path}")
+                self.results[module_name] = {'status': 'skipped', 'reason': 'directory not found'}
+                continue
+
             try:
                 module_start = time.time()
-                results = test_function()
+                result = subprocess.run(
+                    [sys.executable, "-m", "pytest", str(test_path), "-v", "--tb=short"],
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
                 module_duration = time.time() - module_start
 
                 self.results[module_name] = {
-                    'results': results,
+                    'status': 'completed' if result.returncode == 0 else 'failed',
+                    'returncode': result.returncode,
                     'duration_seconds': module_duration,
-                    'status': 'completed',
                     'timestamp': datetime.now().isoformat()
                 }
 
-                print(f"\n✅ {module_name} testing completed in {module_duration:.1f}s")
+                if result.returncode == 0:
+                    print(f"\n✅ {module_name} testing completed in {module_duration:.1f}s")
+                else:
+                    print(f"\n❌ {module_name} testing failed (exit code {result.returncode})")
+                    print(result.stdout[-2000:] if len(result.stdout) > 2000 else result.stdout)
 
+            except subprocess.TimeoutExpired:
+                self.results[module_name] = {'status': 'timeout', 'timestamp': datetime.now().isoformat()}
+                print(f"\n⏰ {module_name} testing timed out")
             except Exception as e:
-                error_info = {
-                    'status': 'error',
-                    'error': str(e),
-                    'traceback': traceback.format_exc(),
-                    'timestamp': datetime.now().isoformat()
-                }
-                self.results[module_name] = error_info
-
+                self.results[module_name] = {'status': 'error', 'error': str(e), 'timestamp': datetime.now().isoformat()}
                 print(f"\n❌ {module_name} testing failed: {e}")
-                print("Continuing with other modules...")
 
         total_duration = time.time() - self.start_time
         print(f"\n🏁 All tests completed in {total_duration:.1f}s")
