@@ -354,7 +354,7 @@ class Tokenizer:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Base Tokenizer Interface
+### 🧪 Unit Test: Base Tokenizer Interface
 
 This test validates our base tokenizer defines the correct interface for all implementations.
 
@@ -365,8 +365,8 @@ This test validates our base tokenizer defines the correct interface for all imp
 
 # %% nbgrader={"grade": true, "grade_id": "test-base-tokenizer", "locked": true, "points": 5}
 def test_unit_base_tokenizer():
-    """🔬 Test base tokenizer interface."""
-    print("🔬 Unit Test: Base Tokenizer Interface...")
+    """🧪 Test base tokenizer interface."""
+    print("🧪 Unit Test: Base Tokenizer Interface...")
 
     # Test that base class defines the interface
     tokenizer = Tokenizer()
@@ -550,7 +550,7 @@ class CharTokenizer(Tokenizer):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Character Tokenizer
+### 🧪 Unit Test: Character Tokenizer
 
 This test validates our character tokenizer works correctly with vocabulary building, encoding, and decoding.
 
@@ -561,8 +561,8 @@ This test validates our character tokenizer works correctly with vocabulary buil
 
 # %% nbgrader={"grade": true, "grade_id": "test-char-tokenizer", "locked": true, "points": 15}
 def test_unit_char_tokenizer():
-    """🔬 Test character tokenizer implementation."""
-    print("🔬 Unit Test: Character Tokenizer...")
+    """🧪 Test character tokenizer implementation."""
+    print("🧪 Unit Test: Character Tokenizer...")
 
     # Test basic functionality
     vocab = ['h', 'e', 'l', 'o', ' ', 'w', 'r', 'd']
@@ -781,7 +781,7 @@ class BPETokenizer(Tokenizer):
         return pairs
         ### END SOLUTION
 
-    def train(self, corpus: List[str], vocab_size: int) -> None:
+    def train(self, corpus: List[str], vocab_size: int = None) -> None:
         """
         Train BPE on corpus to learn merge rules.
 
@@ -1012,7 +1012,7 @@ class BPETokenizer(Tokenizer):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: BPE Tokenizer
+### 🧪 Unit Test: BPE Tokenizer
 
 This test validates our BPE tokenizer learns merge rules and correctly encodes/decodes text.
 
@@ -1023,8 +1023,8 @@ This test validates our BPE tokenizer learns merge rules and correctly encodes/d
 
 # %% nbgrader={"grade": true, "grade_id": "test-bpe-tokenizer", "locked": true, "points": 20}
 def test_unit_bpe_tokenizer():
-    """🔬 Test BPE tokenizer implementation."""
-    print("🔬 Unit Test: BPE Tokenizer...")
+    """🧪 Test BPE tokenizer implementation."""
+    print("🧪 Unit Test: BPE Tokenizer...")
 
     # Test basic functionality with simple corpus
     corpus = ["hello", "world", "hello", "hell"]  # "hell" and "hello" share prefix
@@ -1245,7 +1245,7 @@ def analyze_tokenization(texts: List[str], tokenizer: Tokenizer) -> Dict[str, fl
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Tokenization Utilities
+### 🧪 Unit Test: Tokenization Utilities
 
 This test validates our utility functions for tokenizer creation, dataset processing, and analysis.
 
@@ -1256,8 +1256,8 @@ This test validates our utility functions for tokenizer creation, dataset proces
 
 # %% nbgrader={"grade": true, "grade_id": "test-tokenization-utils", "locked": true, "points": 10}
 def test_unit_tokenization_utils():
-    """🔬 Test tokenization utility functions."""
-    print("🔬 Unit Test: Tokenization Utils...")
+    """🧪 Test tokenization utility functions."""
+    print("🧪 Unit Test: Tokenization Utils...")
 
     # Test tokenizer factory
     corpus = ["hello world", "test text", "more examples"]
@@ -1651,7 +1651,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test realistic tokenization workflow
-    print("🔬 Integration Test: Complete tokenization pipeline...")
+    print("🧪 Integration Test: Complete tokenization pipeline...")
 
     # Create training corpus
     training_corpus = [

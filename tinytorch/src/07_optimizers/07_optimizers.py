@@ -308,7 +308,7 @@ class Optimizer:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Base Optimizer
+### 🧪 Unit Test: Base Optimizer
 
 This test validates our base Optimizer class works correctly.
 
@@ -319,18 +319,14 @@ This test validates our base Optimizer class works correctly.
 
 # %% nbgrader={"grade": true, "grade_id": "test-optimizer-base", "locked": true, "points": 10}
 def test_unit_optimizer_base():
-    """🔬 Test base Optimizer functionality."""
-    print("🔬 Unit Test: Base Optimizer...")
+    """🧪 Test base Optimizer functionality."""
+    print("🧪 Unit Test: Base Optimizer...")
 
     # Create test parameters
     param1 = Tensor([1.0, 2.0], requires_grad=True)
     param2 = Tensor([[3.0, 4.0], [5.0, 6.0]], requires_grad=True)
 
-    # Add some gradients
-    param1.grad = Tensor([0.1, 0.2])
-    param2.grad = Tensor([[0.3, 0.4], [0.5, 0.6]])
-
-    # Create optimizer
+    # Create optimizer first (optimizer.__init__ resets grad to None)
     optimizer = Optimizer([param1, param2])
 
     # Test parameter storage
@@ -338,6 +334,10 @@ def test_unit_optimizer_base():
     assert optimizer.params[0] is param1
     assert optimizer.params[1] is param2
     assert optimizer.step_count == 0
+
+    # Add gradients AFTER creating optimizer to test zero_grad properly
+    param1.grad = Tensor([0.1, 0.2])
+    param2.grad = Tensor([[0.3, 0.4], [0.5, 0.6]])
 
     # Test zero_grad
     optimizer.zero_grad()
@@ -588,7 +588,7 @@ class SGD(Optimizer):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: SGD Optimizer
+### 🧪 Unit Test: SGD Optimizer
 
 This test validates our SGD implementation works correctly.
 
@@ -599,28 +599,28 @@ This test validates our SGD implementation works correctly.
 
 # %% nbgrader={"grade": true, "grade_id": "test-sgd", "locked": true, "points": 15}
 def test_unit_sgd_optimizer():
-    """🔬 Test SGD optimizer implementation."""
-    print("🔬 Unit Test: SGD Optimizer...")
+    """🧪 Test SGD optimizer implementation."""
+    print("🧪 Unit Test: SGD Optimizer...")
 
     # Test basic SGD without momentum
     param = Tensor([1.0, 2.0], requires_grad=True)
-    param.grad = Tensor([0.1, 0.2])
-
     optimizer = SGD([param], lr=0.1)
+    # Set gradient AFTER creating optimizer (optimizer.__init__ resets grad to None)
+    param.grad = Tensor([0.1, 0.2])
     original_data = param.data.copy()
 
     optimizer.step()
 
     # Expected: param = param - lr * grad = [1.0, 2.0] - 0.1 * [0.1, 0.2] = [0.99, 1.98]
-    expected = original_data - 0.1 * param.grad.data
+    expected = original_data - 0.1 * np.array([0.1, 0.2])
     assert np.allclose(param.data, expected)
     assert optimizer.step_count == 1
 
     # Test SGD with momentum
     param2 = Tensor([1.0, 2.0], requires_grad=True)
-    param2.grad = Tensor([0.1, 0.2])
-
     optimizer_momentum = SGD([param2], lr=0.1, momentum=0.9)
+    # Set gradient AFTER creating optimizer
+    param2.grad = Tensor([0.1, 0.2])
 
     # First step: v = 0.9 * 0 + [0.1, 0.2] = [0.1, 0.2]
     optimizer_momentum.step()
@@ -637,9 +637,9 @@ def test_unit_sgd_optimizer():
 
     # Test weight decay
     param3 = Tensor([1.0, 2.0], requires_grad=True)
-    param3.grad = Tensor([0.1, 0.2])
-
     optimizer_wd = SGD([param3], lr=0.1, weight_decay=0.01)
+    # Set gradient AFTER creating optimizer
+    param3.grad = Tensor([0.1, 0.2])
     optimizer_wd.step()
 
     # grad_with_decay = [0.1, 0.2] + 0.01 * [1.0, 2.0] = [0.11, 0.22]
@@ -834,7 +834,7 @@ class Adam(Optimizer):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Adam Optimizer
+### 🧪 Unit Test: Adam Optimizer
 
 This test validates our Adam implementation works correctly.
 
@@ -845,14 +845,14 @@ This test validates our Adam implementation works correctly.
 
 # %% nbgrader={"grade": true, "grade_id": "test-adam", "locked": true, "points": 20}
 def test_unit_adam_optimizer():
-    """🔬 Test Adam optimizer implementation."""
-    print("🔬 Unit Test: Adam Optimizer...")
+    """🧪 Test Adam optimizer implementation."""
+    print("🧪 Unit Test: Adam Optimizer...")
 
     # Test basic Adam functionality
     param = Tensor([1.0, 2.0], requires_grad=True)
-    param.grad = Tensor([0.1, 0.2])
-
     optimizer = Adam([param], lr=0.01, betas=(0.9, 0.999), eps=1e-8)
+    # Set gradient AFTER creating optimizer (optimizer.__init__ resets grad to None)
+    param.grad = Tensor([0.1, 0.2])
     original_data = param.data.copy()
 
     # First step
@@ -891,9 +891,9 @@ def test_unit_adam_optimizer():
 
     # Test with weight decay
     param2 = Tensor([1.0, 2.0], requires_grad=True)
-    param2.grad = Tensor([0.1, 0.2])
-
     optimizer_wd = Adam([param2], lr=0.01, weight_decay=0.01)
+    # Set gradient AFTER creating optimizer
+    param2.grad = Tensor([0.1, 0.2])
     optimizer_wd.step()
 
     # Weight decay should modify the effective gradient
@@ -1083,7 +1083,7 @@ class AdamW(Optimizer):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: AdamW Optimizer
+### 🧪 Unit Test: AdamW Optimizer
 
 This test validates our AdamW implementation with decoupled weight decay.
 
@@ -1094,20 +1094,21 @@ This test validates our AdamW implementation with decoupled weight decay.
 
 # %% nbgrader={"grade": true, "grade_id": "test-adamw", "locked": true, "points": 20}
 def test_unit_adamw_optimizer():
-    """🔬 Test AdamW optimizer implementation."""
-    print("🔬 Unit Test: AdamW Optimizer...")
+    """🧪 Test AdamW optimizer implementation."""
+    print("🧪 Unit Test: AdamW Optimizer...")
 
     # Test AdamW vs Adam difference in weight decay
     # Create identical parameters for comparison
     param_adam = Tensor([1.0, 2.0], requires_grad=True)
     param_adamw = Tensor([1.0, 2.0], requires_grad=True)
 
-    param_adam.grad = Tensor([0.1, 0.2])
-    param_adamw.grad = Tensor([0.1, 0.2])
-
     # Create optimizers with same settings
     adam = Adam([param_adam], lr=0.01, weight_decay=0.01)
     adamw = AdamW([param_adamw], lr=0.01, weight_decay=0.01)
+
+    # Set gradients AFTER creating optimizers (optimizer.__init__ resets grad to None)
+    param_adam.grad = Tensor([0.1, 0.2])
+    param_adamw.grad = Tensor([0.1, 0.2])
 
     # Take one step
     adam.step()
@@ -1118,9 +1119,9 @@ def test_unit_adamw_optimizer():
 
     # Test AdamW basic functionality
     param = Tensor([1.0, 2.0], requires_grad=True)
-    param.grad = Tensor([0.1, 0.2])
-
     optimizer = AdamW([param], lr=0.01, weight_decay=0.01)
+    # Set gradient AFTER creating optimizer
+    param.grad = Tensor([0.1, 0.2])
     original_data = param.data.copy()
 
     optimizer.step()
@@ -1137,11 +1138,12 @@ def test_unit_adamw_optimizer():
     param1 = Tensor([1.0, 2.0], requires_grad=True)
     param2 = Tensor([1.0, 2.0], requires_grad=True)
 
-    param1.grad = Tensor([0.1, 0.2])
-    param2.grad = Tensor([0.1, 0.2])
-
     adam_no_wd = Adam([param1], lr=0.01, weight_decay=0.0)
     adamw_no_wd = AdamW([param2], lr=0.01, weight_decay=0.0)
+
+    # Set gradients AFTER creating optimizers
+    param1.grad = Tensor([0.1, 0.2])
+    param2.grad = Tensor([0.1, 0.2])
 
     adam_no_wd.step()
     adamw_no_wd.step()
@@ -1231,17 +1233,19 @@ def analyze_optimizer_memory_usage():
     for size in param_sizes:
         # Create parameter
         param = Tensor(np.random.randn(size), requires_grad=True)
-        param.grad = Tensor(np.random.randn(size))
 
         # SGD memory (parameter + momentum buffer)
         sgd = SGD([param], momentum=0.9)
+        # Set gradient AFTER creating optimizer
+        param.grad = Tensor(np.random.randn(size))
         sgd.step()  # Initialize buffers
         sgd_memory = size * 2  # param + momentum buffer
 
         # Adam memory (parameter + 2 moment buffers)
         param_adam = Tensor(np.random.randn(size), requires_grad=True)
-        param_adam.grad = Tensor(np.random.randn(size))
         adam = Adam([param_adam])
+        # Set gradient AFTER creating optimizer
+        param_adam.grad = Tensor(np.random.randn(size))
         adam.step()  # Initialize buffers
         adam_memory = size * 3  # param + m_buffer + v_buffer
 
@@ -1374,18 +1378,19 @@ def test_module():
 
     params = [W1, b1, W2, b2]
 
-    # Add realistic gradients
-    W1.grad = Tensor(np.random.randn(3, 4) * 0.01)
-    b1.grad = Tensor(np.random.randn(4) * 0.01)
-    W2.grad = Tensor(np.random.randn(4, 2) * 0.01)
-    b2.grad = Tensor(np.random.randn(2) * 0.01)
-
     # Test all optimizers on same network
+    # Create optimizers BEFORE setting gradients (optimizer.__init__ resets grad to None)
     optimizers = [
         SGD(params, lr=0.01, momentum=0.9),
         Adam([p for p in params], lr=0.001),  # Fresh param list for Adam
         AdamW([p for p in params], lr=0.001, weight_decay=0.01)  # Fresh param list for AdamW
     ]
+
+    # Add realistic gradients AFTER creating optimizers
+    W1.grad = Tensor(np.random.randn(3, 4) * 0.01)
+    b1.grad = Tensor(np.random.randn(4) * 0.01)
+    W2.grad = Tensor(np.random.randn(4, 2) * 0.01)
+    b2.grad = Tensor(np.random.randn(2) * 0.01)
 
     # Save original parameter values
     original_params = [p.data.copy() for p in params]
@@ -1446,9 +1451,9 @@ def test_module():
     print("🧪 Integration Test: Optimizer State Management...")
 
     param = Tensor([1.0, 2.0], requires_grad=True)
-    param.grad = Tensor([0.1, 0.2])
-
     optimizer = Adam([param], lr=0.001)
+    # Set gradient AFTER creating optimizer
+    param.grad = Tensor([0.1, 0.2])
 
     # First step should initialize buffers
     optimizer.step()
@@ -1587,13 +1592,15 @@ def demo_optimizers():
 
     # Create a parameter with a gradient
     weight = Tensor(np.array([5.0]), requires_grad=True)
+
+    # SGD takes a step in the opposite direction
+    optimizer = SGD([weight], lr=0.5)
+    # Set gradient AFTER creating optimizer (optimizer.__init__ resets grad to None)
     weight.grad = np.array([1.0])  # Gradient pointing "uphill"
 
     print(f"Initial weight: {weight.data[0]:.2f}")
     print(f"Gradient:       {weight.grad[0]:.2f} (pointing uphill)")
 
-    # SGD takes a step in the opposite direction
-    optimizer = SGD([weight], lr=0.5)
     optimizer.step()
 
     print(f"\nAfter SGD step: {weight.data[0]:.2f}")
