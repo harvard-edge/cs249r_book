@@ -282,7 +282,8 @@ def test_embedding_shape():
 
 def test_positional_encoding_preserves_shape():
     """Positional encoding preserves tensor shape."""
-    pos_enc = PositionalEncoding(128, 50)
+    # PositionalEncoding(max_seq_len, embed_dim) - need seq_len >= 10, embed_dim = 128
+    pos_enc = PositionalEncoding(50, 128)
     x = Tensor(np.random.randn(4, 10, 128))
     y = pos_enc(x)
     assert y.shape == x.shape, f"PositionalEncoding changed shape: {x.shape} → {y.shape}"

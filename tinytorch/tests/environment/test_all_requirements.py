@@ -61,33 +61,23 @@ def parse_requirements_file(filepath: Path) -> List[Tuple[str, Optional[str], Op
 
 def discover_requirements_files() -> List[Path]:
     """
-    Discover all requirements.txt files in the project.
+    Discover the main requirements.txt file in the project.
+
+    Only checks the main requirements.txt, not ancillary files like
+    binder/requirements.txt or site/requirements.txt which are for
+    different deployment contexts.
 
     Returns:
         List of Path objects for requirements files
     """
     project_root = Path.cwd()
 
-    # Primary requirements file
+    # Only check main requirements.txt
     requirements_files = []
 
-    # Main requirements.txt
     main_req = project_root / "requirements.txt"
     if main_req.exists():
         requirements_files.append(main_req)
-
-    # Additional requirements files (dev, test, docs, etc.)
-    for pattern in ["requirements-*.txt", "*/requirements.txt"]:
-        requirements_files.extend(project_root.glob(pattern))
-
-    # Remove duplicates and sort
-    requirements_files = sorted(set(requirements_files))
-
-    # Filter out virtual environment and site-packages
-    requirements_files = [
-        f for f in requirements_files
-        if '.venv' not in str(f) and 'site-packages' not in str(f)
-    ]
 
     return requirements_files
 
@@ -146,7 +136,7 @@ def check_version_compatibility(installed_version: str, version_spec: Optional[s
         return True
 
 
-def test_package_functionality(package_name: str, import_name: str) -> Tuple[bool, str]:
+def check_package_functionality(package_name: str, import_name: str) -> Tuple[bool, str]:
     """
     Test basic functionality of a package.
 
@@ -274,7 +264,7 @@ class TestRequiredPackages:
         import_name = get_import_name(package_name)
 
         # Test functionality
-        success, message = test_package_functionality(package_name, import_name)
+        success, message = check_package_functionality(package_name, import_name)
 
         if not success:
             pytest.fail(

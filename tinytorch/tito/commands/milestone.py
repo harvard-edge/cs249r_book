@@ -93,6 +93,7 @@ MILESTONE_SCRIPTS = {
         "name": "CNN Revolution (1998)",
         "year": 1998,
         "title": "LeNet - Computer Vision Breakthrough",
+        "default_part": 1,  # TinyDigits (no download required) is the default
         "scripts": [
             {
                 "name": "TinyDigits",
@@ -1029,8 +1030,16 @@ class MilestoneCommand(BaseCommand):
                 script_configs = [all_script_configs[args.part - 1]]
                 console.print(f"[dim]Running Part {args.part} of {len(all_scripts)}[/dim]\n")
             else:
-                scripts_to_run = all_scripts
-                script_configs = all_script_configs
+                # Check if milestone has a default_part (e.g., TinyDigits for CNN milestone)
+                # This allows multi-part milestones to have a "no-download" default
+                default_part = milestone.get("default_part")
+                if default_part is not None and 1 <= default_part <= len(all_scripts):
+                    scripts_to_run = [all_scripts[default_part - 1]]
+                    script_configs = [all_script_configs[default_part - 1]]
+                    console.print(f"[dim]Running Part {default_part} (default). Use --part N for other parts.[/dim]\n")
+                else:
+                    scripts_to_run = all_scripts
+                    script_configs = all_script_configs
         else:
             if args.part is not None:
                 console.print(f"[yellow]⚠️ Milestone {milestone_id} has only one part, ignoring --part flag[/yellow]\n")

@@ -758,7 +758,7 @@ class DevTestCommand(BaseCommand):
 
         return self._run_pytest(
             project_root, test_path, name, verbose,
-            extra_args=["--ignore=tests/e2e/", "--ignore=tests/integration/", "--ignore=tests/cli/"],
+            extra_args=["--ignore=tests/e2e/", "--ignore=tests/integration/", "--ignore=tests/cli/", "-m", "not slow"],
             ci_mode=ci_mode
         )
 
@@ -785,7 +785,7 @@ class DevTestCommand(BaseCommand):
         """
         return self._run_pytest(
             project_root, "tests/milestones", "Milestone tests", verbose,
-            timeout=900, ci_mode=ci_mode  # 15 min for all milestones
+            timeout=900, extra_args=["-m", "slow or not slow"], ci_mode=ci_mode  # 15 min, run all including slow tests
         )
 
     def _run_release_validation(self, project_root: Path, args: Namespace) -> TestResult:

@@ -263,6 +263,11 @@ class TestAttentionGradientFlow:
         If they don't get gradients, attention can't improve.
         """
         mha = MultiHeadAttention(embed_dim=16, num_heads=2)
+
+        # Enable gradient tracking on all attention parameters
+        for param in mha.parameters():
+            param.requires_grad = True
+
         x = Tensor(np.random.randn(1, 4, 16), requires_grad=True)
 
         output = mha.forward(x)

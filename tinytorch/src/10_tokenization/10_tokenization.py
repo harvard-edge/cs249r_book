@@ -12,19 +12,11 @@
 #     name: python3
 # ---
 
-#| default_exp core.tokenization
-#| export
-
-from collections import Counter
-from typing import Dict, List, Optional, Set, Tuple
-
-import numpy as np
-
 # %% [markdown]
 """
 # Module 10: Tokenization - Converting Text to Numbers
 
-Welcome to Module 10! Today you'll build tokenization - the bridge that converts human-readable text into numerical representations that machine learning models can process.
+Welcome to Module 10! You're about to build tokenization - the bridge that converts human-readable text into numerical representations that machine learning models can process.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Neural networks, layers, training loops, and data loading
@@ -44,55 +36,67 @@ By the end of this module, you will:
 3. Understand vocabulary management and encoding/decoding operations
 4. Create the foundation for text processing in neural networks
 
-## Prerequisites Checklist
-
-**Module 10 is relatively independent** - it mainly works with strings and numbers!
-
-**Optional Dependencies:**
-- Module 01 (Tensor): Only needed if converting tokens to Tensor format
-  - Run: `pytest modules/source/01_tensor/test_tensor.py` (if available)
-  - If missing: Tokenization works with plain Python lists
-
-**Before starting:**
-- Ensure you have Python 3.8+ with numpy installed
-- No other module dependencies required!
-
-This module focuses on text processing fundamentals that work independently.
-The tokenization algorithms use only standard Python and NumPy.
-
 Let's get started!
-"""
 
-# %% [markdown]
-"""
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/10_tokenization/tokenization_dev.py`
-**Building Side:** Code exports to `tinytorch.text.tokenization`
+**Learning Side:** You work in modules/10_tokenization/tokenization_dev.py
+**Building Side:** Code exports to tinytorch.core.tokenization
 
 ```python
-# How to use this module:
+# Final package structure:
 from tinytorch.core.tokenization import Tokenizer, CharTokenizer, BPETokenizer
 ```
 
 **Why this matters:**
 - **Learning:** Complete tokenization system in one focused module for deep understanding
 - **Production:** Proper organization like Hugging Face's tokenizers with all text processing together
-- **Consistency:** All tokenization operations and vocabulary management in text.tokenization
+- **Consistency:** All tokenization operations and vocabulary management in core.tokenization
 - **Integration:** Works seamlessly with embeddings and data loading for complete NLP pipeline
 """
 
-# %%
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+#| default_exp core.tokenization
 #| export
-# Import from TinyTorch package (Module 01 must be completed before Module 10)
-# Note: Tokenization primarily works with Python lists, but Tensor is available for advanced features
+
+from collections import Counter
+from typing import Dict, List, Optional, Set, Tuple
+
+import numpy as np
 
 # Constants for memory calculations
 KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
 
 # %% [markdown]
 """
-## 💡 Introduction - Why Tokenization?
+## 📋 Module Dependencies
+
+**Prerequisites**: Module 10 is relatively independent - it mainly works with strings and numbers!
+
+**External Dependencies**:
+- `numpy` (for numerical operations and statistics)
+- `collections.Counter` (for frequency counting)
+
+**TinyTorch Dependencies**:
+- Module 01 (Tensor): Optional - only needed if converting tokens to Tensor format
+
+**Important**: This module focuses on text processing fundamentals that work independently.
+The tokenization algorithms use only standard Python and NumPy.
+
+**Dependency Flow**:
+```
+Module 10 (Tokenization) → Module 11 (Embeddings)
+     ↓
+  Text to numbers (token IDs) for neural network input
+```
+
+Students completing this module will have built the text processing foundation
+that enables all NLP tasks in TinyTorch.
+"""
+
+# %% [markdown]
+"""
+## 💡 Introduction: Why Tokenization?
 
 Neural networks operate on numbers, but humans communicate with text. Tokenization is the crucial bridge that converts text into numerical sequences that models can process.
 
@@ -144,7 +148,7 @@ The choice of tokenization strategy dramatically affects:
 
 # %% [markdown]
 """
-## 📐 Foundations - Tokenization Strategies
+## 📐 Foundations: Tokenization Strategies
 
 Different tokenization approaches make different trade-offs between vocabulary size, sequence length, and semantic understanding.
 
@@ -251,9 +255,37 @@ The sweet spot for most applications is BPE with 10K-50K vocabulary size.
 
 # %% [markdown]
 """
-## 🏗️ Implementation - Building Tokenization Systems
+## 🏗️ Implementation: Building Tokenization Systems
 
-Let's implement tokenization systems from simple character-based to sophisticated BPE. We'll start with the base interface and work our way up to advanced algorithms.
+Let's build our tokenization systems step by step, testing each component as we go.
+
+### Tokenization Class Architecture
+
+```
+Tokenization System Structure:
+┌─────────────────────────────────┐
+│ Base Tokenizer Interface:       │
+│ • encode(text) → token_ids      │
+│ • decode(token_ids) → text      │
+├─────────────────────────────────┤
+│ CharTokenizer (Simple):         │
+│ • vocab: list of characters     │
+│ • char_to_id: lookup mapping    │
+│ • id_to_char: reverse mapping   │
+├─────────────────────────────────┤
+│ BPETokenizer (Advanced):        │
+│ • vocab: learned subwords       │
+│ • merges: learned pair rules    │
+│ • token_to_id/id_to_token maps  │
+├─────────────────────────────────┤
+│ Utility Functions:              │
+│ • create_tokenizer()            │
+│ • tokenize_dataset()            │
+│ • analyze_tokenization()        │
+└─────────────────────────────────┘
+```
+
+This clean design provides a consistent interface across different tokenization strategies.
 """
 
 # %% [markdown]
@@ -320,10 +352,21 @@ class Tokenizer:
         raise NotImplementedError("Subclasses must implement decode()")
         ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🧪 Unit Test: Base Tokenizer Interface
+
+This test validates our base tokenizer defines the correct interface for all implementations.
+
+**What we're testing**: Abstract interface definition with NotImplementedError
+**Why it matters**: Ensures consistent API across all tokenizer types
+**Expected**: Base class raises NotImplementedError for both encode and decode
+"""
+
 # %% nbgrader={"grade": true, "grade_id": "test-base-tokenizer", "locked": true, "points": 5}
 def test_unit_base_tokenizer():
-    """🔬 Test base tokenizer interface."""
-    print("🔬 Unit Test: Base Tokenizer Interface...")
+    """🧪 Test base tokenizer interface."""
+    print("🧪 Unit Test: Base Tokenizer Interface...")
 
     # Test that base class defines the interface
     tokenizer = Tokenizer()
@@ -348,7 +391,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Character-Level Tokenizer
+## 🏗️ Character-Level Tokenizer
 
 The simplest tokenization approach: each character becomes a token. This gives us perfect coverage of any text but produces long sequences.
 
@@ -505,10 +548,21 @@ class CharTokenizer(Tokenizer):
         return ''.join(chars)
         ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🧪 Unit Test: Character Tokenizer
+
+This test validates our character tokenizer works correctly with vocabulary building, encoding, and decoding.
+
+**What we're testing**: Character-level tokenization with vocabulary management
+**Why it matters**: Foundation for text processing with perfect coverage
+**Expected**: Correct encoding/decoding, unknown character handling, vocabulary building
+"""
+
 # %% nbgrader={"grade": true, "grade_id": "test-char-tokenizer", "locked": true, "points": 15}
 def test_unit_char_tokenizer():
-    """🔬 Test character tokenizer implementation."""
-    print("🔬 Unit Test: Character Tokenizer...")
+    """🧪 Test character tokenizer implementation."""
+    print("🧪 Unit Test: Character Tokenizer...")
 
     # Test basic functionality
     vocab = ['h', 'e', 'l', 'o', ' ', 'w', 'r', 'd']
@@ -546,7 +600,6 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🧪 Character Tokenizer Analysis
 Character tokenization provides a simple, robust foundation for text processing. The key insight is that with a small vocabulary (typically <100 characters), we can represent any text without unknown tokens.
 
 **Trade-offs**:
@@ -557,7 +610,7 @@ Character tokenization provides a simple, robust foundation for text processing.
 
 # %% [markdown]
 """
-### Byte Pair Encoding (BPE) Tokenizer
+## 🏗️ Byte Pair Encoding (BPE) Tokenizer
 
 BPE is the secret sauce behind modern language models (GPT, BERT, etc.). It learns to merge frequent character pairs, creating subword units that balance vocabulary size with sequence length.
 
@@ -728,7 +781,7 @@ class BPETokenizer(Tokenizer):
         return pairs
         ### END SOLUTION
 
-    def train(self, corpus: List[str], vocab_size: int) -> None:
+    def train(self, corpus: List[str], vocab_size: int = None) -> None:
         """
         Train BPE on corpus to learn merge rules.
 
@@ -957,10 +1010,21 @@ class BPETokenizer(Tokenizer):
         return text
         ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🧪 Unit Test: BPE Tokenizer
+
+This test validates our BPE tokenizer learns merge rules and correctly encodes/decodes text.
+
+**What we're testing**: BPE training, merge rule application, encoding and decoding
+**Why it matters**: BPE is the standard tokenization for modern language models
+**Expected**: Vocabulary building, proper merging, reasonable round-trip on training data
+"""
+
 # %% nbgrader={"grade": true, "grade_id": "test-bpe-tokenizer", "locked": true, "points": 20}
 def test_unit_bpe_tokenizer():
-    """🔬 Test BPE tokenizer implementation."""
-    print("🔬 Unit Test: BPE Tokenizer...")
+    """🧪 Test BPE tokenizer implementation."""
+    print("🧪 Unit Test: BPE Tokenizer...")
 
     # Test basic functionality with simple corpus
     corpus = ["hello", "world", "hello", "hell"]  # "hell" and "hello" share prefix
@@ -1002,8 +1066,6 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🧪 BPE Tokenizer Analysis
-
 BPE provides a balance between vocabulary size and sequence length. By learning frequent subword patterns, it can handle new words through decomposition while maintaining reasonable sequence lengths.
 
 ```
@@ -1028,9 +1090,11 @@ Final:    "tokenization" → ['token','ization']  # 2 tokens vs 13 characters!
 
 # %% [markdown]
 """
-## 🔧 Integration - Bringing It Together
+## 🔧 Integration: Bringing It Together
 
-Now let's build utility functions that make tokenization easy to use in practice. These tools will help you tokenize datasets, analyze performance, and choose the right strategy.
+Let's test how our tokenization components work together in realistic scenarios that mirror NLP pipelines. This integration demonstrates that our individual tokenizers combine correctly for complete text processing workflows.
+
+### Tokenization Pipeline
 
 ```
 Tokenization Workflow:
@@ -1038,10 +1102,25 @@ Tokenization Workflow:
 1. Choose Strategy → 2. Train Tokenizer → 3. Process Dataset → 4. Analyze Results
       ↓                      ↓                    ↓                   ↓
    char/bpe           corpus training        batch encoding      stats/metrics
+
+Real NLP Pipeline:
+Raw Text → Tokenization → Token IDs → Embedding Layer → Neural Network
+   ↓           ↓             ↓              ↓                ↓
+ Strings    Vocabulary    Integers     Dense Vectors    Predictions
 ```
+
+### Why This Integration Matters
+
+This simulation shows how our tokenization components combine to create the preprocessing building blocks of NLP:
+
+- **Factory Pattern**: Easily create and configure tokenizers
+- **Dataset Processing**: Tokenize batches with consistent length limits
+- **Analysis Tools**: Understand vocabulary coverage and compression
+- **Round-Trip Validation**: Ensure text can be recovered from tokens
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tokenization-utils", "solution": true}
+#| export
 def create_tokenizer(strategy: str = "char", vocab_size: int = 1000, corpus: List[str] = None) -> Tokenizer:
     """
     Factory function to create and train tokenizers.
@@ -1078,6 +1157,7 @@ def create_tokenizer(strategy: str = "char", vocab_size: int = 1000, corpus: Lis
     return tokenizer
     ### END SOLUTION
 
+#| export
 def tokenize_dataset(texts: List[str], tokenizer: Tokenizer, max_length: int = None) -> List[List[int]]:
     """
     Tokenize a dataset with optional length limits.
@@ -1114,6 +1194,7 @@ def tokenize_dataset(texts: List[str], tokenizer: Tokenizer, max_length: int = N
     return tokenized
     ### END SOLUTION
 
+#| export
 def analyze_tokenization(texts: List[str], tokenizer: Tokenizer) -> Dict[str, float]:
     """
     Analyze tokenization statistics.
@@ -1162,10 +1243,21 @@ def analyze_tokenization(texts: List[str], tokenizer: Tokenizer) -> Dict[str, fl
     return stats
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🧪 Unit Test: Tokenization Utilities
+
+This test validates our utility functions for tokenizer creation, dataset processing, and analysis.
+
+**What we're testing**: Factory pattern, batch tokenization, and analysis statistics
+**Why it matters**: Essential for building NLP pipelines with consistent preprocessing
+**Expected**: Correct tokenizer creation, length limits respected, meaningful statistics
+"""
+
 # %% nbgrader={"grade": true, "grade_id": "test-tokenization-utils", "locked": true, "points": 10}
 def test_unit_tokenization_utils():
-    """🔬 Test tokenization utility functions."""
-    print("🔬 Unit Test: Tokenization Utils...")
+    """🧪 Test tokenization utility functions."""
+    print("🧪 Unit Test: Tokenization Utils...")
 
     # Test tokenizer factory
     corpus = ["hello world", "test text", "more examples"]
@@ -1197,15 +1289,18 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Systems Analysis - Tokenization Trade-offs
+## 📊 Systems Analysis: Tokenization Trade-offs
 
-Understanding the performance implications of different tokenization strategies is crucial for building efficient NLP systems.
+Let's understand the key systems concepts in tokenization: **vocabulary size vs sequence length trade-offs** and **memory implications**.
+
+This analysis reveals why different tokenization strategies make different choices for different use cases.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "tokenization-analysis", "solution": true}
+# %%
 def analyze_tokenization_strategies():
     """📊 Compare different tokenization strategies on various texts."""
     print("📊 Analyzing Tokenization Strategies...")
+    print("=" * 60)
 
     # Create test corpus with different text types
     corpus = [
@@ -1234,11 +1329,19 @@ def analyze_tokenization_strategies():
               f"{stats['compression_ratio']:<12.2f} "
               f"{stats['unique_tokens']:<10}")
 
-    print("\n💡 Key Insights:")
-    print("- Character tokenization: Small vocab, long sequences, perfect coverage")
-    print("- BPE: Larger vocab trades off with shorter sequences")
-    print("- Higher compression ratio = more characters per token = efficiency")
+    print("\n💡 KEY INSIGHTS:")
+    print("   1. Character tokenization: Small vocab, long sequences, perfect coverage")
+    print("   2. BPE: Larger vocab trades off with shorter sequences")
+    print("   3. Higher compression ratio = more characters per token = efficiency")
 
+    print("\n🚀 REAL-WORLD IMPLICATIONS:")
+    print("   - GPT-3/4 uses ~50K BPE tokens for balance")
+    print("   - Character models need more compute (longer sequences)")
+    print("   - Embedding table size scales with vocabulary size")
+
+    print("\n" + "=" * 60)
+
+# Run the systems analysis
 if __name__ == "__main__":
     analyze_tokenization_strategies()
 
@@ -1249,7 +1352,7 @@ if __name__ == "__main__":
 Let's measure the real memory footprint of different tokenization strategies. This is crucial for understanding resource requirements in production systems.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "memory-profiling", "solution": false}
+# %%
 def analyze_tokenization_memory():
     """📊 Measure actual memory usage of different tokenizers."""
     import tracemalloc
@@ -1315,7 +1418,7 @@ Speed matters in production! Let's measure how fast different tokenizers can pro
 This helps understand computational bottlenecks in NLP pipelines.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "performance-benchmarking", "solution": false}
+# %%
 def benchmark_tokenization_speed():
     """📊 Measure encoding/decoding speed for different strategies."""
     import time
@@ -1376,7 +1479,7 @@ Understanding algorithmic complexity helps us predict performance on larger data
 Let's measure how BPE training time scales with corpus size.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "scaling-analysis", "solution": false}
+# %%
 def analyze_bpe_scaling():
     """📊 Analyze how BPE training scales with corpus size."""
     import time
@@ -1548,7 +1651,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test realistic tokenization workflow
-    print("🔬 Integration Test: Complete tokenization pipeline...")
+    print("🧪 Integration Test: Complete tokenization pipeline...")
 
     # Create training corpus
     training_corpus = [
@@ -1606,42 +1709,78 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🤔 ML Systems Thinking: Text Processing Foundations
+## 🤔 ML Systems Reflection Questions
 
-### Question 1: Vocabulary Size vs Memory
-You implemented tokenizers with different vocabulary sizes.
-If you have a BPE tokenizer with vocab_size=50,000 and embed_dim=512:
-- How many parameters are in the embedding table? _____ million
-- If using float32, how much memory does this embedding table require? _____ MB
+Answer these to deepen your understanding of tokenization and its systems implications:
 
-### Question 2: Sequence Length Trade-offs
-Your character tokenizer produces longer sequences than BPE.
-For the text "machine learning" (16 characters):
+### 1. Vocabulary Size vs Memory
+**Question**: You implemented tokenizers with different vocabulary sizes. If you have a BPE tokenizer with vocab_size=50,000 and embed_dim=512:
+
+**Calculate**:
+- Parameters in embedding table: vocab_size x embed_dim = _____ million
+- Memory usage (float32, 4 bytes per param): _____ MB
+
+**Consider**:
+- How does this compare to character tokenization (vocab ~100)?
+- What happens to memory when you increase embed_dim to 4096 (like GPT-3)?
+- Why do production models use float16 or int8 for embeddings?
+
+---
+
+### 2. Sequence Length Trade-offs
+**Question**: Your character tokenizer produces longer sequences than BPE. For the text "machine learning" (16 characters):
+
+**Compare**:
 - Character tokenizer produces ~16 tokens
 - BPE tokenizer might produce ~3-4 tokens
-If processing batch_size=32 with max_length=512:
-- Character model needs _____ total tokens per batch
-- BPE model needs _____ total tokens per batch
-- Which requires more memory during training? _____
+- If processing batch_size=32 with max_length=512:
+  - Character model processes: _____ total tokens per batch
+  - BPE model processes: _____ total tokens per batch
 
-### Question 3: Tokenization Coverage
-Your BPE tokenizer handles unknown words by decomposing into subwords.
-- Why is this better than word-level tokenization for real applications? _____
-- What happens to model performance when many tokens map to <UNK>? _____
-- How does vocabulary size affect the number of unknown decompositions? _____
+**Think about**:
+- Which requires more compute during attention (attention is O(n^2))?
+- How does this affect training time for large language models?
+- Why is sequence length often the bottleneck for transformer models?
+
+---
+
+### 3. Tokenization Coverage and Robustness
+**Question**: Your BPE tokenizer handles unknown words by decomposing into subwords.
+
+**Consider**:
+- Why is this better than word-level tokenization for real applications?
+- What happens to model performance when many tokens map to <UNK>?
+- How does vocabulary size affect the number of unknown decompositions?
+- What languages or domains might struggle with English-trained BPE?
+
+**Real-world context**: OpenAI's tiktoken uses ~100K tokens to handle multilingual text. Google's SentencePiece was designed specifically for language-agnostic tokenization.
+
+---
+
+### 4. Production Scale Considerations
+**Question**: A production language model serves 1 million requests per day, each with average 500 tokens.
+
+**Calculate**:
+- Total tokens processed daily: _____ million
+- If tokenization takes 0.1ms per token, how much time is spent tokenizing? _____ hours
+
+**Design implications**:
+- Why do production systems use Rust-based tokenizers (10-100x faster)?
+- How does caching tokenized prompts help for repeated queries?
+- What's the memory cost of keeping tokenizer vocabulary in RAM?
 """
 
 # %% [markdown]
 """
 ## ⭐ Aha Moment: Text Becomes Tokens
 
-**What you built:** Tokenizers that convert text into numerical sequences.
+**What you built:** Tokenizers that convert text into numerical sequences that neural networks can process.
 
-**Why it matters:** Neural networks can't read text—they need numbers! Your tokenizer bridges
+**Why it matters:** Neural networks can't read text - they need numbers! Your tokenizer bridges
 this gap, converting words into token IDs that can be embedded and processed. Every language
-model from GPT to Claude uses tokenization as the first step.
+model from GPT to Claude uses tokenization as the first step in understanding text.
 
-In the next module, you'll convert these tokens into dense vector representations.
+Your tokenization system is ready for NLP applications.
 """
 
 # %%
@@ -1662,7 +1801,6 @@ def demo_tokenization():
 
     print(f"Input text:       '{text}'")
     print(f"Token IDs:        {tokens}")
-    print(f"Vocab size:       {tokenizer.vocab_size}")
     print(f"Decoded back:     '{decoded}'")
     print(f"Match:            {decoded == text}")
 
@@ -1676,9 +1814,8 @@ def demo_tokenization():
 
     print(f"Character tokenizer: {len(char_tokens)} tokens")
     print(f"BPE tokenizer:       {len(bpe_tokens)} tokens")
-    print(f"Compression ratio:   {len(char_tokens) / len(bpe_tokens):.1f}x")
 
-    print("\n✨ Text → tokens → text (language models start here)!")
+    print("\n✨ Text becomes tokens - language models start here!")
 
 # %%
 if __name__ == "__main__":
@@ -1693,11 +1830,17 @@ if __name__ == "__main__":
 Congratulations! You've built a complete tokenization system for converting text to numerical representations!
 
 ### Key Accomplishments
-- Built character-level tokenizer with perfect text coverage
-- Implemented BPE tokenizer that learns efficient subword representations
-- Created vocabulary management and encoding/decoding systems
-- Discovered the vocabulary size vs sequence length trade-off
-- All tests pass ✅ (validated by `test_module()`)
+- **Built a character-level tokenizer** with perfect text coverage and simple implementation
+- **Implemented BPE tokenizer** that learns efficient subword representations from data
+- **Created vocabulary management** with encoding/decoding and unknown token handling
+- **Discovered the vocabulary size vs sequence length trade-off** through systems analysis
+- **All tests pass** (validated by `test_module()`)
+
+### Systems Insights Discovered
+- **Memory scaling**: Embedding table size = vocab_size x embed_dim (can be 100+ MB)
+- **Sequence length trade-offs**: BPE compresses text, reducing compute by 3-4x
+- **Training complexity**: BPE training scales O(n^2) with corpus size
+- **Production patterns**: Rust tokenizers are 10-100x faster than pure Python
 
 ### Ready for Next Steps
 Your tokenization implementation enables text processing for language models.

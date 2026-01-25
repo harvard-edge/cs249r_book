@@ -60,8 +60,9 @@ from tinytorch.core.dataloader import download_mnist, download_cifar10
 - **Integration:** Works seamlessly with training loops to create complete ML systems
 """
 
-# %%
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
 #| export
+
 # Essential imports for data loading
 import random
 import sys
@@ -73,6 +74,32 @@ import numpy as np
 
 # Import real Tensor class from tinytorch package
 from tinytorch.core.tensor import Tensor
+
+# %% [markdown]
+"""
+## 📋 Module Dependencies
+
+**Prerequisites**: Module 01 (Tensor) must be complete
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+- `random` (for shuffling indices)
+- `abc` (for abstract base class)
+- `typing` (for type hints)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor.Tensor` (foundation from Module 01)
+
+**Dependency Flow**:
+```
+Module 01 (Tensor) → Module 05 (DataLoader)
+     ↓                    ↓
+  Foundation        Data pipeline for training
+```
+
+Students completing this module will have built the data loading
+infrastructure that powers all training in TinyTorch.
+"""
 
 # %% [markdown]
 """
@@ -121,6 +148,13 @@ Dataset Interface
 ```
 
 **Connection to systems**: This abstraction is crucial because it separates *how data is stored* from *how it's accessed*, enabling optimizations like caching, prefetching, and parallel loading.
+"""
+
+# %% [markdown]
+"""
+### Dataset Base Class Implementation
+
+First, we implement the abstract Dataset base class that defines the interface.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "dataset-implementation", "solution": true}
@@ -177,11 +211,21 @@ class Dataset(ABC):
         pass
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🧪 Unit Test: Dataset Abstract Base Class
+
+This test validates our Dataset abstract base class is properly defined.
+
+**What we're testing**: Abstract methods are enforced, concrete implementations work
+**Why it matters**: Foundation interface for all dataset types
+**Expected**: Cannot instantiate abstract Dataset, can instantiate concrete implementations
+"""
 
 # %% nbgrader={"grade": true, "grade_id": "test-dataset", "locked": true, "points": 10}
 def test_unit_dataset():
-    """🔬 Test Dataset abstract base class."""
-    print("🔬 Unit Test: Dataset Abstract Base Class...")
+    """🧪 Test Dataset abstract base class."""
+    print("🧪 Unit Test: Dataset Abstract Base Class...")
 
     # Test that Dataset is properly abstract
     try:
@@ -267,6 +311,13 @@ dataset = TensorDataset(sequences, targets)
 ```
 
 The key insight: TensorDataset transforms "arrays of data" into "a dataset that serves samples".
+"""
+
+# %% [markdown]
+"""
+### TensorDataset Implementation
+
+Now we implement TensorDataset for tensor-based data storage.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tensordataset-implementation", "solution": true}
@@ -381,11 +432,21 @@ class TensorDataset(Dataset):
         return tuple(Tensor(tensor.data[idx]) for tensor in self.tensors)
         ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🧪 Unit Test: TensorDataset
+
+This test validates our TensorDataset implementation works correctly with tensor-based data.
+
+**What we're testing**: Length calculation, indexing, tuple returns, error handling
+**Why it matters**: Core dataset type for in-memory training data
+**Expected**: Correct sample retrieval with proper tensor wrapping
+"""
 
 # %% nbgrader={"grade": true, "grade_id": "test-tensordataset", "locked": true, "points": 15}
 def test_unit_tensordataset():
-    """🔬 Test TensorDataset implementation."""
-    print("🔬 Unit Test: TensorDataset...")
+    """🧪 Test TensorDataset implementation."""
+    print("🧪 Unit Test: TensorDataset...")
 
     # Test basic functionality
     features = Tensor([[1, 2], [3, 4], [5, 6]])  # 3 samples, 2 features
@@ -497,6 +558,13 @@ Without Shuffling (epoch 2):          With Shuffling (epoch 2):
 ```
 
 This transforms the dataset from "access one sample" to "iterate through batches" - exactly what training loops need.
+"""
+
+# %% [markdown]
+"""
+### DataLoader Implementation
+
+Now we implement the DataLoader class with batching and shuffling support.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "dataloader-implementation", "solution": true}
@@ -961,7 +1029,9 @@ class Compose:
 # %% [markdown]
 """
 ### 🧪 Unit Test: Data Augmentation Transforms
+
 This test validates our augmentation implementations.
+
 **What we're testing**: RandomHorizontalFlip, RandomCrop, Compose pipeline
 **Why it matters**: Augmentation is critical for training models that generalize
 **Expected**: Correct shapes and appropriate randomness
@@ -971,8 +1041,8 @@ This test validates our augmentation implementations.
 
 
 def test_unit_augmentation():
-    """🔬 Test data augmentation transforms."""
-    print("🔬 Unit Test: Data Augmentation...")
+    """🧪 Test data augmentation transforms."""
+    print("🧪 Unit Test: Data Augmentation...")
 
     # Test 1: RandomHorizontalFlip
     print("  Testing RandomHorizontalFlip...")
@@ -1048,10 +1118,21 @@ def test_unit_augmentation():
 if __name__ == "__main__":
     test_unit_augmentation()
 
+# %% [markdown]
+"""
+### 🧪 Unit Test: DataLoader
+
+This test validates our DataLoader implementation with batching and shuffling.
+
+**What we're testing**: Batch creation, length calculation, shuffling, data preservation
+**Why it matters**: Core component for feeding data to training loops
+**Expected**: Correct batch sizes, proper shuffling, all data preserved
+"""
+
 # %% nbgrader={"grade": true, "grade_id": "test-dataloader", "locked": true, "points": 20}
 def test_unit_dataloader():
-    """🔬 Test DataLoader implementation."""
-    print("🔬 Unit Test: DataLoader...")
+    """🧪 Test DataLoader implementation."""
+    print("🧪 Unit Test: DataLoader...")
 
     # Create test dataset
     features = Tensor([[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]])  # 5 samples
@@ -1102,11 +1183,21 @@ def test_unit_dataloader():
 if __name__ == "__main__":
     test_unit_dataloader()
 
+# %% [markdown]
+"""
+### 🧪 Unit Test: DataLoader Deterministic Shuffling
+
+This test validates deterministic shuffling with fixed random seeds.
+
+**What we're testing**: Same seed produces same shuffle, different seeds produce different shuffles
+**Why it matters**: Reproducibility is crucial for debugging and research
+**Expected**: Identical batches with same seed, different batches with different seeds
+"""
 
 # %% nbgrader={"grade": true, "grade_id": "test-dataloader-deterministic", "locked": true, "points": 5}
 def test_unit_dataloader_deterministic():
-    """🔬 Test DataLoader deterministic shuffling with fixed seed."""
-    print("🔬 Unit Test: DataLoader Deterministic Shuffling...")
+    """🧪 Test DataLoader deterministic shuffling with fixed seed."""
+    print("🧪 Unit Test: DataLoader Deterministic Shuffling...")
 
     # Create test dataset
     features = Tensor([[1, 2], [3, 4], [5, 6], [7, 8]])
@@ -1337,7 +1428,7 @@ We'll measure three critical metrics:
 These measurements will reveal whether our pipeline is CPU-bound (slow data loading) or compute-bound (slow model).
 """
 
-# %% nbgrader={"grade": false, "grade_id": "systems-analysis", "solution": true}
+# %%
 def analyze_dataloader_performance():
     """📊 Analyze DataLoader performance characteristics."""
     print("📊 Analyzing DataLoader Performance...")
@@ -1433,7 +1524,7 @@ def analyze_memory_usage():
     print("• Sweet spot: Usually 32-128 depending on model size")
 
     # Demonstrate actual memory usage with our tensors
-    print("\n🔬 Actual Tensor Memory Usage:")
+    print("\n🧪 Actual Tensor Memory Usage:")
 
     # Create different sized tensors
     tensor_small = Tensor(np.random.randn(32, 784))    # Small batch
@@ -1492,6 +1583,12 @@ def analyze_collation_overhead():
     print("• But fewer large batches are more efficient than many small ones")
     print("• Optimal: Balance between batch size and iteration overhead")
 
+
+# Run the systems analysis (uncomment to run)
+# if __name__ == "__main__":
+#     analyze_dataloader_performance()
+#     analyze_memory_usage()
+#     analyze_collation_overhead()
 
 # %% [markdown]
 """
@@ -1592,15 +1689,26 @@ These patterns will save you hours of debugging and help you build robust traini
 
 # %% [markdown]
 """
-## 🔧 Integration Testing
+## 🔧 Integration: Bringing It Together
 
 Let's test how our DataLoader integrates with a complete training workflow, simulating real ML pipeline usage.
 """
 
+# %% [markdown]
+"""
+### 🧪 Integration Test: Training Workflow
+
+Let's test how our DataLoader integrates with a complete training workflow, simulating real ML pipeline usage.
+
+**What we're testing**: Complete training loop with train/val split
+**Why it matters**: DataLoader must work seamlessly in real training pipelines
+**Expected**: All samples processed correctly with proper batch shapes
+"""
+
 # %% nbgrader={"grade": false, "grade_id": "integration-test", "solution": true}
 def test_training_integration():
-    """🔬 Test DataLoader integration with training workflow."""
-    print("🔬 Integration Test: Training Workflow...")
+    """🧪 Test DataLoader integration with training workflow."""
+    print("🧪 Integration Test: Training Workflow...")
 
     # Create a realistic dataset
     num_samples = 1000
@@ -1675,10 +1783,10 @@ if __name__ == "__main__":
 """
 ## 🧪 Module Integration Test
 
-Final validation that everything works together correctly.
+Final validation that everything works together correctly before module completion.
 """
 
-# %%
+# %% nbgrader={"grade": true, "grade_id": "module-integration", "locked": true, "points": 20}
 def test_module():
     """🧪 Module Test: Complete Integration
 
@@ -1706,7 +1814,7 @@ def test_module():
     test_training_integration()
 
     # Test augmentation with DataLoader
-    print("🔬 Integration Test: Augmentation with DataLoader...")
+    print("🧪 Integration Test: Augmentation with DataLoader...")
 
     # Create dataset with augmentation
     train_transforms = Compose([
@@ -1738,13 +1846,12 @@ def test_module():
 
 # %% [markdown]
 """
-## 🤔 ML Systems Thinking
+## 🤔 ML Systems Reflection Questions
 
-Now that you've implemented DataLoader, let's explore the critical systems trade-offs that affect real training pipelines. Understanding these decisions will help you build efficient ML systems in production.
+Answer these to deepen your understanding of data loading and its systems implications:
 
-### Question 1: The Batch Size Dilemma
-
-You're training a ResNet-50 on ImageNet. Your GPU has 16GB memory. Consider these batch size choices:
+### 1. The Batch Size Dilemma
+**Question**: You're training a ResNet-50 on ImageNet. Your GPU has 16GB memory. Consider these batch size choices:
 
 **Option A: batch_size=256**
 - Peak memory: 14GB (near limit)
@@ -1764,9 +1871,10 @@ You're training a ResNet-50 on ImageNet. Your GPU has 16GB memory. Consider thes
 
 **Systems insight**: Batch size creates a three-way trade-off between memory usage, training speed, and model convergence. The "right" answer depends on whether you're memory-constrained, time-constrained, or accuracy-constrained.
 
-### Question 2: To Shuffle or Not to Shuffle?
+---
 
-You're training on a medical dataset where samples are ordered by patient (first 1000 samples = Patient A, next 1000 = Patient B, etc.). Consider these scenarios:
+### 2. To Shuffle or Not to Shuffle?
+**Question**: You're training on a medical dataset where samples are ordered by patient (first 1000 samples = Patient A, next 1000 = Patient B, etc.). Consider these scenarios:
 
 **Scenario 1: Training with shuffle=True**
 ```
@@ -1788,11 +1896,12 @@ Epoch 2 batches: [Patient A, Patient A, Patient A, Patient B...]
 
 **Your DataLoader's shuffle prevents this by mixing patients in every batch!**
 
-**Systems insight**: Shuffling isn't just about randomness—it's about ensuring the model sees representative samples in every batch, preventing order-dependent biases.
+**Systems insight**: Shuffling isn't just about randomness-it's about ensuring the model sees representative samples in every batch, preventing order-dependent biases.
 
-### Question 3: Data Loading Bottlenecks
+---
 
-Your training loop reports these timings per batch:
+### 3. Data Loading Bottlenecks
+**Question**: Your training loop reports these timings per batch:
 
 ```
 Data loading:    45ms
@@ -1834,9 +1943,10 @@ Result: Eliminate repeated decode overhead
 
 **Systems insight**: Data loading is often the hidden bottleneck in training. Profile first, optimize second.
 
-### Question 4: Memory Explosion with Large Datasets
+---
 
-You're training on 100GB of high-resolution medical scans. Your DataLoader code:
+### 4. Memory Explosion with Large Datasets
+**Question**: You're training on 100GB of high-resolution medical scans. Your DataLoader code:
 
 ```python
 # ❌ This tries to load ALL data into memory!
@@ -1875,9 +1985,10 @@ loader = DataLoader(dataset, batch_size=32)
 
 **Systems insight**: For large datasets, load data on-demand rather than upfront. Your DataLoader's `__getitem__` is called only when needed, enabling lazy loading patterns.
 
-### Question 5: The Shuffle Memory Trap
+---
 
-You implement shuffling like this:
+### 5. The Shuffle Memory Trap
+**Question**: You implement shuffling like this:
 
 ```python
 def __iter__(self):
@@ -1910,9 +2021,11 @@ def __iter__(self):
 
 **Why this matters:** You can shuffle 100 million samples using just 800MB of RAM!
 
-**Systems insight**: Shuffle indices, not data. This is a classic systems pattern—operate on lightweight proxies (indices) rather than expensive objects (actual data).
+**Systems insight**: Shuffle indices, not data. This is a classic systems pattern-operate on lightweight proxies (indices) rather than expensive objects (actual data).
 
-### The Big Picture: Data Pipeline Design Patterns
+---
+
+### Bonus Challenge: Data Pipeline Design Patterns
 
 Your DataLoader implements three fundamental patterns:
 
@@ -1935,6 +2048,19 @@ Training:   WHAT to do with batches
 ```
 
 These patterns are why PyTorch's DataLoader scales from 1,000 samples (your laptop) to 1 billion samples (Google's TPU pods) using the same API!
+"""
+
+# %% [markdown]
+"""
+## ⭐ Aha Moment: DataLoader Batches Your Data
+
+**What you built:** A complete data loading pipeline with Dataset abstraction, TensorDataset for tensor-based data, and DataLoader with batching and shuffling.
+
+**Why it matters:** Your DataLoader transforms scattered data into organized learning batches.
+Every neural network training loop uses this exact pattern to feed data efficiently to the model.
+The fact that it handles shuffling, batching, and iteration means you've built something production-ready.
+
+Your DataLoader is ready to power neural network training!
 """
 
 # %%
