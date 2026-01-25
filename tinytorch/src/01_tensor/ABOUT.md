@@ -322,8 +322,12 @@ def reshape(self, *shape):
 
     # Validate total elements match
     if np.prod(new_shape) != self.size:
+        target_size = int(np.prod(new_shape))
         raise ValueError(
-            f"Total elements must match: {self.size} ≠ {int(np.prod(new_shape))}"
+            f"Cannot reshape {self.shape} to {new_shape}\n"
+            f"  ❌ Element count mismatch: {self.size} elements vs {target_size} elements\n"
+            f"  💡 Reshape preserves data, so total elements must stay the same\n"
+            f"  🔧 Use -1 to infer a dimension: reshape(-1, {new_shape[-1] if len(new_shape) > 0 else 1}) lets NumPy calculate"
         )
 
     reshaped_data = np.reshape(self.data, new_shape)
