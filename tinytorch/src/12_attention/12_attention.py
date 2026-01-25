@@ -588,10 +588,10 @@ class MultiHeadAttention:
         ### BEGIN SOLUTION
         if embed_dim % num_heads != 0:
             raise ValueError(
-                f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads}).\n"
-                f"  Issue: Multi-head attention splits embed_dim into num_heads heads.\n"
-                f"  Fix: Choose embed_dim and num_heads such that embed_dim % num_heads == 0.\n"
-                f"  Example: embed_dim=512, num_heads=8 works (512/8=64 per head)."
+                f"Multi-head attention dimension mismatch\n"
+                f"  ❌ embed_dim={embed_dim} is not divisible by num_heads={num_heads} (remainder={embed_dim % num_heads})\n"
+                f"  💡 Multi-head attention splits embed_dim equally among heads, so embed_dim must be a multiple of num_heads\n"
+                f"  🔧 Try: embed_dim={num_heads * (embed_dim // num_heads + 1)} (next valid size) or num_heads={embed_dim // (embed_dim // num_heads)} (fewer heads)"
             )
 
         self.embed_dim = embed_dim
@@ -646,10 +646,10 @@ class MultiHeadAttention:
         batch_size, seq_len, embed_dim = x.shape
         if embed_dim != self.embed_dim:
             raise ValueError(
-                f"Input dimension mismatch in MultiHeadAttention.forward().\n"
-                f"  Expected: embed_dim={self.embed_dim} (set during initialization)\n"
-                f"  Got: embed_dim={embed_dim} from input shape {x.shape}\n"
-                f"  Fix: Ensure input tensor's last dimension matches the embed_dim used when creating MultiHeadAttention."
+                f"MultiHeadAttention input dimension mismatch\n"
+                f"  ❌ Expected embed_dim={self.embed_dim}, got {embed_dim} from input shape {x.shape}\n"
+                f"  💡 The last dimension of input must match embed_dim from initialization (MultiHeadAttention({self.embed_dim}, {self.num_heads}))\n"
+                f"  🔧 Try: x.reshape({x.shape[0]}, {x.shape[1]}, {self.embed_dim}) or create new MultiHeadAttention({embed_dim}, num_heads)"
             )
 
         # Step 2: Project to Q, K, V

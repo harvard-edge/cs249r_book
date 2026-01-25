@@ -539,7 +539,27 @@ class Conv2d:
         ### BEGIN SOLUTION
         # Input validation and shape extraction
         if len(x.shape) != 4:
-            raise ValueError(f"Expected 4D input (batch, channels, height, width), got {x.shape}")
+            if len(x.shape) == 3:
+                raise ValueError(
+                    f"Conv2D expected 4D input (batch, channels, height, width), got 3D: {x.shape}\n"
+                    f"  ❌ Missing batch dimension\n"
+                    f"  💡 Conv2D processes batches of images, not single images\n"
+                    f"  🔧 Add batch dim: x.reshape(1, {x.shape[0]}, {x.shape[1]}, {x.shape[2]})"
+                )
+            elif len(x.shape) == 2:
+                raise ValueError(
+                    f"Conv2D expected 4D input (batch, channels, height, width), got 2D: {x.shape}\n"
+                    f"  ❌ Got a matrix, expected an image tensor\n"
+                    f"  💡 Conv2D needs spatial dimensions (height, width) plus batch and channels\n"
+                    f"  🔧 If this is a flattened image, reshape it: x.reshape(1, channels, height, width)"
+                )
+            else:
+                raise ValueError(
+                    f"Conv2D expected 4D input (batch, channels, height, width), got {len(x.shape)}D: {x.shape}\n"
+                    f"  ❌ Wrong number of dimensions\n"
+                    f"  💡 Conv2D expects: (batch_size, in_channels, height, width)\n"
+                    f"  🔧 Reshape your input to 4D with the correct dimensions"
+                )
 
         batch_size, in_channels, in_height, in_width = x.shape
         out_channels = self.out_channels
@@ -995,7 +1015,27 @@ class MaxPool2d:
         ### BEGIN SOLUTION
         # Input validation and shape extraction
         if len(x.shape) != 4:
-            raise ValueError(f"Expected 4D input (batch, channels, height, width), got {x.shape}")
+            if len(x.shape) == 3:
+                raise ValueError(
+                    f"MaxPool2d expected 4D input (batch, channels, height, width), got 3D: {x.shape}\n"
+                    f"  ❌ Missing batch dimension\n"
+                    f"  💡 MaxPool2d processes batches of feature maps, not single images\n"
+                    f"  🔧 Add batch dim: x.reshape(1, {x.shape[0]}, {x.shape[1]}, {x.shape[2]})"
+                )
+            elif len(x.shape) == 2:
+                raise ValueError(
+                    f"MaxPool2d expected 4D input (batch, channels, height, width), got 2D: {x.shape}\n"
+                    f"  ❌ Got a matrix, expected an image tensor\n"
+                    f"  💡 MaxPool2d needs spatial dimensions (height, width) plus batch and channels\n"
+                    f"  🔧 If this is a flattened image, reshape it: x.reshape(1, channels, height, width)"
+                )
+            else:
+                raise ValueError(
+                    f"MaxPool2d expected 4D input (batch, channels, height, width), got {len(x.shape)}D: {x.shape}\n"
+                    f"  ❌ Wrong number of dimensions\n"
+                    f"  💡 MaxPool2d expects: (batch_size, channels, height, width)\n"
+                    f"  🔧 Reshape your input to 4D with the correct dimensions"
+                )
 
         batch_size, channels, in_height, in_width = x.shape
         kernel_h, kernel_w = self.kernel_size
@@ -1189,7 +1229,27 @@ class AvgPool2d:
         ### BEGIN SOLUTION
         # Input validation and shape extraction
         if len(x.shape) != 4:
-            raise ValueError(f"Expected 4D input (batch, channels, height, width), got {x.shape}")
+            if len(x.shape) == 3:
+                raise ValueError(
+                    f"AvgPool2d expected 4D input (batch, channels, height, width), got 3D: {x.shape}\n"
+                    f"  ❌ Missing batch dimension\n"
+                    f"  💡 AvgPool2d processes batches of feature maps, not single images\n"
+                    f"  🔧 Add batch dim: x.reshape(1, {x.shape[0]}, {x.shape[1]}, {x.shape[2]})"
+                )
+            elif len(x.shape) == 2:
+                raise ValueError(
+                    f"AvgPool2d expected 4D input (batch, channels, height, width), got 2D: {x.shape}\n"
+                    f"  ❌ Got a matrix, expected an image tensor\n"
+                    f"  💡 AvgPool2d needs spatial dimensions (height, width) plus batch and channels\n"
+                    f"  🔧 If this is a flattened image, reshape it: x.reshape(1, channels, height, width)"
+                )
+            else:
+                raise ValueError(
+                    f"AvgPool2d expected 4D input (batch, channels, height, width), got {len(x.shape)}D: {x.shape}\n"
+                    f"  ❌ Wrong number of dimensions\n"
+                    f"  💡 AvgPool2d expects: (batch_size, channels, height, width)\n"
+                    f"  🔧 Reshape your input to 4D with the correct dimensions"
+                )
 
         batch_size, channels, in_height, in_width = x.shape
         kernel_h, kernel_w = self.kernel_size
@@ -1405,12 +1465,37 @@ class BatchNorm2d:
         ### BEGIN SOLUTION
         # Input validation
         if len(x.shape) != 4:
-            raise ValueError(f"Expected 4D input (batch, channels, height, width), got {x.shape}")
+            if len(x.shape) == 3:
+                raise ValueError(
+                    f"BatchNorm2d expected 4D input (batch, channels, height, width), got 3D: {x.shape}\n"
+                    f"  ❌ Missing batch dimension\n"
+                    f"  💡 BatchNorm2d computes statistics over the batch dimension\n"
+                    f"  🔧 Add batch dim: x.reshape(1, {x.shape[0]}, {x.shape[1]}, {x.shape[2]})"
+                )
+            elif len(x.shape) == 2:
+                raise ValueError(
+                    f"BatchNorm2d expected 4D input (batch, channels, height, width), got 2D: {x.shape}\n"
+                    f"  ❌ Got a matrix, expected an image tensor\n"
+                    f"  💡 BatchNorm2d normalizes over spatial dimensions per channel\n"
+                    f"  🔧 If this is a flattened image, reshape it: x.reshape(1, channels, height, width)"
+                )
+            else:
+                raise ValueError(
+                    f"BatchNorm2d expected 4D input (batch, channels, height, width), got {len(x.shape)}D: {x.shape}\n"
+                    f"  ❌ Wrong number of dimensions\n"
+                    f"  💡 BatchNorm2d expects: (batch_size, channels, height, width)\n"
+                    f"  🔧 Reshape your input to 4D with the correct dimensions"
+                )
 
         batch_size, channels, height, width = x.shape
 
         if channels != self.num_features:
-            raise ValueError(f"Expected {self.num_features} channels, got {channels}")
+            raise ValueError(
+                f"BatchNorm2d channel mismatch: expected {self.num_features} channels, got {channels}\n"
+                f"  ❌ Input has {channels} channels but BatchNorm2d was created for {self.num_features}\n"
+                f"  💡 BatchNorm2d(num_features) must match the channel dimension of your input\n"
+                f"  🔧 Either fix your input shape or create BatchNorm2d({channels})"
+            )
 
         if self.training:
             # Compute batch statistics per channel

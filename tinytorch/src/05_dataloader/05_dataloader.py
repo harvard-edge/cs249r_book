@@ -369,8 +369,11 @@ class TensorDataset(Dataset):
         for i, tensor in enumerate(tensors):
             if len(tensor.data) != first_size:
                 raise ValueError(
-                    f"All tensors must have same size in first dimension. "
-                    f"Tensor 0: {first_size}, Tensor {i}: {len(tensor.data)}"
+                    f"Tensor size mismatch in TensorDataset\n"
+                    f"  ❌ Tensor 0 has {first_size} samples, but Tensor {i} has {len(tensor.data)} samples\n"
+                    f"  💡 All tensors must have the same size in their first dimension (the sample dimension)\n"
+                    f"  🔧 Check your data: features.shape[0] should equal labels.shape[0]\n"
+                    f"     Example fix: labels = labels[:{first_size}] or features = features[:{len(tensor.data)}]"
                 )
         ### END SOLUTION
 
@@ -820,7 +823,12 @@ class RandomHorizontalFlip:
         """
         ### BEGIN SOLUTION
         if not 0.0 <= p <= 1.0:
-            raise ValueError(f"Probability must be between 0 and 1, got {p}")
+            raise ValueError(
+                f"Invalid flip probability: {p}\n"
+                f"  ❌ p must be between 0.0 and 1.0\n"
+                f"  💡 p is the probability of flipping the image horizontally (p=0.5 means 50% chance)\n"
+                f"  🔧 Common values: p=0.0 (never flip), p=0.5 (standard), p=1.0 (always flip)"
+            )
         self.p = p
         ### END SOLUTION
 
@@ -869,7 +877,12 @@ class RandomHorizontalFlip:
                     # Fallback to width as last axis
                     axis = -1
             else:
-                raise ValueError(f"Expected 2D+ input, got shape {data.shape}")
+                raise ValueError(
+                    f"RandomHorizontalFlip requires at least 2D input\n"
+                    f"  ❌ Got {data.ndim}D input with shape {data.shape}\n"
+                    f"  💡 Images need at least height and width dimensions (H, W) to flip horizontally\n"
+                    f"  🔧 Reshape your data: x.reshape(height, width) or x.reshape(1, height, width)"
+                )
 
             flipped = np.flip(data, axis=axis).copy()
             return Tensor(flipped) if is_tensor else flipped
@@ -989,7 +1002,14 @@ class RandomCrop:
 
                 cropped = padded[top:top + target_h, left:left + target_w, :]
         else:
-            raise ValueError(f"Expected 2D or 3D input, got shape {data.shape}")
+            raise ValueError(
+                f"RandomCrop requires 2D or 3D input\n"
+                f"  ❌ Got {len(data.shape)}D input with shape {data.shape}\n"
+                f"  💡 Expected formats: (H, W) for grayscale, (C, H, W) or (H, W, C) for color images\n"
+                f"  🔧 Reshape your data:\n"
+                f"     - For single grayscale image: x.reshape(height, width)\n"
+                f"     - For single color image: x.reshape(channels, height, width)"
+            )
 
         return Tensor(cropped) if is_tensor else cropped
         ### END SOLUTION

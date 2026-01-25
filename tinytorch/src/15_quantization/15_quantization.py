@@ -1166,10 +1166,20 @@ def quantize_model(model, calibration_data: Optional[List[Tensor]] = None) -> No
 
     elif isinstance(model, Linear):  # Single Linear layer
         # Can't replace in-place for single layer, user should handle
-        raise ValueError("Cannot quantize single Linear layer in-place. Use QuantizedLinear directly.")
+        raise ValueError(
+            f"Cannot quantize single Linear layer in-place\n"
+            f"  ❌ quantize_model() modifies models in-place, but a single layer has no container to modify\n"
+            f"  💡 In-place modification requires a container (like Sequential) that holds layer references\n"
+            f"  🔧 Use QuantizedLinear directly: quantized_layer = QuantizedLinear(your_linear_layer)"
+        )
 
     else:
-        raise ValueError(f"Unsupported model type: {type(model)}")
+        raise ValueError(
+            f"Unsupported model type for quantization: {type(model).__name__}\n"
+            f"  ❌ quantize_model() expects a model with .layers attribute (like Sequential)\n"
+            f"  💡 The function iterates through model.layers to find and replace Linear layers\n"
+            f"  🔧 Wrap your layers in Sequential: model = Sequential(layer1, activation, layer2)"
+        )
     ### END SOLUTION
 
 # %% [markdown]
