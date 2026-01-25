@@ -497,7 +497,7 @@ print(f"Memory: {get_memory_usage():.2f} MB")
 
 ### **4. Encourage Systems Questions**
 - "What would break at 1B parameters?"
-- "How would you distributed this?"
+- "How would you distribute this?"
 - "What's the bottleneck here?"
 
 ## 🔧 Troubleshooting

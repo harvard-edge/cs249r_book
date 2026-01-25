@@ -46,7 +46,7 @@ WITHOUT KV Cache (Slow):              WITH KV Cache (Fast):
   Module 18 (Memoization)   : YOUR KV cache implementation
 
 📊 EXPECTED RESULTS:
-  | Generation Mode      | Time/Token | Speedup | Memory  |
+  | Generation Mode     | Time/Token | Speedup | Memory  |
   |---------------------|------------|---------|---------|
   | Baseline (no cache) |   ~10ms    |   1×    |  Low    |
   | With KV Cache       |   ~1.5ms   |  6-10×  |  Higher |

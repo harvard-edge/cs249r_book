@@ -14,7 +14,7 @@
 
 # %% [markdown]
 """
-# Module 06: Autograd ⚡ - The Gradient Engine
+# Module 06: Autograd - The Gradient Engine
 
 Welcome to Module 06! Today you'll awaken the gradient engine and unlock automatic differentiation.
 
@@ -55,7 +55,7 @@ from tinytorch.core.autograd import Function, enable_autograd
 - **Consistency:** All gradient operations in core.autograd
 - **Integration:** Enhances existing Tensor without breaking anything
 
-Let's build the gradient engine that makes neural networks learn! 🚀
+Let's get started!
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
@@ -1235,7 +1235,9 @@ class SumBackward(Function):
 # %% [markdown]
 """
 ### 🔬 Unit Test: Function Classes
+
 This test validates our Function classes compute gradients correctly.
+
 **What we're testing**: Forward and backward passes for each operation
 **Why it matters**: These are the building blocks of autograd
 **Expected**: Correct gradients that satisfy mathematical definitions
@@ -1246,9 +1248,15 @@ def test_unit_function_classes():
     """🔬 Test Function classes."""
     print("🔬 Unit Test: Function Classes...")
 
+    # Note: We manually set requires_grad here because enable_autograd() hasn't been
+    # called yet. This tests the Backward classes in isolation before the full
+    # autograd system is enabled.
+
     # Test AddBackward
-    a = Tensor([1, 2, 3], requires_grad=True)
-    b = Tensor([4, 5, 6], requires_grad=True)
+    a = Tensor([1, 2, 3])
+    a.requires_grad = True  # Set manually (enable_autograd not called yet)
+    b = Tensor([4, 5, 6])
+    b.requires_grad = True
     add_func = AddBackward(a, b)
     grad_output = np.array([1, 1, 1])
     grad_a, grad_b = add_func.apply(grad_output)
@@ -1262,8 +1270,10 @@ def test_unit_function_classes():
     assert np.allclose(grad_b, a.data), f"MulBackward grad_b failed: {grad_b}"
 
     # Test MatmulBackward
-    a_mat = Tensor([[1, 2], [3, 4]], requires_grad=True)
-    b_mat = Tensor([[5, 6], [7, 8]], requires_grad=True)
+    a_mat = Tensor([[1, 2], [3, 4]])
+    a_mat.requires_grad = True
+    b_mat = Tensor([[5, 6], [7, 8]])
+    b_mat.requires_grad = True
     matmul_func = MatmulBackward(a_mat, b_mat)
     grad_output = np.ones((2, 2))
     grad_a, grad_b = matmul_func.apply(grad_output)
@@ -2397,7 +2407,9 @@ with torch.no_grad():
 # %% [markdown]
 """
 ### 🔬 Unit Test: Tensor Autograd Enhancement
+
 This test validates our enhanced Tensor class computes gradients correctly.
+
 **What we're testing**: Gradient computation and chain rule implementation
 **Why it matters**: This is the core of automatic differentiation
 **Expected**: Correct gradients for various operations and computation graphs
@@ -2437,6 +2449,70 @@ def test_unit_tensor_autograd():
 
 if __name__ == "__main__":
     test_unit_tensor_autograd()
+
+# %% [markdown]
+"""
+## 📊 Systems Analysis: Computation Graph Memory
+
+Let's understand ONE key systems concept: **computation graph memory overhead**.
+
+This single analysis reveals why gradient tracking is expensive and why frameworks make gradient tracking opt-in.
+"""
+
+# %%
+def analyze_computation_graph_memory():
+    """📊 Demonstrate memory overhead of computation graphs."""
+    print("📊 Analyzing Computation Graph Memory...")
+    print("=" * 60)
+
+    import sys
+
+    # Create tensors with different sizes
+    sizes = [(100, 100), (500, 500), (1000, 1000)]
+
+    print("\nMemory comparison: With vs Without Gradient Tracking")
+    print("-" * 60)
+
+    for shape in sizes:
+        # Without gradient tracking
+        x_no_grad = Tensor(np.random.randn(*shape))
+        base_memory = x_no_grad.data.nbytes
+
+        # With gradient tracking
+        x_with_grad = Tensor(np.random.randn(*shape), requires_grad=True)
+        y = x_with_grad * 2  # Simple operation that builds graph
+        z = y + 1
+
+        # Estimate graph overhead: saved tensors in grad_fn
+        graph_overhead = 0
+        if hasattr(z, '_grad_fn') and z._grad_fn is not None:
+            for tensor in z._grad_fn.saved_tensors:
+                if isinstance(tensor, Tensor):
+                    graph_overhead += tensor.data.nbytes
+
+        print(f"\nShape {shape}:")
+        print(f"   Base tensor: {base_memory / 1024:.1f} KB")
+        print(f"   Graph overhead: {graph_overhead / 1024:.1f} KB")
+        print(f"   Overhead ratio: {(graph_overhead / base_memory):.1f}x")
+
+    print("\n" + "=" * 60)
+    print("📊 KEY INSIGHTS:")
+    print("   1. Each operation saves inputs for backward pass")
+    print("   2. Memory scales with number of operations, not just parameters")
+    print("   3. Deep networks have more graph overhead than shallow ones")
+    print("   4. This is why requires_grad is opt-in, not default!")
+
+    print("\n🚀 REAL-WORLD IMPLICATIONS:")
+    print("   - Training uses ~2-3x memory of inference")
+    print("   - Gradient checkpointing trades compute for memory")
+    print("   - Mixed precision (float16) halves gradient memory")
+    print("   - torch.no_grad() context saves memory during evaluation")
+
+    print("\n" + "=" * 60)
+
+# Run the systems analysis
+if __name__ == "__main__":
+    analyze_computation_graph_memory()
 
 # %% [markdown]
 """
@@ -2675,16 +2751,19 @@ def demo_autograd():
 
     # Simple example: y = x^2, so dy/dx = 2x
     x = Tensor(np.array([3.0]), requires_grad=True)
-    y = x * x  # y = x²
+    y = x * x  # y = x^2
 
     print(f"x = {x.data[0]}")
-    print(f"y = x² = {y.data[0]}")
+    print(f"y = x^2 = {y.data[0]}")
 
     # Backward pass computes gradient
     y.backward()
 
-    print(f"\ndy/dx = 2x = 2 × {x.data[0]} = {x.grad.data[0]}")
-    print(f"Computed automatically: {x.grad.data[0]}")
+    # Show computed vs expected gradient
+    expected_grad = 2 * x.data[0]
+    print(f"\nExpected: dy/dx = 2x = 2 * {x.data[0]} = {expected_grad}")
+    print(f"Computed: {x.grad[0]}")
+    print(f"Match: {np.allclose(x.grad[0], expected_grad)}")
 
     print("\n✨ Gradients computed automatically—no manual derivatives!")
 
@@ -2700,47 +2779,22 @@ if __name__ == "__main__":
 
 Congratulations! You've built the gradient engine that makes neural networks learn!
 
-### Key Accomplishments ⭐⭐
+### Key Accomplishments
 - **Enhanced Tensor class** with backward() method (no new wrapper classes!)
 - **Built computation graph tracking** for automatic differentiation
 - **Implemented Function classes** (Add, Mul, Matmul, Sum) with correct gradients
 - **Created enable_autograd()** function that activates gradients globally
 - **Tested complex multi-layer** computation graphs with gradient propagation
-- **All tests pass** ✅ (validated by `test_module()`)
+- **All tests pass** (validated by `test_module()`)
 
-### Ready for Next Steps 🚀
-Your autograd implementation enables optimization! The dormant gradient features from Module 01 are now fully active. Every tensor can track gradients, every operation builds computation graphs, and backward() computes gradients automatically.
+### Systems Insights Discovered
+- **Memory overhead**: Computation graphs store tensors for backward pass (2x memory)
+- **Gradient accumulation**: Allows processing large batches in smaller chunks
+- **Backward pass cost**: Approximately same as forward pass (similar number of matmuls)
+- **Graph retention**: Must call zero_grad() to prevent gradient accumulation across iterations
 
-**What you can do now:**
-```python
-# Create tensors with gradient tracking
-x = Tensor([2.0], requires_grad=True)
-W = Tensor([[0.5, 0.3]], requires_grad=True)
+### Ready for Next Steps
+Your autograd implementation enables optimization! Export with: `tito module complete 06_autograd`
 
-# Build computation graphs automatically
-y = x.matmul(W.T)  # Forward pass
-loss = (y - 1.0) ** 2  # Simple loss
-
-# Compute gradients automatically
-loss.backward()  # Magic happens here!
-
-# Access gradients
-print(f"x.grad: {x.grad}")  # Gradient w.r.t. x
-print(f"W.grad: {W.grad}")  # Gradient w.r.t. W
-```
-
-Export with: `tito module complete 06_autograd`
-
-**Next**: Module 07 will add optimizers (SGD, Adam) that use these gradients to actually train neural networks! 🎯
-
-### 📈 Progress: Autograd ✓
-```
-✅ Module 01: Tensor (Foundation)
-✅ Module 02: Activations (Non-linearities)
-✅ Module 03: Layers (Building blocks)
-✅ Module 04: Losses (Training objectives)
-✅ Module 06: Autograd (Gradient engine) ← YOU ARE HERE
-🔄 Module 07: Optimizers (Learning algorithms)
-🔄 Module 08: Training (Complete training loops)
-```
+**Next**: Module 07 will add optimizers (SGD, Adam) that use these gradients to actually train neural networks!
 """

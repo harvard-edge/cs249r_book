@@ -4,7 +4,7 @@
 
 ### Build Your Own ML Framework From Scratch
 
-[![Version](https://img.shields.io/badge/version-0.1.4-D4740C?logo=fireship&logoColor=white)](https://github.com/harvard-edge/cs249r_book/releases?q=tinytorch)
+[![Version](https://img.shields.io/github/v/tag/harvard-edge/cs249r_book?filter=tinytorch-v*&label=version&color=D4740C&logo=fireship&logoColor=white)](https://github.com/harvard-edge/cs249r_book/releases?q=tinytorch)
 [![Status](https://img.shields.io/badge/status-preview-orange?logo=github)](https://github.com/harvard-edge/cs249r_book/discussions/1076)
 [![Docs](https://img.shields.io/badge/docs-mlsysbook.ai-blue?logo=readthedocs)](https://mlsysbook.ai/tinytorch)
 [![Python](https://img.shields.io/badge/python-3.8+-3776ab?logo=python&logoColor=white)](https://python.org)
@@ -278,6 +278,9 @@ Thanks to these wonderful people who helped improve TinyTorch!
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/jettythek"><img src="https://avatars.githubusercontent.com/jettythek?v=4?s=80" width="80px;" alt="jettythek"/><br /><sub><b>jettythek</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Takosaga"><img src="https://avatars.githubusercontent.com/Takosaga?v=4?s=80" width="80px;" alt="Takosaga"/><br /><sub><b>Takosaga</b></sub></a><br />🪲</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/wz1114841863"><img src="https://avatars.githubusercontent.com/wz1114841863?v=4?s=80" width="80px;" alt="wzz"/><br /><sub><b>wzz</b></sub></a><br />🪲</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/ngbolin"><img src="https://avatars.githubusercontent.com/u/9389997?v=4?v=4?s=80" width="80px;" alt="Ng Bo Lin"/><br /><sub><b>Ng Bo Lin</b></sub></a><br />🧪</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/keo-dara"><img src="https://avatars.githubusercontent.com/u/175544368?v=4?v=4?s=80" width="80px;" alt="keo-dara"/><br /><sub><b>keo-dara</b></sub></a><br />🪲</td>
     </tr>
   </tbody>
 </table>

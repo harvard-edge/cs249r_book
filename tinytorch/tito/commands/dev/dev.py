@@ -2,19 +2,15 @@
 Developer command group for TinyTorch CLI.
 
 These commands are for TinyTorch developers and instructors, not students.
-They help with:
-- Pre-commit/pre-release verification (preflight)
-- CI/CD integration
-- Development workflows
+Primary command: tito dev test (unified testing)
 """
 
 from argparse import ArgumentParser, Namespace
 from rich.panel import Panel
 
 from ..base import BaseCommand
-from .preflight import PreflightCommand
+from .test import DevTestCommand
 from .export import DevExportCommand
-from .validate import ValidateCommand
 
 
 class DevCommand(BaseCommand):
@@ -26,7 +22,7 @@ class DevCommand(BaseCommand):
 
     @property
     def description(self) -> str:
-        return "Developer tools: preflight checks, CI/CD, workflows"
+        return "Developer tools: test, export"
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         subparsers = parser.add_subparsers(
@@ -35,13 +31,13 @@ class DevCommand(BaseCommand):
             metavar='SUBCOMMAND'
         )
 
-        # Preflight subcommand
-        preflight_parser = subparsers.add_parser(
-            'preflight',
-            help='Run preflight verification checks before commit/release'
+        # Test subcommand (unified testing - primary command)
+        test_parser = subparsers.add_parser(
+            'test',
+            help='Run tests: --unit, --integration, --e2e, --cli, --milestone, --all, --release'
         )
-        preflight_cmd = PreflightCommand(self.config)
-        preflight_cmd.add_arguments(preflight_parser)
+        test_cmd = DevTestCommand(self.config)
+        test_cmd.add_arguments(test_parser)
 
         # Export subcommand (rebuild curriculum from src/)
         export_parser = subparsers.add_parser(
@@ -51,14 +47,6 @@ class DevCommand(BaseCommand):
         export_cmd = DevExportCommand(self.config)
         export_cmd.add_arguments(export_parser)
 
-        # Validate subcommand (release validation)
-        validate_parser = subparsers.add_parser(
-            'validate',
-            help='Simulate student journey for release validation'
-        )
-        validate_cmd = ValidateCommand(self.config)
-        validate_cmd.add_arguments(validate_parser)
-
     def run(self, args: Namespace) -> int:
         console = self.console
 
@@ -66,41 +54,34 @@ class DevCommand(BaseCommand):
             console.print(Panel(
                 "[bold cyan]Developer Commands[/bold cyan]\n\n"
                 "[bold]For developers and instructors - not for students.[/bold]\n\n"
-                "Available subcommands:\n"
-                "  • [bold]export[/bold]     - Rebuild curriculum from src/*.py files\n"
-                "  • [bold]preflight[/bold]  - Run verification checks before commit/release\n"
-                "  • [bold]validate[/bold]   - Simulate student journey for release validation\n\n"
+                "[bold cyan]Testing (Primary):[/bold cyan]\n"
+                "  [dim]tito dev test[/dim]               Run pytest unit tests (default)\n"
+                "  [dim]tito dev test --all[/dim]         Run all test types\n"
+                "  [dim]tito dev test --inline[/dim]      Inline tests from src/ (progressive)\n"
+                "  [dim]tito dev test --unit[/dim]        Pytest unit tests\n"
+                "  [dim]tito dev test --integration[/dim] Integration tests\n"
+                "  [dim]tito dev test --e2e[/dim]         End-to-end tests\n"
+                "  [dim]tito dev test --cli[/dim]         CLI tests\n"
+                "  [dim]tito dev test --milestone[/dim]   Milestone script tests\n"
+                "  [dim]tito dev test --release[/dim]     Full release validation\n"
+                "  [dim]tito dev test --module 06[/dim]   Test specific module\n\n"
                 "[bold cyan]Export (Rebuild Curriculum):[/bold cyan]\n"
-                "  [dim]tito dev export 01[/dim]           Export specific module\n"
-                "  [dim]tito dev export 01 02 03[/dim]     Export multiple modules\n"
-                "  [dim]tito dev export --all[/dim]        Export all modules\n"
+                "  [dim]tito dev export --all[/dim]       Export all modules\n"
+                "  [dim]tito dev export 01[/dim]          Export specific module\n"
                 "  [bold red]⚠️  This OVERWRITES student notebooks![/bold red]\n\n"
-                "[bold cyan]Preflight Levels:[/bold cyan]\n"
-                "  [dim]tito dev preflight[/dim]           Standard checks (~30s)\n"
-                "  [dim]tito dev preflight --quick[/dim]   Quick checks only (~10s)\n"
-                "  [dim]tito dev preflight --full[/dim]    Full validation (~2-5min)\n"
-                "  [dim]tito dev preflight --release[/dim] Release validation (~10-30min)\n\n"
-                "[bold cyan]Validate (Release Testing):[/bold cyan]\n"
-                "  [dim]tito dev validate[/dim]            Full student journey simulation\n"
-                "  [dim]tito dev validate --module 08[/dim] Validate through module 08\n"
-                "  [dim]tito dev validate --ci[/dim]       CI mode with JSON output\n\n"
                 "[bold cyan]CI/CD Integration:[/bold cyan]\n"
-                "  [dim]tito dev preflight --ci[/dim]      Non-interactive, exit codes\n"
-                "  [dim]tito dev preflight --json[/dim]    JSON output for automation",
+                "  [dim]tito dev test --ci[/dim]          JSON output for automation",
                 title="🛠️ Developer Tools",
                 border_style="bright_cyan"
             ))
             return 0
 
         # Execute the appropriate subcommand
-        if args.dev_command == 'preflight':
-            cmd = PreflightCommand(self.config)
-            return cmd.execute(args)
+        if args.dev_command == 'test':
+            cmd = DevTestCommand(self.config)
+            return cmd.run(args)
         elif args.dev_command == 'export':
             cmd = DevExportCommand(self.config)
-            return cmd.run(args)
-        elif args.dev_command == 'validate':
-            cmd = ValidateCommand(self.config)
             return cmd.run(args)
         else:
             console.print(Panel(

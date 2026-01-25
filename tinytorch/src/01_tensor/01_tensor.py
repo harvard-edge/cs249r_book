@@ -1382,7 +1382,7 @@ def analyze_memory_layout():
 
     # Test 1: Row-wise access (cache-friendly)
     # Memory layout: [row0][row1][row2]... stored contiguously
-    print("\n🔬 Test 1: Row-wise Access (Cache-Friendly)")
+    print("\nTest 1: Row-wise Access (Cache-Friendly)")
     start = time.time()
     row_sums = []
     for i in range(size):
@@ -1394,7 +1394,7 @@ def analyze_memory_layout():
 
     # Test 2: Column-wise access (cache-unfriendly)
     # Must jump between rows, poor spatial locality
-    print("\n🔬 Test 2: Column-wise Access (Cache-Unfriendly)")
+    print("\nTest 2: Column-wise Access (Cache-Unfriendly)")
     start = time.time()
     col_sums = []
     for j in range(size):
@@ -1600,117 +1600,73 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🤔 ML Systems Reflection Questions
+## 🤔 ML Systems Thinking: Tensor Operations
 
-Answer these to deepen your understanding of tensor operations and their systems implications:
+Now that you've built a complete Tensor class, let's think about its systems-level implications.
+Understanding memory layout, scaling behavior, and computational costs helps you make informed
+decisions when building production ML systems.
 
-### 1. Memory Layout and Cache Performance
-**Question**: How does row-major vs column-major storage affect cache performance in tensor operations?
+### Question 1: Memory Layout and Cache Performance
+
+How does row-major vs column-major storage affect cache performance in tensor operations?
 
 **Consider**:
 - What happens when you access matrix elements sequentially vs. with large strides?
-- Why did our analysis show column-wise access being ~2-3× slower than row-wise?
+- Why did our analysis show column-wise access being slower than row-wise?
 - How would this affect the design of a convolutional neural network's memory layout?
 
-**Real-world context**: PyTorch uses NCHW (batch, channels, height, width) format specifically because accessing channels sequentially has better cache locality than NHWC format.
+**Key Insight**: PyTorch uses NCHW (batch, channels, height, width) format specifically because
+accessing channels sequentially has better cache locality than NHWC format.
 
----
+### Question 2: Batch Processing and Scaling
 
-### 2. Batch Processing and Scaling
-**Question**: If you double the batch size in a neural network, what happens to memory usage? What about computation time?
+If you double the batch size in a neural network, what happens to memory usage? What about
+computation time?
 
 **Consider**:
 - A linear layer with input (batch, features): y = xW + b
 - Memory for: input tensor, weight matrix, output tensor, intermediate results
-- How does matrix multiplication time scale with batch size?
-
-**Think about**:
 - If (32, 784) @ (784, 256) takes 10ms, how long does (64, 784) @ (784, 256) take?
-- Does doubling batch size double memory usage? Why or why not?
-- What are the trade-offs between large and small batch sizes?
 
----
+**Key Insight**: Input/output memory scales linearly with batch size, but weight memory stays constant.
+Computation time also scales linearly for matrix multiplication.
 
-### 3. Data Type Precision and Memory
-**Question**: What's the memory difference between float64 and float32 for a (1000, 1000) tensor? When would you choose each?
+### Question 3: Data Type Precision and Memory
 
-**Calculate**:
-- float64: 8 bytes per element
-- float32: 4 bytes per element
-- Total elements in (1000, 1000): ___________
-- Memory difference: ___________
-
-**Trade-offs to consider**:
-- Training accuracy vs. memory consumption
-- GPU memory limits (often 8-16GB for consumer GPUs)
-- Numerical stability in gradient computation
-- Inference speed on mobile devices
-
----
-
-### 4. Production Scale: Memory Requirements
-**Question**: A GPT-3-scale model has 175 billion parameters. How much RAM is needed just to store the weights in float32? What about with an optimizer like Adam?
+What's the memory difference between float64 and float32 for a (1000, 1000) tensor?
 
 **Calculate**:
-- Parameters: 175 × 10^9
+- float64: 8 bytes per element, float32: 4 bytes per element
+- Total elements: 1,000,000
+- Memory: float64 = 8MB, float32 = 4MB (2x difference)
+
+**Key Insight**: Production systems often use float16 or bfloat16 for 4x memory savings over float32,
+trading precision for capacity. GPU memory limits (8-16GB) make this critical.
+
+### Question 4: Production Scale Memory
+
+A GPT-3-scale model has 175 billion parameters. How much RAM is needed just to store the weights?
+
+**Calculate**:
+- Parameters: 175 x 10^9
 - Bytes per float32: 4
-- Weight memory: ___________GB
+- Weight memory: 700 GB
 
-**Additional memory for Adam optimizer**:
-- Adam stores: parameters, gradients, first moment (m), second moment (v)
-- Total multiplier: 4× the parameter count
-- Total with Adam: ___________GB
+With Adam optimizer (stores parameters, gradients, momentum, velocity): 4x = 2,800 GB
 
-**Real-world implications**:
-- Why do we need 8× A100 GPUs (40GB each) for training?
-- What is mixed-precision training (float16/bfloat16)?
-- How does gradient checkpointing help?
+**Key Insight**: This is why training large models requires distributed systems across many GPUs.
+Mixed-precision training (float16/bfloat16) and gradient checkpointing help manage memory.
 
----
+### Question 5: Hardware Awareness
 
-### 5. Hardware Awareness: GPU Efficiency
-**Question**: Why do GPUs strongly prefer operations on large tensors over many small ones?
+Why do GPUs strongly prefer operations on large tensors over many small ones?
 
-**Consider these scenarios**:
-- **Scenario A**: 1000 separate (10, 10) matrix multiplications
-- **Scenario B**: 1 batched (1000, 10, 10) matrix multiplication
+**Compare**:
+- Scenario A: 1000 separate (10, 10) matrix multiplications
+- Scenario B: 1 batched (1000, 10, 10) matrix multiplication
 
-**Think about**:
-- GPU kernel launch overhead (~5-10 microseconds per launch)
-- Thread parallelism utilization (GPUs have 1000s of cores)
-- Memory transfer costs (CPU→GPU has ~10GB/s bandwidth, GPU memory has ~900GB/s)
-- When is the GPU actually doing computation vs. waiting?
-
-**Design principle**: Batch operations together to amortize overhead and maximize parallelism.
-
----
-
-### Bonus Challenge: Optimization Analysis
-
-**Scenario**: You're implementing a custom activation function that will be applied to every element in a tensor. You have two implementation choices:
-
-**Option A**: Python loop over each element
-```python
-def custom_activation(tensor):
-    result = np.empty_like(tensor.data)
-    for i in range(tensor.data.size):
-        result.flat[i] = complex_math_function(tensor.data.flat[i])
-    return Tensor(result)
-```
-
-**Option B**: NumPy vectorized operation
-```python
-def custom_activation(tensor):
-    return Tensor(complex_math_function(tensor.data))
-```
-
-**Questions**:
-1. For a (1000, 1000) tensor, estimate the speedup of Option B vs Option A
-2. Why is vectorization faster even though both are O(n) operations?
-3. What if the tensor is tiny (10, 10) - does the answer change?
-4. How would this change if we move to GPU computation?
-
-**Key insight**: Algorithmic complexity (Big-O) doesn't tell the whole performance story. Constant factors from vectorization, cache behavior, and parallelism dominate in practice.
+**Key Insight**: GPU kernel launch overhead (~5-10 microseconds per launch) dominates for small operations.
+Batching amortizes this overhead and maximizes parallelism across GPU cores.
 """
 
 # %% [markdown]
@@ -1768,17 +1724,21 @@ if __name__ == "__main__":
 Congratulations! You've built the foundational Tensor class that powers all machine learning operations!
 
 ### Key Accomplishments
-- **Built a complete Tensor class** with arithmetic operations, matrix multiplication, and shape manipulation
-- **Implemented broadcasting semantics** that match NumPy for automatic shape alignment
-- **Created reduction operations** (sum, mean, max) for loss computation and pooling
-- **Added comprehensive ASCII diagrams** showing tensor operations visually
-- **All tests pass ✅** (validated by `test_module()`)
+- Built a complete Tensor class with arithmetic operations, matrix multiplication, and shape manipulation
+- Implemented broadcasting semantics that match NumPy for automatic shape alignment
+- Created reduction operations (sum, mean, max) for loss computation and pooling
+- Discovered cache performance implications through memory layout analysis
+- All tests pass (validated by `test_module()`)
 
 ### Systems Insights Discovered
-- **Memory scaling**: Matrix operations create new tensors (3× memory during computation)
-- **Broadcasting efficiency**: NumPy's automatic shape alignment vs. explicit operations
-- **Cache behavior**: Row-wise access is faster than column-wise due to memory layout
-- **Shape validation trade-offs**: Clear errors vs. performance in tight loops
+- Memory layout matters: Row-wise access is faster than column-wise due to cache locality
+- Broadcasting efficiency: NumPy handles shape alignment without explicit data copying
+- Matrix multiplication is the computational foundation of neural networks
+- Shape validation provides clear error messages at minimal performance cost
 
+### Ready for Next Steps
+Your Tensor implementation enables all future neural network operations.
 Export with: `tito module complete 01_tensor`
+
+**Next**: Module 02 will add Activations that introduce nonlinearity to your tensors!
 """

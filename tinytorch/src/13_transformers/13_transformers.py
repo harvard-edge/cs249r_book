@@ -12,6 +12,9 @@
 #     name: python3
 # ---
 
+#| default_exp core.transformers
+#| export
+
 # %% [markdown]
 """
 # Module 13: Transformers - Complete Transformer Architecture
@@ -40,11 +43,9 @@ By the end of this module, you will:
 Let's get started!
 """
 
-# %%
-#| default_exp core.transformers
-
-# %%
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
 #| export
+
 import numpy as np
 
 from tinytorch.core.activations import GELU
@@ -111,6 +112,32 @@ from tinytorch.core.transformers import TransformerBlock, TinyGPT, LayerNorm, ML
 - **Integration:** Demonstrates the power of modular design by combining all previous modules
 """
 
+# %% [markdown]
+"""
+## 📋 Module Dependencies
+
+**Prerequisites**: Modules 01-12 must be complete
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor` (Module 01: Tensor foundation)
+- `tinytorch.core.activations` (Module 03: GELU activation)
+- `tinytorch.core.layers` (Module 04: Linear layers)
+- `tinytorch.core.attention` (Module 11: MultiHeadAttention)
+- `tinytorch.core.embeddings` (Module 12: Embedding layers)
+
+**Dependency Flow**:
+```
+Tensor → Activations → Layers → Attention → Embeddings → Transformers
+  ↓         ↓           ↓         ↓            ↓            ↓
+ data    GELU act    Linear    MultiHead    Token+Pos   Complete GPT
+```
+
+Students completing this module will have built the complete
+transformer architecture that powers modern language models.
+"""
 
 # %% [markdown]
 """
@@ -483,17 +510,19 @@ class LayerNorm:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Layer Normalization
+### 🧪 Unit Test: Layer Normalization
+
 This test validates our LayerNorm implementation works correctly.
+
 **What we're testing**: Normalization statistics and parameter learning
 **Why it matters**: Essential for transformer stability and training
-**Expected**: Mean ≈ 0, std ≈ 1 after normalization, learnable parameters work
+**Expected**: Mean approximately 0, std approximately 1 after normalization, learnable parameters work
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-layer-norm", "locked": true, "points": 10}
 def test_unit_layer_norm():
-    """🔬 Test LayerNorm implementation."""
-    print("🔬 Unit Test: Layer Normalization...")
+    """🧪 Test LayerNorm implementation."""
+    print("🧪 Unit Test: Layer Normalization...")
 
     # Test basic normalization
     ln = LayerNorm(4)
@@ -686,8 +715,10 @@ class MLP:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: MLP (Feed-Forward Network)
+### 🧪 Unit Test: MLP (Feed-Forward Network)
+
 This test validates our MLP implementation works correctly.
+
 **What we're testing**: Shape preservation and parameter counting
 **Why it matters**: MLP provides the non-linear transformation in transformers
 **Expected**: Input/output shapes match, correct parameter count
@@ -695,8 +726,8 @@ This test validates our MLP implementation works correctly.
 
 # %% nbgrader={"grade": true, "grade_id": "test-mlp", "locked": true, "points": 10}
 def test_unit_mlp():
-    """🔬 Test MLP implementation."""
-    print("🔬 Unit Test: MLP (Feed-Forward Network)...")
+    """🧪 Test MLP implementation."""
+    print("🧪 Unit Test: MLP (Feed-Forward Network)...")
 
     # Test MLP with standard 4x expansion
     embed_dim = 64
@@ -933,8 +964,10 @@ class TransformerBlock:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Transformer Block
+### 🧪 Unit Test: Transformer Block
+
 This test validates our complete TransformerBlock implementation.
+
 **What we're testing**: Shape preservation, residual connections, parameter counting
 **Why it matters**: This is the core component that will be stacked to create GPT
 **Expected**: Input/output shapes match, all components work together
@@ -942,8 +975,8 @@ This test validates our complete TransformerBlock implementation.
 
 # %% nbgrader={"grade": true, "grade_id": "test-transformer-block", "locked": true, "points": 15}
 def test_unit_transformer_block():
-    """🔬 Test TransformerBlock implementation."""
-    print("🔬 Unit Test: Transformer Block...")
+    """🧪 Test TransformerBlock implementation."""
+    print("🧪 Unit Test: Transformer Block...")
 
     # Test transformer block
     embed_dim = 64
@@ -1313,8 +1346,10 @@ class GPT:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: GPT Model
+### 🧪 Unit Test: GPT Model
+
 This test validates our complete GPT implementation.
+
 **What we're testing**: Model forward pass, shape consistency, generation capability
 **Why it matters**: This is the complete language model that ties everything together
 **Expected**: Correct output shapes, generation works, parameter counting
@@ -1322,8 +1357,8 @@ This test validates our complete GPT implementation.
 
 # %% nbgrader={"grade": true, "grade_id": "test-gpt", "locked": true, "points": 20}
 def test_unit_gpt():
-    """🔬 Test GPT model implementation."""
-    print("🔬 Unit Test: GPT Model...")
+    """🧪 Test GPT model implementation."""
+    print("🧪 Unit Test: GPT Model...")
 
     # Test small GPT model
     vocab_size = 100
@@ -1628,7 +1663,7 @@ if __name__ == "__main__":
 Final validation that everything works together correctly.
 """
 
-# %% nbgrader={"grade": true, "grade_id": "test-module", "locked": true, "points": 25}
+# %% nbgrader={"grade": true, "grade_id": "module-integration", "locked": true, "points": 25}
 def test_module():
     """🧪 Module Test: Complete Integration
 
@@ -1652,7 +1687,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test complete transformer training scenario
-    print("🔬 Integration Test: Full Training Pipeline...")
+    print("🧪 Integration Test: Full Training Pipeline...")
 
     # Create model and data
     vocab_size = 50
@@ -1697,37 +1732,53 @@ def test_module():
 
 # %% [markdown]
 """
-## 🤔 ML Systems Thinking: Transformer Architecture Foundations
+## 🤔 ML Systems Thinking: Transformer Architecture
+
+Now that you've built a complete transformer architecture, let's think about its systems-level implications. Understanding memory scaling, gradient flow, and parameter distribution helps you make informed decisions when building and deploying production language models.
 
 ### Question 1: Attention Memory Complexity
+
 You implemented multi-head attention that computes attention matrices of size (batch, heads, seq_len, seq_len).
 
-For a model with seq_len=1024, batch_size=4, num_heads=8:
-- How many elements in the attention matrix? _____
-- If each element is 4 bytes (float32), how much memory per layer? _____ MB
-- Why does doubling sequence length quadruple attention memory? _____
+**Consider**:
+- For a model with seq_len=1024, batch_size=4, num_heads=8, how many elements in the attention matrix?
+- If each element is 4 bytes (float32), how much memory per layer?
+- Why does doubling sequence length quadruple attention memory?
+
+**Key Insight**: Attention memory scales quadratically with sequence length, which is why long-context models require techniques like FlashAttention, sliding window attention, or sparse attention.
 
 ### Question 2: Residual Connection Benefits
+
 Your TransformerBlock uses residual connections (x + attention_output, x + mlp_output).
 
-- What happens to gradients during backpropagation without residual connections? _____
-- How do residual connections help train deeper networks? _____
-- Why is pre-norm (LayerNorm before operations) preferred over post-norm? _____
+**Consider**:
+- What happens to gradients during backpropagation without residual connections?
+- How do residual connections help train deeper networks?
+- Why is pre-norm (LayerNorm before operations) preferred over post-norm?
+
+**Key Insight**: Residual connections create "gradient highways" that allow gradients to flow directly from loss to early layers. This enables training networks with 100+ layers that would otherwise suffer from vanishing gradients.
 
 ### Question 3: Parameter Scaling Analysis
+
 Your GPT model combines embeddings, transformer blocks, and output projection.
 
-For embed_dim=512, vocab_size=10000, num_layers=6:
-- Token embedding parameters: _____ (vocab_size × embed_dim)
-- Approximate parameters per transformer block: _____ (hint: ~4 × embed_dim²)
-- Total model parameters: approximately _____ million
+**Calculate** (for embed_dim=512, vocab_size=10000, num_layers=6):
+- Token embedding parameters: vocab_size x embed_dim = 5.12M
+- Parameters per transformer block: approximately 4 x embed_dim^2 = 1.05M
+- Total model parameters: approximately 11.4M
+
+**Key Insight**: Most parameters in large language models come from the embedding layers (for large vocabularies) and the MLP layers (which use 4x expansion). Attention parameters are relatively small.
 
 ### Question 4: Autoregressive Generation Efficiency
+
 Your generate() method processes the full sequence for each new token.
 
-- Why is this inefficient for long sequences? _____
-- What optimization caches key-value pairs to avoid recomputation? _____
-- How would this change the computational complexity from O(n²) to O(n)? _____
+**Consider**:
+- Why is this inefficient for long sequences?
+- What optimization caches key-value pairs to avoid recomputation?
+- How would this change the computational complexity from O(n^2) to O(n)?
+
+**Key Insight**: KV-caching stores the key and value projections from previous tokens, so each new token only needs to compute attention with its own query against cached keys/values. This transforms generation from O(n^2) to O(n) in sequence length.
 """
 
 # %% [markdown]
@@ -1772,10 +1823,10 @@ def demo_transformers():
     print(f"  Output sum: {output_sum:.1f}  (after attention + MLP)")
 
     print("\nTransformerBlock architecture:")
-    print(f"  • Multi-head attention ({num_heads} heads)")
-    print("  • Layer normalization (before operations)")
-    print(f"  • MLP ({embed_dim} → {4*embed_dim} → {embed_dim} with GELU)")
-    print("  • Residual connections (preserve information flow)")
+    print(f"  - Multi-head attention ({num_heads} heads)")
+    print("  - Layer normalization (before operations)")
+    print(f"  - MLP ({embed_dim} -> {4*embed_dim} -> {embed_dim} with GELU)")
+    print("  - Residual connections (preserve information flow)")
 
     print("\n✨ The building block of GPT, Claude, and modern language models!")
 
@@ -1810,8 +1861,3 @@ Export with: `tito module complete 13`
 
 **Next**: Module 14 will add profiling and optimization techniques to make your transformers production-ready!
 """
-
-# %%
-#| export
-# Alias for backward compatibility with tests
-TinyGPT = GPT

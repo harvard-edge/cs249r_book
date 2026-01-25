@@ -55,11 +55,10 @@ from tinytorch.core.embeddings import Embedding, PositionalEncoding, create_sinu
 - **Integration:** Works seamlessly with tokenizers for complete text processing pipeline
 """
 
-# %%
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
 #| default_exp core.embeddings
-
-# %%
 #| export
+
 import numpy as np
 import math
 from typing import List, Optional, Tuple
@@ -67,13 +66,42 @@ from typing import List, Optional, Tuple
 # Import from previous modules - following dependency chain
 from tinytorch.core.tensor import Tensor
 
+# Enable autograd for gradient tracking (required for learnable embeddings)
+from tinytorch.core.autograd import enable_autograd
+enable_autograd()
+
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
+KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
 MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
-## 💡 Introduction - Why Embeddings?
+## 📋 Module Dependencies
+
+**Prerequisites**: Modules 01-10 (especially Tensor foundation)
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+- `math` (for mathematical constants and functions)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor.Tensor` (from Module 01)
+
+**Dependency Flow**:
+```
+Module 01 (Tensor) → Module 11 (Embeddings) → Module 12 (Attention)
+     ↓                       ↓                       ↓
+  Foundation        Token-to-Vector           Context-Aware
+```
+
+Students completing this module will have built the embedding system
+that converts discrete tokens into continuous representations for transformers.
+"""
+
+# %% [markdown]
+"""
+## 💡 Introduction: Why Embeddings?
 
 Neural networks operate on dense vectors, but language consists of discrete tokens. Embeddings are the crucial bridge that converts discrete tokens into continuous, learnable vector representations that capture semantic meaning.
 
@@ -125,7 +153,7 @@ The choice of embedding strategy dramatically affects:
 
 # %% [markdown]
 """
-## 📐 Foundations - Embedding Strategies
+## 📐 Foundations: Embedding Strategies
 
 Different embedding approaches make different trade-offs between memory, semantic understanding, and computational efficiency.
 
@@ -226,7 +254,7 @@ The combination enables transformers to understand both meaning and order!
 
 # %% [markdown]
 """
-## 🏗️ Implementation - Building Embedding Systems
+## 🏗️ Implementation: Building Embedding Systems
 
 Let's implement embedding systems from basic token lookup to sophisticated position-aware representations. We'll start with the core embedding layer and work up to complete systems.
 """
@@ -301,7 +329,16 @@ class Embedding:
         # This is equivalent to one-hot multiplication but much more efficient
         embedded = self.weight.data[indices.data.astype(int)]
 
-        return Tensor(embedded)
+        result = Tensor(embedded)
+
+        # Attach gradient function for backpropagation
+        # EmbeddingBackward handles sparse gradient accumulation
+        if self.weight.requires_grad:
+            from tinytorch.core.autograd import EmbeddingBackward
+            result.requires_grad = True
+            result._grad_fn = EmbeddingBackward(self.weight, indices)
+
+        return result
 
     def __call__(self, indices: Tensor) -> Tensor:
         """Allows the embedding to be called like a function."""
@@ -315,10 +352,21 @@ class Embedding:
         return f"Embedding(vocab_size={self.vocab_size}, embed_dim={self.embed_dim})"
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🧪 Unit Test: Embedding Layer
+
+This test validates our Embedding class works correctly with various token indices and batch configurations.
+
+**What we're testing**: Token embedding lookup and parameter management
+**Why it matters**: Foundation for all NLP models - if embedding fails, nothing works
+**Expected**: Correct shape output, consistent lookups, proper parameter access
+"""
+
 # %% nbgrader={"grade": true, "grade_id": "test-embedding", "locked": true, "points": 10}
 def test_unit_embedding():
-    """🔬 Unit Test: Embedding Layer Implementation"""
-    print("🔬 Unit Test: Embedding Layer...")
+    """🧪 Test Embedding layer implementation."""
+    print("🧪 Unit Test: Embedding Layer...")
 
     # Test 1: Basic embedding creation and forward pass
     embed = Embedding(vocab_size=100, embed_dim=64)
@@ -494,10 +542,21 @@ class PositionalEncoding:
         return f"PositionalEncoding(max_seq_len={self.max_seq_len}, embed_dim={self.embed_dim})"
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🧪 Unit Test: Positional Encoding
+
+This test validates our PositionalEncoding class works correctly with various sequence lengths and configurations.
+
+**What we're testing**: Position embedding consistency and shape handling
+**Why it matters**: Position awareness is critical for sequence understanding
+**Expected**: Consistent encodings, correct shapes, proper parameter management
+"""
+
 # %% nbgrader={"grade": true, "grade_id": "test-positional", "locked": true, "points": 10}
 def test_unit_positional_encoding():
-    """🔬 Unit Test: Positional Encoding Implementation"""
-    print("🔬 Unit Test: Positional Encoding...")
+    """🧪 Test Positional Encoding implementation."""
+    print("🧪 Unit Test: Positional Encoding...")
 
     # Test 1: Basic functionality
     pos_enc = PositionalEncoding(max_seq_len=512, embed_dim=64)
@@ -672,10 +731,21 @@ def create_sinusoidal_embeddings(max_seq_len: int, embed_dim: int) -> Tensor:
     return Tensor(pe)
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🧪 Unit Test: Sinusoidal Embeddings
+
+This test validates our sinusoidal positional encoding function creates correct mathematical patterns.
+
+**What we're testing**: Sinusoidal pattern generation and frequency properties
+**Why it matters**: Enables position awareness without trainable parameters
+**Expected**: Correct sin/cos patterns, unique positions, frequency decay
+"""
+
 # %% nbgrader={"grade": true, "grade_id": "test-sinusoidal", "locked": true, "points": 10}
 def test_unit_sinusoidal_embeddings():
-    """🔬 Unit Test: Sinusoidal Positional Embeddings"""
-    print("🔬 Unit Test: Sinusoidal Embeddings...")
+    """🧪 Test sinusoidal positional embeddings."""
+    print("🧪 Unit Test: Sinusoidal Embeddings...")
 
     # Test 1: Basic shape and properties
     pe = create_sinusoidal_embeddings(512, 64)
@@ -720,7 +790,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Integration - Bringing It Together
+## 🔧 Integration: Bringing It Together
 
 Now let's build the complete embedding system that combines token and positional embeddings into a production-ready component used in modern transformers and language models.
 
@@ -948,10 +1018,21 @@ class EmbeddingLayer:
                 f"pos_encoding='{self.pos_encoding_type}')")
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🧪 Unit Test: Complete Embedding System
+
+This test validates our EmbeddingLayer combines all components correctly for production use.
+
+**What we're testing**: Token + positional embedding integration, scaling, and batch processing
+**Why it matters**: Production transformers use this exact pattern
+**Expected**: Correct shapes, proper scaling, flexible position encoding support
+"""
+
 # %% nbgrader={"grade": true, "grade_id": "test-complete-system", "locked": true, "points": 15}
 def test_unit_complete_embedding_system():
-    """🔬 Unit Test: Complete Embedding System"""
-    print("🔬 Unit Test: Complete Embedding System...")
+    """🧪 Test complete embedding system."""
+    print("🧪 Unit Test: Complete Embedding System...")
 
     # Test 1: Learned positional encoding
     embed_learned = EmbeddingLayer(
@@ -1028,15 +1109,16 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Systems Analysis - Embedding Trade-offs
+## 📊 Systems Analysis: Embedding Trade-offs
 
 Understanding the performance implications of different embedding strategies is crucial for building efficient NLP systems that scale to production workloads.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "memory-analysis", "solution": true}
+# %%
 def analyze_embedding_memory_scaling():
     """📊 Compare embedding memory requirements across different model scales."""
     print("📊 Analyzing Embedding Memory Requirements...")
+    print("=" * 60)
 
     # Vocabulary and embedding dimension scenarios
     scenarios = [
@@ -1081,10 +1163,11 @@ def analyze_embedding_memory_scaling():
 if __name__ == "__main__":
     analyze_embedding_memory_scaling()
 
-# %% nbgrader={"grade": false, "grade_id": "lookup-performance", "solution": true}
+# %%
 def analyze_embedding_performance():
     """📊 Compare embedding lookup performance across different configurations."""
     print("\n📊 Analyzing Embedding Lookup Performance...")
+    print("=" * 60)
 
     import time
 
@@ -1136,10 +1219,11 @@ def analyze_embedding_performance():
 if __name__ == "__main__":
     analyze_embedding_performance()
 
-# %% nbgrader={"grade": false, "grade_id": "position-encoding-comparison", "solution": true}
+# %%
 def analyze_positional_encoding_strategies():
     """📊 Compare different positional encoding approaches and trade-offs."""
     print("\n📊 Analyzing Positional Encoding Trade-offs...")
+    print("=" * 60)
 
     max_seq_len = 512
     embed_dim = 256
@@ -1213,17 +1297,19 @@ if __name__ == "__main__":
 """
 ## 🧪 Module Integration Test
 
-Let's test our complete embedding system to ensure everything works together correctly.
+Final validation that everything works together correctly before module completion.
 """
 
-# %% nbgrader={"grade": true, "grade_id": "module-test", "locked": true, "points": 20}
+# %% nbgrader={"grade": true, "grade_id": "module-integration", "locked": true, "points": 20}
 def test_module():
     """🧪 Module Test: Complete Integration
 
-    Comprehensive test of entire embeddings module functionality.
+    Comprehensive test of entire module functionality.
 
-    This final test ensures all components work together and the module
-    is ready for integration with attention mechanisms and transformers.
+    This final test runs before module summary to ensure:
+    - All unit tests pass
+    - Functions work together correctly
+    - Module is ready for integration with TinyTorch
     """
     print("🧪 RUNNING MODULE INTEGRATION TEST")
     print("=" * 50)
@@ -1238,7 +1324,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Integration Test 1: Realistic NLP pipeline
-    print("🔬 Integration Test: NLP Pipeline Simulation...")
+    print("🧪 Integration Test: NLP Pipeline Simulation...")
 
     # Simulate a small transformer setup
     vocab_size = 1000
@@ -1275,7 +1361,7 @@ def test_module():
     print("✅ Variable length sentence processing works!")
 
     # Integration Test 2: Batch processing with padding
-    print("🔬 Integration Test: Batched Processing...")
+    print("🧪 Integration Test: Batched Processing...")
 
     # Create padded batch (real-world scenario)
     max_len = max(len(s) for s in sentences)
@@ -1294,7 +1380,7 @@ def test_module():
     print("✅ Batch processing with padding works!")
 
     # Integration Test 3: Different positional encoding types
-    print("🔬 Integration Test: Position Encoding Variants...")
+    print("🧪 Integration Test: Position Encoding Variants...")
 
     test_tokens = Tensor([[1, 2, 3, 4, 5]])
 
@@ -1318,7 +1404,7 @@ def test_module():
     print("✅ All positional encoding variants work!")
 
     # Integration Test 4: Memory efficiency check
-    print("🔬 Integration Test: Memory Efficiency...")
+    print("🧪 Integration Test: Memory Efficiency...")
 
     # Test that we're not creating unnecessary copies
     large_embed = EmbeddingLayer(vocab_size=10000, embed_dim=512)
@@ -1333,38 +1419,39 @@ def test_module():
 
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
-    print("📚 Summary of capabilities built:")
-    print("  • Token embedding with trainable lookup tables")
-    print("  • Learned positional encodings for position awareness")
-    print("  • Sinusoidal positional encodings for extrapolation")
-    print("  • Complete embedding system for NLP pipelines")
-    print("  • Efficient batch processing and memory management")
-    print("\n🚀 Ready for: Attention mechanisms, transformers, and language models!")
-    print("Export with: tito module complete 11")
+    print("Run: tito module complete 11")
 
 # %% [markdown]
 """
-## 🤔 ML Systems Thinking: Embedding Foundations
+## 🤔 ML Systems Reflection Questions
 
-### Question 1: Memory Scaling
+Answer these to deepen your understanding of embedding systems and their implications:
+
+### 1. Memory Scaling
 You implemented an embedding layer with vocab_size=50,000 and embed_dim=512.
 - How many parameters does this embedding table contain? _____ million
 - If using FP32 (4 bytes per parameter), how much memory does this use? _____ MB
 - If you double the embedding dimension to 1024, what happens to memory usage? _____ MB
 
-### Question 2: Lookup Complexity
+---
+
+### 2. Lookup Complexity
 Your embedding layer performs table lookups for token indices.
 - What is the time complexity of looking up a single token? O(_____)
 - For a batch of 32 sequences, each of length 128, how many lookup operations? _____
 - Why doesn't vocabulary size affect individual lookup performance? _____
 
-### Question 3: Positional Encoding Trade-offs
+---
+
+### 3. Positional Encoding Trade-offs
 You implemented both learned and sinusoidal positional encodings.
 - Learned PE for max_seq_len=2048, embed_dim=512 adds how many parameters? _____
 - What happens if you try to process a sequence longer than max_seq_len with learned PE? _____
 - Which type of PE can handle sequences longer than seen during training? _____
 
-### Question 4: Production Implications
+---
+
+### 4. Production Implications
 Your complete EmbeddingLayer combines token and positional embeddings.
 - In GPT-3 (vocab_size≈50K, embed_dim≈12K), approximately what percentage of total parameters are in the embedding table? _____%
 - If you wanted to reduce memory usage by 50%, which would be more effective: halving vocab_size or halving embed_dim? _____
@@ -1419,30 +1506,21 @@ if __name__ == "__main__":
 Congratulations! You've built a complete embedding system that transforms discrete tokens into learnable representations!
 
 ### Key Accomplishments
-- Built `Embedding` class with efficient token-to-vector lookup (10M+ token support)
-- Implemented `PositionalEncoding` for learnable position awareness (unlimited sequence patterns)
-- Created `create_sinusoidal_embeddings` with mathematical position encoding (extrapolates beyond training)
-- Developed `EmbeddingLayer` integrating both token and positional embeddings (production-ready)
-- Analyzed embedding memory scaling and lookup performance trade-offs
-- All tests pass ✅ (validated by `test_module()`)
+- **Built Embedding class** with efficient token-to-vector lookup and Xavier initialization
+- **Implemented PositionalEncoding** for learnable position-specific patterns
+- **Created sinusoidal embeddings** using the Transformer paper formula for extrapolation
+- **Developed EmbeddingLayer** combining token and positional embeddings (production-ready)
+- **All tests pass** (validated by `test_module()`)
 
-### Technical Achievements
-- **Memory Efficiency**: Optimized embedding table storage and lookup patterns
-- **Flexible Architecture**: Support for learned, sinusoidal, and no positional encoding
-- **Batch Processing**: Efficient handling of variable-length sequences with padding
-- **Systems Analysis**: Deep understanding of memory vs performance trade-offs
+### Systems Insights Discovered
+- **Memory scaling**: Embedding tables grow linearly with vocab_size x embed_dim
+- **Lookup efficiency**: O(1) per token regardless of vocabulary size
+- **Positional trade-offs**: Learned PE is task-specific; sinusoidal PE extrapolates to longer sequences
+- **Production patterns**: GPT-3's embedding table alone uses ~2.4GB of memory
 
 ### Ready for Next Steps
-Your embeddings implementation enables attention mechanisms and transformer architectures!
-The combination of token and positional embeddings provides the foundation for sequence-to-sequence models.
+Your embeddings implementation enables attention mechanisms and transformer architectures.
+Export with: `tito module complete 11`
 
 **Next**: Module 12 will add attention mechanisms for context-aware representations!
-
-### Production Context
-You've built the exact embedding patterns used in:
-- **GPT models**: Token embeddings + learned positional encoding
-- **BERT models**: Token embeddings + sinusoidal positional encoding
-- **T5 models**: Relative positional embeddings (variant of your implementations)
-
-Export with: `tito module complete 11`
 """

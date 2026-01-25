@@ -62,12 +62,19 @@ set -e  # Exit on any error
 # ============================================================================
 # Configuration
 # ============================================================================
+# These can be overridden via environment variables for testing:
+#   TINYTORCH_BRANCH=dev curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
+#   TINYTORCH_VERSION=0.1.5 TINYTORCH_BRANCH=feature/foo ./install.sh
 REPO_URL="https://github.com/harvard-edge/cs249r_book.git"
 REPO_SHORT="harvard-edge/cs249r_book"
-BRANCH="main"
-INSTALL_DIR="tinytorch"
+TAGS_API="https://api.github.com/repos/harvard-edge/cs249r_book/tags"
+TAG_PREFIX="tinytorch-v"
+BRANCH="${TINYTORCH_BRANCH:-main}"
+INSTALL_DIR="${TINYTORCH_INSTALL_DIR:-tinytorch}"
 SPARSE_PATH="tinytorch"
-TINYTORCH_VERSION="0.1.4"
+# Version is fetched from GitHub tags (single source of truth)
+# Can be overridden for testing: TINYTORCH_VERSION=0.1.5 ./install.sh
+TINYTORCH_VERSION="${TINYTORCH_VERSION:-}"
 
 # ============================================================================
 # ANSI Color Codes (for terminal output)
@@ -127,6 +134,49 @@ print_banner() {
 # ============================================================================
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+# Fetch latest version from GitHub tags API (single source of truth)
+# Sets TINYTORCH_VERSION global variable
+fetch_latest_version() {
+    # Skip if already set via environment variable
+    if [ -n "$TINYTORCH_VERSION" ]; then
+        return 0
+    fi
+
+    # Try curl first (more reliable across platforms)
+    if command_exists curl; then
+        local response
+        response=$(curl -fsSL --max-time 10 "$TAGS_API" 2>/dev/null) || true
+        if [ -n "$response" ]; then
+            # Parse JSON to find first tinytorch-v* tag
+            # Uses grep/sed for portability (no jq dependency)
+            local tag_name
+            tag_name=$(echo "$response" | grep -o "\"name\": *\"${TAG_PREFIX}[^\"]*\"" | head -1 | sed 's/.*"name": *"\([^"]*\)".*/\1/')
+            if [ -n "$tag_name" ]; then
+                TINYTORCH_VERSION="${tag_name#$TAG_PREFIX}"
+                return 0
+            fi
+        fi
+    fi
+
+    # Fallback: fetch pyproject.toml directly from raw.githubusercontent.com
+    if command_exists curl; then
+        local pyproject_url="https://raw.githubusercontent.com/${REPO_SHORT}/${BRANCH}/tinytorch/pyproject.toml"
+        local pyproject
+        pyproject=$(curl -fsSL --max-time 10 "$pyproject_url" 2>/dev/null) || true
+        if [ -n "$pyproject" ]; then
+            local version
+            version=$(echo "$pyproject" | grep -E "^version" | head -1 | sed 's/.*= *"\([^"]*\)".*/\1/')
+            if [ -n "$version" ]; then
+                TINYTORCH_VERSION="$version"
+                return 0
+            fi
+        fi
+    fi
+
+    # Final fallback: unknown version (will still work, just won't show version)
+    TINYTORCH_VERSION="latest"
 }
 
 # Check if Python version is 3.8+
@@ -464,6 +514,9 @@ print_success_message() {
 # ============================================================================
 
 main() {
+    # Fetch version from GitHub (single source of truth: pyproject.toml via tags)
+    fetch_latest_version
+
     print_banner
 
     # Pre-flight checks

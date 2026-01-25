@@ -109,11 +109,11 @@ EPSILON = 1e-7  # Small value to prevent log(0) and numerical instability
 
 # %% [markdown]
 """
-## 💡 Introduction - What Are Loss Functions?
+## 💡 Introduction: What Are Loss Functions?
 
 Loss functions are the mathematical conscience of machine learning. They measure the distance between what your model predicts and what actually happened. Without loss functions, models have no way to improve - they're like athletes training without knowing their score.
 
-## 💡 The Three Essential Loss Functions
+### The Three Essential Loss Functions
 
 Think of loss functions as different ways to measure "wrongness" - each optimized for different types of problems:
 
@@ -180,9 +180,9 @@ Each loss function creates a different "error landscape" that guides learning in
 
 # %% [markdown]
 """
-## 📐 Mathematical Foundations
+## 📐 Foundations: Mathematical Background
 
-## 📐 Mean Squared Error (MSE)
+### Mean Squared Error (MSE)
 The foundation of regression, MSE measures the average squared distance between predictions and targets:
 
 ```
@@ -194,7 +194,7 @@ MSE = (1/N) * Σ(prediction_i - target_i)²
 - Heavily penalizes large errors (error of 2 becomes 4, error of 10 becomes 100)
 - Creates smooth gradients for optimization
 
-## 📐 Cross-Entropy Loss
+### Cross-Entropy Loss
 For classification, we need to measure how wrong our probability distributions are:
 
 ```
@@ -210,7 +210,7 @@ log_softmax(x) = x - log(Σ exp(x_i))
 
 This prevents exp(large_number) from exploding to infinity.
 
-## 📐 Binary Cross-Entropy
+### Binary Cross-Entropy
 A specialized case where we have only two classes:
 ```
 BCE = -(target * log(prediction) + (1-target) * log(1-prediction))
@@ -221,14 +221,11 @@ The mathematics naturally handles both "positive" and "negative" cases in a sing
 
 # %% [markdown]
 """
-## 🏗️ Implementation - Building Loss Functions
+## 🏗️ Implementation: Building Loss Functions
 
 Let's implement our loss functions with proper numerical stability and clear educational structure.
-"""
 
-# %% [markdown]
-"""
-## 🏗️ Log-Softmax - The Numerically Stable Foundation
+### Log-Softmax: The Numerically Stable Foundation
 
 Before implementing loss functions, we need a reliable way to compute log-softmax. This function is the numerically stable backbone of classification losses.
 
@@ -269,7 +266,7 @@ logits - log(sum)              sum(exp(shifted))
 Both give the same result, but the stable version never overflows!
 """
 
-# %% nbgrader={"grade": false, "grade_id": "log_softmax", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "log-softmax", "solution": true}
 #| export
 def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
     """
@@ -307,10 +304,21 @@ def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
     return Tensor(result)
     ### END SOLUTION
 
-# %% nbgrader={"grade": true, "grade_id": "test_log_softmax", "locked": true, "points": 10}
+# %% [markdown]
+"""
+### 🧪 Unit Test: Log-Softmax
+
+This test validates our log_softmax function works correctly with numerical stability.
+
+**What we're testing**: Numerical stability and correctness of log-softmax computation
+**Why it matters**: Foundation for cross-entropy loss - must handle large values without overflow
+**Expected**: Stable results even with extreme inputs, softmax sums to 1
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-log-softmax", "locked": true, "points": 10}
 def test_unit_log_softmax():
-    """🔬 Test log_softmax numerical stability and correctness."""
-    print("🔬 Unit Test: Log-Softmax...")
+    """🧪 Test log_softmax numerical stability and correctness."""
+    print("🧪 Unit Test: Log-Softmax...")
 
     # Test basic functionality
     x = Tensor([[1.0, 2.0, 3.0], [0.1, 0.2, 0.9]])
@@ -337,7 +345,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ MSELoss - Measuring Continuous Prediction Quality
+### MSELoss: Measuring Continuous Prediction Quality
 
 Mean Squared Error is the workhorse of regression problems. It measures how far your continuous predictions are from the true values.
 
@@ -398,7 +406,7 @@ Error Sensitivity Comparison:
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "mse_loss", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "mse-loss", "solution": true}
 #| export
 class MSELoss:
     """Mean Squared Error loss for regression tasks."""
@@ -456,10 +464,21 @@ class MSELoss:
         """
         pass
 
-# %% nbgrader={"grade": true, "grade_id": "test_mse_loss", "locked": true, "points": 10}
+# %% [markdown]
+"""
+### 🧪 Unit Test: MSE Loss
+
+This test validates our MSELoss implementation with various prediction scenarios.
+
+**What we're testing**: Mean squared error calculation with perfect and imperfect predictions
+**Why it matters**: MSE is the foundation for regression - must be mathematically correct
+**Expected**: Zero loss for perfect predictions, positive loss for errors, non-negative always
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-mse-loss", "locked": true, "points": 10}
 def test_unit_mse_loss():
-    """🔬 Test MSELoss implementation and properties."""
-    print("🔬 Unit Test: MSE Loss...")
+    """🧪 Test MSELoss implementation and properties."""
+    print("🧪 Unit Test: MSE Loss...")
 
     loss_fn = MSELoss()
 
@@ -491,7 +510,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ CrossEntropyLoss - Measuring Classification Confidence
+### CrossEntropyLoss: Measuring Classification Confidence
 
 Cross-entropy loss is the gold standard for multi-class classification. It measures how wrong your probability predictions are and heavily penalizes confident mistakes.
 
@@ -575,7 +594,7 @@ Uses: CrossEntropyLoss            Uses: BinaryCrossEntropyLoss
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "cross_entropy_loss", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "cross-entropy-loss", "solution": true}
 #| export
 class CrossEntropyLoss:
     """Cross-entropy loss for multi-class classification."""
@@ -637,10 +656,21 @@ class CrossEntropyLoss:
         """
         pass
 
-# %% nbgrader={"grade": true, "grade_id": "test_cross_entropy_loss", "locked": true, "points": 10}
+# %% [markdown]
+"""
+### 🧪 Unit Test: Cross-Entropy Loss
+
+This test validates our CrossEntropyLoss implementation with various confidence levels.
+
+**What we're testing**: Cross-entropy loss with confident correct, uncertain, and confident wrong predictions
+**Why it matters**: CrossEntropy is the gold standard for classification - must handle all confidence levels
+**Expected**: Low loss for confident correct, high loss for confident wrong, numerical stability
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-cross-entropy-loss", "locked": true, "points": 10}
 def test_unit_cross_entropy_loss():
-    """🔬 Test CrossEntropyLoss implementation and properties."""
-    print("🔬 Unit Test: Cross-Entropy Loss...")
+    """🧪 Test CrossEntropyLoss implementation and properties."""
+    print("🧪 Unit Test: Cross-Entropy Loss...")
 
     loss_fn = CrossEntropyLoss()
 
@@ -677,7 +707,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ BinaryCrossEntropyLoss - Measuring Yes/No Decision Quality
+### BinaryCrossEntropyLoss: Measuring Yes/No Decision Quality
 
 Binary Cross-Entropy is specialized for yes/no decisions. It's like regular cross-entropy but optimized for the special case of exactly two classes.
 
@@ -777,7 +807,7 @@ Message: "Be confident about positive class, uncertain is okay,
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "binary_cross_entropy_loss", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "binary-cross-entropy-loss", "solution": true}
 #| export
 class BinaryCrossEntropyLoss:
     """Binary cross-entropy loss for binary classification."""
@@ -839,10 +869,21 @@ class BinaryCrossEntropyLoss:
         """
         pass
 
-# %% nbgrader={"grade": true, "grade_id": "test_binary_cross_entropy_loss", "locked": true, "points": 10}
+# %% [markdown]
+"""
+### 🧪 Unit Test: Binary Cross-Entropy Loss
+
+This test validates our BinaryCrossEntropyLoss implementation with binary classification scenarios.
+
+**What we're testing**: Binary cross-entropy with perfect, worst, and boundary predictions
+**Why it matters**: BCE is essential for binary classification - must handle edge cases
+**Expected**: Low loss for correct predictions, high loss for wrong predictions, numerical stability at boundaries
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-binary-cross-entropy-loss", "locked": true, "points": 10}
 def test_unit_binary_cross_entropy_loss():
-    """🔬 Test BinaryCrossEntropyLoss implementation and properties."""
-    print("🔬 Unit Test: Binary Cross-Entropy Loss...")
+    """🧪 Test BinaryCrossEntropyLoss implementation and properties."""
+    print("🧪 Unit Test: Binary Cross-Entropy Loss...")
 
     loss_fn = BinaryCrossEntropyLoss()
 
@@ -879,11 +920,11 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Integration - Bringing It Together
+## 🔧 Integration: Bringing It Together
 
 Now let's test how our loss functions work together with real data scenarios and explore their behavior with different types of predictions.
 
-## 🔧 Real-World Loss Function Usage Patterns
+### Real-World Loss Function Usage Patterns
 
 Understanding when and why to use each loss function is crucial for ML engineering success:
 
@@ -909,7 +950,7 @@ BCE: Spam detection, fraud detection, medical diagnosis
 CE:  Image classification, language modeling, multiclass text classification
 ```
 
-## 🔧 Loss Function Behavior Comparison
+### Loss Function Behavior Comparison
 
 Each loss function creates different learning pressures on your model:
 
@@ -927,7 +968,7 @@ BCE/CE: Logarithmic growth, explodes with confident wrong predictions
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "loss_comparison", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "loss-comparison", "solution": true}
 def analyze_loss_behaviors():
     """
     📊 Compare how different loss functions behave with various prediction patterns.
@@ -971,7 +1012,7 @@ def analyze_loss_behaviors():
     return mse.data, ce.data, bce.data
 
 
-# %% nbgrader={"grade": false, "grade_id": "loss_sensitivity", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "loss-sensitivity", "solution": true}
 def analyze_loss_sensitivity():
     """
     📊 Analyze how sensitive each loss function is to prediction errors.
@@ -1031,11 +1072,11 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Systems Analysis - Understanding Loss Function Performance
+## 📊 Systems Analysis: Understanding Loss Function Performance
 
 Loss functions seem simple, but they have important computational and numerical properties that affect training performance. Let's analyze the systems aspects.
 
-## 📊 Computational Complexity Analysis
+### Computational Complexity Analysis
 
 Different loss functions have different computational costs, especially at scale:
 
@@ -1068,7 +1109,7 @@ Cross-entropy is C times more expensive than MSE!
 For ImageNet (C=1000), CE is 1000x more expensive than MSE.
 ```
 
-## 📊 Memory Layout and Access Patterns
+### Memory Layout and Access Patterns
 
 ```
 Memory Usage Patterns:
@@ -1097,7 +1138,7 @@ Memory: 3*B*sizeof(float)            │ log + index
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze_numerical_stability", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-numerical-stability", "solution": true}
 def analyze_numerical_stability():
     """
     📊 Demonstrate why numerical stability matters in loss computation.
@@ -1135,7 +1176,7 @@ def analyze_numerical_stability():
     print("   With it: We can handle arbitrarily large logits safely")
 
 
-# %% nbgrader={"grade": false, "grade_id": "analyze_loss_memory", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-loss-memory", "solution": true}
 def analyze_loss_memory():
     """
     📊 Analyze memory usage patterns of different loss functions.
@@ -1187,11 +1228,11 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Production Context - How Loss Functions Scale
+### Production Context: How Loss Functions Scale
 
 Understanding how loss functions behave in production helps make informed engineering decisions about model architecture and training strategies.
 
-## 📊 Loss Function Scaling Challenges
+**Loss Function Scaling Challenges**
 
 As models grow larger, loss function bottlenecks become critical:
 
@@ -1211,7 +1252,7 @@ Memory grows as B*C for cross-entropy!
 At scale, vocabulary (C) dominates everything.
 ```
 
-## 📊 Engineering Optimizations in Production
+**Engineering Optimizations in Production**
 
 ```
 Common Production Optimizations:
@@ -1240,10 +1281,10 @@ Common Production Optimizations:
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze_production_patterns", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-production-patterns", "solution": true}
 def analyze_production_patterns():
     """
-    🚀 Analyze loss function patterns in production ML systems.
+    📊 Analyze loss function patterns in production ML systems.
 
     Real insights from systems perspective.
     """
@@ -1296,7 +1337,7 @@ Final validation that everything works together correctly.
 """
 
 
-# %% nbgrader={"grade": true, "grade_id": "test_module", "locked": true, "points": 20}
+# %% nbgrader={"grade": true, "grade_id": "module-integration", "locked": true, "points": 20}
 def test_module():
     """🧪 Module Test: Complete Integration
 
@@ -1320,7 +1361,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test realistic end-to-end scenario with previous modules
-    print("🔬 Integration Test: Realistic training scenario...")
+    print("🧪 Integration Test: Realistic training scenario...")
 
     # Simulate a complete prediction -> loss computation pipeline
 
@@ -1372,13 +1413,13 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🤔 ML Systems Thinking: Loss Function Engineering
+## 🤔 ML Systems Reflection Questions
 
-Before we finish, let's reflect on what you've learned about loss functions from a systems perspective.
+Answer these to deepen your understanding of loss functions and their systems implications:
 
-### Memory and Performance
+### 1. Memory and Performance
 
-**Question 1: Loss Function Selection for Large Vocabulary**
+**Question**: Loss Function Selection for Large Vocabulary
 
 You're building a language model with a 50,000 word vocabulary. Your GPU has 16GB of memory, and you want to use batch size 128.
 
@@ -1402,7 +1443,8 @@ Strategies to reduce memory:
 
 ---
 
-**Question 2: Loss Function Performance Bottleneck**
+### 2. Loss Function Performance Bottleneck
+**Question**: Performance Analysis
 
 You profile your training loop and find:
 - Forward pass (model): 80ms
@@ -1429,9 +1471,8 @@ Your model has 1000 output classes. What's the bottleneck and how would you fix 
 
 ---
 
-### Numerical Stability
-
-**Question 3: Debugging Exploding Loss**
+### 3. Numerical Stability
+**Question**: Debugging Exploding Loss
 
 During training, you see:
 ```
@@ -1470,9 +1511,8 @@ loss = -log_softmax[target]
 
 ---
 
-### Production Considerations
-
-**Question 4: Real-Time Inference Latency**
+### 4. Production Considerations
+**Question**: Real-Time Inference Latency
 
 Your spam filter needs to classify emails in <10ms. Currently:
 - Model inference: 3ms
@@ -1513,7 +1553,8 @@ confidence = abs(prediction.data - 0.5) * 2  # Distance from decision boundary
 
 ---
 
-**Question 5: Class Imbalance in Medical Diagnosis**
+### 5. Class Imbalance in Medical Diagnosis
+**Question**: Handling Class Imbalance
 
 You're building a cancer detection system:
 - 95% of samples are negative (healthy)
@@ -1560,9 +1601,8 @@ Automatically downweights easy examples (majority class).
 
 ---
 
-### Systems Thinking
-
-**Question 6: Batch Size and Loss Computation**
+### 6. Batch Size and Loss Computation
+**Question**: Systems Thinking
 
 You're training on a GPU with 24GB memory. With batch size 32, memory usage is 8GB. You increase batch size to 128.
 
@@ -1617,7 +1657,7 @@ optimizer.step()  # Update once with accumulated gradients
 
 ---
 
-These questions test your systems understanding of loss functions - not just "how do they work" but "how do they behave in production at scale." Keep these considerations in mind as you build real ML systems!
+**Key insight**: These questions test your systems understanding of loss functions - not just "how do they work" but "how do they behave in production at scale." Keep these considerations in mind as you build real ML systems!
 """
 
 # %% [markdown]
@@ -1674,14 +1714,18 @@ if __name__ == "__main__":
 Congratulations! You've built the measurement system that enables all machine learning!
 
 ### Key Accomplishments
-- Built 3 essential loss functions: MSE, CrossEntropy, and BinaryCrossEntropy ✅
-- Implemented numerical stability with log-sum-exp trick ✅
-- Discovered memory scaling patterns with batch size and vocabulary ✅
-- Analyzed production trade-offs between different loss function choices ✅
-- All tests pass ✅ (validated by `test_module()`)
+- **Built 3 essential loss functions**: MSE, CrossEntropy, and BinaryCrossEntropy
+- **Implemented numerical stability** with log-sum-exp trick for handling large logits
+- **Discovered memory scaling patterns** with batch size and vocabulary size
+- **Analyzed production trade-offs** between different loss function choices
+- **All tests pass** (validated by `test_module()`)
 
-### Ready for Next Steps
-Your loss functions provide the essential feedback signal for learning. These "error measurements" will become the starting point for backpropagation in Module 06 (Autograd)!
+### Systems Insights Discovered
+- **Memory scaling**: CrossEntropy memory grows as B x C (batch x classes)
+- **Numerical stability**: Log-sum-exp trick prevents overflow with large logits
+- **Computational cost**: CE is C times more expensive than MSE due to softmax
+- **Production patterns**: Hierarchical softmax and sampled softmax for large vocabularies
+
 Export with: `tito module complete 04`
 
 **Next**: Module 05 will add DataLoader for efficient data pipelines, then Module 06 adds automatic differentiation!

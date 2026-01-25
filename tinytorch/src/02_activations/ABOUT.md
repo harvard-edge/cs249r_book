@@ -410,7 +410,7 @@ Let's walk through the key similarities and differences:
 - **Line 1 (Import)**: TinyTorch imports activation classes; PyTorch uses functional interface `torch.nn.functional`. Both approaches work; PyTorch also supports class-based activations via `torch.nn.ReLU()`.
 - **Line 4-6 (ReLU)**: Identical semantics. Both zero out negative values, preserve positive values.
 - **Line 9-10 (Sigmoid)**: Identical mathematical function. Both use numerically stable implementations to prevent overflow.
-- **Line 13-15 (Softmax)**: Same mathematical operation. Both require specifying the dimension for multi-dimensional tensors. PyTorch uses `dim` keyword argument; TinyTorch defaults to `dim=-1`.
+- **Line 13-15 (Softmax)**: Same mathematical operation. Both require specifying the dimension for multidimensional tensors. PyTorch uses `dim` keyword argument; TinyTorch defaults to `dim=-1`.
 
 ```{tip} What's Identical
 

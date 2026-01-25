@@ -27,6 +27,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
+from tinytorch.core.layers import Linear
+from tinytorch.perf.quantization import (
+    Quantizer,
+    QuantizedLinear,
+    quantize_int8,
+    dequantize_int8,
+)
 
 
 class TestQuantizationBasics:
@@ -34,11 +41,7 @@ class TestQuantizationBasics:
 
     def test_quantizer_import(self):
         """Verify Quantizer can be imported."""
-        try:
-            from tinytorch.perf.quantization import Quantizer
-            assert Quantizer is not None
-        except ImportError as e:
-            pytest.skip(f"Quantizer not yet exported: {e}")
+        assert Quantizer is not None
 
     def test_quantize_produces_int8(self):
         """
@@ -47,11 +50,6 @@ class TestQuantizationBasics:
         WHY: INT8 is the target representation. Values outside this
         range would overflow and produce garbage.
         """
-        try:
-            from tinytorch.perf.quantization import Quantizer
-        except ImportError:
-            pytest.skip("Quantizer not yet exported")
-
         # Create FP32 tensor
         fp32_tensor = Tensor(np.random.randn(10, 10).astype(np.float32))
 
@@ -69,11 +67,6 @@ class TestQuantizationBasics:
         WHY: Quantization is lossy, but should be approximately reversible.
         Large errors would destroy model accuracy.
         """
-        try:
-            from tinytorch.perf.quantization import Quantizer
-        except ImportError:
-            pytest.skip("Quantizer not yet exported")
-
         # Create FP32 tensor with known values
         original = Tensor(np.array([0.5, -0.5, 1.0, -1.0]).astype(np.float32))
 
@@ -100,11 +93,6 @@ class TestQuantizationAdvanced:
         WHY: Constant tensors are an edge case where min=max. The algorithm
         must handle this gracefully without division by zero.
         """
-        try:
-            from tinytorch.perf.quantization import quantize_int8
-        except ImportError:
-            pytest.skip("quantize_int8 not yet exported")
-
         # All zeros
         constant = Tensor(np.zeros((4, 4), dtype=np.float32))
         q_tensor, scale, zero_point = quantize_int8(constant)
@@ -119,11 +107,6 @@ class TestQuantizationAdvanced:
         WHY: If [0.1, 0.2, 0.3] becomes [5, 4, 6], the model's predictions
         would be garbage. Relative ordering must be preserved.
         """
-        try:
-            from tinytorch.perf.quantization import quantize_int8
-        except ImportError:
-            pytest.skip("quantize_int8 not yet exported")
-
         # Strictly increasing values
         original = Tensor(np.array([0.1, 0.2, 0.3, 0.4, 0.5], dtype=np.float32))
         q_tensor, _, _ = quantize_int8(original)
@@ -142,11 +125,6 @@ class TestQuantizationAdvanced:
         WHY: Neural network weights are typically centered around zero
         with both positive and negative values.
         """
-        try:
-            from tinytorch.perf.quantization import quantize_int8, dequantize_int8
-        except ImportError:
-            pytest.skip("Quantization functions not yet exported")
-
         # Mixed positive and negative
         original = Tensor(np.array([-2.0, -1.0, 0.0, 1.0, 2.0], dtype=np.float32))
         q_tensor, scale, zero_point = quantize_int8(original)
@@ -174,12 +152,6 @@ class TestQuantizedLinear:
         WHY: Quantized layers should approximate the original behavior.
         Large deviations indicate incorrect implementation.
         """
-        try:
-            from tinytorch.perf.quantization import QuantizedLinear
-            from tinytorch.core.layers import Linear
-        except ImportError:
-            pytest.skip("QuantizedLinear not yet exported")
-
         # Create and quantize a linear layer
         linear = Linear(4, 3)
         q_linear = QuantizedLinear(linear)

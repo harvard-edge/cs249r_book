@@ -18,7 +18,7 @@ Several TinyTorch modules have grown quite large (1000+ lines), making them diff
 
 ## 🎯 **Proposed Solution**
 
-Break each complex module into **smaller, focused sub-components** while maintaining the module structure and educational flow. Think "bite-sized pieces that still work as a whole."
+Break each complex module into **smaller, focused subcomponents** while maintaining the module structure and educational flow. Think "bite-sized pieces that still work as a whole."
 
 ### Example: Breaking Down `02_tensor` Module
 
@@ -74,12 +74,12 @@ modules/15_mlops/
 
 ### 1. **Maintain Module Unity**
 - Keep the main `{module}_dev.py` file as the **primary entry point**
-- Use imports to bring all sub-components together
+- Use imports to bring all subcomponents together
 - Ensure the module still "feels like one cohesive lesson"
 
 ### 2. **Logical Decomposition**
 - Break modules by **conceptual boundaries**, not arbitrary line counts
-- Each sub-component should be **self-contained** but **integrate seamlessly**
+- Each subcomponent should be **self-contained** but **integrate seamlessly**
 - Maintain the **Build → Use → Optimize** educational flow across parts
 
 ### 3. **Educational Benefits**
@@ -128,7 +128,7 @@ __all__ = ['Tensor', 'run_complete_tensor_demo']
 
 ## 📋 **Success Criteria**
 
-- [ ] No single sub-component exceeds ~300 lines
+- [ ] No single subcomponent exceeds ~300 lines
 - [ ] Each part has clear educational purpose
 - [ ] Main module file remains functional entry point
 - [ ] All inline tests continue to pass

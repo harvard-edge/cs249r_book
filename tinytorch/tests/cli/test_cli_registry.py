@@ -134,20 +134,13 @@ class TestCommandFiles:
             'setup': 'setup.py',
             'system': 'system/__init__.py',  # Now in subfolder
             'module': 'module/__init__.py',   # Now in subfolder
-            'src': 'src.py',
+            'dev': 'dev/__init__.py',         # Now in subfolder
             'package': 'package/__init__.py', # Now in subfolder
             'nbgrader': 'nbgrader.py',
-            'milestones': 'milestone.py',
-            'leaderboard': 'leaderboard.py',
+            'milestone': 'milestone.py',      # Singular, not plural
             'olympics': 'olympics.py',
             'benchmark': 'benchmark.py',
             'community': 'community.py',
-            'export': 'export.py',
-            'test': 'test.py',
-            'book': 'book.py',
-            'grade': 'grade.py',
-            'demo': 'demo.py',
-            'logo': 'logo.py',
         }
 
         for cmd_name, expected_file in cmd_to_file.items():
@@ -168,14 +161,12 @@ class TestCommandFiles:
         # Files we expect to see (registered commands + internal helpers)
         expected_files = {
             # Registered top-level commands
-            'setup.py', 'src.py', 'nbgrader.py',
+            'setup.py', 'nbgrader.py',
             'milestone.py', 'benchmark.py',
-            'community.py', 'export.py', 'test.py',
-            'grade.py', 'logo.py',
-            # Known internal/subcommand files (not top-level)
+            'community.py', 'olympics.py',
+            # Known internal/helper files (not top-level commands)
             'login.py',  # Subcommand of community
-            'clean_workspace.py', 'version.py', 'check.py', 'view.py',
-            'protect.py', 'report.py'
+            'export_utils.py',  # Helper for export functionality
         }
 
         orphaned = []
@@ -209,8 +200,7 @@ class TestEpilogDocumentation:
             'module',
             'package',
             'nbgrader',
-            'milestones',
-            'leaderboard',
+            'milestone',
             'olympics'
         ]
 

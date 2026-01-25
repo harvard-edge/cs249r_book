@@ -31,7 +31,7 @@ def test_core_module_integration():
         print("✅ Tensor + Autograd integration working")
 
         # Test tensor + layers integration
-        from tinytorch.nn import Linear
+        from tinytorch.core.layers import Linear
         layer = Linear(3, 2)
 
         # This tests that layers can accept tensor inputs
@@ -52,7 +52,7 @@ def test_training_pipeline_integration():
     try:
         # Test data + model integration
         from tinytorch.utils.data import DataLoader, SimpleDataset
-        from tinytorch.nn import Linear
+        from tinytorch.core.layers import Linear
         from tinytorch.core.optimizers import SGD
 
         # Create simple dataset
@@ -99,7 +99,7 @@ def test_optimization_module_integration():
 
         # Test quantization + models (when available)
         import tinytorch.quantization
-        from tinytorch.nn import Linear
+        from tinytorch.core.layers import Linear
 
         model = Linear(10, 5)
         # quantized_model = tinytorch.quantization.quantize(model)  # When implemented
@@ -126,7 +126,7 @@ def test_import_compatibility():
 
         # Test core imports still work
         from tinytorch.core import tensor, autograd
-        from tinytorch.nn import Linear, functional
+        from tinytorch.core.layers import Linear, functional
         from tinytorch.utils.data import DataLoader
 
         print("✅ All import paths compatible")
@@ -145,7 +145,7 @@ def test_cross_module_data_flow():
 
     try:
         from tinytorch.core.tensor import Tensor
-        from tinytorch.nn import Linear
+        from tinytorch.core.layers import Linear
         from tinytorch.utils.data import SimpleDataset
 
         # Create data

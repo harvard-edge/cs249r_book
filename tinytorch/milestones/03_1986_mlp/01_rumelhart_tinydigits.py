@@ -36,15 +36,8 @@ real-world problems. Let's recreate that breakthrough using YOUR Tiny🔥Torch!
 
     Sample 8×8 Digit Images:              What the Hidden Layer Learns:
 
-    ┌────────┐  ┌────────┐               • Edge detectors (horizontal, vertical)
-    │░░██░░░░│  │░░░██░░░│               • Curve patterns (loops in 0, 6, 8, 9)
-    │░██░░░░░│  │░░░██░░░│               • Stroke endings (1, 7 vs 8, 0)
-    │░██░░░░░│  │░░░██░░░│               • Intersection points (4, 8)
-    │░██░░░░░│  │░░░██░░░│
-    │░██░░░░░│  │░░░██░░░│               32 hidden units = 32 feature detectors
-    │░░██████│  │░░░██░░░│               that YOUR network learns automatically!
-    └────────┘  └────────┘
-       "1"         "7"
+can 
+       "0"         "1"
 
 🔍 MLP LIMITATION (Why CNNs will be better):
     MLP treats each pixel INDEPENDENTLY - no spatial awareness!
@@ -111,7 +104,7 @@ console = Console()
 # │                     │ layer (64→32)                  │ digit patterns              │
 # │                     │                                │                             │
 # │ Module 03: Linear   │ Two layers: feature extraction │ 2,378 parameters total      │
-# │                     │ (64→32) + classification (32→10)│ learned by YOUR autograd    │
+# │                     │ (64→32)+classification (32→10 )│ learned by YOUR autograd    │
 # │                     │                                │                             │
 # │ Module 04: Loss     │ CrossEntropyLoss for           │ Multi-class loss guides     │
 # │                     │ 10-way classification          │ learning of all 10 digits   │

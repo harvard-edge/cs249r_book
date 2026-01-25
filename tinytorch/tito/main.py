@@ -97,7 +97,7 @@ class TinyTorchCLI:
 
         # Command categorization for help display
         self.student_commands = ['module', 'milestone', 'community', 'benchmark', 'olympics']
-        self.developer_commands = ['dev', 'system', 'src', 'package', 'nbgrader']
+        self.developer_commands = ['dev', 'system', 'package', 'nbgrader']
 
         # Welcome screen sections (used for both tito and tito --help)
         self.welcome_sections = {

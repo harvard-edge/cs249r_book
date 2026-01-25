@@ -7,6 +7,7 @@ Implements the natural workflow:
 3. tito module complete 01 → Tests, exports, updates progress
 """
 
+import os
 import subprocess
 import sys
 from argparse import ArgumentParser, Namespace
@@ -615,7 +616,9 @@ class ModuleWorkflowCommand(BaseCommand):
             if next_num in module_mapping:
                 next_module = module_mapping[next_num]
                 next_name = next_module.split('_', 1)[1].title()
-                celebration_text.append(f"💡 Next: [bold cyan]tito module start {next_num}[/bold cyan]\n", style="")
+                celebration_text.append("💡 Next: ", style="")
+                celebration_text.append(f"tito module start {next_num}", style="bold cyan")
+                celebration_text.append("\n", style="")
                 celebration_text.append(f"         Build {next_name}", style="dim")
 
             self.console.print(Panel(
@@ -633,8 +636,128 @@ class ModuleWorkflowCommand(BaseCommand):
 
         return 0 if success else 1
 
+    def complete_all_modules(self, skip_tests: bool = False, skip_export: bool = False) -> int:
+        """Complete all modules in sequence.
+
+        This iterates through all modules in order (01 → 20) and runs
+        complete_module on each one. Useful for:
+        - CI validation of all modules
+        - Students who want to export everything they've built
+        - Rebuilding the full package from existing notebooks
+
+        Note: This expects notebooks to exist in modules/. For rebuilding
+        from src/, use 'tito dev export --all' instead.
+        """
+        from rich import box
+
+        module_mapping = get_module_mapping()
+        module_nums = sorted(module_mapping.keys(), key=lambda x: int(x))
+
+        console = self.console
+        console.print(Panel(
+            f"[bold cyan]Completing All Modules ({len(module_nums)} total)[/bold cyan]\n\n"
+            "This will test and export each module in sequence.\n"
+            "[dim]Modules without notebooks will be skipped.[/dim]",
+            title="🔄 Complete All Modules",
+            border_style="cyan",
+            box=box.ROUNDED
+        ))
+        console.print()
+
+        passed = 0
+        failed = 0
+        skipped = 0
+
+        for module_num in module_nums:
+            module_name = module_mapping[module_num]
+
+            # Check if notebook exists
+            short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+            notebook_path = self.config.project_root / "modules" / module_name / f"{short_name}.ipynb"
+
+            if not notebook_path.exists():
+                console.print(f"  [dim]⏭️  Module {module_num}: {module_name} (no notebook)[/dim]")
+                skipped += 1
+                continue
+
+            console.print(f"  [cyan]▶[/cyan] Module {module_num}: {module_name}...", end=" ")
+
+            # Temporarily suppress the elaborate complete_module output
+            # by calling the core logic directly
+            result = self._complete_module_quiet(module_num, module_name, skip_tests, skip_export)
+
+            if result == 0:
+                passed += 1
+                console.print("[green]✓[/green]")
+            else:
+                failed += 1
+                console.print("[red]✗[/red]")
+                # Stop on first failure
+                console.print(f"\n[red]❌ Failed at module {module_num}[/red]")
+                break
+
+        console.print()
+
+        if failed == 0:
+            console.print(Panel(
+                f"[bold green]✅ All modules completed![/bold green]\n\n"
+                f"Passed: {passed}  Skipped: {skipped}",
+                title="🎉 Success",
+                border_style="green",
+                box=box.ROUNDED
+            ))
+            return 0
+        else:
+            console.print(Panel(
+                f"[bold red]❌ Module completion failed[/bold red]\n\n"
+                f"Passed: {passed}  Failed: {failed}  Skipped: {skipped}",
+                title="⚠️ Failure",
+                border_style="red",
+                box=box.ROUNDED
+            ))
+            return 1
+
+    def _complete_module_quiet(self, module_num: str, module_name: str,
+                                skip_tests: bool, skip_export: bool) -> int:
+        """Complete a single module without verbose output.
+
+        Core logic extracted from complete_module for use in batch operations.
+        Returns 0 on success, 1 on failure.
+        """
+        # Run unit tests
+        if not skip_tests:
+            unit_result = self._run_inline_unit_tests(module_name, verbose=False)
+            if unit_result['failed'] > 0:
+                return 1
+
+        # Export to package
+        if not skip_export:
+            export_result = self.export_module(module_name)
+            if export_result != 0:
+                return 1
+
+        # Run integration tests (after export)
+        if not skip_tests:
+            integration_result = self._run_integration_tests(module_name, verbose=False)
+            if integration_result['failed'] > 0:
+                return 1
+
+        # Update progress
+        progress = self.get_progress_data()
+        self.update_progress(module_num, module_name)
+
+        return 0
+
     def _trigger_submission(self):
-        """Asks the user to submit their progress if they are logged in."""
+        """Asks the user to submit their progress if they are logged in.
+
+        In CI mode (non-interactive), skips the prompt entirely.
+        """
+        # Skip interactive prompts in CI/non-interactive mode
+        # Check for common CI environment indicators
+        if os.environ.get('CI') or os.environ.get('GITHUB_ACTIONS') or not sys.stdin.isatty():
+            return
+
         self.console.print()  # Add a blank line for spacing
 
         if auth.is_logged_in():
@@ -723,12 +846,22 @@ class ModuleWorkflowCommand(BaseCommand):
                 self.console.print(f"   [dim yellow]No source file found: {dev_file}[/dim yellow]")
             return {'passed': 0, 'failed': 0, 'tests': [], 'returncode': 0}
 
+        # Set up environment with project root in PYTHONPATH
+        # This allows src files to import from tinytorch.core.*
+        env = os.environ.copy()
+        pythonpath = env.get('PYTHONPATH', '')
+        if pythonpath:
+            env['PYTHONPATH'] = f"{project_root}:{pythonpath}"
+        else:
+            env['PYTHONPATH'] = str(project_root)
+
         # Run the module file (which triggers if __name__ == "__main__" tests)
         result = subprocess.run(
             [sys.executable, str(dev_file.absolute())],
             capture_output=True,
             text=True,
-            cwd=project_root
+            cwd=project_root,
+            env=env
         )
 
         # Parse output to extract individual test results
@@ -1324,6 +1457,12 @@ class ModuleWorkflowCommand(BaseCommand):
             elif args.module_command == 'resume':
                 return self.resume_module(getattr(args, 'module_number', None))
             elif args.module_command == 'complete':
+                # Check for --all flag
+                if getattr(args, 'all', False):
+                    return self.complete_all_modules(
+                        getattr(args, 'skip_tests', False),
+                        getattr(args, 'skip_export', False)
+                    )
                 return self.complete_module(
                     getattr(args, 'module_number', None),
                     getattr(args, 'skip_tests', False),

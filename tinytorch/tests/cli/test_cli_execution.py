@@ -69,9 +69,8 @@ class TestCommandExecution:
         assert "Tiny" in result.stdout or "CLI" in result.stdout
 
     @pytest.mark.parametrize("command", [
-        'setup', 'system', 'module', 'src', 'package', 'nbgrader',
-        'milestones', 'benchmark', 'community', 'export', 'test',
-        'grade', 'logo'
+        'setup', 'system', 'module', 'dev', 'package', 'nbgrader',
+        'milestone', 'benchmark', 'community', 'olympics'
     ])
     def test_command_help_works(self, command):
         """Test that each command's help can be displayed."""
@@ -99,7 +98,7 @@ class TestCommandExecution:
         ('module', 'status'),
         ('module', 'list'),
         ('community', 'join'),
-        ('milestones', 'status'),
+        ('milestone', 'status'),
     ])
     def test_subcommand_help_works(self, command, subcommand):
         """Test that subcommands can show help."""
@@ -135,7 +134,7 @@ class TestCommandGrouping:
         )
 
         # Key student commands should be visible
-        student_commands = ['setup', 'module', 'milestones']
+        student_commands = ['setup', 'module', 'milestone']
 
         for cmd in student_commands:
             assert cmd in result.stdout, (
@@ -152,7 +151,7 @@ class TestCommandGrouping:
         )
 
         # Developer commands should be in help
-        dev_commands = ['src', 'package', 'nbgrader']
+        dev_commands = ['dev', 'package', 'nbgrader']
 
         for cmd in dev_commands:
             assert cmd in result.stdout, (
