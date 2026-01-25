@@ -9,16 +9,12 @@ name: 🔥 TinyTorch CI
 #   Stage 1: INLINE BUILD
 #     └─ Build package from src/ modules (if this fails, nothing works)
 #
-#   Stage 2: UNIT TESTS
-#     └─ Test individual module functions
+#   Stage 2-4: PARALLEL TESTS (all depend on Stage 1 only)
+#     ├─ Stage 2: UNIT TESTS - Test individual module functions
+#     ├─ Stage 3: INTEGRATION TESTS - Cross-module validation
+#     └─ Stage 4: CLI TESTS - Verify CLI commands work correctly
 #
-#   Stage 3: INTEGRATION TESTS
-#     └─ Cross-module validation
-#
-#   Stage 4: CLI TESTS
-#     └─ Verify CLI commands work correctly
-#
-#   Stage 5: E2E TESTS
+#   Stage 5: E2E TESTS (depends on Stages 2-4 all passing)
 #     └─ Full user journey validation
 #
 #   Stage 6: RELEASE VALIDATION (runs after all stages pass)
@@ -197,6 +193,7 @@ jobs:
 
   # ===========================================================================
   # STAGE 2: UNIT TESTS - Test individual module functions
+  # Runs in PARALLEL with Stages 3 and 4 (all depend only on Stage 1)
   # ===========================================================================
   stage-2-unit:
     name: 🧪 Stage 2 · Unit Tests
@@ -234,15 +231,16 @@ jobs:
 
   # ===========================================================================
   # STAGE 3: INTEGRATION TESTS - Cross-module validation
+  # Runs in PARALLEL with Stages 2 and 4 (all depend only on Stage 1)
   # ===========================================================================
   stage-3-integration:
     name: 🔗 Stage 3 · Integration
     runs-on: ubuntu-latest
-    needs: [configure, stage-2-unit]
+    needs: [configure, stage-1-inline]
     if: |
       always() &&
       needs.configure.outputs.run_integration == 'true' &&
-      (needs.stage-2-unit.result == 'success' || needs.stage-2-unit.result == 'skipped')
+      (needs.stage-1-inline.result == 'success' || needs.stage-1-inline.result == 'skipped')
     timeout-minutes: 15
 
     defaults:
@@ -271,15 +269,16 @@ jobs:
 
   # ===========================================================================
   # STAGE 4: CLI TESTS - Verify CLI commands work
+  # Runs in PARALLEL with Stages 2 and 3 (all depend only on Stage 1)
   # ===========================================================================
   stage-4-cli:
     name: 💻 Stage 4 · CLI Tests
     runs-on: ubuntu-latest
-    needs: [configure, stage-3-integration]
+    needs: [configure, stage-1-inline]
     if: |
       always() &&
       needs.configure.outputs.run_cli == 'true' &&
-      (needs.stage-3-integration.result == 'success' || needs.stage-3-integration.result == 'skipped')
+      (needs.stage-1-inline.result == 'success' || needs.stage-1-inline.result == 'skipped')
     timeout-minutes: 10
 
     defaults:
@@ -308,14 +307,17 @@ jobs:
 
   # ===========================================================================
   # STAGE 5: E2E TESTS - Full user journey validation
+  # Depends on Stages 2, 3, and 4 ALL passing (the integration gate)
   # ===========================================================================
   stage-5-e2e:
     name: 🌐 Stage 5 · E2E Tests
     runs-on: ubuntu-latest
-    needs: [configure, stage-4-cli]
+    needs: [configure, stage-2-unit, stage-3-integration, stage-4-cli]
     if: |
       always() &&
       needs.configure.outputs.run_e2e == 'true' &&
+      (needs.stage-2-unit.result == 'success' || needs.stage-2-unit.result == 'skipped') &&
+      (needs.stage-3-integration.result == 'success' || needs.stage-3-integration.result == 'skipped') &&
       (needs.stage-4-cli.result == 'success' || needs.stage-4-cli.result == 'skipped')
     timeout-minutes: 15
 
