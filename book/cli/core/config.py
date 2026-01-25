@@ -24,14 +24,18 @@ class ConfigManager:
         self.root_dir = Path(root_dir)
 
         # Determine book directory
-        if (self.root_dir / "book" / "quarto").exists():
-            # New structure: book/quarto/
-            self.book_dir = self.root_dir / "book" / "quarto"
-        elif (self.root_dir / "quarto").exists():
-            # Old structure or running from book/: quarto/
+        # Expected to run from book/ folder where quarto/ is a subdirectory
+        if (self.root_dir / "quarto").exists():
+            # Running from book/: quarto/
             self.book_dir = self.root_dir / "quarto"
+        elif (self.root_dir / "book" / "quarto").exists():
+            # Running from repo root: book/quarto/
+            self.book_dir = self.root_dir / "book" / "quarto"
+        elif (self.root_dir / "contents").exists():
+            # We're in quarto directory itself
+            self.book_dir = self.root_dir
         else:
-            # We're in quarto directory
+            # Fallback
             self.book_dir = self.root_dir
 
         # Configuration file paths (combined configs)
