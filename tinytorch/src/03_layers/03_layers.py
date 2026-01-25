@@ -386,7 +386,7 @@ class Linear(Layer):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Linear Layer
+### 🧪 Unit Test: Linear Layer
 
 This test validates our Linear layer implementation works correctly.
 
@@ -397,8 +397,8 @@ This test validates our Linear layer implementation works correctly.
 
 # %% nbgrader={"grade": true, "grade_id": "test-linear", "locked": true, "points": 15}
 def test_unit_linear_layer():
-    """🔬 Test Linear layer implementation."""
-    print("🔬 Unit Test: Linear Layer...")
+    """🧪 Test Linear layer implementation."""
+    print("🧪 Unit Test: Linear Layer...")
 
     # Test layer creation
     layer = Linear(784, 256)
@@ -446,7 +446,7 @@ Additional tests for edge cases and error handling.
 
 # %% nbgrader={"grade": true, "grade_id": "test-linear-edge-cases", "locked": true, "points": 5}
 def test_edge_cases_linear():
-    """🔬 Test Linear layer edge cases."""
+    """🧪 Test Linear layer edge cases."""
     print("🧪 Edge Case Tests: Linear Layer...")
 
     layer = Linear(10, 5)
@@ -489,7 +489,7 @@ Tests to ensure Linear layer parameters can be collected for optimization.
 
 # %% nbgrader={"grade": true, "grade_id": "test-linear-params", "locked": true, "points": 5}
 def test_parameter_collection_linear():
-    """🔬 Test Linear layer parameter collection."""
+    """🧪 Test Linear layer parameter collection."""
     print("🧪 Parameter Collection Test: Linear Layer...")
 
     layer = Linear(10, 5)
@@ -738,7 +738,7 @@ class Sequential:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Dropout Layer
+### 🧪 Unit Test: Dropout Layer
 
 This test validates our Dropout layer implementation works correctly.
 
@@ -749,8 +749,8 @@ This test validates our Dropout layer implementation works correctly.
 
 # %% nbgrader={"grade": true, "grade_id": "test-dropout", "locked": true, "points": 10}
 def test_unit_dropout_layer():
-    """🔬 Test Dropout layer implementation."""
-    print("🔬 Unit Test: Dropout Layer...")
+    """🧪 Test Dropout layer implementation."""
+    print("🧪 Unit Test: Dropout Layer...")
 
     # Test dropout creation
     dropout = Dropout(0.5)

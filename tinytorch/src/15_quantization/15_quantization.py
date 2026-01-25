@@ -512,7 +512,7 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: INT8 Quantization
+### 🧪 Unit Test: INT8 Quantization
 
 This test validates our INT8 quantization function works correctly with various data types and edge cases.
 
@@ -639,7 +639,7 @@ def dequantize_int8(q_tensor: Tensor, scale: float, zero_point: int) -> Tensor:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: INT8 Dequantization
+### 🧪 Unit Test: INT8 Dequantization
 
 This test validates our dequantization function correctly restores FP32 values from INT8.
 
@@ -961,7 +961,7 @@ class QuantizedLinear:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: QuantizedLinear
+### 🧪 Unit Test: QuantizedLinear
 
 This test validates our QuantizedLinear layer works correctly and achieves memory savings.
 
@@ -1174,7 +1174,7 @@ def quantize_model(model, calibration_data: Optional[List[Tensor]] = None) -> No
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Model Quantization
+### 🧪 Unit Test: Model Quantization
 
 This test validates our model quantization function correctly replaces Linear layers with QuantizedLinear.
 
@@ -1374,7 +1374,7 @@ def analyze_model_sizes(original_model, quantized_model) -> Dict[str, float]:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Model Size Analysis
+### 🧪 Unit Test: Model Size Analysis
 
 This test validates our model size analysis function correctly measures compression.
 

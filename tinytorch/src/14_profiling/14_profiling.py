@@ -807,7 +807,7 @@ def quick_profile(model, input_tensor, profiler=None):
     profile = profiler.profile_forward_pass(model, input_tensor)
 
     # Display formatted results
-    print("🔬 Quick Profile Results:")
+    print("🧪 Quick Profile Results:")
     print(f"   Parameters: {profile['parameters']:,}")
     print(f"   FLOPs: {profile['flops']:,}")
     print(f"   Latency: {profile['latency_ms']:.2f} ms")
@@ -873,7 +873,7 @@ def analyze_weight_distribution(model, percentiles=[10, 25, 50, 75, 90]):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Helper Functions
+### 🧪 Unit Test: Helper Functions
 
 This test validates our helper utilities work correctly and provide useful output.
 
@@ -884,8 +884,8 @@ This test validates our helper utilities work correctly and provide useful outpu
 
 # %% nbgrader={"grade": true, "grade_id": "test-helper-functions", "locked": true, "points": 5}
 def test_unit_helper_functions():
-    """🔬 Test helper function implementations."""
-    print("🔬 Unit Test: Helper Functions...")
+    """🧪 Test helper function implementations."""
+    print("🧪 Unit Test: Helper Functions...")
 
     # Test 1: Quick profile function
     from tinytorch.core.layers import Linear
@@ -954,7 +954,7 @@ Parameter Growth Examples:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Parameter Counting
+### 🧪 Unit Test: Parameter Counting
 
 This test validates our parameter counting works correctly for different model types.
 
@@ -965,8 +965,8 @@ This test validates our parameter counting works correctly for different model t
 
 # %% nbgrader={"grade": true, "grade_id": "test-parameter-counting", "locked": true, "points": 10}
 def test_unit_parameter_counting():
-    """🔬 Test parameter counting implementation."""
-    print("🔬 Unit Test: Parameter Counting...")
+    """🧪 Test parameter counting implementation."""
+    print("🧪 Unit Test: Parameter Counting...")
 
     profiler = Profiler()
 
@@ -1045,7 +1045,7 @@ Different operations require different FLOP calculations:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: FLOP Counting
+### 🧪 Unit Test: FLOP Counting
 
 This test validates our FLOP counting for different operations and architectures.
 
@@ -1056,8 +1056,8 @@ This test validates our FLOP counting for different operations and architectures
 
 # %% nbgrader={"grade": true, "grade_id": "test-flop-counting", "locked": true, "points": 10}
 def test_unit_flop_counting():
-    """🔬 Test FLOP counting implementation."""
-    print("🔬 Unit Test: FLOP Counting...")
+    """🧪 Test FLOP counting implementation."""
+    print("🧪 Unit Test: FLOP Counting...")
 
     profiler = Profiler()
 
@@ -1127,7 +1127,7 @@ We use Python's `tracemalloc` to track memory allocations during model execution
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Memory Measurement
+### 🧪 Unit Test: Memory Measurement
 
 This test validates our memory tracking works correctly and provides useful metrics.
 
@@ -1138,8 +1138,8 @@ This test validates our memory tracking works correctly and provides useful metr
 
 # %% nbgrader={"grade": true, "grade_id": "test-memory-measurement", "locked": true, "points": 10}
 def test_unit_memory_measurement():
-    """🔬 Test memory measurement implementation."""
-    print("🔬 Unit Test: Memory Measurement...")
+    """🧪 Test memory measurement implementation."""
+    print("🧪 Unit Test: Memory Measurement...")
 
     profiler = Profiler()
 
@@ -1222,7 +1222,7 @@ Our latency measurement follows professional benchmarking practices:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Latency Measurement
+### 🧪 Unit Test: Latency Measurement
 
 This test validates our latency measurement provides consistent and reasonable results.
 
@@ -1233,8 +1233,8 @@ This test validates our latency measurement provides consistent and reasonable r
 
 # %% nbgrader={"grade": true, "grade_id": "test-latency-measurement", "locked": true, "points": 10}
 def test_unit_latency_measurement():
-    """🔬 Test latency measurement implementation."""
-    print("🔬 Unit Test: Latency Measurement...")
+    """🧪 Test latency measurement implementation."""
+    print("🧪 Unit Test: Latency Measurement...")
 
     profiler = Profiler()
 
@@ -1331,7 +1331,7 @@ Total Training Memory: 4x parameter memory!
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Advanced Profiling Functions
+### 🧪 Unit Test: Advanced Profiling Functions
 
 This test validates our advanced profiling functions provide comprehensive analysis.
 
@@ -1342,8 +1342,8 @@ This test validates our advanced profiling functions provide comprehensive analy
 
 # %% nbgrader={"grade": true, "grade_id": "test-advanced-profiling", "locked": true, "points": 15}
 def test_unit_advanced_profiling():
-    """🔬 Test advanced profiling functions."""
-    print("🔬 Unit Test: Advanced Profiling Functions...")
+    """🧪 Test advanced profiling functions."""
+    print("🧪 Unit Test: Advanced Profiling Functions...")
 
     # Create profiler and test model
     profiler = Profiler()
@@ -1728,7 +1728,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test realistic usage patterns
-    print("🔬 Integration Test: Complete Profiling Workflow...")
+    print("🧪 Integration Test: Complete Profiling Workflow...")
 
     # Create profiler
     profiler = Profiler()

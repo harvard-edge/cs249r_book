@@ -261,7 +261,7 @@ class CosineSchedule:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: CosineSchedule
+### 🧪 Unit Test: CosineSchedule
 
 This test validates our learning rate scheduling implementation.
 
@@ -272,8 +272,8 @@ This test validates our learning rate scheduling implementation.
 
 # %% nbgrader={"grade": true, "grade_id": "test_scheduler", "locked": true, "points": 10}
 def test_unit_cosine_schedule():
-    """🔬 Test CosineSchedule implementation."""
-    print("🔬 Unit Test: CosineSchedule...")
+    """🧪 Test CosineSchedule implementation."""
+    print("🧪 Unit Test: CosineSchedule...")
 
     # Test basic schedule
     schedule = CosineSchedule(max_lr=0.1, min_lr=0.01, total_epochs=100)
@@ -405,7 +405,7 @@ def clip_grad_norm(parameters: List, max_norm: float = 1.0) -> float:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Gradient Clipping
+### 🧪 Unit Test: Gradient Clipping
 
 This test validates our gradient clipping implementation.
 
@@ -416,8 +416,8 @@ This test validates our gradient clipping implementation.
 
 # %% nbgrader={"grade": true, "grade_id": "test_clipping", "locked": true, "points": 10}
 def test_unit_clip_grad_norm():
-    """🔬 Test clip_grad_norm implementation."""
-    print("🔬 Unit Test: Gradient Clipping...")
+    """🧪 Test clip_grad_norm implementation."""
+    print("🧪 Unit Test: Gradient Clipping...")
 
     # Use real Tensor from Module 01
     import sys
@@ -805,7 +805,7 @@ class Trainer:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Trainer Class
+### 🧪 Unit Test: Trainer Class
 
 This test validates our complete training system.
 
@@ -816,8 +816,8 @@ This test validates our complete training system.
 
 # %% nbgrader={"grade": true, "grade_id": "test_trainer", "locked": true, "points": 15}
 def test_unit_trainer():
-    """🔬 Test Trainer implementation."""
-    print("🔬 Unit Test: Trainer...")
+    """🧪 Test Trainer implementation."""
+    print("🧪 Unit Test: Trainer...")
 
     # Use REAL components from previous modules (already imported at module level)
 

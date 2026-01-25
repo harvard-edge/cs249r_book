@@ -701,7 +701,7 @@ class Tensor:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Tensor Creation
+### 🧪 Unit Test: Tensor Creation
 
 This test validates our Tensor constructor works correctly with various data types and properly initializes all attributes.
 
@@ -712,8 +712,8 @@ This test validates our Tensor constructor works correctly with various data typ
 
 # %% nbgrader={"grade": true, "grade_id": "test-tensor-creation", "locked": true, "points": 10}
 def test_unit_tensor_creation():
-    """🔬 Test Tensor creation with various data types."""
-    print("🔬 Unit Test: Tensor Creation...")
+    """🧪 Test Tensor creation with various data types."""
+    print("🧪 Unit Test: Tensor Creation...")
 
     # Test scalar creation
     scalar = Tensor(5.0)
@@ -827,7 +827,7 @@ normalized = (batch_data - mean) / std
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Arithmetic Operations
+### 🧪 Unit Test: Arithmetic Operations
 
 This test validates our arithmetic operations work correctly with both tensor-tensor and tensor-scalar operations, including broadcasting behavior.
 
@@ -838,8 +838,8 @@ This test validates our arithmetic operations work correctly with both tensor-te
 
 # %% nbgrader={"grade": true, "grade_id": "test-arithmetic", "locked": true, "points": 15}
 def test_unit_arithmetic_operations():
-    """🔬 Test arithmetic operations with broadcasting."""
-    print("🔬 Unit Test: Arithmetic Operations...")
+    """🧪 Test arithmetic operations with broadcasting."""
+    print("🧪 Unit Test: Arithmetic Operations...")
 
     # Test tensor + tensor
     a = Tensor([1, 2, 3])
@@ -977,7 +977,7 @@ This is why GPU acceleration matters - modern GPUs can perform thousands of thes
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Matrix Multiplication
+### 🧪 Unit Test: Matrix Multiplication
 
 This test validates matrix multiplication works correctly with proper shape checking and error handling.
 
@@ -988,8 +988,8 @@ This test validates matrix multiplication works correctly with proper shape chec
 
 # %% nbgrader={"grade": true, "grade_id": "test-matmul", "locked": true, "points": 15}
 def test_unit_matrix_multiplication():
-    """🔬 Test matrix multiplication operations."""
-    print("🔬 Unit Test: Matrix Multiplication...")
+    """🧪 Test matrix multiplication operations."""
+    print("🧪 Unit Test: Matrix Multiplication...")
 
     # Test 2×2 matrix multiplication (basic case)
     a = Tensor([[1, 2], [3, 4]])  # 2×2
@@ -1130,7 +1130,7 @@ This is why frameworks like PyTorch often use "lazy" transpose operations that d
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Shape Manipulation
+### 🧪 Unit Test: Shape Manipulation
 
 This test validates reshape and transpose operations work correctly with validation and edge cases.
 
@@ -1141,8 +1141,8 @@ This test validates reshape and transpose operations work correctly with validat
 
 # %% nbgrader={"grade": true, "grade_id": "test-shape-ops", "locked": true, "points": 15}
 def test_unit_shape_manipulation():
-    """🔬 Test reshape and transpose operations."""
-    print("🔬 Unit Test: Shape Manipulation...")
+    """🧪 Test reshape and transpose operations."""
+    print("🧪 Unit Test: Shape Manipulation...")
 
     # Test basic reshape (flatten → matrix)
     tensor = Tensor([1, 2, 3, 4, 5, 6])  # Shape: (6,)
@@ -1287,7 +1287,7 @@ Optimization strategies:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Reduction Operations
+### 🧪 Unit Test: Reduction Operations
 
 This test validates reduction operations work correctly with axis control and maintain proper shapes.
 
@@ -1298,8 +1298,8 @@ This test validates reduction operations work correctly with axis control and ma
 
 # %% nbgrader={"grade": true, "grade_id": "test-reductions", "locked": true, "points": 10}
 def test_unit_reduction_operations():
-    """🔬 Test reduction operations."""
-    print("🔬 Unit Test: Reduction Operations...")
+    """🧪 Test reduction operations."""
+    print("🧪 Unit Test: Reduction Operations...")
 
     matrix = Tensor([[1, 2, 3], [4, 5, 6]])  # Shape: (2, 3)
 
@@ -1519,7 +1519,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test realistic neural network computation
-    print("🔬 Integration Test: Two-Layer Neural Network...")
+    print("🧪 Integration Test: Two-Layer Neural Network...")
 
     # Create input data (2 samples, 3 features)
     x = Tensor([[1, 2, 3], [4, 5, 6]])
@@ -1549,7 +1549,7 @@ def test_module():
     print("✅ Two-layer neural network computation works!")
 
     # Test complex shape manipulations
-    print("🔬 Integration Test: Complex Shape Operations...")
+    print("🧪 Integration Test: Complex Shape Operations...")
     data = Tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
 
     # Reshape to 3D tensor (simulating batch processing)
@@ -1571,7 +1571,7 @@ def test_module():
     print("✅ Complex shape operations work!")
 
     # Test broadcasting edge cases
-    print("🔬 Integration Test: Broadcasting Edge Cases...")
+    print("🧪 Integration Test: Broadcasting Edge Cases...")
 
     # Scalar broadcasting
     scalar = Tensor(5.0)

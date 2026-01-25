@@ -306,7 +306,7 @@ def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Log-Softmax
+### 🧪 Unit Test: Log-Softmax
 
 This test validates our log_softmax function works correctly with numerical stability.
 
@@ -317,8 +317,8 @@ This test validates our log_softmax function works correctly with numerical stab
 
 # %% nbgrader={"grade": true, "grade_id": "test-log-softmax", "locked": true, "points": 10}
 def test_unit_log_softmax():
-    """🔬 Test log_softmax numerical stability and correctness."""
-    print("🔬 Unit Test: Log-Softmax...")
+    """🧪 Test log_softmax numerical stability and correctness."""
+    print("🧪 Unit Test: Log-Softmax...")
 
     # Test basic functionality
     x = Tensor([[1.0, 2.0, 3.0], [0.1, 0.2, 0.9]])
@@ -466,7 +466,7 @@ class MSELoss:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: MSE Loss
+### 🧪 Unit Test: MSE Loss
 
 This test validates our MSELoss implementation with various prediction scenarios.
 
@@ -477,8 +477,8 @@ This test validates our MSELoss implementation with various prediction scenarios
 
 # %% nbgrader={"grade": true, "grade_id": "test-mse-loss", "locked": true, "points": 10}
 def test_unit_mse_loss():
-    """🔬 Test MSELoss implementation and properties."""
-    print("🔬 Unit Test: MSE Loss...")
+    """🧪 Test MSELoss implementation and properties."""
+    print("🧪 Unit Test: MSE Loss...")
 
     loss_fn = MSELoss()
 
@@ -658,7 +658,7 @@ class CrossEntropyLoss:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Cross-Entropy Loss
+### 🧪 Unit Test: Cross-Entropy Loss
 
 This test validates our CrossEntropyLoss implementation with various confidence levels.
 
@@ -669,8 +669,8 @@ This test validates our CrossEntropyLoss implementation with various confidence 
 
 # %% nbgrader={"grade": true, "grade_id": "test-cross-entropy-loss", "locked": true, "points": 10}
 def test_unit_cross_entropy_loss():
-    """🔬 Test CrossEntropyLoss implementation and properties."""
-    print("🔬 Unit Test: Cross-Entropy Loss...")
+    """🧪 Test CrossEntropyLoss implementation and properties."""
+    print("🧪 Unit Test: Cross-Entropy Loss...")
 
     loss_fn = CrossEntropyLoss()
 
@@ -871,7 +871,7 @@ class BinaryCrossEntropyLoss:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Binary Cross-Entropy Loss
+### 🧪 Unit Test: Binary Cross-Entropy Loss
 
 This test validates our BinaryCrossEntropyLoss implementation with binary classification scenarios.
 
@@ -882,8 +882,8 @@ This test validates our BinaryCrossEntropyLoss implementation with binary classi
 
 # %% nbgrader={"grade": true, "grade_id": "test-binary-cross-entropy-loss", "locked": true, "points": 10}
 def test_unit_binary_cross_entropy_loss():
-    """🔬 Test BinaryCrossEntropyLoss implementation and properties."""
-    print("🔬 Unit Test: Binary Cross-Entropy Loss...")
+    """🧪 Test BinaryCrossEntropyLoss implementation and properties."""
+    print("🧪 Unit Test: Binary Cross-Entropy Loss...")
 
     loss_fn = BinaryCrossEntropyLoss()
 
@@ -1361,7 +1361,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test realistic end-to-end scenario with previous modules
-    print("🔬 Integration Test: Realistic training scenario...")
+    print("🧪 Integration Test: Realistic training scenario...")
 
     # Simulate a complete prediction -> loss computation pipeline
 

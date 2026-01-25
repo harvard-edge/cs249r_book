@@ -267,7 +267,7 @@ class Sigmoid:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Sigmoid
+### 🧪 Unit Test: Sigmoid
 
 This test validates sigmoid activation behavior.
 
@@ -278,8 +278,8 @@ This test validates sigmoid activation behavior.
 
 # %% nbgrader={"grade": true, "grade_id": "test-sigmoid", "locked": true, "points": 10}
 def test_unit_sigmoid():
-    """🔬 Test Sigmoid implementation."""
-    print("🔬 Unit Test: Sigmoid...")
+    """🧪 Test Sigmoid implementation."""
+    print("🧪 Unit Test: Sigmoid...")
 
     sigmoid = Sigmoid()
 
@@ -384,7 +384,7 @@ class ReLU:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: ReLU
+### 🧪 Unit Test: ReLU
 
 This test validates ReLU activation behavior.
 
@@ -395,8 +395,8 @@ This test validates ReLU activation behavior.
 
 # %% nbgrader={"grade": true, "grade_id": "test-relu", "locked": true, "points": 10}
 def test_unit_relu():
-    """🔬 Test ReLU implementation."""
-    print("🔬 Unit Test: ReLU...")
+    """🧪 Test ReLU implementation."""
+    print("🧪 Unit Test: ReLU...")
 
     relu = ReLU()
 
@@ -504,7 +504,7 @@ class Tanh:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Tanh
+### 🧪 Unit Test: Tanh
 
 This test validates tanh activation behavior.
 
@@ -515,8 +515,8 @@ This test validates tanh activation behavior.
 
 # %% nbgrader={"grade": true, "grade_id": "test-tanh", "locked": true, "points": 10}
 def test_unit_tanh():
-    """🔬 Test Tanh implementation."""
-    print("🔬 Unit Test: Tanh...")
+    """🧪 Test Tanh implementation."""
+    print("🧪 Unit Test: Tanh...")
 
     tanh = Tanh()
 
@@ -634,7 +634,7 @@ class GELU:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: GELU
+### 🧪 Unit Test: GELU
 
 This test validates GELU activation behavior.
 
@@ -645,8 +645,8 @@ This test validates GELU activation behavior.
 
 # %% nbgrader={"grade": true, "grade_id": "test-gelu", "locked": true, "points": 10}
 def test_unit_gelu():
-    """🔬 Test GELU implementation."""
-    print("🔬 Unit Test: GELU...")
+    """🧪 Test GELU implementation."""
+    print("🧪 Unit Test: GELU...")
 
     gelu = GELU()
 
@@ -772,7 +772,7 @@ class Softmax:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Softmax
+### 🧪 Unit Test: Softmax
 
 This test validates softmax activation behavior.
 
@@ -783,8 +783,8 @@ This test validates softmax activation behavior.
 
 # %% nbgrader={"grade": true, "grade_id": "test-softmax", "locked": true, "points": 10}
 def test_unit_softmax():
-    """🔬 Test Softmax implementation."""
-    print("🔬 Unit Test: Softmax...")
+    """🧪 Test Softmax implementation."""
+    print("🧪 Unit Test: Softmax...")
 
     softmax = Softmax()
 
@@ -882,7 +882,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test 1: All activations preserve tensor properties
-    print("🔬 Integration Test: Tensor property preservation...")
+    print("🧪 Integration Test: Tensor property preservation...")
     test_data = Tensor([[1, -1], [2, -2]])  # 2D tensor
 
     activations = [Sigmoid(), ReLU(), Tanh(), GELU()]
@@ -894,7 +894,7 @@ def test_module():
     print("✅ All activations preserve tensor properties!")
 
     # Test 2: Softmax works with different dimensions
-    print("🔬 Integration Test: Softmax dimension handling...")
+    print("🧪 Integration Test: Softmax dimension handling...")
     data_3d = Tensor([[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]])  # (2, 2, 3)
     softmax = Softmax()
 
@@ -909,7 +909,7 @@ def test_module():
     print("✅ Softmax handles different dimensions correctly!")
 
     # Test 3: Activation chaining (simulating neural network)
-    print("🔬 Integration Test: Activation chaining...")
+    print("🧪 Integration Test: Activation chaining...")
 
     # Simulate: Input → Linear → ReLU → Linear → Softmax (like a simple network)
     x = Tensor([[-1, 0, 1, 2]])  # Batch of 1, 4 features
@@ -1086,7 +1086,7 @@ def analyze_activation_performance():
         _ = gelu(test_data)
     gelu_time = (time.time() - start) / n_runs * 1000
 
-    print("\n🔬 Activation Performance Results:")
+    print("\n🧪 Activation Performance Results:")
     print(f"   ReLU:    {relu_time:.2f}ms (baseline)")
     print(f"   Sigmoid: {sigmoid_time:.2f}ms ({sigmoid_time/relu_time:.1f}x slower)")
     print(f"   Tanh:    {tanh_time:.2f}ms ({tanh_time/relu_time:.1f}x slower)")

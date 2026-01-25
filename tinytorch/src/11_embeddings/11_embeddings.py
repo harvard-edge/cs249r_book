@@ -354,7 +354,7 @@ class Embedding:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Embedding Layer
+### 🧪 Unit Test: Embedding Layer
 
 This test validates our Embedding class works correctly with various token indices and batch configurations.
 
@@ -365,8 +365,8 @@ This test validates our Embedding class works correctly with various token indic
 
 # %% nbgrader={"grade": true, "grade_id": "test-embedding", "locked": true, "points": 10}
 def test_unit_embedding():
-    """🔬 Test Embedding layer implementation."""
-    print("🔬 Unit Test: Embedding Layer...")
+    """🧪 Test Embedding layer implementation."""
+    print("🧪 Unit Test: Embedding Layer...")
 
     # Test 1: Basic embedding creation and forward pass
     embed = Embedding(vocab_size=100, embed_dim=64)
@@ -544,7 +544,7 @@ class PositionalEncoding:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Positional Encoding
+### 🧪 Unit Test: Positional Encoding
 
 This test validates our PositionalEncoding class works correctly with various sequence lengths and configurations.
 
@@ -555,8 +555,8 @@ This test validates our PositionalEncoding class works correctly with various se
 
 # %% nbgrader={"grade": true, "grade_id": "test-positional", "locked": true, "points": 10}
 def test_unit_positional_encoding():
-    """🔬 Test Positional Encoding implementation."""
-    print("🔬 Unit Test: Positional Encoding...")
+    """🧪 Test Positional Encoding implementation."""
+    print("🧪 Unit Test: Positional Encoding...")
 
     # Test 1: Basic functionality
     pos_enc = PositionalEncoding(max_seq_len=512, embed_dim=64)
@@ -733,7 +733,7 @@ def create_sinusoidal_embeddings(max_seq_len: int, embed_dim: int) -> Tensor:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Sinusoidal Embeddings
+### 🧪 Unit Test: Sinusoidal Embeddings
 
 This test validates our sinusoidal positional encoding function creates correct mathematical patterns.
 
@@ -744,8 +744,8 @@ This test validates our sinusoidal positional encoding function creates correct 
 
 # %% nbgrader={"grade": true, "grade_id": "test-sinusoidal", "locked": true, "points": 10}
 def test_unit_sinusoidal_embeddings():
-    """🔬 Test sinusoidal positional embeddings."""
-    print("🔬 Unit Test: Sinusoidal Embeddings...")
+    """🧪 Test sinusoidal positional embeddings."""
+    print("🧪 Unit Test: Sinusoidal Embeddings...")
 
     # Test 1: Basic shape and properties
     pe = create_sinusoidal_embeddings(512, 64)
@@ -1020,7 +1020,7 @@ class EmbeddingLayer:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Complete Embedding System
+### 🧪 Unit Test: Complete Embedding System
 
 This test validates our EmbeddingLayer combines all components correctly for production use.
 
@@ -1031,8 +1031,8 @@ This test validates our EmbeddingLayer combines all components correctly for pro
 
 # %% nbgrader={"grade": true, "grade_id": "test-complete-system", "locked": true, "points": 15}
 def test_unit_complete_embedding_system():
-    """🔬 Test complete embedding system."""
-    print("🔬 Unit Test: Complete Embedding System...")
+    """🧪 Test complete embedding system."""
+    print("🧪 Unit Test: Complete Embedding System...")
 
     # Test 1: Learned positional encoding
     embed_learned = EmbeddingLayer(

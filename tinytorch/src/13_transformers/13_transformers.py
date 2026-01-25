@@ -510,7 +510,7 @@ class LayerNorm:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Layer Normalization
+### 🧪 Unit Test: Layer Normalization
 
 This test validates our LayerNorm implementation works correctly.
 
@@ -521,8 +521,8 @@ This test validates our LayerNorm implementation works correctly.
 
 # %% nbgrader={"grade": true, "grade_id": "test-layer-norm", "locked": true, "points": 10}
 def test_unit_layer_norm():
-    """🔬 Test LayerNorm implementation."""
-    print("🔬 Unit Test: Layer Normalization...")
+    """🧪 Test LayerNorm implementation."""
+    print("🧪 Unit Test: Layer Normalization...")
 
     # Test basic normalization
     ln = LayerNorm(4)
@@ -715,7 +715,7 @@ class MLP:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: MLP (Feed-Forward Network)
+### 🧪 Unit Test: MLP (Feed-Forward Network)
 
 This test validates our MLP implementation works correctly.
 
@@ -726,8 +726,8 @@ This test validates our MLP implementation works correctly.
 
 # %% nbgrader={"grade": true, "grade_id": "test-mlp", "locked": true, "points": 10}
 def test_unit_mlp():
-    """🔬 Test MLP implementation."""
-    print("🔬 Unit Test: MLP (Feed-Forward Network)...")
+    """🧪 Test MLP implementation."""
+    print("🧪 Unit Test: MLP (Feed-Forward Network)...")
 
     # Test MLP with standard 4x expansion
     embed_dim = 64
@@ -964,7 +964,7 @@ class TransformerBlock:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Transformer Block
+### 🧪 Unit Test: Transformer Block
 
 This test validates our complete TransformerBlock implementation.
 
@@ -975,8 +975,8 @@ This test validates our complete TransformerBlock implementation.
 
 # %% nbgrader={"grade": true, "grade_id": "test-transformer-block", "locked": true, "points": 15}
 def test_unit_transformer_block():
-    """🔬 Test TransformerBlock implementation."""
-    print("🔬 Unit Test: Transformer Block...")
+    """🧪 Test TransformerBlock implementation."""
+    print("🧪 Unit Test: Transformer Block...")
 
     # Test transformer block
     embed_dim = 64
@@ -1346,7 +1346,7 @@ class GPT:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: GPT Model
+### 🧪 Unit Test: GPT Model
 
 This test validates our complete GPT implementation.
 
@@ -1357,8 +1357,8 @@ This test validates our complete GPT implementation.
 
 # %% nbgrader={"grade": true, "grade_id": "test-gpt", "locked": true, "points": 20}
 def test_unit_gpt():
-    """🔬 Test GPT model implementation."""
-    print("🔬 Unit Test: GPT Model...")
+    """🧪 Test GPT model implementation."""
+    print("🧪 Unit Test: GPT Model...")
 
     # Test small GPT model
     vocab_size = 100

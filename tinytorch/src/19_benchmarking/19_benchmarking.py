@@ -414,7 +414,7 @@ class BenchmarkResult:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: BenchmarkResult
+### 🧪 Unit Test: BenchmarkResult
 
 This test validates our BenchmarkResult class correctly computes statistical properties from measurements.
 
@@ -425,8 +425,8 @@ This test validates our BenchmarkResult class correctly computes statistical pro
 
 # %% nbgrader={"grade": true, "grade_id": "test-benchmark-result", "locked": true, "points": 10}
 def test_unit_benchmark_result():
-    """🔬 Test BenchmarkResult statistical calculations."""
-    print("🔬 Unit Test: BenchmarkResult...")
+    """🧪 Test BenchmarkResult statistical calculations."""
+    print("🧪 Unit Test: BenchmarkResult...")
 
     # Test basic statistics
     values = [1.0, 2.0, 3.0, 4.0, 5.0]
@@ -544,7 +544,7 @@ def precise_timer():
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Precise Timer
+### 🧪 Unit Test: Precise Timer
 
 This test validates our timing context manager provides accurate measurements.
 
@@ -555,8 +555,8 @@ This test validates our timing context manager provides accurate measurements.
 
 # %% nbgrader={"grade": true, "grade_id": "test-precise-timer", "locked": true, "points": 5}
 def test_unit_precise_timer():
-    """🔬 Test precise_timer context manager."""
-    print("🔬 Unit Test: precise_timer...")
+    """🧪 Test precise_timer context manager."""
+    print("🧪 Unit Test: precise_timer...")
 
     # Test basic timing
     with precise_timer() as timer:
@@ -823,7 +823,7 @@ class Benchmark:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Benchmark
+### 🧪 Unit Test: Benchmark
 
 This test validates our Benchmark class measures latency, accuracy, and memory correctly.
 
@@ -834,8 +834,8 @@ This test validates our Benchmark class measures latency, accuracy, and memory c
 
 # %% nbgrader={"grade": true, "grade_id": "test-benchmark", "locked": true, "points": 15}
 def test_unit_benchmark():
-    """🔬 Test Benchmark class functionality."""
-    print("🔬 Unit Test: Benchmark...")
+    """🧪 Test Benchmark class functionality."""
+    print("🧪 Unit Test: Benchmark...")
 
     # Create mock models for testing
     class MockModel:
@@ -976,7 +976,7 @@ class BenchmarkSuite:
 
     def run_full_benchmark(self) -> Dict[str, Dict[str, BenchmarkResult]]:
         """Run all benchmark categories."""
-        print("🔬 Running comprehensive benchmark suite...")
+        print("🧪 Running comprehensive benchmark suite...")
 
         # Run all benchmark types
         print("  📊 Measuring latency...")
@@ -1263,7 +1263,7 @@ class BenchmarkSuite:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: BenchmarkSuite
+### 🧪 Unit Test: BenchmarkSuite
 
 This test validates our BenchmarkSuite runs comprehensive multi-metric evaluation.
 
@@ -1274,8 +1274,8 @@ This test validates our BenchmarkSuite runs comprehensive multi-metric evaluatio
 
 # %% nbgrader={"grade": true, "grade_id": "test-benchmark-suite", "locked": true, "points": 15}
 def test_unit_benchmark_suite():
-    """🔬 Test BenchmarkSuite comprehensive functionality."""
-    print("🔬 Unit Test: BenchmarkSuite...")
+    """🧪 Test BenchmarkSuite comprehensive functionality."""
+    print("🧪 Unit Test: BenchmarkSuite...")
 
     # Create mock models
     class MockModel:
@@ -1463,7 +1463,7 @@ class TinyMLPerf:
             )
 
         config = self.benchmarks[benchmark_name]
-        print(f"🔬 Running TinyMLPerf {benchmark_name} benchmark...")
+        print(f"🧪 Running TinyMLPerf {benchmark_name} benchmark...")
         print(f"   Target: {config['target_accuracy']:.1%} accuracy, "
               f"<{config['max_latency_ms']}ms latency")
 
@@ -1706,7 +1706,7 @@ class TinyMLPerf:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: TinyMLPerf
+### 🧪 Unit Test: TinyMLPerf
 
 This test validates our TinyMLPerf class provides standardized benchmarking.
 
@@ -1717,8 +1717,8 @@ This test validates our TinyMLPerf class provides standardized benchmarking.
 
 # %% nbgrader={"grade": true, "grade_id": "test-tinymlperf", "locked": true, "points": 10}
 def test_unit_tinymlperf():
-    """🔬 Test TinyMLPerf standardized benchmarking."""
-    print("🔬 Unit Test: TinyMLPerf...")
+    """🧪 Test TinyMLPerf standardized benchmarking."""
+    print("🧪 Unit Test: TinyMLPerf...")
 
     # Create mock model for testing
     class MockModel:
@@ -1880,7 +1880,7 @@ def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any]
     all_models = [base_model] + optimized_models
     suite = BenchmarkSuite(all_models, datasets)
 
-    print("🔬 Running optimization comparison benchmark...")
+    print("🧪 Running optimization comparison benchmark...")
     benchmark_results = suite.run_full_benchmark()
 
     # Extract base model performance for comparison
@@ -2036,7 +2036,7 @@ def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any]
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Optimization Comparison
+### 🧪 Unit Test: Optimization Comparison
 
 This test validates our optimization comparison function generates useful recommendations.
 
@@ -2047,8 +2047,8 @@ This test validates our optimization comparison function generates useful recomm
 
 # %% nbgrader={"grade": true, "grade_id": "test-optimization-comparison", "locked": true, "points": 10}
 def test_unit_optimization_comparison():
-    """🔬 Test optimization comparison functionality."""
-    print("🔬 Unit Test: analyze_optimization_techniques...")
+    """🧪 Test optimization comparison functionality."""
+    print("🧪 Unit Test: analyze_optimization_techniques...")
 
     # Create mock models with different characteristics
     class MockModel:
@@ -2270,7 +2270,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test realistic benchmarking workflow
-    print("🔬 Integration Test: Complete benchmarking workflow...")
+    print("🧪 Integration Test: Complete benchmarking workflow...")
 
     # Create realistic test models
     class RealisticModel:

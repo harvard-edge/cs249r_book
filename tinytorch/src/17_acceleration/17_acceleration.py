@@ -306,8 +306,8 @@ def vectorized_matmul(a: Tensor, b: Tensor) -> Tensor:
 
 # %% nbgrader={"grade": true, "grade_id": "test-vectorized-matmul", "locked": true, "points": 10}
 def test_unit_vectorized_matmul():
-    """🔬 Test vectorized matrix multiplication implementation."""
-    print("🔬 Unit Test: Vectorized Matrix Multiplication...")
+    """🧪 Test vectorized matrix multiplication implementation."""
+    print("🧪 Unit Test: Vectorized Matrix Multiplication...")
 
     # Test basic 2D multiplication
     a = Tensor([[1, 2], [3, 4]])
@@ -479,7 +479,7 @@ def fused_gelu(x: Tensor) -> Tensor:
 # %% nbgrader={"grade": true, "grade_id": "test-fused-gelu", "locked": true, "points": 10}
 def test_unit_fused_gelu():
     """🔬 Test fused GELU activation implementation."""
-    print("🔬 Unit Test: Fused GELU...")
+    print("🧪 Unit Test: Fused GELU...")
 
     # Test basic properties
     x = Tensor([-3, -1, 0, 1, 3])
@@ -521,7 +521,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Fusion Performance
+### 🧪 Unit Test: Fusion Performance
 
 Let's quantify the impact of kernel fusion by comparing fused vs unfused implementations.
 """
@@ -582,8 +582,8 @@ def unfused_gelu(x: Tensor) -> Tensor:
 
 # %% nbgrader={"grade": true, "grade_id": "test-fusion-speedup", "locked": true, "points": 10}
 def test_unit_fusion_speedup():
-    """🔬 Measure the performance impact of kernel fusion."""
-    print("🔬 Unit Test: Kernel Fusion Performance Impact...")
+    """🧪 Measure the performance impact of kernel fusion."""
+    print("🧪 Unit Test: Kernel Fusion Performance Impact...")
 
     # Create moderately large tensor for meaningful timing
     size = 2000
@@ -745,8 +745,8 @@ def tiled_matmul(a: Tensor, b: Tensor, tile_size: int = 64) -> Tensor:
 
 # %% nbgrader={"grade": true, "grade_id": "test-tiled-matmul", "locked": true, "points": 10}
 def test_unit_tiled_matmul():
-    """🔬 Test cache-aware tiled matrix multiplication."""
-    print("🔬 Unit Test: Tiled Matrix Multiplication...")
+    """🧪 Test cache-aware tiled matrix multiplication."""
+    print("🧪 Unit Test: Tiled Matrix Multiplication...")
 
     # Test correctness against vectorized version
     a = Tensor(np.random.randn(128, 128).astype(np.float32))
@@ -1317,7 +1317,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test realistic acceleration pipeline
-    print("🔬 Integration Test: Complete acceleration pipeline...")
+    print("🧪 Integration Test: Complete acceleration pipeline...")
 
     # Create realistic model scenario
     batch_size, seq_len, hidden_dim = 16, 64, 256

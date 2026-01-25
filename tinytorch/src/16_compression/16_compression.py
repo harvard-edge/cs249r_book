@@ -159,7 +159,7 @@ def show_weight_distribution_motivation():
     # Profile basic characteristics
     profile = profiler.profile_forward_pass(model, input_data)
 
-    print("🔬 Profiling Parameter Distribution:\n")
+    print("🧪 Profiling Parameter Distribution:\n")
     print(f"   Total parameters: {profile['parameters']:,}")
     print(f"   Model memory: {profile['parameters'] * BYTES_PER_FLOAT32 / MB_TO_BYTES:.1f} MB (FP32)")
 
@@ -419,7 +419,7 @@ def measure_sparsity(model) -> float:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Sparsity Measurement
+### 🧪 Unit Test: Sparsity Measurement
 
 This test validates our sparsity measurement function works correctly.
 
@@ -430,8 +430,8 @@ This test validates our sparsity measurement function works correctly.
 
 # %% nbgrader={"grade": true, "grade_id": "test-measure-sparsity", "locked": true, "points": 5}
 def test_unit_measure_sparsity():
-    """🔬 Test sparsity measurement functionality."""
-    print("🔬 Unit Test: Measure Sparsity...")
+    """🧪 Test sparsity measurement functionality."""
+    print("🧪 Unit Test: Measure Sparsity...")
 
     # Test with dense model - explicit composition shows structure
     layer1 = Linear(4, 3)
@@ -572,7 +572,7 @@ def magnitude_prune(model, sparsity=0.9):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Magnitude Pruning
+### 🧪 Unit Test: Magnitude Pruning
 
 This test validates magnitude-based pruning works correctly with threshold selection.
 
@@ -583,8 +583,8 @@ This test validates magnitude-based pruning works correctly with threshold selec
 
 # %% nbgrader={"grade": true, "grade_id": "test-magnitude-prune", "locked": true, "points": 10}
 def test_unit_magnitude_prune():
-    """🔬 Test magnitude-based pruning functionality."""
-    print("🔬 Unit Test: Magnitude Prune...")
+    """🧪 Test magnitude-based pruning functionality."""
+    print("🧪 Unit Test: Magnitude Prune...")
 
     # Create test model with explicit composition - students see structure
     layer1 = Linear(4, 3)
@@ -752,7 +752,7 @@ def structured_prune(model, prune_ratio=0.5):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Structured Pruning
+### 🧪 Unit Test: Structured Pruning
 
 This test validates structured pruning removes entire channels correctly.
 
@@ -763,8 +763,8 @@ This test validates structured pruning removes entire channels correctly.
 
 # %% nbgrader={"grade": true, "grade_id": "test-structured-prune", "locked": true, "points": 10}
 def test_unit_structured_prune():
-    """🔬 Test structured pruning functionality."""
-    print("🔬 Unit Test: Structured Prune...")
+    """🧪 Test structured pruning functionality."""
+    print("🧪 Unit Test: Structured Prune...")
 
     # Create test model with explicit layers - students see the architecture
     layer1 = Linear(4, 6)
@@ -921,7 +921,7 @@ def low_rank_approximate(weight_matrix, rank_ratio=0.5):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Low-Rank Approximation
+### 🧪 Unit Test: Low-Rank Approximation
 
 This test validates SVD-based matrix factorization for compression.
 
@@ -932,8 +932,8 @@ This test validates SVD-based matrix factorization for compression.
 
 # %% nbgrader={"grade": true, "grade_id": "test-low-rank", "locked": true, "points": 10}
 def test_unit_low_rank_approximate():
-    """🔬 Test low-rank approximation functionality."""
-    print("🔬 Unit Test: Low-Rank Approximate...")
+    """🧪 Test low-rank approximation functionality."""
+    print("🧪 Unit Test: Low-Rank Approximate...")
 
     # Create test weight matrix
     original_weight = np.random.randn(20, 15)
@@ -1178,7 +1178,7 @@ class KnowledgeDistillation:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Knowledge Distillation
+### 🧪 Unit Test: Knowledge Distillation
 
 This test validates teacher-student knowledge transfer with temperature scaling.
 
@@ -1189,8 +1189,8 @@ This test validates teacher-student knowledge transfer with temperature scaling.
 
 # %% nbgrader={"grade": true, "grade_id": "test-distillation", "locked": true, "points": 15}
 def test_unit_knowledge_distillation():
-    """🔬 Test knowledge distillation functionality."""
-    print("🔬 Unit Test: Knowledge Distillation...")
+    """🧪 Test knowledge distillation functionality."""
+    print("🧪 Unit Test: Knowledge Distillation...")
 
     # Create teacher model with more capacity - explicit composition
     teacher_l1 = Linear(10, 20)
@@ -1357,7 +1357,7 @@ def compress_model(model, compression_config):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Comprehensive Model Compression
+### 🧪 Unit Test: Comprehensive Model Compression
 
 This test validates the complete compression pipeline with multiple techniques.
 
@@ -1368,8 +1368,8 @@ This test validates the complete compression pipeline with multiple techniques.
 
 # %% nbgrader={"grade": true, "grade_id": "test-compression-integration", "locked": true, "points": 20}
 def test_unit_compress_model():
-    """🔬 Test comprehensive model compression."""
-    print("🔬 Unit Test: Compress Model...")
+    """🧪 Test comprehensive model compression."""
+    print("🧪 Unit Test: Compress Model...")
 
     # Create test model with explicit layers - students see the full architecture
     layer1 = Linear(20, 15)
@@ -1772,7 +1772,7 @@ def verify_pruning_works(model, target_sparsity=0.8):
         >>> results = verify_pruning_works(model, target_sparsity=0.8)
         >>> assert results['verified']  # Pruning actually works!
     """
-    print("🔬 Verifying pruning sparsity with actual zero counting...")
+    print("🧪 Verifying pruning sparsity with actual zero counting...")
 
     # Count actual zeros in model parameters
     zeros = sum(np.sum(p.data == 0) for p in model.parameters())
@@ -1841,7 +1841,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test 1: Complete compression pipeline
-    print("🔬 Integration Test: Complete compression pipeline...")
+    print("🧪 Integration Test: Complete compression pipeline...")
 
     # Create a realistic model with explicit layers - students see the architecture
     input_layer = Linear(784, 512)    # Input layer (like MNIST)
@@ -1870,7 +1870,7 @@ def test_module():
     print(f"✅ Achieved {final_sparsity:.1f}% sparsity with {len(stats['applied_techniques'])} techniques")
 
     # Test 2: Knowledge distillation setup
-    print("🔬 Integration Test: Knowledge distillation...")
+    print("🧪 Integration Test: Knowledge distillation...")
 
     # Create teacher with more capacity - explicit layers show architecture
     teacher_l1 = Linear(100, 200)
@@ -1895,7 +1895,7 @@ def test_module():
     print(f"✅ Knowledge distillation: {compression_ratio:.2f}x size reduction")
 
     # Test 3: Low-rank approximation
-    print("🔬 Integration Test: Low-rank approximation...")
+    print("🧪 Integration Test: Low-rank approximation...")
 
     large_matrix = np.random.randn(200, 150)
     U, S, V = low_rank_approximate(large_matrix, rank_ratio=0.3)

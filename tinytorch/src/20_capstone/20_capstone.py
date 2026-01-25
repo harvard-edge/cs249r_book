@@ -1253,7 +1253,7 @@ Each test validates one specific aspect and provides clear feedback.
 
 # %% [markdown]
 """
-### 🔬 Unit Test: SimpleMLP
+### 🧪 Unit Test: SimpleMLP
 
 This test validates the SimpleMLP model works correctly for benchmarking demonstrations.
 
@@ -1264,8 +1264,8 @@ This test validates the SimpleMLP model works correctly for benchmarking demonst
 
 # %% nbgrader={"grade": true, "grade_id": "test-simple-mlp", "locked": true, "points": 10}
 def test_unit_simple_mlp():
-    """🔬 Test SimpleMLP model creation and forward pass."""
-    print("🔬 Unit Test: SimpleMLP...")
+    """🧪 Test SimpleMLP model creation and forward pass."""
+    print("🧪 Unit Test: SimpleMLP...")
 
     # Test model creation with default parameters
     model = SimpleMLP()
@@ -1295,7 +1295,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🔬 Unit Test: BenchmarkReport
+### 🧪 Unit Test: BenchmarkReport
 
 This test validates the BenchmarkReport class captures all required metrics.
 
@@ -1306,8 +1306,8 @@ This test validates the BenchmarkReport class captures all required metrics.
 
 # %% nbgrader={"grade": true, "grade_id": "test-benchmark-report", "locked": true, "points": 15}
 def test_unit_benchmark_report():
-    """🔬 Test BenchmarkReport class functionality."""
-    print("🔬 Unit Test: BenchmarkReport...")
+    """🧪 Test BenchmarkReport class functionality."""
+    print("🧪 Unit Test: BenchmarkReport...")
 
     # Create report
     report = BenchmarkReport(model_name="test_model")
@@ -1353,7 +1353,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Submission Generation
+### 🧪 Unit Test: Submission Generation
 
 This test validates the submission generation creates proper JSON structure.
 
@@ -1364,8 +1364,8 @@ This test validates the submission generation creates proper JSON structure.
 
 # %% nbgrader={"grade": true, "grade_id": "test-submission-generation", "locked": true, "points": 15}
 def test_unit_submission_generation():
-    """🔬 Test generate_submission() function."""
-    print("🔬 Unit Test: Submission Generation...")
+    """🧪 Test generate_submission() function."""
+    print("🧪 Unit Test: Submission Generation...")
 
     # Create baseline report
     np.random.seed(42)
@@ -1406,7 +1406,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Schema Validation
+### 🧪 Unit Test: Schema Validation
 
 This test validates submissions conform to the required schema.
 
@@ -1466,8 +1466,8 @@ def validate_submission_schema(submission: Dict[str, Any]) -> bool:
     return True
 
 def test_unit_submission_schema():
-    """🔬 Test submission schema validation."""
-    print("🔬 Unit Test: Submission Schema...")
+    """🧪 Test submission schema validation."""
+    print("🧪 Unit Test: Submission Schema...")
 
     # Create valid submission
     np.random.seed(42)
@@ -1507,7 +1507,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Submission with Optimization
+### 🧪 Unit Test: Submission with Optimization
 
 This test validates submissions with both baseline and optimized results.
 
@@ -1518,8 +1518,8 @@ This test validates submissions with both baseline and optimized results.
 
 # %% nbgrader={"grade": true, "grade_id": "test-submission-with-optimization", "locked": true, "points": 10}
 def test_unit_submission_with_optimization():
-    """🔬 Test submission with baseline + optimized comparison."""
-    print("🔬 Unit Test: Submission with Optimization...")
+    """🧪 Test submission with baseline + optimized comparison."""
+    print("🧪 Unit Test: Submission with Optimization...")
 
     # Create baseline
     np.random.seed(42)
@@ -1572,7 +1572,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Improvements Calculation
+### 🧪 Unit Test: Improvements Calculation
 
 This test validates the mathematical correctness of improvement metrics.
 
@@ -1583,8 +1583,8 @@ This test validates the mathematical correctness of improvement metrics.
 
 # %% nbgrader={"grade": true, "grade_id": "test-improvements-calculation", "locked": true, "points": 10}
 def test_unit_improvements_calculation():
-    """🔬 Test speedup/compression/accuracy calculations are correct."""
-    print("🔬 Unit Test: Improvements Calculation...")
+    """🧪 Test speedup/compression/accuracy calculations are correct."""
+    print("🧪 Unit Test: Improvements Calculation...")
 
     # Create baseline with known metrics
     baseline_report = BenchmarkReport(model_name="baseline")
@@ -1635,7 +1635,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🔬 Unit Test: JSON Serialization
+### 🧪 Unit Test: JSON Serialization
 
 This test validates save_submission() creates valid, round-trip compatible JSON.
 
@@ -1646,8 +1646,8 @@ This test validates save_submission() creates valid, round-trip compatible JSON.
 
 # %% nbgrader={"grade": true, "grade_id": "test-json-serialization", "locked": true, "points": 10}
 def test_unit_json_serialization():
-    """🔬 Test save_submission() creates valid JSON files."""
-    print("🔬 Unit Test: JSON Serialization...")
+    """🧪 Test save_submission() creates valid JSON files."""
+    print("🧪 Unit Test: JSON Serialization...")
 
     # Create submission
     np.random.seed(42)

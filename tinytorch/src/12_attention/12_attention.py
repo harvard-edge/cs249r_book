@@ -419,7 +419,7 @@ def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor, mask: Optional
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Scaled Dot-Product Attention
+### 🧪 Unit Test: Scaled Dot-Product Attention
 
 This test validates our core attention mechanism works correctly with proper shape handling and masking.
 
@@ -430,8 +430,8 @@ This test validates our core attention mechanism works correctly with proper sha
 
 # %% nbgrader={"grade": true, "grade_id": "test-attention-basic", "locked": true, "points": 10}
 def test_unit_scaled_dot_product_attention():
-    """🔬 Test scaled dot-product attention implementation."""
-    print("🔬 Unit Test: Scaled Dot-Product Attention...")
+    """🧪 Test scaled dot-product attention implementation."""
+    print("🧪 Unit Test: Scaled Dot-Product Attention...")
 
     # Test basic functionality
     batch_size, seq_len, d_model = 2, 4, 8
@@ -736,7 +736,7 @@ class MultiHeadAttention:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Multi-Head Attention
+### 🧪 Unit Test: Multi-Head Attention
 
 **What we're testing**: Configuration, parameter counting, shape preservation, and masking support
 **Why it matters**: Multi-head attention must correctly split dimensions across heads and recombine them
@@ -745,8 +745,8 @@ class MultiHeadAttention:
 
 # %% nbgrader={"grade": true, "grade_id": "test-multihead", "locked": true, "points": 15}
 def test_unit_multihead_attention():
-    """🔬 Test multi-head attention implementation."""
-    print("🔬 Unit Test: Multi-Head Attention...")
+    """🧪 Test multi-head attention implementation."""
+    print("🧪 Unit Test: Multi-Head Attention...")
 
     # Test initialization
     embed_dim, num_heads = 64, 8
@@ -1007,7 +1007,7 @@ Let's see these patterns emerge in our implementation.
 # %%
 def test_attention_scenarios():
     """Test attention mechanisms in realistic scenarios."""
-    print("🔬 Testing Attention Scenarios...")
+    print("🧪 Testing Attention Scenarios...")
 
     # Scenario 1: Small transformer block setup
     print("\n1. Small Transformer Setup:")

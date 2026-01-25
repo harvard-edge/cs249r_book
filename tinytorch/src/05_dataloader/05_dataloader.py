@@ -213,7 +213,7 @@ class Dataset(ABC):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Dataset Abstract Base Class
+### 🧪 Unit Test: Dataset Abstract Base Class
 
 This test validates our Dataset abstract base class is properly defined.
 
@@ -224,8 +224,8 @@ This test validates our Dataset abstract base class is properly defined.
 
 # %% nbgrader={"grade": true, "grade_id": "test-dataset", "locked": true, "points": 10}
 def test_unit_dataset():
-    """🔬 Test Dataset abstract base class."""
-    print("🔬 Unit Test: Dataset Abstract Base Class...")
+    """🧪 Test Dataset abstract base class."""
+    print("🧪 Unit Test: Dataset Abstract Base Class...")
 
     # Test that Dataset is properly abstract
     try:
@@ -434,7 +434,7 @@ class TensorDataset(Dataset):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: TensorDataset
+### 🧪 Unit Test: TensorDataset
 
 This test validates our TensorDataset implementation works correctly with tensor-based data.
 
@@ -445,8 +445,8 @@ This test validates our TensorDataset implementation works correctly with tensor
 
 # %% nbgrader={"grade": true, "grade_id": "test-tensordataset", "locked": true, "points": 15}
 def test_unit_tensordataset():
-    """🔬 Test TensorDataset implementation."""
-    print("🔬 Unit Test: TensorDataset...")
+    """🧪 Test TensorDataset implementation."""
+    print("🧪 Unit Test: TensorDataset...")
 
     # Test basic functionality
     features = Tensor([[1, 2], [3, 4], [5, 6]])  # 3 samples, 2 features
@@ -1028,7 +1028,7 @@ class Compose:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Data Augmentation Transforms
+### 🧪 Unit Test: Data Augmentation Transforms
 
 This test validates our augmentation implementations.
 
@@ -1041,8 +1041,8 @@ This test validates our augmentation implementations.
 
 
 def test_unit_augmentation():
-    """🔬 Test data augmentation transforms."""
-    print("🔬 Unit Test: Data Augmentation...")
+    """🧪 Test data augmentation transforms."""
+    print("🧪 Unit Test: Data Augmentation...")
 
     # Test 1: RandomHorizontalFlip
     print("  Testing RandomHorizontalFlip...")
@@ -1120,7 +1120,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🔬 Unit Test: DataLoader
+### 🧪 Unit Test: DataLoader
 
 This test validates our DataLoader implementation with batching and shuffling.
 
@@ -1131,8 +1131,8 @@ This test validates our DataLoader implementation with batching and shuffling.
 
 # %% nbgrader={"grade": true, "grade_id": "test-dataloader", "locked": true, "points": 20}
 def test_unit_dataloader():
-    """🔬 Test DataLoader implementation."""
-    print("🔬 Unit Test: DataLoader...")
+    """🧪 Test DataLoader implementation."""
+    print("🧪 Unit Test: DataLoader...")
 
     # Create test dataset
     features = Tensor([[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]])  # 5 samples
@@ -1185,7 +1185,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🔬 Unit Test: DataLoader Deterministic Shuffling
+### 🧪 Unit Test: DataLoader Deterministic Shuffling
 
 This test validates deterministic shuffling with fixed random seeds.
 
@@ -1196,8 +1196,8 @@ This test validates deterministic shuffling with fixed random seeds.
 
 # %% nbgrader={"grade": true, "grade_id": "test-dataloader-deterministic", "locked": true, "points": 5}
 def test_unit_dataloader_deterministic():
-    """🔬 Test DataLoader deterministic shuffling with fixed seed."""
-    print("🔬 Unit Test: DataLoader Deterministic Shuffling...")
+    """🧪 Test DataLoader deterministic shuffling with fixed seed."""
+    print("🧪 Unit Test: DataLoader Deterministic Shuffling...")
 
     # Create test dataset
     features = Tensor([[1, 2], [3, 4], [5, 6], [7, 8]])
@@ -1524,7 +1524,7 @@ def analyze_memory_usage():
     print("• Sweet spot: Usually 32-128 depending on model size")
 
     # Demonstrate actual memory usage with our tensors
-    print("\n🔬 Actual Tensor Memory Usage:")
+    print("\n🧪 Actual Tensor Memory Usage:")
 
     # Create different sized tensors
     tensor_small = Tensor(np.random.randn(32, 784))    # Small batch
@@ -1707,8 +1707,8 @@ Let's test how our DataLoader integrates with a complete training workflow, simu
 
 # %% nbgrader={"grade": false, "grade_id": "integration-test", "solution": true}
 def test_training_integration():
-    """🔬 Test DataLoader integration with training workflow."""
-    print("🔬 Integration Test: Training Workflow...")
+    """🧪 Test DataLoader integration with training workflow."""
+    print("🧪 Integration Test: Training Workflow...")
 
     # Create a realistic dataset
     num_samples = 1000
@@ -1814,7 +1814,7 @@ def test_module():
     test_training_integration()
 
     # Test augmentation with DataLoader
-    print("🔬 Integration Test: Augmentation with DataLoader...")
+    print("🧪 Integration Test: Augmentation with DataLoader...")
 
     # Create dataset with augmentation
     train_transforms = Compose([

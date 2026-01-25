@@ -619,7 +619,7 @@ class Conv2d:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Conv2d Implementation
+### 🧪 Unit Test: Conv2d Implementation
 
 This test validates our convolution implementation with different configurations.
 
@@ -632,8 +632,8 @@ This test validates our convolution implementation with different configurations
 
 
 def test_unit_conv2d():
-    """🔬 Test Conv2d implementation with multiple configurations."""
-    print("🔬 Unit Test: Conv2d...")
+    """🧪 Test Conv2d implementation with multiple configurations."""
+    print("🧪 Unit Test: Conv2d...")
 
     # Test 1: Basic convolution without padding
     print("  Testing basic convolution...")
@@ -763,7 +763,7 @@ Sliding 2×2 window with stride=2:
 Step 1:     Step 2:     Step 3:     Step 4:
 ┌──┐        ┌──┐
 │▓▓│        │▓▓│
-└──┘        └──┘                   ┌──┐        ┌──┐
+└──┘        └──┘                    ┌──┐        ┌──┐
                                     │▓▓│        │▓▓│
                                     └──┘        └──┘
 
@@ -1460,7 +1460,7 @@ class BatchNorm2d:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: BatchNorm2d
+### 🧪 Unit Test: BatchNorm2d
 
 This test validates batch normalization implementation.
 
@@ -1473,8 +1473,8 @@ This test validates batch normalization implementation.
 
 
 def test_unit_batchnorm2d():
-    """🔬 Test BatchNorm2d implementation."""
-    print("🔬 Unit Test: BatchNorm2d...")
+    """🧪 Test BatchNorm2d implementation."""
+    print("🧪 Unit Test: BatchNorm2d...")
 
     # Test 1: Basic forward pass shape
     print("  Testing basic forward pass...")
@@ -1553,7 +1553,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Pooling Operations
+### 🧪 Unit Test: Pooling Operations
 
 This test validates both max and average pooling implementations.
 
@@ -1566,8 +1566,8 @@ This test validates both max and average pooling implementations.
 
 
 def test_unit_pooling():
-    """🔬 Test MaxPool2d and AvgPool2d implementations."""
-    print("🔬 Unit Test: Pooling Operations...")
+    """🧪 Test MaxPool2d and AvgPool2d implementations."""
+    print("🧪 Unit Test: Pooling Operations...")
 
     # Test 1: MaxPool2d basic functionality
     print("  Testing MaxPool2d...")
@@ -1812,10 +1812,10 @@ CNN wins with 120× fewer parameters!
 Layer-by-Layer Feature Evolution:
 
 Layer 1 (Conv 3→16):              Layer 2 (Conv 16→32):
-┌─────┐ ┌─────┐ ┌─────┐           ┌─────┐ ┌─────┐ ┌─────┐
+┌─────┐ ┌─────┐ ┌─────┐           ┌─────┐ ┌──────┐ ┌───────┐
 │Edge │ │Edge │ │Edge │           │Shape│ │Corner│ │Texture│
-│ \\ /│ │  |  │ │ / \\│           │ ◇  │ │  L  │ │ ≈≈≈ │
-└─────┘ └─────┘ └─────┘           └─────┘ └─────┘ └─────┘
+│ \\ /│ │  |  │ │ / \\│           │ ◇   │ │  L   │ │ ≈≈≈≈≈ │
+└─────┘ └─────┘ └─────┘           └─────┘ └──────┘ └───────┘
 Simple features                   Complex combinations
 
 Why pooling between layers:
@@ -2023,7 +2023,7 @@ class SimpleCNN:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: SimpleCNN Integration
+### 🧪 Unit Test: SimpleCNN Integration
 
 This test validates that spatial operations work together in a complete CNN architecture.
 
@@ -2036,8 +2036,8 @@ This test validates that spatial operations work together in a complete CNN arch
 
 
 def test_unit_simple_cnn():
-    """🔬 Test SimpleCNN integration with spatial operations."""
-    print("🔬 Unit Test: SimpleCNN Integration...")
+    """🧪 Test SimpleCNN integration with spatial operations."""
+    print("🧪 Unit Test: SimpleCNN Integration...")
 
     # Test 1: Forward pass with CIFAR-10 sized input
     print("  Testing forward pass...")
