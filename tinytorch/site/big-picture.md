@@ -125,11 +125,11 @@ Concrete outcomes at each major checkpoint:
 
 | After Module | You'll Have Built | Historical Context |
 |--------------|-------------------|-------------------|
-| **01-04** | Working Perceptron classifier | Rosenblatt 1958 |
+| **01-03** | Working Perceptron classifier (forward pass) | Rosenblatt 1958 |
 | **01-08** | MLP solving XOR + complete training pipeline | AI Winter breakthrough 1969→1986 |
 | **01-09** | CNN with convolutions and pooling | LeNet-5 (1998) |
-| **01-13** | GPT model with autoregressive generation | "Attention Is All You Need" (2017) |
-| **01-19** | Optimized, quantized, accelerated system | Production ML today |
+| **01-08 + 11-13** | GPT model with autoregressive generation | "Attention Is All You Need" (2017) |
+| **01-08 + 14-19** | Optimized, quantized, accelerated system | Production ML today |
 | **01-20** | MLPerf-style benchmarking submission | Torch Olympics |
 
 ```{admonition} The North Star Build

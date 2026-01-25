@@ -157,13 +157,14 @@ You're recreating ML history with your own code. *By Module 19, you'll benchmark
 
 As you complete more modules, you unlock more milestones:
 
-| Modules Completed | Milestone Unlocked | What You Recreate |
-|-------------------|-------------------|-------------------|
-| 01-04 | `perceptron` | The 1958 Perceptron |
-| 01-08 | `backprop` | 1986 Backpropagation |
-| 01-09 | `lenet` | 1998 LeNet CNN |
-| 01-13 | `transformer` | 2017 Transformer |
-| 01-19 | `mlperf` | MLPerf Benchmarks |
+| Modules Completed | Milestone | What You Recreate |
+|-------------------|-----------|-------------------|
+| 01-03 | Perceptron (1958) | First neural network (forward pass) |
+| 01-03 | XOR Crisis (1969) | The limitation that triggered AI Winter |
+| 01-08 | MLP Revival (1986) | Backprop solves XOR + real digit recognition |
+| 01-09 | CNN Revolution (1998) | Convolutions for spatial understanding |
+| 01-08 + 11-13 | Transformers (2017) | Language generation with attention |
+| 01-08 + 14-19 | MLPerf (2018) | Production optimization pipeline |
 
 See all milestones and their requirements:
 

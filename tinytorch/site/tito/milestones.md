@@ -145,7 +145,7 @@ See your journey through ML history in a visual tree format.
 
 **What**: Frank Rosenblatt's first trainable neural network
 
-**Requires**: Module 01 (Tensor)
+**Requires**: Modules 01-03 (Tensor, Activations, Layers)
 
 **What you'll do**: Implement and train the perceptron that proved machines could learn
 
@@ -160,13 +160,13 @@ tito milestone run 01
 
 ### Milestone 02: XOR Crisis (1969)
 
-**What**: Solving the problem that stalled AI research
+**What**: Demonstrating the problem that stalled AI research
 
-**Requires**: Modules 01-02 (Tensor, Activations)
+**Requires**: Modules 01-03 (Tensor, Activations, Layers)
 
-**What you'll do**: Use multi-layer networks to solve XOR - impossible for single-layer perceptrons
+**What you'll do**: Experience how single-layer perceptrons fail on XOR - the limitation that triggered the "AI Winter"
 
-**Historical significance**: Minsky & Papert showed perceptron limitations; this shows how to overcome them
+**Historical significance**: Minsky & Papert showed perceptron limitations; this milestone demonstrates the crisis before the solution
 
 **Run it**:
 ```bash
@@ -213,7 +213,7 @@ tito milestone run 04
 
 **What**: "Attention is All You Need"
 
-**Requires**: Modules 01-13 (Foundation + Architecture Tiers)
+**Requires**: Modules 01-08 + 11-13 (Foundation + Embeddings, Attention, Transformers)
 
 **What you'll do**: Implement transformer architecture with self-attention mechanism
 
@@ -230,7 +230,7 @@ tito milestone run 05
 
 **What**: Production ML Systems
 
-**Requires**: Modules 01-19 (Foundation + Architecture + Optimization Tiers)
+**Requires**: Modules 01-08 + 14-19 (Foundation + Optimization Tier)
 
 **What you'll do**: Optimize for production deployment with quantization, compression, and benchmarking
 
@@ -426,7 +426,7 @@ tito module complete XX
 
 **Solution**:
 1. Check error message for which module failed
-2. Edit `modules/source/XX_name/` (NOT `tinytorch/`)
+2. Edit `modules/XX_name/XX_name.ipynb` (NOT `tinytorch/`)
 3. Re-export: `tito module complete XX`
 4. Run milestone again
 
@@ -435,8 +435,8 @@ tito module complete XX
 <div style="background: #f8f9fa; padding: 2rem; border-radius: 0.5rem; margin: 2rem 0; text-align: center;">
 <h3 style="margin: 0 0 1rem 0; color: #495057;">Ready to Recreate ML History?</h3>
 <p style="margin: 0 0 1.5rem 0; color: #6c757d;">Start with the Foundation Tier and work toward your first milestone</p>
-<a href="tiers/foundation.html" style="display: inline-block; background: #007bff; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500; margin-right: 1rem;">Foundation Tier →</a>
-<a href="chapters/milestones.html" style="display: inline-block; background: #6f42c1; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">Historical Context →</a>
+<a href="../tiers/foundation.html" style="display: inline-block; background: #007bff; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500; margin-right: 1rem;">Foundation Tier →</a>
+<a href="../milestones/milestones_ABOUT.html" style="display: inline-block; background: #6f42c1; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">Historical Context →</a>
 </div>
 
 
