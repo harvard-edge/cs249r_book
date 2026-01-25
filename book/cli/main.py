@@ -39,16 +39,21 @@ console = Console()
 class MLSysBookCLI:
     """Main CLI application class."""
 
-    def __init__(self):
-        """Initialize the CLI with all components."""
+    def __init__(self, verbose: bool = False):
+        """Initialize the CLI with all components.
+
+        Args:
+            verbose: If True, stream build output in real-time
+        """
         self.root_dir = Path.cwd()
+        self.verbose = verbose
 
         # Initialize core components
         self.config_manager = ConfigManager(self.root_dir)
         self.chapter_discovery = ChapterDiscovery(self.config_manager.book_dir)
 
         # Initialize command handlers
-        self.build_command = BuildCommand(self.config_manager, self.chapter_discovery)
+        self.build_command = BuildCommand(self.config_manager, self.chapter_discovery, verbose=verbose)
         self.preview_command = PreviewCommand(self.config_manager, self.chapter_discovery)
         self.doctor_command = DoctorCommand(self.config_manager, self.chapter_discovery)
         self.clean_command = CleanCommand(self.config_manager, self.chapter_discovery)
@@ -155,6 +160,16 @@ class MLSysBookCLI:
         aliases_text.append("  h → help\n", style="green")
 
         console.print(Panel(aliases_text, title="⚡ Shortcuts", border_style="cyan"))
+
+        # Global Options
+        options_text = Text()
+        options_text.append("🔧 Global Options:\n", style="bold yellow")
+        options_text.append("  -v, --verbose  ", style="yellow")
+        options_text.append("Stream build output in real-time\n", style="dim")
+        options_text.append("  Example: ", style="dim")
+        options_text.append("./binder pdf --vol1 -v", style="cyan")
+
+        console.print(Panel(options_text, title="⚙️ Options", border_style="yellow"))
 
     def handle_build_command(self, args):
         """Handle build command (HTML format)."""
@@ -455,8 +470,19 @@ class MLSysBookCLI:
 
 def main():
     """Main entry point."""
-    cli = MLSysBookCLI()
-    success = cli.run(sys.argv[1:])
+    # Check for verbose flag
+    args = sys.argv[1:]
+    verbose = False
+
+    if "-v" in args:
+        verbose = True
+        args.remove("-v")
+    elif "--verbose" in args:
+        verbose = True
+        args.remove("--verbose")
+
+    cli = MLSysBookCLI(verbose=verbose)
+    success = cli.run(args)
     sys.exit(0 if success else 1)
 
 
