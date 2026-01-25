@@ -18,15 +18,17 @@ console = Console()
 class BuildCommand:
     """Handles build operations for the MLSysBook."""
 
-    def __init__(self, config_manager, chapter_discovery):
+    def __init__(self, config_manager, chapter_discovery, verbose: bool = False):
         """Initialize build command.
 
         Args:
             config_manager: ConfigManager instance
             chapter_discovery: ChapterDiscovery instance
+            verbose: If True, stream build output in real-time
         """
         self.config_manager = config_manager
         self.chapter_discovery = chapter_discovery
+        self.verbose = verbose
 
     def build_full(self, format_type: str = "html") -> bool:
         """Build full book in specified format.
@@ -427,31 +429,57 @@ class BuildCommand:
             True if command succeeded, False otherwise
         """
         try:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-                transient=False
-            ) as progress:
-                task = progress.add_task(description, total=None)
-
-                result = subprocess.run(
+            if self.verbose:
+                # Verbose mode: stream output in real-time
+                console.print(f"[dim]▶ {description}[/dim]")
+                process = subprocess.Popen(
                     cmd,
                     cwd=cwd,
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
                     text=True,
-                    timeout=1800  # 30 minute timeout
+                    bufsize=1
                 )
 
-                progress.update(task, completed=True)
+                # Stream output line by line
+                for line in iter(process.stdout.readline, ''):
+                    if line:
+                        console.print(line.rstrip())
 
-            if result.returncode == 0:
-                return True
+                process.wait(timeout=1800)
+
+                if process.returncode == 0:
+                    return True
+                else:
+                    console.print(f"[red]Command failed with exit code {process.returncode}[/red]")
+                    return False
             else:
-                console.print(f"[red]Command failed with exit code {result.returncode}[/red]")
-                if result.stderr:
-                    console.print(f"[red]Error: {result.stderr}[/red]")
-                return False
+                # Quiet mode: show spinner
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    console=console,
+                    transient=False
+                ) as progress:
+                    task = progress.add_task(description, total=None)
+
+                    result = subprocess.run(
+                        cmd,
+                        cwd=cwd,
+                        capture_output=True,
+                        text=True,
+                        timeout=1800  # 30 minute timeout
+                    )
+
+                    progress.update(task, completed=True)
+
+                if result.returncode == 0:
+                    return True
+                else:
+                    console.print(f"[red]Command failed with exit code {result.returncode}[/red]")
+                    if result.stderr:
+                        console.print(f"[red]Error: {result.stderr}[/red]")
+                    return False
 
         except subprocess.TimeoutExpired:
             console.print("[red]❌ Build timed out after 30 minutes[/red]")
