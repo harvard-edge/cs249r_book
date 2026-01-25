@@ -40,7 +40,50 @@ The deployment of machine learning systems confronts a reality that no amount of
 
 ## Deployment Paradigm Framework {#sec-ml-system-architecture-deployment-paradigm-framework-0d25}
 
-Machine learning systems comprise three fundamental components: data, algorithms,[^fn-algorithm] and computing infrastructure. As established in @sec-introduction, the systems engineer's goal is to optimize the **Samples per Dollar** within this triad. However, in the real world, this optimization is bounded by a fourth dimension: the **Deployment Environment**.
+The Introduction established the Iron Law of ML Systems as a sum of three terms: data movement, compute, and overhead. But which term dominates? The answer depends entirely on the deployment environment. A model that is compute-bound during training may become memory-bound during inference; a system that runs efficiently in the cloud may hit power limits on mobile devices. Before examining specific deployment paradigms, we need a framework for reasoning about where bottlenecks occur.
+
+::: {.callout-perspective title="The Iron Law of System Balance"}
+
+In a machine learning system, the total time to deliver a prediction is governed by the **Bottleneck Principle**. Unlike traditional software where optimizing the average case works, ML systems are dominated by their slowest component:
+
+$$ T_{system} = \max(T_{compute}, T_{memory}, T_{network}, T_{io}) + L_{overhead} $$
+
+*   **$T_{compute}$**: Time to execute the matrix multiplications (FLOPS).
+*   **$T_{memory}$**: Time to move weights/activations (HBM Bandwidth).
+*   **$T_{network}$**: Time to synchronize gradients or fetch features (Interconnect).
+*   **$T_{io}$**: Time to load data from disk (Storage Throughput).
+
+**The Engineering Implication:** If your system is **Memory Bound** ($T_{memory} > T_{compute}$), buying a GPU with 2x more FLOPS yields exactly **0% speedup**. You must identify the dominant term before optimizing.
+:::
+
+::: {.callout-note title="From Sums to Bottlenecks: The Roofline Transition" collapse="true"}
+
+The Introduction presented the Iron Law as a sum: $L = \frac{D}{B} + \frac{Ops}{P \cdot \eta} + L_{fixed}$. Here we use $\max()$. Why?
+
+**Serial Execution (The Additive Law):** When operations execute sequentially:
+
+$$[Load] \to [Compute] \to [Load] \to [Compute] \implies T = T_{mem} + T_{compute}$$
+
+**Pipelined Execution (The Bottleneck Law):** Modern accelerators overlap memory transfers with computation using double buffering and CUDA streams:
+
+$$\begin{array}{c}
+[Load_1][Load_2][Load_3]... \\
+\quad\quad[Compute_1][Compute_2]...
+\end{array} \implies T \approx \max(T_{mem}, T_{compute})$$
+
+With perfect overlap, total time equals the slower operation. The Iron Law tells you the *cost of each ingredient*; the Bottleneck Law tells you the *speed of the assembly line*.
+
+**When does each apply?**
+
+- **Additive form** → **Latency**: Time to complete *one* task (critical path analysis)
+- **Max form** → **Throughput**: Rate of completing *many* tasks (Roofline model)
+
+The $\max()$ form assumes sufficient hardware queues and double-buffering to overlap operations. Without these, you fall back to the additive form.
+
+Both are the same Iron Law viewed through different lenses: latency decomposition vs. throughput limits.
+:::
+
+Now that we understand how bandwidth and compute become pipelined bottlenecks rather than additive costs, we can classify workloads by which term dominates. The Bottleneck Principle explains why machine learning systems comprise not just algorithms, but three tightly coupled components: data, algorithms,[^fn-algorithm] and computing infrastructure. As established in @sec-introduction, the systems engineer's goal is to optimize the **Samples per Dollar** within this triad. However, in the real world, this optimization is bounded by a fourth dimension: the **Deployment Environment**.
 
 To navigate this environment, we categorize ML workloads into four **Archetypes**.[^fn-archetype] These archetypes represent fundamental physical constraints, not just specific model architectures. Throughout this book, we will refer to these archetypes to explain why certain optimizations work for some models but fail for others. Understanding which archetype your workload belongs to determines which optimizations will help—and which are wasted effort.
 
@@ -62,7 +105,7 @@ These archetypes recur throughout this volume. In @sec-dnn-architectures, we int
 
 [^fn-quantization]: **Quantization**: From Latin *quantus* (how much), via quantum physics where it describes the restriction of continuous values to discrete levels. Max Planck introduced quantum theory in 1900 to explain blackbody radiation. In ML, quantization similarly restricts continuous floating-point weights to discrete values (INT8, INT4), trading precision for memory and compute efficiency. The physics metaphor is apt: just as quantized energy levels enabled new physics, quantized weights enable new deployment targets.
 
-::: {.callout-lighthouse title="Lighthouse Examples: Quantitative Reference" collapse="true"}
+::: {.callout-lighthouse title="Lighthouse Examples" collapse="true"}
 Throughout this volume, we use five representative models as **Lighthouse Examples**—concrete workloads spanning the deployment spectrum. This table previews their key characteristics; @sec-dnn-architectures provides full architectural details.
 
 +--------------------------------------------+---------------------------+-------------------+------------------------+----------------------+--------------------------------+
@@ -138,11 +181,11 @@ California to Virginia (4,000 km) requires **40 ms minimum** before any computat
 $$\text{Power} \propto C \times V^2 \times f \quad \text{where } V \propto f \implies \text{Power} \propto f^3$$
 Doubling clock frequency requires approximately 8× more power. This cubic relationship ended the "free lunch" of frequency scaling and forced the industry toward parallelism (multi-core) and specialization (GPUs, TPUs). Mobile devices hit hard thermal limits at 3–5W sustained; exceeding this causes throttling.
 
-**The Memory Wall** reflects the widening bandwidth[^fn-bandwidth] gap, approximately 2× every 3 years:
+**The Memory Wall** reflects the widening bandwidth[^fn-bandwidth] gap:
 
-$\frac{\text{Compute Growth}}{\text{Memory BW Growth}} \approx \frac{2\times/\text{year}}{1.2\times/\text{year}} \approx 1.67\times/\text{year}$
+$\frac{\text{Compute Growth}}{\text{Memory BW Growth}} \approx \frac{1.6\times/\text{year}}{1.2\times/\text{year}} \approx 1.33\times/\text{year}$
 
-Processors double in compute every ~18 months; memory bandwidth improves only ~20% annually. This widening gap makes data movement the dominant bottleneck and energy cost for most ML workloads. A memory-bound model gains **zero** speedup from faster processors.
+Processors double in compute every 18 months ($\approx 1.6\times$ annually per Moore's Law); memory bandwidth improves only $\approx 20\%$ annually. This widening gap makes data movement the dominant bottleneck and energy cost for most ML workloads. A memory-bound model gains **zero** speedup from faster processors.
 
 [^fn-dennard-scaling]: **Dennard Scaling**: Formulated by Robert Dennard and colleagues at IBM in 1974 [@dennard1974design], this observation predicted that as transistors shrink, voltage and current scale proportionally, keeping power density constant. This enabled the "free lunch" era where each chip generation ran faster without increasing power. The breakdown around 2005 occurred because voltage could no longer scale below ~0.7V due to leakage currents, forcing the industry shift from frequency scaling to parallelism and specialization that now defines ML hardware.
 

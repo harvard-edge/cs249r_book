@@ -949,6 +949,31 @@ Where:
 
 : **Training and Inference Throughput**: Representative throughput comparison across execution modes for common model architectures on NVIDIA A100 GPU with batch size 32. torch.compile typically provides 1.4-1.5$\times$ speedup over eager mode; TensorRT provides 2-3$\times$ speedup but requires longer compilation and is inference-only. Compile times vary based on model complexity and optimization level. {#tbl-training-benchmark}
 
+::: {.callout-lighthouse title="Framework Strategy by Archetype" collapse="true"}
+
+The optimal framework execution strategy depends on which Iron Law term dominates your workload:
+
++-------------------+------------------------------------------+------------------------------------------+--------------------------------------------+
+| **Archetype**     | **Dominant Iron Law Term**               | **Optimal Framework Strategy**           | **Rationale**                              |
++:==================+:=========================================+:=========================================+:===========================================+
+| **ResNet-50**     | $\frac{Ops}{P \cdot \eta}$ (Compute)     | **TensorRT** (inference)                 | Kernel fusion maximizes MFU; compute-bound |
+| (Compute Beast)   |                                          | **torch.compile** (training)             | workloads benefit most from optimization   |
++-------------------+------------------------------------------+------------------------------------------+--------------------------------------------+
+| **GPT-2**         | $\frac{D}{B}$ (Memory Bandwidth)         | **torch.compile**                        | Kernel fusion reduces HBM round-trips;     |
+| (Bandwidth Hog)   |                                          |                                          | keeps data in cache to mitigate bandwidth  |
++-------------------+------------------------------------------+------------------------------------------+--------------------------------------------+
+| **DLRM**          | $\frac{D}{B}$ (Random Access) +          | **Eager** with specialized kernels       | Embedding lookups are inherently irregular |
+| (Sparse Scatter)  | $T_{network}$                            | (FBGEMM)                                 | and dynamic; compilation gains are small   |
++-------------------+------------------------------------------+------------------------------------------+--------------------------------------------+
+| **DS-CNN**        | $L_{fixed}$ (Overhead)                   | **AOT compilation** (TFLite, ONNX)       | Sub-ms inference; every microsecond of     |
+| (Tiny Constraint) |                                          |                                          | Python overhead is unacceptable            |
++-------------------+------------------------------------------+------------------------------------------+--------------------------------------------+
+
+: Framework execution strategy aligned to workload archetype and dominant Iron Law term. {#tbl-framework-archetype-strategy}
+
+**Key insight**: Compilation benefits scale with how much of your workload is *optimizable*. Compute Beasts (@tbl-training-benchmark: ResNet-50 sees 2.6× speedup from TensorRT) benefit most. Sparse Scatter workloads gain little because their bottleneck (embedding lookups) is inherently irregular.
+:::
+
 This principle has concrete implications:
 
 **Research prototyping** ($N_{\text{dev}} \gg N_{\text{prod}}$): Stay eager. If you're changing model architecture every few minutes, compilation overhead dominates. A 30-second compile time with 10 iterations/hour means 5 minutes lost to compilation per hour—often more than the runtime savings.
