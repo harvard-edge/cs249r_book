@@ -65,6 +65,7 @@ set -e  # Exit on any error
 # These can be overridden via environment variables for testing:
 #   TINYTORCH_BRANCH=dev curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
 #   TINYTORCH_VERSION=0.1.5 TINYTORCH_BRANCH=feature/foo ./install.sh
+#   TINYTORCH_NON_INTERACTIVE=1 ./install.sh  # Skip all prompts (for CI)
 REPO_URL="https://github.com/harvard-edge/cs249r_book.git"
 REPO_SHORT="harvard-edge/cs249r_book"
 TAGS_API="https://api.github.com/repos/harvard-edge/cs249r_book/tags"
@@ -72,6 +73,8 @@ TAG_PREFIX="tinytorch-v"
 BRANCH="${TINYTORCH_BRANCH:-main}"
 INSTALL_DIR="${TINYTORCH_INSTALL_DIR:-tinytorch}"
 SPARSE_PATH="tinytorch"
+# Non-interactive mode: skip prompts, use defaults (for CI/testing)
+NON_INTERACTIVE="${TINYTORCH_NON_INTERACTIVE:-}"
 # Version is fetched from GitHub tags (single source of truth)
 # Can be overridden for testing: TINYTORCH_VERSION=0.1.5 ./install.sh
 TINYTORCH_VERSION="${TINYTORCH_VERSION:-}"
@@ -311,6 +314,16 @@ check_existing_directory() {
 # ============================================================================
 
 prompt_install_directory() {
+    # Non-interactive mode: use INSTALL_DIR as-is (from env var or default)
+    if [ -n "$NON_INTERACTIVE" ]; then
+        return
+    fi
+
+    # No TTY available: use defaults silently
+    if ! [ -t 0 ] && ! [ -e /dev/tty ]; then
+        return
+    fi
+
     echo ""
     echo -e "Where would you like to install Tiny${YELLOW}🔥Torch${NC}?"
     echo -e "  ${DIM}Press Enter for default: ${BOLD}$PWD/tinytorch${NC}"
@@ -533,14 +546,16 @@ main() {
     # Check directory doesn't exist (after user chooses)
     check_existing_directory
 
-    # Show plan and confirm
-    show_plan_and_confirm
+    # Show plan and confirm (skip in non-interactive mode)
+    if [ -z "$NON_INTERACTIVE" ] && { [ -t 0 ] || [ -e /dev/tty ]; }; then
+        show_plan_and_confirm
 
-    printf "Continue? [Y/n] "
-    read -r REPLY </dev/tty
-    if [[ $REPLY =~ ^[Nn]$ ]]; then
-        print_info "Installation cancelled"
-        exit 0
+        printf "Continue? [Y/n] "
+        read -r REPLY </dev/tty
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            print_info "Installation cancelled"
+            exit 0
+        fi
     fi
 
     # Run installation

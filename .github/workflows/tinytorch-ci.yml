@@ -384,12 +384,38 @@ jobs:
           ./bin/tito dev test --release --ci
 
   # ===========================================================================
+  # STAGE 7: FRESH INSTALL - Simulates real student experience
+  # ===========================================================================
+  stage-7-fresh-install:
+    name: 📦 Stage 7 · Fresh Install
+    runs-on: ubuntu-latest
+    needs: [configure, stage-5-e2e]
+    # Run on standard/all/release test types, after stage 5 passes
+    if: |
+      always() &&
+      (needs.configure.outputs.run_e2e == 'true' || needs.configure.outputs.run_release == 'true') &&
+      (needs.stage-5-e2e.result == 'success' || needs.stage-5-e2e.result == 'skipped')
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout (for test script only)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            tinytorch/scripts/test-fresh-install.sh
+
+      - name: Run Fresh Install Test (Docker)
+        run: |
+          chmod +x tinytorch/scripts/test-fresh-install.sh
+          ./tinytorch/scripts/test-fresh-install.sh --branch ${{ github.ref_name }}
+
+  # ===========================================================================
   # Summary: Collect and report all results
   # ===========================================================================
   summary:
     name: 📊 Summary
     runs-on: ubuntu-latest
-    needs: [configure, stage-1-inline, stage-2-unit, stage-3-integration, stage-4-cli, stage-5-e2e, stage-6-release]
+    needs: [configure, stage-1-inline, stage-2-unit, stage-3-integration, stage-4-cli, stage-5-e2e, stage-6-release, stage-7-fresh-install]
     if: always()
 
     steps:
@@ -475,6 +501,17 @@ jobs:
             echo "| 6 | 🚀 Release | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
           fi
 
+          # Stage 7: Fresh Install
+          if [ "${{ needs.configure.outputs.run_e2e }}" = "true" ] || [ "${{ needs.configure.outputs.run_release }}" = "true" ]; then
+            case "${{ needs.stage-7-fresh-install.result }}" in
+              success) echo "| 7 | 📦 Fresh Install | ✅ Passed |" >> $GITHUB_STEP_SUMMARY ;;
+              failure) echo "| 7 | 📦 Fresh Install | ❌ Failed |" >> $GITHUB_STEP_SUMMARY ;;
+              *) echo "| 7 | 📦 Fresh Install | ⏭️ ${{ needs.stage-7-fresh-install.result }} |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          else
+            echo "| 7 | 📦 Fresh Install | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: Check for failures
         run: |
           FAILED=false
@@ -502,6 +539,10 @@ jobs:
           fi
           if [ "${{ needs.configure.outputs.run_release }}" = "true" ] && [ "${{ needs.stage-6-release.result }}" = "failure" ]; then
             echo "❌ Stage 6 (Release) failed"
+            FAILED=true
+          fi
+          if { [ "${{ needs.configure.outputs.run_e2e }}" = "true" ] || [ "${{ needs.configure.outputs.run_release }}" = "true" ]; } && [ "${{ needs.stage-7-fresh-install.result }}" = "failure" ]; then
+            echo "❌ Stage 7 (Fresh Install) failed"
             FAILED=true
           fi
 

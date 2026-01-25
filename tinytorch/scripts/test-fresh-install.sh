@@ -70,13 +70,9 @@ echo "════════════════════════�
 echo ""
 echo "▶ Step 1: Running install script (branch: $BRANCH)..."
 export TINYTORCH_BRANCH="$BRANCH"
+export TINYTORCH_NON_INTERACTIVE=1
 curl -sSL "https://raw.githubusercontent.com/harvard-edge/cs249r_book/${BRANCH}/tinytorch/site/extra/install.sh" -o /tmp/install.sh
-
-# Auto-accept prompts
-echo "tinytorch" | bash /tmp/install.sh << 'EOF'
-tinytorch
-y
-EOF
+bash /tmp/install.sh
 
 cd tinytorch
 source .venv/bin/activate
