@@ -371,9 +371,10 @@ class BenchmarkResult:
         """Compute statistics after initialization."""
         if not self.values:
             raise ValueError(
-                "BenchmarkResult requires at least one measurement.\n"
-                "  Issue: Cannot compute statistics without any measurements.\n"
-                "  Fix: Ensure benchmark runs produce at least one measurement before creating BenchmarkResult."
+                f"Empty values list for BenchmarkResult\n"
+                f"  ❌ Cannot compute statistics: values=[] (0 measurements)\n"
+                f"  💡 BenchmarkResult needs data to compute mean, std, percentiles\n"
+                f"  🔧 Add measurements: BenchmarkResult('{self.metric_name}', [1.2, 1.3, 1.1])"
             )
 
         self.mean = statistics.mean(self.values)
@@ -799,9 +800,10 @@ class Benchmark:
             results = self.run_memory_benchmark()
         else:
             raise ValueError(
-                f"Unknown metric: '{metric}'.\n"
-                f"  Available metrics: 'latency', 'memory', 'accuracy'.\n"
-                f"  Fix: Use one of the supported metric names."
+                f"Unknown benchmark metric: '{metric}'\n"
+                f"  ❌ Metric '{metric}' is not supported\n"
+                f"  💡 compare_models() supports three metrics: latency (timing), memory (bytes), accuracy (correctness)\n"
+                f"  🔧 Use: compare_models(metric='latency') or 'memory' or 'accuracy'"
             )
 
         # Return structured list of dicts for easy comparison
@@ -1456,10 +1458,12 @@ class TinyMLPerf:
                              num_runs: int = 100) -> Dict[str, Any]:
         """Run a standardized TinyMLPerf benchmark."""
         if benchmark_name not in self.benchmarks:
+            available = list(self.benchmarks.keys())
             raise ValueError(
-                f"Unknown benchmark: '{benchmark_name}'.\n"
-                f"  Available benchmarks: {list(self.benchmarks.keys())}.\n"
-                f"  Fix: Use one of the supported benchmark names from the list above."
+                f"Unknown TinyMLPerf benchmark: '{benchmark_name}'\n"
+                f"  ❌ '{benchmark_name}' is not a registered benchmark\n"
+                f"  💡 TinyMLPerf defines standard edge ML benchmarks for reproducible comparison\n"
+                f"  🔧 Choose from: {available}"
             )
 
         config = self.benchmarks[benchmark_name]

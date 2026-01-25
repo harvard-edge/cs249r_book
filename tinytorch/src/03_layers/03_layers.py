@@ -200,7 +200,15 @@ class Layer:
         Returns:
             Output tensor after transformation
         """
-        raise NotImplementedError("Subclasses must implement forward()")
+        raise NotImplementedError(
+            f"forward() not implemented in {self.__class__.__name__}\n"
+            f"  ❌ The Layer base class requires subclasses to implement forward()\n"
+            f"  💡 forward() defines how input data is transformed by this layer\n"
+            f"  🔧 Add this method to your class:\n"
+            f"     def forward(self, x):\n"
+            f"         # Your transformation logic here\n"
+            f"         return transformed_x"
+        )
 
     def __call__(self, x, *args, **kwargs):
         """Allow layer to be called like a function."""
@@ -604,7 +612,15 @@ class Dropout(Layer):
         """
         ### BEGIN SOLUTION
         if not DROPOUT_MIN_PROB <= p <= DROPOUT_MAX_PROB:
-            raise ValueError(f"Dropout probability must be between {DROPOUT_MIN_PROB} and {DROPOUT_MAX_PROB}, got {p}")
+            raise ValueError(
+                f"Invalid dropout probability: {p}\n"
+                f"  ❌ p must be between {DROPOUT_MIN_PROB} and {DROPOUT_MAX_PROB}\n"
+                f"  💡 p is the probability of DROPPING a neuron (not keeping it!)\n"
+                f"     p=0.0 means keep all neurons (no dropout)\n"
+                f"     p=0.5 means drop 50% of neurons randomly\n"
+                f"     p=1.0 means drop all neurons (zero output)\n"
+                f"  🔧 Common values: Dropout(0.1) for light, Dropout(0.3) for moderate, Dropout(0.5) for aggressive"
+            )
         self.p = p
         ### END SOLUTION
 
