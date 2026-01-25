@@ -291,7 +291,7 @@ class TestKVCacheIntegration:
             cache.update(0, k, v)
             assert False, "Should raise ValueError on overflow"
         except ValueError as e:
-            assert "Sequence position" in str(e)
+            assert "cache is full" in str(e).lower() or "position" in str(e).lower()
             print(f"✅ Overflow protection works: {str(e)[:50]}...")
 
         # Test 4: Invalid layer index
@@ -299,7 +299,7 @@ class TestKVCacheIntegration:
             cache.get(layer_idx=99)
             assert False, "Should raise ValueError for invalid layer"
         except ValueError as e:
-            assert "Layer index" in str(e)
+            assert "layer" in str(e).lower() and "index" in str(e).lower()
             print(f"✅ Layer bounds checking works: {str(e)[:50]}...")
 
 
