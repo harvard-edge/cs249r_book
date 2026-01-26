@@ -37,6 +37,8 @@ As you complete modules, you unlock milestones that recreate landmark moments in
 
 ## Step 1: Install & Setup (2 Minutes)
 
+`````{tab-set}
+````{tab-item} macOS / Linux
 ```bash
 # Install TinyTorch (run from a project folder like ~/projects)
 curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
@@ -46,6 +48,30 @@ cd tinytorch
 source .venv/bin/activate
 tito setup
 ```
+````
+
+````{tab-item} Windows
+TinyTorch works on Windows using **Git Bash** (included with Git for Windows).
+
+**Step 1: Install Git for Windows** (if you don't have it)
+- Download from [git-scm.com/download/win](https://git-scm.com/download/win)
+- Run the installer with default options
+
+**Step 2: Open Git Bash**
+- Search "Git Bash" in the Start menu and open it
+
+**Step 3: Install TinyTorch**
+```bash
+# In Git Bash (run from a project folder like ~/projects)
+curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
+
+# Activate and verify
+cd tinytorch
+source .venv/Scripts/activate
+tito setup
+```
+````
+`````
 
 **What this does:**
 - Checks your system (Python 3.8+, git)
