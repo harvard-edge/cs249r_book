@@ -71,7 +71,7 @@ This equation reveals three levers for improvement: reduce total operations thro
 +---------------------------------+--------------------+-----------------------------------------------+
 | **Technique**                   | **Term Affected**  | **Mechanism**                                 |
 +:================================+:===================+:==============================================+
-| **Mixed Precision (FP16/BF16)** | Peak Throughput ↑  | Tensor Cores operate at 8-16× higher FLOP/s   |
+| **Mixed Precision (FP16/BF16)** | Peak Throughput ↑  | Tensor Cores operate at up to 16× higher FLOP/s |
 +---------------------------------+--------------------+-----------------------------------------------+
 | **Data Prefetching**            | Utilization ↑      | Reduces GPU idle time waiting for data        |
 +---------------------------------+--------------------+-----------------------------------------------+
@@ -98,7 +98,9 @@ The Iron Law framework shows how training systems co-evolved with hardware capab
 - **1986**: Backpropagation algorithm formalized [@rumelhart1986learning]. Training a 3-layer network on toy datasets required days on CPU workstations. The bottleneck was raw compute throughput (Peak Throughput in Iron Law terms).
 - **2012**: AlexNet demonstrated GPU training [@krizhevsky2012imagenet]. Two GTX 580 GPUs reduced ImageNet training from weeks to days—a 10× improvement that launched the deep learning era. GPUs increased Peak Throughput dramatically.
 - **2017**: Transformers introduced attention mechanisms [@vaswani2017attention]. NVIDIA Volta GPUs with Tensor Cores enabled mixed-precision training, delivering 5× speedup over previous generation. Tensor Cores further increased Peak Throughput for specific operations.
-- **2020**: GPT-3 training required 1,024 A100 GPUs for months, consuming an estimated $4.6M in compute [@brown2020language]. At this scale, Utilization became critical—idle GPUs wasted thousands of dollars per hour.
+- **2020**: GPT-3 training used over 10,000 V100 GPUs on Microsoft's Azure supercomputer, consuming an estimated $4.6M in compute [@brown2020language].[^fn-gpt3-hardware] At this scale, Utilization became critical—idle GPUs wasted thousands of dollars per hour.
+
+[^fn-gpt3-hardware]: GPT-3 was released in June 2020, before A100 GPUs were widely available. The training infrastructure comprised Microsoft Azure's V100-based supercomputer. Later estimates suggest equivalent training on 1,024 A100s would take approximately 34 days.
 - **2023**: Training efficiency improved 10× through the techniques examined in this chapter. FlashAttention reduces Total Operations while improving Utilization; gradient checkpointing trades Operations for memory capacity; ZeRO optimization maximizes Utilization across distributed systems.
 
 Memory limits motivated gradient checkpointing; bandwidth limits motivated FlashAttention; cost limits motivated mixed precision. The Iron Law explains *why* each technique matters: they each pull different levers in the fundamental performance equation.
@@ -238,7 +240,7 @@ $$
 - With 48 layers in GPT-2: ~9.8 trillion FLOPS per training step
 - At 50K training steps: ~490 petaFLOPS total training computation
 
-**System Implication:** A V100 GPU (125 TFLOPS peak FP16 with Tensor Cores, 28 TFLOPS without) would require 79 seconds just for the attention computations per step at 100% utilization (theoretical peak; practical throughput would be lower). Actual training steps take 180 to 220ms, requiring 8 to 32 GPUs to achieve this throughput depending on utilization and interconnect efficiency.
+**System Implication:** A V100 GPU (125 TFLOPS peak FP16 with Tensor Cores, 15.7 TFLOPS FP32 without) would require 79 seconds just for the attention computations per step at 100% utilization (theoretical peak; practical throughput would be lower). Actual training steps take 180 to 220ms, requiring 8 to 32 GPUs to achieve this throughput depending on utilization and interconnect efficiency.
 
 :::
 
@@ -903,7 +905,7 @@ Consider @tbl-training-arithmetic-intensity: dense matrix multiplication achieve
 
 Consider the GPT-2 Attention Layer where Q, K, V projections with dimensions (B × S × H) multiplied by (H × H) produce BSH² FLOPs. Data movement requires reading Q, K, V (3 × BSH × 2 bytes) plus writing the output (BSH × 2 bytes). The arithmetic intensity equals BSH² divided by (8BSH), which simplifies to H/8. For GPT-2 with H=768, this yields 96 FLOP/byte—below the A100's ridge point, making standard attention memory-bound.
 
-GPUs have characteristic hardware ridge points where operations transition from memory-bound to compute-bound. The A100 with 312 TFLOPS FP16 and 2.0 TB/s bandwidth has a ridge point of 156 FLOP/byte. The H100 with 990 TFLOPS and 3.4 TB/s bandwidth has a ridge point of 291 FLOP/byte. Operations below the ridge point are memory-bound; above are compute-bound.
+GPUs have characteristic hardware ridge points where operations transition from memory-bound to compute-bound. The A100 with 312 TFLOPS FP16 Tensor Core and 2.0 TB/s bandwidth has a ridge point of 156 FLOP/byte. The H100 SXM with 989 TFLOPS TF32 Tensor Core and 3.35 TB/s bandwidth has a ridge point of approximately 295 FLOP/byte. Operations below the ridge point are memory-bound; above are compute-bound.
 
 ::: {.callout-perspective title="Peak FLOPS vs. Sustained Performance"}
 Hardware vendors often market "Peak TFLOPS," but for a systems engineer, this number is often a theoretical limit that is rarely reached. The intensity gap reveals that most neural network operations—especially in the backward pass—have arithmetic intensities well below the hardware's ridge point. When an operation is memory-bound (like LayerNorm or Softmax), doubling the hardware's peak TFLOPS does *nothing* for performance. This is why **Mixed-Precision (FP16/BF16)** is so effective: it doesn't just enable faster arithmetic; it halves the bytes moved per operation, effectively doubling the "Data Supply Rate" and allowing the system to reach a much higher percentage of its peak computational capability. Successful optimization is the art of increasing arithmetic intensity through kernel fusion and reducing data movement through precision management.
@@ -2088,19 +2090,19 @@ A neural network trained in FP32 requires 4 bytes per parameter, while both FP16
 
 The numerical precision differences between these formats shape their use cases. @tbl-precision-comparison reveals that BF16's 8-bit exponent matches FP32's dynamic range ($10^{-45}$ minimum representable), while FP16's 5-bit exponent limits its range to $6 \times 10^{-8}$, explaining why gradients below this threshold underflow to zero without loss scaling. FP32 represents numbers from approximately $\pm1.18 \times 10^{-38}$ to $\pm3.4 \times 10^{38}$ with 7 decimal digits of precision. FP16 ranges from $\pm6.10 \times 10^{-5}$ to $\pm65,504$ with 3-4 decimal digits of precision. Bfloat16, developed by Google Brain, maintains the same dynamic range as FP32 ($\pm1.18 \times 10^{-38}$ to $\pm3.4 \times 10^{38}$) but with reduced precision (3-4 decimal digits). This range preservation makes bfloat16 particularly suited for deep learning training, as it handles large and small gradients more effectively than FP16.
 
-+-------------------------+----------+-----------+----------+
-| **Property**            | **FP32** | **FP16**  | **BF16** |
-+:========================+=========:+==========:+=========:+
-| **Exponent bits**       | 8        | 5         | 8        |
-+-------------------------+----------+-----------+----------+
-| **Mantissa bits**       | 23       | 10        | 7        |
-+-------------------------+----------+-----------+----------+
-| **Min representable**   | 10^-45   | 6 x 10^-8 | 10^-45   |
-+-------------------------+----------+-----------+----------+
-| **Tensor Core speedup** | 1x       | 16x       | 16x      |
-+-------------------------+----------+-----------+----------+
++-------------------------+----------+----------------+----------+
+| **Property**            | **FP32** | **FP16**       | **BF16** |
++:========================+=========:+:==============:+=========:+
+| **Exponent bits**       | 8        | 5              | 8        |
++-------------------------+----------+----------------+----------+
+| **Mantissa bits**       | 23       | 10             | 7        |
++-------------------------+----------+----------------+----------+
+| **Min normal value**    | 10^-38   | 6.1 x 10^-5    | 10^-38   |
++-------------------------+----------+----------------+----------+
+| **Tensor Core speedup** | 1x       | 16x            | 16x      |
++-------------------------+----------+----------------+----------+
 
-: **Precision Format Comparison**: The choice between FP16 and BF16 depends on whether dynamic range (BF16's strength) or precision (FP16's advantage) matters more for the specific workload. {#tbl-precision-comparison}
+: **Precision Format Comparison**: The choice between FP16 and BF16 depends on whether dynamic range (BF16's strength) or precision (FP16's advantage) matters more for the specific workload. The minimum normal values shown are the practical thresholds for training, as subnormal values may flush to zero on many GPUs. {#tbl-precision-comparison}
 
 The choice between formats depends on model characteristics. Models with gradient outliers, common in transformer architectures, generally benefit from BF16's wider dynamic range. Models with well-conditioned gradients may prefer FP16's greater mantissa precision. Regardless of the reduced-precision format chosen for forward and backward passes, certain operations require FP32 precision: loss accumulation, softmax denominators, normalization variance computation, and optimizer state. These requirements stem from the numerical sensitivity of these operations rather than arbitrary convention.
 
@@ -2225,7 +2227,7 @@ On NVIDIA V100 (Tensor Cores enabled):
 
 #### Mixed-Precision Training Applications {#sec-ai-training-mixedprecision-training-applications-a644}
 
-Mixed-precision training has become essential wherever computational efficiency and memory optimization are critical. In natural language processing, models such as BERT [@Devlin2019] (345M parameters), GPT-3 [@brown2020language] (175B parameters), and Transformer-based architectures exemplify the computational patterns discussed throughout this chapter. Mixed-precision allows these models to operate with larger batch sizes or deeper configurations, facilitating faster convergence on massive datasets.
+Mixed-precision training has become essential wherever computational efficiency and memory optimization are critical. In natural language processing, models such as BERT-Large [@Devlin2019] (340M parameters), GPT-3 [@brown2020language] (175B parameters), and Transformer-based architectures exemplify the computational patterns discussed throughout this chapter. Mixed-precision allows these models to operate with larger batch sizes or deeper configurations, facilitating faster convergence on massive datasets.
 
 In computer vision, tasks such as image classification, object detection, and segmentation often require handling high-resolution images and applying computationally intensive convolutional operations. By leveraging mixed-precision training, these workloads can be executed more efficiently, enabling the training of advanced architectures like ResNet [@he2016residual], EfficientNet, and vision transformers within practical resource limits.
 
@@ -2270,7 +2272,7 @@ The computational advantage of Tensor Cores becomes apparent when comparing theo
 - **FP32 throughput**: 19.5 TFLOPs (standard CUDA cores)
 - **FP16 Tensor Core throughput**: 312 TFLOPs (16× speedup)
 - **BF16 Tensor Core throughput**: 312 TFLOPs (same as FP16)
-- **FP8 Tensor Core throughput** (H100): 1,979 TFLOPs (100× speedup over FP32)
+- **FP8 Tensor Core throughput** (H100 SXM): 1,979 TFLOPs without sparsity (approximately 100× speedup over FP32)
 
 This 16× theoretical speedup for FP16 materializes in practice because matrix multiplications, the dominant operation in neural network training, map naturally to Tensor Core operations. A transformer's attention mechanism computing $QK^T$ for a $(B, H, N, D)$ tensor requires $2 \times B \times H \times N^2 \times D$ FLOPs. On Tensor Cores, this executes 16× faster than on CUDA cores, directly translating to wall-clock speedups.
 
@@ -2278,7 +2280,9 @@ This 16× theoretical speedup for FP16 materializes in practice because matrix m
 
 Brain Float 16 (BF16) maintains FP32's 8-bit exponent while reducing the mantissa to 7 bits. This design choice prioritizes dynamic range preservation over precision, crucial for gradient-based learning where values span many orders of magnitude. Google's TPUs natively support BF16, while NVIDIA's Ampere architecture (A100) and newer provide full hardware support.
 
-The hardware advantage of BF16 over FP16 emerges in gradient accumulation scenarios. Consider summing 1000 gradients with values around $10^{-4}$. FP16's smallest representable value is $6 \times 10^{-8}$, so gradients below $10^{-7}$ underflow to zero. BF16's smallest representable value matches FP32 at approximately $10^{-45}$, so no underflow occurs. FP32 has full range but computes 2× slower.
+The hardware advantage of BF16 over FP16 emerges in gradient accumulation scenarios. Consider summing 1000 gradients with values around $10^{-4}$. FP16's smallest positive subnormal value is approximately $6 \times 10^{-8}$, but the smallest normal value is $6.1 \times 10^{-5}$.[^fn-fp16-subnormal] In practice, gradients below approximately $10^{-7}$ may underflow to zero depending on hardware behavior. BF16's smallest representable value matches FP32 at approximately $10^{-45}$, so no underflow occurs. FP32 has full range but computes 2x slower.
+
+[^fn-fp16-subnormal]: Many GPU implementations flush subnormal numbers to zero for performance reasons, making the normal minimum ($6.1 \times 10^{-5}$) the practical threshold. Loss scaling addresses this by multiplying gradients before the backward pass to keep values in the representable range.
 
 For transformer training where attention gradients vary from $10^{-10}$ to $10^3$, BF16's range prevents the loss scaling complexity required for FP16, simplifying implementation without sacrificing throughput.
 

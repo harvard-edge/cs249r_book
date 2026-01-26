@@ -337,7 +337,7 @@ The textbook content (chapters, figures, explanations) is educational material t
 
 Thanks goes to these wonderful people who have contributed to making this resource better for everyone!
 
-**Legend:** 🪲 Bug Hunter · 🧑‍💻 Code Contributor · ✍️ Word Wizard · 🎨 Design Artist · 🧠 Idea Generator · 🔎 Code Reviewer · 🧪 Test Engineer · 🛠️ Tool Builder
+**Legend:** 🪲 Bug Hunter · 🧑‍💻 Code Contributor · ✍️ Doc Wizard · 🎨 Design Artist · 🧠 Idea Spark · 🔎 Code Reviewer · 🧪 Test Tinkerer · 🛠️ Tool Builder
 
 ### 📖 Textbook Contributors
 

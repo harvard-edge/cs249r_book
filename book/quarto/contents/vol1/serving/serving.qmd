@@ -250,7 +250,7 @@ The preceding section established the architectural spectrum from cloud to TinyM
 
 While model optimization focuses on the mathematical artifact, model serving requires a specialized software architecture to manage high-frequency request streams and hardware utilization. An inference server[^fn-inference-server] (such as NVIDIA Triton, TensorFlow Serving, or TorchServe) is not a simple wrapper around a model script; it is a high-performance scheduler that manages concurrency, memory, and data movement.
 
-[^fn-inference-server]: **Inference Server**: The concept emerged from Google's TensorFlow Serving [@olston2017tensorflow], open-sourced February 2016, which pioneered the separation of model logic from serving infrastructure. NVIDIA's Triton [@nvidia2024triton], originally TensorRT Inference Server released 2019, extended this to multi-framework support. These servers implement dynamic batching that can improve GPU utilization by up to 70% compared to naive single-request serving. The architecture mirrors the separation of concerns in traditional web servers like Apache (1995) and nginx (2004), applying decades of distributed systems knowledge to ML deployment.
+[^fn-inference-server]: **Inference Server**: The concept emerged from Google's TensorFlow Serving [@olston2017tensorflow], open-sourced February 2016, which pioneered the separation of model logic from serving infrastructure. NVIDIA's Triton [@nvidia2024triton], originally TensorRT Inference Server with GA release in March 2019, extended this to multi-framework support. These servers implement dynamic batching that can improve GPU utilization by up to 70% compared to naive single-request serving. The architecture mirrors the separation of concerns in traditional web servers like Apache (1995) and nginx (2004), applying decades of distributed systems knowledge to ML deployment.
 
 Understanding the internal anatomy of these servers reveals how they bridge the gap between irregular user traffic and the highly regular, batch-oriented requirements of accelerators.
 
@@ -434,7 +434,7 @@ Doubling resolution from 224 to 448 theoretically yields 4x slowdown (measured: 
 | **640×640**    | 102.4MB             | 18 FLOPS/byte        | Memory BW      |
 +----------------+---------------------+----------------------+----------------+
 
-: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity decreases with resolution as activation sizes grow. The V100 ridge point for FP32 operations is approximately 17 FLOPS/byte (15 TFLOPS compute divided by 900 GB/s bandwidth). At 224x224, compute dominates; by 512x512, memory bandwidth becomes the limiting factor. {#tbl-resolution-bottleneck}
+: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity decreases with resolution as activation sizes grow. For a V100 PCIe (14 TFLOPS FP32, 900 GB/s bandwidth), the ridge point is approximately 16 FLOPS/byte. At 224x224, compute dominates; by 512x512, memory bandwidth becomes the limiting factor. {#tbl-resolution-bottleneck}
 
 #### Deployment-Specific Resolution Decisions {#sec-model-serving-systems-deploymentspecific-resolution-decisions-1d76}
 
@@ -817,7 +817,7 @@ Strategies for multi-model serving include time-multiplexing that loads one mode
 
 #### Multi-Stream Execution {#sec-model-serving-systems-multistream-execution-1b1f}
 
-When multiple models or multiple instances of the same model must run concurrently on a single GPU, the hardware must partition resources between them. NVIDIA's Multi-Instance GPU technology enables hardware-level isolation, dividing an A100 into up to 7 independent GPU instances, each with dedicated memory and compute resources. MIG is available on A100, A30, H100, and newer data center GPUs. For older GPUs such as V100 or T4, CUDA stream scheduling provides time-multiplexed sharing without hardware isolation.
+When multiple models or multiple instances of the same model must run concurrently on a single GPU, the hardware must partition resources between them. NVIDIA's Multi-Instance GPU technology enables hardware-level isolation, dividing an A100 into up to 7 independent GPU instances, each with dedicated memory and compute resources. MIG is available on A100, A30 (up to 4 instances), H100, H200, and newer data center GPUs. For older GPUs such as V100 or T4, CUDA stream scheduling provides time-multiplexed sharing without hardware isolation.
 
 The choice depends on whether consistent latency with MIG or maximum utilization with shared streams is the priority.
 
@@ -1422,7 +1422,7 @@ Total serving cost decomposes into several components including compute time for
 
 ::: {.callout-note title="ResNet-50: Cost Analysis"}
 
-Consider serving ResNet-50 on AWS infrastructure:
+Consider serving ResNet-50 on AWS infrastructure (US-East region, on-demand pricing as of 2024):
 
 +---------------------------+---------------+----------------+------------------------+
 | **Instance Type**         | **Cost/Hour** | **Throughput** | **Cost per 1M Images** |
@@ -1432,7 +1432,7 @@ Consider serving ResNet-50 on AWS infrastructure:
 | **p3.2xlarge (V100 GPU)** | $3.06         | 1,200 img/s    | $0.71                  |
 +---------------------------+---------------+----------------+------------------------+
 
-**Key insight**: The T4 GPU instance achieves the lowest cost per inference despite higher hourly cost, because GPU throughput dramatically exceeds CPU throughput. The V100 is only cost-effective at very high sustained traffic where its higher throughput justifies the 6× price increase.
+**Key insight**: The T4 GPU instance achieves the lowest cost per inference despite higher hourly cost, because GPU throughput dramatically exceeds CPU throughput. The V100 is only cost-effective at very high sustained traffic where its higher throughput justifies the 6x price increase. Note that cloud pricing varies by region and changes over time; consult current pricing for production planning.
 
 :::
 
@@ -1456,14 +1456,14 @@ The relationship between utilization and latency is nonlinear as shown in the ut
 
 The worked example in @sec-model-serving-systems-queuing-theory-tail-latency-29a6 demonstrates the complete capacity planning process by starting from a 50ms p99 SLO and 5,000 QPS target, deriving the safe utilization threshold of 72 percent, calculating required service rate of 6,944 QPS, and determining GPU count with headroom of 10 V100s. Production systems typically provision for peak load plus 30 percent headroom, using auto-scaling to reduce costs during low-traffic periods while meeting latency objectives during peaks.
 
-### Production Case Study: Serving Llama-3-7B {#sec-model-serving-systems-production-case-study-serving-llama37b-0499}
+### Production Case Study: Serving Llama-3-8B {#sec-model-serving-systems-production-case-study-serving-llama38b-0499}
 
 To apply the principles of latency budgeting, memory management, and hardware efficiency, we analyze the production profile of a modern Large Language Model (LLM) serving workload. This case study demonstrates how physical constraints—memory bandwidth and PCIe capacity—translate directly into service-level metrics and unit economics.
 
 #### Workload Profile {#sec-model-serving-systems-workload-profile-a380}
 
-*   **Model**: Llama-3-7B (quantized to 4-bit AWQ).
-*   **Hardware**: 1$\times$ NVIDIA H100 GPU (80 GB HBM3).
+*   **Model**: Llama-3-8B (quantized to 4-bit AWQ).
+*   **Hardware**: 1$\times$ NVIDIA H100 SXM5 GPU (80 GB HBM3, 3.35 TB/s bandwidth).
 *   **Request Characteristics**: 1,000-token input prompt (Prefill), 256-token generated response (Decode).
 *   **Target SLOs**: TTFT $<$ 200 ms, TPOT $<$ 20 ms.
 
@@ -1487,7 +1487,7 @@ The model generates 256 tokens sequentially. This phase is memory-bandwidth boun
 $$ T_{\text{token}} \approx \frac{\text{Model Size (Bytes)}}{\text{Memory Bandwidth (Bytes/s)}} $$
 
 **The Engineering Implication**:
-For Llama-3-7B (3.5 GB int4), an A100 (2 TB/s) generates tokens at $\approx 1.7$ ms/token. An H100 (3.3 TB/s) improves this to $\approx 1$ ms/token. Adding more *compute cores* yields **zero** latency improvement; only faster memory (or smaller models) can speed up generation.
+For Llama-3-8B (3.5 GB int4), an A100 80GB (2 TB/s HBM2e) generates tokens at $\approx 1.7$ ms/token. An H100 SXM5 (3.35 TB/s) improves this to $\approx 1$ ms/token. Adding more *compute cores* yields **zero** latency improvement; only faster memory (or smaller models) can speed up generation.
 :::
 
 *   $T_{\text{token}} \approx \frac{3.5 \text{ GB}}{3.35 \text{ TB/s}} \approx 1 \text{ ms}$ (theoretical limit).
@@ -1505,7 +1505,7 @@ With 4-bit weights occupying 3.5 GB, the remaining ~76 GB of VRAM is available f
 
 #### Unit Economics {#sec-model-serving-systems-unit-economics-b685}
 
-For an H100 instance costing \$3.00 per hour:
+For an H100 SXM5 instance at approximately \$3.00 per hour (specialized cloud providers; hyperscaler rates vary from \$2-13 per hour as of 2024):
 *   Total tokens per hour = $114 \text{ batch} \times \frac{3600 \text{ s/hr}}{2.68 \text{ s/req}} \times 1256 \text{ tokens/req} \approx 190 \text{ million tokens/hour}$.
 *   **Cost per million tokens**: $\frac{\$3.00}{190} \approx \mathbf{\$0.015}$.
 

@@ -21,10 +21,10 @@ CONTRIBUTION_EMOJIS = {
     "bug": "🪲",             # Bug Hunter
     "code": "🧑‍💻",            # Code Contributor
     "design": "🎨",          # Design Artist
-    "doc": "✍️",             # Word Wizard
-    "ideas": "🧠",           # Idea Generator
+    "doc": "✍️",             # Doc Wizard
+    "ideas": "🧠",           # Idea Spark
     "review": "🔎",          # Code Reviewer
-    "test": "🧪",            # Test Engineer
+    "test": "🧪",            # Test Tinkerer
     "tool": "🛠️",           # Tool Builder
 }
 
@@ -33,11 +33,11 @@ CONTRIBUTION_EMOJIS = {
 CONTRIBUTION_LEGEND = {
     "bug": ("🪲", "Bug Hunter"),
     "code": ("🧑‍💻", "Code Contributor"),
-    "doc": ("✍️", "Word Wizard"),
+    "doc": ("✍️", "Doc Wizard"),
     "design": ("🎨", "Design Artist"),
-    "ideas": ("🧠", "Idea Generator"),
+    "ideas": ("🧠", "Idea Spark"),
     "review": ("🔎", "Code Reviewer"),
-    "test": ("🧪", "Test Engineer"),
+    "test": ("🧪", "Test Tinkerer"),
     "tool": ("🛠️", "Tool Builder"),
 }
 

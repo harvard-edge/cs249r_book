@@ -531,7 +531,7 @@ When ML systems exhibit failures, @tbl-four-pillars-diagnostic helps teams ident
 
 Having examined how each pillar addresses specific concerns and how they manifest across pipeline stages, we now turn to how they function together as a system. Understanding each pillar individually provides important insights, but effective data engineering requires recognizing their interconnections. These four pillars are not independent components but interconnected aspects of a unified system where decisions in one area affect all others. Quality improvements must account for scalability constraints, reliability requirements influence governance implementations, and governance policies shape quality metrics. This systems perspective guides our exploration of data engineering, examining how each technical topic supports and balances these principles while managing their tensions.
 
-Why does this integrated framework matter? Data scientists spend 60–80% of their time on data preparation tasks.[^fn-data-quality-stats] @fig-ds-time quantifies this reality, revealing that data cleaning alone consumes up to 60% of practitioners' effort. This imbalance reflects a state where data engineering practices are often ad-hoc rather than systematic. Applying the four-pillar framework consistently can reduce data preparation time while building more reliable and maintainable systems.
+Why does this integrated framework matter? According to industry surveys, data scientists spend an estimated 60–80% of their time on data preparation tasks.[^fn-data-quality-stats] @fig-ds-time quantifies this reality, revealing that data cleaning alone consumes up to 60% of practitioners' effort. This imbalance reflects a state where data engineering practices are often ad-hoc rather than systematic. Applying the four-pillar framework consistently can reduce data preparation time while building more reliable and maintainable systems.
 
 ::: {#fig-ds-time fig-env="figure" fig-pos="htb" fig-cap="**Data Scientist Time Allocation**: Data preparation consumes a majority of data science effort, up to 60%, underscoring the need for systematic data engineering practices to prevent downstream model failures and ensure project success. Prioritizing data quality and pipeline development yields greater returns than solely focusing on advanced algorithms. Source: Various industry reports." fig-alt="Pie chart showing data scientist time allocation: 60% cleaning and organizing data, 19% collecting datasets, 9% mining for patterns, 5% building training sets, 4% refining algorithms, 3% other tasks."}
 ```{.tikz}
@@ -598,7 +598,7 @@ Just as systems engineers memorize latency numbers, ML engineers should internal
 +------------------------------+--------------+------------------------+
 | **S3 storage (Standard)**    | $23/TB/month | Hot storage            |
 +------------------------------+--------------+------------------------+
-| **S3 retrieval (Glacier)**   | $0.02/GB     | Plus 12-hour latency   |
+| **S3 retrieval (Glacier)**   | $0.01/GB     | Standard: 3-5 hours[^fn-glacier-tiers] |
 +------------------------------+--------------+------------------------+
 | **GPU training hour (A100)** | $2–4         | Cloud spot pricing     |
 +------------------------------+--------------+------------------------+
@@ -612,7 +612,7 @@ Just as systems engineers memorize latency numbers, ML engineers should internal
 +:===================================+=============:+:======================+
 | **Label 1M images (crowdsourced)** | 2–4 weeks    | Annotation throughput |
 +------------------------------------+--------------+-----------------------+
-| **Train ResNet-50 on ImageNet**    | 4–8 hours    | Compute (8× A100)     |
+| **Train ResNet-50 on ImageNet**    | 4–6 hours    | Compute (8× A100, optimized) |
 +------------------------------------+--------------+-----------------------+
 | **Feature store lookup**           | 1–10 ms      | Network + cache       |
 +------------------------------------+--------------+-----------------------+
@@ -625,6 +625,8 @@ The contrast matters: **weeks** for human labeling, **hours** for GPU training, 
 :::
 
 [^fn-data-quality-stats]: **Data Quality Reality**: The famous "garbage in, garbage out" principle was first coined by IBM computer programmer George Fuechsel in the 1960s, describing how flawed input data produces nonsense output. This principle remains critically relevant in modern ML systems [@crowdflower2016data].
+
+[^fn-glacier-tiers]: **S3 Glacier Retrieval Tiers**: AWS S3 Glacier offers multiple retrieval options with different cost and latency trade-offs: Standard ($0.01/GB, 3-5 hours), Expedited ($0.03/GB, 1-5 minutes), and Bulk (free, 5-12 hours). Glacier Deep Archive has longer retrieval times (up to 12 hours for Standard). Pricing as of 2024; see aws.amazon.com/s3/pricing for current rates.
 
 ### Framework Application Across Data Lifecycle {#sec-data-engineering-ml-framework-application-across-data-lifecycle-c512}
 
@@ -2721,7 +2723,7 @@ To build engineering judgment, practitioners must internalize the orders of magn
 
 Beyond the core storage capabilities we've examined, ML workloads introduce unique requirements that conventional databases and warehouses weren't designed to handle. Understanding these ML-specific needs and their performance implications shapes infrastructure decisions that cascade through the entire development lifecycle, from experimental notebooks to production serving systems handling millions of requests per second.
 
-Modern ML models contain millions to billions of parameters requiring efficient storage and retrieval patterns quite different from traditional data. GPT-3 [@brown2020language] requires approximately 700 gigabytes for model weights when stored as 32-bit floats, larger than many organizations' entire operational databases. The trajectory reveals accelerating scale: from AlexNet's 60 million parameters in 2012 [@krizhevsky2012imagenet] to GPT-3's 175 billion parameters in 2020, model size grew approximately 2,900-fold in eight years. Storage systems must handle these dense numerical arrays efficiently for both capacity and access speed. Unlike typical files where sequential organization matters for readability, model weights benefit from block-aligned storage enabling parallel reads across parameter groups. When multiple GPUs need to read model data from shared storage, whether during training initialization or checkpoint loading, storage systems must deliver aggregate bandwidth approaching network interface limits, often 25 Gbps or higher, without introducing bottlenecks that would idle expensive compute resources.
+Modern ML models contain millions to billions of parameters requiring efficient storage and retrieval patterns quite different from traditional data. GPT-3 [@brown2020language] requires approximately 700 gigabytes for model weights when stored in FP32 format (175 billion parameters times 4 bytes), though practical deployments typically use FP16 (350 GB) or quantized formats for reduced storage and faster inference. Even at FP16 precision, this exceeds many organizations' entire operational databases. The trajectory reveals accelerating scale: from AlexNet's 60 million parameters in 2012 [@krizhevsky2012imagenet] to GPT-3's 175 billion parameters in 2020, model size grew approximately 2,900-fold in eight years (60M to 175B parameters). Storage systems must handle these dense numerical arrays efficiently for both capacity and access speed. Unlike typical files where sequential organization matters for readability, model weights benefit from block-aligned storage enabling parallel reads across parameter groups. When multiple GPUs need to read model data from shared storage, whether during training initialization or checkpoint loading, storage systems must deliver aggregate bandwidth approaching network interface limits, often 25 Gbps or higher, without introducing bottlenecks that would idle expensive compute resources.
 
 The iterative nature of ML development introduces versioning requirements qualitatively different from traditional software. While Git excels at tracking code changes where files are predominantly text with small incremental modifications, it fails for large binary files where even small model changes result in entirely new checkpoints. Storing 10 versions of a 10 GB model naively would consume 100 GB, but most ML versioning systems store only deltas between versions, reducing storage proportionally to how much models actually change. Tools like DVC (Data Version Control) and MLflow maintain pointers to model artifacts rather than storing copies, enabling efficient versioning while preserving the ability to reproduce any historical model. A typical ML project generates hundreds of model versions during hyperparameter tuning—one version per training run as engineers explore learning rates, batch sizes, architectures, and regularization strategies. Without systematic versioning capturing training configuration, accuracy metrics, and training data version alongside model weights, reproducing results becomes impossible when yesterday's model performed better than today's but teams cannot identify which configuration produced it. This reproducibility challenge connects directly to the governance requirements @sec-data-engineering-ml-governance-observability-2c05 examines where regulatory compliance often requires demonstrating exactly which data and process produced specific model predictions.
 
@@ -2735,7 +2737,7 @@ Understanding these quantitative relationships enables informed architectural de
 **The Problem:** Design a storage system that ensures an NVIDIA A100 is never starved for data while training ResNet-50.
 
 **1. The Compute Term (Throughput Ceiling)**
-*   **Hardware Peak:** NVIDIA A100 = 312 TFLOPS (FP16 Tensor Core).
+*   **Hardware Peak:** NVIDIA A100 = 312 TFLOPS (FP16 Tensor Core, dense operations).[^fn-a100-sparsity]
 *   **Model Cost:** ResNet-50 = ~4 GFLOPs per image (forward + backward $\approx$ 12 GFLOPs).
 *   **Maximum Theoretical Throughput**:
     $$ \frac{312 \times 10^{12} \text{ FLOPs/sec}}{12 \times 10^9 \text{ FLOPs/img}} = \mathbf{26,000 \text{ images/sec}} $$
@@ -2753,6 +2755,8 @@ To saturate a *single* A100, your storage must deliver **3.9 GB/s**.
 
 **Iron Law Implication:** If you use SATA SSDs, your maximum throughput is capped at $500 \text{ MB/s} / 150 \text{ KB} \approx 3,300 \text{ img/s}$. Your \$15,000 GPU will run at **12% utilization** ($3,300/26,000$). Storage physics dictates training speed.
 :::
+
+[^fn-a100-sparsity]: **A100 Sparsity Support**: NVIDIA also advertises 624 TFLOPS with structured sparsity enabled (2:4 pattern), doubling effective throughput for models that can leverage sparse computation. The 312 TFLOPS dense figure used here represents the baseline for general workloads where sparsity cannot be assumed.
 
 This calculation illustrates the general principle governing data pipelines:
 
@@ -3483,7 +3487,8 @@ Effective debugging requires applying the diagnostic principles established earl
   - Check: Slice-level metrics (by demographic, by category, by difficulty)
   - Fix: Targeted data collection, reweighting, fairness-aware sampling
 
-**The Diagnosis Priority**: Most production ML failures trace to data, not models. Check in this order:
+**The Diagnosis Priority**: Most production ML failures trace to data, not models. Check in this order (approximate proportions based on industry experience):[^fn-failure-proportions]
+
 1. **Training-serving skew** (30–40% of failures)
 2. **Data drift** (20–30% of failures)
 3. **Label quality** (15–25% of failures)
@@ -3491,6 +3496,8 @@ Effective debugging requires applying the diagnostic principles established earl
 
 Debugging the model before verifying data consistency wastes engineering cycles on the wrong 10–15%.
 :::
+
+[^fn-failure-proportions]: **ML Failure Distribution**: These proportions represent synthesized estimates from industry reports and practitioner experience, including findings from @sculley2015hidden on ML technical debt and platform experiences at companies like Uber, Google, and Meta. Actual proportions vary by domain and organizational maturity; the key insight is that data-related issues collectively dominate model-related issues.
 
 ## Fallacies and Pitfalls {#sec-data-engineering-ml-fallacies-pitfalls-d2f5}
 

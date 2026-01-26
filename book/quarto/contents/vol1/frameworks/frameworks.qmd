@@ -87,7 +87,7 @@ Understanding why modern frameworks are designed as they are requires tracing th
 
 1. **Hardware Primitives (1979–1992)**: The **Basic Linear Algebra Subprograms (BLAS)**[^fn-blas] established standardized, hardware-optimized implementations of operations like matrix multiplication (`GEMM`) [@lawson1979blas]. **LAPACK** extended this with higher-level solvers. These libraries remain the hidden foundation of every modern ML system—vendors like Intel (MKL) and NVIDIA (cuBLAS) provide highly tuned versions for their silicon.
 
-[^fn-blas]: **BLAS (Basic Linear Algebra Subprograms)**: A standardized specification (Level 1: vector operations; Level 2: matrix-vector; Level 3: matrix-matrix like GEMM) published in 1979 that defines portable APIs for dense linear algebra. Hardware vendors implement optimized BLAS libraries: Intel MKL achieves near-peak FLOPS on x86 CPUs through AVX-512 vectorization, while NVIDIA cuBLAS uses Tensor Cores for 312 TFLOPS on A100 GPUs. This 45-year-old interface remains the performance foundation of modern ML frameworks.
+[^fn-blas]: **BLAS (Basic Linear Algebra Subprograms)**: A standardized specification (Level 1: vector operations; Level 2: matrix-vector; Level 3: matrix-matrix like GEMM) published in 1979 that defines portable APIs for dense linear algebra. Hardware vendors implement optimized BLAS libraries: Intel MKL achieves near-peak FLOPS on x86 CPUs through AVX-512 vectorization, while NVIDIA cuBLAS uses Tensor Cores for up to 312 TFLOPS (FP16/BF16/TF32) on A100 GPUs, or 624 TFLOPS with structured sparsity. This 45-year-old interface remains the performance foundation of modern ML frameworks.
 
 2. **Vectorized Productivity (2006)**: **NumPy**[^fn-numpy] made Python viable for numerical computing by delegating heavy computation to underlying C and Fortran BLAS libraries. This "vectorization" approach—writing code in high-level Python but executing it in low-level C—became the dominant pattern, drastically reducing the gap between research ideas and execution speed.
 
@@ -145,7 +145,9 @@ This evolution highlights a critical engineering lesson: scaling ML development 
 \node[Box={col7!50},below=2 of B7](BB7){JAX introduces functional paradigms};
 \end{tikzpicture}
 ```
-**Computational Library Evolution**: Modern machine learning frameworks build upon decades of numerical computing advancements, transitioning from low-level routines like BLAS and LAPACK to high-level abstractions in NumPy, SciPy, and finally to deep learning frameworks such as TensorFlow and PyTorch. This progression reflects a shift toward increased developer productivity and accessibility in machine learning system development.
+**Computational Library Evolution**: Modern machine learning frameworks build upon decades of numerical computing advancements, transitioning from low-level routines like BLAS and LAPACK to high-level abstractions in NumPy, SciPy,[^fn-scipy-date] and finally to deep learning frameworks such as TensorFlow and PyTorch. This progression reflects a shift toward increased developer productivity and accessibility in machine learning system development.
+
+[^fn-scipy-date]: SciPy was first released in 2001; the timeline shows its adoption alongside Theano in the 2007 period when both contributed to establishing Python's scientific computing ecosystem for machine learning.
 :::
 
 ## The Execution Problem {#sec-ai-frameworks-execution-problem-e1e1}
@@ -1521,12 +1523,12 @@ PyTorch's autograd saves these tensors in the `Function` object's `saved_tensors
 - **Large batch size**: Saves activations for the entire batch
 - **Total training memory** $\approx$ forward activations + gradients + optimizer state $\approx$ 2–3$\times$ inference memory
 
-For a ResNet-50 processing batch size 64 with 224×224 images:
+For a ResNet-50 (25M parameters, ~100 MB in FP32) processing batch size 64 with 224×224 images:
 
-- Forward activations: ~7 GB
-- Gradients: ~7 GB
-- Optimizer state (Adam): ~7 GB
-- **Total**: ~21 GB for training vs. ~7 GB for inference only
+- Forward activations: ~8-12 GB (varies by implementation and checkpointing)
+- Parameter gradients: ~100 MB (same size as parameters)
+- Optimizer state (Adam): ~200 MB (2 states per parameter)
+- **Total**: ~10-15 GB for training vs. ~100 MB + batch activations for inference
 
 #### Custom Autograd Functions {#sec-ai-frameworks-custom-autograd-functions-d61f}
 
@@ -2423,7 +2425,7 @@ The cost of device transfers varies dramatically with interconnect technology.[^
 | **GPU Memory**   | 2000 GB/s              | 0.002 ms          | Optimal                     |
 +------------------+------------------------+-------------------+-----------------------------+
 
-: Transfer overhead for 4 MB tensor across different interconnects. NVLink bandwidth is bidirectional (300 GB/s per direction). PCIe transfers are significantly slower than on-device memory access, making device placement critical for performance. {#tbl-device-transfer-overhead}
+: Transfer overhead for 4 MB tensor across different interconnects. PCIe bandwidth shown is unidirectional (typical for GPU transfers); full-duplex operation provides 2x total bandwidth. NVLink bandwidth is bidirectional (300 GB/s per direction). Transfer times dominate for small operations, making device placement critical for performance. {#tbl-device-transfer-overhead}
 
 The practical impact is significant: a model forward pass taking 0.5 ms on GPU doubles in latency when inputs and outputs transfer over PCIe 3.0. For small batches or lightweight models, transfer overhead can exceed computation time entirely.
 
@@ -3460,7 +3462,7 @@ To illustrate how these trade-off dimensions interact, we examine the TensorFlow
 | **Native Quantization Tooling** | No                          | Yes                 | Yes                                      |
 +---------------------------------+-----------------------------+---------------------+------------------------------------------+
 
-: **TensorFlow Variant Trade-Offs**: TensorFlow, TensorFlow lite, and TensorFlow lite micro represent a spectrum of design choices balancing model expressiveness, binary size, and resource constraints for diverse deployment scenarios. Supported operations decrease from approximately 1400 in full TensorFlow to 50 in TensorFlow lite micro, reflecting a shift from training capability to efficient inference on edge devices; native quantization tooling enables further optimization for resource-constrained environments. {#tbl-tf-comparison}
+: **TensorFlow Variant Trade-Offs**: TensorFlow, TensorFlow lite, and TensorFlow lite micro represent a spectrum of design choices balancing model expressiveness, binary size, and resource constraints for diverse deployment scenarios. Supported operations decrease from approximately 1400 in full TensorFlow to approximately 50 in TensorFlow lite micro (operation counts vary by framework version), reflecting a shift from training capability to efficient inference on edge devices; native quantization tooling enables further optimization for resource-constrained environments. {#tbl-tf-comparison}
 
 Engineers analyze three primary aspects when selecting a framework:
 
@@ -3748,7 +3750,7 @@ These problems are interconnected and constrained by physics—particularly the 
 
 ::: {.callout-important title="Key Takeaways"}
 * Every framework must solve the execution, differentiation, and abstraction problems—their design choices in each area determine framework characteristics
-* The memory wall (compute growing 1000× vs. memory bandwidth 30× since 2000) drives framework optimization strategies like kernel fusion
+* The memory wall (compute capacity growing orders of magnitude faster than memory bandwidth over the past two decades) drives framework optimization strategies like kernel fusion
 * Execution models (eager/graph/hybrid) embody fundamental trade-offs between development flexibility and optimization potential
 * Framework selection requires matching technical capabilities (operations, hardware support, optimization features) to project requirements
 * Common fallacies—assuming framework equivalence, ignoring deployment constraints, treating frameworks as black boxes—lead to 5-10× performance gaps

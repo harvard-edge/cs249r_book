@@ -27,10 +27,10 @@ EMOJI_KEY = {
     "bug": "🪲",             # Bug Hunter
     "code": "🧑‍💻",            # Code Contributor
     "design": "🎨",          # Design Artist
-    "doc": "✍️",             # Word Wizard
-    "ideas": "🧠",           # Idea Generator
+    "doc": "✍️",             # Doc Wizard
+    "ideas": "🧠",           # Idea Spark
     "review": "🔎",          # Code Reviewer
-    "test": "🧪",            # Test Engineer
+    "test": "🧪",            # Test Tinkerer
     "tool": "🛠️",           # Tool Builder
 }
 
