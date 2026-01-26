@@ -199,8 +199,6 @@ We are working toward **1 million learners by 2030** so that AI engineering beco
 
 <div align="center">
 
-**👉 [⭐ Click here to Star this repo](https://github.com/harvard-edge/cs249r_book) and help us reach 1M learners!**
-
 *What gets measured gets improved.*
 
 Each star is a learner, educator, or supporter who believes AI systems should be engineered with rigor and real world constraints in mind.
