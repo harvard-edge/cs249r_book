@@ -15,21 +15,21 @@ from datetime import datetime
 # Chapter to section ID mappings by volume
 VOL1_CHAPTER_MAPPING = {
     "introduction": "@sec-introduction",
-    "ml_systems": "@sec-ml-systems",
-    "dl_primer": "@sec-dl-primer",
+    "ml_systems": "@sec-ml-system-architecture",
+    "dl_primer": "@sec-deep-learning-systems-foundations",
     "dnn_architectures": "@sec-dnn-architectures",
     "frameworks": "@sec-ai-frameworks",
     "training": "@sec-ai-training",
     "benchmarking": "@sec-benchmarking-ai",
-    "data_engineering": "@sec-data-engineering",
+    "data_engineering": "@sec-data-engineering-ml",
     "hw_acceleration": "@sec-ai-acceleration",
-    "efficient_ai": "@sec-efficient-ai",
-    "optimizations": "@sec-model-optimizations",
-    "ops": "@sec-ml-operations",
-    "serving": "@sec-serving",
-    "responsible_engr": "@sec-responsible-engr",
-    "workflow": "@sec-ai-workflow",
-    "conclusion": "@sec-conclusion-vol1",
+    "data_efficiency": "@sec-data-efficiency",
+    "optimizations": "@sec-model-compression",
+    "ops": "@sec-machine-learning-operations-mlops",
+    "serving": "@sec-model-serving-systems",
+    "responsible_engr": "@sec-responsible-engineering",
+    "workflow": "@sec-ai-development-workflow",
+    "conclusion": "@sec-conclusion",
 }
 
 VOL2_CHAPTER_MAPPING = {
