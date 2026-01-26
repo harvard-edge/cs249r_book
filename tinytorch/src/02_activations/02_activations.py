@@ -748,20 +748,18 @@ class Softmax:
         """
         ### BEGIN SOLUTION
         # Numerical stability: subtract max to prevent overflow
-        x_max_data = np.max(x.data, axis=dim, keepdims=True)
-        x_max = Tensor(x_max_data)
-        x_shifted = x - x_max  # Tensor subtraction
+        x_max = np.max(x.data, axis=dim, keepdims=True)
+        x_shifted = x.data - x_max
 
         # Compute exponentials
-        exp_values = Tensor(np.exp(x_shifted.data))
+        exp_values = np.exp(x_shifted)
 
         # Sum along dimension
-        exp_sum_data = np.sum(exp_values.data, axis=dim, keepdims=True)
-        exp_sum = Tensor(exp_sum_data)
+        exp_sum = np.sum(exp_values, axis=dim, keepdims=True)
 
         # Normalize to get probabilities
         result = exp_values / exp_sum
-        return result
+        return Tensor(result)
         ### END SOLUTION
 
     def __call__(self, x: Tensor, dim: int = -1) -> Tensor:
