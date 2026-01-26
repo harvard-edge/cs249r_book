@@ -240,7 +240,7 @@ assert t.data[0] == 1, "First element should be 1"
 The GitHub Actions workflow supports all test types:
 
 ```yaml
-# .github/workflows/tinytorch-ci.yml
+# .github/workflows/tinytorch-validate-dev.yml
 
 # Quick tests on every push
 - name: Run Quick Tests
