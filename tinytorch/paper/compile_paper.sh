@@ -17,8 +17,11 @@ echo "Compiling paper.tex with LuaLaTeX (for emoji support)..."
 # First pass
 lualatex -interaction=nonstopmode paper.tex
 
-# BibTeX pass
-if command -v bibtex &> /dev/null; then
+# Biber pass (for biblatex)
+if command -v biber &> /dev/null; then
+    biber paper
+elif command -v bibtex &> /dev/null; then
+    echo "Warning: biber not found, falling back to bibtex (may not work with biblatex)"
     bibtex paper
 fi
 
