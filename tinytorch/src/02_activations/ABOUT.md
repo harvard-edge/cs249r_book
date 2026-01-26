@@ -235,7 +235,7 @@ class ReLU:
 
 This simplicity is ReLU's greatest strength. The operation is a single comparison per element: O(n) with a tiny constant factor. Modern CPUs can execute billions of comparisons per second. Compare this to sigmoid, which requires computing an exponential for every element.
 
-ReLU creates **sparsity**. When half your activations are exactly zero, computations become faster (multiplying by zero is free) and models generalize better (sparse representations are less prone to overfitting). In a 1000-neuron layer, ReLU typically activates 300-500 neurons, effectively creating a smaller, specialized network for each input.
+ReLU creates **sparsity**. When half of your activations are exactly zero, computations become faster (multiplying by zero is free) and models generalize better (sparse representations are less prone to overfitting). In a 1000-neuron layer, ReLU typically activates 300-500 neurons, effectively creating a smaller, specialized network for each input.
 
 The discontinuity at zero is both a feature and a bug. During training (Module 08), you'll discover that ReLU's gradient is exactly 1 for positive inputs and exactly 0 for negative inputs. This prevents the vanishing gradient problem that plagued sigmoid-based networks. But it creates a new problem: **dying ReLU**. If a neuron's weights shift such that it always receives negative inputs, it will output zero forever, and the zero gradient means it can never recover.
 
@@ -415,7 +415,7 @@ probs = F.softmax(logits, dim=-1)  # [0.09, 0.24, 0.67], sum = 1
 Let's walk through the key similarities and differences:
 
 - **Line 1 (Import)**: TinyTorch imports activation classes; PyTorch uses functional interface `torch.nn.functional`. Both approaches work; PyTorch also supports class-based activations via `torch.nn.ReLU()`.
-- **Line 4-6 (ReLU)**: Identical semantics. Both zero out negative values, preserve positive values.
+- **Line 4-6 (ReLU)**: Identical semantics. Both zero out negative values, preserving positive values.
 - **Line 9-10 (Sigmoid)**: Identical mathematical function. Both use numerically stable implementations to prevent overflow.
 - **Line 13-15 (Softmax)**: Same mathematical operation. Both require specifying the dimension for multidimensional tensors. PyTorch uses `dim` keyword argument; TinyTorch defaults to `dim=-1`.
 
@@ -468,7 +468,7 @@ At scale, this matters: if you have 100 activation layers in your model, switchi
 
 Why does softmax subtract the maximum value before computing exponentials? What would happen without this step?
 
-```{admonition} Answer
+````{admonition} Answer
 :class: dropdown
 
 **Without max subtraction**: Computing `softmax([1000, 1001, 1002])` requires `exp(1000)`, which overflows to infinity in float32/float64, producing NaN.
@@ -482,7 +482,7 @@ exp(x - max) / Σ exp(x - max) = [exp(x) / exp(max)] / [Σ exp(x) / exp(max)]
 ```
 
 The `exp(max)` factor cancels out, so the result is mathematically identical. But numerically, it prevents overflow. This is a classic example of why production ML requires careful numerical engineering, not just correct math.
-```
+````
 
 **Q4: Sparsity Analysis**
 
@@ -510,7 +510,7 @@ This is why ReLU is so effective: it creates natural sparsity without requiring 
 
 You're building a sentiment classifier that outputs "positive" or "negative". Which activation should you use for the output layer, and why?
 
-```{admonition} Answer
+````{admonition} Answer
 :class: dropdown
 
 **Use Sigmoid** for the output layer.
@@ -532,7 +532,7 @@ Input → Linear + ReLU → Linear + ReLU → Linear + Sigmoid → Binary Probab
 ```
 
 For multi-class sentiment (positive/negative/neutral), you'd use Softmax instead to get a 3-element probability distribution.
-```
+````
 
 ## Further Reading
 
