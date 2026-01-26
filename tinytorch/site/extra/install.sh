@@ -459,7 +459,15 @@ do_install() {
     
     # Use the detected 3.10+ command explicitly
     $PYTHON_CMD -m venv .venv
-    source .venv/bin/activate
+
+    # Activate venv (handle Windows Git Bash vs Unix)
+    if [ -f ".venv/Scripts/activate" ]; then
+        # Windows (Git Bash)
+        source .venv/Scripts/activate
+    else
+        # macOS/Linux
+        source .venv/bin/activate
+    fi
     print_success "Created virtual environment using $PYTHON_CMD"
 
     # -------------------------------------------------------------------------
@@ -505,13 +513,20 @@ do_install() {
 print_success_message() {
     local install_path="$PWD"
 
+    # Determine correct activation command for the platform
+    local activate_cmd="source .venv/bin/activate"
+    if [ -f ".venv/Scripts/activate" ]; then
+        # Windows (Git Bash)
+        activate_cmd="source .venv/Scripts/activate"
+    fi
+
     echo ""
     echo -e "${GREEN}✓${NC} Tiny${YELLOW}🔥Torch${NC} installed successfully!"
     echo ""
     echo -e "${BOLD}Next steps:${NC}"
     echo ""
     echo -e "  ${CYAN}cd $install_path${NC}"
-    echo -e "  ${CYAN}source .venv/bin/activate${NC}"
+    echo -e "  ${CYAN}$activate_cmd${NC}"
     echo -e "  ${CYAN}tito setup${NC}"
     echo ""
     echo -e "${BOLD}Then start building:${NC}"

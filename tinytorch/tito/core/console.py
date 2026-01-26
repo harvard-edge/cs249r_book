@@ -21,7 +21,10 @@ def get_console() -> Console:
     """Get the global console instance."""
     global _console
     if _console is None:
-        _console = Console(stderr=False)
+        # Disable legacy Windows console rendering which uses cp1252 encoding
+        # and doesn't support emoji. Modern Windows Terminal and Git Bash
+        # support ANSI codes and UTF-8 via VT mode.
+        _console = Console(stderr=False, legacy_windows=False)
     return _console
 
 def print_banner(compact: bool = False):
