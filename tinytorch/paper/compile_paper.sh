@@ -1,6 +1,6 @@
 #!/bin/bash
 # Compile TinyTorch LaTeX paper to PDF
-# Uses LuaLaTeX for emoji support
+# Uses LuaLaTeX + BibTeX (natbib)
 
 cd "$(dirname "$0")"
 
@@ -17,13 +17,8 @@ echo "Compiling paper.tex with LuaLaTeX (for emoji support)..."
 # First pass
 lualatex -interaction=nonstopmode paper.tex
 
-# Biber pass (for biblatex)
-if command -v biber &> /dev/null; then
-    biber paper
-elif command -v bibtex &> /dev/null; then
-    echo "Warning: biber not found, falling back to bibtex (may not work with biblatex)"
-    bibtex paper
-fi
+# BibTeX pass (for natbib)
+bibtex paper
 
 # Second pass (resolve references)
 lualatex -interaction=nonstopmode paper.tex
