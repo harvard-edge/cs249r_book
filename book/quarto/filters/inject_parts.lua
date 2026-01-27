@@ -338,8 +338,10 @@ function RawBlock(el)
         part_cmd = "\\division{" .. formatted_title .. "}"
         local toc_cmd = "\\addtocontents{toc}{\\par\\addvspace{12pt}\\noindent\\hfil\\bfseries\\color{crimson}" .. formatted_title .. "\\color{black}\\hfil\\par\\addvspace{6pt}}"
         local line_cmd = "\\addtocontents{toc}{\\par\\noindent\\hfil{\\color{crimson}\\rule{0.6\\textwidth}{0.5pt}}\\hfil\\par\\addvspace{6pt}}"
+        local float_flush = "\\FloatBarrier\\clearpage"  -- Aggressively flush all floats before division break
         log_info("🔄 Replacing key '" .. key .. "' with division: '" .. formatted_title .. "' (with TOC entry + crimson line)")
         return {
+          pandoc.RawBlock("latex", float_flush),
           pandoc.RawBlock("latex", toc_cmd),
           pandoc.RawBlock("latex", line_cmd),
           pandoc.RawBlock("latex", part_cmd)
@@ -349,8 +351,10 @@ function RawBlock(el)
       elseif part_type == "lab" then
         part_cmd = "\\labdivision{" .. formatted_title .. "}"
         local toc_cmd = "\\addtocontents{toc}{\\par\\addvspace{12pt}\\noindent\\hfil\\bfseries\\color{crimson}" .. formatted_title .. "\\color{black}\\hfil\\par\\addvspace{6pt}}"
+        local float_flush = "\\FloatBarrier\\clearpage"  -- Aggressively flush all floats before lab division break
         log_info("🔄 Replacing key '" .. key .. "' with lab division: '" .. formatted_title .. "' (circuit style, clean TOC entry)")
         return {
+          pandoc.RawBlock("latex", float_flush),
           pandoc.RawBlock("latex", toc_cmd),
           pandoc.RawBlock("latex", part_cmd)
         }
@@ -367,8 +371,12 @@ function RawBlock(el)
         part_cmd = "\\numberedpart{" .. formatted_title .. "}"  -- Use custom command instead
         local toc_cmd = "\\addtocontents{toc}{\\par\\addvspace{12pt}\\noindent\\hfil\\bfseries\\color{crimson}Part~" .. roman_numeral .. "~" .. formatted_title .. "\\color{black}\\hfil\\par\\addvspace{6pt}}"
         local reset_cmd = "\\haspartsummaryfalse"  -- Reset flag after display
+        -- Skip part pages when building single chapters to avoid Float(s) lost errors
+        -- The float_skip just outputs floats without the fancy part page
+        local float_skip = "\\FloatBarrier\\clearpage"
         log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' (Part " .. roman_numeral .. ", division: " .. (part_entry.division or "mainmatter") .. ")")
         return {
+          pandoc.RawBlock("latex", float_skip),
           pandoc.RawBlock("latex", setpartsummary_cmd),
           pandoc.RawBlock("latex", toc_cmd),
           pandoc.RawBlock("latex", part_cmd),
