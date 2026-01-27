@@ -14,8 +14,17 @@ If you can multiply two matrices by hand and write a Python class, you're ready.
 :::
 
 `````{only} html
-````{grid} 1 2 3 3
+````{grid} 1 2 2 2
 :gutter: 3
+
+```{grid-item-card} 🎧 Audio Overview
+
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; height: 54px; margin-top: auto;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/01_tensor.mp3" type="audio/mpeg">
+</audio>
+```
 
 ```{grid-item-card} 🚀 Launch Binder
 
@@ -28,16 +37,14 @@ Run interactively in your browser.
 
 Browse the source code on GitHub.
 
-<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/01_tensor/01_tensor.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #6b7280; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
+<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/01_tensor/01_tensor.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #14b8a6; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
 ```
 
-```{grid-item-card} 🎧 Audio Overview
+```{grid-item-card} 📊 Slide Deck
 
-Listen to an AI-generated overview.
+Download the lecture PDF.
 
-<audio controls style="width: 100%; height: 54px; margin-top: auto;">
-  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/01_tensor.mp3" type="audio/mpeg">
-</audio>
+<a href="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-slides-v0.1.0/01_tensor.pdf" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #0ea5e9; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Download PDF →</a>
 ```
 
 ````
@@ -322,8 +329,12 @@ def reshape(self, *shape):
 
     # Validate total elements match
     if np.prod(new_shape) != self.size:
+        target_size = int(np.prod(new_shape))
         raise ValueError(
-            f"Total elements must match: {self.size} ≠ {int(np.prod(new_shape))}"
+            f"Cannot reshape {self.shape} to {new_shape}\n"
+            f"  ❌ Element count mismatch: {self.size} elements vs {target_size} elements\n"
+            f"  💡 Reshape preserves data, so total elements must stay the same\n"
+            f"  🔧 Use -1 to infer a dimension: reshape(-1, {new_shape[-1] if len(new_shape) > 0 else 1}) lets NumPy calculate"
         )
 
     reshaped_data = np.reshape(self.data, new_shape)

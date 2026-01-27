@@ -4,6 +4,380 @@
 
 This page answers: *How do all the pieces fit together?* Read this before diving into modules to build your mental map.
 
+```{raw} html
+<style>
+.pdf-viewer-container {
+  margin: 1.5rem 0;
+  background: #0f172a;
+  border-radius: 1.25rem;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+.pdf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: rgba(255,255,255,0.03);
+}
+.pdf-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #94a3b8;
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+.pdf-title-icon {
+  font-size: 1rem;
+}
+.pdf-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+.pdf-toolbar button {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  width: 32px;
+  height: 32px;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  font-size: 1.1rem;
+  font-weight: 400;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pdf-toolbar button:hover {
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
+}
+.pdf-toolbar button:active {
+  transform: scale(0.92);
+}
+.pdf-nav-group {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+.pdf-page-info {
+  color: #64748b;
+  font-size: 0.75rem;
+  padding: 0 0.5rem;
+  font-weight: 500;
+}
+.pdf-zoom-group {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-left: 0.25rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid rgba(255,255,255,0.1);
+}
+.pdf-canvas-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0.5rem 1rem 1rem 1rem;
+  min-height: 480px;
+  background: #0f172a;
+}
+#pdf-canvas {
+  max-width: 100%;
+  max-height: 450px;
+  height: auto;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+.pdf-progress-wrapper {
+  padding: 0 1rem 0.5rem 1rem;
+  background: #0f172a;
+}
+.pdf-progress-bar {
+  height: 3px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 1.5px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.pdf-progress-fill {
+  height: 100%;
+  background: #f97316;
+  border-radius: 1.5px;
+  transition: width 0.2s ease;
+}
+.pdf-loading {
+  color: #f97316;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.pdf-loading::before {
+  content: '';
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(249, 115, 22, 0.2);
+  border-top-color: #f97316;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.pdf-footer {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: rgba(255,255,255,0.02);
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.pdf-footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: #f97316;
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 2rem;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.8rem;
+  transition: all 0.15s;
+}
+.pdf-footer a:hover {
+  background: #ea580c;
+  transform: translateY(-1px);
+  color: white;
+}
+.pdf-footer a.secondary {
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.pdf-footer a.secondary:hover {
+  background: rgba(255,255,255,0.05);
+  color: #f8fafc;
+  border-color: rgba(255,255,255,0.25);
+}
+.pdf-viewer-container:fullscreen,
+.pdf-viewer-container:-webkit-full-screen {
+  display: flex;
+  flex-direction: column;
+  background: #0a0a0f;
+}
+.pdf-viewer-container:fullscreen .pdf-canvas-wrapper,
+.pdf-viewer-container:-webkit-full-screen .pdf-canvas-wrapper {
+  flex: 1;
+  min-height: auto;
+  padding: 1rem;
+}
+.pdf-viewer-container:fullscreen #pdf-canvas,
+.pdf-viewer-container:-webkit-full-screen #pdf-canvas {
+  max-height: calc(100vh - 140px);
+  max-width: 95vw;
+}
+@media (max-width: 600px) {
+  .pdf-header {
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.625rem 0.75rem;
+  }
+  .pdf-toolbar button {
+    width: 28px;
+    height: 28px;
+    font-size: 1rem;
+  }
+  .pdf-canvas-wrapper {
+    min-height: 300px;
+    padding: 0.5rem;
+  }
+  #pdf-canvas {
+    max-height: 260px;
+  }
+  .pdf-progress-wrapper {
+    padding: 0 0.75rem 0.375rem 0.75rem;
+  }
+  .pdf-footer {
+    flex-direction: row;
+    padding: 0.625rem 0.75rem;
+  }
+  .pdf-footer a {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.75rem;
+  }
+}
+</style>
+
+<div class="pdf-viewer-container">
+  <div class="pdf-header">
+    <div class="pdf-title">
+      <span class="pdf-title-icon">🔥</span>
+      <span>TinyTorch Overview</span>
+    </div>
+    <div class="pdf-toolbar">
+      <div class="pdf-nav-group">
+        <button id="pdf-prev" onclick="pdfPrevPage()" title="Previous slide">‹</button>
+        <span class="pdf-page-info"><span id="pdf-page-num">1</span> / <span id="pdf-page-count">-</span></span>
+        <button id="pdf-next" onclick="pdfNextPage()" title="Next slide">›</button>
+      </div>
+      <div class="pdf-zoom-group">
+        <button onclick="pdfZoomOut()" title="Zoom out">−</button>
+        <button onclick="pdfZoomIn()" title="Zoom in">+</button>
+      </div>
+    </div>
+  </div>
+  <div class="pdf-canvas-wrapper">
+    <div id="pdf-loading" class="pdf-loading">Loading slides...</div>
+    <canvas id="pdf-canvas" style="display:none;"></canvas>
+  </div>
+  <div class="pdf-progress-wrapper">
+    <div class="pdf-progress-bar" id="pdf-progress-bar" onclick="pdfProgressClick(event)">
+      <div class="pdf-progress-fill" id="pdf-progress-fill" style="width: 0%;"></div>
+    </div>
+  </div>
+  <div class="pdf-footer">
+    <a href="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-slides-v0.1.0/00_tinytorch.pdf" download>
+      ⬇️ Download
+    </a>
+    <a href="#" onclick="pdfFullscreen(); return false;" class="secondary">
+      ⛶ Fullscreen
+    </a>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+(function() {
+  const pdfUrl = '_static/downloads/00_tinytorch.pdf';
+  let pdfDoc = null;
+  let pageNum = 1;
+  let pageRendering = false;
+  let pageNumPending = null;
+  let scale = 1.5;
+  const canvas = document.getElementById('pdf-canvas');
+  const ctx = canvas.getContext('2d');
+
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  function updateProgress() {
+    if (pdfDoc) {
+      const progress = (pageNum / pdfDoc.numPages) * 100;
+      document.getElementById('pdf-progress-fill').style.width = progress + '%';
+    }
+  }
+
+  function renderPage(num) {
+    pageRendering = true;
+    pdfDoc.getPage(num).then(function(page) {
+      const viewport = page.getViewport({scale: scale});
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+
+      const renderContext = {
+        canvasContext: ctx,
+        viewport: viewport
+      };
+      const renderTask = page.render(renderContext);
+
+      renderTask.promise.then(function() {
+        pageRendering = false;
+        if (pageNumPending !== null) {
+          renderPage(pageNumPending);
+          pageNumPending = null;
+        }
+      });
+    });
+    document.getElementById('pdf-page-num').textContent = num;
+    updateProgress();
+  }
+
+  function queueRenderPage(num) {
+    if (pageRendering) {
+      pageNumPending = num;
+    } else {
+      renderPage(num);
+    }
+  }
+
+  window.pdfPrevPage = function() {
+    if (pageNum <= 1) return;
+    pageNum--;
+    queueRenderPage(pageNum);
+  };
+
+  window.pdfNextPage = function() {
+    if (pageNum >= pdfDoc.numPages) return;
+    pageNum++;
+    queueRenderPage(pageNum);
+  };
+
+  window.pdfZoomIn = function() {
+    scale = Math.min(scale + 0.25, 3);
+    queueRenderPage(pageNum);
+  };
+
+  window.pdfZoomOut = function() {
+    scale = Math.max(scale - 0.25, 0.5);
+    queueRenderPage(pageNum);
+  };
+
+  window.pdfFullscreen = function() {
+    const container = document.querySelector('.pdf-viewer-container');
+    if (container.requestFullscreen) {
+      container.requestFullscreen();
+    } else if (container.webkitRequestFullscreen) {
+      container.webkitRequestFullscreen();
+    } else if (container.msRequestFullscreen) {
+      container.msRequestFullscreen();
+    }
+  };
+
+  window.pdfProgressClick = function(event) {
+    if (!pdfDoc) return;
+    const bar = document.getElementById('pdf-progress-bar');
+    const rect = bar.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const percentage = clickX / rect.width;
+    const targetPage = Math.max(1, Math.min(pdfDoc.numPages, Math.ceil(percentage * pdfDoc.numPages)));
+    if (targetPage !== pageNum) {
+      pageNum = targetPage;
+      queueRenderPage(pageNum);
+    }
+  };
+
+  // Keyboard navigation
+  document.addEventListener('keydown', function(event) {
+    // Only handle if not in an input field
+    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
+    
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      pdfPrevPage();
+    } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key === ' ') {
+      event.preventDefault();
+      pdfNextPage();
+    }
+  });
+
+  pdfjsLib.getDocument(pdfUrl).promise.then(function(pdf) {
+    pdfDoc = pdf;
+    document.getElementById('pdf-page-count').textContent = pdf.numPages;
+    document.getElementById('pdf-loading').style.display = 'none';
+    canvas.style.display = 'block';
+    renderPage(pageNum);
+  }).catch(function(error) {
+    document.getElementById('pdf-loading').innerHTML = 
+      'Unable to load PDF viewer. <a href="' + pdfUrl + '" style="color:#f97316;">Download directly</a>';
+  });
+})();
+</script>
+```
+
 ---
 
 ## The Journey: Foundation to Production
@@ -125,11 +499,11 @@ Concrete outcomes at each major checkpoint:
 
 | After Module | You'll Have Built | Historical Context |
 |--------------|-------------------|-------------------|
-| **01-04** | Working Perceptron classifier | Rosenblatt 1958 |
+| **01-03** | Working Perceptron classifier (forward pass) | Rosenblatt 1958 |
 | **01-08** | MLP solving XOR + complete training pipeline | AI Winter breakthrough 1969→1986 |
 | **01-09** | CNN with convolutions and pooling | LeNet-5 (1998) |
-| **01-13** | GPT model with autoregressive generation | "Attention Is All You Need" (2017) |
-| **01-19** | Optimized, quantized, accelerated system | Production ML today |
+| **01-08 + 11-13** | GPT model with autoregressive generation | "Attention Is All You Need" (2017) |
+| **01-08 + 14-19** | Optimized, quantized, accelerated system | Production ML today |
 | **01-20** | MLPerf-style benchmarking submission | Torch Olympics |
 
 ```{admonition} The North Star Build

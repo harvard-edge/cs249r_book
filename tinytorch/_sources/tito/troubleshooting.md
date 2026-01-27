@@ -889,20 +889,56 @@ chmod +x setup-environment.sh activate.sh
 
 </div>
 
+### Windows: Using TinyTorch
+
+<div style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1.5rem 0;">
+
+**TinyTorch works on Windows via Git Bash** (included with Git for Windows).
+
+**Install Git for Windows** (if needed):
+- Download from [git-scm.com/download/win](https://git-scm.com/download/win)
+- Run installer with default options
+
+**Use Git Bash for all TinyTorch commands**:
+```bash
+# Open Git Bash from Start Menu
+# Navigate to your project folder
+cd ~/projects
+
+# Install TinyTorch
+curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
+
+# Activate (note the Scripts path on Windows)
+cd tinytorch
+source .venv/Scripts/activate
+
+# Run TinyTorch
+tito setup
+```
+
+**Why Git Bash?** TinyTorch uses bash scripts that work consistently across macOS, Linux, and Windows via Git Bash.
+
+</div>
+
 ### Windows: "activate.sh not working"
 
 <div style="background: #fff5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #e74c3c; margin: 1.5rem 0;">
 
-**Solution**: Use Windows-specific activation:
+**Solution**: Use the correct activation path for Git Bash on Windows:
 ```bash
+# Git Bash (recommended)
+source .venv/Scripts/activate
+
+# Note: The path is Scripts/ not bin/ on Windows
+```
+
+**If using PowerShell or CMD** (not recommended):
+```powershell
 # PowerShell
-.\venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 
 # Command Prompt
-.\venv\Scripts\activate.bat
-
-# Git Bash
-source venv/Scripts/activate
+.\.venv\Scripts\activate.bat
 ```
 
 </div>

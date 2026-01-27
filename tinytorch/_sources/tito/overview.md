@@ -101,20 +101,21 @@ tito nbgrader feedback 01
 # src/01_tensor/01_tensor.py
 
 # Export to notebooks & package
-tito src export 01_tensor
-tito src export --all
+tito dev export 01
+tito dev export --all
 
 # Test implementations
-tito src test 01_tensor
+tito dev test --unit
+tito dev test --inline --module 01
 
-# Validate changes
-tito milestone run 03
+# Before merging
+tito dev test --all
 ```
 
 **Key Commands:**
-- `tito src` - Developer workflow
-- `tito module` - Test as student
-- `tito milestone` - Validate
+- `tito dev test` - Run tests
+- `tito dev export` - Rebuild curriculum
+- `tito milestone` - Validate with history
 
 </div>
 
@@ -200,19 +201,26 @@ tito milestone run 03
 
 ### Developer Commands
 
-**Purpose**: Source code development and contribution (for developers only)
+**Purpose**: Source code development, testing, and contribution (for developers only)
 
 | Command | Description | Use Case |
 |---------|-------------|----------|
-| `tito src export <module>` | Export src/ → modules/ → tinytorch/ | After editing source files |
-| `tito src export --all` | Export all modules | After major refactoring |
-| `tito src test <module>` | Run tests on source files | During development |
-| `tito dev preflight` | Run preflight checks before commit | Before committing changes |
-| `tito dev export` | Rebuild full curriculum pipeline | After major refactoring |
-| `tito dev validate` | Full curriculum validation for releases | Before releases |
+| `tito dev export <module>` | Export src/ → modules/ → tinytorch/ | After editing source files |
+| `tito dev export --all` | Export all modules | After major refactoring |
+| `tito dev test` | Run unit tests (default) | Quick validation |
+| `tito dev test --inline` | Run inline tests from src/ | After editing modules |
+| `tito dev test --unit` | Run pytest unit tests | Component validation |
+| `tito dev test --cli` | Run CLI tests | After CLI changes |
+| `tito dev test --integration` | Run integration tests | Cross-module validation |
+| `tito dev test --e2e` | Run end-to-end tests | User journey validation |
+| `tito dev test --milestone` | Run milestone tests | Full package validation |
+| `tito dev test --all` | Run all test types | Before PRs |
+| `tito dev test --release` | Full release validation (destructive) | Before releases only |
 
 **Note**: These commands work with `src/XX_name/XX_name.py` files and are for TinyTorch contributors/developers.
 **Students** use `tito module` commands to work with generated notebooks.
+
+**See**: [Developer Testing Guide](testing.md) for complete testing documentation
 
 **Directory Structure:**
 ```
@@ -258,13 +266,17 @@ tito module status
 vim src/01_tensor/01_tensor.py
 
 # Export to notebooks + package
-tito src export 01_tensor
+tito dev export 01
+
+# Run tests
+tito dev test --unit           # Quick validation
+tito dev test --inline --module 01   # Test specific module
 
 # Test implementation
 python -c "from tinytorch import Tensor; print(Tensor([1,2,3]))"
 
-# Validate with milestones
-tito milestone run 03
+# Before PR: run all tests
+tito dev test --all
 ```
 
 ### Achievement & Validation
@@ -354,6 +366,7 @@ tito milestone run --help
 - **[Module Workflow](modules.md)** - Complete guide to building and exporting modules
 - **[Milestone System](milestones.md)** - Running historical ML recreations
 - **[Progress & Data](data.md)** - Managing your learning journey
+- **[Developer Testing](testing.md)** - Complete testing infrastructure guide
 - **[Troubleshooting](troubleshooting.md)** - Common issues and solutions
 
 

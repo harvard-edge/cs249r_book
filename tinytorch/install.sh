@@ -62,12 +62,22 @@ set -e  # Exit on any error
 # ============================================================================
 # Configuration
 # ============================================================================
+# These can be overridden via environment variables for testing:
+#   TINYTORCH_BRANCH=dev curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
+#   TINYTORCH_VERSION=0.1.5 TINYTORCH_BRANCH=feature/foo ./install.sh
+#   TINYTORCH_NON_INTERACTIVE=1 ./install.sh  # Skip all prompts (for CI)
 REPO_URL="https://github.com/harvard-edge/cs249r_book.git"
 REPO_SHORT="harvard-edge/cs249r_book"
-BRANCH="main"
-INSTALL_DIR="tinytorch"
+TAGS_API="https://api.github.com/repos/harvard-edge/cs249r_book/tags"
+TAG_PREFIX="tinytorch-v"
+BRANCH="${TINYTORCH_BRANCH:-main}"
+INSTALL_DIR="${TINYTORCH_INSTALL_DIR:-tinytorch}"
 SPARSE_PATH="tinytorch"
-TINYTORCH_VERSION="0.1.4"
+# Non-interactive mode: skip prompts, use defaults (for CI/testing)
+NON_INTERACTIVE="${TINYTORCH_NON_INTERACTIVE:-}"
+# Version is fetched from GitHub tags (single source of truth)
+# Can be overridden for testing: TINYTORCH_VERSION=0.1.5 ./install.sh
+TINYTORCH_VERSION="${TINYTORCH_VERSION:-}"
 
 # ============================================================================
 # ANSI Color Codes (for terminal output)
@@ -127,6 +137,49 @@ print_banner() {
 # ============================================================================
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+# Fetch latest version from GitHub tags API (single source of truth)
+# Sets TINYTORCH_VERSION global variable
+fetch_latest_version() {
+    # Skip if already set via environment variable
+    if [ -n "$TINYTORCH_VERSION" ]; then
+        return 0
+    fi
+
+    # Try curl first (more reliable across platforms)
+    if command_exists curl; then
+        local response
+        response=$(curl -fsSL --max-time 10 "$TAGS_API" 2>/dev/null) || true
+        if [ -n "$response" ]; then
+            # Parse JSON to find first tinytorch-v* tag
+            # Uses grep/sed for portability (no jq dependency)
+            local tag_name
+            tag_name=$(echo "$response" | grep -o "\"name\": *\"${TAG_PREFIX}[^\"]*\"" | head -1 | sed 's/.*"name": *"\([^"]*\)".*/\1/')
+            if [ -n "$tag_name" ]; then
+                TINYTORCH_VERSION="${tag_name#$TAG_PREFIX}"
+                return 0
+            fi
+        fi
+    fi
+
+    # Fallback: fetch pyproject.toml directly from raw.githubusercontent.com
+    if command_exists curl; then
+        local pyproject_url="https://raw.githubusercontent.com/${REPO_SHORT}/${BRANCH}/tinytorch/pyproject.toml"
+        local pyproject
+        pyproject=$(curl -fsSL --max-time 10 "$pyproject_url" 2>/dev/null) || true
+        if [ -n "$pyproject" ]; then
+            local version
+            version=$(echo "$pyproject" | grep -E "^version" | head -1 | sed 's/.*= *"\([^"]*\)".*/\1/')
+            if [ -n "$version" ]; then
+                TINYTORCH_VERSION="$version"
+                return 0
+            fi
+        fi
+    fi
+
+    # Final fallback: unknown version (will still work, just won't show version)
+    TINYTORCH_VERSION="latest"
 }
 
 # Check if Python version is 3.8+
@@ -261,6 +314,16 @@ check_existing_directory() {
 # ============================================================================
 
 prompt_install_directory() {
+    # Non-interactive mode: use INSTALL_DIR as-is (from env var or default)
+    if [ -n "$NON_INTERACTIVE" ]; then
+        return
+    fi
+
+    # No TTY available: use defaults silently
+    if ! [ -t 0 ] && ! [ -e /dev/tty ]; then
+        return
+    fi
+
     echo ""
     echo -e "Where would you like to install Tiny${YELLOW}🔥Torch${NC}?"
     echo -e "  ${DIM}Press Enter for default: ${BOLD}$PWD/tinytorch${NC}"
@@ -396,7 +459,15 @@ do_install() {
     
     # Use the detected 3.10+ command explicitly
     $PYTHON_CMD -m venv .venv
-    source .venv/bin/activate
+
+    # Activate venv (handle Windows Git Bash vs Unix)
+    if [ -f ".venv/Scripts/activate" ]; then
+        # Windows (Git Bash)
+        source .venv/Scripts/activate
+    else
+        # macOS/Linux
+        source .venv/bin/activate
+    fi
     print_success "Created virtual environment using $PYTHON_CMD"
 
     # -------------------------------------------------------------------------
@@ -442,13 +513,20 @@ do_install() {
 print_success_message() {
     local install_path="$PWD"
 
+    # Determine correct activation command for the platform
+    local activate_cmd="source .venv/bin/activate"
+    if [ -f ".venv/Scripts/activate" ]; then
+        # Windows (Git Bash)
+        activate_cmd="source .venv/Scripts/activate"
+    fi
+
     echo ""
     echo -e "${GREEN}✓${NC} Tiny${YELLOW}🔥Torch${NC} installed successfully!"
     echo ""
     echo -e "${BOLD}Next steps:${NC}"
     echo ""
     echo -e "  ${CYAN}cd $install_path${NC}"
-    echo -e "  ${CYAN}source .venv/bin/activate${NC}"
+    echo -e "  ${CYAN}$activate_cmd${NC}"
     echo -e "  ${CYAN}tito setup${NC}"
     echo ""
     echo -e "${BOLD}Then start building:${NC}"
@@ -464,6 +542,9 @@ print_success_message() {
 # ============================================================================
 
 main() {
+    # Fetch version from GitHub (single source of truth: pyproject.toml via tags)
+    fetch_latest_version
+
     print_banner
 
     # Pre-flight checks
@@ -480,14 +561,16 @@ main() {
     # Check directory doesn't exist (after user chooses)
     check_existing_directory
 
-    # Show plan and confirm
-    show_plan_and_confirm
+    # Show plan and confirm (skip in non-interactive mode)
+    if [ -z "$NON_INTERACTIVE" ] && { [ -t 0 ] || [ -e /dev/tty ]; }; then
+        show_plan_and_confirm
 
-    printf "Continue? [Y/n] "
-    read -r REPLY </dev/tty
-    if [[ $REPLY =~ ^[Nn]$ ]]; then
-        print_info "Installation cancelled"
-        exit 0
+        printf "Continue? [Y/n] "
+        read -r REPLY </dev/tty
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            print_info "Installation cancelled"
+            exit 0
+        fi
     fi
 
     # Run installation
