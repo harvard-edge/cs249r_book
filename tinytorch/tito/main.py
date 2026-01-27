@@ -16,6 +16,11 @@ import sys
 from pathlib import Path
 from typing import Dict, Type, Optional, List
 
+# Fix encoding issues on Windows (emoji/unicode output)
+# See: https://github.com/harvard-edge/cs249r_book/discussions/1145
+if sys.platform == "win32" or os.name == "nt":
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
 # Set TINYTORCH_QUIET before any tinytorch imports to suppress autograd messages
 os.environ['TINYTORCH_QUIET'] = '1'
 
