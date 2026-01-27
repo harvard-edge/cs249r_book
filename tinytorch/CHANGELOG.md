@@ -7,13 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-01-27
+
 ### Added
-- Dynamic `tito --version` command showing current TinyTorch version
-- CHANGELOG.md for tracking releases
-- Updated publish workflow with release_type (patch/minor/major)
+- Windows/Git Bash support for installer script (thanks @rnjema, @joeswagson, @Kobra299!)
+- Platform detection (`get_platform()`) for OS-specific guidance
+- Cross-platform line endings via `.gitattributes`
 
 ### Changed
-- Version now managed in `tinytorch/__init__.py` and `pyproject.toml`
+- Installer uses `$PYTHON_CMD -m pip` for more reliable pip invocation
+- Dynamic `tito --version` command showing current TinyTorch version
+
+### Fixed
+- Virtual environment activation now works correctly on Windows Git Bash
 
 ## [0.1.1] - 2025-01-13
 
