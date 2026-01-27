@@ -354,7 +354,7 @@ This page answers: *How do all the pieces fit together?* Read this before diving
   document.addEventListener('keydown', function(event) {
     // Only handle if not in an input field
     if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
-    
+
     if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
       event.preventDefault();
       pdfPrevPage();
@@ -371,7 +371,7 @@ This page answers: *How do all the pieces fit together?* Read this before diving
     canvas.style.display = 'block';
     renderPage(pageNum);
   }).catch(function(error) {
-    document.getElementById('pdf-loading').innerHTML = 
+    document.getElementById('pdf-loading').innerHTML =
       'Unable to load PDF viewer. <a href="' + pdfUrl + '" style="color:#f97316;">Download directly</a>';
   });
 })();
