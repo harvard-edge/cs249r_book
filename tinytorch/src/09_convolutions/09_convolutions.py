@@ -182,11 +182,11 @@ Position (0,1):  Position (1,0):  Position (1,1):
 │ 2 3 │         │ 5 6 │          │ 6 7 │
 │ 6 7 │         │ 9 0 │          │ 0 1 │
 └─────┘         └─────┘          └─────┘
-Result: 9       Result: 5        Result: 8
+Result: 9       Result: 5        Result: 7
 
-Final Output:   ┌─────┐
+Final Output:  ┌─────┐
                │ 7 9 │
-               │ 5 8 │
+               │ 5 7 │
                └─────┘
 ```
 
