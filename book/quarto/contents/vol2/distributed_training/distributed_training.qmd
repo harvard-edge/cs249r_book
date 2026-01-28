@@ -428,20 +428,26 @@ Synchronization frequency presents a trade-off between communication efficiency 
 
 Just as the Iron Law of Processor Performance governs single-thread execution, distributed training is governed by an extended version of Amdahl's Law that explicitly accounts for communication overhead. The time to complete one training step on $N$ devices is not simply $T_{single} / N$, but is constrained by the sequential nature of synchronization.
 
-We can formalize the **Distributed Step Time** equation:
+We can formalize the **Distributed Step Time** equation and map it directly to our Iron Law variables:
 
-$$ T_{step}(N) = \frac{T_{compute}}{N} + T_{comm}(N) - T_{overlap} $$
+$$ T_{step}(N) = \underbrace{\frac{T_{compute}}{N}}_{\text{FLOPS Term}} + \underbrace{T_{comm}(N)}_{\text{Bandwidth Term}} - T_{overlap} $$
 
 Where:
-*   $T_{compute}$ is the total computation required for the batch (ideally perfectly parallelizable).
-*   $T_{comm}(N)$ is the communication overhead, which typically grows with $N$ (e.g., $2(N-1)/N \times M/B$ for Ring AllReduce).
-*   $T_{overlap}$ is the portion of communication that can be hidden behind computation.
+*   **FLOPS Term** ($T_{compute}$): The total computation required for the batch. In an ideal world, this scales perfectly with $N$.
+*   **Bandwidth Term** ($T_{comm}$): The time spent moving data. This is governed by the **Iron Law**: $Time = \frac{Data}{Bandwidth}$. For Ring AllReduce, this term is $\frac{2(N-1)}{N} \times \frac{M}{B_{net}}$, where $M$ is model size and $B_{net}$ is network bandwidth.
+*   **Overlap** ($T_{overlap}$): The portion of communication hidden behind computation.
 
 This leads to the **Scaling Efficiency** metric:
 
 $$ \text{Efficiency}(N) = \frac{T_{compute}}{N \times T_{step}(N)} = \frac{1}{1 + \frac{N(T_{comm}(N) - T_{overlap})}{T_{compute}}} $$
 
-This equation reveals the **Scaling Wall**: as $N$ increases, the compute term ($T_{compute}/N$) shrinks, but the communication term ($T_{comm}$) remains constant or grows. Eventually, the denominator is dominated by communication, driving efficiency toward zero. This physics dictates the transition points between parallelism strategies: when Data Parallelism hits this wall (high $T_{comm}$ due to full gradient sync), we must switch to Model or Pipeline Parallelism to change the variables in the equation.
+This equation reveals the **Scaling Wall**: as $N$ increases, the compute term ($T_{compute}/N$) shrinks, but the communication term ($T_{comm}$) remains constant or grows. Eventually, the denominator is dominated by communication, driving efficiency toward zero.
+
+::: {.callout-perspective title="Systems Perspective: The Energy Tax of Scale"}
+Distributed training is not just a race against time; it is a race against **energy**. In a single GPU, moving a byte from HBM to the cores costs roughly **1–2 pJ/bit**. Moving that same byte across an NVLink interconnect costs **5–10 pJ/bit**. Moving it across an InfiniBand network through switches costs **20–50 pJ/bit**. 
+
+At the scale of 10,000 GPUs, the "Energy Tax" of moving gradients becomes a multi-megawatt problem. This is why **Communication-Computation Overlap** is not just a performance optimization—it is a necessity for making large-scale AI economically and physically sustainable. Every bit *not* moved is a joule saved.
+:::
 
 Scaling efficiency follows predictable patterns across different GPU counts. In the linear scaling regime of 2-32 GPUs, systems typically achieve 85-95% parallel efficiency because communication overhead remains minimal. The communication bound regime emerges at 64-256 GPUs, where efficiency drops to 60-80% even with optimal interconnects. Beyond 512 GPUs, coordination overhead becomes dominant and limits efficiency to 40-60% due to collective operation latency.
 
@@ -1063,21 +1069,19 @@ In a system with 8 GPUs training a ResNet model, each GPU computes local gradien
 
 This process, which involves splitting data, performing computations, synchronizing results, and updating parameters, repeats for each batch of data. Modern frameworks automate this cycle, allowing developers to focus on model architecture and hyperparameter tuning rather than distributed computing logistics.
 
-### Data Parallelism Advantages {#sec-distributed-training-systems-systems-data-parallelism-advantages-c48e}
+### Trade-offs: The Communication Wall {#sec-distributed-training-systems-systems-data-parallelism-tradeoffs}
 
-Data parallelism offers several key benefits that make it the predominant approach for distributed training. By splitting the dataset across multiple devices and allowing each device to train an identical copy of the model, this approach effectively addresses the core challenges in modern AI training systems.
+Data parallelism is the default strategy for a reason: it scales **throughput** linearly with device count, provided the model fits in memory and communication is not the bottleneck. However, it hits a hard ceiling defined by the **Communication-Computation Ratio**.
 
-The primary advantage of data parallelism is its linear scaling capability with large datasets. As datasets grow into the terabyte range, processing them on a single machine becomes prohibitively slow. Training a vision transformer on ImageNet with 1.2 million images might take weeks on a single GPU but only days when distributed across 8 GPUs. This scalability proves particularly valuable in domains like language modeling, where datasets can exceed billions of tokens.
+**The Advantages**:
+*   **Linear Throughput Scaling**: For compute-bound models (like ResNet-50 on ImageNet), scaling from 1 to 256 GPUs yields near-linear speedup because the gradient exchange is small relative to the compute time.
+*   **Implementation Simplicity**: The model architecture remains unchanged. You simply wrap the model in `DistributedDataParallel`, and the framework handles the gradient synchronization hooks.
+*   **High Utilization**: Unlike model parallelism, there are no pipeline bubbles. All GPUs work on the forward/backward pass simultaneously.
 
-Hardware utilization efficiency represents another important benefit. Data parallelism maintains high GPU utilization rates typically above 85% by ensuring each device actively processes its data portion. Modern implementations achieve this through asynchronous data loading and gradient computation overlapping with communication. While one batch computes gradients, the next batch's data is already being loaded and preprocessed.
-
-Implementation simplicity distinguishes data parallelism from other distribution strategies. Modern frameworks have reduced complex distributed training to just a few lines of code. Converting a PyTorch model to use data parallelism often requires only wrapping it in `DistributedDataParallel` and initializing a distributed environment. This accessibility has contributed significantly to its widespread adoption in both research and industry.
-
-The approach also offers flexibility across model architectures. Whether training a ResNet for vision, BERT for language, or Graph Neural Network for graph data, the same data parallelism principles apply without modification. This universality makes it particularly valuable as a default choice for distributed training.
-
-Training time reduction is perhaps the most immediate benefit. Given proper implementation, data parallelism can achieve near-linear speedup with additional devices. Training that takes 100 hours on a single GPU might complete in roughly 13 hours on 8 GPUs, assuming efficient gradient synchronization and minimal communication overhead.
-
-While these benefits make data parallelism compelling, achieving these advantages requires careful system design. Several challenges must be addressed to fully realize these benefits.
+**The Limitations**:
+*   **The Memory Wall**: Every GPU must hold a full copy of the model parameters, gradients, and optimizer states. For a 175B parameter model, this requires $>1$TB of memory per GPU, which is physically impossible on today's hardware without ZeRO sharding.
+*   **The Bandwidth Wall**: As $N$ grows, the AllReduce cost $2(N-1)/N \times M/B$ eventually dominates. For large language models, gradient synchronization can consume 50%+ of the step time, collapsing efficiency.
+*   **The Batch Size Trap**: To scale to thousands of GPUs, you must increase the global batch size ($B_{global} = N \times B_{local}$). Eventually, you hit the **Critical Batch Size**, where adding more data per step yields diminishing returns in convergence.
 
 ::: {.callout-notebook title="Worked Example: GPT-2 Data Parallel Scaling (1→8→32 GPUs)" collapse="true"}
 
@@ -1145,30 +1149,6 @@ Communication dominates and becomes the bottleneck.
 OpenAI's GPT-2 paper reports training on 32 V100s across 4 nodes using optimized communication (likely gradient accumulation combined with pipeline parallelism), not pure data parallelism.
 
 :::
-
-### Data Parallelism Limitations {#sec-distributed-training-systems-systems-data-parallelism-limitations-e03a}
-
-While data parallelism is effective for distributed training, it introduces several challenges that must be addressed to achieve efficient and scalable training systems. These challenges stem from the inherent trade-offs between computation and communication, as well as the limitations imposed by hardware and network infrastructures.
-
-Communication overhead represents the most significant bottleneck in data parallelism. During gradient synchronization, each device must exchange gradient updates, often hundreds of megabytes per step for large models. With 8 GPUs training a 1-billion-parameter model, each synchronization step might require transferring several gigabytes of data across the network. While high-speed interconnects like NVLink at 300 GB/s or InfiniBand[^fn-infiniband] at 200 Gb/s help, the overhead remains substantial.
-
-[^fn-infiniband]: InfiniBand provides 200 Gb/s per port with sub-microsecond latency, enabling efficient gradient synchronization across nodes via RDMA. @sec-compute explores network topology design, including fat-tree and dragonfly architectures that optimize bisection bandwidth for AllReduce communication patterns.
-
-NCCL's ring-allreduce algorithm[^fn-allreduce-algorithm] reduces this burden by organizing devices in a ring topology, but communication costs still grow with model size and device count.
-
-[^fn-allreduce-algorithm]: **AllReduce Algorithm**: A collective communication primitive where each process contributes data and all processes receive the same combined result (typically a sum). Naive implementations require O(n²) messages for n devices. The ring-allreduce algorithm achieves bandwidth-optimal performance by organizing devices in a logical ring where each device communicates only with its neighbors [@patarasuk2009allreduce], making it scalable for modern ML with hundreds of GPUs.
-
-Scalability limitations become apparent as device count increases. While 8 GPUs might achieve $7\times$ speedup with 87.5% scaling efficiency, scaling to 64 GPUs typically yields only 45-50$\times$ speedup with 70-78% efficiency due to growing synchronization costs. Scaling efficiency, calculated as speedup divided by the number of devices, quantifies how effectively additional hardware translates to reduced training time. Perfect linear scaling would yield 100% efficiency, but communication overhead and synchronization barriers typically degrade efficiency as device count grows. This non-linear scaling means that doubling the number of devices rarely halves the training time, particularly in configurations exceeding 16-32 devices.
-
-Memory constraints present a hard limit for data parallelism. Consider a transformer model with 175 billion parameters, which requires approximately 350 GB just to store model parameters in FP32. When accounting for optimizer states and activation memories, the total requirement often exceeds 1 TB per device. Since even high-end GPUs typically offer 80 GB or less, such models cannot use pure data parallelism.
-
-Workload imbalance affects heterogeneous systems significantly. In a cluster mixing A100 and V100 GPUs, the A100s might process batches $1.7\times$ faster, forcing them to wait for the V100s to catch up. This idle time can reduce cluster utilization by 20-30% without proper load balancing mechanisms.
-
-Finally, there are critical challenges related to fault tolerance and reliability in distributed training systems. Node failures become inevitable at scale: with 100 GPUs running continuously, hardware failures occur multiple times per week. A training run that costs millions of dollars cannot restart from scratch each time a single GPU fails. Modern distributed training systems implement sophisticated checkpointing strategies, storing model state every N iterations to minimize lost computation. Checkpoint frequency creates trade-offs: frequent checkpointing reduces the potential loss from failures but increases storage I/O overhead and training latency. Production systems typically checkpoint every 100-1000 iterations, balancing fault tolerance against performance.
-
-Implementation complexity compounds these reliability challenges. While modern frameworks abstract much of the complexity, implementing robust distributed training systems requires significant engineering expertise. Graceful degradation when subsets of nodes fail, consistent gradient synchronization despite network partitions, and automatic recovery from transient failures demand deep understanding of both machine learning and distributed systems principles.
-
-Despite these challenges, data parallelism remains important for distributed training, with many strategies available to address its limitations. Monitoring these distributed systems requires specialized tooling for tracking gradient norms, communication patterns, and hardware utilization across nodes. Before examining model parallelism, we first explore memory optimization techniques that extend data parallelism to larger models.
 
 ### Memory-Efficient Data Parallelism: ZeRO and FSDP {#sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69}
 
@@ -1696,163 +1676,25 @@ In a distributed setting, experts are partitioned across workers. If we have 8 G
 
 The primary advantage is decoupling model size from compute budget. A trillion-parameter MoE model might use only 10B parameters per token, enabling training on feasible hardware budgets. The constraint is the **All-to-All** communication, which is bandwidth-intensive and sensitive to load imbalance (if all tokens route to one expert, that device becomes a straggler). Advanced load balancing losses and capacity factors are required to ensure uniform expert utilization.
 
-### Model Parallelism Advantages {#sec-distributed-training-systems-systems-model-parallelism-advantages-a5ce}
+::: {.callout-note title="Archetype B (Scaled Lighthouse): Embedding Sharding"}
+**Archetype B (The Global Recommendation Engine)** faces a different memory wall than GPT-4. While LLMs are bound by the *computation* of dense layers, Archetype B is bound by the *capacity* of **Embedding Tables**. 
 
-The tensor parallelism analysis above demonstrated that 8-way parallelism reduces per-GPU memory requirements proportionally while incurring 2 AllReduce operations per transformer layer. This trade-off proves favorable in practice, enabling training of architectures that would otherwise be impossible on current hardware.
-
-Memory scaling represents the primary advantage. Consider a 175B parameter model: storing parameters alone requires 700 GB (FP32) or 350 GB (FP16). With 8-way tensor parallelism, each GPU holds 44-87 GB of parameters, within the 80 GB capacity of an A100. Without model parallelism, this model simply cannot train on current hardware regardless of optimizer sharding or gradient accumulation. When accounting for optimizer states and gradients, the total memory footprint reaches 2.1-2.8 TB, making distribution across devices not merely beneficial but essential.
-
-Efficient utilization of device memory follows directly from this distribution. Each device stores and processes only its portion of the model, enabling larger batch sizes without exceeding memory limits. An 8-way tensor parallel configuration can support batch sizes 4-8x larger per GPU than data parallel training of the same model would allow, improving both throughput and training stability.
-
-Model parallelism provides flexibility across architectures. Sequential models in language processing naturally map to pipeline parallelism, while attention-heavy transformers benefit from tensor parallelism that distributes the attention matrices. Mixture-of-Expert architectures use expert parallelism to distribute conditional computation paths. This adaptability, combined with quantitative guidance on communication overhead at different parallel degrees, enables practitioners to select appropriate strategies for their specific architecture.
-
-Finally, model parallelism complements other distributed training strategies. Production systems combine 8-way tensor parallelism within nodes with 8-16 stage pipeline parallelism across nodes and data parallelism across replica groups, achieving 45-65% parallel efficiency at 1000+ GPU scale. This hybrid flexibility enables scaling both model size and dataset simultaneously.
-
-While model parallelism offers these quantifiable benefits, its effectiveness depends on careful partitioning strategy design. The following sections examine the challenges that arise in practice.
-
-### Model Parallelism Limitations {#sec-distributed-training-systems-systems-model-parallelism-limitations-62e2}
-
-While model parallelism provides an effective approach for training large-scale models, it also introduces unique challenges. These challenges arise from the complexity of partitioning the model and the dependencies between partitions during training. Addressing these issues requires careful system design and optimization.
-
-One major challenge in model parallelism is balancing the workload across devices. Not all parts of a model require the same amount of computation. For instance, in layer-wise partitioning, some layers may perform significantly more operations than others, leading to an uneven distribution of work. Devices responsible for the heavier computations may become bottlenecks, leaving others underutilized. This imbalance reduces overall efficiency and slows down training. Identifying optimal partitioning strategies is critical to ensuring all devices contribute evenly.
-
-Another challenge is data dependency between devices. During the forward pass, activation tensors of shape [batch_size, sequence_length, hidden_dimension] must transfer between devices. For a typical transformer model with batch size 32, sequence length 2048, and hidden dimension 2048, each transfer moves approximately 512 MB of data at float32 precision. With gradient transfers in the backward pass, a single training step can require several gigabytes of inter-device communication. On systems using PCIe interconnects with 64 GB/s theoretical bandwidth, these transfers introduce significant latency.
-
-Model parallelism also increases the complexity of implementation and debugging. Partitioning the model, ensuring proper data flow, and synchronizing gradients across devices require detailed coordination. Errors in any of these steps can lead to incorrect gradient updates or even model divergence. Debugging such errors is often more difficult in distributed systems, as issues may arise only under specific conditions or workloads.
-
-A further challenge is pipeline bubbles in pipeline parallelism. With $P$ pipeline stages and $M$ microbatches per training step, the pipeline experiences idle time at the start (fill) and end (drain) of the schedule.
-
-::: {.callout-notebook title="Engineering Calculation: Pipeline Efficiency" collapse="true"}
-**Scenario**: 8-stage pipeline ($P=8$), choosing micro-batch count ($M$).
-
-**Formula (Bubble Fraction)**:
-$$ \text{Overhead} = \frac{P - 1}{M} $$
-
-**Case A: Low Latency ($M=4$)**
-$$ \text{Overhead} = \frac{7}{4} = 175\% \text{ (Wait time > Compute time)} $$
-$$ \text{Efficiency} = \frac{1}{1 + 1.75} \approx \mathbf{36\%} $$
-
-**Case B: High Throughput ($M=32$)**
-$$ \text{Overhead} = \frac{7}{32} \approx 22\% $$
-$$ \text{Efficiency} = \frac{1}{1 + 0.22} \approx \mathbf{82\%} $$
-
-**Trade-off**: Case B achieves high efficiency but requires storing activations for $32$ micro-batches, increasing memory usage by $8\times$ compared to Case A.
+A model serving billions of items can have embedding tables exceeding 10TB. This cannot fit in GPU memory, even with 3D parallelism. Instead, Archetype B uses **Embedding Sharding**: partitioning the tables across the CPU DRAM of hundreds of nodes. During the forward pass, the system performs **Sparse Lookups** across the network. The challenge here is not AllReduce throughput, but **All-to-All Latency** and the ability of the network to handle millions of small, unpredictable lookups simultaneously.
 :::
 
-Increasing $M$ reduces this overhead but increases the memory required to store activations for the pending backward passes. This trade-off between throughput with high $M$ and memory with low $M$ is the central optimization constraint in pipeline parallelism.
+### Trade-offs: The Bubble vs. Bandwidth Dilemma {#sec-distributed-training-systems-systems-model-parallelism-tradeoffs}
 
-::: {.callout-note title="Figure: Pipeline Bubble Analysis" collapse="false"}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.8]
-  \definecolor{ForwardColor}{RGB}{200,220,255}
-  \definecolor{BackwardColor}{RGB}{255,220,200}
-  \definecolor{BubbleColor}{RGB}{240,240,240}
+Model parallelism breaks the memory wall but introduces sequential dependencies that reduce hardware utilization. The engineering challenge is balancing **pipeline bubbles** (idle time) against **all-to-all bandwidth** (communication time).
 
-  \tikzset{
-    box/.style={draw=black!70, thick, minimum width=1.2cm, minimum height=0.8cm, align=center, font=\scriptsize},
-    fwd/.style={box, fill=ForwardColor},
-    bwd/.style={box, fill=BackwardColor},
-    bubble/.style={box, fill=BubbleColor, text=gray}
-  }
+**The Advantages**:
+*   **Memory Scaling**: Enables training of models that exceed single-device memory. With 8-way tensor parallelism, a 175B model fits comfortably on A100s.
+*   **Efficient Large Batch Training**: By splitting the model, each GPU processes a smaller slice, effectively allowing larger global batch sizes without OOM.
+*   **Architectural Flexibility**: Maps naturally to the physical structure of transformers (Attention heads split via Tensor Parallelism, Layers split via Pipeline Parallelism).
 
-  % Headers
-  \node at (-1, 3) {GPU 3};
-  \node at (-1, 2) {GPU 2};
-  \node at (-1, 1) {GPU 1};
-  \node at (-1, 0) {GPU 0};
-
-  \node at (0.6, 4) {T1}; \node at (1.8, 4) {T2}; \node at (3.0, 4) {T3}; \node at (4.2, 4) {T4};
-  \node at (5.4, 4) {T5}; \node at (6.6, 4) {T6}; \node at (7.8, 4) {T7}; \node at (9.0, 4) {T8};
-
-  % GPU 0
-  \node[fwd] at (0.6, 0) {$F_{0,0}$};
-  \node[fwd] at (1.8, 0) {$F_{0,1}$};
-  \node[bubble] at (3.0, 0) {...};
-  \node[bubble] at (4.2, 0) {...};
-  \node[bubble] at (5.4, 0) {...};
-  \node[bwd] at (6.6, 0) {$B_{0,0}$};
-  \node[bwd] at (7.8, 0) {$B_{0,1}$};
-
-  % GPU 1
-  \node[bubble] at (0.6, 1) {};
-  \node[fwd] at (1.8, 1) {$F_{1,0}$};
-  \node[fwd] at (3.0, 1) {$F_{1,1}$};
-  \node[bubble] at (4.2, 1) {...};
-  \node[bubble] at (5.4, 1) {...};
-  \node[bwd] at (6.6, 1) {$B_{1,0}$};
-  \node[bubble] at (7.8, 1) {};
-
-  % GPU 2
-  \node[bubble] at (0.6, 2) {}; \node[bubble] at (1.8, 2) {};
-  \node[fwd] at (3.0, 2) {$F_{2,0}$};
-  \node[fwd] at (4.2, 2) {$F_{2,1}$};
-  \node[bubble] at (5.4, 2) {...};
-  \node[bwd] at (6.6, 2) {$B_{2,0}$};
-
-  % GPU 3
-  \node[bubble] at (0.6, 3) {}; \node[bubble] at (1.8, 3) {}; \node[bubble] at (3.0, 3) {};
-  \node[fwd] at (4.2, 3) {$F_{3,0}$};
-  \node[bwd] at (5.4, 3) {$B_{3,0}$};
-
-  % Bubble Braces
-  \draw[decorate, decoration={brace, amplitude=5pt}, thick] (0,-0.6) -- (3.6,-0.6) node[midway, below, yshift=-5pt] {Pipeline Fill (Bubble)};
-  \draw[decorate, decoration={brace, amplitude=5pt}, thick] (6,-0.6) -- (9.6,-0.6) node[midway, below, yshift=-5pt] {Pipeline Drain};
-
-\end{tikzpicture}
-```
-**Pipeline Bubble Analysis**. A space-time diagram showing the "Fill" and "Drain" phases of a pipeline. Gray areas represent idle time (bubbles) where GPUs wait for dependencies. Synchronous pipeline parallelism (GPipe) results in a bubble overhead of $(P-1)/M$, where $P$ is the number of stages and $M$ is the number of microbatches.
-:::
-
-::: {.callout-perspective title="Optimizing Pipeline Bubble Overhead"}
-
-**Problem Statement**: Your 8-stage pipeline shows 50% bubble overhead when the formula predicts only 12.5% for your configuration. Where is the efficiency going?
-
-Applying the Systems Sandwich framework to diagnose pipeline inefficiency:
-
-**Physical Layer (Infrastructure)**:
-
-- **Configuration**: 8 pipeline stages across 8 nodes
-- **Inter-node bandwidth**: InfiniBand HDR at 200 Gb/s (25 GB/s)
-- **Activation tensor size**: 128 MB per microbatch boundary
-- **Transfer time**: $128 \text{ MB} / 25 \text{ GB/s} = 5.1\text{ms}$ per stage transition
-
-**Operational Layer (Logic)**:
-
-- **Microbatch count**: $M = 16$ microbatches
-- **Expected bubble fraction**: $(P-1)/M = 7/16 = 43.75\%$
-- **Computation time per stage**: 40ms per microbatch
-- **Communication time**: 5.1ms per boundary crossing
-
-**Service Layer (Measurement)**:
-
-- **Observed efficiency**: 50% (matching bubble prediction plus overhead)
-- **Stage utilization histogram**: Shows Stage 4 consistently 15% slower than others
-- **Memory pressure**: Stage 4 reports 95% HBM utilization
-
-**Root Cause Diagnosis**: The Physical-Operational mismatch reveals two issues:
-
-1. **Insufficient microbatches**: With $M=16$, theoretical bubble overhead is 43.75%, already high
-2. **Unbalanced stage computation**: Stage 4 (the FFN expansion layer with 4x hidden dimension) takes longer, creating additional stalls
-
-**Validated Solution**:
-
-1. **Increase microbatch count to $M=64$**: This reduces theoretical bubble to $(8-1)/64 = 10.9\%$
-2. **Rebalance pipeline stages**: Move one transformer layer from Stage 4 to Stage 5 to equalize computation time
-3. **Trade-off**: Increasing to $M=64$ requires 4x more activation memory storage. Verify this fits within HBM capacity or enable activation checkpointing for the additional microbatches
-
-**Quantitative Impact**:
-
-- Before: 50% bubble overhead → 50% efficiency
-- After ($M=64$ + rebalancing): 10.9% bubble + 3% communication overhead → 86% efficiency
-- Training time reduction: $1 - (0.50/0.86) = 42\%$ faster
-
-This example demonstrates how the Systems Sandwich connects algorithmic choices (microbatch count) to physical constraints (memory capacity) through observable metrics (stage utilization). The diagnosis required examining all three layers: Physical revealed the memory constraint, Operational identified the suboptimal configuration, and Service metrics pinpointed the unbalanced stage.
-
-:::
-
-Finally, model parallelism may be less effective for certain architectures, such as models with highly interdependent operations. In these cases, splitting the model may lead to excessive communication overhead, outweighing the benefits of parallel computation. For such models, alternative strategies like data parallelism or hybrid approaches might be more suitable.
-
-Despite these challenges, model parallelism remains an indispensable tool for training large models. With careful optimization and the use of modern frameworks, many of these issues can be mitigated, enabling efficient distributed training at scale.
+**The Limitations**:
+*   **Pipeline Bubbles**: In pipeline parallelism, GPUs sit idle while filling and draining the pipeline. The bubble fraction is $(P-1)/M$, where $P$ is pipeline stages and $M$ is microbatches. To achieve >90% efficiency, you need $M \gg P$, which increases activation memory.
+*   **Communication Intensity**: Tensor parallelism requires 2 AllReduce operations *per layer* in the critical path. This demands extremely high-bandwidth, low-latency interconnects (NVLink). It typically cannot scale beyond a single node (8 GPUs) without hitting the bandwidth wall.
+*   **Implementation Complexity**: Requires invasive changes to the model definition (replacing `nn.Linear` with `ColumnParallelLinear`), unlike Data Parallelism which wraps the model externally.
 
 ## Hybrid Parallelism {#sec-distributed-training-systems-systems-hybrid-parallelism-12a0}
 
@@ -1914,73 +1756,19 @@ Inter-layer hybrid parallelism focuses on distributing the workload between mode
 
 This configuration allows for dynamic allocation of resources, adapting to the specific demands of different layers in the model. By tailoring the parallelism strategy to the unique characteristics of each layer, inter-layer hybrid parallelism achieves an optimal balance between memory usage and computational efficiency.
 
-### Hybrid Parallelism Advantages {#sec-distributed-training-systems-systems-hybrid-parallelism-advantages-9e05}
+### Trade-offs: Complexity vs. Scale {#sec-distributed-training-systems-systems-hybrid-parallelism-tradeoffs}
 
-The quantitative analysis of preceding sections demonstrates why hybrid parallelism becomes essential at scale. Pure data parallelism achieves 85-95% efficiency up to 32 GPUs but degrades to 40-60% beyond 512 GPUs due to communication overhead. Pure model parallelism enables training of 175B+ parameter models but introduces 20-30% pipeline bubble overhead even with optimized scheduling. Hybrid 3D parallelism, combining 8-way tensor parallelism within nodes, 8-way pipeline parallelism across nodes, and 16-way data parallelism across replica groups, enables training 175B parameter models on 1024 GPUs with 45% parallel efficiency, compared to approximately 4% efficiency for pure data parallelism at the same scale.
+Hybrid parallelism is the only viable path for training frontier models (100B+ parameters), but it introduces massive configuration complexity.
 
-The primary advantage lies in simultaneous scaling across model size and dataset throughput. A 3D parallel configuration for GPT-3 training distributes the 175B parameters across 8 tensor parallel GPUs within each node, reducing per-GPU memory from 700 GB to 87.5 GB. Pipeline parallelism across 8 stages further enables processing of long sequences without activation memory overflow. Data parallelism across 16 replica groups then scales throughput, achieving effective batch sizes of 1536 while maintaining gradient quality. This orthogonal decomposition addresses memory, throughput, and convergence constraints simultaneously.
+**The Advantages**:
+*   **Orthogonal Scaling**: Addresses all three bottlenecks simultaneously. Tensor parallelism fits the layer in memory. Pipeline parallelism fits the depth. Data parallelism scales the throughput.
+*   **Hierarchical Bandwidth Matching**: Maps logical communication patterns to physical hardware topology. High-bandwidth NVLink handles tensor parallelism; medium-bandwidth InfiniBand handles pipeline and data parallelism.
+*   **Maximum Utilization**: By overlapping pipeline stages with data parallel communication, hybrid systems can achieve 50-55% Model FLOPS Utilization (MFU) at scale, compared to <40% for pure strategies.
 
-Hardware utilization improves substantially over single-strategy approaches. Pure model parallelism leaves devices idle during pipeline bubbles (20-30% of training time). Pure data parallelism leaves devices waiting during gradient synchronization (10-40% of training time). Hybrid approaches overlap these operations: while one pipeline stage computes, another synchronizes gradients within its data parallel group. Megatron-LM demonstrates approximately 50-55% MFU (Model FLOPS Utilization) on 1024 A100 GPUs using 3D parallelism [@narayanan_pipeline_parallelism_2021], compared to 30-40% MFU for pure data parallelism at similar scale. @fig-hybrid-mapping illustrates how these efficiency gains emerge from hierarchical communication structure: tensor parallelism confines high-frequency communication to NVLink within nodes, pipeline parallelism restricts cross-node traffic to activation transfers at stage boundaries, and data parallelism performs AllReduce across replica groups using InfiniBand.
-
-Communication overhead reduces through hierarchical structuring. Tensor parallelism restricts high-frequency communication to NVLink-connected GPUs within nodes (600 GB/s bandwidth). Pipeline parallelism limits cross-node communication to activation transfers at stage boundaries (requires 100-200 GB/s per stage). Data parallelism performs AllReduce across replica groups using InfiniBand (200 GB/s aggregate). This hierarchy matches communication patterns to available bandwidth at each level, avoiding the scenario where all communication competes for the slowest interconnect.
-
-::: {#fig-hybrid-mapping fig-env="figure" fig-pos="htb" fig-cap="**3D Parallelism Physical Mapping**. How Hybrid Parallelism maps to hardware topology. **Tensor Parallelism** uses high-bandwidth NVLink within a node to split layers. **Pipeline Parallelism** connects adjacent nodes via high-speed InfiniBand to form the model depth. **Data Parallelism** replicates this entire pipeline structure, synchronizing gradients via the inter-node network." fig-alt="Two-node cluster diagram. Within each node, 4 GPUs connect via NVLink for Tensor Parallelism. Between nodes, InfiniBand carries Pipeline Parallelism. Dashed box shows Data Parallel replica group."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
-  \definecolor{NodeColor}{RGB}{245,245,245}
-  \definecolor{TPColor}{RGB}{176,196,222} % LightSteelBlue
-  \definecolor{PPColor}{RGB}{255,182,193} % LightPink
-
-  % Node 1
-  \node[draw, fill=NodeColor, rounded corners=4pt, minimum width=4cm, minimum height=2.5cm, label={north:Node 1 (PP Stage 1)}] (N1) at (0,0) {};
-  \node[draw, fill=TPColor, circle, label={below:G1}] (G11) at (-1.5, -0.5) {};
-  \node[draw, fill=TPColor, circle, label={below:G2}] (G12) at (-0.5, -0.5) {};
-  \node[draw, fill=TPColor, circle, label={below:G3}] (G13) at (0.5, -0.5) {};
-  \node[draw, fill=TPColor, circle, label={below:G4}] (G14) at (1.5, -0.5) {};
-  \draw[thick, <->, blue] (G11) -- (G12) -- (G13) -- (G14);
-  \node[blue, font=\scriptsize] at (0, 0.2) {Tensor Parallel (NVLink)};
-
-  % Node 2
-  \node[draw, fill=NodeColor, rounded corners=4pt, minimum width=4cm, minimum height=2.5cm, label={north:Node 2 (PP Stage 2)}] (N2) at (6,0) {};
-  \node[draw, fill=TPColor, circle, label={below:G1}] (G21) at (4.5, -0.5) {};
-  \node[draw, fill=TPColor, circle, label={below:G2}] (G22) at (5.5, -0.5) {};
-  \node[draw, fill=TPColor, circle, label={below:G3}] (G23) at (6.5, -0.5) {};
-  \node[draw, fill=TPColor, circle, label={below:G4}] (G24) at (7.5, -0.5) {};
-  \draw[thick, <->, blue] (G21) -- (G22) -- (G23) -- (G24);
-
-  % Pipeline Arrow
-  \draw[ultra thick, ->, orange] (N1) -- node[above, font=\bfseries] {Pipeline Parallel (InfiniBand)} (N2);
-
-  % Replica Group (Data Parallel)
-  \node[draw, dashed, inner sep=10pt, label={above:Replica 1}] (R1) at (3, 0) [minimum width=11cm, minimum height=3.5cm] {};
-
-  \node[align=left, font=\footnotesize, anchor=west] at (-2, -3) {
-    \textbf{Mapping Strategy:}\\
-    1. \textcolor{blue}{Tensor Parallel}: Inside single Node (Highest BW)\\
-    2. \textcolor{orange}{Pipeline Parallel}: Between adjacent Nodes (High BW)\\
-    3. \textbf{Data Parallel}: Replicates this entire structure
-  };
-\end{tikzpicture}
-```
-:::
-
-Hybrid parallelism enables training at scales that would otherwise be impossible. GPT-4 training required an estimated 10,000+ H100 GPUs for months. Without hybrid approaches, memory constraints would limit training to smaller models, throughput constraints would extend training time beyond practical limits, and communication overhead would waste the majority of available compute. The combination of tensor, pipeline, and data parallelism transforms these theoretical capabilities into practical training systems.
-
-### Hybrid Parallelism Limitations {#sec-distributed-training-systems-systems-hybrid-parallelism-limitations-4827}
-
-While hybrid parallelism provides a robust framework for scaling machine learning training, it also introduces complexities that require careful consideration. These challenges stem from the intricate coordination needed to integrate both model and data parallelism effectively. Understanding these obstacles is crucial for designing efficient hybrid systems and avoiding potential bottlenecks.
-
-One of the primary challenges of hybrid parallelism is communication overhead. Both model and data parallelism involve significant inter-device communication. In model parallelism, devices must exchange intermediate outputs and gradients to maintain the sequential flow of computation. In data parallelism, gradients computed on separate data subsets must be synchronized across devices. Hybrid parallelism compounds these demands, as it requires efficient communication for both processes simultaneously. If not managed properly, the resulting overhead can negate the benefits of parallelization, particularly in large-scale systems with slower interconnects or high network latency.
-
-Another critical challenge is the complexity of implementation. Hybrid parallelism demands a nuanced understanding of both model and data parallelism techniques, as well as the underlying hardware and software infrastructure. Designing efficient hybrid strategies involves making decisions about how to partition the model, how to distribute data, and how to synchronize computations across devices. This process often requires extensive experimentation and optimization, particularly for custom architectures or non-standard hardware setups. While modern frameworks like PyTorch and TensorFlow provide tools for distributed training, implementing hybrid parallelism at scale still requires significant engineering expertise.
-
-Workload balancing also presents a challenge in hybrid parallelism. In a distributed system, not all devices may have equal computational capacity. Some devices may process data or compute gradients faster than others, leading to inefficiencies as faster devices wait for slower ones to complete their tasks. Additionally, certain model layers or operations may require more resources than others, creating imbalances in computational load. Managing this disparity requires careful tuning of partitioning strategies and the use of dynamic workload distribution techniques.
-
-Memory constraints remain a concern, even in hybrid setups. While model parallelism addresses the issue of fitting large models into device memory, the additional memory requirements for data parallelism, such as storing multiple data batches and gradient buffers, can still exceed available capacity. This is especially true for models with extremely large intermediate computations, such as transformers with high-dimensional attention mechanisms. Balancing memory usage across devices is essential to prevent resource exhaustion during training.
-
-Lastly, hybrid parallelism poses challenges related to fault tolerance and debugging. Distributed systems are inherently more prone to hardware failures and synchronization errors. Debugging issues in hybrid setups can be significantly more complex than in standalone model or data parallelism systems, as errors may arise from interactions between the two approaches. Ensuring robust fault-tolerance mechanisms and designing tools for monitoring and debugging distributed systems are essential for maintaining reliability.
-
-Despite these challenges, hybrid parallelism remains an indispensable strategy for training large-scale machine learning models. By addressing these obstacles through optimized communication protocols, intelligent partitioning strategies, and robust fault-tolerance systems, practitioners can unlock the full potential of hybrid parallelism and drive innovation in AI research and applications.
+**The Limitations**:
+*   **The Cartesian Product of Complexity**: Debugging requires tracing errors through a 3D coordinate system (Data rank, Pipeline stage, Tensor slice). A NaN in one microbatch can propagate backward and crash a different GPU in a different pipeline stage.
+*   **Straggler Amplification**: In a synchronous 3D mesh, a single slow GPU stalls the entire cluster. The probability of a straggler event approaches 100% as $N \rightarrow 10,000$.
+*   **Rigid Topologies**: Requires homogeneous clusters. You cannot easily mix NVIDIA A100s and H100s, or varying network bandwidths, without destroying efficiency.
 
 ## Parallelism Strategy Comparison {#sec-distributed-training-systems-systems-parallelism-strategy-comparison-d92a}
 
@@ -2264,8 +2052,9 @@ The efficiency metrics governing distributed training—communication overhead, 
 **The 3D Parallelism Space**. Distributed training for frontier models combines three orthogonal scaling axes. Data Parallelism ($d$) replicates the model to scale throughput. Tensor Parallelism ($t$) splits layers within a node to fit memory. Pipeline Parallelism ($p$) splits layers across nodes to reduce communication frequency.
 :::
 
-... (later in summary) ...
+The parallelism strategies examined here define the *logical* traffic patterns of the Machine Learning Fleet. However, logic must eventually run on physics. Each strategy creates specific demands on the hardware:
+*   **Tensor Parallelism** demands massive bisection bandwidth within a node (NVLink).
+*   **Pipeline Parallelism** demands low-latency point-to-point links between nodes.
+*   **Data Parallelism** demands high-throughput AllReduce across the entire cluster fabric.
 
-The parallelism strategies examined here determine how we coordinate learning across the Machine Learning Fleet. However, each of these strategies—whether splitting by data, layer, or tensor—creates specific, high-volume traffic patterns that can easily become the system bottleneck.
-
-The next chapter, @sec-communication-collective-operations, examines the logical communication patterns and collective operations (AllReduce, AllGather) that coordinate these distributed shards and explores how to optimize the "Communication-Computation Ratio" that governs scaling efficiency.
+In **Part II: Building the Machine Learning Fleet**, we will construct the physical supercomputer capable of satisfying these demands, starting with **Compute Infrastructure** (@sec-compute). But first, we must optimize the communication primitives themselves. The next chapter, @sec-communication-collective-operations, opens the black box of `dist.all_reduce` to reveal the ring and tree algorithms that make distributed consistency possible.
