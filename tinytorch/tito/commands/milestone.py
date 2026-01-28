@@ -1421,13 +1421,19 @@ class MilestoneCommand(BaseCommand):
         # Check if user is logged in
         if auth.is_logged_in():
             console.print()
-            try:
-                should_sync = Confirm.ask(
-                    f"[cyan]Would you like to sync this achievement to your profile?[/cyan]",
-                    default=True
-                )
-            except EOFError:
-                # Non-interactive mode - skip sync prompt
+            # Only prompt in interactive terminal (skip in CI/pipes)
+            import sys
+            if sys.stdin.isatty() and sys.stdout.isatty():
+                try:
+                    should_sync = Confirm.ask(
+                        f"[cyan]Would you like to sync this achievement to your profile?[/cyan]",
+                        default=True
+                    )
+                except EOFError:
+                    # Non-interactive mode - skip sync prompt
+                    should_sync = False
+            else:
+                # Non-interactive mode (CI, pipes, etc.) - skip sync
                 should_sync = False
 
             if should_sync:

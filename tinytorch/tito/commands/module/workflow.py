@@ -64,6 +64,11 @@ class ModuleWorkflowCommand(BaseCommand):
             'module_number',
             help='Module number to start (01, 02, 03, etc.)'
         )
+        start_parser.add_argument(
+            '--no-jupyter',
+            action='store_true',
+            help='Create notebook but skip opening Jupyter (for CI/testing)'
+        )
 
         # VIEW command - just open the notebook
         view_parser = subparsers.add_parser(
@@ -184,8 +189,13 @@ class ModuleWorkflowCommand(BaseCommand):
 
     # Module mapping and normalization now imported from core.modules
 
-    def start_module(self, module_number: str) -> int:
-        """Start working on a module with prerequisite checking and visual feedback."""
+    def start_module(self, module_number: str, no_jupyter: bool = False) -> int:
+        """Start working on a module with prerequisite checking and visual feedback.
+        
+        Args:
+            module_number: The module to start (e.g., "01", "02")
+            no_jupyter: If True, create notebook but don't open Jupyter (for CI/testing)
+        """
         from rich import box
         from rich.table import Table
 
@@ -312,6 +322,12 @@ class ModuleWorkflowCommand(BaseCommand):
 
         # Mark as started
         self.mark_module_started(normalized)
+
+        if no_jupyter:
+            # CI/testing mode - just create notebook, don't open Jupyter
+            self.console.print(f"[green]✅ Module {normalized} ready (notebook created)[/green]")
+            self.console.print(f"💡 Next: [bold cyan]tito module complete {normalized}[/bold cyan]")
+            return 0
 
         # Instructions
         self.console.print("💡 [bold]What to do:[/bold]")
@@ -548,7 +564,8 @@ class ModuleWorkflowCommand(BaseCommand):
             export_result = self.export_module(module_name)
             if export_result != 0:
                 self.console.print(f"[red]   ❌ Export failed for {module_name}[/red]")
-                success = False
+                self.console.print("   💡 Fix the issues and try again")
+                return 1
             else:
                 # Extract export path (simplified)
                 export_path = f"tinytorch/core/{module_name.split('_')[1]}.py"
@@ -851,7 +868,7 @@ class ModuleWorkflowCommand(BaseCommand):
         env = os.environ.copy()
         pythonpath = env.get('PYTHONPATH', '')
         if pythonpath:
-            env['PYTHONPATH'] = f"{project_root}:{pythonpath}"
+            env['PYTHONPATH'] = f"{project_root}{os.pathsep}{pythonpath}"
         else:
             env['PYTHONPATH'] = str(project_root)
 
@@ -1451,7 +1468,10 @@ class ModuleWorkflowCommand(BaseCommand):
         # Handle subcommands
         if hasattr(args, 'module_command') and args.module_command:
             if args.module_command == 'start':
-                return self.start_module(args.module_number)
+                return self.start_module(
+                    args.module_number,
+                    no_jupyter=getattr(args, 'no_jupyter', False)
+                )
             elif args.module_command == 'view':
                 return self.view_module(args.module_number)
             elif args.module_command == 'resume':
