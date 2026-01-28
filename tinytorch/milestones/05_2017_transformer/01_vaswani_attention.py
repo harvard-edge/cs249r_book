@@ -59,7 +59,7 @@ by passing THREE increasingly difficult challenges.
     Input:  P Y T H O N  →  Output: N O H T Y P
 
     ┌─┬─┬─┬─┬─┬─┐              ┌─┬─┬─┬─┬─┬─┐
-    │P│Y│T│H│O│N│     →       │N│O│H│T│Y│P│
+    │P│Y│T│H│O│N│     →        │N│O│H│T│Y│P│
     └─┴─┴─┴─┴─┴─┘              └─┴─┴─┴─┴─┴─┘
      0 1 2 3 4 5                5 4 3 2 1 0  ← Attention pattern
 
@@ -517,8 +517,27 @@ def challenge_1_reversal(model, optimizer, loss_fn, config=CONFIG):
     """
     Challenge 1: Learn to reverse sequences (PYTHON -> NOHTYP).
 
-    Tests if attention can learn anti-diagonal patterns where
-    output position i attends to input position (n-1-i).
+    Task: Input sequence reversed in output
+    ──────────────────────────────────────
+        Input:   P  Y  T  H  O  N
+        Output:  N  O  H  T  Y  P
+
+    Required Attention Pattern (anti-diagonal):
+    ───────────────────────────────────────────
+        Output position 0 (N) attends to input position 5 (N)
+        Output position 1 (O) attends to input position 4 (O)
+        Output position 2 (H) attends to input position 3 (H)
+        ...
+
+        Attention weights matrix (ideal):
+                    Input positions
+                    0  1  2  3  4  5
+        Output  0 [ .  .  .  .  .  █ ]  → attends to pos 5
+        pos     1 [ .  .  .  .  █  . ]  → attends to pos 4
+                2 [ .  .  .  █  .  . ]  → attends to pos 3
+                3 [ .  .  █  .  .  . ]  → attends to pos 2
+                4 [ .  █  .  .  .  . ]  → attends to pos 1
+                5 [ █  .  .  .  .  . ]  → attends to pos 0
 
     Returns:
         passed: bool - whether target accuracy was achieved
@@ -544,11 +563,33 @@ def challenge_2_copying(model, optimizer, loss_fn, config=CONFIG):
     """
     Challenge 2: Learn to copy sequences (TENSOR -> TENSOR).
 
-    Tests if attention can learn diagonal patterns where
-    output position i attends to input position i.
+    Task: Input sequence copied to output (identity)
+    ────────────────────────────────────────────────
+        Input:   T  E  N  S  O  R
+        Output:  T  E  N  S  O  R
 
-    Note: Uses the SAME model from Challenge 1, demonstrating
-    that transformers can adapt to new tasks.
+    Required Attention Pattern (diagonal):
+    ──────────────────────────────────────
+        Output position 0 (T) attends to input position 0 (T)
+        Output position 1 (E) attends to input position 1 (E)
+        Output position 2 (N) attends to input position 2 (N)
+        ...
+
+        Attention weights matrix (ideal):
+                    Input positions
+                    0  1  2  3  4  5
+        Output  0 [ █  .  .  .  .  . ]  → attends to pos 0
+        pos     1 [ .  █  .  .  .  . ]  → attends to pos 1
+                2 [ .  .  █  .  .  . ]  → attends to pos 2
+                3 [ .  .  .  █  .  . ]  → attends to pos 3
+                4 [ .  .  .  .  █  . ]  → attends to pos 4
+                5 [ .  .  .  .  .  █ ]  → attends to pos 5
+
+    Why same model?
+    ───────────────
+    Uses the SAME model from Challenge 1, demonstrating that
+    transformers can adapt their attention patterns to new tasks
+    without architectural changes.
 
     Returns:
         passed: bool - whether target accuracy was achieved
@@ -574,14 +615,43 @@ def challenge_3_mixed(config=CONFIG):
     """
     Challenge 3: Learn BOTH tasks with prefix conditioning.
 
-    This is the real test! The model must learn:
-      [R]ABC -> CBA  (reverse when prefix is [R])
-      [C]ABC -> ABC  (copy when prefix is [C])
+    Task: Prefix token controls behavior
+    ────────────────────────────────────
+        [R] A B C D E F  →  F E D C B A   (reverse)
+        [C] A B C D E F  →  A B C D E F   (copy)
 
-    IMPORTANT: We build a FRESH model here because:
-    - After challenges 1 & 2, the model is "stuck" in copy mode
-    - To learn conditional behavior, it needs to see both tasks together
-    - This tests the model's ability to use the prefix token to route behavior
+        The prefix token [R] or [C] tells the model what to do!
+        This is how GPT-style instruction following works.
+
+    Required Attention Pattern (context-dependent):
+    ───────────────────────────────────────────────
+        When prefix = [R]:
+                      [R] A  B  C  D  E  F
+            Output A [ .  .  .  .  .  .  █ ]  → attends to F
+            Output B [ .  .  .  .  .  █  . ]  → attends to E
+            ...
+
+        When prefix = [C]:
+                      [C] A  B  C  D  E  F
+            Output A [ .  █  .  .  .  .  . ]  → attends to A
+            Output B [ .  .  █  .  .  .  . ]  → attends to B
+            ...
+
+        The model learns to READ the prefix and ROUTE accordingly!
+
+    Why fresh model?
+    ────────────────
+    After challenges 1 & 2, the model has been trained sequentially:
+      1. Learn reversal → weights encode anti-diagonal pattern
+      2. Learn copying  → weights OVERWRITE to diagonal pattern
+
+    By challenge 3, the model is "stuck" in copy mode and can't
+    learn conditional behavior. Starting fresh allows it to learn
+    BOTH patterns simultaneously, conditioned on the prefix token.
+
+    This is the key insight: transformers can learn to dynamically
+    route information based on context (the prefix), which is the
+    foundation of instruction-following in modern LLMs.
 
     Returns:
         passed: bool - whether target accuracy was achieved
