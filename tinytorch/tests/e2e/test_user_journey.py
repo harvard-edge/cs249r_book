@@ -383,7 +383,8 @@ class TestErrorHandling:
         code, stdout, stderr = run_tito(["nonexistent_command"])
         assert code != 0
         combined = stdout + stderr
-        assert "invalid" in combined.lower() or "error" in combined.lower()
+        # Check for "not found" or "not a valid" (the actual error message text)
+        assert "not found" in combined.lower() or "not a valid" in combined.lower()
 
     @pytest.mark.quick
     def test_invalid_module_number_handled(self):
