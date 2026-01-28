@@ -737,6 +737,11 @@ class BuildCommand:
 
         Note: render field doesn't work for PDF. We preserve the structure
         but comment out files not in the selected list.
+
+        Handles multiple path patterns:
+        - Regular chapters: contents/vol1/chapter_name/chapter_name.qmd
+        - Backmatter/appendix: contents/vol1/backmatter/appendix_name.qmd
+        - Glossary: contents/vol1/backmatter/glossary/glossary.qmd
         """
         # Get list of chapter names to keep
         keep_chapters = set(['index'])  # Always keep index.qmd
@@ -781,7 +786,11 @@ class BuildCommand:
                     # Check if this line has a chapter we want to include
                     if '.qmd' in next_line:
                         for chapter_name in keep_chapters:
-                            if f'{chapter_name}/{chapter_name}.qmd' in next_line or f'{chapter_name}.qmd' in next_line:
+                            # Check multiple path patterns for PDF backmatter/appendix support
+                            if (f'{chapter_name}/{chapter_name}.qmd' in next_line or
+                                f'{chapter_name}.qmd' in next_line or
+                                f'backmatter/{chapter_name}.qmd' in next_line or
+                                f'glossary/{chapter_name}.qmd' in next_line):
                                 part_has_active_chapters = True
                                 break
                         # Also check always_include
@@ -815,10 +824,18 @@ class BuildCommand:
                                 should_include = True
                                 break
 
-                        # Check against selected chapters
+                        # Check against selected chapters using multiple path patterns
                         if not should_include:
                             for chapter_name in keep_chapters:
-                                if f'{chapter_name}/{chapter_name}.qmd' in part_line or f'{chapter_name}.qmd' in part_line:
+                                # Check multiple path patterns:
+                                # 1. Regular: chapter_name/chapter_name.qmd
+                                # 2. Direct: chapter_name.qmd (for backmatter files)
+                                # 3. Backmatter: backmatter/chapter_name.qmd (explicit)
+                                # 4. Glossary: backmatter/glossary/glossary.qmd
+                                if (f'{chapter_name}/{chapter_name}.qmd' in part_line or
+                                    f'{chapter_name}.qmd' in part_line or
+                                    f'backmatter/{chapter_name}.qmd' in part_line or
+                                    f'glossary/{chapter_name}.qmd' in part_line):
                                     should_include = True
                                     break
 
@@ -865,10 +882,18 @@ class BuildCommand:
                         should_include = True
                         break
 
-                # Check against selected chapters
+                # Check against selected chapters using multiple path patterns
                 if not should_include:
                     for chapter_name in keep_chapters:
-                        if f'{chapter_name}/{chapter_name}.qmd' in line or f'{chapter_name}.qmd' in line:
+                        # Check multiple path patterns:
+                        # 1. Regular: chapter_name/chapter_name.qmd
+                        # 2. Direct: chapter_name.qmd (for backmatter files)
+                        # 3. Backmatter: backmatter/chapter_name.qmd (explicit)
+                        # 4. Glossary: backmatter/glossary/glossary.qmd
+                        if (f'{chapter_name}/{chapter_name}.qmd' in line or
+                            f'{chapter_name}.qmd' in line or
+                            f'backmatter/{chapter_name}.qmd' in line or
+                            f'glossary/{chapter_name}.qmd' in line):
                             should_include = True
                             break
 
@@ -913,6 +938,12 @@ class BuildCommand:
         - Must preserve part structure (parts cannot be commented out if they contain active chapters)
         - Must uncomment both part and chapters lines when building chapters in that part
         - Uses same commenting approach as PDF but with stricter part preservation
+
+        Handles multiple path patterns:
+        - Regular chapters: contents/vol1/chapter_name/chapter_name.qmd
+        - Backmatter/appendix: contents/vol1/backmatter/appendix_name.qmd
+        - Glossary: contents/vol1/backmatter/glossary/glossary.qmd
+        - Handles "Appendices" part wrapper for backmatter in EPUB
         """
         # Get list of chapter names to keep
         keep_chapters = set(['index'])  # Always keep index.qmd
@@ -957,7 +988,11 @@ class BuildCommand:
                     # Check if this line has a chapter we want to include
                     if '.qmd' in next_line:
                         for chapter_name in keep_chapters:
-                            if f'{chapter_name}/{chapter_name}.qmd' in next_line or f'{chapter_name}.qmd' in next_line:
+                            # Check multiple path patterns for EPUB backmatter/appendix support
+                            if (f'{chapter_name}/{chapter_name}.qmd' in next_line or
+                                f'{chapter_name}.qmd' in next_line or
+                                f'backmatter/{chapter_name}.qmd' in next_line or
+                                f'glossary/{chapter_name}.qmd' in next_line):
                                 part_has_active_chapters = True
                                 break
                         # Also check always_include
@@ -976,6 +1011,7 @@ class BuildCommand:
                     if part_has_active_chapters and ('part:' in part_line or part_stripped.startswith('chapters:')):
                         # EPUB CRITICAL: This part has active chapters, so ensure structural lines are uncommented
                         # Always ensure part and chapters lines are uncommented when part has active chapters
+                        # This handles "Appendices" part wrapper for backmatter chapters
                         if part_stripped.startswith('#'):
                             uncommented = part_line.replace('# ', '', 1).replace('#', '', 1)
                             modified_lines.append(uncommented)
@@ -991,10 +1027,18 @@ class BuildCommand:
                                 should_include = True
                                 break
 
-                        # Check against selected chapters
+                        # Check against selected chapters using multiple path patterns
                         if not should_include:
                             for chapter_name in keep_chapters:
-                                if f'{chapter_name}/{chapter_name}.qmd' in part_line or f'{chapter_name}.qmd' in part_line:
+                                # Check multiple path patterns:
+                                # 1. Regular: chapter_name/chapter_name.qmd
+                                # 2. Direct: chapter_name.qmd (for backmatter files)
+                                # 3. Backmatter: backmatter/chapter_name.qmd (explicit)
+                                # 4. Glossary: backmatter/glossary/glossary.qmd
+                                if (f'{chapter_name}/{chapter_name}.qmd' in part_line or
+                                    f'{chapter_name}.qmd' in part_line or
+                                    f'backmatter/{chapter_name}.qmd' in part_line or
+                                    f'glossary/{chapter_name}.qmd' in part_line):
                                     should_include = True
                                     break
 
@@ -1041,10 +1085,18 @@ class BuildCommand:
                         should_include = True
                         break
 
-                # Check against selected chapters
+                # Check against selected chapters using multiple path patterns
                 if not should_include:
                     for chapter_name in keep_chapters:
-                        if f'{chapter_name}/{chapter_name}.qmd' in line or f'{chapter_name}.qmd' in line:
+                        # Check multiple path patterns:
+                        # 1. Regular: chapter_name/chapter_name.qmd
+                        # 2. Direct: chapter_name.qmd (for backmatter files)
+                        # 3. Backmatter: backmatter/chapter_name.qmd (explicit)
+                        # 4. Glossary: backmatter/glossary/glossary.qmd
+                        if (f'{chapter_name}/{chapter_name}.qmd' in line or
+                            f'{chapter_name}.qmd' in line or
+                            f'backmatter/{chapter_name}.qmd' in line or
+                            f'glossary/{chapter_name}.qmd' in line):
                             should_include = True
                             break
 

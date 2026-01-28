@@ -713,22 +713,22 @@ Matrix operations appear consistently across modern neural architectures. Convol
 ::: {#lst-matrix_patterns lst-cap="**Linear Layers**: Layer transformations combine input features to produce hidden representations. Matrix operations in neural networks enable efficient feature extraction and transformation, forming the backbone of many machine learning architectures."}
 ```{.python}
 hidden = matmul(weights, inputs)
-# weights: [out_dim x in_dim], inputs: [in_dim x batch] {#sec-weights-out_dim-x-in_dim-inputs-in_dim-x-batch}
-# Result combines all inputs for each output {#sec-result-combines-inputs-output}
+# weights: [out_dim x in_dim], inputs: [in_dim x batch]
+# Result combines all inputs for each output
 
 # Attention Mechanisms - Multiple matrix operations
 Q = matmul(Wq, inputs)
 # Project inputs to query space [query_dim x batch]
 K = matmul(Wk, inputs)
-# Project inputs to key space[key_dim x batch]
+# Project inputs to key space [key_dim x batch]
 attention = matmul(Q, K.T)
 # Compare all queries with all keys [query_dim x key_dim]
 
-# Convolutions - Matrix multiply after reshaping {#sec-convolutions-matrix-multiply-reshaping}
+# Convolutions - Matrix multiply after reshaping
 patches = im2col(input)
-# Convert [H x W x C] image to matrix of patches {#sec-convert-h-x-w-x-c-image-matrix-patches}
+# Convert [H x W x C] image to matrix of patches
 output = matmul(kernel, patches)
-# Apply kernels to all patches simultaneously {#sec-apply-kernels-patches-simultaneously}
+# Apply kernels to all patches simultaneously
 ```
 :::
 
@@ -1334,6 +1334,30 @@ ggplot(data_melted, aes(x = Year, y = Performance, color = Metric, shape = Metri
 Beyond performance limitations, memory access imposes a significant energy cost. Fetching data from off-chip DRAM consumes far more energy than performing arithmetic operations [@Horowitz2014]. This inefficiency is particularly evident in machine learning models, where large parameter sizes, frequent memory accesses, and non-uniform data movement patterns exacerbate memory bottlenecks. The energy differential drives architectural decisions—Google's TPU achieves 30-83$\times$ better energy efficiency than contemporary GPUs by minimizing data movement through systolic arrays and large on-chip memory. These design choices demonstrate that energy constraints, not computational limits, often determine practical deployment feasibility.
 
 #### Memory Access Patterns in ML Workloads {#sec-ai-acceleration-memory-access-patterns-ml-workloads-a960}
+
+::: {.callout-lighthouse title="Life of a Tensor: The KWS Journey"}
+Recall the 1-second audio clip from Chapter 2. Here is its physical journey through the hardware during inference:
+
+1.  **DRAM (HBM)**: The tensor starts here.
+    *   **Size**: 16,000 samples $\times$ 2 bytes (FP16) = **32 KB**.
+    *   **Latency**: Fetching this from off-chip memory takes **~100 ns** (plus queuing delay).
+    *   **Energy**: Cost is **~200 pJ/bit**. High cost.
+
+2.  **L2 Cache**: The GPU's DMA engine pulls it here.
+    *   **Latency**: ~20 ns.
+    *   **Access**: Shared across multiple Streaming Multiprocessors (SMs).
+
+3.  **L1 Cache / Shared Memory**: A specific SM claims a tile of the audio.
+    *   **Latency**: ~1-2 ns.
+    *   **Locality**: Critical step. If the data leaves this level, we pay the "HBM Tax" again.
+
+4.  **Registers**: The Tensor Core operates here.
+    *   **Latency**: ~0 ns (single cycle).
+    *   **Throughput**: 312 TFLOPS.
+    *   **Energy**: Cost is **~0.1 pJ/bit**.
+
+**The Systems Insight**: The "Speed of Light" limit means we cannot compute faster than we can move data from Step 1 to Step 4. The **Roofline** is determined by the bandwidth of the Step 1 $\rightarrow$ Step 2 link.
+:::
 
 Machine learning workloads place substantial demands on memory systems due to the large volume of data involved in computation. Unlike traditional compute-bound applications, where performance is often dictated by the speed of arithmetic operations, ML workloads are characterized by high data movement requirements. The efficiency of an accelerator is not solely determined by its computational throughput but also by its ability to continuously supply data to processing units without introducing stalls or delays.
 
@@ -2028,7 +2052,7 @@ Since Actual Intensity ($1.0$) $\ll$ Ridge Point ($156$), the system is **Bandwi
     $$ \frac{2.0 \text{ TFLOPS (Actual)}}{312 \text{ TFLOPS (Peak)}} \approx \mathbf{0.6\%} $$
 
 **The Systems Conclusion:**
-Without batching or caching, a \$15,000 GPU runs at **less than 1% efficiency** on LLM inference. This "Utilization Gap" drives the need for Key-Value Caching (@sec-optimization-kv-cache) and Quantization (@sec-model-compression).
+Without batching or caching, a \$15,000 GPU runs at **less than 1% efficiency** on LLM inference. This "Utilization Gap" drives the need for Key-Value Caching and Quantization (@sec-model-compression).
 :::
 
 As this derivation demonstrates, the Roofline model provides the diagnostic framework for identifying whether operations are compute-bound or memory-bound. Knowing that a workload is memory-bound at 0.6% utilization is only the first step; the next challenge is translating this diagnosis into efficient execution plans that exploit accelerator architectures. This is the domain of hardware mapping: the art of assigning computations to processing elements and scheduling data movement to maximize the utilization that the Roofline analysis reveals as possible.
@@ -3335,7 +3359,13 @@ Teams expect 8 GPUs to train 8× faster than 1 GPU. Multi-accelerator scaling in
 
 **Fallacy:** _Peak FLOPS specifications determine real-world accelerator performance._
 
-Vendors advertise peak TFLOPS under optimal conditions (large matrix multiplies, perfect memory access patterns, Tensor Core utilization). Real workloads rarely achieve these peaks. An A100 advertises 312 TFLOPS for FP16 with Tensor Cores, but typical transformer training achieves 120-180 TFLOPS (38-58% utilization) due to memory-bound operations (attention, LayerNorm), kernel launch overhead, and imperfect batching. Recommendation models with sparse embeddings achieve 30-80 TFLOPS (10-25% utilization) despite the same peak specification. Organizations budget projects assuming peak performance, then experience 2-3× longer training times than predicted. Effective capacity planning requires measuring sustained throughput on representative workloads, not relying on peak specifications.
+**Correction**: Performance = Peak FLOPS $\times$ Utilization.
+Vendors advertise Peak FLOPS (Theoretical Speed Limit). Real workloads are limited by Utilization, which is dictated by the Roofline Model.
+*   **A100 Peak**: 312 TFLOPS (FP16).
+*   **Transformer Training**: Typically 120-180 TFLOPS (40-60% Utilization).
+*   **Reason**: Memory-bound operations (Attention, LayerNorm) drag down the average.
+*   **Recommendation Models**: Often 10-30 TFLOPS (3-10% Utilization) due to sparse memory access.
+Budget projects based on *sustained* throughput (measured or estimated via Roofline), not *peak* marketing numbers.
 
 **Pitfall:** _Deploying small-batch inference workloads on high-compute accelerators._
 
@@ -3441,7 +3471,7 @@ Consider the economics: GPU compute scales exponentially (roughly 10× every 3-4
 
 This asymmetry inverts the optimization priority. When compute was scarce and data abundant, the winning strategy was hardware acceleration. Now that compute is abundant and quality data is scarce, the winning strategy is **data efficiency**—extracting maximum learning from every sample.
 
-@sec-data-efficiency addresses this newest optimization frontier:
+The next chapter on **Data Efficiency** addresses this newest optimization frontier:
 
 - **Static data pruning**: Removing redundant samples before training begins—often cutting datasets by 30-50% with minimal accuracy impact
 - **Dynamic selection**: Curriculum learning and active learning to prioritize high-value samples during training
@@ -3450,7 +3480,7 @@ This asymmetry inverts the optimization priority. When compute was scarce and da
 
 The hardware understanding from this chapter directly enables data efficiency analysis. Memory bandwidth determines whether data loading or computation dominates training cost. Arithmetic intensity reveals whether a workload is compute-bound (benefit from better algorithms) or memory-bound (benefit from smarter data pipelines).
 
-We have optimized the math and the silicon. Now we optimize the input: **Data Efficiency** (@sec-data-efficiency) completes the optimization trilogy.
+We have optimized the math and the silicon. Now we optimize the input: the **Data Efficiency** chapter completes the optimization trilogy.
 
 :::
 

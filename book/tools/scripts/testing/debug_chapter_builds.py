@@ -88,7 +88,6 @@ def build_chapter(
     volume: str, 
     format_type: str, 
     log_dir: Path,
-    verbose: bool = False
 ) -> tuple[bool, float, str, int, int, Path]:
     """
     Build a single chapter and return (success, duration, error_output, warning_count, error_count, chapter_log_dir).
@@ -105,13 +104,28 @@ def build_chapter(
         format_type,
         chapter,
         f"--{volume}",
+        "-v",  # Always use verbose for full output capture (including "Output created:" line)
     ]
     
-    # Add verbose flag if requested
-    if verbose:
-        cmd.append("-v")
-    
     log_file = chapter_log_dir / f"build_{format_type}.log"
+    
+    # Determine the output file path and delete it before building
+    # This ensures we're checking if THIS build created the file, not a previous one
+    if format_type == "pdf":
+        output_path = book_dir / "_build" / f"pdf-{volume}" / "Machine-Learning-Systems.pdf"
+    elif format_type == "epub":
+        output_path = book_dir / "_build" / f"epub-{volume}" / "Machine-Learning-Systems.epub"
+    elif format_type == "html":
+        output_path = book_dir / "_build" / f"html-{volume}" / "index.html"
+    else:
+        output_path = None
+    
+    # Delete the output file if it exists (to ensure clean test)
+    if output_path and output_path.exists():
+        try:
+            output_path.unlink()
+        except Exception:
+            pass  # Ignore deletion errors
     
     start = time.time()
     try:
@@ -135,8 +149,8 @@ def build_chapter(
         # Write full output to log file
         log_file.write_text(full_output)
         
-        # Copy build artifacts (index.tex, index.log, etc.) from _book directory
-        _copy_build_artifacts(book_dir, chapter_log_dir, format_type)
+        # Copy build artifacts (tex, pdf, logs) to chapter log folder
+        _copy_build_artifacts(book_dir, chapter_log_dir, format_type, volume)
         
         # Count warnings and errors
         combined = result.stdout + result.stderr
@@ -148,13 +162,16 @@ def build_chapter(
         has_tikz_error = 'Gscale@box' in combined or 'Emergency stop' in combined
         has_duplicate_footnote = 'Duplicate note reference' in combined
         
-        if result.returncode == 0:
+        # Ultimate test: did the output file get created?
+        # Ignore exit code - only check if the file exists
+        if output_path and output_path.exists():
             return True, duration, "", warning_count, error_count, chapter_log_dir
         else:
-            # Capture last 50 lines of error output
+            # Build failed - capture last 50 lines of output for error summary
             error_lines = combined.strip().split('\n')
             error_summary = '\n'.join(error_lines[-50:])
-            return False, duration, error_summary, warning_count, error_count, chapter_log_dir
+            file_type = format_type.upper()
+            return False, duration, f"{file_type} not created: {output_path}\n\n{error_summary}", warning_count, error_count + 1, chapter_log_dir
             
     except subprocess.TimeoutExpired:
         log_file.write_text(f"TIMEOUT: Build exceeded 10 minutes\nCommand: {' '.join(cmd)}")
@@ -164,85 +181,78 @@ def build_chapter(
         return False, time.time() - start, f"EXCEPTION: {str(e)}", 0, 1, chapter_log_dir
 
 
-def _copy_build_artifacts(book_dir: Path, chapter_log_dir: Path, format_type: str) -> None:
+def _copy_build_artifacts(book_dir: Path, chapter_log_dir: Path, format_type: str, volume: str) -> None:
     """
-    Copy build artifacts (index.tex, index.log, etc.) from build directory to chapter log folder.
-    Quarto outputs files directly to book_dir (quarto/) for PDF builds.
+    Copy build artifacts from build directory to chapter log folder.
+    For PDF: copies Machine-Learning-Systems.tex and Machine-Learning-Systems.pdf
     """
-    # Quarto outputs to different locations depending on format
-    # For PDF: files are in book_dir directly (index.tex, index.log)
-    # For HTML: files are in _book/
-    if format_type == "pdf":
-        build_dir = book_dir  # quarto/ directory
-    else:
-        build_dir = book_dir / "_book"
-    
-    if not build_dir.exists():
-        return
-    
-    # Artifacts to copy for PDF builds
-    artifacts_to_copy = []
-    
-    if format_type == "pdf":
-        # Look for .tex, .log, .aux files in build directory
-        artifacts_to_copy = [
-            "index.tex",
-            "index.log", 
-            "index.aux",
-            "index.toc",
-            "index.out",
-            "Machine-Learning-Systems.tex",  # Sometimes named this way
-        ]
-    elif format_type == "html":
-        artifacts_to_copy = ["index.html"]
-    elif format_type == "epub":
-        artifacts_to_copy = ["index.epub"]
-    
     # Create artifacts subdirectory
     artifacts_dir = chapter_log_dir / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     
-    copied_count = 0
-    for artifact in artifacts_to_copy:
-        src = build_dir / artifact
-        if src.exists():
-            dst = artifacts_dir / artifact
-            try:
-                shutil.copy2(src, dst)
-                copied_count += 1
-            except Exception as e:
-                # Write error to a note file
-                (artifacts_dir / f"{artifact}.error").write_text(f"Failed to copy: {e}")
+    copied_files = []
     
-    # For PDF builds, also look for .log and .tex files directly in the build directory
     if format_type == "pdf":
-        for pattern in ["*.log", "*.tex", "*.aux"]:
-            for file in build_dir.glob(pattern):
-                if file.name not in [a for a in artifacts_to_copy]:  # Avoid duplicates
-                    try:
-                        dst = artifacts_dir / file.name
-                        if not dst.exists():
-                            shutil.copy2(file, dst)
-                            copied_count += 1
-                    except Exception:
-                        pass
+        # Primary artifact: Machine-Learning-Systems.tex in quarto/ directory
+        tex_file = book_dir / "Machine-Learning-Systems.tex"
+        if tex_file.exists():
+            dst = artifacts_dir / "Machine-Learning-Systems.tex"
+            try:
+                shutil.copy2(tex_file, dst)
+                copied_files.append("Machine-Learning-Systems.tex")
+            except Exception as e:
+                (artifacts_dir / "Machine-Learning-Systems.tex.error").write_text(f"Failed to copy: {e}")
+        
+        # Copy the generated PDF
+        pdf_file = book_dir / "_build" / f"pdf-{volume}" / "Machine-Learning-Systems.pdf"
+        if pdf_file.exists():
+            dst = artifacts_dir / "Machine-Learning-Systems.pdf"
+            try:
+                shutil.copy2(pdf_file, dst)
+                copied_files.append("Machine-Learning-Systems.pdf")
+            except Exception as e:
+                (artifacts_dir / "Machine-Learning-Systems.pdf.error").write_text(f"Failed to copy: {e}")
+        
+        # Also copy any .log files from quarto/ (LaTeX logs)
+        for log_file in book_dir.glob("*.log"):
+            try:
+                dst = artifacts_dir / log_file.name
+                if not dst.exists():
+                    shutil.copy2(log_file, dst)
+                    copied_files.append(log_file.name)
+            except Exception:
+                pass
     
-    # Also look for any .log files that might be in subdirectories
-    for log_file in build_dir.glob("**/*.log"):
-        try:
-            rel_path = log_file.relative_to(build_dir)
-            dst = artifacts_dir / rel_path
-            if not dst.exists():
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(log_file, dst)
-                copied_count += 1
-        except Exception:
-            pass
+    elif format_type == "html":
+        # For HTML, check _build/html-* directories
+        for html_build in book_dir.glob("_build/html-*"):
+            index_html = html_build / "index.html"
+            if index_html.exists():
+                try:
+                    dst = artifacts_dir / "index.html"
+                    shutil.copy2(index_html, dst)
+                    copied_files.append("index.html")
+                except Exception:
+                    pass
+                break
     
-    if copied_count > 0:
+    elif format_type == "epub":
+        # For EPUB, check _build/epub-* directories
+        for epub_build in book_dir.glob("_build/epub-*"):
+            for epub_file in epub_build.glob("*.epub"):
+                try:
+                    dst = artifacts_dir / epub_file.name
+                    shutil.copy2(epub_file, dst)
+                    copied_files.append(epub_file.name)
+                except Exception:
+                    pass
+                break
+    
+    if copied_files:
         # Write a summary file
         (artifacts_dir / "_artifacts_copied.txt").write_text(
-            f"Copied {copied_count} build artifacts from {build_dir}\n"
+            f"Copied {len(copied_files)} build artifacts from {book_dir}\n"
+            f"Files: {', '.join(copied_files)}\n"
             f"Timestamp: {datetime.now().isoformat()}\n"
         )
 
@@ -275,7 +285,7 @@ def main():
     parser.add_argument("--only", type=str, help="Only test these chapters (comma-separated)")
     parser.add_argument("--log-dir", type=str, help="Custom log directory")
     parser.add_argument("-v", "--verbose", action="store_true", 
-                        help="Enable verbose output and save build artifacts (index.tex, index.log)")
+                        help="Show extra status info (verbose build output is always captured in logs)")
     args = parser.parse_args()
     
     if not args.vol1 and not args.vol2:
@@ -323,8 +333,8 @@ def main():
     print("=" * 70)
     print(f"  Testing {len(chapters)} chapters...")
     print(f"  Log directory: {log_dir}")
-    if args.verbose:
-        print(f"  Verbose mode: ON (build artifacts will be saved)")
+    print(f"  Verbose build output: always captured in logs")
+    print(f"  Build artifacts: always saved (Machine-Learning-Systems.tex, etc.)")
     print()
     
     results = []
@@ -335,7 +345,7 @@ def main():
         print(f"[{i}/{len(chapters)}] Building {chapter}...", end=" ", flush=True)
         
         success, duration, error, warn_count, err_count, chapter_log_dir = build_chapter(
-            chapter, volume, args.format, log_dir, verbose=args.verbose
+            chapter, volume, args.format, log_dir
         )
         
         log_file = chapter_log_dir / f"build_{args.format}.log"
@@ -432,8 +442,7 @@ def main():
     print()
     print("=" * 70)
     print(f"  Full logs available in: {log_dir}/{volume}/<chapter>/")
-    if args.verbose:
-        print(f"  Build artifacts (index.tex, index.log) saved in: <chapter>/artifacts/")
+    print(f"  Build artifacts saved in: <chapter>/artifacts/")
     print("=" * 70)
     
     # Exit with error code if any failed

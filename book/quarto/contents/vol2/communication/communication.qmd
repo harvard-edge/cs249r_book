@@ -1,7 +1,7 @@
 ---
 ---
 
-# Communication and Collective Operations {#sec-communication}
+# Communication and Collective Operations {#sec-communication-collective-operations-collective-operations}
 
 ::: {layout-narrow}
 ::: {.column-margin}
@@ -35,19 +35,19 @@ Computation scales by adding processors; communication scales by moving data bet
 
 :::
 
-## Communication Fundamentals {#sec-communication-fundamentals}
+## Communication Fundamentals {#sec-communication-collective-operations-collective-operations-communication-fundamentals-44eb}
 
 In the **Systems Sandwich** (@sec-vol2-introduction), Communication algorithms sit squarely in the **Operational Layer**. While the physical network provides the raw bandwidth (the road), these algorithms determine the traffic patterns (the traffic lights). If the **Iron Law** defines the step time, then communication is the **Friction**—the term that grows with scale and resists our attempts to train larger models.
 
-The parallelism strategies introduced in @sec-distributed-training—data parallelism, model parallelism, and pipeline parallelism—all share a common assumption: workers can exchange data efficiently. That assumption hides what becomes the dominant engineering challenge at scale.
+The parallelism strategies introduced in @sec-distributed-training-systems—data parallelism, model parallelism, and pipeline parallelism—all share a common assumption: workers can exchange data efficiently. That assumption hides what becomes the dominant engineering challenge at scale.
 
 This transition reveals a fundamental asymmetry in how computation and communication scale. Computation is inherently local: each GPU operates on its own data independently, so adding GPUs increases aggregate compute capacity proportionally. Communication, however, is inherently global: ensuring all GPUs converge on the same synchronized state requires information to traverse physical distances between them. Adding more independent workers scales local work linearly, but coordinating those workers requires moving data across physical space.
 
-## Network Performance Modeling {#sec-network-modeling}
+## Network Performance Modeling {#sec-communication-collective-operations-collective-operations-network-performance-modeling-0d8e}
 
 **Part II: Building the Machine Learning Fleet** examines the physical hardware of datacenters (InfiniBand, NVLink, switches), while this chapter focuses on the abstract performance models required to design efficient algorithms. A distributed training architect must reason about communication costs without necessarily knowing the specific cable layout of every cluster.
 
-### The $\alpha$-$\beta$ Model
+### The $\alpha$-$\beta$ Model {#sec-communication-collective-operations-collective-operations-alphabeta-model-f9b4}
 
 The fundamental tool for analyzing collective algorithms is the $\alpha$-$\beta$ model, which simplifies network performance into two parameters:
 *   **Latency ($\alpha$)**: The fixed cost to send a message, regardless of size. This includes software overhead (kernel launch), PCIe traversal, and network switching time. Typical values: $5$–$20$ μs.
@@ -81,7 +81,7 @@ Mixture of Experts (MoE)[^fn-moe] architectures represent an important case wher
 
 This simple model explains the "Communication Wall": as we scale to more GPUs ($P$), the latency term often grows with $\log P$ or $P$, eventually dominating the computation time for small messages.
 
-### The LogP Model
+### The LogP Model {#sec-communication-collective-operations-collective-operations-logp-model-e45d}
 
 For more complex analysis involving pipelining, the LogP model [@culler1993logp] adds two parameters:
 *   **Overhead ($o$)**: The CPU/GPU time spent initiating a transfer. During this time, the processor cannot compute.
@@ -89,7 +89,7 @@ For more complex analysis involving pipelining, the LogP model [@culler1993logp]
 
 Optimizing distributed training often comes down to hiding $L$ (latency) behind computation and minimizing $o$ (overhead) to keep the GPU fed.
 
-### Latency vs. Bandwidth Bound Regimes
+### Latency vs. Bandwidth Bound Regimes {#sec-communication-collective-operations-collective-operations-latency-vs-bandwidth-bound-regimes-75db}
 
 Distributed workloads fall into two distinct regimes based on message size:
 
@@ -98,7 +98,7 @@ Distributed workloads fall into two distinct regimes based on message size:
 
 Understanding which regime your model falls into is the first step in optimizing distributed performance. A ResNet-50 gradient sync (100 MB) is bandwidth-bound; a MoE token route (10 KB) is latency-bound.
 
-## AllReduce Algorithms {#sec-allreduce-algorithms}
+## AllReduce Algorithms {#sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545}
 
 AllReduce is the workhorse collective operation for data-parallel training. Every major deep learning framework uses AllReduce to synchronize gradients across workers, making it the most performance-critical communication primitive in distributed ML. This section develops the theory and practice of AllReduce algorithms, from naive implementations to bandwidth-optimal designs used in production systems.
 
@@ -106,7 +106,7 @@ AllReduce is the workhorse collective operation for data-parallel training. Ever
 **Gradient Synchronization** is the collective communication phase in distributed training where workers exchange and aggregate their locally computed gradients. This step ensures that all workers update their model parameters with the same global gradient information, maintaining mathematical equivalence to single-device training.
 :::
 
-### The AllReduce Operation {#sec-allreduce-operation}
+### The AllReduce Operation {#sec-communication-collective-operations-collective-operations-allreduce-operation-0bbc}
 
 AllReduce combines values from all processes and distributes the result back to all processes. Formally, given $N$ processes each holding a vector $x_i$ of $M$ elements, AllReduce computes:
 
@@ -116,7 +116,7 @@ $$
 
 where $\bigoplus$ is an associative and commutative reduction operator (typically sum or average for gradients), and distributes the result $y$ to all processes. After AllReduce completes, every process holds an identical copy of $y$.
 
-### Lower Bounds on AllReduce Performance {#sec-allreduce-lower-bounds}
+### Lower Bounds on AllReduce Performance {#sec-communication-collective-operations-collective-operations-lower-bounds-allreduce-performance-0bdb}
 
 Now that we understand what AllReduce computes, the question becomes: how efficiently can we implement it? Before examining specific algorithms, we establish fundamental lower bounds that constrain any AllReduce implementation. These bounds provide a baseline for evaluating algorithm efficiency and reveal the inherent trade-offs that no algorithm can escape.
 
@@ -136,7 +136,7 @@ $$
 T_{latency} \geq \log_2 N \cdot \alpha
 $$
 
-### Ring AllReduce {#sec-ring-allreduce}
+### Ring AllReduce {#sec-communication-collective-operations-collective-operations-ring-allreduce-ffce}
 
 Ring AllReduce[^fn-ring-history] arranges processes in a logical ring and pipelines communication to achieve optimal bandwidth utilization. Originally developed for MPI implementations, it became the standard for distributed deep learning after Baidu demonstrated its effectiveness in 2017 [@gibiansky2017baidu].
 
@@ -206,7 +206,7 @@ $$
 
 The bandwidth term $2(N-1)M/(N\beta)$ matches the lower bound exactly. Ring AllReduce is bandwidth-optimal. However, the latency term $2(N-1)\alpha$ is far from optimal, making ring AllReduce inefficient for small messages.
 
-### Hierarchical AllReduce {#sec-hierarchical-allreduce}
+### Hierarchical AllReduce {#sec-communication-collective-operations-collective-operations-hierarchical-allreduce-1338}
 
 Modern GPU clusters have hierarchical network topology: high-bandwidth NVLink within nodes (900 GB/s) and lower-bandwidth InfiniBand between nodes (50 GB/s). Hierarchical AllReduce exploits this topology by performing separate AllReduce operations at each level.
 
@@ -263,7 +263,7 @@ Modern GPU clusters have hierarchical network topology: high-bandwidth NVLink wi
 
 This reduces the effective latency by a factor of $G$ (GPUs per node), trading cheap intra-node bandwidth for scarce inter-node bandwidth.
 
-## Beyond AllReduce: Other Collective Operations {#sec-other-collectives}
+## Beyond AllReduce: Other Collective Operations {#sec-communication-collective-operations-collective-operations-beyond-allreduce-collective-operations-e0d8}
 
 AllReduce is optimized for one specific communication pattern: all workers contribute to computing the same result, and all workers receive that result. This pattern fits data-parallel gradient synchronization perfectly. However, production ML systems exhibit diverse communication patterns that AllReduce cannot efficiently express. Recommendation systems require each worker to fetch specific embeddings from specific other workers, not a global average. Mixture-of-experts models route different tokens to different experts, requiring targeted exchanges rather than global reductions.
 
@@ -273,7 +273,7 @@ While **AllReduce** scales efficiently because it can be pipelined in a ring (wh
 In an AlltoAll, every process has a unique piece of data for every other process. This creates $O(N^2)$ logical connections. At the hardware level, this leads to **network contention**: if 1024 GPUs all try to send data to different targets simultaneously, the "Fat-Tree" or "Spine" switches in the datacenter become the bottleneck. This is why Expert Parallelism (MoE) and large-scale Recommendation systems often hit a "communication wall" much earlier than standard data-parallel models.
 :::
 
-### The Collective Operation Vocabulary {#sec-collective-vocabulary}
+### The Collective Operation Vocabulary {#sec-communication-collective-operations-collective-operations-collective-operation-vocabulary-fdc7}
 
 MPI standardized eight core collective operations that form the basis for all distributed communication patterns. Each operation has distinct semantics, complexity characteristics, and use cases.
 
@@ -287,7 +287,7 @@ MPI standardized eight core collective operations that form the basis for all di
 
 **AlltoAll** is the most general collective where each process sends distinct data to every other process. This is critical for **Expert Parallelism** (routing tokens to experts) and **Recommendation Systems** (exchanging embeddings). Unlike AllReduce, AlltoAll scales poorly with latency ($O(N)$) because it cannot be easily pipelined or aggregated.
 
-### Selecting the Right Collective {#sec-collective-selection}
+### Selecting the Right Collective {#sec-communication-collective-operations-collective-operations-selecting-right-collective-8814}
 
 Choosing the appropriate collective operation depends on the distributed training strategy and model architecture. The table below provides guidance:
 
@@ -311,15 +311,15 @@ DLRM and MoE[^fn-lighthouse] serve as canonical "lighthouse" workloads throughou
 
 [^fn-lighthouse]: **Lighthouse Examples**: DLRM (Deep Learning Recommendation Model) and MoE (Mixture of Experts) illuminate how different model architectures create distinct communication patterns. DLRM's massive embedding tables require AlltoAll for cross-worker embedding exchange, while MoE's dynamic token routing similarly requires AlltoAll to direct tokens to their assigned experts.
 
-## Gradient Compression {#sec-gradient-compression}
+## Gradient Compression {#sec-communication-collective-operations-collective-operations-gradient-compression-7a5c}
 
 When network bandwidth limits training throughput, reducing the volume of data transmitted becomes essential. Gradient compression techniques trade computation and potentially some model accuracy for reduced communication volume.
 
-### Quantization: Reducing Precision {#sec-quantization}
+### Quantization: Reducing Precision {#sec-communication-collective-operations-collective-operations-quantization-reducing-precision-815b}
 
 Quantization reduces gradient size by representing values with fewer bits. Modern accelerators support native INT8 and FP8 operations, enabling efficient quantized communication. NVIDIA's Transformer Engine uses FP8 for activations; the same precision can apply to gradients, halving communication volume compared to FP16 while maintaining training accuracy for most models.
 
-### Sparsification: Transmitting Important Gradients {#sec-sparsification}
+### Sparsification: Transmitting Important Gradients {#sec-communication-collective-operations-collective-operations-sparsification-transmitting-important-gradients-2cd2}
 
 Sparsification exploits the observation that gradient updates are often concentrated in a subset of parameters. By transmitting only the most significant gradient elements (Top-K), we can achieve higher compression ratios than quantization alone. However, naive sparsification loses information. Error Feedback (also known as Error Compensation) ensures that the discarded information is not lost permanently.
 
@@ -351,13 +351,13 @@ By carrying over the "compression error" $e_t$ to the next iteration, the system
 **Result**: The sum of transmitted values (1) approximates sum of gradients (0.7) better than instantaneous rounding would ($0+0=0$).
 :::
 
-## Mapping Collectives to Topology {#sec-collective-mapping}
+## Mapping Collectives to Topology {#sec-communication-collective-operations-collective-operations-mapping-collectives-topology-3214}
 
 Physical network topology shapes communication performance as fundamentally as the algorithm itself. A logical ring that traverses random physical links will suffer from contention and high latency. Optimal performance requires mapping the logical communication pattern to the physical hardware topology.
 
 Detailed analysis of physical topologies (Fat-Tree, Rail-Optimized, Torus) is provided in **Part II: Building the Machine Learning Fleet**. This section focuses on the algorithmic strategies for exploiting these physical structures.
 
-### Topology-Aware Algorithms
+### Topology-Aware Algorithms {#sec-communication-collective-operations-collective-operations-topologyaware-algorithms-f066}
 
 Standard collective algorithms assume a flat network with uniform bandwidth. Real clusters are hierarchical: NVLink provides 900 GB/s within nodes, while InfiniBand provides 50–100 GB/s between nodes.
 
@@ -368,7 +368,7 @@ Standard collective algorithms assume a flat network with uniform bandwidth. Rea
 
 This approach reduces inter-node traffic by a factor of $G$ (GPUs per node), trading cheap intra-node bandwidth for scarce inter-node bandwidth.
 
-### Adaptive Routing and Congestion Control {#sec-adaptive-routing}
+### Adaptive Routing and Congestion Control {#sec-communication-collective-operations-collective-operations-adaptive-routing-congestion-control-1738}
 
 The topology-aware algorithms discussed above assume a static network where paths are predictable. However, in large clusters, **Flow Collisions** (incast) and **Head-of-Line Blocking** can destroy performance even on non-blocking topologies like Fat-Trees.
 
@@ -380,7 +380,7 @@ The topology-aware algorithms discussed above assume a static network where path
 
 **Congestion Control (DCQCN)**: Even with adaptive routing, many senders targeting one receiver causes **Incast**. Data Center Quantized Congestion Notification (DCQCN) provides backpressure. The switch marks packets (ECN) when queues fill; the receiver echoes this to the sender (CNP); the sender throttles its injection rate. Tuning DCQCN parameters ($K_{min}$, $K_{max}$, $P_{max}$) is critical for preventing "Congestion Spreading" where one slow receiver backs up the entire fabric.
 
-### Topology Detection and Selection
+### Topology Detection and Selection {#sec-communication-collective-operations-collective-operations-topology-detection-selection-2dc7}
 
 Communication libraries like NCCL automatically detect topology to select optimal algorithms. The library builds a graph of GPU connectivity (NVLink vs PCIe vs Network) and runs a graph search to find the highest-bandwidth paths for rings and trees.
 
@@ -388,55 +388,55 @@ For example, on a Torus topology (TPU Pods), the optimal AllReduce is dimension-
 
 Understanding these mappings allows engineers to debug performance issues. Often a "slow network" is actually a mismatch between the logical algorithm and physical topology.
 
-## Communication Libraries and NCCL {#sec-communication-libraries}
+## Communication Libraries and NCCL {#sec-communication-collective-operations-collective-operations-communication-libraries-nccl-5307}
 
 Every algorithm, topology optimization, and compression technique we have developed ultimately materializes in a communication library. These libraries abstract the complexity of collective operations, allowing framework developers to invoke `AllReduce` or `AllGather` without implementing ring algorithms or topology detection. However, the abstraction is not free: library choice and configuration determine whether training achieves theoretical scaling limits or wastes cluster resources on suboptimal communication patterns.
 
-### The Communication Library Landscape
+### The Communication Library Landscape {#sec-communication-collective-operations-collective-operations-communication-library-landscape-4756}
 
 Three major libraries dominate distributed ML communication. **NCCL** (NVIDIA Collective Communications Library) optimizes for NVIDIA GPU clusters, achieving near-hardware-limit performance on NVLink and InfiniBand interconnects. **Gloo** provides CPU-focused collectives with broad platform support, serving as the default backend for PyTorch CPU distributed training. **MPI** (Message Passing Interface) implementations such as OpenMPI and MPICH offer the most general collective operations with decades of HPC optimization, though they require more configuration for GPU workloads.
 
 NCCL has become the de facto standard for GPU training because it exploits NVIDIA-specific hardware features unavailable to general libraries. Direct GPU memory access through GPUDirect RDMA bypasses CPU involvement entirely, reducing latency from hundreds of microseconds to single-digit microseconds for intra-node transfers. NVLink topology detection enables NCCL to construct optimal ring orderings that maximize bandwidth utilization within DGX nodes. These optimizations explain why switching from Gloo to NCCL often yields 2–5$\times$ throughput improvements without any algorithmic changes.
 
-### Algorithm Selection and Tuning
+### Algorithm Selection and Tuning {#sec-communication-collective-operations-collective-operations-algorithm-selection-tuning-fddc}
 
-NCCL automatically selects between ring and tree algorithms based on message size, applying the crossover analysis from @sec-allreduce-algorithms. For messages below approximately 256 KB, tree-based algorithms minimize latency. For larger messages, ring algorithms achieve bandwidth optimality. The `NCCL_ALGO` environment variable allows manual override when automatic selection proves suboptimal for specific workloads.
+NCCL automatically selects between ring and tree algorithms based on message size, applying the crossover analysis from @sec-communication-collective-operations-allreduce-algorithms-7545. For messages below approximately 256 KB, tree-based algorithms minimize latency. For larger messages, ring algorithms achieve bandwidth optimality. The `NCCL_ALGO` environment variable allows manual override when automatic selection proves suboptimal for specific workloads.
 
 Beyond algorithm selection, NCCL exposes tuning parameters that trade latency for throughput. The `NCCL_BUFFSIZE` parameter controls internal buffer sizes, affecting pipelining depth. Larger buffers improve bandwidth utilization for large messages but increase memory overhead and startup latency. The `NCCL_NTHREADS` parameter controls the number of GPU threads dedicated to communication, balancing communication performance against compute kernel availability. Production deployments typically require systematic tuning of these parameters, as defaults optimize for general workloads rather than specific model architectures.
 
-### Debugging Communication Performance
+### Debugging Communication Performance {#sec-communication-collective-operations-collective-operations-debugging-communication-performance-6c74}
 
 When distributed training underperforms expectations, communication libraries provide diagnostic tools. NCCL's `NCCL_DEBUG=INFO` environment variable reveals algorithm selection, topology detection, and per-operation timing. Common failure modes include incorrect topology detection (NCCL falling back to PCIe when NVLink is available), algorithm mismatch (using ring for small messages), and network configuration errors (InfiniBand misconfiguration causing fallback to TCP).
 
 Understanding NCCL internals transforms debugging from trial-and-error into systematic diagnosis. Engineers who recognize that a 7B parameter AllReduce should complete in 0.5 seconds on InfiniBand can immediately identify a 5-second measured time as a configuration problem rather than an algorithmic limitation. The fundamentals developed throughout this chapter provide the mental model necessary for this diagnostic reasoning.
 
-## Fallacies and Pitfalls {#sec-communication-fallacies-pitfalls}
+## Fallacies and Pitfalls {#sec-communication-collective-operations-collective-operations-fallacies-pitfalls-9cd0}
 
 Distributed communication involves counterintuitive scaling behavior that violates intuitions from single-machine programming. Engineers accustomed to optimizing local memory bandwidth discover that network communication follows fundamentally different performance models where fixed costs dominate, topology heterogeneity creates cascading bottlenecks, and algorithmic choice determines whether systems scale or stall. These fallacies and pitfalls capture errors that waste cluster resources and prevent distributed training from achieving meaningful speedup.
 
 **Fallacy:** _Bandwidth is the only metric that matters for network performance._
 
-Engineers design systems around headline bandwidth (400 Gbps InfiniBand, 900 GB/s NVLink) and expect this throughput universally. However, the $\alpha$-$\beta$ model from @sec-network-modeling shows latency ($\alpha$) dominates for small messages: $T = \alpha + n/\beta$. A 10 KB message on a 400 Gbps link ($\beta \approx 50$ GB/s) has bandwidth term $n/\beta = 0.2$ μs, but latency adds $\alpha \approx 5$–$10$ μs, making the transfer 25–50$\times$ slower than bandwidth predicts. Pipeline parallelism and mixture-of-experts transmit kilobyte-sized activations where latency is the bottleneck. Teams optimizing bandwidth (compression, batching) while ignoring latency (fusion, kernel overhead) see minimal improvement because they optimize the wrong term.
+Engineers design systems around headline bandwidth (400 Gbps InfiniBand, 900 GB/s NVLink) and expect this throughput universally. However, the $\alpha$-$\beta$ model from @sec-communication-collective-operations-network-performance-modeling-0d8e shows latency ($\alpha$) dominates for small messages: $T = \alpha + n/\beta$. A 10 KB message on a 400 Gbps link ($\beta \approx 50$ GB/s) has bandwidth term $n/\beta = 0.2$ μs, but latency adds $\alpha \approx 5$–$10$ μs, making the transfer 25–50$\times$ slower than bandwidth predicts. Pipeline parallelism and mixture-of-experts transmit kilobyte-sized activations where latency is the bottleneck. Teams optimizing bandwidth (compression, batching) while ignoring latency (fusion, kernel overhead) see minimal improvement because they optimize the wrong term.
 
 **Pitfall:** _Assuming network homogeneity across the cluster._
 
-Production clusters exhibit non-uniform network performance, which collective algorithms expose through synchronization barriers. Every worker must complete its step before the next begins, causing the system to synchronize at the speed of the slowest link. Ring AllReduce (@sec-ring-allreduce) on a 1024-GPU cluster with one degraded InfiniBand cable (200 Gbps to 10 Gbps, 20$\times$ slower from physical damage) operates at 10 Gbps effective bandwidth cluster-wide. For a 7B model with 14 GB gradients, AllReduce time increases from 0.28s to 5.6s per step, a 20$\times$ slowdown. Standard monitoring reports average bandwidth, masking individual link failures. A single faulty cable among thousands reduces cluster throughput by 10$\times$, and aggregate dashboards will not reveal it.
+Production clusters exhibit non-uniform network performance, which collective algorithms expose through synchronization barriers. Every worker must complete its step before the next begins, causing the system to synchronize at the speed of the slowest link. Ring AllReduce (@sec-communication-collective-operations-ring-allreduce-ffce) on a 1024-GPU cluster with one degraded InfiniBand cable (200 Gbps to 10 Gbps, 20$\times$ slower from physical damage) operates at 10 Gbps effective bandwidth cluster-wide. For a 7B model with 14 GB gradients, AllReduce time increases from 0.28s to 5.6s per step, a 20$\times$ slowdown. Standard monitoring reports average bandwidth, masking individual link failures. A single faulty cable among thousands reduces cluster throughput by 10$\times$, and aggregate dashboards will not reveal it.
 
 **Fallacy:** _Non-blocking collectives always hide communication behind computation._
 
-The async API `dist.all_reduce(tensor, async_op=True)` suggests automatic overlap, but overlap only materializes when $T_{compute} \geq T_{comm}$. A transformer layer computing backward pass in 50 μs while AllReduce requires 100 μs latency (the $2(N-1)\alpha$ term from @sec-allreduce-algorithms) stalls the GPU for 50 μs regardless of async flags. When computation cannot cover communication time, async operations merely reorder the stall, not eliminate it. Tensor parallelism and pipeline parallelism achieve high overlap because compute exceeds communication time. Data parallelism with small per-layer gradients often violates this condition. Training throughput remains unchanged because the α-β model physics—not API semantics—determines whether overlap is possible.
+The async API `dist.all_reduce(tensor, async_op=True)` suggests automatic overlap, but overlap only materializes when $T_{compute} \geq T_{comm}$. A transformer layer computing backward pass in 50 μs while AllReduce requires 100 μs latency (the $2(N-1)\alpha$ term from @sec-communication-collective-operations-allreduce-algorithms-7545) stalls the GPU for 50 μs regardless of async flags. When computation cannot cover communication time, async operations merely reorder the stall, not eliminate it. Tensor parallelism and pipeline parallelism achieve high overlap because compute exceeds communication time. Data parallelism with small per-layer gradients often violates this condition. Training throughput remains unchanged because the α-β model physics—not API semantics—determines whether overlap is possible.
 
 **Pitfall:** _Using AllReduce for all communication patterns regardless of data flow._
 
-AllReduce becomes the default synchronization primitive, yet it exchanges $2(N-1)/N \cdot M$ bytes per worker (@sec-allreduce-lower-bounds), optimal only when every worker needs the global sum. Sparse embedding updates where each worker modifies 1% of rows transmit 99% zeros with AllReduce—wasting 99$\times$ bandwidth. Recommendation models with 10 GB embedding tables where workers update disjoint 100 MB shards should use AlltoAll (1 GB per worker) instead of AllReduce (20 GB per worker), achieving 20$\times$ bandwidth reduction. Mixture-of-experts routing requires AlltoAll to send tokens to specific experts, not broadcast to all. Matching the primitive (@sec-collective-selection) to communication structure is not optimization but a scaling requirement.
+AllReduce becomes the default synchronization primitive, yet it exchanges $2(N-1)/N \cdot M$ bytes per worker (@sec-communication-collective-operations-lower-bounds-allreduce-performance-0bdb), optimal only when every worker needs the global sum. Sparse embedding updates where each worker modifies 1% of rows transmit 99% zeros with AllReduce—wasting 99$\times$ bandwidth. Recommendation models with 10 GB embedding tables where workers update disjoint 100 MB shards should use AlltoAll (1 GB per worker) instead of AllReduce (20 GB per worker), achieving 20$\times$ bandwidth reduction. Mixture-of-experts routing requires AlltoAll to send tokens to specific experts, not broadcast to all. Matching the primitive (@sec-communication-collective-operations-selecting-right-collective-8814) to communication structure is not optimization but a scaling requirement.
 
 **Fallacy:** _Ring AllReduce is always the optimal algorithm._
 
-Ring AllReduce's bandwidth optimality leads engineers to apply it universally. The actual behavior depends on message size relative to network parameters. @sec-allreduce-algorithms shows $T_{ring} = 2(N-1)\alpha + 2(N-1)M/(N\beta)$. For large messages where $M \gg N\alpha\beta$, the bandwidth term dominates and Ring is optimal. For small messages where $M < N\alpha\beta$, the latency term $2(N-1)\alpha$ dominates, growing linearly with $N$. Tree AllReduce has latency $2\log_2(N)\alpha$, exponentially better for small messages. At 64 GPUs with $\alpha = 10$ μs and $M = 1$ MB, Ring takes 1.26 ms while tree takes 0.24 ms (5$\times$ faster). The crossover is $M_{crossover} \approx N\alpha\beta$. Below this, Ring's linear latency makes it slower despite bandwidth optimality. Production systems require message-size-based algorithm selection.
+Ring AllReduce's bandwidth optimality leads engineers to apply it universally. The actual behavior depends on message size relative to network parameters. @sec-communication-collective-operations-allreduce-algorithms-7545 shows $T_{ring} = 2(N-1)\alpha + 2(N-1)M/(N\beta)$. For large messages where $M \gg N\alpha\beta$, the bandwidth term dominates and Ring is optimal. For small messages where $M < N\alpha\beta$, the latency term $2(N-1)\alpha$ dominates, growing linearly with $N$. Tree AllReduce has latency $2\log_2(N)\alpha$, exponentially better for small messages. At 64 GPUs with $\alpha = 10$ μs and $M = 1$ MB, Ring takes 1.26 ms while tree takes 0.24 ms (5$\times$ faster). The crossover is $M_{crossover} \approx N\alpha\beta$. Below this, Ring's linear latency makes it slower despite bandwidth optimality. Production systems require message-size-based algorithm selection.
 
 **Pitfall:** _Treating gradient compression as free performance improvement._
 
-Compression techniques from @sec-gradient-compression promise bandwidth reduction without apparent cost. Production data shows compression trades bandwidth for computation and convergence cost. Quantizing FP16 gradients to INT8 halves bandwidth (14 GB to 7 GB for a 7B model) but introduces quantization error. Top-K sparsification at 1% density reduces volume 100$\times$ but requires error feedback and adds compression overhead. For a 64-GPU cluster with 50 GB/s InfiniBand, uncompressed AllReduce takes 0.56s; INT8 compression reduces this to 0.28s (2$\times$ speedup). However, if compression overhead adds 0.15s computation per step, net speedup is only 1.4$\times$ (0.56s to 0.43s). Aggressive compression (1-bit, 99% sparsification) can increase training steps by 20–30%, erasing communication savings. Compression is a bandwidth-computation-accuracy trade-off, not free optimization.
+Compression techniques from @sec-communication-collective-operations-gradient-compression-7a5c promise bandwidth reduction without apparent cost. Production data shows compression trades bandwidth for computation and convergence cost. Quantizing FP16 gradients to INT8 halves bandwidth (14 GB to 7 GB for a 7B model) but introduces quantization error. Top-K sparsification at 1% density reduces volume 100$\times$ but requires error feedback and adds compression overhead. For a 64-GPU cluster with 50 GB/s InfiniBand, uncompressed AllReduce takes 0.56s; INT8 compression reduces this to 0.28s (2$\times$ speedup). However, if compression overhead adds 0.15s computation per step, net speedup is only 1.4$\times$ (0.56s to 0.43s). Aggressive compression (1-bit, 99% sparsification) can increase training steps by 20–30%, erasing communication savings. Compression is a bandwidth-computation-accuracy trade-off, not free optimization.
 
 ::: {.callout-important title="Key Takeaways"}
 * **Computation scales linearly** (add more GPUs), but **communication scales quadratically** (coordination overhead).
@@ -447,4 +447,4 @@ Compression techniques from @sec-gradient-compression promise bandwidth reductio
 
 The algorithms developed here allow us to synchronize thousands of GPUs efficiently. However, these collective operations assume that all workers are alive and responding. In a cluster of 10,000 GPUs, this assumption is statistically false every few hours.
 
-The next chapter, @sec-fault-tolerance, examines the reliability mechanisms—checkpointing and elastic training—that allow these massive distributed jobs to survive the inevitable hardware failures that occur in any fleet.
+The next chapter, @sec-fault-tolerance-reliability, examines the reliability mechanisms—checkpointing and elastic training—that allow these massive distributed jobs to survive the inevitable hardware failures that occur in any fleet.

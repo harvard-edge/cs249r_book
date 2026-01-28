@@ -1,0 +1,439 @@
+---
+title: "System Foundations"
+---
+
+# System Foundations {#sec-system-foundations}
+
+This appendix provides the foundational knowledge—spanning hardware, data engineering, statistics, and programming—needed to reason about machine learning systems. Rather than an exhaustive reference, think of this as a practitioner's toolkit: the concepts that recur when debugging slow pipelines, optimizing latency, or choosing between hardware configurations.
+
+## Quick Reference {.unnumbered}
+
+Before diving in, @tbl-appendix-overview provides a map of what this appendix covers and where each concept appears in the main text.
+
++----------------------------+--------------------------------------------+--------------------------------------------------------------+
+| **Topic**                  | **What It Helps You Do**                   | **Where It Appears**                                         |
++:===========================+:===========================================+:=============================================================+
+| **Performance Models**     | Determine if a workload is memory-bound    | @sec-ai-acceleration, @sec-ai-training,                      |
+|                            | or compute-bound                           | @sec-model-serving-systems                                   |
++----------------------------+--------------------------------------------+--------------------------------------------------------------+
+| **Memory Hierarchy**       | Optimize data movement and cache usage     | @sec-ai-acceleration, @sec-model-compression                 |
++----------------------------+--------------------------------------------+--------------------------------------------------------------+
+| **Data Engineering**       | Choose storage formats and design          | @sec-data-engineering-ml                                     |
+|                            | reliable pipelines                         |                                                              |
++----------------------------+--------------------------------------------+--------------------------------------------------------------+
+| **System Statistics**      | Measure data drift and monitor tail        | @sec-data-engineering-ml, @sec-machine-learning-operations-mlops |
+|                            | latencies                                  |                                                              |
++----------------------------+--------------------------------------------+--------------------------------------------------------------+
+| **Numerical Formats**      | Choose precision for training vs inference | @sec-model-compression, @sec-model-serving-systems           |
++----------------------------+--------------------------------------------+--------------------------------------------------------------+
+| **Linear Algebra (GEMM)**  | Understand core neural network computation | @sec-deep-learning-systems-foundations, @sec-ai-acceleration |
++----------------------------+--------------------------------------------+--------------------------------------------------------------+
+| **Tensor Programming**     | Write efficient code and avoid shape bugs  | @sec-ai-frameworks, @sec-ai-training                         |
++----------------------------+--------------------------------------------+--------------------------------------------------------------+
+| **Backpropagation**        | Debug gradient issues and memory usage     | @sec-deep-learning-systems-foundations, @sec-ai-training     |
++----------------------------+--------------------------------------------+--------------------------------------------------------------+
+| **Computational Graphs**   | Understand compiler and hardware           | @sec-ai-frameworks, @sec-ai-acceleration                     |
+|                            | optimizations                              |                                                              |
++----------------------------+--------------------------------------------+--------------------------------------------------------------+
+
+: **Appendix Quick Reference**: Foundational concepts, the engineering decisions they inform, and their primary chapters. {#tbl-appendix-overview}
+
+***
+
+## The Physics of Computing {#sec-system-foundations-physics-computing-b6a4}
+
+::: {.callout-tip title="Why This Matters"}
+You have trained a model that achieves good accuracy, but inference takes 200ms when your SLA requires 50ms. Where do you start? Performance analysis models give you a systematic way to diagnose whether you are limited by computation, memory bandwidth, or something else entirely. Without these tools, optimization is guesswork.
+:::
+
+The models in this section form the foundation of quantitative systems thinking. They define the "speed limits" set by physics and hardware design.
+
+### The Roofline Model {#sec-system-foundations-roofline-model-5f7c}
+
+The Roofline Model [@williams2009roofline] answers a deceptively simple question: *how fast can this workload possibly run on this hardware?* The answer depends on whether you run out of compute or memory bandwidth first.
+
+Every operation has an **arithmetic intensity**: the ratio of computations performed to bytes moved from memory. Matrix multiplication has high arithmetic intensity because you can reuse each loaded element many times. Element-wise operations like ReLU have low intensity because you load a number, do one operation, and write it back.
+
+::: {#fig-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Model**: Performance ceiling for a hypothetical accelerator. The sloped line represents memory bandwidth limits; the horizontal line represents peak compute. Every workload can be plotted on this diagram to determine its optimization strategy." fig-alt="A plot with arithmetic intensity on the x-axis and performance on the y-axis. Two lines form a roofline shape: a diagonal line rising from the origin labeled Memory Bound, and a horizontal line labeled Compute Bound. They meet at the Ridge Point."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=1.0]
+  \tikzset{
+    Axis/.style={line width=1.0pt, draw=GrayLine, ->, >=stealth},
+    Guide/.style={dashed, draw=GrayLine!60, line width=0.6pt},
+    Label/.style={text=TextBlack, align=center, font=\footnotesize\usefont{T1}{phv}{m}{n}},
+    Dot/.style={circle, fill=#1, draw=white, line width=0.5pt, minimum size=5pt, inner sep=0pt}
+  }
+  \draw[step=0.5, gray!10, very thin] (0,0) grid (6,4);
+  \draw[Axis] (0,0) -- (6,0) node[right, text=TextBlack] {Arithmetic Intensity (Ops/Byte)};
+  \draw[Axis] (0,0) -- (0,4.2) node[above, text=TextBlack] {Performance (FLOP/s)};
+  \draw[BlueLine, line width=2pt] (0,0) -- (3,3);
+  \draw[RedLine, line width=2pt] (3,3) -- (5.8,3);
+  \node[Label, text=BlueLine, rotate=45, anchor=south, yshift=2pt] at (1.5, 1.5) {\textbf{Memory Bound}};
+  \node[Label, text=RedLine, anchor=south, yshift=2pt] at (4.4, 3) {\textbf{Compute Bound}};
+  \node[Dot=TextBlack] at (3,3) {};
+  \draw[Guide] (3,0) -- (3,3);
+  \node[below, font=\scriptsize\usefont{T1}{phv}{m}{n}, text=TextBlack] at (3,0) {Ridge Point};
+\end{tikzpicture}
+```
+:::
+
+The **ridge point** determines the hardware's balance. If your workload's intensity is below this point, you are **memory-bound** (sloped region). If it is above, you are **compute-bound** (flat region).
+
+$$ \text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{Bytes Accessed}} $$
+
+$$ \text{Ridge Point} = \frac{\text{Peak FLOP/s}}{\text{Memory Bandwidth}} $$
+
+#### A Concrete Example: The A100 Analysis {#sec-system-foundations-concrete-example-a100-analysis-0bb9}
+
+Consider an NVIDIA A100 GPU with FP16 Tensor Core performance of 312 TFLOP/s and HBM2e bandwidth of 2.0 TB/s. The ridge point is $312 / 2.0 = 156$ FLOP/byte.
+
+Now compare two common operations:
+
+**GEMM (Matrix Multiplication)**: For two $4096 \times 4096$ matrices, arithmetic intensity is approximately $1365$ FLOP/byte. Since $1365 > 156$, this operation is compute-bound. You are using the hardware efficiently.
+
+**ReLU (Element-wise)**: For a $4096 \times 4096$ tensor, intensity is approximately $0.25$ op/byte. Since $0.25 \ll 156$, this operation is severely memory-bound, achieving only about $0.16\%$ of peak TFLOP/s. The hardware is mostly waiting for data.
+
+This explains why modern frameworks fuse operations: combining ReLU with the preceding MatMul avoids writing intermediate results to memory, effectively increasing arithmetic intensity.
+
+### Amdahl's Law and Gustafson's Law {#sec-system-foundations-amdahls-law-gustafsons-law-2f5c}
+
+Parallelization is the primary tool for scaling ML, but it has limits.
+
+**Amdahl's Law** [@amdahl1967validity] captures the limit of *strong scaling*: trying to finish the same task faster by adding more processors ($n$). If a fraction $s$ of your task is serial (cannot be parallelized), your maximum speedup is capped:
+
+$$ \text{Speedup}(n) = \frac{1}{s + \frac{1-s}{n}} $$
+
+As $n \to \infty$, speedup approaches $1/s$. If 10% of your training step is serial (e.g., data loading), you can never go faster than 10x, no matter how many GPUs you add.
+
+**Gustafson's Law** [@gustafson1988reevaluating] captures *weak scaling*: using more processors to do a *larger* task in the same amount of time. This is more common in large-scale ML, where more compute allows training larger models.
+
+### Little's Law {#sec-system-foundations-littles-law-9c4c}
+
+For capacity planning in inference systems, **Little's Law** [@little1961proof] relates concurrency ($L$), arrival rate ($\lambda$), and latency ($W$):
+
+$$ L = \lambda \times W $$
+
+To sustain 1,000 queries per second (QPS) with 50ms average latency, your system must support $1000 \times 0.05 = 50$ concurrent requests. This tells you exactly how to size your inference worker pools.
+
+***
+
+## Computer Architecture Essentials {#sec-system-foundations-computer-architecture-essentials-bb18}
+
+### The Memory Hierarchy {#sec-system-foundations-memory-hierarchy-674b}
+
+Computer systems use a hierarchy because no single technology provides both high capacity and low latency. Every technique that keeps data higher in the pyramid (registers/cache) directly improves performance.
+
+::: {#fig-memory-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Memory Hierarchy**: Performance depends on data proximity. Accessing HBM is ~100x slower than registers; accessing SSD is ~100,000x slower." fig-alt="Pyramid showing Registers at top, followed by Cache, HBM/DRAM, and Storage at bottom."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=1.0]
+  \tikzset{
+    LabelAxis/.style={text=TextBlack!60, font=\footnotesize\usefont{T1}{phv}{m}{n}, align=center}
+  }
+  \filldraw[fill=RedFill, draw=RedLine, line width=1pt] (0, 5.2) -- (-1.2, 4.2) -- (1.2, 4.2) -- cycle;
+  \node[text=RedLine] at (0, 4.55) {\textbf{Registers}};
+  \filldraw[fill=YellowFill, draw=YellowLine, line width=1pt] (-1.2, 4.2) -- (-2.4, 2.8) -- (2.4, 2.8) -- (1.2, 4.2) -- cycle;
+  \node[text=YellowLine!80!black] at (0, 3.5) {\textbf{L1 / L2 / L3 Cache}};
+  \filldraw[fill=BlueFill, draw=BlueLine, line width=1pt] (-2.4, 2.8) -- (-3.6, 1.4) -- (3.6, 1.4) -- (2.4, 2.8) -- cycle;
+  \node[text=BlueLine] at (0, 2.1) {\textbf{HBM / DRAM}};
+  \filldraw[fill=GreenFill, draw=GreenLine, line width=1pt] (-3.6, 1.4) -- (-4.8, 0) -- (4.8, 0) -- (3.6, 1.4) -- cycle;
+  \node[text=GreenLine] at (0, 0.7) {\textbf{Storage (SSD / Disk)}};
+  \draw[->, ultra thick, gray!40] (5.5, 0) -- (5.5, 5.2) node[midway, right, LabelAxis, text=gray] {Faster Speed\\Lower Latency};
+  \draw[->, ultra thick, gray!40] (-5.5, 5.2) -- (-5.5, 0) node[midway, left, LabelAxis, text=gray] {Larger Capacity\\Lower Cost};
+\end{tikzpicture}
+```
+:::
+
+### Bandwidth vs. Latency {#sec-system-foundations-bandwidth-vs-latency-e155}
+
+Bandwidth (throughput) and latency (delay) are distinct constraints. Total transfer time follows:
+
+$$ T = \text{Latency} + \frac{\text{Data Size}}{\text{Bandwidth}} $$
+
+For small transfers (e.g., single-token inference), latency dominates. For large transfers (e.g., loading weights), bandwidth dominates.
+
+***
+
+## Data Engineering Foundations {#sec-system-foundations-data-engineering-foundations-9ba2}
+
+::: {.callout-tip title="Why This Matters"}
+Your training job is stalling because the GPU is waiting for data. Is the bottleneck your disk speed, your file format, or your row-based parsing logic? Data engineering is the practice of shaping data so it flows efficiently through the physical constraints of your system.
+:::
+
+### Row vs. Columnar Formats {#sec-system-foundations-row-vs-columnar-formats-1f97}
+
+The choice of file format determines the "physics" of how your data is read.
+
+**Row-Oriented (CSV, JSON)**: Data is stored record-by-record. To read just the `age` column, you must scan every byte of every row. This is efficient for *writing* (appending a log) but inefficient for *analytics* (training on specific features).
+
+**Column-Oriented (Parquet, Arrow)**: Data is stored column-by-column. To read the `age` column, the disk head seeks to that column's block and reads it sequentially. This enables **projection pushdown** (reading only the bytes you need) and **vectorized processing** (SIMD operations on columns).
+
+::: {#fig-row-vs-col fig-env="figure" fig-pos="htb" fig-cap="**Storage Layouts**: Row-oriented formats pack data together by record (good for transactions). Column-oriented formats pack data by feature (good for analytics)." fig-alt="Diagram contrasting Row Store vs Column Store. Row store shows Record 1 [ID, Name, Age] followed by Record 2. Column store shows Column 1 [ID1, ID2...] followed by Column 2 [Name1, Name2...]."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=1.0]
+  \tikzset{
+    DataBlock/.style={draw=GrayLine, line width=0.8pt, minimum height=0.6cm, minimum width=1.2cm, align=center, font=\footnotesize},
+    Label/.style={text=TextBlack, font=\bfseries}
+  }
+
+  % Row Store
+  \node[Label] at (0, 3.5) {Row-Oriented (CSV)};
+  \node[DataBlock, fill=RedFill] (r1a) at (0, 2.8) {ID: 1};
+  \node[DataBlock, fill=BlueFill, right=0pt of r1a] (r1b) {Age: 25};
+  \node[DataBlock, fill=GreenFill, right=0pt of r1b] (r1c) {Loc: US};
+  
+  \node[DataBlock, fill=RedFill, right=0.2cm of r1c] (r2a) {ID: 2};
+  \node[DataBlock, fill=BlueFill, right=0pt of r2a] (r2b) {Age: 30};
+  \node[DataBlock, fill=GreenFill, right=0pt of r2b] (r2c) {Loc: UK};
+
+  % Column Store
+  \node[Label] at (0, 1.5) {Column-Oriented (Parquet)};
+  \node[DataBlock, fill=RedFill] (c1a) at (0, 0.8) {ID: 1};
+  \node[DataBlock, fill=RedFill, right=0pt of c1a] (c1b) {ID: 2};
+  
+  \node[DataBlock, fill=BlueFill, right=0.2cm of c1b] (c2a) {Age: 25};
+  \node[DataBlock, fill=BlueFill, right=0pt of c2a] (c2b) {Age: 30};
+  
+  \node[DataBlock, fill=GreenFill, right=0.2cm of c2b] (c3a) {Loc: US};
+  \node[DataBlock, fill=GreenFill, right=0pt of c3a] (c3b) {Loc: UK};
+
+  % Scan Path
+  \draw[->, thick, dashed, gray] (-0.8, 2.5) -- (7.5, 2.5) node[right] {Scan reads all fields};
+  \draw[->, thick, dashed, BlueLine] (2.6, 0.2) -- (5.2, 0.2) node[right] {Scan reads ONLY Age};
+
+\end{tikzpicture}
+```
+:::
+
+### The Algebra of Data {#sec-system-foundations-algebra-data-7b3d}
+
+Feature engineering is built on three SQL primitives. Understanding their computational cost prevents pipeline bottlenecks.
+
+1.  **Selection ($\sigma$)**: Filtering rows. Cheap if indexed; expensive if full scan.
+2.  **Projection ($\pi$)**: Selecting columns. Free in columnar formats; linear cost in row formats.
+3.  **Join ($\bowtie$)**: Combining tables. The most expensive operation. A **Shuffle Join** (moving data across network to match keys) creates massive network traffic. A **Broadcast Join** (sending a small table to all workers) avoids the shuffle but requires one table to fit in memory.
+
+***
+
+## Probability & Statistics for Systems {#sec-system-foundations-probability-statistics-systems-a2cb}
+
+::: {.callout-tip title="Why This Matters"}
+Your monitoring dashboard says average latency is fine, but users are complaining. Why? Because systems live in the "long tail." Statistics gives us the tools to measure uncertainty, detect drift, and handle numerical stability.
+:::
+
+### Distributions and the Long Tail {#sec-system-foundations-distributions-long-tail-37cc}
+
+In systems, the **mean** is often misleading. Latency distributions are almost always **long-tailed** (log-normal or power law). A "P99" (99th percentile) latency of 500ms means 1% of your users experience extreme slowness, which at scale (1M users) is 10,000 unhappy people.
+
+### Measuring Drift (Divergence) {#sec-system-foundations-measuring-drift-divergence-0525}
+
+How do we know if serving data ($Q$) has drifted from training data ($P$)? We measure the "distance" between their distributions.
+
+**KL Divergence** measures how much information is lost if we approximate $P$ with $Q$:
+$$ D_{KL}(P || Q) = \sum P(x) \log \frac{P(x)}{Q(x)} $$
+
+**Population Stability Index (PSI)** is a symmetric, industry-standard metric derived from KL divergence. A PSI > 0.2 typically triggers an alert for retraining.
+
+### Logits and Numerical Stability {#sec-system-foundations-logits-numerical-stability-9f55}
+
+Neural networks output **logits** (unnormalized scores), not probabilities. We convert them using Softmax:
+$$ \text{Softmax}(z_i) = \frac{e^{z_i}}{\sum e^{z_j}} $$
+
+**The Problem**: If $z_i$ is large (e.g., 100), $e^{100}$ overflows floating-point range.
+**The Solution**: We compute in **log-space**. The "Log-Sum-Exp" trick allows us to compute $\log(\sum e^{z_j})$ without ever calculating the massive exponentials directly, preserving numerical precision.
+
+***
+
+## Numerical Representations {#sec-system-foundations-numerical-representations-7b2f}
+
+::: {.callout-tip title="Why This Matters"}
+Your production model runs at 50 QPS in FP32 but your target is 200 QPS. Switching to INT8 could get you there, but will accuracy suffer? Understanding numerical formats lets you make this trade-off quantitatively rather than hoping for the best.
+:::
+
+Neural networks are remarkably tolerant of reduced numerical precision. This section explains the formats you will encounter and their trade-offs.
+
+### Floating-Point Format Comparison {#sec-system-foundations-floatingpoint-format-comparison-c861}
+
+The IEEE 754 standard and its AI-specific derivatives define different trade-offs between dynamic range (the span of representable values) and precision (how finely you can represent values within that range). @tbl-numerical-formats summarizes the key formats and their use cases.
+
++------------+----------+--------------+--------------+-------------------+-------------------------------------------+
+| **Format** | **Bits** | **Exponent** | **Mantissa** | **Dynamic Range** | **Typical Use Case**                      |
++:===========+=========:+=============:+=============:+==================:+:==========================================+
+| **FP32**   | 32       | 8            | 23           | ~$10^{-38}$ to    | Training (full precision), reference      |
+|            |          |              |              | $10^{38}$         | inference                                 |
++------------+----------+--------------+--------------+-------------------+-------------------------------------------+
+| **FP16**   | 16       | 5            | 10           | ~$10^{-5}$ to     | Training with loss scaling, inference     |
+|            |          |              |              | $6.5 \times       |                                           |
+|            |          |              |              | 10^{4}$           |                                           |
++------------+----------+--------------+--------------+-------------------+-------------------------------------------+
+| **BF16**   | 16       | 8            | 7            | Same as FP32      | Training (preferred), avoids loss scaling |
++------------+----------+--------------+--------------+-------------------+-------------------------------------------+
+| **FP8**    | 8        | 4 or 5       | 3 or 2       | Varies            | Inference on newest hardware (H100+)      |
++------------+----------+--------------+--------------+-------------------+-------------------------------------------+
+| **INT8**   | 8        | N/A          | N/A          | -128 to 127       | Inference after quantization              |
++------------+----------+--------------+--------------+-------------------+-------------------------------------------+
+
+: **Numerical Format Comparison**: Each format trades off precision, dynamic range, memory footprint, and compute throughput. BF16 has emerged as the preferred training format because it matches FP32's range while using half the memory. {#tbl-numerical-formats}
+
+**Brain Float 16 (BF16)** deserves special attention. It matches FP32's 8-bit exponent (preserving dynamic range) while truncating the mantissa to 7 bits. This avoids the gradient underflow problems that plague FP16 training, eliminating the need for complex loss scaling. Most modern training uses BF16 for this reason.
+
+### Integer Quantization {#sec-system-foundations-integer-quantization-9d02}
+
+Quantization maps continuous floating-point values to discrete integers, typically INT8. The key challenge is choosing how to map the floating-point range to integers.
+
+**Symmetric quantization** centers the mapping at zero:
+$$ x_{int} = \text{round}\left(\frac{x}{\alpha} \times 127\right) $$
+
+where $\alpha$ is the scale factor (typically the maximum absolute value). This works well for weight distributions centered around zero.
+
+**Asymmetric quantization** handles distributions that are not centered (common after ReLU, which produces only non-negative values) by adding a zero-point offset:
+$$ x_{int} = \text{round}\left(\frac{x - z}{\alpha} \times 255\right) $$
+
+The choice between symmetric and asymmetric quantization depends on your tensor's distribution and has measurable accuracy implications.
+
+***
+
+## Linear Algebra for Neural Networks {#sec-system-foundations-linear-algebra-neural-networks-f606}
+
+::: {.callout-tip title="Why This Matters"}
+Every neural network, regardless of architecture, spends most of its time doing matrix multiplication. Understanding GEMM performance characteristics explains why batch size affects throughput, why certain layer dimensions are "better" than others, and how to interpret profiler output.
+:::
+
+### Tensor Operations and Notation {#sec-system-foundations-tensor-operations-notation-de17}
+
+We use **Einstein summation** notation throughout this book because it makes complex operations explicit. Matrix multiplication $C = AB$ becomes:
+
+$$ C_{ij} = \sum_k A_{ik} B_{kj} $$
+
+Or in einsum notation: `ik,kj->ij`. This notation extends naturally to the multi-dimensional operations in attention mechanisms. For example, batched multi-head attention is `bhid,bhjd->bhij` (batch, head, sequence indices).
+
+### Memory Layouts and Performance {#sec-system-foundations-memory-layouts-performance-ae64}
+
+Data layout in memory (row-major vs. column-major) directly affects cache efficiency. When iterating over a matrix, accessing contiguous memory locations is dramatically faster than strided access. The difference can be 10x to 100x in effective bandwidth.
+
+A common optimization pattern: transpose tensors once before repeated operations to ensure contiguous access in the hot loop. The one-time transpose cost is amortized across many subsequent operations.
+
+### The Dot Product as Similarity {#sec-system-foundations-dot-product-similarity-879f}
+
+The dot product $\mathbf{a} \cdot \mathbf{b} = \sum a_i b_i$ is geometrically equivalent to $|\mathbf{a}| |\mathbf{b}| \cos \theta$.
+
+In deep learning, this is our primary tool for measuring **similarity**. In Attention mechanisms:
+*   Query ($Q$) and Key ($K$) vectors are dot-produced.
+*   A large positive result means they align (high similarity).
+*   A result of zero means they are orthogonal (unrelated).
+
+### General Matrix Multiply (GEMM) {#sec-system-foundations-general-matrix-multiply-gemm-5f92}
+
+GEMM is the computational workhorse of deep learning. For matrices of size $M \times K$ and $K \times N$, GEMM performs $2MNK$ floating-point operations (multiply-accumulate counts as two operations).
+
+The arithmetic intensity of GEMM scales linearly with matrix dimension. For square $n \times n$ matrices, intensity is approximately $n/3$ FLOP/byte. This explains several important phenomena:
+
+- **Larger batches improve efficiency**: Batching increases the effective matrix dimensions, pushing workloads toward the compute-bound region of the roofline.
+- **Power-of-two dimensions help**: Hardware tensor cores are optimized for specific tile sizes (typically 16x16 or 32x32). Dimensions that align with these sizes avoid padding overhead.
+- **Small matrices are inefficient**: A 64x64 GEMM may achieve only 10% of peak throughput because it cannot fully utilize the hardware.
+
+### Sparse Matrix Formats {#sec-system-foundations-sparse-matrix-formats-7920}
+
+When most elements in a matrix are zero, specialized storage formats avoid wasting memory on zeros and enable computations that skip them entirely.
+
+The **Compressed Sparse Row (CSR)** format uses three arrays:
+
+- `Values`: The non-zero elements, stored in row order
+- `Col_Idx`: The column index of each non-zero element
+- `Row_Ptr`: The starting position in `Values` for each row (length = num_rows + 1)
+
+CSR is essential for recommendation systems (sparse embedding tables) and pruned models. For a matrix with $N$ elements and $K$ non-zeros, CSR uses $O(K)$ storage instead of $O(N)$, saving massive memory when sparsity exceeds 90%.
+
+***
+
+## Tensor Programming Primitives {#sec-system-foundations-tensor-programming-primitives-7baf}
+
+::: {.callout-tip title="Why This Matters"}
+Your logic is correct, but your code crashes with a shape mismatch error. Or worse, it runs but produces garbage because you broadcasted dimensions incorrectly. Mastering tensor shapes, strides, and broadcasting is the literacy of ML engineering.
+:::
+
+### Shapes and Strides {#sec-system-foundations-shapes-strides-bfd9}
+
+A tensor is a view over a contiguous block of memory.
+
+*   **Shape:** The dimensions of the tensor (e.g., `(3, 4)`).
+*   **Stride:** The number of elements to skip in memory to move to the next element in a dimension.
+
+**Key Insight:** Operations like `transpose()` or `view()` often just change the *strides*, not the data in memory. This is fast ($O(1)$) but can lead to non-contiguous tensors that fail in optimized kernels. `contiguous()` forces a memory copy to realign data.
+
+### Broadcasting {#sec-system-foundations-broadcasting-3387}
+
+Broadcasting allows arithmetic operations on tensors of different shapes. The rule is: compare dimensions from the last to the first. Two dimensions are compatible if:
+1.  They are equal.
+2.  One of them is 1.
+
+The dimension with size 1 is "stretched" to match the other.
+
+**Example:**
+*   A: `(32, 1, 64)`  (Batch, Channels, Height)
+*   B: `(1, 128, 64)` (1, Width, Height)
+*   Result: `(32, 128, 64)`
+
+Visualizing this expansion prevents silent logic bugs where you accidentally create a massive tensor (e.g., `(Batch, Batch)` matrix instead of element-wise `(Batch,)` vector).
+
+***
+
+## The Mechanics of Learning {#sec-system-foundations-mechanics-learning-78b6}
+
+::: {.callout-tip title="Why This Matters"}
+When training fails (loss goes to NaN, gradients explode, memory runs out), understanding what backpropagation actually does helps you diagnose the problem. This section gives you the mental model to reason about gradient flow and memory usage during training.
+:::
+
+### The Chain Rule and Automatic Differentiation {#sec-system-foundations-chain-rule-automatic-differentiation-e742}
+
+For a composed function $y = f(g(x))$, the derivative is $\frac{dy}{dx} = \frac{dy}{dg} \cdot \frac{dg}{dx}$.
+
+Modern frameworks use **reverse-mode automatic differentiation**, which computes gradients for all $N$ parameters in a single backward pass. This is why training (one forward + one backward pass) has similar compute cost to two inference passes, rather than $N$ passes.
+
+### The Backpropagation Algorithm {#sec-system-foundations-backpropagation-algorithm-3175}
+
+Backpropagation implements the chain rule efficiently through two passes: forward to compute outputs, backward to compute gradients.
+
+::: {#fig-backprop-graph fig-env="figure" fig-pos="htb" fig-cap="**Backpropagation Computational Graph**: A two-layer network showing the forward pass (black arrows) and backward pass (red dashed arrows). Each node caches values during the forward pass that are reused during the backward pass." fig-alt="A computational graph with four nodes labeled x, h, y, and L connected left to right. Solid black arrows show the forward pass with weights W1 and W2. Dashed red arrows curve backward showing gradient flow with partial derivative notation."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=3cm, auto, >=stealth, thick]
+  \tikzset{
+    Node/.style={circle, draw=BlueLine, fill=BlueFill, line width=0.8pt, minimum size=0.9cm, text=TextBlack},
+    Edge/.style={->, draw=GrayLine, line width=0.8pt},
+    BackEdge/.style={->, dashed, draw=RedLine, line width=0.8pt, bend right=50},
+    Label/.style={font=\footnotesize\usefont{T1}{phv}{m}{n}, text=TextBlack}
+  }
+  \node[Node] (x) {x};
+  \node[Node, right of=x] (h) {h};
+  \node[Node, right of=h] (y) {y};
+  \node[Node, right of=y, fill=RedLine!10, draw=RedLine] (L) {L};
+  \draw[Edge] (x) -- node[below, Label] {$W_1$} (h);
+  \draw[Edge] (h) -- node[below, Label] {$W_2$} (y);
+  \draw[Edge] (y) -- node[below, Label] {Loss} (L);
+  \draw[BackEdge] (L) to node[above, Label, text=RedLine] {$\frac{\partial L}{\partial y}$} (y);
+  \draw[BackEdge] (y) to node[above, Label, text=RedLine] {$\frac{\partial L}{\partial W_2}$} (h);
+  \draw[BackEdge] (h) to node[above, Label, text=RedLine] {$\frac{\partial L}{\partial W_1}$} (x);
+\end{tikzpicture}
+```
+:::
+
+**How to trace the computation.** @fig-backprop-graph shows a simple two-layer network. Practice tracing both passes to understand what happens during training:
+
+**Forward pass (black arrows, left to right)**: Start at $x$, your input. Multiply by $W_1$ to get hidden activation $h$. Cache $h$ because you will need it later. Multiply $h$ by $W_2$ to get output $y$. Cache $y$. Compare $y$ to the target label to compute loss $L$.
+
+At this point, you have computed the loss and your memory contains: the input $x$, the cached activation $h$, the cached output $y$, and the loss $L$. For a large model, these cached activations dominate memory usage.
+
+**Backward pass (red arrows, right to left)**: Now trace backward from $L$. The loss function tells you $\frac{\partial L}{\partial y}$, the gradient of loss with respect to your prediction. This is where the error signal enters the network.
+
+To compute $\frac{\partial L}{\partial W_2}$, you need to know how $W_2$ affected $y$. That requires the cached value of $h$. The chain rule gives you: $\frac{\partial L}{\partial W_2} = \frac{\partial L}{\partial y} \cdot h^T$.
+
+To continue backward to $W_1$, you need $\frac{\partial L}{\partial h}$, then multiply by the cached input $x$. Each step backward requires the activations cached during the forward pass.
+
+**Memory Implication**: Cached activations dominate memory usage. Storing activations for a 100-layer network consumes huge memory, motivating **Gradient Checkpointing** (recomputing activations to save memory).
+
+### Computational Graphs and Optimization {#sec-system-foundations-computational-graphs-optimization-b49d}
+
+ML compilers represent models as directed acyclic graphs (DAGs). This representation enables hardware-independent optimizations.
+
+**Static Single Assignment (SSA)**: Compilers transform graphs into SSA form where each variable is assigned exactly once. This makes data dependencies explicit, enabling safe optimizations like **Operator Fusion** (combining `Conv -> ReLU` into one kernel to avoid memory round-trips).
+
+```

@@ -1,6 +1,6 @@
-# Volume II Context & Progression Log
+# Volume II Context & Progression Log {#sec-volume-ii-context-progression-log}
 
-## Part I: Foundations of Scale (The Logic)
+## Part I: Foundations of Scale (The Logic) {#sec-volume-ii-context-progression-log-part-foundations-scale-logic-e5d7}
 *   **Status**: Complete.
 *   **Key Themes**: The mathematical and algorithmic demand for scale.
 *   1. **Introduction**: Motivation and Scale Transformation.
@@ -8,7 +8,7 @@
 *   3. **Communication**: Traffic patterns and collectives ($\alpha$-$\beta$ model).
 *   4. **Fault Tolerance**: Reliability math (MTBF, Young-Daly).
 
-## Part II: Building the Fleet (The Physics)
+## Part II: Building the Fleet (The Physics) {#sec-volume-ii-context-progression-log-part-ii-building-fleet-physics-d688}
 *   **Status**: Complete.
 *   **Key Themes**: Building the physical supercomputer.
 *   5. **Compute**: The Node (GPU/TPU, Power, Cooling).
@@ -16,7 +16,7 @@
 *   7. **Storage**: The Data (Parallel filesystems, Checkpointing I/O).
 *   8. **Orchestration**: The Manager (Slurm, Kubernetes, Quotas).
 
-## Part III: Deployment at Scale (The Service)
+## Part III: Deployment at Scale (The Service) {#sec-volume-ii-context-progression-log-part-iii-deployment-scale-service-bc08}
 *   **Status**: Complete.
 *   **Key Themes**: Serving models to billions.
 *   9. **Inference**: Scaling serving (Load Balancers, Batching).
@@ -24,7 +24,7 @@
 *   11. **Edge Intelligence**: Distributed devices (Federated Learning, TinyTL).
 *   12. **MLOps**: Lifecycle management (CI/CD, Monitoring).
 
-## Part IV: Production Concerns (The Hardening)
+## Part IV: Production Concerns (The Hardening) {#sec-volume-ii-context-progression-log-part-iv-production-concerns-hardening-86b7}
 *   **Status**: Started.
 *   **Key Themes**: The "Adult Supervision" layer.
 *   13. **Privacy & Security**: Reviewed. Model Extraction, Data Poisoning, TEEs.
@@ -32,5 +32,5 @@
 *   15. **Sustainable AI**: Reviewed. Energy, Carbon, Efficiency, Jevons Paradox.
 *   16. **Frontiers**: Next. AGI systems, Compound AI.
 
-## Conclusion
+## Conclusion {#sec-volume-ii-context-progression-log-conclusion-57b2}
 *   17. **Conclusion**: Wrapping up.
