@@ -321,12 +321,47 @@ The best way to learn:
 
         return 0
 
+    def _check_invalid_command(self, args: Optional[List[str]]) -> Optional[int]:
+        """Check for invalid commands and provide a helpful error message.
+
+        Returns exit code if handled, None to continue normal parsing.
+        """
+        if not args:
+            return None
+
+        first_arg = args[0]
+
+        # Skip flags (--help, --version, etc.)
+        if first_arg.startswith('-'):
+            return None
+
+        # Check if it's an invalid command
+        if first_arg.lower() not in self.commands:
+            from rich.panel import Panel
+
+            self.console.print()
+            self.console.print(Panel(
+                f"[yellow]'{first_arg}' is not a valid command.[/yellow]\n\n"
+                f"[dim]Run 'tito --help' to see all available commands.[/dim]",
+                title="[bold]Command Not Found[/bold]",
+                border_style="yellow"
+            ))
+            self.console.print()
+            return 1
+
+        return None
+
     def run(self, args: Optional[List[str]] = None) -> int:
         """Run the CLI application."""
         try:
             # Check for help flag before argparse to use Rich formatting
             if args and ('-h' in args or '--help' in args) and len(args) == 1:
                 return self._show_help()
+
+            # Check for invalid commands before argparse (cleaner error message)
+            mistake_result = self._check_invalid_command(args)
+            if mistake_result is not None:
+                return mistake_result
 
             parser = self.create_parser()
             parsed_args = parser.parse_args(args)
