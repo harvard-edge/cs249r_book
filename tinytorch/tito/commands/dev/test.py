@@ -992,7 +992,7 @@ class DevTestCommand(BaseCommand):
                             capture_output=True,
                             text=True,
                             cwd=project_root,
-                            timeout=180
+                            timeout=300  # 5 min for heavy milestones (CNN, Transformer)
                         )
                         milestone_duration = time.time() - milestone_start
                         if result.returncode == 0:
