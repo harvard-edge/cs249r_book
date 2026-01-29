@@ -40,52 +40,104 @@ Algorithms live in a world of abstract mathematics, but models must execute in a
 
 ## Deployment Paradigm Framework {#sec-ml-system-architecture-deployment-paradigm-framework-0d25}
 
-The Introduction established the Iron Law of ML Systems as a sum of three terms: data movement, compute, and overhead. But which term dominates? The answer depends entirely on the deployment environment. A model that is compute-bound during training may become memory-bound during inference[^fn-inference-etymology]; a system that runs efficiently in the cloud may hit power limits on mobile devices. 
+### The Four Deployment Paradigms {#sec-ml-system-architecture-four-deployment-paradigms}
 
-### The Iron Law of System Balance
+Machine learning models must execute somewhere—but where? The answer is not "wherever is most convenient." Different deployment locations offer fundamentally different trade-offs in latency, power, memory, and cost. This chapter introduces four **deployment paradigms** that span the full spectrum of ML system design:
 
-To navigate these environments, we must apply the **Bottleneck Principle**. Unlike traditional software where optimizing the average case works, ML systems are dominated by their slowest component:
++---------------+------------------+-------------+-----------+------------+------------------------------+
+| **Paradigm**  | **Where**        | **Latency** | **Power** | **Memory** | **Best For**                 |
++:==============+:=================+============:+:==========+:===========+:=============================+
+| **Cloud ML**  | Data centers     | 100-500 ms  | MW        | TB         | Training, complex inference  |
++---------------+------------------+-------------+-----------+------------+------------------------------+
+| **Edge ML**   | Local servers    | 10-100 ms   | 100s W    | GB         | Real-time inference, privacy |
++---------------+------------------+-------------+-----------+------------+------------------------------+
+| **Mobile ML** | Smartphones      | 5-50 ms     | 1-5 W     | GB         | Personal AI, offline         |
++---------------+------------------+-------------+-----------+------------+------------------------------+
+| **TinyML**    | Microcontrollers | 1-10 ms     | mW        | KB         | Always-on sensing            |
++---------------+------------------+-------------+-----------+------------+------------------------------+
+
+: **The Deployment Spectrum**: Four paradigms span six orders of magnitude in power (MW to mW) and memory (TB to KB), each optimized for different constraints. {#tbl-deployment-paradigms-overview}
+
+**Cloud ML** aggregates computational resources in data centers, offering virtually unlimited compute and storage at the cost of network latency. When you train a large language model or run complex inference that can tolerate 100+ ms delays, Cloud ML is the natural choice.
+
+**Edge ML** moves computation closer to where data originates—factory floors, retail stores, hospitals. By processing locally rather than sending data to distant servers, edge systems achieve lower latency (10-100 ms) and keep sensitive data on-premises.
+
+**Mobile ML** brings intelligence directly to smartphones and tablets. These devices must balance computational capability against battery life and thermal constraints, making them ideal for personal AI applications that need to work offline.
+
+**TinyML** pushes intelligence to the smallest devices—microcontrollers costing dollars and consuming milliwatts. When you need always-on sensing (wake-word detection, motion recognition) that runs for months on a coin-cell battery, TinyML is the only viable option.
+
+Why do these four paradigms exist? The answer lies not in engineering choices but in physical laws that no amount of optimization can overcome.
+
+### Physical Constraints: Why Paradigms Exist {#sec-ml-system-architecture-deployment-spectrum-71be}
+
+The physical laws of **speed of light**, **power thermodynamics**, and **memory signaling** dictate that no single "ideal" computer exists. Where a system runs fundamentally alters the contract between model and hardware. These three constraints—which we call the **Light Barrier**, **Power Wall**, and **Memory Wall**—are the root causes of the four paradigms.[^fn-paradigm]
+
+**The Light Barrier** establishes the absolute latency[^fn-latency-etymology] floor. The minimum round-trip time is governed by:
+$$\text{Latency}_{\min} = \frac{2 \times \text{Distance}}{c_{\text{fiber}}} \approx \frac{2 \times \text{Distance}}{200{,}000 \text{ km/s}}$$
+California to Virginia (~3,600 km straight-line) requires **~36 ms minimum** before any computation begins. Actual cloud services typically add 60–150 ms of software overhead. Applications requiring sub-10 ms response *cannot* use distant cloud infrastructure—physics forbids it. This constraint creates the need for **Edge ML** and **TinyML**: when latency budgets are tight, computation must move closer to the data source.
+
+**The Power Wall** emerged because thermodynamics limits how much computation can occur in a given volume. The relationship between power and frequency is cubic:
+$$\text{Power} \propto C \times V^2 \times f \quad \text{where } V \propto f \implies \text{Power} \propto f^3$$
+Doubling clock frequency requires approximately 8× more power. This cubic relationship ended the era of "free" speedups via frequency scaling and forced the industry toward the parallelism (multi-core) and specialization (GPUs, TPUs) that defines modern ML. Mobile devices hit hard thermal limits at 3–5W; exceeding this causes "throttling," where the device reduces performance to prevent overheating. This constraint creates the need for **Mobile ML**: battery-powered devices cannot simply run cloud-scale models locally.
+
+**The Memory Wall** reflects the widening bandwidth[^fn-bandwidth] gap:
+
+$$\frac{\text{Compute Growth}}{\text{Memory BW Growth}} \approx \frac{1.6\times/\text{year}}{1.2\times/\text{year}} \approx 1.33\times/\text{year}$$
+
+Processors double in compute capacity every 18 months, but memory bandwidth improves only ~20% annually. This widening gap makes data movement the dominant bottleneck and energy cost for most ML workloads. This constraint affects all paradigms but is especially acute for **TinyML**, where devices have only kilobytes of memory to work with.
+
+These physical laws explain *why* the four paradigms exist. But given a specific ML workload, *how* do we determine which paradigm fits? The answer requires analytical tools that connect workload characteristics to physical constraints.
+
+### Analyzing Workloads: The Iron Law and Archetypes {#sec-ml-system-architecture-analyzing-workloads}
+
+The Introduction established the **Iron Law of ML Systems**:
+
+$$L = \frac{D}{B} + \frac{Ops}{P \cdot \eta} + L_{fixed}$$
+
+This equation decomposes total latency into three terms: data movement ($D/B$), compute ($Ops/P \cdot \eta$), and fixed overhead ($L_{fixed}$). But which term dominates? The answer depends entirely on the deployment environment. A model that is compute-bound during training may become memory-bound during inference[^fn-inference-etymology]; a system that runs efficiently in the cloud may hit power limits on mobile devices.
+
+#### The Bottleneck Principle
+
+To navigate deployment environments, we apply the **Bottleneck Principle**. Unlike traditional software where optimizing the average case works, ML systems are dominated by their slowest component:
 
 $$ T_{system} = \max(T_{compute}, T_{memory}, T_{network}, T_{io}) + L_{overhead} $$
 
-*   **$T_{compute}$**: Time to execute the matrix multiplications (FLOPS).
-*   **$T_{memory}$**: Time to move weights/activations (HBM Bandwidth).
-*   **$T_{network}$**: Time to synchronize gradients or fetch features (Interconnect).
-*   **$T_{io}$**: Time to load data from disk (Storage Throughput).
+*   **$T_{compute}$**: Time to execute the calculations.
+*   **$T_{memory}$**: Time to move data between memory and processor.
+*   **$T_{network}$**: Time for network communication.
+*   **$T_{io}$**: Time to load data from storage.
 
-This principle dictates that if your system is **Memory Bound** ($T_{memory} > T_{compute}$), buying a GPU with 2x more FLOPS yields exactly **0% speedup**. You must identify the dominant term before optimizing.
+This principle dictates that if your system is **Memory Bound** ($T_{memory} > T_{compute}$), buying faster processors yields exactly **0% speedup**. You must identify the dominant term before optimizing.
 
-#### From Sums to Bottlenecks: The Roofline Transition
+The Introduction presented the Iron Law as a sum. Why do we now use $\max()$? The distinction lies in whether operations happen sequentially or overlap. In **Serial Execution**, costs add up. However, modern accelerators use **Pipelined Execution** to overlap memory transfers with computation. With perfect overlap, the total time is determined by whichever operation is slower. The Iron Law tells you the *cost of each ingredient*; the Bottleneck Principle tells you the *speed of the assembly line*.
 
-The Introduction presented the Iron Law as a sum: $L = \frac{D}{B} + \frac{Ops}{P \cdot \eta} + L_{fixed}$. Why do we now use $\max()$? The distinction lies in whether operations happen one after another or at the same time. 
+As a rule of thumb: use the **additive form** when analyzing the **latency** of a single task, and use the **max form** when analyzing the **throughput** of a continuous stream of tasks.
 
-In **Serial Execution**, operations execute sequentially, and the costs are additive ($T = T_{mem} + T_{compute}$). However, modern accelerators use **Pipelined Execution** to overlap memory transfers with computation. With perfect overlap, the total time is determined by whichever operation is slower. The Iron Law from the Introduction tells you the *cost of each ingredient*; the Bottleneck Law here tells you the *speed of the assembly line*. 
+#### Workload Archetypes
 
-As a rule of thumb, use the **additive form** when analyzing the **latency** of a single task, and use the **max form** when analyzing the **throughput** of a continuous stream of tasks.
+Now that we understand bottlenecks, we can classify workloads by which constraint dominates. Recall the **AI Triad** from @sec-introduction: every ML system comprises **Data**, **Algorithm**, and **Machine**. Different deployment environments create different bottlenecks in the Triad—a cloud server with terabytes of memory faces Algorithm constraints, while a microcontroller with kilobytes faces Machine constraints.
 
-Now that we understand how bandwidth and compute become pipelined bottlenecks rather than additive costs, we can classify workloads by which term dominates. This classification allows us to group models not by their use cases (e.g., "vision" vs "audio") but by their physical constraints. 
+To navigate these constraints systematically, we categorize ML workloads into four **Archetypes**.[^fn-archetype] These represent fundamental physical bottlenecks, not just specific model architectures:
 
-### Workload Archetypes
+**Archetype I: The Compute Beast.** These workloads perform many calculations per byte of data loaded. The binding constraint is raw computational throughput. Training large neural networks falls into this category.
 
-The systems engineer's goal is to optimize the **Samples per Dollar** within the AI Triad. However, in the real world, this optimization is bounded by the deployment environment. We categorize ML workloads into four **Archetypes**.[^fn-archetype] These represent fundamental physical constraints, not just specific model architectures. 
+**Archetype II: The Bandwidth Hog.** These workloads spend more time loading data than computing. Memory bandwidth becomes the binding constraint. Autoregressive text generation (like ChatGPT producing one token at a time) falls into this category.
 
-**Archetype I: The Compute Beast.** These workloads exhibit high Arithmetic Intensity ($> 100$ FLOPs/Byte), performing many calculations per byte of data loaded. The binding constraint is raw TFLOPS—the system's peak computational throughput. Optimization focuses on faster matrix multiplication and parallel accelerators.
+**Archetype III: The Sparse Scatter.** Irregular memory access patterns with poor cache locality define this archetype. Memory capacity and access latency constrain performance. Recommendation systems with massive embedding tables are canonical examples.
 
-**Archetype II: The Bandwidth Hog.** With low Arithmetic Intensity ($< 10$ FLOPs/Byte), these workloads spend more time loading data than computing. Memory Bandwidth becomes the binding constraint. Autoregressive text generation (like ChatGPT) falls into this category. Optimization targets reducing data size through quantization[^fn-quantization] and caching.
+**Archetype IV: The Tiny Constraint.** Extreme power envelopes ($< 1$ mW) and memory limits ($< 256$ KB) characterize these workloads. The binding constraint is energy per inference—efficiency, not raw speed. Always-on sensing operates in this regime.
 
-**Archetype III: The Sparse Scatter.** Irregular memory access patterns with poor cache locality define this archetype. Memory Capacity and access latency constrain performance. Recommendation systems with large tables are canonical examples. Optimization requires high-bandwidth networking and data sharding.
-
-**Archetype IV: The Tiny Constraint.** Extreme power envelopes ($< 1$ mW) and memory limits ($< 256$ KB) characterize these workloads. The binding constraint is Joules per Inference—energy efficiency, not raw speed. Always-on sensing operates in this regime. Optimization demands aggressive compression and specialized low-power hardware.
-
-These archetypes recur throughout this volume. In @sec-dnn-architectures, we introduce **Lighthouse Examples**—specific model architectures that serve as concrete instances of each archetype for quantitative analysis.
+These archetypes map naturally to deployment paradigms: **Compute Beasts** and **Sparse Scatter** workloads gravitate toward **Cloud ML** where resources are abundant. **Bandwidth Hogs** span Cloud and Edge depending on latency requirements. **Tiny Constraint** workloads are exclusively **TinyML** territory.
 
 [^fn-archetype]: **Archetype**: From Greek *arkhetypon*, combining *arkhe* (beginning, origin) and *typos* (pattern, model). Plato used the term for the original forms from which all instances derive. In ML systems, archetypes represent the fundamental workload patterns from which all specific models derive their computational characteristics.
 
 [^fn-inference-etymology]: **Inference**: From Latin *inferre* (to bring in, to deduce), combining *in* (into) and *ferre* (to carry, bear). The term captures the essential act: carrying information *into* a conclusion. In statistics and ML, inference means deriving conclusions from data. The contrast between "training" (learning patterns) and "inference" (applying them) reflects the Latin distinction between acquiring knowledge and *bringing it to bear* on new situations.
 
-[^fn-algorithm]: **Algorithm**: A Latinization of "al-Khwarizmi," the 9th-century Persian mathematician Muhammad ibn Musa al-Khwarizmi, whose treatise on arithmetic introduced Hindu-Arabic numerals to Europe. His name, meaning "from Khwarezm" (modern Uzbekistan), became synonymous with systematic computational procedures. Every ML model, from linear regression to transformers, is fundamentally an algorithm: a precise sequence of steps that transforms input data into predictions.
+[^fn-paradigm]: **Paradigm**: From Greek *paradeigma* (pattern, example), combining *para* (beside) and *deiknynai* (to show). Thomas Kuhn popularized its modern scientific usage in *The Structure of Scientific Revolutions* (1962) to describe fundamental frameworks that shape how practitioners approach problems. In ML systems, deployment paradigms (Cloud, Edge, Mobile, TinyML) represent distinct operational frameworks, each with its own constraints, trade-offs, and engineering practices.
 
-[^fn-quantization]: **Quantization**: From Latin *quantus* (how much), via quantum physics where it describes the restriction of continuous values to discrete levels. Max Planck introduced quantum theory in 1900 to explain blackbody radiation. In ML, quantization similarly restricts continuous floating-point weights to discrete values (INT8, INT4), trading precision for memory and compute efficiency. The physics metaphor is apt: just as quantized energy levels enabled new physics, quantized weights enable new deployment targets.
+[^fn-latency-etymology]: **Latency**: From Latin *latere* (to lie hidden), via *latens* (lying hidden). The term captures the essential concept: time that "hides" between request and response. In computing, latency measures the delay from input to output. For ML systems, latency budgets often determine deployment paradigm: sub-10ms requirements mandate edge deployment, while 100ms+ tolerances permit cloud inference.
+
+[^fn-bandwidth]: **Bandwidth**: Originally a radio engineering term from the 1930s describing the width of frequency bands. In computing, it measures data transfer rate (bytes/second). The "memory wall" describes the growing gap between processor speed and memory bandwidth—compute capability doubles every 18 months while memory bandwidth improves only ~20% annually, making data movement the dominant bottleneck in modern ML systems.
 
 ::: {.callout-lighthouse title="Lighthouse Examples" collapse="true"}
 Throughout this volume, we use five representative models as **Lighthouse Examples**—concrete workloads spanning the deployment spectrum. This table previews their key characteristics; @sec-dnn-architectures provides full architectural details.
@@ -104,79 +156,12 @@ Throughout this volume, we use five representative models as **Lighthouse Exampl
 | **Keyword Spotter** (e.g., DS-CNN)         | Tiny Constraint           | 200 K             | 20 MFLOPs              | 800 KB (FP32)        | TinyML, always-on              |
 +--------------------------------------------+---------------------------+-------------------+------------------------+----------------------+--------------------------------+
 
-**Key insight**: The huge range in compute requirements (20 MOPs → 4 GFLOPs) and memory (800 KB → 100 GB) explain why no single deployment paradigm fits all workloads. A keyword spotter runs comfortably on a $2 microcontroller; a recommendation system requires a warehouse-scale computer.
+**Key insight**: The huge range in compute requirements (20 MFLOPs → 4 GFLOPs) and memory (800 KB → 100 GB) explain why no single deployment paradigm fits all workloads. A keyword spotter runs comfortably on a $2 microcontroller; a recommendation system requires a warehouse-scale computer.
 :::
 
-These hardware requirements map to four distinct deployment paradigms, each with characteristic resource profiles.
+### From Framework to Practice {#sec-ml-system-architecture-framework-to-practice}
 
-::: {.callout-tip title="Quick Reference: The Four Deployment Paradigms" collapse="true"}
-Before diving into details, here is a roadmap of the four paradigms we will explore:
-
-+---------------+------------------+-------------+-----------+------------+------------------------------+
-| **Paradigm**  | **Where**        | **Latency** | **Power** | **Memory** | **Best For**                 |
-+:==============+:=================+============:+:==========+:===========+:=============================+
-| **Cloud ML**  | Data centers     | 100-500 ms  | MW        | TB         | Training, complex inference  |
-+---------------+------------------+-------------+-----------+------------+------------------------------+
-| **Edge ML**   | Local servers    | 10-100 ms   | 100s W    | GB         | Real-time inference, privacy |
-+---------------+------------------+-------------+-----------+------------+------------------------------+
-| **Mobile ML** | Smartphones      | 5-50 ms     | 1-5 W     | GB         | Personal AI, offline         |
-+---------------+------------------+-------------+-----------+------------+------------------------------+
-| **TinyML**    | Microcontrollers | 1-10 ms     | mW        | KB         | Always-on sensing            |
-+---------------+------------------+-------------+-----------+------------+------------------------------+
-
-**When to use which**: If latency < 10 ms required → TinyML/Edge. If privacy critical → Edge/Mobile/TinyML. If model > 1B params → Cloud. If battery-powered → Mobile/TinyML.
-
-The detailed comparison table appears in @sec-ml-system-architecture-comparative-analysis-paradigm-selection-bf66 after we've built intuition for each paradigm.
-:::
-
-With these concrete examples in mind, we can now formalize the relationship between workload archetypes and deployment paradigms. Each archetype's binding constraint maps to a specific deployment paradigm because of the physical laws that govern all computing systems.
-
-### The Deployment Spectrum {#sec-ml-system-architecture-deployment-spectrum-71be}
-
-The physical laws of **speed of light**, **power thermodynamics**, and **memory signaling** dictate that no single "ideal" computer exists. Where a system runs fundamentally alters the contract between model and hardware.
-
-These laws are the root causes of the four paradigms:[^fn-paradigm] **Cloud ML** accepts network latency to maximize computational power. **Edge ML** moves inference near data sources when the speed of light makes cloud latency unacceptable. **Mobile ML** extends intelligence to personal devices where the power wall dominates. **TinyML** enables ubiquitous sensing where energy efficiency—measured in micro-Joules—is the only metric that matters.
-
-Understanding these constraints precisely—their mathematical formulations and engineering implications—provides the foundation for making deployment decisions that physics will not override.
-
-**The Light Barrier** establishes the absolute latency[^fn-latency-etymology] floor. The minimum round-trip time is governed by:
-$$\text{Latency}_{\min} = \frac{2 \times \text{Distance}}{c_{\text{fiber}}} \approx \frac{2 \times \text{Distance}}{200{,}000 \text{ km/s}}$$
-California to Virginia (~3,600 km straight-line) requires **~36 ms minimum** before any computation begins. Actual cloud services typically add 60–150 ms of software overhead. Applications requiring sub-10 ms response *cannot* use distant cloud infrastructure—physics forbids it.
-
-**The Power Wall** emerged because thermodynamics limits how much computation can occur in a given volume. The relationship between power and frequency is cubic:
-$$\text{Power} \propto C \times V^2 \times f \quad \text{where } V \propto f \implies \text{Power} \propto f^3$$
-Doubling clock frequency requires approximately 8× more power. This cubic relationship ended the era of "free" speedups via frequency scaling and forced the industry toward the parallelism (multi-core) and specialization (GPUs, TPUs) that defines modern ML. Mobile devices hit hard thermal limits at 3–5W; exceeding this causes "throttling," where the OS forces the frequency down to prevent the hardware from melting.
-
-**The Memory Wall** reflects the widening bandwidth[^fn-bandwidth] gap:
-
-$\frac{\text{Compute Growth}}{\text{Memory BW Growth}} \approx \frac{1.6\times/\text{year}}{1.2\times/\text{year}} \approx 1.33\times/\text{year}$
-
-Processors double in compute capacity every 18 months, but memory bandwidth improves only ~20% annually. This widening gap makes data movement the dominant bottleneck and energy cost for most ML workloads. This is why a **Bandwidth Hog** model gains **zero** speedup from a faster processor—it is simply "starving" for data.
-
-**The Entropy Invariant**[^fn-entropy-etymology] represents the statistical reality that distinguishes ML from traditional software. Unlike a sorting algorithm, which remains correct as long as the code is unchanged, an ML model’s accuracy decays monotonically as the world moves away from its training distribution. This **System Entropy** ensures that every deployed model is in a state of unobserved decay from the moment it is shipped. Reliability in ML is not a property of the code, but a property of the **Control Loop** (monitoring and retraining) built to fight this entropy.
-
-[^fn-paradigm]: **Paradigm**: From Greek *paradeigma* (pattern, example), combining *para* (beside) and *deiknynai* (to show). Thomas Kuhn popularized its modern scientific usage in *The Structure of Scientific Revolutions* (1962) to describe fundamental frameworks that shape how practitioners approach problems. In ML systems, deployment paradigms (Cloud, Edge, Mobile, TinyML) represent distinct operational frameworks, each with its own constraints, trade-offs, and engineering practices.
-
-[^fn-latency-etymology]: **Latency**: From Latin *latere* (to lie hidden), via *latens* (lying hidden). The term captures the essential concept: time that "hides" between request and response. In computing, latency measures the delay from input to output. For ML systems, latency budgets often determine deployment paradigm: sub-10ms requirements mandate edge deployment, while 100ms+ tolerances permit cloud inference.
-
-[^fn-bandwidth]: **Bandwidth**: Originally a radio engineering term from the 1930s describing the width of frequency bands. In computing, it measures data transfer rate (bytes/second). The "memory wall" describes the growing gap between processor speed and memory bandwidth—compute capability doubles every 18 months while memory bandwidth improves only ~20% annually, making data movement the dominant bottleneck in modern ML systems.
-
-[^fn-entropy-etymology]: **Entropy**: From Greek *entropia* (transformation), coined by Rudolf Clausius in 1865 for thermodynamics. Claude Shannon adapted it for information theory in 1948 to measure uncertainty. In ML systems, "entropy" describes the inevitable degradation of model accuracy as real-world distributions drift from training data—a form of informational disorder that requires continuous monitoring and retraining to counteract.
-
-#### The Complexity Tax
-
-To decide which paradigm to use, an engineer must weigh the **Complexity Tax** of a system. 
-
-Consider a classification problem that could be solved with a simple **Heuristic** (if-then rules) or a **Deep Learning Pipeline**. 
-
-1.  **The Heuristic**: 50 lines of code. $Ops \approx 0$. **Tax**: ~1 hour/month to update a rule. **Entropy**: Zero (rules don't drift).
-2.  **The ML System**: 50 lines of model code + 2,000 lines of "Glue Code" (Data pipelines, monitoring, GPU drivers). **Tax**: ~40 hours/month (debugging drift, managing infra).
-
-If the ML system provides 95% accuracy and the heuristic provides 90%, is that 5% gain worth a **40x increase** in complexity? ML systems engineering is the art of minimizing this tax through robust architecture. If you cannot afford the operational cost to fight **System Entropy**, the heuristic is the superior systems choice.
-
-@tbl-latency-numbers provides order-of-magnitude latencies that should inform every deployment decision. The key decision rule: if your latency budget is $X$ ms, you cannot use any operation with latency $> X$ in your critical path.
-
- Detailed hardware latencies are covered in @sec-ai-acceleration. The key decision rule: if your latency budget is $X$ ms, you cannot use any operation with latency $> X$ in your critical path.
+We have now established the conceptual foundation: four deployment paradigms exist because of physical constraints, and workload archetypes help us match applications to paradigms. @tbl-latency-numbers provides order-of-magnitude latencies that should inform every deployment decision. Detailed hardware latencies are covered in @sec-ai-acceleration. The key decision rule: if your latency budget is $X$ ms, you cannot use any operation with latency $> X$ in your critical path.
 
 +----------------------------------+-------------+----------------------------------+
 | **Operation**                    | **Latency** | **Deployment Implication**       |
@@ -392,7 +377,7 @@ pics/mobile/.style = {
 
 ### Deployment Paradigm Foundations {#sec-ml-system-architecture-deployment-paradigm-foundations-9667}
 
-The physical laws we have just examined are not abstract limitations—they manifest concretely in how each deployment paradigm optimizes the fundamental ML system components. Where the previous section established *that* constraints exist and *how much* they constrain us quantitatively, this section shows *how* each paradigm navigates them in practice.
+The physical constraints and workload archetypes we have established are not abstract limitations—they manifest concretely in how each deployment paradigm optimizes the fundamental ML system components. This section shows *how* each paradigm navigates these constraints in practice before we examine each paradigm in detail.
 
 Recall that @sec-introduction established the three foundational components of ML systems: data, algorithms, and infrastructure. Each deployment paradigm optimizes this framework differently based on which physical constraints dominate:
 
@@ -442,7 +427,7 @@ This shift between training and inference is fundamental. Recall the AI Triad fr
 
 The following worked example demonstrates how to apply this analysis quantitatively to the same model across two deployment targets.
 
-::: {.callout-notebook title="Worked Example: ResNet-50 on Cloud vs Mobile" collapse="true"}
+::: {.callout-notebook title="ResNet-50 on Cloud vs Mobile" collapse="true"}
 **Problem**: Determine whether ResNet-50 inference is compute-bound or memory-bound on (a) a high-end datacenter GPU (NVIDIA A100 class) and (b) a flagship mobile NPU (Apple/Qualcomm class).
 
 **Given** (from Lighthouse Examples):
@@ -452,19 +437,31 @@ The following worked example demonstrates how to apply this analysis quantitativ
 **Analysis**:
 
 **(a) Cloud: NVIDIA A100 (batch=1, FP16)**
+
 - Peak compute: 312 TFLOPS (FP16)
+
 - Memory bandwidth: 2 TB/s (HBM2e)
+
 - Compute time: $\frac{4.1 \times 10^9 \text{ FLOPs}}{312 \times 10^{12} \text{ FLOP/s}} = 0.013 \text{ ms}$
+
 - Memory time: $\frac{51 \times 10^6 \text{ bytes}}{2 \times 10^{12} \text{ B/s}} = 0.026 \text{ ms}$
+
 - **Bottleneck**: Memory (2× slower than compute)
+
 - **Arithmetic Intensity**: $\frac{4.1 \times 10^9}{51 \times 10^6} \approx 80$ FLOPs/byte
 
 **(b) Mobile: Flagship NPU (batch=1, INT8)**
+
 - Peak compute: ~35 TOPS (INT8) — representative of modern mobile NPUs
+
 - Memory bandwidth: ~100 GB/s (LPDDR5)
+
 - Model size: 25 MB (INT8 quantized)
+
 - Compute time: $\frac{4.1 \times 10^9 \text{ Ops}}{35 \times 10^{12} \text{ Op/s}} = 0.12 \text{ ms}$
+
 - Memory time: $\frac{25 \times 10^6 \text{ bytes}}{100 \times 10^{9} \text{ B/s}} = 0.25 \text{ ms}$
+
 - **Bottleneck**: Memory (2× slower than compute)
 
 **Key Insight**: Both platforms are memory-bound for single-image inference! The A100's faster memory bandwidth (2 TB/s vs 100 GB/s = 20×) translates to roughly 10× faster inference, not the 10,000× compute advantage. This explains why quantization (reducing bytes) often beats faster hardware (increasing FLOPS) for deployment.
@@ -582,7 +579,7 @@ node[above](GAD){gap}(B34);
 ```
 :::
 
-Having established the physical constraints and hardware landscape that create the deployment spectrum, we now examine each paradigm in depth. The following four sections progress from cloud to TinyML, tracing the gradient from maximum computational resources to maximum efficiency constraints. Each section follows a consistent structure: definition, key characteristics, benefits and trade-offs, and representative applications. This systematic treatment reveals both what distinguishes each paradigm and what principles they share.
+Having established the physical constraints (Light Barrier, Power Wall, Memory Wall) and workload archetypes (Compute Beast, Bandwidth Hog, Sparse Scatter, Tiny Constraint) that create the deployment spectrum, we now examine each paradigm in depth. The following four sections progress from cloud to TinyML, tracing the gradient from maximum computational resources to maximum efficiency constraints. Each section follows a consistent structure: definition, key characteristics, benefits and trade-offs, and representative applications. This systematic treatment reveals both what distinguishes each paradigm and what principles they share—setting the stage for the hybrid architectures that combine them.
 
 ## Cloud ML: Maximizing Computational Power {#sec-ml-system-architecture-cloud-ml-maximizing-computational-power-a338}
 
@@ -711,7 +708,7 @@ Privacy and security present significant challenges when adopting cloud deployme
 
 Cost management introduces operational complexity requiring total cost of ownership (TCO) analysis rather than naive unit comparisons.
 
-::: {.callout-notebook title="Engineering Calculation: Cloud vs. Edge TCO" collapse="true"}
+::: {.callout-notebook title="Cloud vs. Edge TCO" collapse="true"}
 **Scenario**: A vision system serving 1 million daily inferences (ResNet-50 scale).
 
 **Cloud Implementation** (AWS/GCP pricing, 2024)
@@ -767,17 +764,23 @@ Cloud ML's computational advantages manifest most visibly in consumer-facing app
 
 The economics drive this architecture as much as latency.
 
-::: {.callout-notebook title="Engineering Calculation: Wake-Word Economics" collapse="true"}
+::: {.callout-notebook title="Wake-Word Economics" collapse="true"}
 **Scenario**: 1 billion voice assistant devices using continuous audio streaming.
 
 **Cloud-Only Approach**
+
 - **Compute Cost**: ~$0.50 per device/year (conservative estimate)
+
 - **Total Annual Cost**: $1,000,000,000 \times \$0.50 = \$500,000,000$
+
 - **Feasibility**: Economically prohibitive for a free/low-cost feature.
 
 **Edge (TinyML) Approach**
+
 - **Power Consumption**: 0.1--1 mW for local wake-word detection
+
 - **Cost Shift**: Transferred to user's battery (<$0.01 per year)
+
 - **Result**: System becomes economically viable at global scale.
 :::
 
@@ -918,7 +921,7 @@ These benefits carry corresponding limitations. Limited computational resources[
 
 [^fn-edge-coordination]: **Edge Network Coordination**: Managing distributed edge devices requires sophisticated orchestration to handle the communication complexity of many interconnected nodes. Hierarchical architectures reduce coordination overhead, and specialized frameworks manage models, data, and updates across heterogeneous devices. We examine these operational patterns in @sec-machine-learning-operations-mlops.
 
-::: {.callout-notebook title="Engineering Calculation: Edge Inference Sizing" collapse="true"}
+::: {.callout-notebook title="Edge Inference Sizing" collapse="true"}
 **Scenario**: A smart retail chain deploying person detection across 500 stores, each with 20 cameras at 15 FPS.
 
 **Requirements Analysis**
@@ -1536,7 +1539,7 @@ Selecting the appropriate deployment paradigm requires systematic evaluation of 
 
 The framework evaluates four critical decision layers sequentially. Privacy constraints form the first filter, determining whether data can be transmitted externally. Applications handling sensitive data under GDPR, HIPAA, or proprietary restrictions mandate local processing, immediately eliminating cloud-only deployments. Latency requirements establish the second constraint through response time budgets: applications requiring sub-10 ms response times cannot use cloud processing, as physics-imposed network delays alone exceed this threshold. Computational demands form the third evaluation layer, assessing whether applications require high-performance infrastructure that only cloud or edge systems provide, or whether they can operate within the resource constraints of mobile or tiny devices. Cost considerations complete the framework by balancing capital expenditure, operational expenses, and energy efficiency across expected deployment lifetimes.
 
-::: {.callout-notebook title="Worked Example: Autonomous Vehicle Emergency Braking"}
+::: {.callout-notebook title="Autonomous Vehicle Emergency Braking"}
 **Application**: Vision-based pedestrian detection for emergency braking.
 
 **Walking through the decision framework**:
@@ -1566,6 +1569,17 @@ The framework evaluates four critical decision layers sequentially. Privacy cons
 The decision framework above identifies technically feasible options—but feasibility does not guarantee success. Production deployment also depends on organizational capabilities that determine whether a technically sound choice can be implemented and maintained effectively.
 
 Successful deployment requires considering factors beyond pure engineering constraints. Organizational factors shape success by determining whether teams possess the capabilities to implement and maintain chosen paradigms. Team expertise must align with paradigm requirements: Cloud ML demands distributed systems knowledge, Edge ML requires device management capabilities, Mobile ML needs platform-specific optimization skills, and TinyML requires embedded systems expertise. Organizations lacking appropriate skills face extended development timelines and ongoing maintenance challenges that undermine technical advantages. Monitoring and maintenance capabilities similarly determine viability at scale: edge deployments require distributed device orchestration, while TinyML demands specialized firmware management that many organizations lack. Cost structures further complicate decisions through their temporal patterns: Cloud incurs recurring operational expenses favorable for unpredictable workloads, Edge requires substantial upfront investment offset by lower ongoing costs, Mobile leverages user-provided devices to minimize infrastructure expenses, and TinyML minimizes hardware and connectivity costs while demanding significant development investment.
+
+::: {.callout-perspective title="The Complexity Tax"}
+Before committing to any ML deployment, weigh the **Complexity Tax** against simpler alternatives.
+
+Consider a classification problem solvable by either a **Heuristic** (if-then rules) or a **Deep Learning Pipeline**:
+
+1.  **The Heuristic**: 50 lines of code. Near-zero compute cost. Maintenance: ~1 hour/month to update rules. No drift.
+2.  **The ML System**: 50 lines of model code + 2,000 lines of infrastructure (data pipelines, monitoring, GPU drivers). Maintenance: ~40 hours/month debugging drift and managing infrastructure.
+
+If the ML system provides 95% accuracy and the heuristic provides 90%, is that 5% gain worth a **40× increase** in complexity? ML systems engineering is the art of minimizing this tax through robust architecture. If you cannot afford the operational cost to maintain model quality over time, the simpler heuristic may be the superior systems choice.
+:::
 
 Successful deployment emerges from balancing technical optimization against organizational capability. Paradigm selection represents systems engineering challenges that extend well beyond pure technical requirements, encompassing team skills, operational capacity, and economic constraints. These decisions remain constrained by fundamental scaling laws, with operational aspects detailed in @sec-machine-learning-operations-mlops and benchmarking approaches covered in @sec-benchmarking-ai.
 
@@ -1780,7 +1794,13 @@ This convergence explains why techniques transfer effectively between scales:
 
 The remaining chapters in this volume explore each layer: @sec-data-engineering-ml examines data pipelines, @sec-model-compression addresses optimization, and @sec-machine-learning-operations-mlops covers operational aspects—all applying whether you deploy to a TPU Pod or an ESP32.
 
-Understanding how to combine paradigms effectively is essential. However, even well-designed hybrid architectures can fail if engineers fall prey to common misconceptions about ML deployment. The physical constraints we have examined throughout this chapter create counterintuitive behaviors that challenge intuitions from traditional software engineering.
+### From Deployment to Operations
+
+The preceding sections addressed *where* to deploy ML systems and *how* to combine paradigms effectively. But deployment is not the end of the engineering challenge—it is the beginning of a new one. Traditional software, once deployed correctly, remains correct indefinitely. ML systems face a fundamentally different reality: **statistical decay**.
+
+Unlike a sorting algorithm that remains correct as long as the code is unchanged, an ML model's accuracy degrades as the world drifts away from its training distribution—precisely what the Introduction's Degradation Equation captured. Every deployed model is in a state of unobserved decay from the moment it ships. Reliability in ML systems is therefore not a property of the code but a property of the monitoring and retraining infrastructure built to detect and correct this drift. The operational aspects covered in @sec-machine-learning-operations-mlops address precisely this challenge.
+
+Beyond statistical decay, engineers also fall prey to common misconceptions about ML deployment. The physical constraints we have examined throughout this chapter create counterintuitive behaviors that challenge intuitions from traditional software engineering.
 
 ## Fallacies and Pitfalls {#sec-ml-system-architecture-fallacies-pitfalls-3dfe}
 
