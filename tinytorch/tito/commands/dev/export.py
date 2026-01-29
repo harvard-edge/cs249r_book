@@ -92,10 +92,16 @@ class DevExportCommand(BaseCommand):
         ))
         console.print()
 
-        # Guard: Ensure we're in the correct directory
-        if not (Path.cwd() / "tinytorch" / "__init__.py").exists():
+        # Guard: Ensure we're in the correct directory (tinytorch project root)
+        # Check for key files that indicate we're in the right place
+        cwd = Path.cwd()
+        is_tinytorch_root = (
+            (cwd / "tinytorch" / "__init__.py").exists() or  # Running from repo root
+            (cwd / "src").exists() and (cwd / "settings.ini").exists()  # Already in tinytorch/
+        )
+        if not is_tinytorch_root:
             console.print(Panel(
-                "[red]❌ Must run from TinyTorch repo root[/red]\n\n"
+                "[red]❌ Must run from TinyTorch project directory[/red]\n\n"
                 "[dim]Expected structure:[/dim]\n"
                 "[dim]  tinytorch/          ← run from here[/dim]\n"
                 "[dim]  ├── src/[/dim]\n"
