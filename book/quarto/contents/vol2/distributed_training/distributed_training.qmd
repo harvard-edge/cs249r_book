@@ -1663,6 +1663,21 @@ Tensor parallelism scaling degrades rapidly beyond 8-way parallelism because:
 
 Production systems (GPT-4, LLaMA, Gemini) use 8-way tensor parallelism within nodes, combined with pipeline parallelism across nodes, achieving the best balance of memory distribution and communication efficiency.
 
+### Parameter Servers and Embedding Sharding {#sec-distributed-training-systems-systems-parameter-servers-embedding-sharding-8821}
+
+While AllReduce dominates dense model training, the **Parameter Server (PS)** architecture remains the standard for recommendation systems and other sparse workloads. A Parameter Server architecture separates workers (who compute gradients) from servers (who store parameters and apply updates).
+
+For dense models (like ResNet or BERT), the PS architecture creates a bottleneck: all workers send dense gradient updates to the servers simultaneously, saturating the server's network bandwidth. This "incast" problem drove the adoption of Ring AllReduce, which distributes the bandwidth load across all nodes.
+
+However, for **Recommendation Systems (DLRM)**, the model parameters are dominated by massive **Embedding Tables** (often 10TB+) that cannot fit on any single GPU. Furthermore, the updates are **sparse**: a batch of users interacts with only a tiny fraction (e.g., 0.001%) of the items.
+
+In this regime, Parameter Servers (often rebranded as "Embedding Servers") shine:
+1.  **Embedding Sharding**: The massive tables are partitioned across the PS fleet (often CPU nodes with massive DRAM).
+2.  **Sparse Lookups**: Workers send a list of IDs to the PS.
+3.  **Sparse Updates**: The PS returns only the requested embedding vectors, not the full table.
+
+This **Sparse Pull / Sparse Push** pattern avoids the bandwidth bottleneck of dense AllReduce. Modern implementations like TorchRec or Meta's hierarchical sharding place "hot" embeddings on GPUs and "cold" embeddings on CPU PS nodes, creating a tiered memory hierarchy for model parameters.
+
 ### Expert Parallelism (Mixture of Experts) {#sec-distributed-training-systems-systems-expert-parallelism-mixture-experts-bc45}
 
 While tensor parallelism splits dense layers across devices, **Expert Parallelism** enables scaling model capacity (parameters) without increasing compute cost (FLOPs) by using conditional computation. In a Mixture-of-Experts (MoE) architecture [@shazeer2017outrageously], the feed-forward network (FFN) of each transformer block is replaced by a set of $N$ "experts" (independent FFNs). For each token, a gating network selects a small subset (typically top-1 or top-2) of experts to process it.
@@ -1676,10 +1691,11 @@ In a distributed setting, experts are partitioned across workers. If we have 8 G
 
 The primary advantage is decoupling model size from compute budget. A trillion-parameter MoE model might use only 10B parameters per token, enabling training on feasible hardware budgets. The constraint is the **All-to-All** communication, which is bandwidth-intensive and sensitive to load imbalance (if all tokens route to one expert, that device becomes a straggler). Advanced load balancing losses and capacity factors are required to ensure uniform expert utilization.
 
-::: {.callout-note title="Archetype B (Scaled Lighthouse): Embedding Sharding"}
-**Archetype B (The Global Recommendation Engine)** faces a different memory wall than GPT-4. While LLMs are bound by the *computation* of dense layers, Archetype B is bound by the *capacity* of **Embedding Tables**. 
-
-A model serving billions of items can have embedding tables exceeding 10TB. This cannot fit in GPU memory, even with 3D parallelism. Instead, Archetype B uses **Embedding Sharding**: partitioning the tables across the CPU DRAM of hundreds of nodes. During the forward pass, the system performs **Sparse Lookups** across the network. The challenge here is not AllReduce throughput, but **All-to-All Latency** and the ability of the network to handle millions of small, unpredictable lookups simultaneously.
+::: {.callout-note title="Archetype B (Scaled Lighthouse): DLRM vs. LLM Scaling"}
+**Archetype B (The Global Recommendation Engine)** and **Archetype A (The LLM)** scale differently.
+*   **LLMs (Dense)**: Scale via Tensor/Pipeline Parallelism. Constraint: **Compute & Interconnect Bandwidth** (NVLink).
+*   **DLRMs (Sparse)**: Scale via Embedding Sharding (Parameter Servers). Constraint: **Memory Capacity & Interconnect Latency** (Random Access).
+This distinction dictates fundamentally different cluster designs: dense GPU pods for LLMs versus memory-rich CPU/GPU hybrids for RecSys.
 :::
 
 ### Trade-offs: The Bubble vs. Bandwidth Dilemma {#sec-distributed-training-systems-systems-model-parallelism-tradeoffs}

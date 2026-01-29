@@ -1841,6 +1841,33 @@ Several platforms provide feature store functionality, each with different trade
 
 @tbl-feature-store-buildbuy weighs the costs and benefits of building versus adopting an existing platform. For most organizations, starting with an open-source solution (Feast) or cloud-managed service provides faster time-to-value than building custom infrastructure. Custom feature stores become worthwhile at massive scale (billions of features, millions of QPS) where platform limitations become constraints.
 
+The feature store provides a consistent view of *structured* data. However, modern AI systems, particularly Large Language Models, require efficient access to *unstructured* data represented as dense vectors. This requirement has given rise to a new storage primitive.
+
+## Vector Databases and Retrieval Systems {#sec-storage-vector-databases-retrieval-systems-12ab}
+
+While Feature Stores manage the "structured context" (user history, item counts), Vector Databases manage the "semantic context" (document meaning, image content). They serve as the **Long-Term Memory** for AI systems, enabling Retrieval-Augmented Generation (RAG) and semantic search.
+
+::: {.callout-definition title="Vector Database"}
+**Vector Database**: A specialized database optimized for storing and querying high-dimensional vectors. Unlike relational databases (exact match) or search engines (keyword match), vector databases perform **Approximate Nearest Neighbor (ANN)** search to find vectors semantically similar to a query vector.
+:::
+
+### The System Challenge: ANN at Scale {#sec-storage-ann-at-scale-34cd}
+
+The core engineering challenge of a Vector DB is the trade-off between **Recall**, **Latency**, and **Memory**. An exact nearest neighbor search (k-NN) requires comparing the query against every vector in the database ($O(N)$), which is prohibitively slow for billion-scale datasets.
+
+To achieve sub-10ms latency, systems use Approximate Nearest Neighbor (ANN) algorithms that build index structures to prune the search space:
+
+*   **IVF (Inverted File Index)**: Partitions the vector space into Voronoi cells. Search is restricted to the cells closest to the query.
+*   **HNSW (Hierarchical Navigable Small World)**: Builds a multi-layer graph. Search starts at the top layer (coarse navigation) and descends to finer layers for precision. HNSW offers superior latency/recall trade-offs but consumes significantly more memory for the graph structure.
+*   **DiskANN**: Offloads the raw vectors to SSDs while keeping a compressed index in RAM, enabling datasets larger than system memory.
+
+### Distributed Consistency and Freshness {#sec-storage-vector-consistency-56ef}
+
+Unlike static training datasets, vector databases in production are often mutable. New documents are ingested, embedded, and indexed continuously.
+
+*   **Real-time Indexing**: Building an HNSW graph is computationally expensive. Systems often use a **Log-Structured Merge (LSM)** tree approach: new vectors go into a small, fresh in-memory index, while background processes merge them into the large, immutable on-disk index.
+*   **Consistency**: For RAG systems, "read-your-writes" consistency is critical. If a user uploads a document, they expect the AI to be able to answer questions about it immediately. This requires tight coupling between the embedding pipeline and the serving index.
+
 ## Model Registries and Artifact Management {#sec-storage-model-registries-artifact-management-c193}
 
 The preceding sections addressed storage for different phases of the ML lifecycle: training data infrastructure provides the raw material, checkpoint storage preserves model state during training for fault tolerance, and feature stores deliver runtime data for serving. But what about the trained models themselves? Training produces model weights, but deploying those weights to production requires its own infrastructure: storage, versioning, and governance for the trained artifacts.

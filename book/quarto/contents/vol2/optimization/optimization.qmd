@@ -51,22 +51,17 @@ In inference, the Key-Value (KV) cache grows linearly with sequence length, beco
 *   **INT4 KV Cache**: Compressing the cache to 4-bit integers to increase maximum batch size and context length.
 *   **Accuracy Impact**: Analyzing the sensitivity of attention mechanisms to cache precision.
 
-## Compiler and Kernel Optimization {#sec-optimization-scale-compiler}
+## Distributed System Optimization {#sec-optimization-scale-distributed-system}
 
-### The Memory Wall and Kernel Fusion {#sec-optimization-scale-fusion}
-Deep learning frameworks execute operations sequentially (e.g., `x = x + y`, `x = relu(x)`). Each operation reads from HBM and writes back to HBM.
-*   **The Cost**: For simple element-wise ops, the GPU spends 99% of time waiting for memory.
-*   **Fusion**: Compilers fuse sequences into a single kernel that reads once, computes multiple steps in registers/SRAM, and writes once.
+### FlashAttention and System Memory {#sec-optimization-scale-flashattention}
+Standard Attention is $O(N^2)$ in memory access, a scaling bottleneck that no amount of compute can overcome. FlashAttention typically addressed this through tiling, but at scale, it becomes a system primitive.
+*   **FlashAttention-2**: Optimizing parallelism across thread blocks to saturate A100/H100 GPUs.
+*   **Ring Attention**: Extending tiling across the network. By passing Key/Value blocks between GPUs in a ring, we can train on sequences longer than any single GPU's memory, effectively fusing communication into the attention kernel.
 
-### Tiling and FlashAttention {#sec-optimization-scale-flashattention}
-Standard Attention is $O(N^2)$ in memory access.
-*   **Tiling Logic**: FlashAttention tiles the computation to keep blocks of $Q, K, V$ in fast SRAM.
-*   **Recomputation**: Recomputing attention scores during the backward pass to avoid storing the massive $N 	imes N$ attention matrix.
-*   **Result**: Linear memory complexity and significant wall-clock speedup despite more FLOPs (because HBM access is the bottleneck).
-
-### Graph Compilation {#sec-optimization-scale-graph-compilation}
-*   **TorchCompile / XLA**: Capturing the full compute graph to perform global optimizations.
-*   **Pattern Matching**: Identifying subgraphs that can be replaced with optimized kernels (e.g., fusing LSTM cells).
+### Communication-Computation Overlap {#sec-optimization-scale-overlap}
+In the $\alpha$-$\beta$ model, latency is a fixed cost. System optimization aims to hide this cost entirely.
+*   **Kernel Overlap**: Launching communication kernels (NCCL) asynchronously alongside compute kernels (GEMM).
+*   **The Zero-Bubble Objective**: Structuring backward passes so that gradient communication for layer $L$ happens while layer $L-1$ is computing, requiring precise scheduling and priority streams.
 
 ## Algorithmic System Optimizations {#sec-optimization-scale-algorithmic}
 
