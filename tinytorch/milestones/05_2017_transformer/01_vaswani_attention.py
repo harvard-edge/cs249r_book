@@ -59,7 +59,7 @@ by passing THREE increasingly difficult challenges.
     Input:  P Y T H O N  →  Output: N O H T Y P
 
     ┌─┬─┬─┬─┬─┬─┐              ┌─┬─┬─┬─┬─┬─┐
-    │P│Y│T│H│O│N│     →       │N│O│H│T│Y│P│
+    │P│Y│T│H│O│N│     →        │N│O│H│T│Y│P│
     └─┴─┴─┴─┴─┴─┘              └─┴─┴─┴─┴─┴─┘
      0 1 2 3 4 5                5 4 3 2 1 0  ← Attention pattern
 
@@ -468,93 +468,231 @@ def run_challenge(name, model, train_data, test_data, optimizer, loss_fn, epochs
     return passed, final_acc
 
 
-def main():
-    """Main training loop with three challenges."""
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
 
-    # Banner
-    console.print()
-    console.print(Panel.fit(
-        "[bold cyan]MILESTONE 05: ATTENTION IS ALL YOU NEED[/bold cyan]\n\n"
-        "[yellow]Prove your attention mechanism works by passing THREE challenges.[/yellow]\n\n"
-        "Challenge 1: Sequence Reversal (PYTHON -> NOHTYP)\n"
-        "Challenge 2: Sequence Copying  (TENSOR -> TENSOR)\n"
-        "Challenge 3: Mixed Tasks       ([R]ABC -> CBA, [C]ABC -> ABC)",
-        border_style="cyan",
-        title="The Transformer Challenge"
-    ))
-    console.print()
+# Model hyperparameters (shared across all challenges)
+CONFIG = {
+    'vocab_size': 29,      # 0=pad, 1-26=A-Z, 27=[R], 28=[C]
+    'seq_len': 6,          # Sequence length for tasks
+    'embed_dim': 64,       # Embedding dimensions
+    'num_heads': 4,        # Attention heads
+    'num_layers': 2,       # Transformer blocks
+    'lr': 0.001,           # Learning rate
+}
 
-    # Configuration
-    vocab_size = 29  # 0=pad, 1-26=A-Z, 27=[R], 28=[C]
-    seq_len = 6
-    embed_dim = 64
-    num_heads = 4
-    num_layers = 2
-    lr = 0.001
 
-    console.print(Panel(
-        f"[bold]Model Configuration[/bold]\n"
-        f"  Vocabulary:  {vocab_size} tokens (A-Z + special)\n"
-        f"  Sequence:    {seq_len} letters\n"
-        f"  Embedding:   {embed_dim} dimensions\n"
-        f"  Attention:   {num_heads} heads\n"
-        f"  Layers:      {num_layers} transformer blocks\n"
-        f"  Learning:    {lr}",
-        title="Configuration",
-        border_style="blue"
-    ))
+def build_model(config=CONFIG):
+    """
+    Build a fresh transformer model with optimizer.
 
-    # Build model
-    console.print("\n[bold]Building Transformer...[/bold]")
+    Returns:
+        model: AttentionTransformer instance
+        optimizer: Adam optimizer
+        loss_fn: CrossEntropyLoss
+    """
     model = AttentionTransformer(
-        vocab_size=vocab_size,
-        embed_dim=embed_dim,
-        num_heads=num_heads,
-        seq_len=seq_len + 1,  # +1 for task prefix in challenge 3
-        num_layers=num_layers
+        vocab_size=config['vocab_size'],
+        embed_dim=config['embed_dim'],
+        num_heads=config['num_heads'],
+        seq_len=config['seq_len'] + 1,  # +1 for task prefix in challenge 3
+        num_layers=config['num_layers']
     )
-    console.print(f"  Total parameters: {model.total_params:,}")
 
     for param in model.parameters():
         param.requires_grad = True
 
-    optimizer = Adam(model.parameters(), lr=lr)
+    optimizer = Adam(model.parameters(), lr=config['lr'])
     loss_fn = CrossEntropyLoss()
 
-    results = {}
+    return model, optimizer, loss_fn
 
-    # Challenge 1: Sequence Reversal
-    train_rev = generate_reversal_data(600, seq_len)
-    test_rev = generate_reversal_data(200, seq_len)
-    passed1, acc1 = run_challenge(
+
+# =============================================================================
+# CHALLENGE 1: SEQUENCE REVERSAL
+# =============================================================================
+
+def challenge_1_reversal(model, optimizer, loss_fn, config=CONFIG):
+    """
+    Challenge 1: Learn to reverse sequences (PYTHON -> NOHTYP).
+
+    Task: Input sequence reversed in output
+    ──────────────────────────────────────
+        Input:   P  Y  T  H  O  N
+        Output:  N  O  H  T  Y  P
+
+    Required Attention Pattern (anti-diagonal):
+    ───────────────────────────────────────────
+        Output position 0 (N) attends to input position 5 (N)
+        Output position 1 (O) attends to input position 4 (O)
+        Output position 2 (H) attends to input position 3 (H)
+        ...
+
+        Attention weights matrix (ideal):
+                    Input positions
+                    0  1  2  3  4  5
+        Output  0 [ .  .  .  .  .  █ ]  → attends to pos 5
+        pos     1 [ .  .  .  .  █  . ]  → attends to pos 4
+                2 [ .  .  .  █  .  . ]  → attends to pos 3
+                3 [ .  .  █  .  .  . ]  → attends to pos 2
+                4 [ .  █  .  .  .  . ]  → attends to pos 1
+                5 [ █  .  .  .  .  . ]  → attends to pos 0
+
+    Returns:
+        passed: bool - whether target accuracy was achieved
+        accuracy: float - final test accuracy
+    """
+    seq_len = config['seq_len']
+
+    train_data = generate_reversal_data(600, seq_len)
+    test_data = generate_reversal_data(200, seq_len)
+
+    return run_challenge(
         "CHALLENGE 1: SEQUENCE REVERSAL",
-        model, train_rev, test_rev, optimizer, loss_fn,
+        model, train_data, test_data, optimizer, loss_fn,
         epochs=50, target_acc=95
     )
-    results['reversal'] = (passed1, acc1)
 
-    # Challenge 2: Sequence Copying (same model, different task)
-    train_copy = generate_copy_data(600, seq_len)
-    test_copy = generate_copy_data(200, seq_len)
-    passed2, acc2 = run_challenge(
+
+# =============================================================================
+# CHALLENGE 2: SEQUENCE COPYING
+# =============================================================================
+
+def challenge_2_copying(model, optimizer, loss_fn, config=CONFIG):
+    """
+    Challenge 2: Learn to copy sequences (TENSOR -> TENSOR).
+
+    Task: Input sequence copied to output (identity)
+    ────────────────────────────────────────────────
+        Input:   T  E  N  S  O  R
+        Output:  T  E  N  S  O  R
+
+    Required Attention Pattern (diagonal):
+    ──────────────────────────────────────
+        Output position 0 (T) attends to input position 0 (T)
+        Output position 1 (E) attends to input position 1 (E)
+        Output position 2 (N) attends to input position 2 (N)
+        ...
+
+        Attention weights matrix (ideal):
+                    Input positions
+                    0  1  2  3  4  5
+        Output  0 [ █  .  .  .  .  . ]  → attends to pos 0
+        pos     1 [ .  █  .  .  .  . ]  → attends to pos 1
+                2 [ .  .  █  .  .  . ]  → attends to pos 2
+                3 [ .  .  .  █  .  . ]  → attends to pos 3
+                4 [ .  .  .  .  █  . ]  → attends to pos 4
+                5 [ .  .  .  .  .  █ ]  → attends to pos 5
+
+    Why same model?
+    ───────────────
+    Uses the SAME model from Challenge 1, demonstrating that
+    transformers can adapt their attention patterns to new tasks
+    without architectural changes.
+
+    Returns:
+        passed: bool - whether target accuracy was achieved
+        accuracy: float - final test accuracy
+    """
+    seq_len = config['seq_len']
+
+    train_data = generate_copy_data(600, seq_len)
+    test_data = generate_copy_data(200, seq_len)
+
+    return run_challenge(
         "CHALLENGE 2: SEQUENCE COPYING",
-        model, train_copy, test_copy, optimizer, loss_fn,
+        model, train_data, test_data, optimizer, loss_fn,
         epochs=50, target_acc=95
     )
-    results['copying'] = (passed2, acc2)
 
-    # Challenge 3: Mixed Tasks (the real test)
-    train_mixed = generate_mixed_data(800, seq_len)
-    test_mixed = generate_mixed_data(300, seq_len)
-    passed3, acc3 = run_challenge(
+
+# =============================================================================
+# CHALLENGE 3: MIXED TASK INFERENCE
+# =============================================================================
+
+def challenge_3_mixed(config=CONFIG):
+    """
+    Challenge 3: Learn BOTH tasks with prefix conditioning.
+
+    Task: Prefix token controls behavior
+    ────────────────────────────────────
+        [R] A B C D E F  →  F E D C B A   (reverse)
+        [C] A B C D E F  →  A B C D E F   (copy)
+
+        The prefix token [R] or [C] tells the model what to do!
+        This is how GPT-style instruction following works.
+
+    Required Attention Pattern (context-dependent):
+    ───────────────────────────────────────────────
+        When prefix = [R]:
+                      [R] A  B  C  D  E  F
+            Output A [ .  .  .  .  .  .  █ ]  → attends to F
+            Output B [ .  .  .  .  .  █  . ]  → attends to E
+            ...
+
+        When prefix = [C]:
+                      [C] A  B  C  D  E  F
+            Output A [ .  █  .  .  .  .  . ]  → attends to A
+            Output B [ .  .  █  .  .  .  . ]  → attends to B
+            ...
+
+        The model learns to READ the prefix and ROUTE accordingly!
+
+    Why fresh model?
+    ────────────────
+    After challenges 1 & 2, the model has been trained sequentially:
+      1. Learn reversal → weights encode anti-diagonal pattern
+      2. Learn copying  → weights OVERWRITE to diagonal pattern
+
+    By challenge 3, the model is "stuck" in copy mode and can't
+    learn conditional behavior. Starting fresh allows it to learn
+    BOTH patterns simultaneously, conditioned on the prefix token.
+
+    This is the key insight: transformers can learn to dynamically
+    route information based on context (the prefix), which is the
+    foundation of instruction-following in modern LLMs.
+
+    Returns:
+        passed: bool - whether target accuracy was achieved
+        accuracy: float - final test accuracy
+    """
+    seq_len = config['seq_len']
+
+    console.print("\n[dim]Building fresh model for mixed task learning...[/dim]")
+    model, optimizer, loss_fn = build_model(config)
+    console.print(f"[dim]  Total parameters: {model.total_params:,}[/dim]")
+
+    train_data = generate_mixed_data(800, seq_len)
+    test_data = generate_mixed_data(300, seq_len)
+
+    return run_challenge(
         "CHALLENGE 3: MIXED TASK INFERENCE",
-        model, train_mixed, test_mixed, optimizer, loss_fn,
+        model, train_data, test_data, optimizer, loss_fn,
         epochs=60, target_acc=90
     )
-    results['mixed'] = (passed3, acc3)
 
-    # Final Summary
-    console.print("\n" + "="*60)
+
+# =============================================================================
+# RESULTS DISPLAY
+# =============================================================================
+
+def print_final_results(results):
+    """
+    Print the final results table and success/failure message.
+
+    Args:
+        results: dict with keys 'reversal', 'copying', 'mixed'
+                 each containing (passed: bool, accuracy: float)
+
+    Returns:
+        0 if all passed, 1 otherwise
+    """
+    passed1, acc1 = results['reversal']
+    passed2, acc2 = results['copying']
+    passed3, acc3 = results['mixed']
+
+    console.print("\n" + "=" * 60)
     console.print(Panel.fit("[bold]FINAL RESULTS[/bold]", border_style="cyan"))
 
     table = Table(box=box.ROUNDED)
@@ -620,6 +758,81 @@ def main():
             title="Keep Working"
         ))
         return 1
+
+
+# =============================================================================
+# MAIN ENTRY POINT
+# =============================================================================
+
+def main():
+    """
+    Main entry point: Run all three transformer challenges.
+
+    Challenge Structure:
+    ────────────────────
+    1. REVERSAL  - Can attention learn anti-diagonal patterns?
+    2. COPYING   - Can attention learn diagonal patterns? (same model)
+    3. MIXED     - Can attention learn conditional behavior? (fresh model)
+
+    The first two challenges use the same model to show adaptability.
+    The third uses a fresh model to properly test prefix conditioning.
+    """
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # BANNER
+    # ─────────────────────────────────────────────────────────────────────────
+    console.print()
+    console.print(Panel.fit(
+        "[bold cyan]MILESTONE 05: ATTENTION IS ALL YOU NEED[/bold cyan]\n\n"
+        "[yellow]Prove your attention mechanism works by passing THREE challenges.[/yellow]\n\n"
+        "Challenge 1: Sequence Reversal (PYTHON -> NOHTYP)\n"
+        "Challenge 2: Sequence Copying  (TENSOR -> TENSOR)\n"
+        "Challenge 3: Mixed Tasks       ([R]ABC -> CBA, [C]ABC -> ABC)",
+        border_style="cyan",
+        title="The Transformer Challenge"
+    ))
+    console.print()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # CONFIGURATION
+    # ─────────────────────────────────────────────────────────────────────────
+    console.print(Panel(
+        f"[bold]Model Configuration[/bold]\n"
+        f"  Vocabulary:  {CONFIG['vocab_size']} tokens (A-Z + special)\n"
+        f"  Sequence:    {CONFIG['seq_len']} letters\n"
+        f"  Embedding:   {CONFIG['embed_dim']} dimensions\n"
+        f"  Attention:   {CONFIG['num_heads']} heads\n"
+        f"  Layers:      {CONFIG['num_layers']} transformer blocks\n"
+        f"  Learning:    {CONFIG['lr']}",
+        title="Configuration",
+        border_style="blue"
+    ))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # BUILD MODEL (shared for challenges 1 & 2)
+    # ─────────────────────────────────────────────────────────────────────────
+    console.print("\n[bold]Building Transformer...[/bold]")
+    model, optimizer, loss_fn = build_model()
+    console.print(f"  Total parameters: {model.total_params:,}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # RUN CHALLENGES
+    # ─────────────────────────────────────────────────────────────────────────
+    results = {}
+
+    # Challenge 1: Sequence Reversal
+    results['reversal'] = challenge_1_reversal(model, optimizer, loss_fn)
+
+    # Challenge 2: Sequence Copying (same model, different task)
+    results['copying'] = challenge_2_copying(model, optimizer, loss_fn)
+
+    # Challenge 3: Mixed Tasks (fresh model - see docstring for why)
+    results['mixed'] = challenge_3_mixed()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # FINAL RESULTS
+    # ─────────────────────────────────────────────────────────────────────────
+    return print_final_results(results)
 
 
 if __name__ == "__main__":

@@ -512,7 +512,7 @@ class Conv2d:
         1. Extract input dimensions and validate
         2. Calculate output dimensions
         3. Apply padding if needed
-        4. Implement 6 nested loops for full convolution
+        4. Implement 7 nested loops for full convolution
         5. Add bias if present
 
         LOOP STRUCTURE:
@@ -580,7 +580,7 @@ class Conv2d:
         # Initialize output
         output = np.zeros((batch_size, out_channels, out_height, out_width))
 
-        # Explicit 6-nested loop convolution to show complexity
+        # Explicit 7-nested loop convolution to show complexity
         for b in range(batch_size):
             for out_ch in range(out_channels):
                 for out_h in range(out_height):
