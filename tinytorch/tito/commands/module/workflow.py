@@ -1109,28 +1109,18 @@ class ModuleWorkflowCommand(BaseCommand):
             if export_target != "unknown":
                 ensure_writable_target(export_target)
             
-            # Run nbdev_export directly on the student's notebook
-            # Use sys.executable to ensure we use the same Python that's running tito
-            import sys
+            # Run nbdev_export using Python API directly (more reliable than subprocess)
+            from nbdev.export import nb_export
+            
             self.console.print(f"[dim]📦 Exporting {notebook_path.name} → tinytorch/core/...[/dim]")
             
-            result = subprocess.run(
-                [sys.executable, "-m", "nbdev.export", "--path", str(notebook_path)],
-                capture_output=True,
-                text=True,
-                cwd=Path.cwd()
-            )
+            lib_path = Path.cwd() / "tinytorch"
+            nb_export(notebook_path, lib_path=lib_path)
             
-            if result.returncode == 0:
-                self.console.print(f"[dim]✅ Your code is now part of the tinytorch package![/dim]")
-                return 0
-            else:
-                self.console.print(f"[red]❌ Export failed[/red]")
-                if result.stderr.strip():
-                    self.console.print(f"[dim]Error: {result.stderr.strip()}[/dim]")
-                return 1
+            self.console.print(f"[dim]✅ Your code is now part of the tinytorch package![/dim]")
+            return 0
                 
-        except FileNotFoundError:
+        except ImportError:
             self.console.print("[red]❌ nbdev not found. Is your environment set up?[/red]")
             return 1
         except Exception as e:
