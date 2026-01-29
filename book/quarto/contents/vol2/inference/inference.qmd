@@ -47,6 +47,7 @@ Distributed inference systems must solve problems that do not exist at single-ma
 
 [^fn-load-balancing]: **Load balancing** in inference systems differs fundamentally from traditional web load balancing. Web servers typically complete requests in milliseconds with uniform processing time; GPU inference workers handle requests lasting from 10ms to 30+ seconds with high variance. This variance makes techniques like least-connections and queue-depth-aware routing essential, whereas simple round-robin suffices for stateless web workloads.
 
+
 The economics of inference at scale differ fundamentally from training economics. Training costs are dominated by compute time and can be amortized over the lifetime of the resulting model. Inference costs are directly tied to user traffic and revenue. An e-commerce recommendation system might serve millions of requests per second during peak shopping periods, with each request contributing directly to potential revenue. The cost of overprovisioning during quiet periods or underprovisioning during peaks translates immediately to business impact. Inference efficiency becomes a first-order concern in ways that training efficiency rarely achieves.
 
 This chapter develops the principles and techniques for building inference systems that scale to meet these demands. We examine when distributed inference becomes necessary, how to architect systems that maintain latency bounds under varying load, and how to optimize the economics of inference through efficient resource utilization. The goal is not merely to make inference work at scale but to make it work efficiently, reliably, and economically.
@@ -60,6 +61,7 @@ Three distinct signals indicate when distributed inference becomes necessary rat
 [^fn-hbm3]: **High Bandwidth Memory 3 (HBM3)**: A 3D-stacked DRAM technology providing 3.35 TB/s bandwidth on the H100, compared to 1 TB/s for HBM2e on the A100. This 3x bandwidth improvement directly enables larger batch sizes and faster token generation for memory-bandwidth-bound LLM decode operations.
 
 [^fn-dlrm]: **Deep Learning Recommendation Model (DLRM)**: Meta's reference architecture (2019) for large-scale recommendation, processing hundreds of billions of inferences daily. DLRM separates dense features (MLP processing) from sparse features (embedding lookups), enabling hybrid CPU-GPU architectures. Embedding tables can exceed 100TB, requiring distributed storage and caching strategies for serving.
+
 
 **Throughput limitations** emerge when request volume exceeds single-machine capacity even with optimal batching. Consider a recommendation system serving 100,000 queries per second with a 10ms latency budget. If single-machine throughput peaks at 10,000 QPS, no amount of optimization on that machine can satisfy demand. Horizontal scaling across multiple replicas becomes mandatory.
 
@@ -107,6 +109,7 @@ Distributing inference across multiple machines introduces overhead absent from 
 **Serialization overhead** converts in-memory tensors to network-transmittable formats. While modern serialization libraries like FlatBuffers and Cap'n Proto[^fn-serialization] minimize this overhead, large activation tensors still require meaningful time to serialize and deserialize. A 1GB activation tensor takes approximately 100 milliseconds to serialize, even with optimized libraries.
 
 [^fn-serialization]: **Zero-copy serialization**: FlatBuffers (Google) and Cap'n Proto enable reading serialized data directly without parsing or unpacking, eliminating the CPU overhead of traditional formats like Protocol Buffers or JSON. For distributed inference, this reduces per-request serialization overhead from milliseconds to microseconds.
+
 
 **Load balancer latency** adds another layer. Requests must be routed to appropriate replicas, which requires examining request metadata, consulting routing tables, and forwarding to selected backends. Well-optimized load balancers add 100–500 microseconds; poorly configured ones can add milliseconds.
 
@@ -284,6 +287,7 @@ Serving frameworks fall into distinct categories based on their design philosoph
 
 [^fn-autoregressive]: **Autoregressive generation**: The process of generating output tokens one at a time, where each new token depends on all previously generated tokens. This sequential dependency creates the memory-bandwidth bottleneck that dominates LLM serving costs, as the entire model must be read from memory for each generated token.
 
+
 **Optimization-focused runtimes** maximize inference speed through compilation. TensorRT provides graph optimization, kernel fusion, precision calibration, and NVIDIA GPU specific optimizations. ONNX Runtime offers cross-platform optimization and execution providers for different hardware. OpenVINO delivers Intel hardware optimization, model compression, and heterogeneous execution.
 
 ### Framework Selection Criteria {#sec-inference-scale-framework-selection-criteria-6c20}
@@ -327,6 +331,7 @@ Selection depends on model type, deployment constraints, and organizational fact
 vLLM[^fn-vllm-name] [@kwon2023vllm] has emerged as the leading open-source LLM serving framework due to its PagedAttention innovation. Understanding its architecture illustrates key LLM serving principles.
 
 [^fn-vllm-name]: **vLLM**: The name stands for "virtual LLM," reflecting its core innovation of applying virtual memory concepts to KV cache management. Developed at UC Berkeley and released in 2023, vLLM achieved 24x throughput improvement over HuggingFace Transformers in initial benchmarks.
+
 
 The core innovations in vLLM include PagedAttention (virtual memory for KV cache, covered in @sec-inference-scale-pagedattention-3c94), continuous batching (add/remove requests mid-generation), optimized attention kernels (FlashAttention [@dao2022flashattention] integration), and tensor parallelism (automatic model sharding across GPUs).
 
@@ -1256,6 +1261,7 @@ Autoregressive language models present a unique batching challenge that static a
 
 [^fn-orca]: **Orca**: Named after the killer whale known for highly coordinated group hunting, Orca pioneered iteration-level scheduling for LLM serving at Microsoft in 2022. The system's insight that sequences could enter and exit batches at each decode step, rather than waiting for entire batches to complete, transformed LLM serving economics.
 
+
 Consider a batch of 8 sequences. If one sequence completes after 10 tokens while others require 100 tokens, the completed sequence's GPU resources sit idle for 90 iterations. With traditional batching:
 
 $$\text{Wasted compute} = \frac{(100 - 10) \times 1}{100 \times 8} = 11.25\%$$
@@ -1839,6 +1845,7 @@ Autoregressive generation without caching requires $O(t^2)$ computation per toke
 
 [^fn-transformer-attention]: **Transformer attention mechanics**: In transformer models, the self-attention mechanism computes attention scores between all pairs of tokens using query (Q), key (K), and value (V) projections. For a sequence of length $t$, this requires computing $t \times t$ attention weights. During autoregressive generation, each new token must attend to all previous tokens. Without caching, this means recomputing all previous K and V projections for every generated token. For readers seeking deeper background, see Vaswani et al. [@vaswani2017attention] or standard deep learning references.
 
+
 The cache size grows with context as calculated by @eq-kv-cache-size:
 
 $$\text{KV cache size} = 2 \times L \times H \times S \times B \times P$$ {#eq-kv-cache-size}
@@ -1907,6 +1914,7 @@ Production systems report 60-80% memory waste from fragmentation under realistic
 PagedAttention [@kwon2023vllm], introduced in vLLM, applies virtual memory[^fn-virtual-memory] concepts to KV cache management. Instead of contiguous allocation, the KV cache is divided into fixed-size pages (typically 16-256 tokens), and sequences are allocated pages on demand.
 
 [^fn-virtual-memory]: **Virtual memory for KV cache**: Just as operating systems use virtual memory to provide processes with contiguous address spaces backed by non-contiguous physical memory, PagedAttention provides sequences with logically contiguous KV caches backed by non-contiguous GPU memory blocks. This enables dynamic allocation, sharing, and efficient memory utilization without fragmentation.
+
 
 @fig-paged-attention illustrates the key concepts including page tables that map logical sequence positions to physical memory pages, block size that defines the number of tokens per page (typically 16 tokens), and physical blocks that provide fixed-size memory allocations assignable to any sequence.
 
@@ -2174,6 +2182,7 @@ Trade-off: Cannot attend to very old tokens, but sufficient for most tasks.
 
 [^fn-gqa]: **GQA trade-off**: Grouped-query attention interpolates between multi-head attention (MHA, one KV head per query head) and multi-query attention (MQA, one KV head for all query heads). GQA with 8 KV heads for 64 query heads achieves 8x KV cache reduction versus MHA while maintaining most of MHA's model quality, unlike MQA which can degrade quality significantly.
 
+
 +-------------------------+--------------+---------------------------+
 | **Attention Type**      | **KV Heads** | **Cache Size (relative)** |
 +:========================+=============:+==========================:+
@@ -2189,6 +2198,7 @@ Modern models like Llama 2 [@touvron2023llama2] and Mistral use GQA specifically
 Autoregressive generation is inherently sequential: each token depends on previous tokens. Speculative decoding[^fn-speculative] [@leviathan2023speculative; @chen2023accelerating] breaks this bottleneck by using a smaller draft model to predict multiple tokens, then verifying them in parallel with the target model.
 
 [^fn-speculative]: **Speculative execution in LLMs**: The concept borrows from CPU speculative execution, where processors predict branch outcomes and execute instructions ahead of confirmation. Similarly, speculative decoding predicts multiple tokens and processes them speculatively, rolling back only when the target model disagrees. Unlike CPU speculation (which is invisible to software), LLM speculation requires explicit acceptance/rejection logic.
+
 
 **Algorithm**:
 
@@ -2650,6 +2660,7 @@ Mixture-of-Experts (MoE)[^fn-moe] models present unique sharding challenges beca
 
 [^fn-moe]: **Mixture-of-Experts (MoE)**: An architecture where only a subset of model parameters (the "experts") are activated for each input, selected by a learned gating network. This enables models with very high total parameter counts (for capacity) while maintaining computational cost proportional to active parameters. The trade-off is increased memory footprint and communication complexity for expert routing.
 
+
 In an MoE layer, a gating network selects $k$ experts (out of $E$ total) for each token:
 
 $$\text{Output} = \sum_{i \in \text{top-}k} g_i \cdot \text{Expert}_i(\text{input})$$
@@ -2955,6 +2966,7 @@ NVLink bandwidth has evolved significantly over GPU generations.[^fn-nvlink]
 
 [^fn-nvlink]: **NVLink evolution**: NVLink bandwidth has grown from 160 GB/s (Pascal, 2016) to 900 GB/s bidirectional (Hopper, 2022) to 1.8 TB/s (Blackwell, 2024). This 10x improvement enables tensor parallelism across 8+ GPUs with less than 5% communication overhead, making large model inference practical.
 
+
 ### Sharding Strategy Selection {#sec-inference-scale-sharding-strategy-selection-f69c}
 
 The choice of sharding strategy depends on model architecture and deployment priorities. @tbl-sharding-selection evaluates each approach across four critical factors:
@@ -3004,9 +3016,10 @@ For homogeneous servers with identical service times, both achieve near-optimal 
 
 Under these realistic conditions, uninformed strategies perform poorly. The maximum queue length under random assignment follows @eq-random-max-queue[^fn-theta-notation]:
 
+[^fn-theta-notation]: **Theta Notation (Θ)**: Asymptotic tight bound indicating both upper (O) and lower (Ω) complexity bounds match. Unlike O(f(n)) which may be loose, Θ(f(n)) precisely characterizes growth rate. In queueing analysis for inference systems, tight bounds enable accurate capacity planning: Θ(log n / log log n) queue length means exactly that scaling, not just "at most".
+
 $$E[\text{max queue}] = \Theta\left(\frac{\log n}{\log \log n}\right)$$ {#eq-random-max-queue}
 
-[^fn-theta-notation]: **Theta Notation (Θ)**: Asymptotic tight bound indicating both upper (O) and lower (Ω) complexity bounds match. Unlike O(f(n)) which may be loose, Θ(f(n)) precisely characterizes growth rate. In queueing analysis for inference systems, tight bounds enable accurate capacity planning: Θ(log n / log log n) queue length means exactly that scaling, not just "at most".
 
 where $n$ is the number of servers. For 1,000 servers, this is approximately 4-5 requests. This seems small, but the unlucky requests in long queues experience significantly higher latency.
 
@@ -3015,6 +3028,7 @@ where $n$ is the number of servers. For 1,000 servers, this is approximately 4-5
 A remarkable result in load balancing theory [@mitzenmacher2001power] shows that querying just two random servers before making a routing decision provides exponentially better load distribution than random assignment.[^fn-balls-bins]
 
 [^fn-balls-bins]: **Balls-into-bins problem**: The power-of-two-choices result comes from probabilistic analysis of throwing balls into bins. With random placement, maximum load is $\Theta(\log n / \log \log n)$. With two choices and placing in the less-loaded bin, maximum load drops to $\Theta(\log \log n)$. This exponential improvement from a constant-factor change in the algorithm is a foundational result in randomized algorithms.
+
 
 The power-of-two-choices algorithm operates as follows. Select two servers uniformly at random. Query both for their current queue length. Route the request to the server with the shorter queue.
 
@@ -3173,6 +3187,7 @@ For these workloads, routing the same user or session to the same server improve
 **Consistent hashing**[^fn-consistent-hashing] [@karger1997consistent] maps requests to servers based on a hash of the routing key (user ID, session ID):
 
 [^fn-consistent-hashing]: **Consistent hashing**: Originally developed for distributed caching (Akamai, 1997), consistent hashing arranges servers on a virtual ring and assigns requests to the nearest server clockwise. When a server fails, only requests that were assigned to that server remap to the next server, minimizing disruption. This property is essential for maintaining KV cache locality during scaling events.
+
 
 $$\text{server}(request) = \arg\min_{s \in S} \text{distance}(\text{hash}(key), \text{hash}(s))$$
 
@@ -3376,6 +3391,7 @@ When servers become overloaded, routing more requests exacerbates the problem. C
 **Circuit breaker pattern**[^fn-circuit-breaker] [@nygard2007releaseit]:
 
 [^fn-circuit-breaker]: **Circuit breaker**: Borrowed from electrical engineering, where circuit breakers prevent electrical fires by cutting power when current exceeds safe levels. In distributed systems, circuit breakers prevent cascade failures by quickly failing requests to unhealthy services rather than waiting for timeouts. The pattern was popularized by Netflix's Hystrix library and is now standard in service mesh implementations like Envoy and Istio.
+
 
 ```
 States: CLOSED → OPEN → HALF-OPEN → CLOSED
@@ -3653,6 +3669,7 @@ The bulkhead pattern[^fn-bulkhead] [@nygard2007releaseit] physically isolates te
 
 [^fn-bulkhead]: **Bulkhead pattern origins**: The Titanic's bulkheads failed because they did not extend to the top of the ship, allowing water to spill over as the ship tilted. Modern software bulkheads learn from this: effective isolation requires complete separation (dedicated resources) rather than partial isolation (shared pools with quotas), at least for critical workloads.
 
+
 **Deployment-level bulkheads** dedicate replicas to specific tenants or tenant groups. @fig-bulkhead-patterns illustrates complete isolation between gold and standard tiers:
 
 ::: {#fig-bulkhead-patterns fig-env="figure" fig-pos="htb" fig-cap="**Bulkhead Isolation Patterns**. To prevent cascading failures in multi-tenant systems, bulkheads isolate resources. **Deployment-level bulkheads** (shown) assign dedicated physical replicas to high-priority tenants, ensuring complete isolation. **Request-level bulkheads** enforce strict concurrency limits within shared processes. Like ship compartments, these boundaries ensure that a failure or resource exhaustion in one segment cannot sink the entire platform." fig-alt="Two-tier system diagram. Gold tier at top with dedicated load balancer and 2 replicas. Standard tier below with shared load balancer and 3 replicas, one showing failure. Dashed line marks complete isolation boundary between tiers."}
@@ -3787,6 +3804,7 @@ Shared pool: 10GB (12.5%)
 - **MIG (Multi-Instance GPU)**[^fn-mig]: Hardware partitioning of A100/H100 into isolated GPU instances
 
 [^fn-mig]: **Multi-Instance GPU (MIG)**: NVIDIA technology introduced with Ampere (A100) that partitions a GPU into up to 7 isolated instances, each with dedicated memory bandwidth and L2 cache. Unlike time-slicing, MIG provides hardware-level isolation with guaranteed performance, enabling secure multi-tenancy on expensive datacenter GPUs.
+
 - **Time-slicing**: Cooperative scheduling between models (higher overhead)
 - **Dedicated GPUs**: Each model gets dedicated hardware (lower utilization)
 
@@ -3898,6 +3916,7 @@ $$T_{cold start} = T_{provision} + T_{load} + T_{warmup}$$ {#eq-cold-start-time}
 **Provisioning time** ($T_{provision}$): Acquiring a GPU instance takes 30 seconds to several minutes depending on cloud provider and GPU type.[^fn-cold-start]
 
 [^fn-cold-start]: **Cold start in ML vs. serverless**: The cold start problem for GPU inference is 10-100x worse than for serverless functions. Lambda functions cold start in 100ms-1s; GPU inference cold starts in 1-10 minutes due to GPU allocation, model loading, and CUDA initialization. This fundamental difference makes predictive scaling and warm pools essential for GPU workloads.
+
 
 **Model loading time** ($T_{load}$): Loading model weights from storage to GPU memory. For large models:
 
@@ -4214,6 +4233,7 @@ Cloud providers offer discounted GPU instances[^fn-spot] that can be reclaimed w
 
 [^fn-spot]: **Spot instance economics**: Spot instances represent cloud providers selling unused capacity at steep discounts (60-90%). The catch is 30-second to 2-minute termination notice. For inference, this means designing for graceful degradation: in-flight requests may need to be re-routed or failed, and KV cache state is lost. The cost savings justify this complexity for non-critical or burst traffic.
 
+
 +----------------------+--------------+-------------------------+-----------------+
 | **Instance Type**    | **Discount** | **Interruption Notice** | **Use Case**    |
 +:=====================+=============:+:========================+:================+
@@ -4347,6 +4367,7 @@ Semantic caching[^fn-semantic-cache] (caching based on embedding similarity rath
 
 [^fn-semantic-cache]: **Semantic caching**: Unlike traditional exact-match caching, semantic caching returns cached responses for queries that are semantically similar to previously seen queries. This requires embedding the query and searching a vector database for similar cached queries. The trade-off is increased complexity and potential for incorrect cache hits when semantically similar queries should produce different responses.
 
+
 **Pattern 3: Federated inference with model sharding**
 
 For the largest models, shard across regions:
@@ -4469,9 +4490,10 @@ LLM inference consists of two distinct phases with different computational chara
 
 **Prefill phase**: Process the entire input prompt in parallel. Computation scales with prompt length. Memory access pattern is compute-bound (high arithmetic intensity[^fn-arithmetic-intensity]).
 
+[^fn-arithmetic-intensity]: **Arithmetic intensity**: The ratio of compute operations to memory accesses, measured in FLOPs per byte. Prefill achieves 100+ FLOPs/byte (compute-bound), while decode achieves 1-10 FLOPs/byte (memory-bound). This 10-100x difference explains why prefill and decode require fundamentally different optimization strategies.
+
 **Decode phase**: Generate output tokens one at a time. Each token requires loading entire model weights. Memory access pattern is bandwidth-bound (low arithmetic intensity).
 
-[^fn-arithmetic-intensity]: **Arithmetic intensity**: The ratio of compute operations to memory accesses, measured in FLOPs per byte. Prefill achieves 100+ FLOPs/byte (compute-bound), while decode achieves 1-10 FLOPs/byte (memory-bound). This 10-100x difference explains why prefill and decode require fundamentally different optimization strategies.
 
 +-------------+-------------------+-------------------+----------------+-------------------+
 | **Phase**   | **Computation**   | **Memory Access** | **Bottleneck** | **Optimal Batch** |
@@ -4487,6 +4509,7 @@ This dichotomy creates a scheduling challenge: prefill operations are long-runni
 **Chunked prefill**[^fn-chunked-prefill] addresses this by breaking long prompts into fixed-size chunks that interleave with decode operations:
 
 [^fn-chunked-prefill]: **Chunked prefill motivation**: Without chunking, a 32K-token prompt blocks decode for 5-30 seconds while prefill completes. Chunking divides the prompt into 256–1024 token chunks processed between decode iterations, bounding decode latency at the cost of slightly longer prefill time. This trade-off favors interactive applications where decode responsiveness matters more than total completion time.
+
 
 $$\text{Chunk latency} = \frac{\text{Chunk size}}{\text{Prefill throughput}}$$
 
@@ -4547,6 +4570,7 @@ This outlier distribution motivates the specialized quantization methods that fo
 GPTQ [@frantar2023gptq] quantizes LLM weights using Hessian-based[^fn-hessian] error compensation. Rather than quantizing all weights independently, GPTQ adjusts remaining weights to compensate for errors introduced by quantization.
 
 [^fn-hessian]: **Hessian matrix in quantization**: The Hessian matrix $H = X^T X$ captures second-order information about how output changes with respect to weight perturbations. Weights with large Hessian diagonal entries have outsized impact on model outputs; GPTQ uses this information to prioritize preserving important weights and compensate for errors in less important ones.
+
 
 The GPTQ algorithm processes the model layer by layer. For each layer, it calibrates using a small dataset (128-256 samples). It quantizes weights in order of decreasing Hessian magnitude. It adjusts remaining weights to minimize output error.
 
@@ -5013,6 +5037,7 @@ async_q3 = async model3(query, predicted_q1, predicted_q2)
 
 [^fn-tpu-search]: **TPU for inference**: While TPUs are often associated with training, Google's search infrastructure leverages TPU's deterministic performance and high memory bandwidth for inference. Unlike GPUs where utilization varies with batching, TPUs provide consistent latency through their systolic array architecture, critical for meeting strict search latency SLOs.
 
+
 - 2D mesh topology for efficient AllReduce
 - High memory bandwidth for attention operations
 - Custom quantization for serving efficiency
@@ -5060,6 +5085,7 @@ User request → User embedding → Candidate videos → Video understanding →
 **Two-tower architecture with caching**[^fn-two-tower]: TikTok separates user understanding (online) from content understanding (offline):
 
 [^fn-two-tower]: **Two-tower architecture**: A design pattern where user features and item features are encoded by separate "towers" (neural networks) into embeddings, then combined for scoring. This separation enables pre-computing item embeddings offline, reducing online inference to user tower computation plus a fast dot product. The architecture trades some model expressiveness for dramatic serving efficiency.
+
 
 +-----------------+----------------------+-------------+--------------+
 | **Tower**       | **Update Frequency** | **Latency** | **Compute**  |

@@ -252,6 +252,7 @@ While model optimization focuses on the mathematical artifact, model serving req
 
 [^fn-inference-server]: **Inference Server**: The concept emerged from Google's TensorFlow Serving [@olston2017tensorflow], open-sourced February 2016, which pioneered the separation of model logic from serving infrastructure. NVIDIA's Triton [@nvidia2024triton], originally TensorRT Inference Server with GA release in March 2019, extended this to multi-framework support. These servers implement dynamic batching that can improve GPU utilization by up to 70% compared to naive single-request serving. The architecture mirrors the separation of concerns in traditional web servers like Apache (1995) and nginx (2004), applying decades of distributed systems knowledge to ML deployment.
 
+
 Understanding the internal anatomy of these servers reveals how they bridge the gap between irregular user traffic and the highly regular, batch-oriented requirements of accelerators.
 
 ### The Request Pipeline {#sec-model-serving-systems-request-pipeline-8fb1}
@@ -324,6 +325,7 @@ Two dominant paradigms define modern serving interfaces, each with distinct syst
 
 [^fn-grpc]: **gRPC**: Open-sourced by Google in February 2015, gRPC evolved from Stubby, Google's internal RPC framework that had been handling tens of billions of calls per second across their datacenters since approximately 2001. The combination of HTTP/2 multiplexing and Protocol Buffers binary serialization achieves roughly 10x lower serialization overhead than REST/JSON, making it the de facto standard for latency-sensitive ML inference APIs.
 
+
 ::: {.callout-note title="Benchmarks: JSON vs Protobuf Serialization"}
 
 Consider a request payload containing 1,000 floating point numbers (e.g., an embedding vector).
@@ -350,6 +352,7 @@ For dynamic inference systems, the fundamental difference from training lies in 
 This shift has concrete implications for system design [@gujarati2020serving]. The metrics that matter change from aggregate throughput to latency distributions. Mean latency tells you little about user experience; p50, p95, and p99 latencies reveal how the system performs across the full range of requests. If your mean latency is 50ms but p99 is 2 seconds, one in a hundred users waits 40 times longer than average. For consumer-facing applications, these tail latencies often determine user satisfaction and retention.[^fn-tail-latency]
 
 [^fn-tail-latency]: **Tail Latency Impact**: Research at Google and Amazon in the mid-2000s established that users are more sensitive to latency variance than mean latency. Industry experience suggests that latency increases of 100ms can measurably impact user engagement and conversion rates for e-commerce applications, though the magnitude varies by context. This is why service level objectives (SLOs) typically specify percentile targets rather than averages.
+
 
 ::: {.callout-definition title="Latency Budget"}
 
@@ -563,11 +566,12 @@ Two mathematical foundations govern serving system behavior: Little's Law, which
 
 The most fundamental result in queuing theory is Little's Law,[^fn-littles-law] which @eq-littles-law expresses as a simple relationship between three quantities in any stable system:
 
+[^fn-littles-law]: **Little's Law**: Proven by John D.C. Little in 1961 [@little1961proof], this theorem establishes that $L = \lambda W$ holds for any stable queuing system regardless of arrival patterns, service distributions, or scheduling policies. The remarkable generality makes it one of the most useful results in operations research. For serving systems, it enables capacity planning from observable metrics: measuring queue depth and arrival rate directly yields average latency without instrumenting individual requests.
+
 $$L = \lambda \cdot W$$ {#eq-littles-law}
 
 where $L$ is the average number of requests in the system, $\lambda$ is the arrival rate (requests per second), and $W$ is the average time each request spends in the system. This relationship holds regardless of arrival distribution, service time distribution, or scheduling policy.
 
-[^fn-littles-law]: **Little's Law**: Proven by John D.C. Little in 1961 [@little1961proof], this theorem establishes that $L = \lambda W$ holds for any stable queuing system regardless of arrival patterns, service distributions, or scheduling policies. The remarkable generality makes it one of the most useful results in operations research. For serving systems, it enables capacity planning from observable metrics: measuring queue depth and arrival rate directly yields average latency without instrumenting individual requests.
 
 Little's Law has immediate practical implications. If your inference service averages 10ms per request ($W = 0.01$s) and you observe 50 concurrent requests in the system on average ($L = 50$), then your arrival rate must be $\lambda = L/W = 5000$ requests per second. Conversely, if you need to limit concurrent requests to 10 (perhaps due to GPU memory constraints), and your service time is 10ms, you can sustain at most 1000 requests per second.
 
@@ -597,6 +601,7 @@ The M/M/1 model assumes exponentially distributed service times, but ML inferenc
 
 [^fn-queuing-models]: **Kendall Notation**: The M/M/1 notation was introduced by British statistician David Kendall in 1953 and follows the pattern A/S/c (Arrivals/Service/servers). "M" stands for "Markovian" (memoryless, meaning exponential distributions), honoring Russian mathematician Andrey Markov (1856-1922). "D" means deterministic. So M/M/1 describes a single server with exponential arrivals and service times, while M/D/1 has deterministic service. ML inference is closer to M/D/1 since inference time is nearly constant, but M/M/1 yields conservative estimates suitable for capacity planning.
 
+
 ### Multi-Server Considerations {#sec-model-serving-systems-multiserver-considerations-00fc}
 
 The preceding analysis focuses on a single ML node—one machine serving inference requests. This scope aligns with Volume I's focus on mastering the fundamental unit of ML systems. Understanding single-node queuing dynamics is prerequisite to effective scaling: you cannot optimize a distributed system without first understanding the behavior of its components.
@@ -616,6 +621,7 @@ For traffic exceeding single-node capacity, production systems deploy multiple r
 Production SLOs[^fn-slo-etymology] typically specify percentile targets (p95, p99) rather than averages because tail latency determines user experience for the slowest requests [@dean2013tail]. For an M/M/1 queue, the p99 latency follows:
 
 [^fn-slo-etymology]: **SLO (Service Level Objective)**: Emerged from telecommunications in the 1980s, formalized in ITIL (IT Infrastructure Library) standards in the 1990s. SLOs define measurable targets (e.g., "p99 latency < 100ms"), while SLAs (Service Level Agreements) are contractual commitments with penalties. Google's Site Reliability Engineering (SRE) practices, documented in their 2016 book, popularized "error budgets" derived from SLOs: if your SLO is 99.9% availability, you have a 0.1% error budget to spend on deployments and experiments.
+
 
 $$W_{p99} \approx \text{service time} \cdot \left(1 + \frac{\ln(100 \cdot \rho)}{1 - \rho}\right)$$ {#eq-p99-latency}
 
@@ -685,6 +691,7 @@ When a request has not completed within the expected time, send a duplicate requ
 
 [^fn-hedging-etymology]: **Hedging**: Borrowed from finance, where "hedging" means reducing risk by making offsetting bets. The term derives from the literal hedge (a boundary of shrubs) that protects a garden. Financial hedging dates to the 1600s Dutch tulip markets. Google's Jeff Dean introduced "hedged requests" in his influential 2013 "Tail at Scale" paper, applying the financial concept to distributed systems: send redundant requests to protect against the risk of slow responses.
 
+
 **Cancellation Complexity**: A critical implementation detail is that CUDA kernels cannot be interrupted mid-execution. When a hedged request completes, the duplicate must be cancelled, but if inference has already begun on the GPU, cancellation approaches include checking a cancellation flag before launching inference, accepting wasted compute for the in-flight kernel, or using request prioritization to deprioritize the duplicate. Since hedging typically applies only to the slowest 5 percent of requests, the overhead from occasional wasted compute remains acceptable.
 
 #### Tied Requests {#sec-model-serving-systems-tied-requests-25de}
@@ -696,6 +703,7 @@ Send the request to multiple servers simultaneously, but include a tag allowing 
 For requests that fan out to many backends, first send the request to a small subset of 1 to 2 servers.[^fn-canary-etymology] If these return within expected time, send to the remainder. If the canary is slow, the system can take corrective action by retrying elsewhere or using cached results before committing to the full fan-out. This prevents a single slow backend from stalling an entire distributed inference request.
 
 [^fn-canary-etymology]: **Canary**: From the practice of using canary birds in coal mines from the early 1900s through the 1980s. Miners brought caged canaries underground because the birds' high metabolic rate made them sensitive to carbon monoxide and methane, dying before gas concentrations became lethal to humans. In software, "canary" describes any small-scale test that detects problems before they affect the full system, whether canary deployments, canary requests, or canary tests.
+
 
 #### Graceful Degradation {#sec-model-serving-systems-graceful-degradation-df79}
 
@@ -760,6 +768,7 @@ Understanding cold start dynamics enables designing systems that meet latency re
 Cold start latency compounds from multiple sources, each adding to the time between deployment and serving readiness. Weight loading reads model parameters from disk or network storage. Graph compilation performs just-in-time compilation of operations for the specific hardware. Memory allocation reserves GPU memory for activations and intermediate values. Warmup[^fn-warmup-etymology] execution performs initial inferences that populate caches and trigger lazy initialization.
 
 [^fn-warmup-etymology]: **Warmup**: The computing metaphor derives from physical warming, where engines and machines perform better after reaching operating temperature. In JIT-compiled systems like the JVM (1990s), "warmup" specifically refers to the period when the runtime gathers profiling data and compiles hot paths. For ML serving, warmup serves a dual purpose: triggering lazy memory allocation and populating CPU/GPU caches with frequently-accessed data, ensuring the first real user request does not pay these one-time costs.
+
 
 ::: {.callout-note title="ResNet-50: Cold Start Timeline"}
 
@@ -840,6 +849,7 @@ With models loaded, initialized, and ready to serve, the next optimization oppor
 
 [^fn-batch-etymology]: **Batch**: From Old French "bache" (a quantity baked at one time), the term entered computing in the 1950s to describe jobs processed together without human interaction, as contrasted with interactive computing. IBM's batch processing systems of the 1960s would collect punch cards overnight and process them sequentially. The ML usage preserves this core meaning: group samples together for efficient processing, trading individual response time for aggregate throughput.
 
+
 ::: {.callout-definition title="Dynamic Batching"}
 
 **Dynamic Batching** refers to a serving strategy that collects incoming requests within a _time window_ and processes them together, trading individual request latency for improved _throughput_ and _hardware utilization_. The window size and maximum batch size parameters control this tradeoff.
@@ -853,6 +863,7 @@ Modern accelerators achieve peak efficiency only at sufficient batch sizes [@she
 Two fixed costs dominate at small batch sizes. **Kernel launch overhead**[^fn-kernel-etymology] is the time for the CPU to prepare and submit work to the GPU. Each layer in a neural network typically requires a separate kernel launch: the CPU must assemble kernel parameters, copy them to GPU-accessible memory, and signal the GPU to begin execution. This overhead is typically 5-20μs per kernel, independent of batch size. ResNet-50 has approximately 50 layers, so kernel launch alone adds 250-1000μs per inference. At batch size 1, this overhead may exceed the actual compute time; at batch size 32, the same overhead is amortized across 32 images. **Weight loading** reads model parameters from GPU memory (VRAM) to the compute units. At batch size 1, the GPU reads all weights to process one image; at batch size 32, the same weight read processes 32 images, achieving 32× better memory efficiency.
 
 [^fn-kernel-etymology]: **Kernel**: From Old English "cyrnel" meaning seed or grain, the essential core of something. In operating systems (1960s), the kernel is the core that manages hardware resources. CUDA borrowed this term around 2007 for GPU functions because they represent the computational "core" of parallel algorithms. Unlike OS kernels that run continuously, GPU kernels are discrete units of parallel work launched by the CPU and executed across thousands of GPU threads simultaneously.
+
 
 ::: {.callout-notebook title="Worked Example: ResNet-50 Batching Efficiency" collapse="true"}
 
@@ -1108,6 +1119,7 @@ Memory management adds complexity to continuous batching. As sequences enter and
 
 [^fn-pagedattention]: **PagedAttention**: Introduced by Kwon et al. at SOSP 2023, this algorithm directly applies operating system virtual memory concepts to GPU memory management for LLMs. Before PagedAttention, researchers found that existing systems wasted 60-80% of KV cache memory due to fragmentation and over-reservation. By borrowing paging and copy-on-write mechanisms from OS design, PagedAttention reduces waste to under 4%, enabling 2-4x higher throughput on the same hardware. This technique has become the de facto standard in production LLM serving systems.
 
+
 ::: {.callout-note title="LLM Serving: Beyond the Fundamentals"}
 
 Language model serving introduces challenges beyond the batching and memory principles established here. The key-value cache that stores attention context scales with sequence length and batch size, often exceeding the model weights themselves in memory consumption. Techniques like speculative decoding use small draft models to propose multiple tokens that the target model verifies in parallel, achieving 2-3× latency reduction for interactive applications. Weight-only quantization (INT4 weights with FP16 activations) proves more effective than activation quantization for memory-bandwidth-bound LLM inference.
@@ -1143,6 +1155,7 @@ The optimal batching strategy depends critically on how requests arrive. Differe
 Cloud APIs and web services typically receive requests following a Poisson process,[^fn-poisson-process] where arrivals are independent and uniformly distributed over time. @eq-poisson-batch expresses the expected batch size for Poisson arrivals with rate $\lambda$ and batching window $T$:
 
 [^fn-poisson-process]: **Poisson Process**: A stochastic model where events occur continuously and independently at a constant average rate. Named after French mathematician Simeon Denis Poisson (1781-1840), this model accurately describes many real-world arrival patterns including web requests and API calls. The key property for serving systems is that inter-arrival times are exponentially distributed, meaning the probability of long gaps between requests decays exponentially, which is why batching windows can be tuned probabilistically.
+
 
 $$E[\text{batch size}] = \lambda \cdot T$$ {#eq-poisson-batch}
 
@@ -1349,6 +1362,7 @@ ONNX Runtime provides a hardware-agnostic optimization layer [@onnxruntime2024].
 TensorRT[^fn-tensorrt] (NVIDIA GPUs), OpenVINO (Intel hardware), and similar engines optimize specifically for their target hardware [@nvidia2024tensorrt; @chen2018tvm]. They apply aggressive optimizations that framework-native runtimes cannot safely perform:
 
 [^fn-tensorrt]: **TensorRT**: NVIDIA's inference optimization SDK that applies layer fusion, kernel auto-tuning, and precision calibration to neural networks. Unlike framework-native runtimes that preserve training-time graph structure, TensorRT rebuilds the computation graph for the specific target GPU during a build phase. This GPU-specific compilation means TensorRT engines are not portable across GPU architectures, requiring separate builds for V100, A100, and H100 deployments. The build phase can take minutes but produces engines that often achieve 2-5x speedup over PyTorch.
+
 
 **Layer fusion** combines multiple sequential operations into a single GPU kernel. Consider a common pattern: convolution → batch normalization → ReLU activation. Without fusion, this requires three kernel launches, three round-trips to GPU memory (write conv output, read for batchnorm, write batchnorm output, read for ReLU), and three sets of intermediate tensors. Fusion combines all three into one kernel that reads inputs once, computes the combined result in registers, and writes final outputs once. This eliminates kernel launch overhead (15-60μs saved per fusion) and reduces memory traffic by 2-3×. TensorRT automatically detects and fuses common patterns; a typical ResNet-50 reduces from ~50 kernels to ~15 after fusion.
 
