@@ -220,6 +220,19 @@ get_python_cmd() {
     echo ""
 }
 
+# Find the system platform (linux, macos, windows)
+# Contributed by @rnjema (PR #1105)
+get_platform() {
+    local uname_out
+    uname_out=$(uname -s)
+    case "${uname_out}" in
+        Linux*)     echo "linux";;
+        Darwin*)    echo "macos";;
+        CYGWIN*|MINGW*|MSYS*) echo "windows";;
+        *)          echo "unknown";;
+    esac
+}
+
 # ============================================================================
 # Pre-flight Checks
 # These run before any installation to catch problems early
@@ -266,6 +279,7 @@ check_prerequisites() {
 
     # Check for Python 3.10+
     PYTHON_CMD=$(get_python_cmd)
+    PLATFORM=$(get_platform)
     if [ -n "$PYTHON_CMD" ]; then
         # We know it's good because get_python_cmd validates it, but we run check again to get the version string
         PY_VERSION=$(check_python_version "$PYTHON_CMD")
@@ -291,6 +305,11 @@ check_prerequisites() {
             echo "  Install: sudo apt install python3-venv (Debian/Ubuntu)"
             errors=$((errors + 1))
         fi
+    fi
+
+    # Show Windows-specific guidance (contributed by @rnjema)
+    if [ "$PLATFORM" = "windows" ]; then
+        print_info "Windows detected - using Git Bash/WSL compatible mode"
     fi
 
     if [ $errors -gt 0 ]; then
@@ -472,11 +491,12 @@ do_install() {
 
     # -------------------------------------------------------------------------
     # Step 3: Install dependencies
+    # Uses $PYTHON_CMD -m pip for reliability (contributed by @rnjema)
     # -------------------------------------------------------------------------
     echo -e "${BLUE}[3/4]${NC} Installing dependencies..."
 
     # Upgrade pip first
-    pip install --upgrade pip -q 2>/dev/null &
+    $PYTHON_CMD -m pip install --upgrade pip -q 2>/dev/null &
     local pip_pid=$!
     spin $pip_pid "Upgrading pip..."
     wait $pip_pid
@@ -484,14 +504,14 @@ do_install() {
     # Install from requirements.txt
     if [ -f "requirements.txt" ]; then
         total_pkgs=$(grep -c -E "^[^#]" requirements.txt 2>/dev/null || echo "?")
-        pip install -r requirements.txt -q 2>/dev/null &
+        $PYTHON_CMD -m pip install -r requirements.txt -q 2>/dev/null &
         local req_pid=$!
         spin $req_pid "Installing $total_pkgs packages..."
         wait $req_pid
     fi
 
     # Install TinyTorch package in editable mode (includes tito CLI)
-    pip install -e . -q 2>/dev/null &
+    $PYTHON_CMD -m pip install -e . -q 2>/dev/null &
     local tt_pid=$!
     spin $tt_pid "Installing TinyTorch..."
     wait $tt_pid
