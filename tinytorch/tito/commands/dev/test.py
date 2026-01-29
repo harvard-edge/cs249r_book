@@ -659,7 +659,17 @@ class DevTestCommand(BaseCommand):
                     failed_module = f"{module_num}:export"
                     if ci_mode:
                         print("✗ EXPORT FAILED")
-                        print(f"      Error: {export_result.stderr[:100] if export_result.stderr else 'Export failed'}")
+                        print(f"      Exit code: {export_result.returncode}")
+                        if export_result.stdout:
+                            print(f"      Stdout (last 500 chars):")
+                            for line in export_result.stdout[-500:].split('\n')[-10:]:
+                                if line.strip():
+                                    print(f"        {line}")
+                        if export_result.stderr:
+                            print(f"      Stderr (last 500 chars):")
+                            for line in export_result.stderr[-500:].split('\n')[-10:]:
+                                if line.strip():
+                                    print(f"        {line}")
                     break
             except subprocess.TimeoutExpired:
                 failed_module = f"{module_num}:export_timeout"
