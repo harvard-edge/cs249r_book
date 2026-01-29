@@ -169,7 +169,7 @@ CONFIG = {
 # STEP 1: PROFILE
 # =============================================================================
 
-def step_1_profile(model, X_test, y_test, Profiler):
+def step_1_profile(model, X_test, y_test, Profiler, Tensor):
     """
     Step 1: Profile the baseline model with YOUR Profiler.
 
@@ -448,7 +448,7 @@ def step_4_kv_cache(KVCache, MinimalTransformer):
 # STEP 5: ACCELERATION
 # =============================================================================
 
-def step_5_accelerate(vectorized_matmul):
+def step_5_accelerate(vectorized_matmul, Tensor):
     """
     Step 5: Demonstrate acceleration with YOUR Module 17.
 
@@ -885,7 +885,7 @@ def main():
     # ─────────────────────────────────────────────────────────────────────────
 
     # Step 1: Profile baseline
-    baseline = step_1_profile(model, X_test, y_test, Profiler)
+    baseline = step_1_profile(model, X_test, y_test, Profiler, Tensor)
 
     # Step 2: Quantize
     quant = step_2_quantize(model, baseline['param_bytes'], Quantizer)
@@ -904,7 +904,7 @@ def main():
         console.print()
 
     # Step 5: Acceleration
-    step_5_accelerate(vectorized_matmul)
+    step_5_accelerate(vectorized_matmul, Tensor)
 
     # Step 6: Benchmark
     step_6_benchmark(model, X_test, y_test, baseline['baseline_acc'], Benchmark)
