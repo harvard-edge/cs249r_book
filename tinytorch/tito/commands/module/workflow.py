@@ -1110,10 +1110,12 @@ class ModuleWorkflowCommand(BaseCommand):
                 ensure_writable_target(export_target)
             
             # Run nbdev_export directly on the student's notebook
+            # Use sys.executable to ensure we use the same Python that's running tito
+            import sys
             self.console.print(f"[dim]📦 Exporting {notebook_path.name} → tinytorch/core/...[/dim]")
             
             result = subprocess.run(
-                ["nbdev_export", "--path", str(notebook_path)],
+                [sys.executable, "-m", "nbdev.export", "--path", str(notebook_path)],
                 capture_output=True,
                 text=True,
                 cwd=Path.cwd()

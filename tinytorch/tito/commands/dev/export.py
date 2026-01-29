@@ -208,8 +208,10 @@ class DevExportCommand(BaseCommand):
         # Step 2: Export all using nbdev_export
         console.print("🔄 Exporting all notebooks to tinytorch package...")
         try:
+            # Use sys.executable to ensure we use the same Python that's running tito
+            import sys
             result = subprocess.run(
-                ["nbdev_export"],
+                [sys.executable, "-m", "nbdev.export"],
                 capture_output=True,
                 text=True,
                 cwd=Path.cwd()
@@ -240,6 +242,7 @@ class DevExportCommand(BaseCommand):
 
     def _run_nbdev_export(self, notebook_paths: list, console) -> int:
         """Run nbdev_export on the given notebooks."""
+        import sys
         success_count = 0
 
         for notebook_path_str in notebook_paths:
@@ -254,8 +257,9 @@ class DevExportCommand(BaseCommand):
                 if export_target != "unknown":
                     ensure_writable_target(export_target)
 
+                # Use sys.executable to ensure we use the same Python that's running tito
                 result = subprocess.run(
-                    ["nbdev_export", "--path", notebook_path_str],
+                    [sys.executable, "-m", "nbdev.export", "--path", notebook_path_str],
                     capture_output=True,
                     text=True,
                     cwd=Path.cwd()
