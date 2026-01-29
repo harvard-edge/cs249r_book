@@ -20,22 +20,16 @@ _DALL·E 3 Prompt: Create an intricate and colorful representation of a System o
 
 _Why does moving data cost more than computing it, and how does this inversion dictate the design of every modern AI accelerator?_
 
-The fundamental surprise of modern computing is that arithmetic is nearly free while memory access is expensive. In the time it takes to fetch a single value from memory, a processor could perform thousands of calculations. This "Memory Wall" explains why GPUs and TPUs exist: they are not merely faster at math, but architected specifically to hide, amortize, and minimize the crushing cost of moving data. The same inversion explains why some optimizations that reduce theoretical computation fail to improve actual runtime: if the operation was already memory-bound, computing less does nothing because the bottleneck was never computation. Understanding this reality transforms hardware selection from comparing peak FLOPS to analyzing whether workload characteristics align with what the hardware actually accelerates.
+Compression reduces model complexity—fewer parameters, lower precision, more efficient architectures. But even a compressed model must execute on physical hardware, and here a counterintuitive truth emerges: the fundamental surprise of modern computing is that arithmetic is nearly free while memory access is expensive. In the time it takes to fetch a single value from memory, a processor could perform thousands of calculations. This "Memory Wall" explains why GPUs and TPUs exist: they are not merely faster at math, but architected specifically to hide, amortize, and minimize the crushing cost of moving data. The same inversion explains why some optimizations that reduce theoretical computation fail to improve actual runtime: if the operation was already memory-bound, computing less does nothing because the bottleneck was never computation. Understanding this reality transforms hardware selection from comparing peak FLOPS to analyzing whether workload characteristics align with what the hardware actually accelerates.
 
 ::: {.callout-tip title="Learning Objectives"}
 
 - Calculate arithmetic intensity for neural network operations and use the roofline model to determine whether workloads are compute-bound or memory-bound on specific hardware
-
 - Explain why systolic arrays and tensor cores achieve 10-100× better efficiency than general-purpose processors for matrix operations
-
 - Predict performance bottlenecks by quantifying the memory wall: bandwidth limits, energy costs of data movement, and cache hierarchy trade-offs
-
 - Select appropriate dataflow strategies (weight-stationary, output-stationary, input-stationary) based on whether a workload prioritizes weight reuse, activation reuse, or accumulator locality
-
 - Identify compiler optimization opportunities including kernel fusion, tiling, and memory planning that translate high-level models into efficient hardware execution
-
 - Evaluate accelerator choices for specific deployment scenarios (training vs. inference, cloud vs. edge, latency vs. throughput) using quantitative cost-performance analysis
-
 - Recognize common pitfalls such as ignoring memory bandwidth limits, expecting linear multi-GPU scaling, or optimizing for peak FLOPS rather than sustained throughput
 
 :::
@@ -48,7 +42,7 @@ Hardware acceleration is the engineering discipline of maximizing the **Throughp
 
 Before examining specific hardware architectures, we establish the fundamental law that governs all acceleration efforts.
 
-::: {.callout-perspective title="The Iron Law of Acceleration"}
+::: {.callout-notebook title="The Iron Law of Acceleration"}
 
 Hardware acceleration does not speed up the entire system; it only speeds up the parallelizable fraction ($P$). This is governed by **Amdahl's Law for AI**:
 
@@ -323,6 +317,7 @@ Machine learning constitutes a computational domain where the primary performanc
 Neural networks are characterized by three unique properties that drive this shift:
 
 1. **Massive Parallelism**: Unlike general-purpose code with complex branching, neural networks execute billions of independent matrix multiplications and convolutions. This regular structure allows replacing complex CPU control logic with dense arrays of processing elements (systolic arrays).
+
 2. **Predictable Data Flow**: Data movement in deep learning is mathematically determined by the network's layers. This predictability enables hardware to "prefetch" data into local scratchpads[^fn-scratchpad-etymology], bypassing the expensive random-access cache hierarchies of CPUs.
 
 [^fn-scratchpad-etymology]: **Scratchpad**: From the physical scratch pads used for quick calculations before computers. In hardware, scratchpad memory is software-managed fast memory near compute units, contrasting with caches that are hardware-managed. Unlike caches that guess what data to keep, scratchpads give programmers explicit control over what data resides in fast memory, enabling the predictable data movement that ML workloads require.
@@ -643,7 +638,6 @@ loop_batch:
 3.  **Vector Loads**: Loads continuous 32-bit input and weight values from memory into vector registers `v1` and `v2` in a single instruction, maximizing memory bandwidth utilization.
 4.  **Fused Multiply-Accumulate**: Performs parallel multiply-add operations ($v_0 = v_0 + v_1 \times v_2$). This is the core computational primitive, doubling throughput compared to separate multiply and add instructions.
 5.  **Pointer Arithmetic**: Updates memory pointers by the vector byte length to prepare for the next data chunk.
-```
 :::
 
 This vector implementation processes eight data elements in parallel, reducing both computation time and energy consumption. Vector load instructions transfer eight values simultaneously, maximizing memory bandwidth utilization. The vector multiply-accumulate instruction processes eight pairs of values in parallel, dramatically reducing the total instruction count from over 4 million to approximately 500,000.
@@ -692,16 +686,16 @@ Neural network computations decompose into hierarchical matrix operations. @lst-
 ::: {#lst-linear_matrix_hierarchy lst-cap="**Matrix Operations**: Neural networks perform transformations using matrix multiplications and biases to achieve output predictions. Training requires careful management of input batches and activation functions to optimize model performance."}
 ```{.python}
 layer = nn.Linear(256, 512)  # Layer transforms 256 inputs to
-# 512 outputs {#sec-512-outputs}
+# 512 outputs
 output = layer(input_batch)  # Process a batch of 32 samples
 
-# Framework Internal: Core operations {#sec-framework-internal-core-operations}
+# Framework Internal: Core operations
 Z = matmul(weights, input)  # Matrix: transforms [256 x 32]
-# input to [512 x 32] output {#sec-input-512-x-32-output}
+# input to [512 x 32] output
 Z = Z + bias  # Vector: adds bias to each
-# output independently {#sec-output-independently}
+# output independently
 output = relu(Z)  # Vector: applies activation to
-# each element independently {#sec-element-independently}
+# each element independently
 ```
 :::
 
@@ -802,7 +796,7 @@ H = max(0, Z)  # ReLU activation
 mean = reduce_mean(H, axis=0)  # BatchNorm statistics
 var = reduce_mean((H - mean) ** 2)  # Variance computation
 output = gamma * (H - mean) / sqrt(var + eps) + beta
-# Normalization {#sec-normalization}
+# Normalization
 ```
 :::
 
@@ -825,7 +819,7 @@ for batch in range(32):
 
        temp[batch, feature] = h  # Extra memory storage needed
 
-# Normalization requires complex arithmetic {#sec-normalization-requires-complex-arithmetic}
+# Normalization requires complex arithmetic
 for feature in range(512):
     mean = mean_sum[feature] / batch_size
     var = (var_sum[feature] / batch_size) - mean * mean
@@ -1002,7 +996,9 @@ While unstructured pruning reduces model size, it rarely translates to hardware 
 
 **Hardware Execution**:
 1.  **Compression**: The hardware stores only the 2 non-zero values and 2 bits of metadata (indices) for every 4-element block.
+
 2.  **Compute**: During matrix multiplication, the Sparse Tensor Core reads the metadata to select the corresponding activations and performs math only on the non-zero weights.
+
 3.  **Result**: This effectively doubles the FLOPs/byte ratio, providing a theoretical $2\times$ speedup over dense matrix multiplication with minimal accuracy loss, provided the model is fine-tuned to respect the 2:4 constraint.
 
 Beyond structured sparsity optimizations, different hardware architectures implement matrix operations through distinct computational structures. Systolic arrays represent one such approach that has proven particularly effective for AI workloads.
@@ -1011,7 +1007,7 @@ Beyond structured sparsity optimizations, different hardware architectures imple
 
 While tensor cores package matrix operations into structured computational units, systolic arrays provide an alternative approach optimized for continuous data flow and operand reuse. The fundamental motivation for systolic architectures stems from the energy efficiency constraints discussed earlier: minimizing the impact of memory access penalties through architectural design.
 
-::: {.callout-perspective title="The Energy Advantage of Pulsing Data"}
+::: {.callout-notebook title="The Energy Advantage of Pulsing Data"}
 **Systolic Arrays vs. Traditional Vector Units**: 
 The "Systolic" (heartbeat) metaphor is not just about timing; it's about energy efficiency. We can quantify the energy advantage of systolic dataflow over traditional vector units using the **Energy Corollary**:
 
@@ -1304,27 +1300,27 @@ The memory wall manifests through three critical constraints. First, the energy 
 #| fig-cap: "**AI Memory Wall**: The growing disparity between compute performance and memory bandwidth emphasizes the increasing challenge in sustaining peak computational efficiency due to memory constraints. Over the past 20 years, while computational capabilities have advanced rapidly, memory bandwidth has not kept pace, leading to potential bottlenecks in data-intensive applications."
 #| fig-alt: "Line graph comparing compute performance and memory bandwidth from 2000 to 2025 on log scale. Compute grows exponentially; bandwidth grows linearly. Shaded gap labeled Memory Wall widens over time."
 
-# Load necessary libraries {#sec-load-necessary-libraries}
+# Load necessary libraries
 library(ggplot2)
 library(reshape2)
 library(grid)
 
-# Data for compute performance (FLOPs) and memory bandwidth (GB/s) over years {#sec-data-compute-performance-flops-memory-bandwidth-gbs-years}
+# Data for compute performance (FLOPs) and memory bandwidth (GB/s) over years
 years <- c(2000, 2005, 2010, 2015, 2020, 2025)
 compute_performance <- c(1e3, 1e5, 1e7, 1e9, 1e12, 1e15)  # FLOPs
 memory_bandwidth <- c(1, 10, 50, 100, 500, 1000)  # GB/s
 
-# Create a data frame {#sec-create-data-frame}
+# Create a data frame
 data <- data.frame(
   Year = years,
   Compute_Performance = compute_performance,
   Memory_Bandwidth = memory_bandwidth
 )
 
-# Melt the data frame for ggplot2 {#sec-melt-data-frame-ggplot2}
+# Melt the data frame for ggplot2
 data_melted <- melt(data, id.vars = "Year", variable.name = "Metric", value.name = "Performance")
 
-# Create the plot {#sec-create-plot}
+# Create the plot
 ggplot(data_melted, aes(x = Year, y = Performance, color = Metric, shape = Metric)) +
   geom_line(linewidth = 1) +  # Updated from size to linewidth
   geom_point(size = 3) +
@@ -1421,7 +1417,7 @@ Unlike traditional computing workloads, where memory access follows well-structu
 
 library(ggplot2)
 
-# AI Processor Data {#sec-ai-processor-data}
+# AI Processor Data
 processors <- data.frame(
     Name = c("NVIDIA Tesla K80", "Google TPU v2", "NVIDIA Tesla V100",
                      "NVIDIA A100", "Google TPU v4", "NVIDIA H100", "Google TPU v6e"),
@@ -1429,7 +1425,7 @@ processors <- data.frame(
     Bandwidth_GBs = c(480, 600, 900, 2000, 1200, 3000, 1640)
 )
 
-# ML Model Data {#sec-ml-model-data}
+# ML Model Data
 models <- data.frame(
     Name = c("AlexNet", "VGG-16", "ResNet-50", "BERT Large",
                      "GPT-3", "PaLM", "GPT-4", "Gemini 1"),
@@ -1437,20 +1433,20 @@ models <- data.frame(
     Params_Million = c(60, 138, 25.6, 340, 175000, 540000, 1000000, 1500000)
 )
 
-# Convert to log scale {#sec-convert-log-scale}
+# Convert to log scale
 processors$Log_Bandwidth <- log10(processors$Bandwidth_GBs)
 models$Log_Params <- log10(models$Params_Million)
 
-# Fit trend lines {#sec-fit-trend-lines}
+# Fit trend lines
 processor_fit <- lm(Log_Bandwidth ~ Year, data = processors)
 model_fit <- lm(Log_Params ~ Year, data = models)
 
-# Create a range of years for smooth trend lines {#sec-create-range-years-smooth-trend-lines}
+# Create a range of years for smooth trend lines
 years_range <- seq(min(models$Year), max(models$Year), by = 1)
 processor_trend <- predict(processor_fit, newdata = data.frame(Year = years_range))
 model_trend <- predict(model_fit, newdata = data.frame(Year = years_range))
 
-# Data frame for shading (2016-2024) {#sec-data-frame-shading-20162024}
+# Data frame for shading (2016-2024)
 shading_data <- data.frame(
     Year = years_range,
     Model_Trend = model_trend,
@@ -1565,7 +1561,7 @@ At the highest level, large-capacity but slow storage devices provide long-term 
 
 : **Memory Hierarchy Trade-Offs**: AI accelerators use a multi-level memory hierarchy to balance performance and capacity, optimizing data access for computationally intensive machine learning tasks. Each level provides distinct latency, bandwidth, and capacity characteristics that dictate how neural network components (weights, activations, and intermediate results) should be strategically allocated to minimize bottlenecks and maximize throughput. {#tbl-memory-hierarchy}
 
-::: {.callout-perspective title="Napkin Math: The Speed of Light Limit"}
+::: {.callout-notebook title="The Speed of Light Limit"}
 **Problem**: Why do we need on-chip SRAM? Why can't we just fetch everything from HBM?
 
 **The Physics**:
@@ -1870,7 +1866,7 @@ The roofline visualization shows performance (TFLOPS) on the vertical axis and a
 
 : **Hardware Ridge Points (Representative, order-of-magnitude)**: Different accelerators have different ridge points determined by their compute-to-bandwidth ratios. Higher ridge points require more operations per byte to achieve peak utilization. {#tbl-ridge-points}
 
-::: {.callout-perspective title="Napkin Math: Calculating the Ridge Point"}
+::: {.callout-notebook title="Calculating the Ridge Point"}
 **Problem**: You are using an **NVIDIA H100** GPU. You want to know if your attention layer is compute-bound or bandwidth-bound.
 
 **The Math**:
@@ -1905,7 +1901,7 @@ The roofline visualization shows performance (TFLOPS) on the vertical axis and a
 
 : **Operations on the Roofline**: Neural network layers span a wide range of arithmetic intensities. By mapping these operations to our **Lighthouse Examples**, we can see why ResNet-50 is compute-bound (high AI) while MobileNet and DLRM are memory-bound (low AI). {#tbl-roofline-operations}
 
-::: {.callout-notebook title="Worked Example: Transformer Layer Analysis"}
+::: {.callout-notebook title="Transformer Layer Analysis"}
 
 For a transformer with hidden_dim=768, batch=32, seq=512:
 
@@ -1936,7 +1932,7 @@ $$\text{Required Bandwidth} = \frac{P}{\text{AI}} \text{ bytes/sec}$$
 When Required Bandwidth exceeds Peak Bandwidth, performance is capped at:
 $$P_{\text{attainable}} = \text{Peak Bandwidth} \times \text{AI}$$
 
-::: {.callout-notebook title="Worked Example: Convolutional Layer Analysis"}
+::: {.callout-notebook title="Convolutional Layer Analysis"}
 
 Consider a Conv2D layer with input shape (batch=32, channels=128, height=56, width=56), output channels=256, kernel size 3×3 on an A100 GPU:
 
@@ -1963,7 +1959,7 @@ The convolutional layer's high arithmetic intensity arises from its weight reuse
 
 However, not all layers in a neural network exhibit this favorable profile. The fully connected (dense) layers that typically appear at the end of classification networks, or as the projection layers in transformers, have fundamentally different arithmetic intensity characteristics. Understanding this contrast is essential for predicting where bottlenecks will occur in end-to-end model execution.
 
-::: {.callout-notebook title="Worked Example: Dense Layer Analysis"}
+::: {.callout-notebook title="Dense Layer Analysis"}
 
 Consider a fully connected layer: input (batch=32, features=2048) → output (batch=32, features=2048) on the same A100:
 
@@ -1992,7 +1988,7 @@ The dense layer's lower arithmetic intensity stems from limited weight reuse: ea
 
 The situation becomes even more extreme for element-wise operations like normalization layers. These operations perform very little computation relative to the data they touch—each element is loaded, transformed by a simple formula, and written back. There is essentially no opportunity for data reuse.
 
-::: {.callout-notebook title="Worked Example: LayerNorm Analysis"}
+::: {.callout-notebook title="LayerNorm Analysis"}
 
 LayerNorm with input shape (batch=32, seq=512, hidden=768):
 
@@ -2061,7 +2057,7 @@ The batch size analysis reveals why inference serving systems are designed aroun
 
 For workloads where batching is impractical—such as interactive LLM generation where users expect streaming responses—the arithmetic intensity remains fundamentally low. Understanding this ceiling is essential for setting realistic performance expectations.
 
-::: {.callout-notebook title="Engineering Calculation: The Throughput Ceiling"}
+::: {.callout-notebook title="The Throughput Ceiling"}
 **The Problem:** Predict the maximum possible utilization of an NVIDIA A100 when running GPT-2 inference (batch size 1).
 
 **1. The Hardware Constraints (The Denominators)**
@@ -2376,12 +2372,12 @@ Even when computational units are mapped efficiently, poor data movement strateg
 
 ::: {#lst-matmul_data_movement lst-cap="**Matrix Multiplication**: Data movement bottlenecks can lead to underutilized hardware resources, illustrating the importance of efficient data flow in optimizing machine learning model performance. Via This operation"}
 ```{.python}
-## Matrix multiplication where: {#sec-ai-acceleration-matrix-multiplication-6a93}
-## weights: [512 x 256] - model parameters {#sec-ai-acceleration-weights-512-x-256-model-parameters-de74}
-## input:   [256 x 32]  - batch of activations {#sec-ai-acceleration-input-256-x-32-batch-activations-0fe1}
-## Z:       [512 x 32]  - output activations {#sec-ai-acceleration-z-512-x-32-output-activations-9bfa}
+## Matrix multiplication where:
+## weights: [512 x 256] - model parameters
+## input:   [256 x 32]  - batch of activations
+## Z:       [512 x 32]  - output activations
 
-## Computing each output element Z[i,j]: {#sec-ai-acceleration-computing-output-element-zij-085f}
+## Computing each output element Z[i,j]:
 for i in range(512):
     for j in range(32):
         for k in range(256):
@@ -2409,10 +2405,10 @@ A key advantage of weight stationary is that it maximizes weight reuse, reducing
 
 ::: {#lst-weight_stationary lst-cap="**Weight Stationary Matrix Multiplication**: Weight stationary matrix multiplication keeps weights fixed in local memory while input activations stream through, demonstrating how it maximizes weight reuse to reduce energy costs."}
 ```{.python}
-## Weight Stationary Matrix Multiplication {#sec-ai-acceleration-weight-stationary-matrix-multiplication-8ff3}
-## - Weights remain fixed in local memory {#sec-ai-acceleration-weights-remain-fixed-local-memory-e4d7}
-## - Input activations stream through {#sec-ai-acceleration-input-activations-stream-8ec6}
-## - Partial sums accumulate for final output {#sec-ai-acceleration-partial-sums-accumulate-final-output-f96d}
+## Weight Stationary Matrix Multiplication
+## - Weights remain fixed in local memory
+## - Input activations stream through
+## - Partial sums accumulate for final output
 
 for weight_block in weights:  # Load and keep weights stationary
     load_to_local(weight_block)  # Fixed in local storage
@@ -2441,9 +2437,9 @@ A key advantage of the output stationary approach is that it optimizes accumulat
 
 ::: {#lst-output_stationary lst-cap="**Output Stationary Execution**: Accumulates partial sums locally to reduce memory writes and enhance efficiency during matrix multiplication, making it ideal for transformer-based models."}
 ```{.python}
-## - Partial sums remain in local memory {#sec-ai-acceleration-partial-sums-remain-local-memory-bd14}
-## - Weights and input activations stream through dynamically {#sec-ai-acceleration-weights-input-activations-stream-dynamically-6686}
-## - Final outputs are written only once {#sec-ai-acceleration-final-outputs-written-9187}
+## - Partial sums remain in local memory
+## - Weights and input activations stream through dynamically
+## - Final outputs are written only once
 
 for output_block in outputs:  # Keep partial sums stationary
     accumulator = 0  # Initialize accumulation buffer
@@ -2476,9 +2472,9 @@ A key advantage of the Input Stationary approach is that it maximizes input reus
 
 ::: {#lst-input_stationary lst-cap="**Input Stationary**: This approach keeps input activations stationary while dynamically streaming weights to maximize memory reuse and reduce energy consumption."}
 ```{.python}
-## - Input activations remain in local memory {#sec-ai-acceleration-input-activations-remain-local-memory-1ce5}
-## - Weights stream through dynamically {#sec-ai-acceleration-weights-stream-dynamically-6907}
-## - Partial sums accumulate and are written out {#sec-ai-acceleration-partial-sums-accumulate-written-0fcf}
+## - Input activations remain in local memory
+## - Weights stream through dynamically
+## - Partial sums accumulate and are written out
 
 for input_block in inputs:  # Keep input activations stationary
     load_to_local(input_block)  # Fixed in local storage
@@ -2598,12 +2594,12 @@ Building on software optimization techniques from @sec-model-compression and mem
 ```{.python}
 import torch
 
-## Input tensor {#sec-ai-acceleration-input-tensor-67da}
+## Input tensor
 X = torch.randn(1024, 1024).cuda()
 
-## Step-by-step execution (naïve approach) {#sec-ai-acceleration-stepbystep-execution-naïve-approach-2bf8}
+## Step-by-step execution (naïve approach)
 X1 = torch.relu(X)  # Intermediate tensor stored
-# in memory {#sec-memory}
+# in memory
 X2 = torch.batch_norm(X1)  # Another intermediate tensor stored
 Y = 2.0 * X2 + 1.0  # Final result
 ```
@@ -2790,7 +2786,7 @@ Instead of computing one element at a time and constantly moving data in and out
 ::: {#lst-tiled_matmul lst-cap="**Tiled Matrix Multiplication**: This approach divides matrices into smaller blocks to optimize memory usage by reusing data within processor cache, thereby improving computational efficiency."}
 ```{.python}
 TILE_SIZE = 32  # Choose a tile size based on
-# hardware constraints {#sec-hardware-constraints}
+# hardware constraints
 
 for i in range(0, N, TILE_SIZE):
     for j in range(0, N, TILE_SIZE):
@@ -3330,11 +3326,6 @@ Qualcomm's Snapdragon AI Engine exemplifies heterogeneous computing for mobile A
 
 [^fn-npu]: NPUs (introduced in @sec-ml-system-architecture) excel at low-power inference on common operator patterns but have less programmability than GPUs. From an architecture perspective, NPUs achieve efficiency by hardcoding common dataflows (systolic arrays for matrix multiplication) rather than supporting general computation, trading flexibility for 10-100x better energy efficiency on supported operations.
 
-::: {.callout-note title="Representative snapshot (mobile SoC peak throughput, as of 2024)"}
-Public vendor materials often report peak NPU throughput on the order of 10s of TOPS for high-end mobile SoCs, typically measured on selected operations and precisions. These numbers are not directly comparable across vendors, and sustained throughput can be materially lower under thermal limits.
-:::
-
-
 While Qualcomm's approach emphasizes diverse processor specialization, vertically integrated strategies highlight how tight hardware-software co-design can enable sophisticated heterogeneous execution. Unified memory architectures can reduce explicit data copying overhead, and different compute blocks can be scheduled for different operator types (for example, matrix-heavy layers on an NPU, convolutional operators on a GPU, and control flow on the CPU). This coordination supports interactive on-device experiences, though realized latency depends on the full pipeline and device thermal conditions.
 
 Beyond vertically integrated solutions, IP licensing models allow SoC designers to customize processor combinations based on target applications, mixing CPU, GPU, DSP, and NPU blocks. This modular flexibility allows automotive SoCs to emphasize deterministic real-time processing while smartphone SoCs optimize for interactive performance and battery efficiency.
@@ -3426,13 +3417,13 @@ Organizations optimize exclusively for specific vendors to maximize performance 
 
 Before procuring accelerators, work through this decision framework:
 
-**Step 1: Characterize Your Workload**
+#### Step 1: Characterize Your Workload {.unnumbered}
 
 - Calculate arithmetic intensity for dominant operations (use roofline analysis from @sec-ai-acceleration-roofline-model)
 - Determine memory footprint: Do model weights + activations fit in accelerator memory?
 - Identify batch size requirements: Single-request latency or batched throughput?
 
-**Step 2: Match Workload to Hardware**
+#### Step 2: Match Workload to Hardware {.unnumbered}
 
 +-----------------------------------------------+-------------------------------+-----------------------------+
 | **If Your Workload Is...**                    | **Prioritize...**             | **Deprioritize...**         |
@@ -3448,14 +3439,14 @@ Before procuring accelerators, work through this decision framework:
 | ****Memory-constrained** (&gt;40GB model)**   | Memory capacity (80GB+ cards) | Entry-level accelerators    |
 +-----------------------------------------------+-------------------------------+-----------------------------+
 
-**Step 3: Validate Before Committing**
+#### Step 3: Validate Before Committing {.unnumbered}
 
 - Run representative workloads on target hardware (cloud instances enable low-cost trials)
 - Measure *sustained* throughput, not peak benchmarks
 - Profile to confirm whether bottleneck matches expectations (compute vs. memory)
 - Calculate cost-per-inference or cost-per-training-step, not just hardware cost
 
-**Step 4: Plan for Evolution**
+#### Step 4: Plan for Evolution {.unnumbered}
 
 - Will model sizes increase? Budget for memory headroom.
 - Will batch sizes change in production? Test across expected range.
@@ -3469,7 +3460,7 @@ Beyond performance optimization, hardware decisions carry broader implications. 
 
 To surpass the traditional focus on raw performance, we must evaluate hardware through the lens of **Silicon Sustainability**. In the era of planetary-scale AI, "Performance per Watt" is not just a mobile constraint—it is a global environmental mandate.
 
-::: {.callout-perspective title="Napkin Math: The Carbon ROI of Specialized Silicon"}
+::: {.callout-notebook title="The Carbon ROI of Specialized Silicon"}
 **The Problem**: Should you run your inference fleet on generic **CPUs** or invest in specialized **NPUs** (Neural Processing Units)?
 
 **The Physics**: Specialized hardware achieves higher **Arithmetic Intensity** while using fewer transistors for control logic.

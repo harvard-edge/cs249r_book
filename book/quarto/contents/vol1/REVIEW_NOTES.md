@@ -100,4 +100,4 @@
 
 ## Conclusion {#sec-volume-1-audit-comprehensive-review-notes-conclusion-546e}
 *   **Synthesis:**
-    *   *Action:* Ensure the "New Golden Age" callout explicitly maps the **AI Triad** (Data, Algorithms, Infrastructure) to the **6 Core Principles**. This provides the final unifying framework for the entire volume.
+    *   *Action:* Ensure the "New Golden Age" callout explicitly maps the **AI Triad** (Data, Algorithm, Machine) to the **6 Core Principles**. This provides the final unifying framework for the entire volume.
