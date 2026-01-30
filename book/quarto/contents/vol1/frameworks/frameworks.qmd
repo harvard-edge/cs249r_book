@@ -40,11 +40,37 @@ The architectural foundations established in @sec-dnn-architectures defined *wha
 
 A framework is to machine learning what a compiler is to traditional programming. A C compiler translates human-readable code into optimized machine instructions, managing register allocation, instruction scheduling, and memory layout. An ML framework translates high-level model definitions into hardware-specific execution plans, managing operator fusion, memory reuse, and device placement. This analogy is more than metaphor: modern frameworks literally include compilers, as we will see throughout this chapter.
 
+::: {.callout-checkpoint title="The Systems Cost of Gradients" collapse="false"}
+Training is fundamentally more expensive than inference because of Automatic Differentiation.
+
+**Computational Reality**
+
+- [ ] **Reverse Mode AD**: Why is this the only viable method for neural networks? (Because we have 1 loss scalar and $10^9$ parameters. Forward mode would require $10^9$ passes).
+- [ ] **The Activation Tax**: Do you understand why training memory scales linearly with depth? (We must stash forward activations to compute backward gradients).
+
+**Optimization Mechanics**
+
+- [ ] **Gradient Checkpointing**: How does re-computing activations save memory? (We discard the stash and regenerate it on demand).
+:::
+
 Every ML framework, regardless of API or design philosophy, must solve three fundamental problems. First, the *execution problem*: when and how should computation happen? Should operations execute immediately as written (eager execution), or should the framework build a complete description first and optimize before executing (graph execution)? This choice shapes debugging capability, optimization potential, and deployment flexibility. Second, the *differentiation problem*: how should the framework compute gradients automatically? Training requires derivatives of a loss function with respect to millions or billions of parameters, and manual differentiation is error-prone at this scale. Frameworks must implement automatic differentiation systems that compute exact gradients for arbitrary compositions of operations while managing the memory overhead of storing intermediate values. Third, the *hardware abstraction problem*: how should the framework target diverse hardware from a single interface? The same model definition should run on CPUs, GPUs, TPUs, and mobile devices, each with different memory constraints and optimal execution patterns.
 
 These three problems are deeply interconnected. The execution model determines when differentiation occurs and what optimizations are possible. The abstraction layer must support both execution styles across all hardware targets. Solving any one problem in isolation leads to frameworks that excel in narrow contexts but fail in broader deployment. This chapter examines how frameworks evolved to solve these problems and the trade-offs each solution entails, tracing the history from early libraries through modern frameworks before examining each problem in depth.
 
-:::{.callout-perspective title="The ML Compiler"}
+::: {.callout-checkpoint title="Execution Models" collapse="false"}
+The choice of execution mode determines both developer velocity and model performance.
+
+**Debuggability vs. Speed**
+
+- [ ] **Eager Mode (Python-First)**: Why does executing ops one-by-one make debugging easy but optimization hard? (Hint: The compiler cannot see the "future" ops to fuse them).
+- [ ] **Graph Mode (Compiler-First)**: Why does building a static graph enable **Kernel Fusion**? (Merging Conv+ReLU saves memory bandwidth).
+
+**The Modern Compromise**
+
+- [ ] **JIT Compilation**: How does `torch.compile` bridge the gap? (It captures the graph *just in time* to optimize, while falling back to Python for dynamic parts).
+:::
+
+::: {.callout-perspective title="The ML Compiler"}
 In the context of the **Iron Law**, a framework is fundamentally a **Compiler for the Silicon Contract**.
 
 Your "Source Code" is the model architecture (the **$Ops$** term). The framework's job is to take this high-level math and compile it into a series of hardware-specific kernel launches that:
@@ -1040,7 +1066,7 @@ When Overhead Ratio $> 1$, the model is **overhead-bound**. Compilation provides
 
 From the case study in @sec-ai-frameworks-putting-together-anatomy-training-step-c7f1, we can quantify this effect.
 
-::: {.callout-notebook title="Napkin Math: The Dispatch Tax"}
+::: {.callout-notebook title="The Dispatch Tax"}
 **Problem**: When does Python overhead kill performance?
 
 **Scenario 1: Small MLP (Overhead Bound)**
@@ -1940,9 +1966,7 @@ Every tensor resides on a specific device, and cross-device operations incur tra
 
 Three systems principles govern effective device and memory management: understanding the bandwidth hierarchy that constrains data movement, overlapping computation with communication to hide transfer latency, and using fine-grained synchronization to maintain correctness without sacrificing concurrency. The remainder of this section develops each principle, with quantitative analysis grounded in the Iron Law's data movement term.
 
-::: {.callout-tip title="Scope: Advanced GPU Programming"}
 The systems principles below build production-level GPU programming skills. These techniques become critical when optimizing large-scale training pipelines, implementing custom data transfer strategies, or diagnosing performance bottlenecks where data transfer latency dominates execution time. A collapsible notebook at the end of this section provides the PyTorch API patterns that implement these principles.
-:::
 
 ##### Principle 1: The Device Bandwidth Hierarchy {#sec-frameworks-device-principle-bandwidth .unnumbered}
 
@@ -2562,7 +2586,7 @@ Before comparing frameworks broadly, we examine one abstraction in depth. PyTorc
 
 The `nn.Module` class is PyTorch's answer to a concrete question: how should a framework organize the parameters, state, and computation of a neural network into a single programmable unit? Rather than catalog its API, we extract three enduring design principles that every framework must address regardless of its syntax or programming paradigm.
 
-### Principle 1: Automatic Parameter Discovery {#sec-nnmodule-param-discovery}
+### Principle 1: Automatic Parameter Discovery {#sec-nnmodule-param-discovery .unnumbered}
 
 A modern neural network may contain millions of trainable parameters spread across dozens of layers. Without automation, a programmer would need to manually enumerate every parameter tensor and pass it to the optimizer, an error-prone process that scales poorly with model complexity. Frameworks solve this through *automatic parameter discovery*: the system walks the module tree, collecting every parameter tensor so the optimizer can update them in a single call.
 
@@ -2596,7 +2620,7 @@ for name, param in layer.named_parameters():
 
 The distinction between *parameters* and *buffers* illustrates a subtlety of the discovery mechanism. Parameters carry `requires_grad=True` and participate in gradient computation. Buffers, registered through `register_buffer()`, travel with the model during device transfers but remain excluded from gradient updates. This separation is essential for normalization layers, where running statistics must persist across batches but must not receive gradients. The same dual-track design appears in Keras (via `non_trainable_weights`) and Flax (via `state` versus `params`).
 
-### Principle 2: Mode-Dependent Behavior {#sec-nnmodule-mode-behavior}
+### Principle 2: Mode-Dependent Behavior {#sec-nnmodule-mode-behavior .unnumbered}
 
 Training and inference require different computational behavior from the same model graph. During training, dropout layers randomly zero elements with probability $p$ to regularize the network, while during inference those same layers must perform identity mapping to produce deterministic outputs. Batch normalization uses per-batch statistics during training but switches to accumulated running statistics during inference. If these behavioral changes are left to the programmer, forgetting a single mode switch produces silently incorrect predictions in production.
 
@@ -2604,7 +2628,7 @@ Frameworks solve this with a *state flag* that propagates through the module hie
 
 This principle extends to parameter freezing for transfer learning. Setting `requires_grad=False` on specific parameters excludes them from gradient computation, effectively creating a third behavioral mode where some parameters train while others remain fixed. Selective freezing achieves computational savings by pruning the backward pass graph: frozen parameters need no gradient storage, reducing memory consumption proportionally.
 
-### Principle 3: Hierarchical Composition and Serialization {#sec-nnmodule-composition}
+### Principle 3: Hierarchical Composition and Serialization {#sec-nnmodule-composition .unnumbered}
 
 Complex models compose from reusable submodules, creating a tree structure. A ResNet is not implemented as a monolithic block of operations but as a hierarchy: the root module contains a sequence of residual blocks, each block contains convolution layers and normalization layers, and each layer contains parameter tensors. This hierarchical composition must support two critical operations: *recursive parameter collection* for training and *state serialization* for checkpointing and deployment.
 
@@ -3112,7 +3136,7 @@ Framework selection can be characterized along three primary axes that define th
 
 **Axis 3: Ecosystem Breadth vs. Specialization.** General-purpose frameworks cover broad operation sets but underperform specialized runtimes. TensorRT achieves 88% GPU utilization versus PyTorch's 32% (@tbl-framework-efficiency-matrix) precisely because it optimizes for a narrower problem. ONNX bridges this gap through standardized interchange.
 
-:::{.callout-tip title="Framework Selection Constraints"}
+::: {.callout-perspective title="Framework Selection Constraints"}
 Rather than seeking the "best" framework, effective selection identifies the framework that satisfies hard constraints (deployment target, required operations, team expertise) while optimizing soft preferences (performance, development speed, ecosystem). Hard constraints eliminate options; soft preferences rank remaining candidates.
 :::
 
@@ -3286,7 +3310,7 @@ Total: ~40M FLOPs, ~5MB memory traffic. On an A100:
 
 Each backend implements the same tensor operations with hardware-specific optimizations. The framework's abstraction layer (@sec-ai-frameworks-abstraction-problem-37a5) ensures identical numerical results (within floating-point tolerance) across platforms.
 
-:::{.callout-tip title="Takeaway: The Three Problems in Action"}
+::: {.callout-perspective title="The Three Problems in Action"}
 This trace reveals the three problems in concrete terms:
 
 - **Execution**: Eager mode enables line-by-line debugging but incurs dispatch overhead
