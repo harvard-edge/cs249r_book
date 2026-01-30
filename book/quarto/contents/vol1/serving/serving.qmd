@@ -278,7 +278,6 @@ While model optimization focuses on the mathematical artifact, model serving req
 
 [^fn-inference-server]: **Inference Server**: The concept emerged from Google's TensorFlow Serving [@olston2017tensorflow], open-sourced February 2016, which pioneered the separation of model logic from serving infrastructure. NVIDIA's Triton [@nvidia2024triton], originally TensorRT Inference Server with GA release in March 2019, extended this to multi-framework support. These servers implement dynamic batching that can improve GPU utilization by up to 70% compared to naive single-request serving. The architecture mirrors the separation of concerns in traditional web servers like Apache (1995) and nginx (2004), applying decades of distributed systems knowledge to ML deployment.
 
-
 Understanding the internal anatomy of these servers reveals how they bridge the gap between irregular user traffic and the highly regular, batch-oriented requirements of accelerators.
 
 **The Request Pipeline.** Every request traverses a multi-stage pipeline designed to maximize hardware throughput while minimizing latency overhead. @fig-server-anatomy visualizes this internal flow.
@@ -374,10 +373,9 @@ With the serving architecture established, we now trace what happens to a single
 
 For dynamic inference systems, the fundamental difference from training lies in optimization objectives. Training optimizes throughput: maximizing samples processed per hour over days of computation. A training job that processes 1000 samples per second is successful regardless of how long any individual sample takes. Serving inverts this priority, optimizing latency (introduced in @sec-ml-system-architecture) per request under strict time constraints. A serving system with 1000ms per-request latency has failed, even if it achieves excellent throughput.
 
-This shift has concrete implications for system design [@gujarati2020serving]. The metrics that matter change from aggregate throughput to latency distributions. Mean latency tells you little about user experience; p50, p95, and p99 latencies reveal how the system performs across the full range of requests. If your mean latency is 50ms but p99 is 2 seconds, one in a hundred users waits 40 times longer than average. For consumer-facing applications, these tail latencies often determine user satisfaction and retention.[^fn-tail-latency]
+This shift has concrete implications for system design [@gujarati2020serving]. The metrics that matter change from aggregate throughput to latency distributions. Mean latency tells you little about user experience; p50, p95, and p99 latencies reveal how the system performs across the full range of requests. If your mean latency is 50ms but p99 is 2 seconds, one in a hundred users waits 40 times longer than average. For consumer-facing applications, these tail latencies often determine user satisfaction and retention.[^fn-tail-latency-impact]
 
-[^fn-tail-latency]: **Tail Latency Impact**: Research at Google and Amazon in the mid-2000s established that users are more sensitive to latency variance than mean latency. Industry experience suggests that latency increases of 100ms can measurably impact user engagement and conversion rates for e-commerce applications, though the magnitude varies by context. This is why service level objectives (SLOs) typically specify percentile targets rather than averages.
-
+[^fn-tail-latency-impact]: **Tail Latency Impact**: Research at Google and Amazon in the mid-2000s established that users are more sensitive to latency variance than mean latency. Industry experience suggests that latency increases of 100ms can measurably impact user engagement and conversion rates for e-commerce applications, though the magnitude varies by context. This is why service level objectives (SLOs) typically specify percentile targets rather than averages.
 
 Managing these percentile constraints requires decomposing the total allowed response time into a *latency budget* that allocates time across each processing phase.
 
@@ -572,8 +570,11 @@ For ResNet-50 image classification, typical postprocessing includes transforming
 ::: {#lst-resnet-postprocessing lst-cap="**ResNet-50 Postprocessing**: Transforms raw logits to calibrated probabilities, extracts top-k predictions, and formats the API response."}
 ```{.python}
 # Transform raw logits to calibrated probabilities
-# Input: logits tensor of shape (batch_size, 1000) - one score per ImageNet class
-probs = torch.softmax(logits, dim=-1)  # Normalize to sum=1; ~0.05ms on GPU
+# Input: logits tensor of shape (batch_size, 1000) - one score per
+# ImageNet class
+probs = torch.softmax(
+    logits, dim=-1
+)  # Normalize to sum=1; ~0.05ms on GPU
 
 # Extract top-5 predictions for multi-class response
 # topk returns (values, indices) sorted by probability
@@ -581,7 +582,9 @@ top5_probs, top5_indices = probs.topk(5)  # ~0.02ms; GPU operation
 
 # Map class indices to human-readable labels
 # IMAGENET_CLASSES: list of 1000 class names from synset mapping
-labels = [IMAGENET_CLASSES[i] for i in top5_indices]  # ~0.01ms; CPU lookup
+labels = [
+    IMAGENET_CLASSES[i] for i in top5_indices
+]  # ~0.01ms; CPU lookup
 
 # Format response with predictions and metadata for API contract
 response = {
@@ -590,7 +593,7 @@ response = {
         for label, prob in zip(labels, top5_probs)
     ],
     "model_version": "resnet50-v2.1",  # Client-side version tracking
-    "inference_time_ms": 5.2,          # Observability for latency monitoring
+    "inference_time_ms": 5.2,  # Observability for latency monitoring
 }
 ```
 :::
@@ -667,7 +670,6 @@ The M/M/1 model assumes exponentially distributed service times, but ML inferenc
 
 [^fn-queuing-models]: **Kendall Notation**: The M/M/1 notation was introduced by British statistician David Kendall in 1953 and follows the pattern A/S/c (Arrivals/Service/servers). "M" stands for "Markovian" (memoryless, meaning exponential distributions), honoring Russian mathematician Andrey Markov (1856-1922). "D" means deterministic. So M/M/1 describes a single server with exponential arrivals and service times, while M/D/1 has deterministic service. ML inference is closer to M/D/1 since inference time is nearly constant, but M/M/1 yields conservative estimates suitable for capacity planning.
 
-
 ### Multi-Server Considerations {#sec-model-serving-systems-multiserver-considerations-00fc}
 
 The preceding analysis focuses on a single ML node—one machine serving inference requests. This scope aligns with Volume I's focus on mastering the fundamental unit of ML systems. Understanding single-node queuing dynamics is prerequisite to effective scaling: you cannot optimize a distributed system without first understanding the behavior of its components.
@@ -685,7 +687,6 @@ For traffic exceeding single-node capacity, production systems deploy multiple r
 ### Tail Latency {#sec-model-serving-systems-tail-latency-5376}
 
 Production SLOs typically specify percentile targets (p95, p99) rather than averages because tail latency determines user experience for the slowest requests [@dean2013tail]. For an M/M/1 queue, the p99 latency follows:
-
 
 $$W_{p99} \approx \text{service time} \cdot \left(1 + \frac{\ln(100 \cdot \rho)}{1 - \rho}\right)$$ {#eq-p99-latency}
 
@@ -755,7 +756,6 @@ Rather than eliminating all sources of latency variability, which is often impra
 
 [^fn-hedging-etymology]: **Hedging**: Borrowed from finance, where "hedging" means reducing risk by making offsetting bets. The term derives from the literal hedge (a boundary of shrubs) that protects a garden. Financial hedging dates to the 1600s Dutch tulip markets. Google's Jeff Dean introduced "hedged requests" in his influential 2013 "Tail at Scale" paper, applying the financial concept to distributed systems: send redundant requests to protect against the risk of slow responses.
 
-
 **Cancellation Complexity**: A critical implementation detail is that CUDA kernels cannot be interrupted mid-execution. When a hedged request completes, the duplicate must be cancelled, but if inference has already begun on the GPU, cancellation approaches include checking a cancellation flag before launching inference, accepting wasted compute for the in-flight kernel, or using request prioritization to deprioritize the duplicate. Since hedging typically applies only to the slowest 5 percent of requests, the overhead from occasional wasted compute remains acceptable.
 
 **Tied Requests.** Send the request to multiple servers simultaneously, but include a tag allowing servers to cancel execution once another server begins processing. This eliminates the delay of waiting to detect a slow response before hedging. For inference servers with significant startup overhead from model loading and memory allocation, tied requests ensure at least one server begins immediately.
@@ -763,7 +763,6 @@ Rather than eliminating all sources of latency variability, which is often impra
 **Canary Requests.** For requests that fan out to many backends, first send the request to a small subset of 1 to 2 servers.[^fn-canary-etymology] If these return within expected time, send to the remainder. If the canary is slow, the system can take corrective action by retrying elsewhere or using cached results before committing to the full fan-out. This prevents a single slow backend from stalling an entire distributed inference request.
 
 [^fn-canary-etymology]: **Canary**: From the practice of using canary birds in coal mines from the early 1900s through the 1980s. Miners brought caged canaries underground because the birds' high metabolic rate made them sensitive to carbon monoxide and methane, dying before gas concentrations became lethal to humans. In software, "canary" describes any small-scale test that detects problems before they affect the full system, whether canary deployments, canary requests, or canary tests.
-
 
 **Graceful Degradation.** When load exceeds capacity, return approximate results rather than timing out. For classification, return cached predictions for similar inputs. For generative models, return shorter outputs. For ensemble systems, return predictions from a subset of models. This maintains responsiveness at the cost of some accuracy, which users often prefer to outright failures.
 
@@ -824,7 +823,6 @@ Understanding cold start dynamics enables designing systems that meet latency re
 **Cold Start Anatomy.** Cold start latency compounds from multiple sources, each adding to the time between deployment and serving readiness. Weight loading reads model parameters from disk or network storage. Graph compilation performs just-in-time compilation of operations for the specific hardware. Memory allocation reserves GPU memory for activations and intermediate values. Warmup[^fn-warmup-etymology] execution performs initial inferences that populate caches and trigger lazy initialization.
 
 [^fn-warmup-etymology]: **Warmup**: The computing metaphor derives from physical warming, where engines and machines perform better after reaching operating temperature. In JIT-compiled systems like the JVM (1990s), "warmup" specifically refers to the period when the runtime gathers profiling data and compiles hot paths. For ML serving, warmup serves a dual purpose: triggering lazy memory allocation and populating CPU/GPU caches with frequently-accessed data, ensuring the first real user request does not pay these one-time costs.
-
 
 ::: {.callout-notebook title="ResNet-50: Cold Start Timeline"}
 
@@ -905,7 +903,6 @@ With models loaded, initialized, and ready to serve, the next optimization oppor
 
 [^fn-batch-etymology]: **Batch**: From Old French "bache" (a quantity baked at one time), the term entered computing in the 1950s to describe jobs processed together without human interaction, as contrasted with interactive computing. IBM's batch processing systems of the 1960s would collect punch cards overnight and process them sequentially. The ML usage preserves this core meaning: group samples together for efficient processing, trading individual response time for aggregate throughput.
 
-
 ::: {.callout-definition title="Dynamic Batching"}
 
 ***Dynamic Batching*** is the runtime optimization of trading **Latency** for **Throughput** under stochastic arrival patterns. By buffering requests into a **Batch Window**, the scheduler amortizes fixed overheads (kernel launch, weight IO) across multiple inputs, pushing the system away from the memory-bound regime.
@@ -916,10 +913,9 @@ With models loaded, initialized, and ready to serve, the next optimization oppor
 
 Modern accelerators achieve peak efficiency only at sufficient batch sizes [@shen2019nexus]. A single inference request leaves most compute units idle because GPUs are designed for parallel execution across thousands of threads. Batching amortizes fixed costs across multiple requests and enables parallel execution across the batch dimension.
 
-Two fixed costs dominate at small batch sizes. **Kernel launch overhead**[^fn-kernel-etymology] is the time for the CPU to prepare and submit work to the GPU. Each layer in a neural network typically requires a separate kernel launch: the CPU must assemble kernel parameters, copy them to GPU-accessible memory, and signal the GPU to begin execution. This overhead is typically 5-20μs per kernel, independent of batch size. ResNet-50 has approximately 50 layers, so kernel launch alone adds 250-1000μs per inference. At batch size 1, this overhead may exceed the actual compute time; at batch size 32, the same overhead is amortized across 32 images. **Weight loading** reads model parameters from GPU memory (VRAM) to the compute units. At batch size 1, the GPU reads all weights to process one image; at batch size 32, the same weight read processes 32 images, achieving 32× better memory efficiency. Measuring *batching efficiency* on a concrete model quantifies how these fixed costs amortize in practice.
+Two fixed costs dominate at small batch sizes. **Kernel launch overhead**[^fn-kernel-etymology-serving] is the time for the CPU to prepare and submit work to the GPU. Each layer in a neural network typically requires a separate kernel launch: the CPU must assemble kernel parameters, copy them to GPU-accessible memory, and signal the GPU to begin execution. This overhead is typically 5-20μs per kernel, independent of batch size. ResNet-50 has approximately 50 layers, so kernel launch alone adds 250-1000μs per inference. At batch size 1, this overhead may exceed the actual compute time; at batch size 32, the same overhead is amortized across 32 images. **Weight loading** reads model parameters from GPU memory (VRAM) to the compute units. At batch size 1, the GPU reads all weights to process one image; at batch size 32, the same weight read processes 32 images, achieving 32× better memory efficiency. Measuring *batching efficiency* on a concrete model quantifies how these fixed costs amortize in practice.
 
-[^fn-kernel-etymology]: **Kernel**: From Old English "cyrnel" meaning seed or grain, the essential core of something. In operating systems (1960s), the kernel is the core that manages hardware resources. CUDA borrowed this term around 2007 for GPU functions because they represent the computational "core" of parallel algorithms. Unlike OS kernels that run continuously, GPU kernels are discrete units of parallel work launched by the CPU and executed across thousands of GPU threads simultaneously.
-
+[^fn-kernel-etymology-serving]: **Kernel**: From Old English "cyrnel" meaning seed or grain, the essential core of something. In operating systems (1960s), the kernel is the core that manages hardware resources. CUDA borrowed this term around 2007 for GPU functions because they represent the computational "core" of parallel algorithms. Unlike OS kernels that run continuously, GPU kernels are discrete units of parallel work launched by the CPU and executed across thousands of GPU threads simultaneously.
 
 ::: {.callout-notebook title="ResNet-50 Batching Efficiency"}
 
@@ -1204,7 +1200,6 @@ The optimal batching strategy depends critically on how requests arrive. Differe
 
 [^fn-poisson-process]: **Poisson Process**: A stochastic model where events occur continuously and independently at a constant average rate. Named after French mathematician Simeon Denis Poisson (1781-1840), this model accurately describes many real-world arrival patterns including web requests and API calls. The key property for serving systems is that inter-arrival times are exponentially distributed, meaning the probability of long gaps between requests decays exponentially, which is why batching windows can be tuned probabilistically.
 
-
 $$E[\text{batch size}] = \lambda \cdot T$$ {#eq-poisson-batch}
 
 The variance equals the mean (a property of Poisson distributions), so batch sizes fluctuate significantly at moderate traffic. With $\lambda = 200$ requests/second and $T = 10$ms, expected batch size is 2, but 16% of windows will have zero requests (wasted compute cycles) while others may have 4 or more.
@@ -1369,7 +1364,7 @@ The computational intensity of managing KV caches across concurrent requests rai
 
 ::: {.callout-notebook title="The Carbon Cost of a Chat"}
 
-**Joules per Token: The Green Metric**: 
+**Joules per Token: The Green Metric**:
 As LLMs scale, energy efficiency becomes a first-class operational metric alongside latency. For an H100 GPU (700W TDP), we can quantify the energy footprint of serving:
 
 1.  **Throughput**: 114 concurrent requests × 7.5 tokens/sec/req $\approx$ **855 tokens/sec**.
@@ -1387,7 +1382,6 @@ A typical 500-token response consumes $\approx \mathbf{585 \text{ Joules}}$.
 **The Engineering Lever**: The primary way to reduce Joules/Token is to **increase hardware utilization**. If the GPU sits at 10% utilization due to poor batching, the "Idle Power" is still ~300W, causing the energy-per-token to skyrocket to **>10 Joules**. MLOps is not just about speed; it's about sustainability through efficiency.
 :::
 
-
 ## Inference Runtime Selection {#sec-model-serving-systems-inference-runtime-selection-5eef}
 
 The batching strategies and LLM-specific techniques examined in preceding sections determine *how* requests are grouped and processed. But these strategies assume an underlying execution engine that actually runs the model computations. The execution environment directly affects whether the latency budgets established earlier are achievable. The inference runtime, the software layer that orchestrates tensor operations and manages hardware resources, can vary by an order of magnitude in performance for identical models. Choosing appropriately requires understanding the tradeoffs between framework-native serving, general-purpose optimization, and specialized inference engines.
@@ -1400,10 +1394,9 @@ TorchScript and TensorFlow SavedModel formats enable ahead-of-time compilation a
 
 **General-Purpose Optimization.** ONNX Runtime provides a hardware-agnostic optimization layer [@onnxruntime2024]. Models export to ONNX format, then ONNX Runtime applies graph optimizations and selects execution providers for the target hardware. This enables single-format deployment across CPUs, GPUs, and specialized accelerators.
 
-**Specialized Inference Engines.** TensorRT[^fn-tensorrt] (NVIDIA GPUs), OpenVINO (Intel hardware), and similar engines optimize specifically for their target hardware [@nvidia2024tensorrt; @chen2018tvm]. They apply aggressive optimizations that framework-native runtimes cannot safely perform:
+**Specialized Inference Engines.** TensorRT[^fn-tensorrt-serving] (NVIDIA GPUs), OpenVINO (Intel hardware), and similar engines optimize specifically for their target hardware [@nvidia2024tensorrt; @chen2018tvm]. They apply aggressive optimizations that framework-native runtimes cannot safely perform:
 
-[^fn-tensorrt]: **TensorRT**: NVIDIA's inference optimization SDK that applies layer fusion, kernel auto-tuning, and precision calibration to neural networks. Unlike framework-native runtimes that preserve training-time graph structure, TensorRT rebuilds the computation graph for the specific target GPU during a build phase. This GPU-specific compilation means TensorRT engines are not portable across GPU architectures, requiring separate builds for V100, A100, and H100 deployments. The build phase can take minutes but produces engines that often achieve 2-5x speedup over PyTorch.
-
+[^fn-tensorrt-serving]: **TensorRT**: NVIDIA's inference optimization SDK that applies layer fusion, kernel auto-tuning, and precision calibration to neural networks. Unlike framework-native runtimes that preserve training-time graph structure, TensorRT rebuilds the computation graph for the specific target GPU during a build phase. This GPU-specific compilation means TensorRT engines are not portable across GPU architectures, requiring separate builds for V100, A100, and H100 deployments. The build phase can take minutes but produces engines that often achieve 2-5x speedup over PyTorch.
 
 **Layer fusion** combines multiple sequential operations into a single GPU kernel. Consider a common pattern: convolution → batch normalization → ReLU activation. Without fusion, this requires three kernel launches, three round-trips to GPU memory (write conv output, read for batchnorm, write batchnorm output, read for ReLU), and three sets of intermediate tensors. Fusion combines all three into one kernel that reads inputs once, computes the combined result in registers, and writes final outputs once. This eliminates kernel launch overhead (15-60μs saved per fusion) and reduces memory traffic by 2-3×. TensorRT automatically detects and fuses common patterns; a typical ResNet-50 reduces from ~50 kernels to ~15 after fusion.
 
