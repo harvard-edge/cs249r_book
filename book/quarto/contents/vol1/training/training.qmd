@@ -46,7 +46,20 @@ The previous chapters established how to express neural network computations: @s
 
 Training workloads exhibit three distinguishing characteristics that separate them from general-purpose computing: extreme computational intensity from iterative gradient computations across massive models, substantial memory pressure from storing parameters, activations, and optimizer states simultaneously, and complex data dependencies requiring synchronized parameter updates. Large language model training requires approximately $10^{23}$ floating-point operations [@brown2020language], memory footprints reaching terabytes when including activation storage, and coordination across many devices. This multiplicative cost structure explains why training systems engineering evolved as a distinct discipline.
 
-These three characteristics create corresponding optimization opportunities. Computational intensity can be addressed through hardware acceleration and precision reduction. Memory pressure responds to techniques like gradient checkpointing and activation recomputation. Data dependencies motivate pipeline designs that overlap computation with data movement. The framework that follows provides the vocabulary for reasoning about which optimizations target which constraints.
+These three characteristics create corresponding optimization opportunities. Computational intensity can be addressed through hardware acceleration and precision reduction. Memory pressure responds to techniques like gradient checkpointing and activation recomputation. Data dependencies motivate pipeline designs that overlap computation with data movement. The framework that follows provides the vocabulary for reasoning about which optimizations target which constraints. Before formalizing that framework, consider how these constraints interact in practice when a single *gradient explosion* can erase days of expensive computation.
+
+::: {.callout-example title="The 3AM Gradient Explosion"}
+**The Scenario**: You are training a 7B parameter LLM. The loss curve has been decreasing smoothly for 4 days. You go to sleep.
+
+**The Failure**: At 3:00 AM, the training loss suddenly spikes from 2.5 to NaN (Not a Number). The training crashes. You have lost 4 days of compute ($\approx \$5,000$).
+
+**The Physics**: A single batch contained an outlier with extremely high activation values. In **Mixed Precision (FP16)**, these values exceeded the dynamic range ($> 65,504$), causing an overflow to Infinity. The gradients became Infinite, updating all weights to NaN.
+
+**The Systems Fix**:
+1.  **Checkpointing**: Save model state every hour so you only lose 1 hour, not 4 days.
+2.  **Gradient Clipping**: Cap the norm of gradient vectors to prevent single-batch spikes from destroying the weights.
+3.  **BF16**: Use Brain Float 16 format, which trades precision for range, making overflows far less likely than in standard FP16.
+:::
 
 ### The Iron Law of Training Performance {#sec-ai-training-iron-law-training-performance-a53f}
 
