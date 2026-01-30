@@ -9,27 +9,27 @@ _Machine Learning Systems_
 
 ## Chapter 1: Introduction
 
-### Figure 1.1: AI Development Timeline
+### Figure 1.1: AI Development Timeline.
 
-**Caption**: AI Development Timeline: Early AI research focused on symbolic reasoning and rule-based systems, while modern AI leverages data-driven approaches like neural networks to achieve increasingly complex tasks. This progression exposes a shift from hand-coded intelligence to learned intelligence, marked by milestones such as the perceptron, deep blue, and large language models like GPT-3.
+**Caption**: AI Development Timeline. A chronological curve traces AI research activity from the 1950s to the 2020s, with gray bands marking the two AI Winter periods (1974 to 1980, 1987 to 1993). Callout boxes highlight key milestones including the Turing Test, the Dartmouth conference, the Perceptron, ELIZA, Deep Blue, and GPT-3.
 
 **Alt Text**: Timeline from 1950 to 2020 with red line showing AI publication frequency. Gray bands mark two AI Winters (1974-1980, 1987-1993). Callout boxes mark milestones: Turing 1950, Dartmouth 1956, Perceptron 1957, ELIZA 1966, Deep Blue 1997, GPT-3 2020.
 
-### Figure 1.2: AlexNet Convolutional Neural Network Architecture
+### Figure 1.2: AlexNet Architecture.
 
-**Caption**: AlexNet Convolutional Neural Network Architecture: The network that launched the deep learning revolution at ImageNet 2012. With 60 million parameters trained on 1.2 million images across two GTX 580 GPUs, AlexNet achieved 15.3% top-5 error compared to 26.2% for the second-place entry, a 42% relative improvement. The architecture progresses from convolutional layers (green blocks showing spatial feature extraction) through fully connected layers (dense connections), demonstrating that deep networks could automatically learn effective visual features without hand-crafted engineering.
+**Caption**: AlexNet Architecture. The network that launched the deep learning revolution at ImageNet 2012. Two parallel GPU streams process 224x224 input images through convolutional layers (green blocks) that extract spatial features at decreasing resolutions, converging through three fully connected layers to 1,000 output classes. With 60 million parameters trained across two GTX 580 GPUs, AlexNet achieved 15.3% top-5 error, a 42% relative improvement over the second-place entry.
 
 **Alt Text**: 3D diagram of AlexNet with two parallel GPU streams. Green blocks show convolutional layers decreasing from 224x224 input. Red kernels overlay green blocks. Right side shows three dense layers converging to 1000 outputs.
 
-### Figure 1.3: Component Interdependencies
+### Figure 1.3: The AI Triad.
 
-**Caption**: Component Interdependencies: Machine learning system performance relies on the coordinated interaction of models, data, and machines; limitations in any one component constrain the capabilities of the others. Effective system design requires balancing these interdependencies to optimize overall performance and feasibility.
+**Caption**: The AI Triad. A triangle diagram with three vertices, Data, Algorithm, and Machine, connected by bidirectional arrows. Each node depicts its domain (database cylinders, neural network graph, and cloud infrastructure), illustrating how limitations in any one component constrain the capabilities of the others.
 
 **Alt Text**: Triangle diagram with three circles at vertices labeled Model, Data, and Machine. Double-headed purple arrows connect all three nodes, showing bidirectional dependencies. Icons inside circles depict neural network, database cylinders, and cloud.
 
-### Figure 1.4: Historical Efficiency Trends
+### Figure 1.4: Historical Efficiency Trends.
 
-**Caption**: Historical Efficiency Trends: The evolution of the DAM Taxonomy components—Data (Information), Algorithm (Logic), and Machine (Physics)—has contributed substantial gains in AI capabilities. Understanding these parallel trajectories helps engineers identify which efficiency dimension currently offers the highest leverage for their workloads.
+**Caption**: Historical Efficiency Trends. A three-track timeline from 1980 to 2023 shows parallel progress in Algorithmic Efficiency (blue), Compute Efficiency (yellow), and Data Selection (green). Each track progresses through distinct eras: algorithms advance from early methods through deep learning to modern efficiency techniques; compute evolves from general-purpose CPUs through accelerated hardware to sustainable computing; data practices shift from scarcity through big data to data-centric AI.
 
 **Alt Text**: Timeline with three horizontal tracks from 1980 to 2023. Blue track shows Algorithmic Efficiency progressing through Deep Learning Era to Modern Efficiency. Yellow shows Compute Efficiency from General-Purpose through Accelerated to Sustainable Computing. Green shows Data Selection from Scarcity through Big Data to Data-Centric AI.
 
@@ -41,9 +41,9 @@ _Machine Learning Systems_
 
 **Alt Text**: Log-scale scatter plot showing petaflop/s-days from 2012 to 2018. Points range from AlexNet at 0.006 to AlphaGoZero at 1900. Dashed diagonal line shows exponential trend. Labels identify models including VGG, ResNet, DeepSpeech2, and AlphaZero.
 
-### Figure 1.7: ML System Lifecycle
+### Figure 1.7: ML System Lifecycle.
 
-**Caption**: ML System Lifecycle: Continuous iteration defines successful machine learning systems, requiring feedback loops to refine models and address performance degradation across data collection, model training, evaluation, and deployment. This cyclical process contrasts with traditional software development and emphasizes the importance of ongoing monitoring and adaptation to maintain system reliability and accuracy in dynamic environments.
+**Caption**: ML System Lifecycle. A six-box flowchart depicting Data Collection, Preparation, Model Training, Evaluation, Deployment, and Monitoring. Two feedback loops distinguish this cycle from linear software development: evaluation returns to preparation when results are insufficient, and monitoring triggers new data collection when performance degrades.
 
 **Alt Text**: Flowchart showing cyclical ML lifecycle. Six boxes: Data Collection, Preparation, Model Training, Evaluation, Deployment, Monitoring. Two loops: evaluation returns to preparation; monitoring triggers collection.
 
@@ -57,13 +57,13 @@ _Machine Learning Systems_
 
 ### Figure 2.1: Distributed Intelligence Spectrum
 
-**Caption**: Distributed Intelligence Spectrum: Machine learning system design involves trade-offs between computational resources, latency, and connectivity, resulting in a spectrum of deployment options ranging from centralized cloud infrastructure to resource-constrained edge and TinyML devices. This figure maps these options, highlighting how each approach balances processing location with device capability and network dependence. Source: [@abiresearch2024tinyml].
+**Caption**: Distributed Intelligence Spectrum: Machine learning deployment spans from centralized cloud infrastructure to resource-constrained TinyML devices, each balancing processing location, device capability, and network dependence. Source: [@abiresearch2024tinyml].
 
 **Alt Text**: Horizontal spectrum showing 5 deployment tiers from left to right: ultra-low-power devices and sensors, intelligent device, gateway, on-premise servers, and cloud. Arrows indicate TinyML, Edge AI, and Cloud AI spans across the spectrum.
 
-### Figure 2.2: Cloud ML Capabilities
+### Figure 2.2: Cloud ML Decomposition.
 
-**Caption**: Cloud ML Capabilities: Cloud machine learning systems address challenges related to scale, complexity, and resource management through centralized computing infrastructure and specialized hardware. This figure outlines key considerations for deploying models in the cloud, including the need for reliable infrastructure and efficient resource allocation to handle large datasets and complex computations.
+**Caption**: Cloud ML Decomposition. Characteristics, benefits, challenges, and representative applications of cloud machine learning, where centralized infrastructure and specialized hardware address scale, complexity, and resource management for large datasets and complex computations.
 
 **Alt Text**: Tree diagram with Cloud ML branching to four categories: Characteristics, Benefits, Challenges, and Examples. Each lists items like computational power, scalability, vendor lock-in, and virtual assistants.
 
@@ -71,9 +71,9 @@ _Machine Learning Systems_
 
 **Alt Text**: Aerial view of Google Cloud TPU data center with long rows of server racks illuminated by blue LEDs extending toward the horizon across a large facility floor.
 
-### Figure 2.4: Edge ML Dimensions
+### Figure 2.4: Edge ML Decomposition.
 
-**Caption**: Edge ML Dimensions: This figure outlines key considerations for edge machine learning, contrasting challenges with benefits and providing representative examples and characteristics. Understanding these dimensions enables designing and deploying effective AI solutions on resource-constrained devices.
+**Caption**: Edge ML Decomposition. Characteristics, benefits, challenges, and representative applications of edge machine learning, where decentralized processing on nearby hardware reduces latency and network dependence at the cost of constrained compute and memory.
 
 **Alt Text**: Tree diagram with Edge ML branching to four categories: Characteristics, Benefits, Challenges, and Examples, listing items like decentralized processing, reduced latency, security concerns, and industrial IoT.
 
@@ -81,15 +81,15 @@ _Machine Learning Systems_
 
 **Alt Text**: Collection of IoT devices arranged on a surface: smart home sensors, fitness wearables, environmental monitors, and connected appliances in various sizes and form factors.
 
-### Figure 2.6: Mobile ML Capabilities
+### Figure 2.6: Mobile ML Decomposition.
 
-**Caption**: Mobile ML Capabilities: Mobile machine learning systems balance performance with resource constraints through on-device processing, specialized hardware acceleration, and optimized frameworks. This figure outlines key considerations for deploying ML models on mobile devices, including the trade-offs between computational efficiency, battery life, and model performance.
+**Caption**: Mobile ML Decomposition. Characteristics, benefits, challenges, and representative applications of mobile machine learning, where on-device processing and hardware acceleration balance computational efficiency, battery life, and model performance on smartphones and tablets.
 
 **Alt Text**: Tree diagram with Mobile ML branching to four categories: Characteristics, Benefits, Challenges, and Examples. Each lists items like on-device processing, real-time response, battery constraints, and voice recognition.
 
-### Figure 2.7: TinyML System Characteristics
+### Figure 2.7: TinyML Decomposition.
 
-**Caption**: TinyML System Characteristics: Constrained devices necessitate a focus on efficiency, driving trade-offs between model complexity, accuracy, and energy consumption, while enabling localized intelligence and real-time responsiveness in embedded applications. This figure outlines key aspects of TinyML, including the challenges of resource limitations, example applications, and the benefits of on-device machine learning.
+**Caption**: TinyML Decomposition. Characteristics, benefits, challenges, and representative applications of TinyML, where milliwatt power budgets and kilobyte memory limits enable always-on sensing and localized intelligence in embedded applications.
 
 **Alt Text**: Tree diagram with TinyML branching to four categories: Characteristics, Benefits, Challenges, and Examples, listing items like low-power operation, always-on capability, resource limitations, and predictive maintenance.
 
@@ -97,9 +97,9 @@ _Machine Learning Systems_
 
 **Alt Text**: Small development boards including Arduino Nano BLE Sense and similar microcontroller kits arranged on a surface, each approximately 2-5 cm in length with visible chips and connectors.
 
-### Figure 2.9: ML System Trade-Offs
+### Figure 2.9: Paradigm Comparison Radar Plots.
 
-**Caption**: ML System Trade-Offs: Radar plots quantify performance and operational characteristics across cloud, edge, mobile, and TinyML paradigms, revealing inherent trade-offs between compute power, latency, energy consumption, and scalability. These visualizations enable informed selection of the most suitable deployment approach based on application-specific constraints and priorities.
+**Caption**: Paradigm Comparison Radar Plots. Two radar plots quantify performance and operational characteristics across cloud, edge, mobile, and TinyML paradigms. The left plot contrasts compute power, latency, scalability, and energy efficiency; the right plot contrasts connectivity, privacy, real-time capability, and offline operation.
 
 **Alt Text**: Two radar plots with four overlapping polygons each. Left plot axes: compute power, latency, scalability, energy. Right plot axes: connectivity, privacy, real-time, offline capability.
 
@@ -111,13 +111,13 @@ _Machine Learning Systems_
 
 ### Figure 2.11: Hybrid System Interactions
 
-**Caption**: Hybrid System Interactions: Data flows upward from sensors through processing layers to cloud analytics for insights, while trained models deploy downward from the cloud to enable inference at the edge, mobile, and TinyML devices. These connection types (deploy, data/results, analyze, and sync) establish a distributed architecture where each paradigm contributes unique capabilities to the overall machine learning system.
+**Caption**: Hybrid System Interactions: Data flows upward from sensors through processing layers to cloud analytics, while trained models deploy downward to edge, mobile, and TinyML inference points. Five connection types (deploy, data, results, assist, and sync) establish a distributed architecture where each paradigm contributes unique capabilities.
 
 **Alt Text**: System diagram with four ML paradigms: TinyML sensors, Edge inference, Mobile processing, and Cloud training. Arrows show deploy, data, results, sync, and assist flows between tiers.
 
 ### Figure 2.12: Convergence of ML Systems
 
-**Caption**: Convergence of ML Systems: Diverse machine learning deployments (cloud, edge, mobile, and tiny) share foundational principles in data pipelines, resource management, and system architecture, enabling hybrid solutions and systematic design approaches. Understanding these shared principles allows practitioners to adapt techniques across different paradigms and build cohesive, efficient ML workflows despite varying constraints and optimization goals.
+**Caption**: Convergence of ML Systems: Three-layer structure showing how diverse deployments converge. The top layer lists four paradigms (Cloud, Edge, Mobile, TinyML); the middle layer identifies shared foundations (data pipelines, resource management, architecture principles); and the bottom layer presents cross-cutting concerns (optimization, operations, trustworthy AI) that apply across all paradigms.
 
 **Alt Text**: Three-layer diagram. Top: Cloud, Edge, Mobile, TinyML implementations. Middle: data pipeline, resource management, architecture principles. Bottom: optimization, operations, trustworthy AI. Arrows connect layers.
 
@@ -125,21 +125,21 @@ _Machine Learning Systems_
 
 ## Chapter 3: The AI Development Workflow
 
-### Figure 3.1: ML Lifecycle Stages
+### Figure 3.1: Dual-Pipeline ML Development
 
-**Caption**: ML Lifecycle Stages: Two parallel pipelines characterize production ML development. The data pipeline (green, top) progresses from raw collection through ingestion, analysis, labeling, validation, and preparation. The model pipeline (blue, bottom) takes prepared datasets through training, evaluation, validation, and deployment. The prominent feedback arrows emphasize what distinguishes ML from traditional software: monitoring insights continuously inform data refinements, evaluation results trigger model improvements, and deployment experiences reshape collection strategies. These bidirectional flows explain why ML projects average 4-8 iteration cycles before production readiness.
+**Caption**: Dual-Pipeline ML Development: The data pipeline (green, top) progresses from collection through ingestion, analysis, labeling, validation, and preparation. The model pipeline (blue, bottom) takes prepared datasets through training, evaluation, validation, and deployment. Feedback arrows show how monitoring insights inform data refinements, evaluation results trigger model improvements, and deployment experiences reshape collection strategies.
 
 **Alt Text**: Two parallel pipelines: data pipeline (green, top) with 6 stages from collection to preparation; model pipeline (blue, bottom) with 4 stages. Curved feedback arrows connect deployment back to collection and training stages.
 
 ### Figure 3.2: Data Scientist Time Allocation
 
-**Caption**: Data Scientist Time Allocation: Data preparation consumes a majority of data science effort, up to 60%, underscoring the need for systematic data engineering practices to prevent downstream model failures and ensure project success. Prioritizing data quality and pipeline development yields greater returns than solely focusing on advanced algorithms. Source: Various industry reports.
+**Caption**: Data Scientist Time Allocation: Data preparation consumes up to 60% of data science effort, with data collection accounting for an additional 19%. Model-focused activities such as pattern mining, training set construction, and algorithm refinement together represent roughly 18% of total time. Source: CrowdFlower 2016 Data Science Report.
 
 **Alt Text**: Pie chart showing data scientist time allocation: 60% cleaning and organizing data, 19% collecting datasets, 9% mining for patterns, 5% building training sets, 4% refining algorithms, 3% other tasks.
 
-### Figure 3.3: Six-Stage ML Lifecycle Framework
+### Figure 3.3: Simplified Lifecycle with Feedback
 
-**Caption**: Six-Stage ML Lifecycle Framework: A simplified view of ML system development emphasizing sequential progression from problem definition through monitoring. The prominent feedback loop from monitoring back to data collection captures the essential insight: production insights drive continuous refinement across all earlier stages. Unlike traditional software where later phases rarely influence earlier ones, ML systems require this bidirectional flow because data distributions shift, model performance drifts, and operational requirements evolve. Teams that design for this feedback from the start report 2-3x faster iteration cycles than those retrofitting feedback mechanisms.
+**Caption**: Simplified Lifecycle with Feedback: Six stages progress from problem definition through data collection, model development, evaluation, deployment, and monitoring. The feedback loop from monitoring back to data collection captures the essential insight that production insights drive continuous refinement across earlier stages, because data distributions shift, model performance drifts, and operational requirements evolve.
 
 **Alt Text**: Linear flowchart with 6 boxes: Problem Definition, Data Collection, Model Development, Evaluation, Deployment, Monitoring. Feedback loop arrow curves from Monitoring back to Data Collection.
 
@@ -147,9 +147,9 @@ _Machine Learning Systems_
 
 **Alt Text**: Two side-by-side retinal fundus images: left shows healthy retina, right shows diabetic retinopathy with dark red hemorrhage spots scattered across the retina.
 
-### Figure 3.5: ML Lifecycle Dependencies
+### Figure 3.5: Feedback Paths Across Lifecycle Stages
 
-**Caption**: ML Lifecycle Dependencies: The interconnected feedback paths between stages reveal why ML systems require integrated rather than sequential development. Data gaps identified during evaluation flow back to collection. Validation issues inform training adjustments. Performance insights from monitoring trigger refinements across the pipeline. Deployment constraints propagate backward to influence model design. These dependencies explain why ML technical debt compounds faster than traditional software debt: changes in any stage can cascade through multiple connected stages, requiring coordinated updates rather than isolated fixes.
+**Caption**: Feedback Paths Across Lifecycle Stages: Six labeled feedback arrows connect the lifecycle stages. Data gaps identified during evaluation flow back to collection. Validation issues inform training adjustments. Performance insights from monitoring trigger pipeline refinements. Model updates propagate from monitoring to training. Data quality issues feed back to preparation. Deployment constraints propagate backward to influence model design.
 
 **Alt Text**: Diagram with 6 boxes: Data Collection, Preparation, Training, Evaluation, Deployment, Monitoring. Labeled feedback arrows show data gaps, validation issues, performance insights, and deployment constraints flowing between stages.
 
@@ -159,13 +159,13 @@ _Machine Learning Systems_
 
 ### Figure 4.1: Data Quality Cascades
 
-**Caption**: Data Quality Cascades: Errors introduced early in the machine learning workflow amplify across subsequent stages, increasing costs and potentially leading to flawed predictions or harmful outcomes. Recognizing these cascades motivates proactive investment in data engineering and quality control. Source: [@sambasivan2021everyone].
+**Caption**: Data Quality Cascades: Errors introduced early in the machine learning workflow amplify across subsequent stages, increasing costs and potentially leading to flawed predictions or harmful outcomes. Source: [@sambasivan2021everyone].
 
 **Alt Text**: Timeline with 7 stages from problem statement to deployment. Colored arcs show errors from data collection propagating to evaluation and deployment stages.
 
 ### Figure 4.2: The Four Pillars of Data Engineering
 
-**Caption**: The Four Pillars of Data Engineering: Quality, Reliability, Scalability, and Governance form the foundational framework for ML data systems. Each pillar contributes essential capabilities (solid arrows), while trade-offs between pillars (dashed lines) require careful balancing: validation overhead affects throughput, consistency constraints limit distributed scale, privacy requirements impact performance, and bias mitigation may reduce available training data. Effective data engineering requires managing these tensions systematically rather than optimizing any single pillar in isolation.
+**Caption**: The Four Pillars of Data Engineering: Quality, Reliability, Scalability, and Governance form the foundational framework for ML data systems. Each pillar contributes essential capabilities (solid arrows), while trade-offs between pillars (dashed lines) require careful balancing: validation overhead affects throughput, consistency constraints limit distributed scale, privacy requirements impact performance, and bias mitigation may reduce available training data.
 
 **Alt Text**: Four boxes labeled Quality, Reliability, Scalability, and Governance surround a central ML Data System circle. Solid arrows connect each box to center showing contributions; dashed lines between boxes indicate trade-offs.
 
@@ -173,9 +173,9 @@ _Machine Learning Systems_
 
 **Alt Text**: Diagram showing voice-activated device with microphone, always-on wake word detector, and connection to main voice assistant that activates upon keyword detection.
 
-### Figure 4.4: Dataset Convergence
+### Figure 4.4: Shared Dataset Bias Propagation
 
-**Caption**: Dataset Convergence: Shared datasets can mask limitations and propagate biases across multiple machine learning systems, potentially leading to overoptimistic performance evaluations and reduced generalization to unseen data. Reliance on common datasets creates a false sense of progress within an ecosystem of models, hindering the development of dependable AI applications.
+**Caption**: Shared Dataset Bias Propagation: Five models (A through E) all train on a single central dataset repository. Arrows show how shared limitations, biases, and blind spots propagate from the common dataset to every downstream model, leading to correlated failures across the ecosystem.
 
 **Alt Text**: Five model boxes labeled A through E at center all connect upward to one central training dataset repository. Arrows downward show shared limitations, biases, and blind spots propagating to all models.
 
@@ -185,19 +185,19 @@ _Machine Learning Systems_
 
 ### Figure 4.6: Synthetic Data Augmentation
 
-**Caption**: Synthetic Data Augmentation: Combining algorithmically generated data with historical datasets expands training set size and diversity, mitigating limitations caused by scarce or biased real-world data and improving model generalization. This approach enables reliable machine learning system development when acquiring sufficient real-world data is impractical or unethical. Source: AnyLogic [@anylogic_synthetic].
+**Caption**: Synthetic Data Augmentation: A four-node pipeline where historical data and simulation outputs feed into a synthetic data generation process, producing an expanded combined training dataset with greater size and diversity than either source alone. Source: AnyLogic [@anylogic_synthetic].
 
 **Alt Text**: Diagram showing historical data icon and simulation cloud icon both feeding into synthetic data generation process, producing an expanded combined training dataset.
 
-### Figure 4.7: Data Pipeline Architecture
+### Figure 4.7: Three-Stage Pipeline Flow
 
-**Caption**: Data Pipeline Architecture: Modular pipelines ingest, process, and deliver data for machine learning tasks, enabling independent scaling of components and improved data quality control. Distinct stages (ingestion, storage, and preparation) transform raw data into a format suitable for model training and validation, forming the foundation of reliable ML systems.
+**Caption**: Three-Stage Pipeline Flow: Raw data sources and APIs feed into batch and stream ingestion at the middle layer, then flow to data warehouse and storage destinations at the bottom. Each stage scales independently, enabling modular quality control across the pipeline.
 
 **Alt Text**: Three-tier flow diagram with raw data sources and APIs at top, batch and stream ingestion in middle layer, and data warehouse and storage destinations at bottom connected by arrows.
 
-### Figure 4.8: Data Pipeline Architectures
+### Figure 4.8: ETL vs. ELT Comparison
 
-**Caption**: Data Pipeline Architectures: ETL pipelines transform data *before* loading it into a data warehouse, while ELT pipelines load raw data first and transform it within the warehouse, impacting system flexibility and resource allocation for machine learning workflows. Choosing between ETL and ELT depends on data volume, transformation complexity, and the capabilities of the target data storage system.
+**Caption**: ETL vs. ELT Comparison: Side-by-side view of two pipeline paradigms. ETL transforms data before loading into a data warehouse, while ELT loads raw data first and transforms within the warehouse. The choice depends on data volume, transformation complexity, and target storage capabilities.
 
 **Alt Text**: Side-by-side comparison showing ETL pipeline with extract, transform, then load sequence versus ELT pipeline with extract, load, then transform sequence within the data warehouse.
 
@@ -205,9 +205,9 @@ _Machine Learning Systems_
 
 **Alt Text**: Two-panel visualization showing raw audio waveform on left transforming into spectrogram on right, with time on horizontal axis and frequency on vertical axis indicated by color intensity.
 
-### Figure 4.10: Data Processing Pipeline
+### Figure 4.10: TFX End-to-End Pipeline
 
-**Caption**: Data Processing Pipeline: A modular end-to-end ML pipeline, as implemented in TensorFlow extended, highlighting key stages from raw data ingestion to trained model deployment and serving. This decomposition enables independent development, versioning, and scaling of each component, improving maintainability and reproducibility of ML systems.
+**Caption**: TFX End-to-End Pipeline: A TensorFlow Extended pipeline traces the complete flow from data ingestion through validation, transformation, training, evaluation, and deployment. Each component is independently versioned, tested, and scaled.
 
 **Alt Text**: Linear flow diagram showing TensorFlow Extended pipeline: data ingestion, validation, transformation, training, evaluation, and deployment stages connected by arrows from left to right.
 
@@ -219,9 +219,9 @@ _Machine Learning Systems_
 
 **Alt Text**: Grid of example images showing labeling challenges: blurred animal photos where species is unclear, rare specimens requiring expert knowledge, and ambiguous object boundaries causing annotator disagreement.
 
-### Figure 4.13: AI-Augmented Labeling
+### Figure 4.13: AI-Augmented Labeling Decision Hierarchy
 
-**Caption**: AI-Augmented Labeling: Programmatic labeling, distant supervision, and active learning scale data annotation by trading potential labeling errors for increased throughput, necessitating careful system design to balance labeling speed, cost, and model quality. These strategies enable machine learning systems to overcome limitations imposed by manual annotation alone, facilitating deployment in data-scarce environments. Source: Stanford AI Lab.
+**Caption**: AI-Augmented Labeling Decision Hierarchy: A top-level question about obtaining labeled data branches into four paths: traditional supervision, semi-supervised learning, weak supervision, and transfer learning, with active learning as a cost-saving alternative. Lower-cost strategies trade labeling precision for throughput. Source: Stanford AI Lab.
 
 **Alt Text**: Hierarchical diagram with question about getting labeled data at top. Four branches: traditional supervision, semi-supervised, weak supervision, and transfer learning. Active learning branches as cost-saving alternative.
 
@@ -243,7 +243,7 @@ _Machine Learning Systems_
 
 ### Figure 4.17: Data Pipeline Debugging Flowchart
 
-**Caption**: Data Pipeline Debugging Flowchart: A systematic diagnostic process for identifying the root causes of ML system failures. By asking sequential questions about degradation patterns, training-validation gaps, and production discrepancies, engineers can isolate specific data issues—from drift and skew to label noise and bias—before investigating model architecture.
+**Caption**: Data Pipeline Debugging Flowchart: Four sequential decision nodes guide root cause diagnosis: (1) accuracy degrades over time leads to Data Drift, (2) training accuracy exceeds validation leads to Overfitting, (3) validation exceeds production accuracy leads to Training-Serving Skew, and (4) subgroup inconsistency leads to Bias. If all answers are no, the issue points to Model Architecture.
 
 **Alt Text**: Vertical flowchart with four blue diamond decision nodes and red result boxes. Top diamond asks if accuracy degrades over time, leading to Data Drift result. Second asks if training accuracy exceeds validation, leading to Overfitting. Third asks if validation exceeds production accuracy, leading to Training-Serving Skew. Fourth asks about subgroup inconsistency, leading to Bias. Gray box at bottom shows Model Architecture issue if all answers are no.
 
@@ -255,15 +255,15 @@ _Machine Learning Systems_
 
 **Alt Text**: Nested circles diagram showing AI as outermost circle containing Machine Learning, which contains Deep Learning, which contains Neural Networks at the center. Arrows indicate progression from broad AI concepts to specific neural network implementations.
 
-### Figure 5.2: Rule-Based System
+### Figure 5.2: Breakout Collision Rules
 
-**Caption**: Rule-Based System: Traditional programming relies on explicitly defined rules to map inputs to outputs, limiting adaptability to complex or uncertain environments as every possible scenario must be anticipated and coded. This approach contrasts with deep learning, where systems learn patterns from data instead of relying on pre-programmed logic.
+**Caption**: Breakout Collision Rules: The game program uses explicit if-then rules for collision detection, specifying ball direction reversal and brick removal upon contact. While effective for a game with clear physics and limited states, this approach illustrates how rule-based systems must anticipate every possible scenario.
 
 **Alt Text**: Breakout game grid with 3 rows of 5 colored bricks at top, brown paddle at bottom, and ball with trajectory arrow. Code snippet shows explicit if-then rules for collision detection: removeBrick, update ball velocity.
 
-### Figure 5.3: Rule-Based Programming
+### Figure 5.3: Traditional Programming Flow
 
-**Caption**: Rule-Based Programming: Traditional programs operate on data using explicitly defined rules, forming the basis for early AI systems but lacking the adaptability of modern machine learning approaches. This approach contrasts with deep learning, where the system infers rules from examples rather than relying on pre-programmed logic.
+**Caption**: Traditional Programming Flow: Rules and data serve as inputs to a traditional program, which produces answers as output. This input-output pattern formed the basis for early AI systems but lacks the adaptability needed for complex pattern recognition tasks.
 
 **Alt Text**: Flow diagram with three boxes: Rules and Data as inputs flowing into central Traditional Programming box, which outputs Answers. Arrows show data flow direction from inputs to output.
 
@@ -277,7 +277,7 @@ _Machine Learning Systems_
 
 ### Figure 5.6: Data-Driven Rule Discovery
 
-**Caption**: Data-Driven Rule Discovery: Deep learning models learn patterns and relationships directly from data, eliminating the need for manually specified rules and enabling automated feature extraction from raw inputs. This contrasts with traditional programming, where both rules and data are required to generate outputs, and classical machine learning, where rules are inferred from labeled data.
+**Caption**: Data-Driven Rule Discovery: The flow diagram inverts the traditional programming pattern: data and answers serve as inputs to the machine learning process, which produces learned rules as output. This inversion eliminates the need for manually specified rules and enables automated feature extraction from raw inputs.
 
 **Alt Text**: Flow diagram with three boxes: Answers and Data as inputs flowing into central Machine Learning box, which outputs Rules. Arrows show inverted flow compared to traditional programming, with rules as output rather than input.
 
@@ -289,9 +289,9 @@ _Machine Learning Systems_
 
 **Alt Text**: Log-scale scatter plot showing training compute in FLOPS from 1950 to 2022. Points represent AI models, with different colors for pre-deep-learning era, deep learning era, and large-scale models. Trend lines show 1.4x growth before 2010 and 3.4-month doubling after 2012.
 
-### Figure 5.9: The Virtuous Cycle of Deep Learning Progress
+### Figure 5.9: Deep Learning Virtuous Cycle
 
-**Caption**: The Virtuous Cycle of Deep Learning Progress: Three mutually reinforcing factors drove the deep learning revolution. Increased data availability enabled training larger models, algorithmic innovations improved learning efficiency and model architectures, and advances in computing infrastructure provided the processing power to handle growing computational demands. Each breakthrough in one area created opportunities in the others, accelerating progress across the field.
+**Caption**: Deep Learning Virtuous Cycle: Three mutually reinforcing factors, data availability, algorithmic innovations, and computing infrastructure, form a self-reinforcing loop where breakthroughs in one area create opportunities in the others.
 
 **Alt Text**: Three connected boxes in a cycle: green Data Availability flows to blue Algorithmic Innovations, which flows to red Computing Infrastructure, which loops back to Data Availability. Yellow background box labeled Key Breakthroughs contains all three elements.
 
@@ -303,13 +303,13 @@ _Machine Learning Systems_
 
 ### Figure 5.11: Common Activation Functions
 
-**Caption**: Common Activation Functions: Neural networks rely on nonlinear activation functions to approximate complex relationships. Each function exhibits distinct characteristics: sigmoid maps inputs to $(0,1)$ with smooth gradients, tanh provides zero-centered outputs in $(-1,1)$, ReLU introduces sparsity by outputting zero for negative inputs, and softmax converts logits into probability distributions. These different behaviors enable networks to learn different types of patterns and relationships.
+**Caption**: Common Activation Functions: Four nonlinear activation functions plotted with their output ranges. Sigmoid maps inputs to $(0,1)$ with smooth gradients, tanh provides zero-centered outputs in $(-1,1)$, ReLU introduces sparsity by outputting zero for negative inputs, and softmax converts logits into probability distributions.
 
 **Alt Text**: Four plots arranged in 2x2 grid. Top-left: Sigmoid S-curve from 0 to 1. Top-right: Tanh S-curve from -1 to 1. Bottom-left: ReLU showing zero for negative x, linear for positive x. Bottom-right: Softmax showing exponential curve approaching small positive values.
 
-### Figure 5.12: Non-Linear Activation
+### Figure 5.12: Linear vs. Nonlinear Decision Boundaries
 
-**Caption**: Non-Linear Activation: Neural networks model complex relationships by applying non-linear activation functions to weighted sums of inputs, enabling the representation of non-linear decision boundaries. These functions transform input values, creating the capacity to learn patterns beyond linear combinations via the arrangement of points.
+**Caption**: Linear vs. Nonlinear Decision Boundaries: Two scatter plots compare classification with and without activation functions. Without activation, a straight line fails to separate the two classes. With a nonlinear activation function applied, the network produces a curved decision boundary that correctly separates the points.
 
 **Alt Text**: Two scatter plots side by side. Left plot shows cyan and green points with straight red line failing to separate them, labeled NN without Activation Function. Right plot shows same points with curved red decision boundary successfully separating classes, labeled NN with Activation Function.
 
@@ -319,31 +319,37 @@ _Machine Learning Systems_
 
 **Alt Text**: Neural network diagram showing input layer on left with multiple nodes, two hidden layers in middle with interconnected nodes, and output layer on right. Arrows show data flow from left to right through fully connected layers.
 
-### Figure 5.14: Forward Propagation Process
+### Figure 5.14: Fully-Connected Layers
 
-**Caption**: Forward Propagation Process: Neural networks transform input data into predictions by sequentially applying weighted sums and activation functions across interconnected layers, enabling complex pattern recognition. This layered computation forms the basis for both making inferences and updating model parameters during training.
+**Caption**: Fully-Connected Layers: A three-layer network with dense connections between layers, where each neuron integrates information from all neurons in the preceding layer. Weight matrices between layers determine connection strengths, with labeled values shown on each edge alongside computed activation values at each node.
+
+**Alt Text**: Three-layer network with 3 green input nodes, 4 blue hidden nodes, and 2 red output nodes. Labeled arrows show weight values on each connection. Input layer shows values 1.0, 5.0, 9.0. Hidden nodes show activation values. Bias values labeled at each layer.
+
+### Figure 5.15: MNIST Network Topology
+
+**Caption**: MNIST Network Topology: Two panels show the network architecture for digit recognition. Panel (a) displays a 28x28 pixel image of a digit connected through hidden layers to 10 output nodes. Panel (b) shows the same architecture with the input image flattened into a 784-element vector, illustrating how spatial data enters the network.
 
 **Alt Text**: Two panels showing MNIST digit recognition. Panel a: 28x28 pixel image of digit 7 connected to hidden layer circles, then to 10 output nodes with one highlighted for digit classification. Panel b: Same architecture with flattened 784-pixel vector representation of input image.
 
-### Figure 5.15: Training Loop Architecture
+### Figure 5.16: Training Loop Architecture
 
 **Caption**: Training Loop Architecture: Complete neural network training flow showing forward propagation through layers to generate prediction, comparison with true value via loss function, and backward propagation of gradients through optimizer to update weights and biases.
 
 **Alt Text**: Neural network training diagram. Left side shows input X flowing through blue, red, and green node layers via forward propagation (red arrow). Right side shows prediction and true value boxes feeding into loss function, which outputs loss score to optimizer, which updates weights and biases. Orange arrow shows backward propagation path.
 
-### Figure 5.16: Inference vs. Training Flow
+### Figure 5.17: Inference vs. Training Flow
 
 **Caption**: Inference vs. Training Flow: During inference, neural networks utilize learned weights for forward pass computation only, simplifying the data flow and reducing computational cost compared to training, which requires both forward and backward passes for weight updates. This streamlined process enables efficient deployment of trained models for real-time predictions.
 
 **Alt Text**: Two parallel diagrams comparing inference and training. Both show stacked rectangles representing batches feeding into network layers and output nodes. Inference section shows smaller varied batch sizes with dashed outlines. Training section shows larger fixed batches with solid outlines. Network architecture identical in both with fully connected layers.
 
-### Figure 5.17: 
+### Figure 5.18: 
 
 **Alt Text**: Grid of handwritten digit samples from USPS dataset showing digits 0-9 in multiple rows. Each digit appears in several variations demonstrating different handwriting styles, stroke widths, slants, and character formations that OCR systems must recognize.
 
-### Figure 5.18: USPS Inference Pipeline
+### Figure 5.19: USPS Inference Pipeline
 
-**Caption**: USPS Inference Pipeline: The mail sorting system combines traditional computing (green) with neural network inference (blue) in a sequential pipeline. Raw envelope images undergo preprocessing (thresholding, segmentation, normalization) before the neural network classifies individual digits. Post-processing then applies confidence thresholds and formats sorting instructions. This hybrid architecture—where the neural network handles pattern recognition while conventional code handles data preparation and decision logic—remains the standard template for production ML systems.
+**Caption**: USPS Inference Pipeline: The mail sorting pipeline combines traditional computing stages (green) with neural network inference (blue). Raw envelope images undergo preprocessing, including thresholding, segmentation, and normalization, before the neural network classifies individual digits. Post-processing applies confidence thresholds and formats sorting instructions for the physical sorting machinery.
 
 **Alt Text**: Linear pipeline with 6 boxes connected by arrows. From left: Raw Input and Pre-processing in green Traditional Computing section, Neural Network in orange Deep Learning section, then Raw Output, Post-processing, and Final Output in green Traditional Computing section.
 
@@ -353,7 +359,7 @@ _Machine Learning Systems_
 
 ### Figure 6.1: Multi-Layer Perceptron Architecture
 
-**Caption**: Multi-Layer Perceptron Architecture: Dense connectivity where every neuron connects to all neurons in adjacent layers, implemented through matrix multiplications. For MNIST classification, a 784-dimensional input connects to 100 hidden neurons through a $784 \times 100$ weight matrix, requiring 78,400 multiply-accumulate operations per sample. The highlighted neuron receives weighted contributions from all input pixels, demonstrating the $O(N \times M)$ computational complexity inherent to fully-connected layers. Adapted from [@reagen2017deep].
+**Caption**: Multi-Layer Perceptron Architecture: Three fully-connected layers where every neuron connects to all neurons in adjacent layers. The highlighted neuron receives weighted contributions from all inputs, illustrating the dense $O(N \times M)$ connectivity pattern implemented through matrix multiplications. For MNIST classification, a 784-dimensional input connects to 100 hidden neurons through a $784 \times 100$ weight matrix, requiring 78,400 multiply-accumulate operations per sample. Adapted from [@reagen2017deep].
 
 **Alt Text**: Three-layer neural network with 4 input nodes, 5 hidden nodes, and 2 output nodes. Lines connect every node to all nodes in adjacent layers. One highlighted node shows weighted connections from all inputs, demonstrating dense O(N x M) connectivity.
 
@@ -365,7 +371,7 @@ _Machine Learning Systems_
 
 ### Figure 6.3: Attention Weights Visualization
 
-**Caption**: Attention Weights Visualization: Attention head (layer 4, head 2) resolving the pronoun "they" in the sentence. Line thickness indicates attention weight magnitude: "student" receives the highest attention (bold connection), followed by "The" and "finish", demonstrating that attention learns to link pronouns with their referents across arbitrary distances. This dynamic routing replaces RNN sequential processing with $O(1)$ information flow depth, enabling parallel computation across all 12 positions simultaneously.
+**Caption**: Attention Weights Visualization: Attention head (layer 4, head 2) resolving the pronoun "they" in the sentence. Line thickness indicates attention weight magnitude: "student", "The", and "finish" receive equally strong attention (bold connections), demonstrating that attention learns to link pronouns with their referents across arbitrary distances. This dynamic routing replaces RNN sequential processing with $O(1)$ information flow depth, enabling parallel computation across all 12 positions simultaneously.
 
 **Alt Text**: Sentence tokens listed vertically with cyan attention lines from highlighted word they connecting to all other tokens. Thick lines to student and finish show high attention weights. Demonstrates pronoun-referent linking across arbitrary distances.
 
@@ -377,7 +383,7 @@ _Machine Learning Systems_
 
 ### Figure 6.5: QKV Projection Computation
 
-**Caption**: QKV Projection Computation: The embedding matrix $(6 \times 768)$ multiplies with QKV weight matrices $(768 \times 2304)$ plus bias to produce combined projections $(6 \times 2304)$. The 2304 output dimension contains concatenated query, key, and value projections (each 768-dimensional). This single batched matrix multiplication, requiring $6 \times 768 \times 2304 = 10.6$ million MACs, replaces three separate projection operations for efficiency. Modern implementations fuse this with subsequent attention computation to reduce memory bandwidth requirements. Source: Transformer Explainer [@transformer_explainer].
+**Caption**: QKV Projection Computation: The embedding matrix $(6 \times 768)$ multiplies with QKV weight matrices $(768 \times 2304)$ plus bias to produce combined projections $(6 \times 2304)$. The 2304 output dimension contains concatenated query, key, and value projections (each 768-dimensional). This single batched matrix multiplication, requiring $6 \times 768 \times 2304 = 10.6$ million MACs, replaces three separate projection operations for efficiency. Source: Transformer Explainer [@transformer_explainer].
 
 **Alt Text**: Matrix multiplication: 6x768 embedding times 768x2304 QKV weights plus 2304 bias equals 6x2304 output. Blue and red regions show concatenated query, key, value projections. Token labels Data, visualization, em, powers, users, to.
 
@@ -411,19 +417,19 @@ _Machine Learning Systems_
 
 ### Figure 7.1: Computational Library Evolution
 
-**Caption**: Computational Library Evolution: Modern machine learning frameworks build upon decades of numerical computing advancements, transitioning from low-level routines like BLAS and LAPACK to high-level abstractions in NumPy, SciPy,[^fn-scipy-date] and finally to deep learning frameworks such as TensorFlow and PyTorch. This progression reflects a shift toward increased developer productivity and accessibility in machine learning system development.
+**Caption**: Computational Library Evolution: Modern machine learning frameworks build upon decades of numerical computing advancements, transitioning from low-level routines like BLAS and LAPACK to high-level abstractions in NumPy, SciPy,[^fn-scipy-date] and finally to deep learning frameworks such as TensorFlow and PyTorch.
 
 **Alt Text**: Horizontal timeline from 1979 to 2018 with colored boxes marking key years. Dashed arrows connect to milestones below: 1979 BLAS introduced, 1992 LAPACK extends BLAS, 2006 NumPy becomes Python's numerical backbone, 2007 SciPy and Theano introduce computational graphs, 2015 TensorFlow revolutionizes distributed ML, 2016 PyTorch introduces dynamic graphs, 2018 JAX introduces functional paradigms.
 
-### Figure 7.2: Computational Graph
+### Figure 7.2: Simple Computational Graph.
 
-**Caption**: Computational Graph: Directed acyclic graphs represent machine learning models as a series of interconnected operations, enabling efficient computation and automatic differentiation. This example presents a simple computation, $z = x \\times y$, where nodes define operations and edges specify the flow of data between them.
+**Caption**: Simple Computational Graph. A directed acyclic graph representing the computation $z = x \\times y$, where nodes define operations and edges specify the flow of data between them.
 
 **Alt Text**: Simple directed graph with nodes x and y flowing into function f(x,y) which outputs z.
 
-### Figure 7.3: Neural Network Computation Graph
+### Figure 7.3: Computation Graph with System Interactions.
 
-**Caption**: Neural Network Computation Graph: This diagram represents a neural network as a directed acyclic graph, where nodes denote operations and edges represent data flow. The system components (memory management, device placement) interact with the computational graph to optimize resource allocation before execution.
+**Caption**: Computation Graph with System Interactions. A neural network represented as a directed acyclic graph (left), with system components including memory management and device placement (right) that interact with the graph to optimize resource allocation before execution.
 
 **Alt Text**: Left side shows computational graph with 6 operation nodes connected by data flow edges. Right side shows system components box with Memory Management and Device Placement nodes that interact with the computational graph.
 
@@ -433,9 +439,9 @@ _Machine Learning Systems_
 
 **Alt Text**: Flow diagram showing Start to Operation 1 to Operation 1 Executed to Operation 2 to Operation 2 Executed to End. Above arrows show Define Operation, Execute Operation, Define Next Operation, Execute Operation, Repeat Until Done.
 
-### Figure 7.5: Static Computation Graph
+### Figure 7.5: Static Graph: Define then Execute.
 
-**Caption**: Static Computation Graph: Machine learning frameworks first define computations as a graph of operations, enabling global optimizations like operation fusion and efficient resource allocation before any data flows through the system. This two-phase approach separates graph construction and optimization from execution, improving performance and predictability.
+**Caption**: Static Graph: Define then Execute. The two phases of static graph execution. The definition phase (left) declares operations and builds the graph. The execution phase (right) loads data, runs the optimized graph, and produces results.
 
 **Alt Text**: Flow diagram showing two phases. Definition Phase: Define Operations, Declare Variables, Build Graph. Execution Phase: Load Data, Run Graph, Get Results. Arrows connect boxes left to right.
 
@@ -445,15 +451,15 @@ _Machine Learning Systems_
 
 **Alt Text**: Graph with x-axis 'Production Executions' (log scale) and y-axis 'Total Time'. Three lines: Eager (steep slope), JIT (moderate slope with offset), Static (gentle slope with larger offset). Lines cross at different points showing when compilation becomes beneficial.
 
-### Figure 7.7: Three-Dimensional Tensor
+### Figure 7.7: Tensor Rank Hierarchy.
 
-**Caption**: Three-Dimensional Tensor: Higher-rank tensors extend the concepts of scalars, vectors, and matrices by arranging data in nested structures; this figure represents a three-dimensional tensor as a stack of matrices, enabling representation of complex, multi-dimensional data relationships. Tensors with rank greater than two are fundamental to representing data in areas like image processing and natural language processing, where data possesses inherent multi-dimensional structure.
+**Caption**: Tensor Rank Hierarchy. Four shapes illustrating tensor ranks from left to right: a single value (rank 0, scalar), a column of values (rank 1, vector), a grid of values (rank 2, matrix), and a cube of values (rank 3, three-dimensional tensor).
 
 **Alt Text**: Four shapes showing tensor ranks left to right: single box labeled Rank 0, vertical column of numbers labeled Rank 1, 2D grid of numbers labeled Rank 2, and 3D cube labeled Rank 3.
 
-### Figure 7.8: Multidimensional Data Representation
+### Figure 7.8: Image as RGB Tensor.
 
-**Caption**: Multidimensional Data Representation: Images naturally map to tensors with dimensions representing image height, width, and color channels, forming a three-dimensional array; stacking multiple images creates a fourth dimension for batch processing and efficient computation. *credit: niklas lang [https://towardsdatascience.com/what-are-tensors-in-machine-learning-5671814646ff](https://towardsdatascience.com/what-are-tensors-in-machine-learning-5671814646ff)*.
+**Caption**: Image as RGB Tensor. Three stacked grids representing the red, green, and blue color channels of an image, with dimension labels showing width, height, and channel depth forming a rank-3 tensor. *Credit: Niklas Lang [https://towardsdatascience.com/what-are-tensors-in-machine-learning-5671814646ff](https://towardsdatascience.com/what-are-tensors-in-machine-learning-5671814646ff)*.
 
 **Alt Text**: Three stacked 3x3 grids in red, green, and blue representing RGB color channels. Dimension labels show width 3 pixels, height 3 pixels, and 3 color channels forming a 3D tensor for image data.
 
@@ -463,21 +469,21 @@ _Machine Learning Systems_
 
 **Alt Text**: Left: 2x3 tensor grid with values 1-6. Right: two linear arrays showing row-major layout (1,2,3,4,5,6) and column-major layout (1,4,2,5,3,6). Below: stride calculations for row-major [3,1] and column-major [1,2].
 
-### Figure 7.10: 3D Parallelism
+### Figure 7.10: 3D Parallelism.
 
-**Caption**: 3D Parallelism: Training can be parallelized across multiple dimensions including data batches, pipeline stages, and model partitions. This figure illustrates how large-scale training systems distribute computation across a grid of accelerators. These distributed training strategies are covered in advanced distributed systems literature.
+**Caption**: 3D Parallelism. A grid of eight accelerator clusters arranged in two rows and four columns, each containing stacked computational units. Distinct colors encode the three parallelism dimensions: data parallelism across columns, pipeline parallelism across rows, and model parallelism within each cluster.
 
 **Alt Text**: Grid of 8 GPU clusters in 2 rows and 4 columns. Each cluster contains 4 stacked cubes. Colors vary: blue, red, green, orange in bottom row; olive, yellow, brown, pink in top row.
 
-### Figure 7.11: Framework Operational Hierarchy
+### Figure 7.11: Core Operations Stack.
 
-**Caption**: Framework Operational Hierarchy: Machine learning frameworks abstract hardware complexities through layered operations (scheduling, memory management, and resource optimization), enabling efficient execution of mathematical models on diverse computing platforms. This hierarchical structure transforms high-level model descriptions into practical implementations by coordinating resources and managing computations.
+**Caption**: Core Operations Stack. Three grouped layers showing how frameworks bridge Python code to hardware. The top layer contains system-level operations (scheduling, memory management, resource optimization), the middle layer holds numerical operations (GEMM, BLAS, element-wise), and the bottom layer provides hardware abstraction (kernel management, memory abstraction, execution control).
 
 **Alt Text**: Three grouped boxes connected by arrows. System-Level: Scheduling, Memory Management, Resource Optimization. Numerical: GEMM, BLAS, Element-wise Operations. Hardware: Kernel Management, Memory Abstraction, Execution Control.
 
-### Figure 7.12: TensorFlow 2.0 Architecture
+### Figure 7.12: TensorFlow Training-to-Deployment Pipeline.
 
-**Caption**: TensorFlow 2.0 Architecture: This diagram outlines TensorFlow's modular design, separating eager execution from graph construction for increased flexibility and ease of debugging. TensorFlow core provides foundational APIs, while Keras serves as its high-level interface for simplified model building and training, supporting deployment across various platforms and hardware accelerators. Source: [TensorFlow.](https://blog.tensorflow.org/2019/01/whats-coming-in-tensorflow-2-0.html).
+**Caption**: TensorFlow Training-to-Deployment Pipeline. Two-column diagram showing the training path (left) from data preprocessing through tf.keras and distribution strategy across CPU, GPU, and TPU, and the deployment path (right) from SavedModel export to TensorFlow Serving, Lite, JS, and language bindings. Source: [TensorFlow.](https://blog.tensorflow.org/2019/01/whats-coming-in-tensorflow-2-0.html).
 
 **Alt Text**: Two-column diagram. Training: data preprocessing, tf.keras, TensorFlow Hub, Premade Estimators, Distribution Strategy across CPU/GPU/TPU. Deployment via SavedModel to TensorFlow Serving, Lite, JS, and language bindings.
 
@@ -489,39 +495,39 @@ _Machine Learning Systems_
 
 ## Chapter 8: AI Training
 
-### Figure 8.1: Activation Function Performance
+### Figure 8.1: Activation Function Execution Time
 
-**Caption**: Activation Function Performance: CPU execution time varies significantly across common activation functions, with tanh and relu offering substantial speed advantages over sigmoid on this architecture. These differences impact system-level considerations such as training time and real-time inference capabilities, guiding activation function selection for performance-critical applications.
+**Caption**: Activation Function Execution Time: CPU benchmarks on Apple M2 hardware reveal significant variation: Tanh completes in 0.61 seconds, ReLU in 0.78 seconds, Softmax in 0.91 seconds, and Sigmoid in 1.10 seconds. These differences directly affect training throughput and real-time inference latency, making activation function selection a system-level design decision.
 
 **Alt Text**: Bar chart comparing CPU execution times: Sigmoid at 1.1 seconds, Tanh at 0.61 seconds, ReLU at 0.78 seconds, and Softmax at 0.91 seconds.
 
 ### Figure 8.2: Training Roofline Model
 
-**Caption**: Training Roofline Model: Performance of training operations plotted against arithmetic intensity. The sloped region (left of ridge point) represents memory-bound operations where performance scales with bandwidth; the flat region (right) represents compute-bound operations achieving peak throughput. GPT-2 matrix multiplications operate in the compute-bound regime, while normalization and activation operations are memory-bound. FlashAttention shifts standard attention from below to above the ridge point.
+**Caption**: Training Roofline Model: GPT-2 training operations mapped against arithmetic intensity on a log-log roofline diagram. Matrix multiplications operate in the compute-bound regime (right of the ridge point), while normalization and activation operations fall in the memory-bound region (left). FlashAttention shifts standard attention from below to above the ridge point, demonstrating how algorithmic redesign can move operations into a more efficient regime.
 
 **Alt Text**: Log-log plot showing roofline model with memory-bound slope and compute-bound ceiling. Points show different training operations: MatMul above ridge point, LayerNorm and Softmax below. Arrow shows FlashAttention improvement.
 
-### Figure 8.3: Pipeline Architecture
+### Figure 8.3: Training System Overview
 
-**Caption**: Pipeline Architecture: Machine learning systems organize training through interconnected data, training, and evaluation pipelines, enabling iterative model refinement and performance assessment. Data flows sequentially through these components, with evaluation metrics providing feedback to guide the training process and ensure reproducible results.
+**Caption**: Training System Overview: Machine learning systems organize training through interconnected data, training, and evaluation pipelines. Data flows sequentially through these components, with evaluation metrics providing feedback to guide iterative model refinement and ensure reproducible results.
 
 **Alt Text**: Block diagram with three connected boxes: Data Pipeline, Training Loop, and Evaluation Pipeline. Arrows show data flow with feedback from evaluation.
 
-### Figure 8.4: GPU-Accelerated Training
+### Figure 8.4: Single-GPU Training Loop
 
-**Caption**: GPU-Accelerated Training: Modern deep learning relies on gpus to parallelize matrix operations, significantly accelerating the forward and backward passes required for parameter updates during training. This single-GPU workflow iteratively refines model parameters by computing gradients from loss functions and applying them to minimize prediction errors.
+**Caption**: Single-GPU Training Loop: The three sequential steps of one training iteration: the forward pass generates predictions, gradient computation propagates error signals backward, and the optimizer applies parameter updates. GPUs parallelize the underlying matrix operations, accelerating both the forward and backward passes.
 
 **Alt Text**: Neural network diagram showing data cylinders feeding into a network of connected nodes. A GPU box at bottom processes the forward and backward pass computations.
 
-### Figure 8.5: Data Pipeline Architecture
+### Figure 8.5: CPU-to-GPU Data Flow
 
-**Caption**: Data Pipeline Architecture: Modern machine learning systems utilize pipelines to efficiently move data from storage to gpus for parallel processing, enabling faster model training and inference. This diagram presents a typical pipeline with stages for formatting, preprocessing, batching, and distributing data across multiple GPU workers.
+**Caption**: CPU-to-GPU Data Flow: Three distinct zones compose the data pipeline: the storage zone houses raw data on disk, the CPU preprocessing zone handles format conversion, processing, and batching, and the GPU training zone distributes preprocessed batches across multiple GPU workers for parallel computation.
 
 **Alt Text**: Block diagram showing data flow through three zones: Storage Zone with raw data, CPU Preprocessing Zone with format, process, and batch stages, and GPU Training Zone with three GPU workers.
 
 ### Figure 8.6: Memory Footprint Breakdown
 
-**Caption**: Memory Footprint Breakdown: Large language models require substantial memory, with optimizer states and gradients often exceeding the size of model weights themselves. This figure quantifies the memory usage of the llama-7B model, revealing how techniques like compression can significantly reduce the overall footprint by minimizing the storage requirements for optimizer data.
+**Caption**: Memory Footprint Breakdown: Memory usage of LLaMA-7B across four optimizer configurations, decomposed into weights, activations, optimizer state, weight gradients, and other components. The dashed red line marks the RTX 4090 24 GB memory limit, illustrating how standard Adam exceeds single-GPU capacity while GaLoRE compression reduces optimizer state enough to fit within this budget.
 
 **Alt Text**: Stacked horizontal bar chart comparing memory usage across four optimizers for LLaMA-7B. Shows components: others, weight gradient, optimization, activation, and weight. Dashed red line marks RTX 4090 memory limit at 30 GB.
 
@@ -535,27 +541,27 @@ _Machine Learning Systems_
 
 **Alt Text**: Flowchart showing optimization decision tree starting from Profile Training Run, branching based on GPU utilization and memory pressure to different optimization techniques.
 
-### Figure 8.9: Sequential Data Transfer
+### Figure 8.9: Sequential Data Fetching
 
-**Caption**: Sequential Data Transfer: Standard data fetching pipelines execute transfers from disk to CPU, CPU to GPU, and through GPU processing one at a time, creating bottlenecks and limiting computational throughput during model training. This serial approach prevents overlapping computation and data movement, hindering efficient resource utilization.
+**Caption**: Sequential Data Fetching: File open, read, and train operations execute serially across two epochs, with the GPU remaining idle during all file operations. The full sequential pipeline spans approximately 90 seconds, establishing the baseline that overlapped prefetching improves upon.
 
 **Alt Text**: Gantt chart showing sequential data pipeline over two epochs. Four rows: Open, Read, Train, and Epoch. Operations execute serially with gaps between phases, spanning from 00:00 to 01:30.
 
-### Figure 8.10: Pipeline Parallelism
+### Figure 8.10: Overlapped Data Prefetching
 
-**Caption**: Pipeline Parallelism: Overlapping computation and data fetching reduces overall job completion time by concurrently processing data and preparing subsequent batches. This optimization achieves a 40% speedup, finishing in 40 s compared to 90 s with naive sequential fetching.
+**Caption**: Overlapped Data Prefetching: Read and train operations execute concurrently, with each time slice overlapping data loading for the next batch with computation on the current batch. Two epochs complete in approximately 55 seconds compared to 90 seconds with sequential fetching, a 40% speedup.
 
 **Alt Text**: Gantt chart showing optimized pipeline with overlapping operations. Read and Train execute in parallel across time slices. Two epochs complete in approximately 55 seconds total.
 
 ### Figure 8.11: Mixed Precision Training
 
-**Caption**: Mixed Precision Training: Reduced precision formats (FP16, bfloat16) accelerate deep learning by decreasing memory bandwidth and computational requirements during both forward and backward passes. Master weights stored in FP32 precision accumulate updates from reduced precision gradients, preserving accuracy while leveraging performance gains from lower precision arithmetic.
+**Caption**: Mixed Precision Training: The seven-step cycle: (1) FP32 master weights convert to FP16 for the forward pass, (2) loss is scaled to prevent gradient underflow, (3) backpropagation computes scaled FP16 gradients, (4) gradients copy to FP32, (5) loss scaling is removed, (6) FP32 gradients update master weights, and (7) the cycle repeats. This approach achieves Tensor Core speedups while preserving numerical stability.
 
 **Alt Text**: Flowchart showing 7-step mixed precision training cycle. FP32 master weights convert to FP16 for forward pass, loss scaling protects gradients during backpropagation, then gradients update FP32 weights.
 
 ### Figure 8.12: Gradient Accumulation
 
-**Caption**: Gradient Accumulation: Effective batch size increases without increasing per-step memory requirements by accumulating gradients from multiple micro-batches before updating model parameters, simulating training with a larger batch. Note that gradient accumulation can affect Batch Normalization behavior since statistics are computed on micro-batches rather than the full effective batch. This technique enables training with large models or datasets when memory is limited, improving training stability and potentially generalization performance.
+**Caption**: Gradient Accumulation: Three micro-batches each compute independent losses and gradients, which sum into a single combined gradient for one parameter update. This simulates training with a batch three times larger without requiring the memory to hold all samples simultaneously.
 
 **Alt Text**: Block diagram showing three batches computing individual losses and gradients. Arrows flow from Batch 1, 2, 3 through Losses to Gradients boxes, then combine into a single summed gradient output.
 
@@ -601,7 +607,7 @@ _Machine Learning Systems_
 
 **Caption**: The Optimization Triad: Machine learning performance relies on three pillars: Algorithms (models), Systems (hardware/software), and Data Selection. While algorithms and systems have traditionally received the most attention, optimizing data selection (Input Optimization) offers a third, powerful lever for scaling performance.
 
-**Alt Text**: A triangular diagram with three nodes: Algorithms, Systems, and Data Selection. Arrows connect all three, forming a cycle. Data Selection is highlighted.
+**Alt Text**: A triangular diagram with three nodes: Algorithms (Model), Systems (Hardware), and Data Selection. Bidirectional arrows connect all three with edge labels: Compute Bound between Algorithms and Systems, I/O Bound between Systems and Data Selection, and Sample Efficiency between Data Selection and Algorithms. Data Selection is highlighted with a bold border. ML Scale appears at the center.
 
 ### Figure 9.3: The Data Selection Pipeline
 
@@ -617,15 +623,15 @@ _Machine Learning Systems_
 
 ### Figure 9.5: Active Learning Loop
 
-**Caption**: Active Learning Loop: Instead of labeling all data, the model selects the most 'confusing' or informative samples from an unlabeled pool. These samples are sent to an Oracle (human annotator) and added to the training set. The model is retrained, and the cycle repeats, creating a feedback loop that maximizes data selection.
+**Caption**: Active Learning Loop: Instead of labeling all data, the model selects the most 'confusing' or informative samples from an unlabeled pool. These samples are sent to an Oracle (human annotator) and added to the training set. The model is retrained, and the cycle repeats, creating a feedback loop that maximizes information gain per label.
 
 **Alt Text**: A cycle diagram: Unlabeled Pool -> Selection Strategy -> Oracle -> Labeled Set -> Model Training -> back to Selection Strategy.
 
 ### Figure 9.6: Cost Amortization in Foundation Models
 
-**Caption**: Cost Amortization in Foundation Models: Training from scratch (left) requires full cost for each task. The foundation model approach (right) pays a large pre-training cost once, then amortizes it across many low-cost fine-tuning tasks. After 3–4 tasks, the foundation model approach becomes more cost-effective; after 10+ tasks, the savings are dramatic.
+**Caption**: Cost Amortization in Foundation Models: Training from scratch (left) requires 1,000 GPU-hours per task (10,000 total for 10 tasks). The foundation model approach (right) pays 10,000 GPU-hours upfront for pre-training but reduces each subsequent task to just 50 GPU-hours. At 10 tasks the totals are comparable (10,000 vs 10,500), but the per-task marginal cost drops by 20x, and the crossover favoring the foundation model occurs around 11 tasks.
 
-**Alt Text**: Two bar charts side by side. Left shows 10 equally tall bars representing train-from-scratch costs. Right shows one tall pre-training bar followed by 10 short fine-tuning bars, with total height much lower.
+**Alt Text**: Two bar charts side by side. Left (Train from Scratch) shows 10 equal bars of 1,000 GPU-hours each, totaling 10,000 hours. Right (Foundation Model) shows one tall pre-training bar of 10,000 GPU-hours followed by 10 short fine-tuning bars of 50 GPU-hours each, totaling 10,500 hours. The per-task marginal cost drops dramatically from 1,000 to 50 GPU-hours.
 
 ### Figure 9.7: The Domain Gap Problem
 
@@ -635,7 +641,7 @@ _Machine Learning Systems_
 
 ### Figure 9.8: Data Selection Technique Selection Tree
 
-**Caption**: Data Selection Technique Selection Tree: Start at the top by identifying your primary bottleneck, then follow the branches to find the most appropriate technique. Leaf nodes show recommended methods. Multiple paths may apply—combine techniques as needed.
+**Caption**: Data Selection Technique Selection Tree: Start at the top by identifying your primary bottleneck, then follow the branches to find the most appropriate technique. Leaf nodes show recommended methods. Multiple paths may apply; combine techniques as needed.
 
 **Alt Text**: A decision tree flowchart with diamond decision nodes and rectangular technique recommendations. Starts with bottleneck identification and branches to specific techniques.
 
@@ -643,11 +649,11 @@ _Machine Learning Systems_
 
 **Caption**: The Selection Inequality: Data selection only improves end-to-end efficiency if the overhead of selection plus training on the subset is less than training on the full dataset. A lightweight selection function (proxy model, cached embeddings) keeps selection overhead low; an expensive selection function (full model forward pass) can negate the savings.
 
-**Alt Text**: Bar chart comparing two approaches: baseline shows one tall bar for full training; data-efficient shows two shorter bars for selection overhead and subset training, with total shorter than baseline.
+**Alt Text**: Stacked bar chart comparing three approaches: Baseline shows a single tall bar (100) for full training; Efficient Selection shows two short stacked bars (5 selection overhead plus 40 subset training) totaling 45 with a 55 percent savings annotation; Expensive Selection shows two stacked bars (60 selection overhead plus 40 subset training) totaling 100 with a No savings annotation.
 
 ### Figure 9.10: The Data Roofline Model
 
-**Caption**: The Data Roofline Model: Analogous to the compute Roofline, this diagnostic tool shows two regimes. Below the diagonal (data-bound), adding more data improves performance—invest in data collection. Above the diagonal (compute-bound), more data won't help without more training compute—invest in GPUs. The optimal operating point is at the knee where data and compute are balanced. Data selection techniques move you along the diagonal by extracting more value per sample.
+**Caption**: The Data Roofline Model: Analogous to the compute Roofline, this diagnostic tool shows two regimes. Below the diagonal (data-bound), adding more data improves performance, so invest in data collection. Above the diagonal (compute-bound), more data will not help without more training compute, so invest in GPUs. The optimal operating point is at the knee where data and compute are balanced. Data selection techniques move you along the diagonal by extracting more value per sample.
 
 **Alt Text**: A log-log plot with Data Quality on x-axis and Model Performance on y-axis. A diagonal line separates data-bound (lower) and compute-bound (upper) regimes. Points show system positions.
 
@@ -673,33 +679,33 @@ _Machine Learning Systems_
 
 **Alt Text**: Two 11x11 matrices side by side. Left matrix shows dense weights with colored cells indicating magnitudes. Right matrix shows sparse version with most cells white (zero) and only high-magnitude values retained in color.
 
-### Figure 10.3: Pruning Strategies
+### Figure 10.3: Channel vs. Layer Pruning.
 
-**Caption**: Pruning Strategies: Channel pruning adjusts filter sizes within layers, while layer pruning removes entire layers and necessitates reconnection of remaining network components. These approaches reduce model size and computational cost, but require fine-tuning to mitigate performance loss due to reduced model capacity.
+**Caption**: Channel vs. Layer Pruning. Channel pruning adjusts filter sizes within layers, while layer pruning removes entire layers and necessitates reconnection of remaining network components. These approaches reduce model size and computational cost, but require fine-tuning to mitigate performance loss due to reduced model capacity.
 
 **Alt Text**: Side-by-side diagrams showing channel pruning (left) and layer pruning (right). Each shows three-stage CNN with feature maps as 3D blocks connected by dashed lines. Red highlights indicate pruned channels or layers.
 
-### Figure 10.4: Pruning Strategies
+### Figure 10.4: Unstructured vs. Structured Pruning.
 
-**Caption**: Pruning Strategies: Unstructured pruning achieves sparsity by removing individual weights, requiring specialized hardware for efficient computation, while structured pruning removes entire neurons or filters, preserving network structure and enabling acceleration on standard hardware. This figure contrasts the resulting weight matrices and network architectures from both approaches, highlighting the trade-offs between sparsity level and computational efficiency. Source: [@qi2021efficient].
+**Caption**: Unstructured vs. Structured Pruning. Unstructured pruning (left) achieves sparsity by removing individual weights, requiring specialized hardware, while structured pruning (middle, right) removes entire neurons or filters, preserving network structure for standard hardware acceleration. Source: [@qi2021efficient].
 
 **Alt Text**: Three-panel diagram. Left shows unstructured pruning with dashed connections in a neural network. Middle and right show structured pruning: fully connected network with pruned neurons and CNN with pruned filters shown as dashed squares.
 
 ### Figure 10.5: Iterative Pruning Performance
 
-**Caption**: Iterative Pruning Performance: Gradual channel removal with interleaved fine-tuning maintains high accuracy while reducing model size. This figure shows a 0.4% accuracy drop with a 27% reduction in channels, demonstrating the benefits of distributing structural modifications across multiple iterations. This approach contrasts with one-shot pruning, which often leads to significant performance degradation.
+**Caption**: Iterative Pruning Performance: Three rows depict successive prune-then-fine-tune cycles, each removing two of the original 22 channels. Accuracy drops from 0.995 to 0.971 after the first prune, recovers to 0.992 after fine-tuning, and settles at 0.991 after all three cycles, a 0.4% loss with 27% fewer channels.
 
 **Alt Text**: Three-row workflow showing iterative pruning. Each row displays CNN architecture, prune step with red arrow, accuracy drop box, fine-tune gears icon, and accuracy recovery. Values progress from 0.995 to 0.991 final accuracy.
 
 ### Figure 10.6: One-Shot Pruning Impact
 
-**Caption**: One-Shot Pruning Impact: Aggressive removal of architectural components, like the 27% of channels shown, causes significant initial accuracy loss because the network struggles to adapt to significant structural changes simultaneously. Fine-tuning partially recovers performance, but establishes that iterative pruning preserves accuracy more effectively than single-step approaches.
+**Caption**: One-Shot Pruning Impact: All six channels (27%) are removed simultaneously, causing accuracy to drop from 0.995 to 0.914. Fine-tuning recovers only to 0.943, a 5% degradation compared to the 0.4% loss from iterative pruning, illustrating why gradual removal preserves accuracy more effectively.
 
 **Alt Text**: Single-row workflow showing one-shot pruning. CNN with six red-highlighted channels to prune, followed by accuracy drop from 0.995 to 0.914, fine-tuning gears, and partial recovery to 0.943.
 
-### Figure 10.7: Winning Ticket Discovery
+### Figure 10.7: Lottery Ticket Iteration Cycle.
 
-**Caption**: Winning Ticket Discovery: Iterative pruning and weight resetting identify subnetworks within larger models that, when trained in isolation, achieve comparable or superior accuracy, challenging the conventional view of pruning as solely a compression technique. This process establishes that well-initialized subnetworks exist and can be efficiently trained, suggesting that much of a large network's capacity may be redundant.
+**Caption**: Lottery Ticket Iteration Cycle. A dense network is trained to convergence, the smallest-magnitude weights are pruned, and the surviving weights are reset to their original initialization. Repeating this cycle progressively identifies a sparse subnetwork (the winning ticket) that matches or exceeds the full model's accuracy.
 
 **Alt Text**: Cyclic flowchart with four stages: dense network, train to convergence, prune smallest weights, reset remaining weights to initial values. Arrows form iterative loop that progressively identifies winning ticket subnetwork.
 
@@ -711,31 +717,31 @@ _Machine Learning Systems_
 
 ### Figure 10.9: Knowledge Distillation Workflow
 
-**Caption**: Knowledge Distillation Workflow: The student model inherits the teacher's generalization capabilities by matching its softened probability distributions. This dual-loss training enables the student to absorb complex class relationships that are absent from binary labels.
+**Caption**: Knowledge Distillation Workflow: An input sample passes through both the teacher and the student network. The teacher produces soft labels via temperature-scaled softmax, while the student output is compared against both the soft labels (distillation loss) and the hard labels (student loss).
 
 **Alt Text**: Block diagram showing knowledge distillation. Input flows to both teacher and student models. Teacher outputs soft labels via temperature-scaled softmax. Student outputs feed into distillation loss and student loss functions.
 
 ### Figure 10.10: Low-Rank Factorization
 
-**Caption**: Low-Rank Factorization: Decomposing a matrix into lower-rank approximations reduces the number of parameters needed for storage and computation, enabling efficient model representation. By expressing a matrix $a$ as the product of two smaller matrices, $u$ and $v$, we transition from storing $m \times n$ parameters to $m \times k + k \times n$ parameters, with $k$ representing the reduced rank. Source: The Clever Machine.
+**Caption**: Low-Rank Factorization: A weight matrix $M$ of size $m \times n$ is approximated as the product of two smaller matrices, $L_k$ ($m \times k$) and $R_k^T$ ($k \times n$), reducing storage from $m \times n$ to $m \times k + k \times n$ parameters at the cost of one additional matrix multiplication during inference.
 
 **Alt Text**: Three rectangular boxes showing matrix factorization. Large M matrix of size m by n approximately equals product of narrower L matrix of size m by k and wider R-transpose matrix of size k by n.
 
 ### Figure 10.11: Tensor Decomposition
 
-**Caption**: Tensor Decomposition: Multi-dimensional tensors enable compact representations of high-dimensional data by factorizing them into lower-rank components, reducing computational costs and memory requirements compared to direct manipulation of the original tensor. This technique extends matrix factorization to handle the multi-way interactions common in modern machine learning models like convolutional neural networks. Source: [@xinyu].
+**Caption**: Tensor Decomposition: A 3D tensor with dimensions $M \times N \times T$ is decomposed into a sum of rank-one components, each formed by the outer product of three factor vectors (U, V, W). This extends low-rank matrix factorization to multi-dimensional data, reducing storage and computation for convolutional layers. Source: [@xinyu].
 
 **Alt Text**: 3D tensor cube with dimensions M, N, T decomposed into sum of three factor matrices U, V, W of reduced dimensions. Small highlighted element shows how single tensor entry decomposes into factor products.
 
 ### Figure 10.12: Neural Architecture Search Flow
 
-**Caption**: Neural Architecture Search Flow: Automated NAS techniques iteratively refine model architectures and their weights, jointly optimizing for performance and efficiency, a departure from manual design approaches that rely on human expertise and extensive trial-and-error. This process enables the discovery of novel, high-performing architectures tailored to specific computational constraints.
+**Caption**: Neural Architecture Search Flow: Three components form a feedback loop: a Search Space defines candidate operations, a Search Strategy selects architectures, and a Performance Estimation Strategy evaluates each candidate. The strategy iterates by feeding performance estimates back into the search until convergence.
 
 **Alt Text**: Three-box flowchart showing NAS process. Search Space box feeds into Search Strategy box, which exchanges Architecture and Performance estimate with Performance Estimation Strategy box in a feedback loop.
 
-### Figure 10.13: Energy Costs
+### Figure 10.13: Energy per Operation by Precision.
 
-**Caption**: Energy Costs: Lower precision reduces computational energy, illustrating trade-offs in model accuracy. Machine learning systems can optimize efficiency by reducing floating-point operations from 32-bit to 16-bit or even lower for significant savings. Source: IEEE spectrum.
+**Caption**: Energy per Operation by Precision. Bar chart comparing energy in picojoules for arithmetic operations (FP32 multiply: 3.7 pJ, INT8 add: 0.03 pJ) and SRAM memory accesses (5 to 50 pJ by cache size). Lower precision yields order-of-magnitude energy savings. Source: IEEE Spectrum.
 
 **Alt Text**: Bar chart comparing energy consumption in picojoules for arithmetic operations and memory accesses. FP32 multiply uses 3.7 pJ, INT8 add uses 0.03 pJ. SRAM reads range from 5 to 50 pJ depending on cache size.
 
@@ -779,25 +785,25 @@ _Machine Learning Systems_
 
 ### Figure 10.21: Quantization Range Variation
 
-**Caption**: Quantization Range Variation: Different convolutional filters exhibit unique activation ranges, necessitating per-filter quantization to minimize accuracy loss during quantization. Adjusting the granularity of clipping ranges—as shown by the differing scales for each filter—optimizes the trade-off between model size and performance. Source: [@gholami2021survey].
+**Caption**: Quantization Range Variation: Different convolutional filters exhibit unique activation ranges, necessitating per-filter quantization to minimize accuracy loss during quantization. Adjusting the granularity of clipping ranges, as shown by the differing scales for each filter, optimizes the trade-off between model size and performance. Source: [@gholami2021survey].
 
 **Alt Text**: Four rows showing CNN filters with Gaussian weight distributions. Each filter has different clipping ranges shown as red and blue dashed lines. Layer-wise clipping uses same range; channel-wise uses per-filter ranges.
 
 ### Figure 10.22: Quantization and Weight Precision
 
-**Caption**: Quantization and Weight Precision: Reducing weight and activation precision from float32 to INT8 significantly lowers model size and computational cost during inference by representing values with fewer bits, though it may introduce a trade-off with model accuracy. This process alters the numerical representation of model parameters and intermediate results, impacting both memory usage and processing speed. Source: HarvardX.
+**Caption**: Quantization and Weight Precision: Color-coded matrix multiplication diagram showing three steps: blue squares represent input activations, red squares represent quantized weights, and green squares represent output activations. Reducing precision from float32 to INT8 lowers model size and computational cost at the potential expense of accuracy. Source: HarvardX.
 
 **Alt Text**: Matrix multiplication diagram with three steps. Blue squares show input activations, red squares show quantized weights, and green squares show output activations. Arrows indicate computation flow through multiply-accumulate operations.
 
 ### Figure 10.23: Quantization-Aware Training
 
-**Caption**: Quantization-Aware Training: Retraining a pre-trained model with simulated low-precision arithmetic adapts weights to mitigate accuracy loss during deployment with reduced numerical precision, enabling efficient inference on resource-constrained devices. This process refines the model to become robust to the effects of quantization, maintaining performance despite lower precision representations.
+**Caption**: Quantization-Aware Training: Vertical flowchart showing the QAT pipeline: a pre-trained model passes through a quantization step that simulates low-precision arithmetic, then undergoes retraining with training data to adapt weights to quantization constraints, producing a final quantized model optimized for efficient inference.
 
 **Alt Text**: Vertical flowchart showing QAT process. Pre-trained model feeds into Quantization step, then Retraining/Finetuning step with Training data input, producing final Quantized model output.
 
-### Figure 10.24: Hybrid Quantization Approach
+### Figure 10.24: PTQ-to-QAT Pipeline.
 
-**Caption**: Hybrid Quantization Approach: Post-training quantization (PTQ) generates an initial quantized model that serves as a warm start for quantization-aware training (QAT), accelerating convergence and mitigating accuracy loss compared to quantizing a randomly initialized network. This two-stage process leverages the efficiency of PTQ while refining the model with training data to optimize performance under low-precision constraints.
+**Caption**: PTQ-to-QAT Pipeline. Two grouped stages: the PTQ stage quantizes and calibrates a pretrained model using calibration data, then the QAT stage fine-tunes the result with training data. This hybrid approach combines PTQ's efficiency with QAT's accuracy preservation.
 
 **Alt Text**: Vertical flowchart with two grouped stages. PTQ stage shows pretrained model through quantize and calibrate steps. QAT stage shows fine-tuning step. Calibrate data feeds PTQ; Training data feeds QAT.
 
@@ -815,25 +821,25 @@ _Machine Learning Systems_
 
 ### Figure 10.27: Block Sparse Representation
 
-**Caption**: Block Sparse Representation: NVIDIA's cusparse library efficiently stores block sparse matrices by exploiting dense submatrix structures, enabling accelerated matrix operations while maintaining compatibility with dense matrix computations through block indexing. This approach reduces memory footprint and arithmetic complexity for sparse linear algebra, important for scaling machine learning models. _Source: NVIDIA._
+**Caption**: Block Sparse Representation: NVIDIA's cusparse library efficiently stores block sparse matrices by exploiting dense submatrix structures, enabling accelerated matrix operations while maintaining compatibility with dense matrix computations through block indexing. This approach reduces memory footprint and arithmetic complexity for sparse linear algebra, important for scaling machine learning models. *Source: NVIDIA.*
 
 **Alt Text**: Grid of 3x3 matrix blocks with varying shades indicating dense submatrices. Adjacent index array shows non-zero block positions. Gray blocks represent zeros, colored blocks represent dense submatrices stored separately.
 
-### Figure 10.28: Sparse Matrix Multiplication
+### Figure 10.28: 2:4 Structured Sparsity GEMM.
 
-**Caption**: Sparse Matrix Multiplication: Block sparsity optimizes matrix operations by storing only non-zero elements and using structured indexing, enabling efficient GPU acceleration for neural network computations. This technique maintains compatibility with dense matrix operations while reducing memory access and computational cost, particularly beneficial for large-scale models. Source: PyTorch blog [@pytorch_sparsity_blog].
+**Caption**: 2:4 Structured Sparsity GEMM. Left: standard dense matrix multiplication on Tensor Cores using full 8-element rows. Right: 2:4 sparse multiplication where each group of four elements retains only two non-zeros, with 2-bit indices selecting matching elements from the dense B matrix, halving compute. Source: PyTorch blog [@pytorch_sparsity_blog].
 
 **Alt Text**: Side-by-side comparison of dense and 2:4 sparse GEMM on Tensor Cores. Left shows 8-element row multiplication. Right shows 4-element sparse row with 2-bit indices selecting matching elements from dense B matrix.
 
-### Figure 10.29: Compression Trade-Offs
+### Figure 10.29: Combined Compression Effectiveness
 
-**Caption**: Compression Trade-Offs: Combining pruning and quantization achieves superior compression ratios with minimal accuracy loss compared to quantization or singular value decomposition (SVD) alone, demonstrating the impact of different numerical precision optimization techniques on model size and performance. Architectural and numerical optimizations can complement each other to efficiently deploy machine learning models via this figure. Source: [@han2015deep].
+**Caption**: Combined Compression Effectiveness: Pruning combined with quantization (red circles) achieves the highest compression ratio at near-zero accuracy loss, followed by pruning alone and quantization alone, while SVD (green diamonds) requires the largest model size to maintain accuracy. Source: [@han2015deep].
 
 **Alt Text**: Line graph of accuracy loss versus model size ratio. Four curves show pruning plus quantization achieving smallest size at near-zero loss, followed by pruning only, quantization only, and SVD requiring largest size to maintain accuracy.
 
-### Figure 10.30: AutoML Workflow
+### Figure 10.30: Traditional vs. AutoML Workflows.
 
-**Caption**: AutoML Workflow: Automated machine learning (automl) streamlines model development by structurally automating data preprocessing, model selection, and hyperparameter tuning, contrasting with traditional workflows requiring extensive manual effort for each stage. This automation enables practitioners to define high-level objectives and constraints, allowing automl systems to efficiently explore a vast design space and identify optimal model configurations.
+**Caption**: Traditional vs. AutoML Workflows. Left: a traditional ML cycle with five manual steps (data collection, preprocessing, training, evaluation, deployment). Right: an AutoML cycle where preprocessing, training, and evaluation are consolidated into a single automated node, reducing manual effort to problem definition and deployment.
 
 **Alt Text**: Two circular workflow diagrams side by side. Left shows traditional ML with five manual steps. Right shows AutoML with three steps where preprocessing, training, and evaluation are automated in a single AutoML node.
 
@@ -849,9 +855,9 @@ _Machine Learning Systems_
 
 ## Chapter 11: AI Acceleration
 
-### Figure 11.1: Hardware Specialization Trajectory
+### Figure 11.1: Hardware Specialization Timeline.
 
-**Caption**: Hardware Specialization Trajectory: Computing architectures progressively incorporate specialized accelerators to address emerging performance bottlenecks and workload demands, mirroring a historical pattern from floating-point units to graphics processors and, ultimately, machine learning accelerators. This evolution reflects a strategy for improving computational efficiency by tailoring hardware to specific task characteristics and advancing increasingly complex applications.
+**Caption**: Hardware Specialization Timeline. Computing architectures progressively incorporate specialized accelerators to address emerging performance bottlenecks, from floating-point units to graphics processors and machine learning accelerators. Each era produced hardware tailored to the dominant computational patterns of its period.
 
 **Alt Text**: Timeline spanning 1980s to 2020s showing hardware evolution: floating-point units, GPUs with hardware transform and lighting, media codecs, TPUs with tensor cores, and application-specific AI engines.
 
@@ -867,13 +873,13 @@ _Machine Learning Systems_
 
 ### Figure 11.4: Systolic Array Dataflow
 
-**Caption**: Systolic Array Dataflow: Processing elements within the array execute matrix operations by streaming data in a pipelined manner, maximizing operand reuse and minimizing memory access compared to traditional memory-compute architectures. This spatial and temporal locality enables efficient parallel computation, as exemplified by the multiply-accumulate units in Google's tpuv4.
+**Caption**: Systolic Array Dataflow: A control unit feeds input data streams into a grid of processing elements, each performing multiply-accumulate operations. Data flows horizontally and vertically through the array in a pipelined manner, maximizing operand reuse and minimizing memory access, as exemplified by Google's TPUv4.
 
 **Alt Text**: Systolic array diagram with control unit feeding data streams into processing element grid. Elements perform multiply-accumulate operations with results flowing through accumulator chain.
 
 ### Figure 11.5: Host-Accelerator Data Transfer
 
-**Caption**: Host-Accelerator Data Transfer: AI workloads require frequent data movement between CPU memory and accelerators; this figure details the sequential steps of copying input data, executing computation, and transferring results, each introducing potential performance bottlenecks. Understanding this data transfer sequence helps optimize AI system performance and minimize latency.
+**Caption**: Host-Accelerator Data Transfer: AI workloads require frequent data movement between CPU memory and accelerators. The four sequential steps of copying input data, issuing execution instructions, parallel computation, and transferring results each introduce potential performance bottlenecks.
 
 **Alt Text**: Four-step data flow diagram: (1) copy data from main memory to GPU memory, (2) CPU instructs GPU, (3) GPU executes in parallel, (4) results copy back to main memory.
 
@@ -887,33 +893,33 @@ _Machine Learning Systems_
 
 ## Chapter 12: Benchmarking AI
 
-### Figure 12.1: ImageNet Benchmark
+### Figure 12.1: GPU Adoption and Error Reduction
 
-**Caption**: ImageNet Benchmark: Advancements in GPU technology have driven improvements in ImageNet classification accuracy since 2012, showcasing the interplay between hardware and algorithmic progress.
+**Caption**: GPU Adoption and Error Reduction: As GPU entries in ImageNet surged from 0 to 110 between 2010 and 2014, top-5 error rates dropped from 28.2% to 7.3%, demonstrating the co-evolution of hardware capabilities and algorithmic advances.
 
 **Alt Text**: Dual-axis chart with blue line showing top-5 error rate declining from 28% to 7% and green bars showing GPU entries rising from 0 to 110 between 2010 and 2014.
 
 ### Figure 12.2: Benchmarking Granularity
 
-**Caption**: Benchmarking Granularity: ML system performance assessment occurs at multiple levels, from end-to-end application metrics to individual model and hardware component efficiency, enabling targeted optimization and bottleneck identification. This hierarchical approach allows practitioners to systematically analyze system performance and prioritize improvements based on specific component limitations.
+**Caption**: Benchmarking Granularity: Four-panel block diagram showing micro, model, application, and end-to-end evaluation layers. Each panel maps a distinct scope of assessment, from isolated kernel operations through full-system deployment, enabling targeted optimization at every level of the ML stack.
 
 **Alt Text**: Block diagram showing three evaluation layers: neural network nodes on left, model components in center, and end-to-end application with compute nodes on right, connected by dashed lines.
 
-### Figure 12.3: Benchmark Granularity Trade-offs
+### Figure 12.3: Isolation vs. Representativeness
 
-**Caption**: Benchmark Granularity Trade-offs: The core trade-off in benchmarking granularity between isolation/diagnostic power and real-world representativeness. Micro-benchmarks provide high diagnostic precision but limited real-world relevance, while end-to-end benchmarks capture realistic system behavior but offer less precise component-level insights. Effective ML system evaluation requires strategic combination of all three levels.
+**Caption**: Isolation vs. Representativeness: The core trade-off in benchmarking granularity. Micro-benchmarks provide high diagnostic precision but limited real-world relevance, while end-to-end benchmarks capture realistic system behavior but offer less precise component-level insights. Effective ML system evaluation requires strategic combination of all three levels.
 
 **Alt Text**: Scatter plot with three labeled points along diagonal: micro-benchmarks at high isolation, macro-benchmarks at medium, and end-to-end benchmarks at high representativeness.
 
-### Figure 12.4: Benchmark Workflow
+### Figure 12.4: Anomaly Detection Pipeline
 
-**Caption**: Benchmark Workflow: AI benchmarks standardize evaluation through a structured pipeline, enabling reproducible performance comparisons across different models and systems. This workflow systematically assesses AI capabilities by defining tasks, selecting datasets, training models, and rigorously evaluating results.
+**Caption**: Anomaly Detection Pipeline: Nine-stage benchmark workflow applied to an industrial audio anomaly detection task. The pipeline progresses from problem definition through dataset selection, model training, quantization, and ARM embedded deployment, illustrating how each benchmark component feeds the next.
 
 **Alt Text**: Workflow diagram showing nine stages from problem definition through deployment, with detailed views of anomaly detection system, model training, quantization, and ARM embedded implementation.
 
 ### Figure 12.5: MLPerf Training Progress
 
-**Caption**: MLPerf Training Progress: Standardized benchmarks reveal that machine learning training performance consistently surpasses moore's law, indicating substantial gains from systems-level optimizations. These trends emphasize how focused measurement and iterative improvement drive rapid advancements in ML training efficiency and scalability. Source: [@tschand2024mlperf].
+**Caption**: MLPerf Training Progress: Standardized benchmarks reveal that machine learning training performance consistently surpasses Moore's Law, indicating substantial gains from systems-level optimizations. These trends emphasize how focused measurement and iterative improvement drive rapid advancements in ML training efficiency and scalability. Source: [@tschand2024mlperf].
 
 **Alt Text**: Line chart with nine model benchmarks from 2018 to 2024 showing relative performance gains up to 48x for Mask R-CNN, all exceeding the Moore's Law baseline of 6.6x.
 
@@ -925,13 +931,13 @@ _Machine Learning Systems_
 
 ### Figure 12.7: Energy Efficiency Gains
 
-**Caption**: Energy Efficiency Gains: Successive MLPerf inference benchmark versions consistently improve energy efficiency (samples/watt) across diverse system scales (datacenter, edge, and tiny), reflecting ongoing advancements in both hardware and software optimization for AI workloads. Standardized measurement protocols enable meaningful comparisons of energy efficiency improvements across different AI systems and deployment scenarios, driving sector-wide progress toward sustainable AI technologies. Source: [@tschand2024mlperf].
+**Caption**: Energy Efficiency Gains: Successive MLPerf inference benchmark versions show energy efficiency (samples per watt) improving up to 378x for datacenter workloads and 1070x for tinyML deployments across successive releases. Standardized measurement protocols enable meaningful cross-platform comparisons, driving sector-wide progress toward sustainable AI. Source: [@tschand2024mlperf].
 
 **Alt Text**: Three line charts showing normalized energy efficiency across MLPerf versions: datacenter models up to 378x gain, edge models up to 4x, and tiny models up to 1070x improvement.
 
 ### Figure 12.8: Hardware-Dependent Accuracy
 
-**Caption**: Hardware-Dependent Accuracy: Model performance varies significantly across hardware platforms, indicating that architectural efficiency is not solely determined by design but also by hardware compatibility. Multi-hardware models exhibit comparable accuracy to mobilenetv3 large on CPU and GPU configurations, yet achieve substantial gains on EdgeTPU and DSP, emphasizing the importance of hardware-aware model optimization for specialized computing environments. Source: [@chu2021discovering].
+**Caption**: Hardware-Dependent Accuracy: Model performance varies significantly across hardware platforms, indicating that architectural efficiency is not solely determined by design but also by hardware compatibility. Multi-hardware models exhibit comparable accuracy to MobileNetV3 Large on CPU and GPU configurations, yet achieve substantial gains on EdgeTPU and DSP, emphasizing the importance of hardware-aware model optimization for specialized computing environments. Source: [@chu2021discovering].
 
 **Alt Text**: Five scatter plots comparing model accuracy versus latency across CPU, GPU, EdgeTPU, and DSP platforms, with arrow showing MobileNetV3 gaining on EdgeTPU and DSP versus CPU and GPU.
 
@@ -949,7 +955,7 @@ _Machine Learning Systems_
 
 ### Figure 12.11: Dataset Saturation
 
-**Caption**: Dataset Saturation: AI systems surpass human performance on benchmark datasets, indicating that continued gains may not reflect genuine improvements in intelligence but rather optimization to fixed evaluation sets. This trend underscores the need for dynamic, challenging datasets that accurately assess AI capabilities and drive meaningful progress beyond simple pattern recognition. Source: [@kiela2021dynabench].
+**Caption**: Dataset Saturation: AI systems surpass human performance on five benchmark capabilities: handwriting recognition, speech recognition, image recognition, reading comprehension, and language understanding, each crossing the human baseline between 1998 and 2020. This saturation underscores the need for dynamic benchmarks that remain challenging as model capabilities improve. Source: [@kiela2021dynabench].
 
 **Alt Text**: Line chart showing five AI capabilities crossing human performance baseline from 1998 to 2020: handwriting, speech, image recognition, reading comprehension, and language understanding.
 
@@ -959,13 +965,13 @@ _Machine Learning Systems_
 
 ### Figure 13.1: The Inference Pipeline
 
-**Caption**: The Inference Pipeline: ML serving systems transform raw inputs into final outputs through sequential stages—preprocessing, neural network computation, and postprocessing. The neural network represents just one component; preprocessing and postprocessing rely on traditional computing and often dominate total latency in optimized systems.
+**Caption**: The Inference Pipeline: ML serving systems transform raw inputs into final outputs through sequential stages: preprocessing, neural network computation, and postprocessing. The neural network represents just one component; preprocessing and postprocessing rely on traditional computing and often dominate total latency in optimized systems.
 
 **Alt Text**: Flow diagram showing six connected boxes: Raw Input, Preprocessing, Neural Network, Raw Output, Postprocessing, Final Output. Preprocessing and postprocessing are labeled Traditional Computing; neural network is labeled Deep Learning.
 
 ### Figure 13.2: Inference Server Anatomy
 
-**Caption**: Inference Server Anatomy: Modern inference servers organize request processing into a decoupled pipeline. The Network Ingress handles high-concurrency protocols (HTTP/gRPC), the Queue buffers bursts of traffic, and the Dynamic Batcher aggregates individual requests into optimized tensors. The Inference Runner manages the low-level execution on the hardware accelerator, ensuring the GPU remains utilized through asynchronous execution.
+**Caption**: Inference Server Anatomy: A modern inference server decouples network handling from accelerator execution through a staged pipeline. Each stage isolates a concern, from absorbing bursty traffic to forming efficient batches, so the hardware accelerator stays highly utilized despite irregular arrival patterns.
 
 **Alt Text**: Flowchart showing 6-stage inference server pipeline: Client to Network Ingress to Request Queue (cylinder) to Dynamic Batcher, then down to Inference Runner to Accelerator. Arrows connect stages sequentially.
 
@@ -979,21 +985,21 @@ _Machine Learning Systems_
 
 ## Chapter 14: Machine Learning Operations (MLOps)
 
-### Figure 14.1: MLOps Lifecycle
+### Figure 14.1: Iterative MLOps Loop.
 
-**Caption**: MLOps Lifecycle: MLOps extends DevOps principles to manage the unique challenges of machine learning systems, including data versioning, model retraining, and continuous monitoring. This diagram outlines the iterative workflow encompassing data engineering, model development, and reliable deployment for sustained performance in production.
+**Caption**: Iterative MLOps Loop. MLOps extends DevOps principles to manage the unique challenges of machine learning systems, including data versioning, model retraining, and continuous monitoring. The iterative workflow encompasses data engineering, model development, and reliable deployment for sustained performance in production.
 
 **Alt Text**: Infinity-loop diagram with three phases. Design phase: requirements, use-case prioritization, data availability. Model Development: data engineering, model engineering, testing. Operations: deployment, CI/CD pipeline, monitoring and triggering.
 
-### Figure 14.2: ML System Complexity
+### Figure 14.2: Hidden Infrastructure of ML Systems.
 
-**Caption**: ML System Complexity: Most engineering effort in a typical machine learning system concentrates on components surrounding the model itself: data collection, feature engineering, and system configuration rather than the model code. This distribution reveals the operational challenges and potential for technical debt arising from these often-overlooked areas of an ML system. Source: [@sculley2015hidden].
+**Caption**: Hidden Infrastructure of ML Systems. Most engineering effort in a typical machine learning system concentrates on components surrounding the model itself: data collection, feature engineering, and system configuration rather than the model code. The distribution reveals the operational challenges and potential for technical debt arising from these often-overlooked surrounding components. Source: [@sculley2015hidden].
 
 **Alt Text**: Hub-and-spoke diagram with ML system at center. Ten surrounding components connected by arrows: data collection, verification, feature extraction, configuration, resource management, serving infrastructure, monitoring, analysis tools, and ML code.
 
-### Figure 14.3: ML Technical Debt Taxonomy
+### Figure 14.3: ML Technical Debt Taxonomy.
 
-**Caption**: ML Technical Debt Taxonomy: Machine learning systems accumulate distinct forms of technical debt that emerge from data dependencies, model interactions, and evolving requirements. This hub-and-spoke diagram illustrates the primary debt patterns: boundary erosion undermines modularity, correction cascades propagate fixes through dependencies, feedback loops create hidden coupling, while data, configuration, and pipeline debt reflect poorly managed artifacts and workflows. Understanding these patterns enables systematic engineering approaches to debt prevention and mitigation.
+**Caption**: ML Technical Debt Taxonomy. Machine learning systems accumulate distinct forms of technical debt from data dependencies, model interactions, and evolving requirements. Six primary debt patterns radiate from a central hub: boundary erosion undermines modularity, correction cascades propagate fixes through dependencies, feedback loops create hidden coupling, while data, configuration, and pipeline debt reflect poorly managed artifacts and workflows.
 
 **Alt Text**: Hub-and-spoke diagram with Hidden Technical Debt at center. Six debt categories radiate outward: Configuration Debt, Feedback Loops, Data Debt, Pipeline Debt, Correction Cascades, and Boundary Erosion, each annotated with specific failure patterns.
 
@@ -1003,15 +1009,15 @@ _Machine Learning Systems_
 
 **Alt Text**: Timeline diagram with seven ML stages from problem statement to deployment. Color-coded arcs show correction cascades: red for domain expertise gaps, blue for real-world brittleness, orange for poor documentation. Dashed arrows indicate restarts.
 
-### Figure 14.5: MLOps Stack Layers
+### Figure 14.5: MLOps Stack Layers.
 
-**Caption**: MLOps Stack Layers: Modular architecture organizes machine learning system components, from model development and orchestration to infrastructure, facilitating automation, reproducibility, and scalable deployment. Each layer builds upon the one below, enabling cross-team collaboration and supporting the entire ML lifecycle from initial experimentation to long-term production maintenance.
+**Caption**: MLOps Stack Layers. Five tiers organize the ML system stack: ML Models at the top, followed by Frameworks, Orchestration, Infrastructure, and Hardware. MLOps spans orchestration tasks (data management through model serving) and infrastructure tasks (job scheduling through monitoring), enabling automation, reproducibility, and scalable deployment.
 
 **Alt Text**: Layered architecture diagram. Top row: ML Models, Frameworks, Orchestration, Infrastructure, Hardware. MLOps section spans orchestration tasks (data management through model serving) and infrastructure tasks (job scheduling through monitoring).
 
-### Figure 14.6: ML CI/CD Pipeline
+### Figure 14.6: ML CI/CD Pipeline.
 
-**Caption**: ML CI/CD Pipeline: Automated workflows streamline model development by integrating version control, testing, and deployment, enabling continuous delivery of updated models to production. This pipeline emphasizes data and model validation, automated retraining triggers, and model registration with metadata for reproducibility and governance. Source: HarvardX.
+**Caption**: ML CI/CD Pipeline. The pipeline begins with dataset and feature repositories, flows through data validation, transformation, training, evaluation, and model registration stages, then deploys to production. Retraining triggers initiate the cycle automatically, while metadata and artifact repositories ensure reproducibility and governance. Source: HarvardX.
 
 **Alt Text**: Pipeline diagram showing continuous training workflow. Central box contains data validation, transformation, training, evaluation, and registration stages. Three repositories connect: dataset and feature, metadata and artifact, model.
 
@@ -1021,9 +1027,9 @@ _Machine Learning Systems_
 
 **Alt Text**: Three-panel visualization over time. Top: incoming data samples coded green or orange. Middle: feature distribution shifting from online to offline sales channel. Bottom: line graph showing model accuracy declining as distribution shifts increase.
 
-### Figure 14.8: Uptime Dependency Stack
+### Figure 14.8: Uptime Dependency Stack.
 
-**Caption**: Uptime Dependency Stack: Robust ML service uptime relies on monitoring a layered stack of interdependent components, from infrastructure to model performance, mirroring the complexity of modern software systems. Operational maturity necessitates observing this entire stack to proactively address potential failures and maintain service levels under varying conditions.
+**Caption**: Uptime Dependency Stack. An iceberg visualization where visible service uptime floats above the waterline, supported by hidden threats below: model accuracy degradation, data drift, concept drift, broken pipelines, schema changes, model bias, data outages, and underperforming segments. Labels group these threats into data health, model health, and service health categories.
 
 **Alt Text**: Iceberg diagram with uptime visible above waterline. Hidden below: model accuracy, data drift, concept drift, broken pipelines, schema changes, model bias, data outages, underperforming segments. Labels indicate data, model, and service health.
 
@@ -1033,9 +1039,9 @@ _Machine Learning Systems_
 
 **Alt Text**: Circular diagram with three nodes: patient, clinician, and AI system. Arrows form cyclic flow: patient provides monitoring data, clinician sets therapy regimen, AI generates alerts and recommendations. Inner and outer loops show feedback pathways.
 
-### Figure 14.10: Patient-Clinician Interaction
+### Figure 14.10: Hypertension Management Loops.
 
-**Caption**: Patient-Clinician Interaction: Continuous monitoring data informs collaborative discussions between patients and clinicians, shifting focus from data collection to actionable insights for lifestyle modifications and improved health management. This loop prioritizes patient engagement and contextual understanding to facilitate personalized care beyond traditional clinical visits. Source: [@chen2023framework].
+**Caption**: Hypertension Management Loops. Three feedback loops operate in parallel: the patient-AI loop enables bounded self-management through blood pressure monitoring and titration recommendations; the clinician-AI loop provides oversight via trend summaries and clinical risk alerts; and the patient-clinician loop shifts appointments toward therapy trends and lifestyle modifiers. Source: [@chen2023framework].
 
 **Alt Text**: Three-panel diagram showing ClinAIOps loops. Patient-AI loop: patient monitors blood pressure, AI recommends titrations. Clinician-AI loop: clinician sets limits, AI sends alerts. Patient-clinician loop: both discuss therapy trends and modifiers.
 
@@ -1057,4 +1063,4 @@ _Machine Learning Systems_
 
 ---
 
-_Total: 175 figures across 15 chapters_
+_Total: 176 figures across 15 chapters_
