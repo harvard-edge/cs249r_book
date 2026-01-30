@@ -19,15 +19,10 @@ The algorithms for training large models are published in papers anyone can read
 ::: {.callout-tip title="Learning Objectives"}
 
 - Calculate datacenter power requirements using PUE and thermal dissipation metrics
-
 - Evaluate cooling architectures for high-density GPU clusters using thermal capacity constraints
-
 - Apply the roofline model to identify compute-bound versus memory-bound workloads
-
 - Analyze accelerator selection by matching workload characteristics to hardware capabilities
-
 - Compute total cost of ownership by combining amortized CapEx and OpEx
-
 - Evaluate the trade-offs between GPU, TPU, and custom ASIC architectures for specific workloads
 
 :::
@@ -128,11 +123,13 @@ A single NVIDIA DGX H100 system consumes 10.2 kW at peak load. A rack containing
 
 [^fn-pue]: **Power Usage Effectiveness (PUE)**: An industry-standard metric where values closer to 1.0 indicate greater efficiency. A PUE of 2.0 means half the power goes to overhead (cooling, lighting, power distribution), while 1.1 means only 10% goes to overhead. Google's most efficient datacenters achieve PUE of 1.06, while typical enterprise facilities operate at 1.5-2.0.
 
+Every watt spent on cooling is a watt not spent on computation, an overhead we call the *cooling tax*. The following worked example quantifies this tax for a realistic GPU cluster.
 
-::: {.callout-perspective title="Napkin Math: The Cooling Tax"}
+::: {.callout-notebook title="The Cooling Tax"}
 **Problem**: You operate a **10 MW** GPU cluster. Electricity costs **$0.10/kWh**. How much money do you waste with inefficient cooling (PUE 1.5) vs. efficient liquid cooling (PUE 1.1)?
 
 **The Math**:
+
 1.  **Compute Power**: 10 MW.
 2.  **Scenario A (Air Cooled, PUE 1.5)**: Total Power = $10 \times 1.5 = 15 \text{ MW}$. Cooling uses 5 MW.
 3.  **Scenario B (Liquid Cooled, PUE 1.1)**: Total Power = $10 \times 1.1 = 11 \text{ MW}$. Cooling uses 1 MW.
@@ -145,6 +142,8 @@ A single NVIDIA DGX H100 system consumes 10.2 kW at peak load. A rack containing
 A PUE of 1.0 represents perfect efficiency where all power goes to computing. Traditional datacenters achieve PUE values of 1.5 to 2.0, while hyperscale facilities target 1.1 to 1.2. ML datacenters face a challenge. The extreme heat density of GPU clusters increases cooling overhead, pushing PUE higher unless advanced cooling technologies are deployed.
 
 #### Cooling Systems at Scale {#sec-compute-cooling-systems-scale-2ccb}
+
+At extreme rack densities, cooling ceases to be a facilities concern and becomes a fundamental bound on computation, what we might call *the thermodynamic limit of intelligence*.
 
 ::: {.callout-perspective title="The Thermodynamic Limit of Intelligence"}
 **The Hardest Constraint:** We often think of intelligence as abstract information processing, but in the warehouse-scale computer, it is a **heat engine**.
@@ -244,15 +243,15 @@ As of 2024, liquid cooling has transitioned from specialty option to requirement
 
 **Immersion Cooling.** The most aggressive thermal solution submerges entire servers in dielectric fluid. Single-phase immersion uses non-conductive oils that remain liquid, while two-phase systems use fluids that boil at low temperatures, leveraging latent heat of vaporization for efficient heat transfer. Immersion enables rack densities exceeding 200 kW but requires specialized maintenance procedures and component compatibility.
 
+#### Physical Layout Optimization {#sec-compute-physical-layout-optimization-54f7}
+
+ML cluster performance depends critically on physical topology. Unlike web serving workloads where any server can handle any request, distributed training requires specific communication patterns between specific nodes. This dependency exists because, at warehouse scale, the network fabric functions as the computer's system bus, making physical distance a first-order performance constraint.
+
 ::: {.callout-perspective title="The Gradient Bus Perspective"}
 **The Network is the Bus:** In a warehouse-scale computer, the InfiniBand/Ethernet fabric is not networking in the traditional sense; it is the **System Bus** (like PCIe or NVLink) writ large. Packet loss equals data corruption, latency equals memory access time, and bandwidth equals memory throughput.
 
 When we optimize physical layout, we are placing memory closer to compute to minimize the speed-of-light latency of the Gradient Bus.
 :::
-
-#### Physical Layout Optimization {#sec-compute-physical-layout-optimization-54f7}
-
-ML cluster performance depends critically on physical topology. Unlike web serving workloads where any server can handle any request, distributed training requires specific communication patterns between specific nodes.
 
 **Rack Density Considerations.** Higher density reduces cable lengths and switch hops but concentrates power and cooling requirements. Production deployments balance these factors based on workload characteristics:
 
@@ -420,6 +419,8 @@ NVIDIA maintains market dominance through integrated hardware-software offerings
 
 *B100 specifications are preliminary estimates based on NVIDIA announcements. Verify against official specifications for production planning.
 
+The TFLOPS figures above assume reduced-precision formats, which raises a natural question: which floating-point format should training use?
+
 ::: {.callout-perspective title="The Case for Bfloat16"}
 Deep learning training is resilient to low precision but sensitive to dynamic range. Standard FP16 (IEEE 754) uses 5 bits for the exponent and 10 bits for the mantissa. This limited exponent range often causes gradients to underflow to zero or overflow to infinity during training, requiring complex loss scaling techniques to maintain stability.
 
@@ -518,9 +519,13 @@ The PCIe variant's higher efficiency reflects reduced interconnect power, accept
 
 [^fn-roofline]: **Roofline model**: A visual performance model developed at Berkeley that plots achievable FLOPS against arithmetic intensity (FLOPS per byte of memory traffic). The "roofline" consists of a sloped region (memory-bound, limited by bandwidth) and a flat region (compute-bound, limited by peak FLOPS). The intersection point, called the ridge point, indicates where workloads transition between these regimes. This model helps identify whether to optimize for compute or memory access.
 
+The roofline model hinges on a single metric, *arithmetic intensity*, that determines which resource constrains a given workload.
+
 ::: {.callout-definition title="Arithmetic Intensity"}
 **Arithmetic Intensity** is the ratio of floating-point operations (FLOPs) performed to bytes of memory accessed (Bytes) during a computation. It determines whether a workload is _compute-bound_ (limited by processor speed) or _memory-bound_ (limited by bandwidth).
 :::
+
+When general-purpose processors cannot deliver sufficient arithmetic intensity, architects turn to *domain-specific architectures (DSAs)* that trade generality for efficiency.
 
 ::: {.callout-definition title="Domain-Specific Architecture (DSA)"}
 ***Domain-Specific Architecture (DSA)*** is a class of processors tailored to a specific domain of workloads (like deep learning) rather than general-purpose computation. DSAs (such as TPUs) trade flexibility for performance per watt by optimizing memory hierarchies and arithmetic units specifically for the domain's dominant operations (e.g., matrix multiplication).
@@ -598,7 +603,9 @@ Most LLM training operates at 50 to 100 FLOP/byte arithmetic intensity, well bel
 
 CNN training with large batch sizes operates near 200 FLOP/byte, approaching the ridge point where both resources limit performance. Recommendation inference with random embedding lookups operates at extremely low arithmetic intensity of 1 to 10 FLOP/byte, memory-bound regardless of accelerator choice.
 
-::: {.callout-notebook title="Engineering Metric: Model FLOPs Utilization (MFU)"}
+These roofline gaps motivate a practical efficiency metric, *Model FLOPs Utilization (MFU)*, that measures what fraction of theoretical peak a workload actually achieves.
+
+::: {.callout-notebook title="Model FLOPs Utilization (MFU)"}
 **The Problem**: You buy an H100 GPU advertised at 990 TFLOPS (FP16). Your training logs show it's only processing data at a rate equivalent to 350 TFLOPS. Where did the performance go?
 
 **Definition**:
@@ -610,10 +617,10 @@ $$ \text{Achieved FLOPS} \approx \frac{6 \cdot P \cdot D}{T} $$
 *(Factor of 6 accounts for forward + backward pass operations per parameter)*.
 
 **Worked Example**:
+
 *   **Model**: 70B parameters ($70 \times 10^9$)
 *   **Data**: 100B tokens
 *   **Time**: 14 days ($1.2 \times 10^6$ seconds) on 512 H100s.
-
 1.  **Total FLOPs Required**: $6 \cdot (70 \times 10^9) \cdot (100 \times 10^9) = 4.2 \times 10^{22}$ FLOPs.
 2.  **Achieved System Throughput**: $\frac{4.2 \times 10^{22}}{1.2 \times 10^6} = 3.5 \times 10^{16}$ FLOPS ($35$ PFLOPS).
 3.  **Per-GPU Throughput**: $35 \text{ PFLOPS} / 512 = 68 \text{ TFLOPS}$.
@@ -695,7 +702,7 @@ Operational expenditure (OpEx) captures ongoing costs that accumulate throughout
 
 Electricity represents the largest operational cost for ML infrastructure. Power costs vary dramatically by geography, with industrial rates ranging from $0.04/kWh in regions with abundant hydroelectric power to $0.20/kWh in constrained markets.
 
-::: {.callout-notebook title="Engineering Calculation: Annual Power Costs" collapse="true"}
+::: {.callout-notebook title="Annual Power Costs" collapse="true"}
 **Scenario**: Calculating the electricity bill for a single DGX H100 system.
 **Parameters**:
 
@@ -925,7 +932,7 @@ Multislice training extends beyond single pods by connecting multiple TPU slices
 
 ### Meta Recommendation Infrastructure {#sec-compute-meta-recommendation-infrastructure-ff88}
 
-Meta's recommendation systems illustrate infrastructure optimized for a different workload pattern: models combining massive embedding tables with relatively modest dense computation. This architecture serves billions of daily recommendation queries across products including Facebook Feed, Instagram, and Reels.
+Meta's recommendation systems illustrate infrastructure optimized for a different workload pattern: models combining massive embedding tables with relatively modest dense computation. This architecture serves billions of daily recommendation queries across products including Facebook Feed, Instagram, and Reels. Unlike the compute-bound LLM workloads examined above, recommendation models hit a *memory capacity wall* where embedding tables exceed any single accelerator's memory.
 
 ::: {.callout-note title="Archetype B (Scaled Lighthouse): The Memory Capacity Wall"}
 **Archetype B (The Global Real-Time Recommendation Engine)** defines this architectural split. Unlike Archetype A (which is compute-bound), Archetype B is **memory-capacity bound**. The embedding tables representing billions of users and items can exceed 10TB. Since this cannot fit in GPU HBM, the system must adopt a hybrid design: storing embeddings in massive CPU DRAM tiers while using GPUs only for the dense compute layers.

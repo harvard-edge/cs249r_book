@@ -28,6 +28,8 @@ A thousand GPUs sitting idle waiting for scheduling decisions cost the same as a
 
 ## Introduction {#sec-orchestration-resource-management-resource-management-introduction-ed23}
 
+Orchestration decisions span multiple layers of the system stack, from physical hardware topology to high-level scheduling policy. Understanding where orchestration fits in this stack clarifies both its responsibilities and its constraints.
+
 ::: {.callout-note title="Connection: The Systems Sandwich"}
 In the **Systems Sandwich** model of Volume II (introduced in @sec-vol2-introduction), Orchestration operates at the **Operational Layer (Distribution)**, but its decisions are fundamentally constrained by the **Physical Layer (Infrastructure)**. The scheduler must reason about physical realities: GPU heterogeneity, NVLink topology, rack power limits, and network bisection bandwidth. When scheduling goes wrong, debugging requires examining all three layers to identify whether the root cause is physical (hardware constraints), logical (algorithm limitations), or operational (policy misconfiguration). The Systems Sandwich provides a systematic framework for this diagnosis.
 :::
@@ -46,6 +48,8 @@ This chapter teaches the algorithms and trade-offs for ML cluster orchestration.
 
 ## The Scheduler's Challenge {#sec-orchestration-resource-management-resource-management-schedulers-challenge-a316}
 
+Cluster schedulers must solve complex optimization problems under tight constraints. This section examines the core algorithmic challenges: fitting heterogeneous workloads onto fixed node configurations and ensuring that distributed training jobs can start atomically without causing deadlocks.
+
 ### Bin Packing at Scale {#sec-orchestration-resource-management-resource-management-bin-packing-scale-91d2}
 *   **The Problem**: Fitting diverse jobs (1-GPU inference, 1024-GPU training) onto fixed node sizes.
 *   **Constraints**: Locality (NVLink), Topology (Switch hops), Power (Rack limits).
@@ -56,6 +60,8 @@ This chapter teaches the algorithms and trade-offs for ML cluster orchestration.
 
 ## Orchestration Paradigms {#sec-orchestration-resource-management-resource-management-orchestration-paradigms-e21b}
 
+Two dominant philosophies have emerged for cluster orchestration: the batch-oriented model from high-performance computing and the service-oriented model from cloud infrastructure. Each brings distinct trade-offs for ML workloads.
+
 ### Slurm: The HPC Heritage {#sec-orchestration-resource-management-resource-management-slurm-hpc-heritage-ffb4}
 *   **Philosophy**: Batch queuing, strict fairness, static partitions.
 *   **Pros/Cons**: Unbeatable for massive static training jobs; rigid for microservices.
@@ -65,6 +71,8 @@ This chapter teaches the algorithms and trade-offs for ML cluster orchestration.
 *   **Adaptations for ML**: Volcano scheduler, Kueue, NVIDIA Device Plugin.
 
 ## Resource Efficiency {#sec-orchestration-resource-management-resource-management-resource-efficiency-dec4}
+
+Maximizing cluster utilization while maintaining fairness across users requires sophisticated resource management policies. This section covers quota systems for multi-tenant environments and preemption mechanisms that balance interactive and batch workloads.
 
 ### Multi-Tenancy and Quotas {#sec-orchestration-resource-management-resource-management-multitenancy-quotas-66bf}
 *   **Hierarchical Fair Share**: Sharing resources between Dept A and Dept B.
@@ -238,6 +246,8 @@ Research schedulers have demonstrated significant improvements over general-purp
 
 Locality-aware scheduling recognizes that communication topology matters for distributed training. A 64-GPU job performs better on 8 nodes of 8 GPUs each than 16 nodes of 4 GPUs, due to higher NVLink bandwidth within nodes. Advanced schedulers consider the fat-tree topology discussed in @sec-networking-networking-largescale-ml-adca, preferring allocations that share fewer switch hops. Experiments show 15 to 30 percent training throughput improvement from topology-aware placement.
 
+Despite advances in scheduling algorithms, real clusters routinely underperform their theoretical utilization targets. Diagnosing why requires examining the full system stack.
+
 ::: {.callout-example title="Systems Sandwich: Debugging Low GPU Utilization"}
 
 **The Problem**: A 1,000-GPU cluster reports 60% average utilization despite a full job queue with over 50 pending jobs. Engineering leadership expects greater than 85% utilization given the capital investment. The standard monitoring dashboards show plenty of idle GPUs, yet users complain about long queue times. Where is the problem, and how do we systematically diagnose it?
@@ -269,11 +279,8 @@ The scheduler's allocation log shows A100-80GB GPUs at 95% allocation (380/400),
 **Diagnosis**: Multiple pathologies compound to create low utilization:
 
 1. **Over-specification**: Model memory analysis reveals that 12 of the 15 large jobs actually require only 45 GB peak memory per GPU, well within A100-40GB capacity. Users copied job templates specifying A100-80GB without recalculating requirements.
-
 2. **Pool fragmentation**: The strict homogeneity requirement means a 64-GPU job requesting "A100-80GB" cannot use any A100-40GB GPUs, even when 300 A100-40GB GPUs sit idle.
-
 3. **Stranded resources**: No jobs target V100 hardware because researchers perceive it as "legacy." The 200 V100 GPUs contribute zero productive work despite consuming power and cooling.
-
 4. **Gang scheduling deadlock**: Without a timeout or preemption policy, partially-satisfied jobs hold resources indefinitely, blocking other work.
 
 **Root Cause (Policy-Infrastructure Mismatch)**: Job templates and organizational practices evolved for a homogeneous A100-80GB cluster. When infrastructure expanded with heterogeneous hardware, the Operational Layer policies were never updated. The scheduler correctly implements its configured policy; the policy itself creates the utilization gap.
@@ -281,11 +288,8 @@ The scheduler's allocation log shows A100-80GB GPUs at 95% allocation (380/400),
 **Solution**: Implement tiered resource matching with topology awareness:
 
 1. **Capability-based scheduling**: Replace exact GPU type requests with capability requirements. Instead of `--gres=gpu:a100-80g:64`, jobs specify `--constraint="gpu_mem>=40GB"` and let the scheduler select appropriate hardware.
-
 2. **Topology-aware placement**: For jobs requiring tensor parallelism, add constraint `--constraint="nvlink"` to ensure placement on NVLink-connected nodes. Data-parallel jobs can omit this constraint to enable V100 scheduling.
-
 3. **Gang scheduling with timeout**: Configure `SchedulerParameters=bf_continue,bf_window=7200` to enable backfill scheduling and prevent indefinite resource holding. Jobs waiting more than 2 hours for gang completion release partial allocations.
-
 4. **Workload-hardware matching guidance**: Provide researchers with a decision matrix mapping model sizes to minimum GPU memory requirements, reducing over-specification.
 
 **Quantified Impact**: After implementing tiered matching and backfill scheduling over a two-week validation period:

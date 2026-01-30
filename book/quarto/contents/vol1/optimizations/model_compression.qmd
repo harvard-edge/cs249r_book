@@ -79,6 +79,8 @@ Model optimization is not a single technique but a *framework* with three comple
 
 **2. Efficient Numerics Representation:** Optimizes how numerical values are stored and processed. **Quantization** and **mixed-precision** training reduce the bit-width of weights and activations (e.g., from 32-bit floating point to 8-bit integers), enabling faster execution and lower memory usage on specialized hardware.
 
+To understand why numerics matter so deeply, consider the *physics of quantization* at the silicon level.
+
 ::: {.callout-notebook title="The Physics of Quantization"}
 Why do we obsess over quantization? Because in the physics of silicon, **bits represent energy**.
 
@@ -150,6 +152,23 @@ Optimization requirements vary dramatically across deployment contexts. What mat
 **TinyML**[^fn-microcontroller-constraints] makes optimization existential, not optional. A microcontroller with 256KB RAM cannot run a 100MB model regardless of accuracy. The model must compress below hardware limits or deployment is impossible [@banbury2020benchmarking].
 
 [^fn-microcontroller-constraints]: **Microcontroller Constraints**: Microcontrollers operate under severe constraints relative to servers and modern accelerators, often with *kilobytes to low megabytes* of RAM and limited persistent storage. A practical mental model is that you may have \(10^3\) to \(10^6\) bytes of memory available for the entire pipeline, which is why "model optimization" is often a prerequisite rather than an optional improvement in embedded deployments.
+
+@tbl-model-vs-device quantifies this gap using the Lighthouse models from @sec-ml-system-architecture. The mismatch between model requirements and device capabilities explains why compression is not optional for resource-constrained deployment—without it, the models simply cannot run.
+
++---------------------------+----------------+---------------+-------------+-------------+-------------+
+| **Model**                 | **Memory**     | **Storage**   | **Cloud**   | **Mobile**  | **TinyML**  |
+|                           | **(Runtime)**  | **(Weights)** | **(~100 GB)**| **(~8 GB)** | **(~512 KB)**|
++:==========================+===============:+==============:+:===========:+:===========:+:===========:+
+| **ResNet-50**             | 100 MB         | 98 MB         | ✓           | ✓           | ✗ (200×)    |
++---------------------------+----------------+---------------+-------------+-------------+-------------+
+| **MobileNetV2**           | 14 MB          | 14 MB         | ✓           | ✓           | ✗ (27×)     |
++---------------------------+----------------+---------------+-------------+-------------+-------------+
+| **MobileNetV2 (INT8)**    | 3.5 MB         | 3.5 MB        | ✓           | ✓           | ✗ (7×)      |
++---------------------------+----------------+---------------+-------------+-------------+-------------+
+| **DS-CNN (KWS)**          | 500 KB         | 500 KB        | ✓           | ✓           | ✓           |
++---------------------------+----------------+---------------+-------------+-------------+-------------+
+
+: **The Deployment Gap**: Model memory requirements compared against typical device capacities. Even MobileNetV2 quantized to INT8 exceeds TinyML constraints by 7×, while the purpose-built DS-CNN keyword spotter fits comfortably. Numbers in parentheses show how many times the model exceeds device memory. {#tbl-model-vs-device}
 
 Optimization also contributes to sustainable and accessible AI deployment. Reducing a model's energy footprint is important as AI workloads scale, helping mitigate the environmental impact of large-scale ML training and inference [@patterson2021carbon]. At the same time, optimized models can expand the reach of machine learning, supporting applications in low-resource environments, from rural healthcare to autonomous systems operating in the field.
 
@@ -665,7 +684,7 @@ However, unstructured pruning does not necessarily improve computational efficie
 
 #### Structured Pruning {#sec-model-compression-structured-pruning-b651}
 
-While unstructured pruning removes individual weights from a neural network, structured pruning[^fn-structured-pruning] eliminates entire computational units, such as neurons, filters, channels, or layers. This approach is particularly beneficial for hardware efficiency, as it produces smaller dense models that can be directly mapped to modern machine learning accelerators. Unlike unstructured pruning, which results in sparse weight matrices that require specialized execution kernels to exploit computational benefits, structured pruning leads to more efficient inference on general-purpose hardware by reducing the overall size of the network architecture.
+While unstructured pruning removes individual weights from a neural network, structured pruning [@li2017pruning][^fn-structured-pruning] eliminates entire computational units, such as neurons, filters, channels, or layers. This approach is particularly beneficial for hardware efficiency, as it produces smaller dense models that can be directly mapped to modern machine learning accelerators. Unlike unstructured pruning, which results in sparse weight matrices that require specialized execution kernels to exploit computational benefits, structured pruning leads to more efficient inference on general-purpose hardware by reducing the overall size of the network architecture.
 
 [^fn-structured-pruning]: **Structured Pruning**: Removing entire filters/channels rather than individual weights, enabling immediate hardware speedups without sparse computation support. ResNet-34 filter pruning achieves 50% FLOP reduction with 1.0% accuracy loss; MobileNetV2 channel pruning yields 3.2× faster ARM inference at 96.5% accuracy. Importance metrics include magnitude, gradient, and Taylor expansion.
 
@@ -1798,6 +1817,8 @@ where $k \ll m, n$ is the approximation rank. This is typically computed via sin
 
 [^fn-svd]: **Singular Value Decomposition (SVD)**: Factorizes matrix $A = U \Sigma V^T$ where singular values in $\Sigma$ indicate importance. Truncating to top-k values minimizes Frobenius norm error (Eckart-Young theorem). For a 4096×4096 weight matrix, rank-128 SVD reduces storage from 64MB to 4MB while preserving 95% of spectral energy. GPU implementations achieve O(mn min(m,n)) complexity.
 
+This factorization reveals a fundamental *bandwidth-compute trade-off* that recurs throughout systems design.
+
 ::: {.callout-notebook title="The Bandwidth-Compute Trade-off"}
 **Reducing the Memory Pressure**: Low-rank factorization illustrates a classic systems trade-off: **trading computation for bandwidth reduction**. Storing a $4096 \times 4096$ matrix requires 64MB (at FP32). Fetching this matrix for a single inference is a massive memory bandwidth hit, especially when limited by physical memory bandwidth constraints.
 
@@ -2249,7 +2270,7 @@ Reinforcement learning based NAS treats architecture search as a sequential deci
 
 Evolutionary algorithms maintain a population of candidate architectures and iteratively apply mutations (changing operations, adding connections) and crossover (combining parent architectures) to generate offspring. Fitness-based selection retains high-performing architectures for the next generation. AmoebaNet used evolution to achieve state-of-the-art results, with massive parallelism amortizing the cost across thousands of workers.
 
-Gradient-based methods like DARTS (Differentiable Architecture Search) represent the search space as a continuous relaxation where all possible operations are weighted combinations. Rather than discrete sampling, DARTS optimizes architecture weights and model weights jointly using gradient descent. By making the search differentiable, DARTS reduces search cost from hundreds to just 1-4 GPU-days, though the continuous relaxation may miss discrete architectural patterns that discrete search methods discover.
+Gradient-based methods like DARTS (Differentiable Architecture Search) [@liu2019darts] represent the search space as a continuous relaxation where all possible operations are weighted combinations. Rather than discrete sampling, DARTS optimizes architecture weights and model weights jointly using gradient descent. By making the search differentiable, DARTS reduces search cost from hundreds to just 1-4 GPU-days, though the continuous relaxation may miss discrete architectural patterns that discrete search methods discover.
 
 #### NAS in Practice {#sec-model-compression-nas-practice-2d81}
 
@@ -2320,6 +2341,8 @@ Efficient numerical representations enable significant reductions in storage req
 #### Energy Costs {#sec-model-compression-energy-costs-fb60}
 
 Beyond computational and memory benefits, the energy costs associated with different numerical precisions further highlight the benefits of reducing precision. @fig-quantized-energy quantifies these energy differences: a 32-bit floating-point addition (FAdd) consumes approximately 0.9 pJ, whereas a 16-bit floating-point addition requires only 0.4 pJ. Similarly, a 32-bit integer addition costs 0.1 pJ, while an 8-bit integer addition is significantly lower at just 0.03 pJ. These savings compound when considering large-scale models operating across billions of operations, supporting sustainability goals. The energy efficiency gained through quantization also enhances security posture by reducing the computational resources available to potential attackers.
+
+These energy savings take on a different character for models where memory capacity, not compute, is the binding constraint. *DLRM embedding quantization* illustrates this distinction.
 
 ::: {.callout-lighthouse title="DLRM and Embedding Quantization"}
 **The Memory Capacity Constraint**: Our **DLRM Lighthouse** (@sec-dnn-architectures) presents a unique compression challenge. Unlike ResNet or GPT, which are constrained by compute or bandwidth, DLRM is constrained by **Memory Capacity**. Its embedding tables can reach terabytes in size, far exceeding GPU memory.
@@ -2517,7 +2540,9 @@ By reducing numerical precision, models can not only execute computations more e
 ```
 :::
 
-::: {.callout-notebook title="Quantization Savings" collapse="true"}
+To make these gains concrete, consider the storage implications of deploying a modern large language model at reduced precision.
+
+::: {.callout-notebook title="Quantization Savings"}
 **Scenario**: Deploying Llama 3 8B (8 billion parameters).
 
 **FP16 (Half Precision)**
@@ -2537,7 +2562,7 @@ However, reducing numerical precision introduces trade-offs. Lower-precision for
 
 ![Quantization error weighted by p(x).](images/png/modeloptimization_quant_hist.png){#fig-quantization width=80% fig-alt="Histogram showing quantization error distribution weighted by probability density. Bell-shaped curve centered near zero with tails extending to positive and negative errors, illustrating typical quantization noise pattern."}
 
-@fig-quantization reveals how the quantization error distribution differs across numerical formats, with each format introducing varying levels of quantization noise that directly influence model accuracy and stability.
+@fig-quantization reveals how the quantization error distribution differs across numerical formats, with each format introducing varying levels of quantization noise that directly influence model accuracy and stability. Understanding this noise is essential, but practitioners ultimately care about end-to-end speedup. The magnitude of that speedup depends on whether a workload is compute-bound or memory-bound.
 
 ::: {.callout-notebook title="The Quantization Speedup (Compute-Bound)"}
 **Problem**: You have a compute-bound matrix multiplication (e.g., in a Transformer MLP block). You switch from FP16 to INT8. What is the expected speedup?
@@ -2653,7 +2678,7 @@ node [midway,above=5mm] {\textbf{16 bits}};
 
 INT8 precision offers more aggressive efficiency improvements for inference workloads. Many quantized models use INT8 for inference, reducing storage by $4\times$ while accelerating computation by 4–8$\times$ on optimized hardware. INT8 is widely used in mobile and embedded AI, where energy constraints are significant.
 
-::: {.callout-notebook title="Quantization Memory Savings" collapse="true"}
+::: {.callout-notebook title="Quantization Memory Savings"}
 Quantizing model weights from FP32 (4 bytes) to INT8 (1 byte) offers a theoretical $4\times$ reduction in model size. For a model with $P$ parameters:
 
 $$ \text{Size}_{\text{FP32}} = P \times 4 \text{ bytes} \quad \text{vs} \quad \text{Size}_{\text{INT8}} = P \times 1 \text{ byte} $$
@@ -2665,7 +2690,7 @@ $$ \text{Size}_{\text{INT8}} = 7 \times 10^9 \times 1 \text{ B} \approx 7 \text{
 This optimization enables the model to fit on a single consumer GPU (e.g., 24GB VRAM), whereas the FP32 version typically requires data-center class hardware or multi-GPU setups.
 :::
 
-Binary and ternary networks represent the extreme end of quantization, where weights and activations are constrained to 1-bit (binary) or 2-bit (ternary) values. This results in massive storage and energy savings, but model accuracy often degrades significantly unless specialized architectures are used.
+Binary and ternary networks represent the extreme end of quantization, where weights and activations are constrained to 1-bit (binary) or 2-bit (ternary) values. This results in massive storage and energy savings, but model accuracy often degrades significantly unless specialized architectures are used. Our *keyword spotting* lighthouse lives precisely in this regime, where even INT8 is a luxury.
 
 ::: {.callout-lighthouse title="Keyword Spotting and Extreme Compression"}
 **The Extreme Constraint**: Our **Keyword Spotting (KWS) Lighthouse** (@sec-dnn-architectures) lives here. Running on a microcontroller with 256KB of SRAM means "standard" compression isn't enough.
@@ -5753,7 +5778,7 @@ The following decision framework guides technique selection based on primary dep
 - Magnitude-based pruning with fine-tuning (days)
 - Avoid: NAS, full QAT, architecture redesign
 
-This decision framework provides starting points for individual technique selection. However, production deployments rarely rely on a single technique. Combining pruning with quantization, or distillation with hardware-aware design, introduces interaction effects that can either amplify benefits or create unexpected accuracy degradation. The following section addresses how to sequence and combine techniques effectively.
+This decision framework provides starting points for individual technique selection. Validating that a chosen technique actually achieves its intended goal requires systematic profiling and measurement, which @sec-model-compression-measuring-model-efficiency-00c7 formalizes in detail. However, production deployments rarely rely on a single technique. Combining pruning with quantization, or distillation with hardware-aware design, introduces interaction effects that can either amplify benefits or create unexpected accuracy degradation. The following section addresses how to sequence and combine techniques effectively.
 
 ## Optimization Strategies {#sec-model-compression-optimization-strategies-f2f6}
 
@@ -6036,7 +6061,7 @@ Despite these limitations, AutoML continues to improve and plays an increasingly
 
 ## Measuring Model Efficiency {#sec-model-compression-measuring-model-efficiency-00c7}
 
-Translating optimization strategies into measurable improvements requires systematic evaluation approaches. Production systems employ coordinated optimization strategies that balance multiple constraints simultaneously, and effective deployment requires structured approaches for profiling systems, measuring optimization impact, and validating that technique combinations achieve deployment goals.
+Having surveyed the major compression techniques and strategies for combining them, we now formalize how to measure their effectiveness. The preceding sections discussed optimization choices in terms of latency reduction, memory savings, and accuracy trade-offs, but translating those goals into measurable improvements requires systematic evaluation approaches. Production systems employ coordinated optimization strategies that balance multiple constraints simultaneously, and effective deployment requires structured approaches for profiling systems, measuring optimization impact, and validating that technique combinations achieve deployment goals.
 
 This section addresses three critical questions: Where should optimization efforts focus? How do we measure whether optimizations achieve their intended goals? How do we validate that combined techniques deliver expected benefits?
 

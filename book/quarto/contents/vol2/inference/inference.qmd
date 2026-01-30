@@ -22,17 +22,11 @@ Training a model is a one-time expense; serving it is perpetual. A model trained
 ::: {.callout-tip title="Learning Objectives"}
 
 - Quantify why serving cost dominates training cost over a model's lifetime using the total cost of serving equation
-
 - Design batching strategies matched to model architectures, distinguishing static batching for vision models from continuous batching for LLMs and feature-parallel batching for recommendation systems
-
 - Apply the serving hierarchy framework (request, replica, service, platform) to systematically identify and resolve inference bottlenecks at each level
-
 - Compare model sharding strategies (tensor parallelism, pipeline parallelism, expert parallelism, embedding sharding) by their communication patterns and latency-memory tradeoffs
-
 - Analyze load balancing algorithms using queuing theory to explain why power-of-two-choices achieves exponentially better performance than random assignment
-
 - Recognize KV cache memory challenges in LLM serving and understand how techniques like continuous batching and memory management enable high GPU utilization
-
 - Design autoscaling policies that account for GPU cold start latency and balance cost optimization with SLO guarantees
 
 :::
@@ -123,14 +117,19 @@ Minimizing this tax requires co-locating communicating components, using high-ba
 
 ### Serving Cost Dominates Training Cost {#sec-inference-scale-serving-cost-dominates-training-cost-576a}
 
+The serving tax quantified above consumes a fraction of the latency budget per request. But the true economic impact of inference emerges when we consider cost over a model's entire operational lifetime.
+
 ::: {.callout-perspective title="The Economics of Inference"}
 A critical insight for infrastructure planning is that serving cost typically dominates training cost over a model's operational lifetime. This reversal from the training-centric view of model development has profound implications for where optimization effort should focus. While training is a one-time capital expenditure (CapEx), serving is a continuous operational expenditure (OpEx) that scales with user growth.
 :::
 
-::: {.callout-perspective title="Napkin Math: The Serving Cost Multiplier"}
+To make this cost dominance concrete, consider a worked example that reveals the *serving cost multiplier* in practice.
+
+::: {.callout-notebook title="The Serving Cost Multiplier"}
 **Problem**: You spent **$2 Million** training a 70B parameter model. You serve it to 1 million daily active users (DAU), each making 50 requests/day. Is training or serving the dominant cost over 1 year?
 
 **The Math**:
+
 1.  **Training Cost**: $2,000,000 (One-time).
 2.  **Inference Volume**: $1M \text{ users} \times 50 \text{ reqs} \times 365 \text{ days} \approx 18 \text{ Billion requests/year}$.
 3.  **Cost per Request**: Assume a 70B model on H100 costs $\approx \$0.001$ per request (input + output).
@@ -145,15 +144,17 @@ $$C_{total} = C_{training} + C_{serving} \times T_{deployment} \times Q_{rate}$$
 
 where $C_{training}$ is the one-time cost to train the model, $C_{serving}$ is the cost per query served, $T_{deployment}$ is the deployment duration in appropriate time units, and $Q_{rate}$ is the query rate.
 
-::: {.callout-notebook title="Engineering Calculation: The Serving Cost Multiplier" collapse="true"}
+::: {.callout-notebook title="The Serving Cost Multiplier" collapse="true"}
 **Scenario**: Recommend-system model (DLRM).
 
 **Training Cost ($C_{train}$)**
+
 - Hardware: 1,000 GPU-hours @ $3/hr = $3,000
 - Engineering Overhead (Data/Exp): 3x Hardware = $9,000
 - **Total Training**: $12,000
 
 **Serving Cost ($C_{serve}$)**
+
 - Deployment: 2 years (constant updates, amortized)
 - Traffic: 10,000 Queries Per Second (QPS)
 - Efficiency: $10^{-5}$ dollars per query ($10 per million)
@@ -871,17 +872,20 @@ $$ X(B) = \frac{B}{L(B)} = \frac{B}{T_{fixed} + B \times T_{variable}} $$
 
 This relationship reveals the **Batching Efficiency Curve**:
 1.  **Small $B$**: Throughput is dominated by $T_{fixed}$. The system is **latency-bound** (or overhead-bound). Increasing $B$ yields super-linear throughput gains.
+
 2.  **Large $B$**: As $B \to \infty$, the $T_{fixed}$ term becomes negligible. Throughput asymptotically approaches the hardware limit $1/T_{variable}$. The system becomes **compute-bound** (or bandwidth-bound for LLMs).
+
 3.  **The Knee**: The optimal batch size is the point where throughput gains diminish while latency continues to grow linearly.
 
-The engineering goal is to find the maximum $B$ such that $L(B) \le \text{SLO}$. This formulation explains why vision models (high $T_{variable}$) saturate at smaller batches than LLMs (high $T_{fixed}$ due to weight loading), requiring different tuning strategies. @tbl-batching-by-model summarizes how these batching characteristics vary across model architectures.
+The engineering goal is to find the maximum $B$ such that $L(B) \le \text{SLO}$. This formulation explains why vision models (high $T_{variable}$) saturate at smaller batches than LLMs (high $T_{fixed}$ due to weight loading), requiring different tuning strategies. Translating these batch-level equations into system-wide capacity planning requires a classical result from queuing theory: *Little's Law*, which relates concurrency, throughput, and latency in any stable system. @tbl-batching-by-model summarizes how these batching characteristics vary across model architectures.
 
-::: {.callout-notebook title="Engineering Calculation: Little's Law for Inference" collapse="true"}
+::: {.callout-notebook title="Little's Law for Inference" collapse="true"}
 **Concept**: In any stable queuing system, the average number of requests in the system ($L$) equals the arrival rate ($\lambda$) multiplied by the average time a request spends in the system ($W$).
 
 $$ L = \lambda \times W $$
 
 **Application: Concurrency Planning**
+
 - **Target Throughput ($\lambda$)**: 1,000 requests/sec
 - **Latency SLO ($W$)**: 100 ms (0.1 s)
 
@@ -890,6 +894,7 @@ $$ L = 1000 \times 0.1 = \mathbf{100 \text{ concurrent requests}} $$
 
 **Capacity Planning**:
 If a single GPU replica handles batch size 8 with 80ms latency:
+
 1. Replica Throughput = $8 / 0.08 = 100 \text{ req/s}$
 2. Replicas Needed = $1000 / 100 = 10 \text{ replicas}$
 
@@ -1062,7 +1067,7 @@ However, this exceeds practical limits (memory constraints typically cap batch s
 
 4. **Diminishing returns beyond B=32**: Further batch size increases would reduce utilization but memory constraints prevent exploration.
 
-::: {.callout-notebook title="Engineering Calculation: Applying Little's Law to Verify" collapse="true"}
+::: {.callout-notebook title="Applying Little's Law to Verify" collapse="true"}
 **Verification using Little's Law**: $L = \lambda \cdot W$
 
 At B=32 with $\lambda = 100$ req/s and $E[T] = 91.5$ ms:
@@ -1081,11 +1086,11 @@ This matches our queue wait calculation: approximately 2-3 requests waiting on a
 
 Production systems must select batch size to meet Service Level Objectives (SLOs), typically specified as latency percentiles (e.g., P99 latency < 200ms). The following framework systematizes this decision:
 
-**Step 1: Characterize Service Time**
+#### Step 1: Characterize Service Time {.unnumbered}
 
 Measure $\alpha$ and $\beta$ empirically by profiling inference at batch sizes 1, 8, and 32. Fit the linear model $S(B) = \alpha + \beta B$.
 
-**Step 2: Compute Stability Threshold**
+#### Step 2: Compute Stability Threshold {.unnumbered}
 
 Find minimum batch size $B_{min}$ such that $\mu_{eff}(B_{min}) > \lambda$:
 
@@ -1093,13 +1098,13 @@ $$B_{min} = \frac{\alpha \lambda}{1 - \beta \lambda}$$
 
 Any batch size below $B_{min}$ results in an unstable system.
 
-**Step 3: Compute Latency at Candidate Batch Sizes**
+#### Step 3: Compute Latency at Candidate Batch Sizes {.unnumbered}
 
 For each candidate $B \in \{B_{min}, 2B_{min}, ..., B_{max}\}$, compute:
 
 $$E[T(B)] = \frac{\lambda \cdot S(B)^2}{2B(1 - \lambda S(B)/B)} + \frac{B}{2\lambda} + S(B)$$
 
-**Step 4: Account for Tail Latency**
+#### Step 4: Account for Tail Latency {.unnumbered}
 
 For P99 SLO compliance, use the heavy-traffic approximation for tail latency:
 
@@ -1107,7 +1112,7 @@ $$T_{P99} \approx E[T] + 2.33 \cdot \sigma_T$$
 
 where $\sigma_T$ is the standard deviation of response time. For exponential-like service time distributions, $\sigma_T \approx E[T]$, yielding $T_{P99} \approx 3.3 \cdot E[T]$.
 
-**Step 5: Select Optimal Batch Size**
+#### Step 5: Select Optimal Batch Size {.unnumbered}
 
 Choose the largest $B$ such that $T_{P99}(B) \leq \text{SLO}$:
 
@@ -1203,7 +1208,7 @@ $$E[L_{total}] = E[L_{queue}] + L_{batch} + L_{inference}(B)$$ {#eq-dynamic-batc
 
 where $E[L_{queue}]$ is the expected queuing delay, $L_{batch}$ is the batch formation delay (up to $T_{window}$), and $L_{inference}(B)$ is the inference time for batch size $B$.
 
-::: {.callout-note title="Worked Example: Dynamic Batching for ResNet-50 at Scale"}
+::: {.callout-example title="Worked Example: Dynamic Batching for ResNet-50 at Scale"}
 
 Consider a vision classification service with the following requirements:
 
@@ -1281,6 +1286,8 @@ Continuous batching's dynamic batch management maintains high GPU utilization re
 $$\text{Throughput gain} \approx 1 + \frac{CV^2}{2}$$ {#eq-continuous-batching-gain}
 
 With typical LLM output lengths having $CV \approx 1.0$, continuous batching achieves approximately 1.5x throughput improvement. For highly variable outputs (conversational vs. code generation), gains can reach 2–4x.
+
+These analytical gains translate directly into production systems. The following implementation study examines how *vLLM* realizes continuous batching through iteration-level scheduling, paged memory management, and preemption.
 
 ::: {.callout-note title="Implementation: Continuous Batching in vLLM"}
 
@@ -1520,14 +1527,19 @@ where $k$ is the number of standard deviations the maximum output exceeds the me
 **Key insight**: Continuous batching is most valuable when:
 
 1. **Output lengths are unpredictable**: User queries that may elicit responses from 10 to 1,000 tokens
+
 2. **Mixed workload types**: Combining summarization (short) with generation (long) on the same cluster
+
 3. **High request volume**: More opportunities to fill vacated slots with waiting requests
+
 4. **Tight latency SLOs**: Short requests benefit most from early completion
 
 Conversely, continuous batching provides minimal benefit when:
 
 1. **Output lengths are uniform**: Fixed-length tasks like classification or embedding generation
+
 2. **Batch sizes are small**: Few opportunities for slot reuse within a batch
+
 3. **Request volume is low**: Vacated slots sit empty waiting for new requests
 
 #### Implementation Complexity Trade-offs {#sec-inference-scale-implementation-complexity-tradeoffs-e055}
@@ -1556,6 +1568,8 @@ Continuous batching's performance benefits come with implementation complexity t
 : **Traditional vs Continuous Batching Trade-offs**. Continuous batching provides significant throughput gains for variable-length workloads at the cost of implementation complexity. For uniform-length workloads, the complexity overhead may not justify adoption. {#tbl-batching-tradeoffs}
 
 **Practical recommendation**: For new LLM serving deployments, continuous batching frameworks like vLLM, TensorRT-LLM, or TGI provide the implementation complexity as a solved problem. The decision becomes whether to adopt these frameworks versus building custom serving infrastructure. For organizations with existing traditional batching systems, the migration cost must be weighed against the workload's output length variance using @tbl-continuous-batching-benefit.
+
+Even with modern frameworks, diagnosing tail latency anomalies requires systematic investigation across the system stack. The following case study applies the Systems Sandwich methodology to a real-world P99 latency regression.
 
 ::: {.callout-tip title="Systems Sandwich: Debugging High P99 Latency"}
 
@@ -1594,8 +1608,11 @@ After implementing these changes, P99 dropped to 185ms. The Physical Layer was a
 Recommendation systems have distinct batching requirements from vision or language models. The computation pattern involves:
 
 1. **Sparse feature lookup**: Retrieve embeddings for user, item, and context features
+
 2. **Dense feature processing**: Transform and normalize dense features
+
 3. **Feature interaction**: Compute interactions between features (often via attention or factorization)
+
 4. **Ranking head**: Produce final scores
 
 The sparse embedding lookup often dominates latency and determines batching strategy.
@@ -1617,7 +1634,7 @@ Then: Combine features per request for ranking
 
 This parallelization is natural when embeddings are sharded across servers: each embedding server handles lookups for its shard across all requests in the batch.
 
-::: {.callout-note title="Worked Example: Recommendation System Batching at Meta Scale"}
+::: {.callout-example title="Worked Example: Recommendation System Batching at Meta Scale"}
 
 Consider Meta's recommendation infrastructure serving 10 million QPS across the platform:
 
@@ -1732,6 +1749,8 @@ This feedback loop maintains latency headroom while maximizing throughput during
 - Group requests by expected output length (inferred from prompt type)
 - Group requests by prompt length to minimize padding
 - Prioritize latency-sensitive requests in smaller batches
+
+These adaptive principles are embodied in production serving infrastructure. The *NVIDIA Triton Inference Server* implements a configurable adaptive batching system that illustrates how SLO-aware and request-aware strategies operate in practice.
 
 ::: {.callout-note title="Production Adaptive Batching: The NVIDIA Triton Approach"}
 
@@ -1867,17 +1886,21 @@ $$ M_{KV} = 2 \times n_{layers} \times n_{heads} \times d_{head} \times P_{prec}
 $$ \text{Total Memory} = M_{weights} + (\text{Batch} \times \text{Context} \times M_{KV}) $$
 
 **Parameters**:
+
 *   $n_{layers} = 80$, $n_{heads} = 64$, $d_{head} = 128$.
 *   $P_{prec} = 2$ bytes (FP16).
 *   Context $= 131,072$ tokens.
 
-**Step 1: Calculate Memory Per Token**
+#### Step 1: Calculate Memory Per Token {.unnumbered}
+
 $$ M_{KV} = 2 \times 80 \times 64 \times 128 \times 2 = 2,621,440 \text{ bytes} \approx \mathbf{2.6 \text{ MB/token}} $$
 
-**Step 2: Calculate Cache per Request (128K context)**
+#### Step 2: Calculate Cache per Request {.unnumbered}
+
 $$ 131,072 \text{ tokens} \times 2.6 \text{ MB/token} \approx \mathbf{340 \text{ GB/request}} $$
 
-**Step 3: Determine Max Batch Size**
+#### Step 3: Determine Max Batch Size {.unnumbered}
+
 Available Memory for KV = $640 \text{ GB (Total)} - 140 \text{ GB (Weights)} - 20 \text{ GB (System)} = 480 \text{ GB}$.
 $$ \text{Max Batch} = \lfloor \frac{480}{340} \rfloor = \mathbf{1} $$
 
@@ -2501,7 +2524,7 @@ $$T_{inference} = \frac{T_{compute}}{P} + 2 \times T_{allreduce}\left(\frac{A}{P
 
 where $T_{compute}$ is the sequential compute time, $P$ is the parallelism degree, and $A$ is the activation size being reduced. The factor of 2 accounts for the two all-reduce operations per transformer layer (attention and feed-forward).
 
-::: {.callout-note title="Worked Example: Tensor Parallelism for Llama-70B"}
+::: {.callout-example title="Worked Example: Tensor Parallelism for Llama-70B"}
 
 Consider serving Llama-70B with the following configuration:
 
@@ -2845,6 +2868,8 @@ The choice of embedding sharding strategy depends on lookup patterns and communi
 ```
 :::
 
+These sharding strategies operate at massive scale in production. Meta's recommendation infrastructure provides a concrete example of how row-wise, column-wise, and hybrid approaches combine to serve trillion-entity embedding tables.
+
 ::: {.callout-note title="Embedding Sharding at Scale: Meta Infrastructure"}
 
 Meta's recommendation infrastructure demonstrates embedding sharding at extreme scale:
@@ -3078,7 +3103,7 @@ where $w_i$ is the weight (capacity) of server $i$.
 2. Query both for current load relative to their capacity
 3. Route to the server with lower relative load
 
-::: {.callout-note title="Worked Example: Heterogeneous GPU Cluster"}
+::: {.callout-example title="Worked Example: Heterogeneous GPU Cluster"}
 
 Consider a cluster with mixed GPU types:
 
@@ -4134,6 +4159,8 @@ A chatbot service shows predictable daily patterns:
 
 :::
 
+The cost savings above depend on anticipating traffic before it arrives. The following figure contrasts predictive and reactive scaling, illustrating why proactive provisioning avoids the SLO violations that reactive-only systems suffer during ramp-up periods.
+
 ::: {.callout-note title="Figure: Predictive vs. Reactive Scaling" collapse="false"}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.8]
@@ -4521,6 +4548,8 @@ With chunk size chosen to match decode iteration time, prefill and decode can sh
 - **Decode pool**: Optimized for memory bandwidth (e.g., nodes with maximum HBM capacity or specialized High Bandwidth Flash as discussed in @sec-storage) to handle thousands of concurrent autoregressive streams.
 
 This separation enables independent scaling: prefill capacity scales with input volume while decode capacity scales with output volume. Crucially, this architecture relies on the high-speed, RDMA-enabled networking fabric established in @sec-networking. When a prefill finishes, the resulting KV cache—often megabytes of data—must be migrated to a decode node within the inter-token latency budget (typically <10 ms). InfiniBand's sub-microsecond latency and high bisection bandwidth are the physical enablers of this logical disaggregation.
+
+The *Sarathi* system formalizes *chunked prefill* into a practical scheduling algorithm that bounds decode latency regardless of incoming prompt length.
 
 ::: {.callout-note title="Sarathi: Chunked Prefill Implementation"}
 
@@ -4971,6 +5000,8 @@ Google Search uses ensemble serving to combine multiple specialized models for q
 
 **Architecture overview**:
 
+To meet this latency budget while evaluating thousands of documents, the system employs a *ranking cascade* that progressively narrows the candidate set through increasingly expensive models.
+
 ::: {.callout-note title="Figure: Ranking Cascade Architecture" collapse="false"}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -5197,9 +5228,7 @@ In development and staging, single-tenant deployments work well. In production, 
 ::: {.callout-important title="Three Things to Remember"}
 
 1. **Serving cost dominates training cost over a model's lifetime.** For high-volume applications, serving cost exceeds training cost by 100x or more. Every percentage point of serving efficiency improvement yields ongoing cost reduction. Optimize serving ruthlessly.
-
 2. **Different model types require different batching strategies.** Static batching for vision, continuous batching for LLMs, feature-parallel batching for recommendation systems. There is no universal optimal strategy. Match technique to workload.
-
 3. **Power-of-two-choices provides exponential load balancing improvement.** Maximum queue length improves from $O(\log n / \log \log n)$ to $O(\log \log n)$ with minimal overhead (two probes per request). This simple technique should be standard for any distributed inference deployment.
 
 :::

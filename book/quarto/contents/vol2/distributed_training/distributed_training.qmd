@@ -22,17 +22,11 @@ Distributed training appears simple: split the work across machines and combine 
 ::: {.callout-tip title="Learning Objectives"}
 
 - Implement data parallel training using gradient synchronization and AllReduce algorithms to achieve 85-95% parallel efficiency in the linear scaling regime (2-32 GPUs)
-
 - Apply memory-efficient data parallelism techniques (ZeRO stages, FSDP) to reduce per-GPU memory requirements while quantifying communication trade-offs
-
 - Design tensor parallelism strategies for transformer layers by partitioning matrix operations and placing AllReduce operations to minimize communication overhead
-
 - Construct pipeline parallelism schedules with microbatching to reduce bubble overhead, calculating the trade-off between pipeline depth and memory requirements
-
 - Select synchronization models (BSP, SSP, asynchronous) based on cluster heterogeneity and convergence requirements, quantifying staleness impacts
-
 - Combine data, tensor, and pipeline parallelism in hybrid configurations for specific model architectures, balancing memory distribution and communication efficiency
-
 - Measure distributed training efficiency using scaling metrics, communication-computation ratios, and bandwidth utilization to identify bottlenecks
 
 :::
@@ -52,6 +46,8 @@ The transition from single-machine to distributed training fundamentally changes
 ### Multi-Machine Training Requirements {#sec-distributed-training-systems-systems-multimachine-training-requirements-0277}
 
 Three concrete signals indicate when distributed training becomes necessary rather than merely beneficial. First, **memory exhaustion** occurs when model parameters, optimizer states, and activation storage exceed single-device capacity. We must distinguish between static memory, which includes parameters and optimizer states and remains constant per batch, and dynamic memory for activations, which scales with batch size and sequence length.
+
+Before examining the mechanisms of distributed training, we formalize the empirical relationships that justify the investment in scale, known as *scaling laws*.
 
 ::: {.callout-definition title="Scaling Laws"}
 **Scaling Laws** describe the predictable, power-law relationship between a model's performance (loss) and the scale of its compute, dataset size, and parameter count. These empirical laws provide the "physics" of deep learning, allowing engineers to extrapolate the resources required to achieve a target performance level before training begins.
@@ -130,6 +126,8 @@ Choosing the right parallelism strategy is not a matter of preference; it is a c
 
 : **Parallelism Communication Costs**: Tensor Parallelism has the highest communication frequency (per layer), confining it to intra-node (NVLink) usage. Pipeline Parallelism has the lowest communication volume (boundary activations only), making it suitable for inter-node (Ethernet/InfiniBand) scaling. Data Parallelism sits in the middle but scales poorly as $M$ grows, necessitating ZeRO optimizations. {#tbl-parallelism-tradeoffs}
 
+These bandwidth requirements impose a hard constraint on hardware placement, a principle we call the *Jeff Dean Test*.
+
 ::: {.callout-perspective title="The Jeff Dean Test"}
 If you attempt **Tensor Parallelism** across server racks connected by standard Ethernet, your training will stall. The communication volume ($\propto$ Batch $\times$ Layers) requires the 600-900 GB/s bandwidth of NVLink. For cross-rack scaling, you *must* switch to **Pipeline** or **Data** parallelism to respect the physics of the network.
 :::
@@ -143,6 +141,8 @@ The single-machine optimization techniques discussed in the previous section, su
 ***Distributed Training*** is the parallelization of model training across _multiple compute devices_ through coordinated _data partitioning_ and _gradient synchronization_, enabling training of models that exceed single-device memory or time constraints.
 
 :::
+
+A useful mental model frames these distributed strategies as *loop transformations*, the same conceptual toolkit that compilers use to optimize sequential code.
 
 ::: {.callout-perspective title="Distributed Training as Loop Transformations"}
 If we view the training process as a massive loop over data and layers, distributed strategies are simply **Loop Transformations** applied by the cluster-level compiler:
@@ -444,7 +444,7 @@ This leads to the **Scaling Efficiency** metric:
 
 $$ \text{Efficiency}(N) = \frac{T_{compute}}{N \times T_{step}(N)} = \frac{1}{1 + \frac{N(T_{comm}(N) - T_{overlap})}{T_{compute}}} $$
 
-This equation reveals the **Scaling Wall**: as $N$ increases, the compute term ($T_{compute}/N$) shrinks, but the communication term ($T_{comm}$) remains constant or grows. Eventually, the denominator is dominated by communication, driving efficiency toward zero.
+This equation reveals the **Scaling Wall**: as $N$ increases, the compute term ($T_{compute}/N$) shrinks, but the communication term ($T_{comm}$) remains constant or grows. Eventually, the denominator is dominated by communication, driving efficiency toward zero. Beyond wall-clock time, this communication overhead imposes an *energy tax* that scales with physical distance between devices.
 
 ::: {.callout-perspective title="Systems Perspective: The Energy Tax of Scale"}
 Distributed training is not just a race against time; it is a race against **energy**. In a single GPU, moving a byte from HBM to the cores costs roughly **1–2 pJ/bit**. Moving that same byte across an NVLink interconnect costs **5–10 pJ/bit**. Moving it across an InfiniBand network through switches costs **20–50 pJ/bit**. 
@@ -653,7 +653,7 @@ The critical batch size has important implications for distributed training syst
 
 To illustrate these concepts concretely, consider training a transformer language model with baseline batch size $b = 32$ per worker.
 
-::: {.callout-notebook title="Worked Example: Scaling from 8 to 64 Workers" collapse="false"}
+::: {.callout-notebook title="Scaling from 8 to 64 Workers" collapse="false"}
 
 **Setup**: Transformer model with 1.3B parameters, target perplexity 15.0, baseline training: 100K iterations on single GPU with $b = 32$.
 
@@ -920,6 +920,8 @@ To maintain consistency across the distributed system, the gradients computed by
 The specific algorithms for gradient synchronization—including **Ring AllReduce**, **Tree AllReduce**, and **Hierarchical AllReduce**—are analyzed in depth in @sec-communication-collective-operations. That chapter derives the bandwidth and latency bounds ($2N(D-1)/D$), explains how topology-aware algorithms exploit NVLink vs. InfiniBand, and details the gradient compression techniques used to reduce this overhead.
 :::
 
+When synchronization performance deviates from theoretical expectations, the Systems Sandwich framework provides a structured approach to isolating the bottleneck.
+
 ::: {.callout-perspective title="Debugging Slow Gradient Synchronization"}
 
 **Problem Statement**: Your AllReduce operation takes 100ms when you expected 50ms based on bandwidth calculations. Where do you look?
@@ -1087,7 +1089,7 @@ Data parallelism is the default strategy for a reason: it scales **throughput** 
 *   **The Bandwidth Wall**: As $N$ grows, the AllReduce cost $2(N-1)/N \times M/B$ eventually dominates. For large language models, gradient synchronization can consume 50%+ of the step time, collapsing efficiency.
 *   **The Batch Size Trap**: To scale to thousands of GPUs, you must increase the global batch size ($B_{global} = N \times B_{local}$). Eventually, you hit the **Critical Batch Size**, where adding more data per step yields diminishing returns in convergence.
 
-::: {.callout-notebook title="Worked Example: GPT-2 Data Parallel Scaling (1→8→32 GPUs)" collapse="true"}
+::: {.callout-notebook title="GPT-2 Data Parallel Scaling (1→8→32 GPUs)" collapse="true"}
 
 This example demonstrates how data parallelism scales in practice, including efficiency degradation.
 
@@ -1160,8 +1162,9 @@ The memory constraints of data parallelism motivate a family of techniques that 
 
 [^fn-zero]: **ZeRO (Zero Redundancy Optimizer)**: Developed by Microsoft Research for DeepSpeed, ZeRO eliminates memory redundancy in data parallel training by partitioning optimizer states, gradients, and parameters across workers instead of replicating them. ZeRO enabled training of models with over 100 billion parameters on hardware previously limited to much smaller models, fundamentally changing the economics of large-scale training.
 
+To understand the scale of memory savings ZeRO provides, consider the concrete memory budget for a modern large language model.
 
-::: {.callout-notebook title="Engineering Calculation: ZeRO Memory Savings" collapse="true"}
+::: {.callout-notebook title="ZeRO Memory Savings" collapse="true"}
 **Scenario**: Training a 7B parameter Llama 2 model using Mixed Precision (FP16).
 
 **Baseline: Standard DDP (Replicated State)**
@@ -1253,7 +1256,7 @@ ZeRO-1 shards optimizer states across GPUs. Each GPU stores only $1/N$ of the Ad
 
 ZeRO-2 additionally shards gradients. Instead of AllReduce, which leaves full gradients on each GPU, ZeRO-2 uses ReduceScatter so each GPU receives $1/N$ of the reduced gradients. Memory savings: gradients reduced from $4N$ bytes/param to $4$ bytes/param total.
 
-ZeRO-3 and FSDP shard parameters themselves. Each GPU stores only $1/N$ of the model. Before each layer's forward pass, parameters are gathered via AllGather; after backward pass, gradients are reduced via ReduceScatter, then parameters are discarded. This achieves maximum memory efficiency at the cost of additional communication.
+ZeRO-3 and FSDP shard parameters themselves. Each GPU stores only $1/N$ of the model. Before each layer's forward pass, parameters are gathered via AllGather; after backward pass, gradients are reduced via ReduceScatter, then parameters are discarded. This achieves maximum memory efficiency at the cost of *additional communication that FSDP introduces* relative to standard DDP.
 
 ::: {.callout-note title="FSDP Communication Analysis"}
 FSDP introduces communication on the critical path that DDP avoids:
@@ -1276,10 +1279,11 @@ The memory optimization techniques examined in the previous section extend data 
 
 Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and parameters across workers, some architectures remain intractable. A 175B parameter model using FSDP across 64 GPUs still requires 700 GB / 64 = 11 GB of parameters per GPU before accounting for activations. For long-context transformers where activation memory dominates, a 2048-token sequence through 175B parameters generates 200+ GB of intermediate activations, and no amount of optimizer sharding addresses this constraint. Model parallelism addresses these limitations by splitting the model architecture itself across devices, rather than replicating it with sharded state.
 
-::: {.callout-perspective title="Napkin Math: The Memory Wall of Scale"}
+::: {.callout-notebook title="The Memory Wall of Scale"}
 **Problem**: You want to train a **175 Billion parameter** model (like GPT-3) on NVIDIA A100s (80 GB). Can you use Data Parallelism with ZeRO-3?
 
 **The Math**:
+
 1.  **Parameter Storage**: 175B params $\times$ 2 bytes (FP16) = **350 GB**.
 2.  **Optimizer State**: 175B params $\times$ 12 bytes (Adam FP32) = **2,100 GB**.
 3.  **Total Static Memory**: 2,450 GB.
@@ -1651,8 +1655,11 @@ Each GPU computes a partial sum. Outputs require AllReduce to combine.
 In transformer architectures, Megatron applies this pattern:
 
 1. **QKV projection**: Column-parallel (weights split, outputs concatenated across heads)
+
 2. **Attention output projection**: Row-parallel (requires AllReduce after)
+
 3. **First FFN layer**: Column-parallel (split intermediate dimension)
+
 4. **Second FFN layer**: Row-parallel (requires AllReduce after)
 
 This design places AllReduce operations strategically: one after attention, one after FFN, totaling 2 AllReduce operations per transformer layer.
@@ -1680,7 +1687,9 @@ However, for **Recommendation Systems (DLRM)**, the model parameters are dominat
 
 In this regime, Parameter Servers (often rebranded as "Embedding Servers") shine:
 1.  **Embedding Sharding**: The massive tables are partitioned across the PS fleet (often CPU nodes with massive DRAM).
+
 2.  **Sparse Lookups**: Workers send a list of IDs to the PS.
+
 3.  **Sparse Updates**: The PS returns only the requested embedding vectors, not the full table.
 
 This **Sparse Pull / Sparse Push** pattern avoids the bandwidth bottleneck of dense AllReduce. Modern implementations like TorchRec or Meta's hierarchical sharding place "hot" embeddings on GPUs and "cold" embeddings on CPU PS nodes, creating a tiered memory hierarchy for model parameters.
@@ -1692,16 +1701,23 @@ While tensor parallelism splits dense layers across devices, **Expert Parallelis
 In a distributed setting, experts are partitioned across workers. If we have 8 GPUs and 8 experts, each GPU hosts one expert. The training process introduces a distinct communication pattern:
 
 1.  **Gating**: Each token determines its destination expert.
+
 2.  **All-to-All Dispatch**: Tokens are routed across the network to the device hosting their selected expert.
+
 3.  **Computation**: Experts process their assigned tokens.
+
 4.  **All-to-All Combine**: Processed tokens are routed back to their original device to resume the sequence.
 
 The primary advantage is decoupling model size from compute budget. A trillion-parameter MoE model might use only 10B parameters per token, enabling training on feasible hardware budgets. The constraint is the **All-to-All** communication, which is bandwidth-intensive and sensitive to load imbalance (if all tokens route to one expert, that device becomes a straggler). Advanced load balancing losses and capacity factors are required to ensure uniform expert utilization.
 
+This sparse communication pattern distinguishes recommendation and MoE workloads (*Archetype B*) from dense LLM training (*Archetype A*), producing fundamentally different scaling behaviors.
+
 ::: {.callout-note title="Archetype B (Scaled Lighthouse): DLRM vs. LLM Scaling"}
 **Archetype B (The Global Recommendation Engine)** and **Archetype A (The LLM)** scale differently.
+
 *   **LLMs (Dense)**: Scale via Tensor/Pipeline Parallelism. Constraint: **Compute & Interconnect Bandwidth** (NVLink).
 *   **DLRMs (Sparse)**: Scale via Embedding Sharding (Parameter Servers). Constraint: **Memory Capacity & Interconnect Latency** (Random Access).
+
 This distinction dictates fundamentally different cluster designs: dense GPU pods for LLMs versus memory-rich CPU/GPU hybrids for RecSys.
 :::
 
@@ -1723,13 +1739,15 @@ Model parallelism breaks the memory wall but introduces sequential dependencies 
 
 The preceding sections revealed a fundamental tension: data parallelism scales throughput but requires each GPU to hold the complete model, while model parallelism enables larger models but reduces throughput through sequential dependencies. For GPT-3 scale training, with 175B parameters across 300B tokens, neither approach alone suffices [@narayanan_pipeline_parallelism_2021]. Data parallelism across 1024 GPUs would require each GPU to hold 700 GB of parameters. Pure model parallelism across 64 stages would create $(64-1)/32 \approx$ 98% pipeline bubble overhead with reasonable microbatch counts.
 
-Hybrid parallelism resolves this tension by applying both strategies orthogonally: model parallelism splits the architecture to fit available memory, while data parallelism scales throughput across multiple model replicas. Training a 175 billion parameter language model on a dataset of 300 billion tokens demonstrates this approach in practice. The neural network layers distribute across multiple GPUs through model parallelism, while data parallelism enables different GPU groups to process separate batches. This dual strategy addresses both memory constraints from model size and computational demands from dataset scale simultaneously.
+Hybrid parallelism resolves this tension by applying both strategies orthogonally: model parallelism splits the architecture to fit available memory, while data parallelism scales throughput across multiple model replicas. Training a 175 billion parameter language model on a dataset of 300 billion tokens demonstrates this approach in practice. The neural network layers distribute across multiple GPUs through model parallelism, while data parallelism enables different GPU groups to process separate batches. This dual strategy addresses both memory constraints from model size and computational demands from dataset scale simultaneously, and it is precisely this combination that defines *Archetype A* training at frontier scale.
 
 ::: {.callout-note title="Archetype A (Scaled Lighthouse): The Physics of 3D Parallelism"}
 **Archetype A (The Trillion-Parameter LLM)** is the primary driver for hybrid parallelism. Because the model parameters ($P$) exceed the memory of any single accelerator ($M_{device}$), and the training dataset ($D$) requires massive throughput, we must split the problem along three orthogonal axes:
+
 1.  **Tensor Parallelism**: Splits individual layers to fit $P$ within a node's memory.
 2.  **Pipeline Parallelism**: Splits layers across nodes to scale $P$ beyond a single node.
 3.  **Data Parallelism**: Replicates the entire split-model pipeline to scale throughput on $D$.
+
 Only by combining all three can we train Archetype A systems efficiently.
 :::
 
@@ -1924,7 +1942,8 @@ model = torch.nn.DataParallel(model)
 For production scale training, `torch.distributed` provides the high-performance alternative that implements the efficient AllReduce communication patterns discussed earlier. This API requires explicit initialization of process groups and distributed coordination but enables the linear scaling characteristics essential for large-scale training.
 
 ```python
-# Production distributed training - explicit control over communication
+# Production distributed training
+# Explicit control over communication
 import torch.distributed as dist
 
 dist.init_process_group(backend="nccl")  # NCCL for GPU communication
@@ -2044,15 +2063,10 @@ Ultimately, the choice of parallelism is a **loop transformation** applied by th
 ::: {.callout-important title="Key Takeaways"}
 
 * **Communication-Computation Ratio is the ceiling**: Distributed training is governed by an extended Amdahl's Law. Speedup is limited by the sequential nature of synchronization (AllReduce) relative to the parallel work of computation.
-
 * **Data parallelism is the default, but hits the batch trap**: Scaling replicas improves throughput linearly until you hit the "Critical Batch Size," beyond which larger batches yield diminishing returns in convergence.
-
 * **Tensor parallelism is node-local**: Because it partitions matrix operations, it requires the 600-900 GB/s bandwidth of NVLink. Scaling it across racks on standard Ethernet will stall the fleet.
-
 * **Pipeline parallelism minimizes bandwidth, but adds "bubbles"**: Splitting depth across nodes allows for massive models, but efficiency depends on microbatching ($M \gg P$) to minimize idle time during fill and drain phases.
-
 * **Memory-efficient DP (ZeRO/FSDP) scales linear memory**: By sharding optimizer states, gradients, and parameters, ZeRO-3 allows 100B+ models to fit on commodity hardware that would otherwise require complex model parallelism.
-
 * **The Linear Scaling Rule requires Warmup**: Multiplying batch size by $k$ allows for multiplying learning rate by $k$, but only with a linear warmup period to maintain stability during the high-gradient-noise initial phase.
 
 :::
@@ -2090,6 +2104,8 @@ The "optimal point" in the 3D Parallelism Cube shifts depending on the system's 
 **The 3D Parallelism Space**. Archetype A occupies a coordinate $(d, t, p)$ inside this cube to balance memory and bandwidth.
 :::
 :::
+
+The parallelism strategies explored throughout this chapter—data, tensor, pipeline, and expert—provide the conceptual toolkit for partitioning any training workload across a cluster. The key insight is that these strategies are not mutually exclusive alternatives but complementary dimensions of a unified optimization space. Production systems like Megatron-LM achieve efficient scaling precisely because they combine all four strategies, using tensor parallelism within nodes, pipeline parallelism across node groups, data parallelism for throughput, and expert parallelism for capacity scaling.
 
 ::: {.callout-chapter-connection title="From Logic to Traffic"}
 

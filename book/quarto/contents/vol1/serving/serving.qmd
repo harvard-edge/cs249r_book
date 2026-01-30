@@ -48,6 +48,8 @@ Applying the **DAM Taxonomy** reveals how deployment fundamentally flips your en
 *   **Machine (Physics)**: In training, you maximize **Utilization** (keeping GPUs at 100% to saturate throughput). In serving, you maximize **Headroom** (keeping GPUs at 50-70% to survive traffic spikes).
 :::
 
+This inversion of priorities motivates a precise definition of the discipline this chapter addresses.
+
 ::: {.callout-definition title="Model Serving"}
 
 **Model Serving** refers to the process of exposing trained machine learning models for _real-time prediction_, requiring systems that transform raw inputs into useful outputs while meeting _latency constraints_, maintaining _consistency_ with training behavior, and achieving _cost-effective resource utilization_.
@@ -334,7 +336,7 @@ Two dominant paradigms define modern serving interfaces, each with distinct syst
 [^fn-grpc]: **gRPC**: Open-sourced by Google in February 2015, gRPC evolved from Stubby, Google's internal RPC framework that had been handling tens of billions of calls per second across their datacenters since approximately 2001. The combination of HTTP/2 multiplexing and Protocol Buffers binary serialization achieves roughly 10x lower serialization overhead than REST/JSON, making it the de facto standard for latency-sensitive ML inference APIs.
 
 
-::: {.callout-notebook title="Benchmarks: JSON vs Protobuf Serialization"}
+::: {.callout-notebook title="JSON vs Protobuf Serialization"}
 
 Consider a request payload containing 1,000 floating point numbers (e.g., an embedding vector).
 
@@ -361,6 +363,8 @@ This shift has concrete implications for system design [@gujarati2020serving]. T
 
 [^fn-tail-latency]: **Tail Latency Impact**: Research at Google and Amazon in the mid-2000s established that users are more sensitive to latency variance than mean latency. Industry experience suggests that latency increases of 100ms can measurably impact user engagement and conversion rates for e-commerce applications, though the magnitude varies by context. This is why service level objectives (SLOs) typically specify percentile targets rather than averages.
 
+
+Managing these percentile constraints requires decomposing the total allowed response time into a *latency budget* that allocates time across each processing phase.
 
 ::: {.callout-definition title="Latency Budget"}
 
@@ -560,7 +564,7 @@ The request lifecycle analysis explains where time goes within a single request,
 
 ### Queuing Fundamentals {#sec-model-serving-systems-queuing-fundamentals-10d3}
 
-Two mathematical foundations govern serving system behavior: Little's Law, which relates queue depth to throughput, and the M/M/1 model, which predicts how latency degrades under load. Together, they provide the quantitative framework for capacity planning.
+Serving engineers routinely face a concrete question: given a latency SLO and an expected request rate, how many GPUs must be provisioned? Answering this question requires predicting how latency changes as load increases, which is precisely what queuing theory provides. Two mathematical foundations govern serving system behavior: Little's Law, which relates queue depth to throughput, and the M/M/1 model, which predicts how latency degrades under load. Together, they provide the quantitative framework for capacity planning.
 
 ### Little's Law {#sec-model-serving-systems-littles-law-9352}
 
@@ -577,7 +581,7 @@ Little's Law has immediate practical implications. If your inference service ave
 
 ### The Utilization-Latency Relationship {#sec-model-serving-systems-utilizationlatency-relationship-a2f0}
 
-For a system with Poisson arrivals and exponential service times (the M/M/1 queue model), the average time in system follows:
+Little's Law tells us what the system looks like on average, but it does not reveal how latency changes as load approaches capacity. To answer the critical question of how much spare capacity a serving system needs, we turn to the M/M/1 queue model. For a system with Poisson arrivals and exponential service times, the average time in system follows:
 
 $$W = \frac{1}{\mu - \lambda} = \frac{\text{service time}}{1 - \rho}$$ {#eq-mm1-wait}
 
@@ -635,7 +639,9 @@ For single-machine serving, this principle has two implications. First, tail lat
 
 **Tail-Tolerant Techniques**: Request hedging sends redundant requests after a timeout, accepting whichever response arrives first. Backup requests and load balancing away from slow servers directly address latency variance. These techniques apply to single-machine serving with multiple GPU streams or model replicas, and become essential when scaling to distributed inference systems.
 
-::: {.callout-notebook title="ResNet-50 Capacity Planning" collapse="true"}
+With the queuing model and tail latency analysis established, we can now apply these tools to a concrete capacity planning exercise.
+
+::: {.callout-notebook title="ResNet-50 Capacity Planning"}
 
 Consider designing a ResNet-50 serving system with these requirements:
 
@@ -727,7 +733,7 @@ The queuing analysis from previous sections assumes two prerequisites: models ar
 
 ### Training-Serving Skew {#sec-model-serving-systems-trainingserving-skew-7b99}
 
-A model that performed well during validation may silently degrade when deployed. This degradation, invisible to latency monitoring and exception tracking, represents one of the most subtle failure modes in production ML.
+A model that performed well during validation may silently degrade when deployed. This phenomenon, known as *training-serving skew*, represents one of the most subtle failure modes in production ML because it is invisible to latency monitoring and exception tracking.
 
 ::: {.callout-definition title="Training-Serving Skew"}
 
@@ -753,7 +759,7 @@ For ResNet-50 serving, common sources of skew include:
 
 ### Model Loading and Initialization {#sec-model-serving-systems-model-loading-initialization-cc5a}
 
-With preprocessing pipelines designed to avoid training-serving skew, the next challenge is getting models ready to serve. Before processing any request, models must load from storage into memory and prepare for inference [@romero2021infaas]. This initialization phase adds latency that affects system responsiveness during deployments, scaling events, and recovery from failures.
+With preprocessing pipelines designed to avoid training-serving skew, the next challenge is getting models ready to serve. Before processing any request, models must load from storage into memory and prepare for inference [@romero2021infaas]. This initialization latency, known as *cold start*, affects system responsiveness during deployments, scaling events, and recovery from failures.
 
 ::: {.callout-definition title="Cold Start"}
 
@@ -845,7 +851,7 @@ The lifecycle management strategies examined so far ensure models are ready to s
 
 ## Throughput Optimization {#sec-model-serving-systems-throughput-optimization-18d1}
 
-With models loaded, initialized, and ready to serve, the next optimization opportunity lies in how requests are grouped for processing. Batching[^fn-batch-etymology] differs fundamentally between training and serving [@crankshaw2017clipper]. Training batches maximize throughput, processing hundreds or thousands of samples together with no concern for individual sample latency. Serving batches must balance throughput against individual request latency, typically processing single digits of requests together while ensuring no request waits too long.
+With models loaded, initialized, and ready to serve, the next optimization opportunity lies in how requests are grouped for processing. Batching[^fn-batch-etymology] differs fundamentally between training and serving [@crankshaw2017clipper]. Training batches maximize throughput, processing hundreds or thousands of samples together with no concern for individual sample latency. Serving batches must balance throughput against individual request latency, typically processing single digits of requests together while ensuring no request waits too long. This adaptive approach is called *dynamic batching* because the system adjusts batch composition in real time based on arriving requests.
 
 [^fn-batch-etymology]: **Batch**: From Old French "bache" (a quantity baked at one time), the term entered computing in the 1950s to describe jobs processed together without human interaction, as contrasted with interactive computing. IBM's batch processing systems of the 1960s would collect punch cards overnight and process them sequentially. The ML usage preserves this core meaning: group samples together for efficient processing, trading individual response time for aggregate throughput.
 
@@ -865,7 +871,7 @@ Two fixed costs dominate at small batch sizes. **Kernel launch overhead**[^fn-ke
 [^fn-kernel-etymology]: **Kernel**: From Old English "cyrnel" meaning seed or grain, the essential core of something. In operating systems (1960s), the kernel is the core that manages hardware resources. CUDA borrowed this term around 2007 for GPU functions because they represent the computational "core" of parallel algorithms. Unlike OS kernels that run continuously, GPU kernels are discrete units of parallel work launched by the CPU and executed across thousands of GPU threads simultaneously.
 
 
-::: {.callout-notebook title="ResNet-50 Batching Efficiency" collapse="true"}
+::: {.callout-notebook title="ResNet-50 Batching Efficiency"}
 
 The throughput-latency tradeoff for ResNet-50 on a V100 GPU illustrates the power of batching:
 
@@ -885,7 +891,7 @@ The throughput-latency tradeoff for ResNet-50 on a V100 GPU illustrates the powe
 
 :::
 
-The table reveals the throughput-latency tradeoff in stark terms: larger batches dramatically improve hardware efficiency but increase per-request latency. In practice, the optimal batch size depends on both the latency Service Level Objective (SLO) and the arrival rate of requests. The following analysis shows how to find the sweet spot.
+The table reveals the throughput-latency tradeoff in stark terms: larger batches dramatically improve hardware efficiency but increase per-request latency. In practice, the optimal batch size depends on both the latency Service Level Objective (SLO) and the arrival rate of requests. The question facing every serving engineer is therefore quantitative: given a specific latency budget, what is the largest batch size that still meets the SLO? The following analysis shows how to find this sweet spot.
 
 ::: {.callout-notebook title="The Batching Sweet Spot"}
 **Problem**: You are serving a ResNet-50 model. At batch=1, the GPU is mostly idle (15% utilization). You want to increase throughput to save money, but you have a **20 ms** latency budget.
@@ -916,21 +922,8 @@ Typical configurations use windows of 5-50ms with maximum batch sizes of 8-32 fo
 
 Dynamic batching introduces a fundamental tension between throughput optimization and latency constraints. Understanding this tradeoff quantitatively enables systematic configuration decisions rather than trial-and-error tuning.
 
-::: {.callout-notebook title="The Little's Law of Queues"}
-**The Problem**: Why does your latency spike when traffic increases?
-
-**The Physics**: Little's Law ($L = \lambda W$) governs all stable queues.
-
-*   $L$: Average number of items in the system (Queue Depth).
-*   $\lambda$: Average arrival rate (Requests/Second).
-*   $W$: Average time an item spends in the system (Latency).
-
-**The Equation**:
-$$ \text{Latency (W)} = \frac{\text{Queue Depth (L)}}{\text{Throughput (}\lambda\text{)}} $$
-
-**The Systems Conclusion**:
-If your hardware is saturated (throughput $\lambda$ is maxed out), any increase in traffic increases queue depth ($L$). Since $\lambda$ cannot grow, **Latency ($W$) must grow linearly with queue depth**.
-This is why **Admission Control** (rejecting requests when $L$ is high) is the *only* way to preserve latency during an overload.
+::: {.callout-notebook title="Why Latency Spikes Under Load"}
+**Recall** from @sec-model-serving-systems-littles-law-9352: Little's Law ($L = \lambda W$) governs all stable queues. When hardware is saturated (throughput $\lambda$ is maxed out), any increase in traffic increases queue depth ($L$). Since $\lambda$ cannot grow, **latency ($W$) must grow linearly with queue depth**. This is why **admission control** (rejecting requests when $L$ exceeds a threshold) is the only way to preserve latency during overload.
 :::
 
 @eq-batching-latency decomposes the total user-perceived latency for a batched request into two components:
@@ -988,7 +981,9 @@ For ResNet-50 on a V100 GPU, service time scales as $S(b) = 5\text{ms} + 0.6b$ (
 
 : **Batching Throughput Analysis**: ResNet-50 throughput on V100 with 10ms batching window. Throughput increases 14.6x from batch size 1 to 32 (64 to 935 img/s), but total latency more than doubles (15.6ms to 34.2ms). The optimal configuration depends on whether the latency SLO or throughput target is the binding constraint. {#tbl-batching-throughput}
 
-::: {.callout-notebook title="The Batching Sweet Spot"}
+The throughput gains in @tbl-batching-throughput trace directly back to the Iron Law framework established in @sec-ai-training-iron-law-training-performance-a53f, where batching amortizes the fixed overhead term.
+
+::: {.callout-notebook title="The Iron Law of Batching Efficiency"}
 **The Iron Law Connection:**
 In serving, we maximize throughput by amortizing the **Latency (Overhead)** term.
 $$ \text{Time}_{\text{total}} = \frac{\text{Ops}}{\text{Peak} \cdot \text{Util}} + \text{Latency}_{\text{fixed}} $$
@@ -1222,7 +1217,7 @@ Unlike Poisson traffic where dynamic batching optimizes throughput, streaming tr
 
 Mobile and embedded applications serve one user at a time, with requests arriving only after the previous result is consumed. Batch size is typically 1, eliminating batching optimization entirely but raising different challenges centered on energy efficiency and thermal management.
 
-::: {.callout-notebook title="ResNet-50: Mobile Single-User Serving (Pixel 6 NPU)"}
+::: {.callout-notebook title="ResNet-50: Mobile Serving"}
 
 +------------------------+--------------+------------+-------------------+
 | **Phase**              | **Duration** | **Energy** | **Notes**         |
@@ -1254,9 +1249,7 @@ Unlike cloud serving where cost dominates, mobile serving faces three related co
 
 2. **Thermal Throttling**: Sustained high-power operation triggers thermal management. When the SoC reaches thermal limits (typically 45°C junction), the OS reduces NPU frequency by 30-50%, degrading both latency and throughput. Bursty workloads that allow cooling between bursts outperform sustained maximum throughput.
 
-3. **Memory Constraints**: Mobile devices share limited RAM between applications. A model consuming 500MB may be evicted during background operation, requiring reload (cold start) that adds 200-500ms latency. Memory-efficient quantization directly improves user experience through faster model restoration.
-
-3. **Memory Pressure**: Mobile apps compete for limited shared memory. A 150MB model footprint is acceptable for a dedicated camera app but problematic when the model must coexist with other app components. Memory-mapped model loading (@sec-model-serving-systems-loading-strategies-eb38) helps by loading pages on demand rather than requiring the full model in memory.
+3. **Memory Constraints**: Mobile devices share limited RAM between applications. A model consuming 500MB may be evicted during background operation, requiring reload (cold start) that adds 200-500ms latency. Even a 150MB footprint becomes problematic when the model must coexist with other app components. Memory-efficient quantization directly improves user experience through faster model restoration, and memory-mapped model loading (@sec-model-serving-systems-loading-strategies-eb38) helps further by loading pages on demand rather than requiring the full model in memory.
 
 These constraints make mobile serving optimization fundamentally different from cloud optimization. The goal is not maximum throughput but **sustainable performance**—maintaining acceptable latency without thermal throttling or excessive battery drain.
 
@@ -1287,7 +1280,7 @@ The traffic patterns and batching strategies examined in the previous section sh
 
 ### Performance Metrics: TTFT and TPOT {#sec-model-serving-systems-performance-metrics-ttft-tpot-b009}
 
-Generative models produce a stream of tokens rather than a single output tensor. This streaming nature requires a two-part metric system that reflects the internal state transition from "prefill" (processing input) to "decode" (generating output).
+Generative models produce a stream of tokens rather than a single output tensor. This streaming nature requires a two-part metric system that reflects the internal state transition from "prefill" (processing input) to "decode" (generating output). The two key measures are *Time to First Token (TTFT)* and *Time Per Output Token (TPOT)*, which capture responsiveness and fluidity respectively.
 
 ::: {.callout-definition title="LLM Performance Metrics"}
 
@@ -1299,7 +1292,7 @@ Generative models produce a stream of tokens rather than a single output tensor.
 
 These two metrics—TTFT and TPOT—capture fundamentally different user experience aspects. A fast TTFT provides immediate responsiveness (the system starts answering quickly), while a fast TPOT provides fluid generation (the answer streams smoothly). Production systems must optimize both, typically with different techniques since they are governed by different hardware constraints.
 
-::: {.callout-lighthouse title="Lighthouse Example: LLM Serving Latency Targets"}
+::: {.callout-lighthouse title="LLM Serving Latency Targets"}
 
 A production-grade LLM service typically targets the following SLOs:
 
@@ -1333,6 +1326,8 @@ Generative inference requires managing the **KV Cache**, a stateful memory struc
 *   **Fragmentation**: Variable-length sequences can lead to memory fragmentation if not managed explicitly.
 
 The continuous batching and PagedAttention techniques covered in @sec-model-serving-systems-continuous-batching-8bb6 address these challenges. Advanced techniques including prefix caching and speculative decoding are covered in specialized coverage of large-scale systems.
+
+The computational intensity of managing KV caches across concurrent requests raises a broader question: what is the energy cost of each token generated? Translating these hardware demands into energy and carbon metrics makes the environmental impact of LLM serving concrete.
 
 ::: {.callout-notebook title="The Carbon Cost of a Chat"}
 **Joules per Token: The Green Metric**: 

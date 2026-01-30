@@ -128,7 +128,7 @@ This evolution highlights a critical engineering lesson: scaling ML development 
 \node[Box={col2!50},below=2 of B2](BB2){LAPACK extends BLAS};
 \node[Box={col3!50},below=2 of B3](BB3){NumPy becomes Python's numerical backbone};
 \node[Box={col4!50},below=2 of B4](BB4){SciPy adds advanced computations};
-\node[Box={col4!50},below= 2mm of BB4](BBB4){Theano introduces computational graphs};
+\node[Box={col4!50},below= 2mm of BB4](BBB4){Theano introduces computational graphs [@bergstra2010theano]};
 \node[Box={col5!50},below=2 of B5](BB5){TensorFlow revolutionizes distributed ML};
 \node[Box={col6!50},below=2 of B6](BB6){PyTorch introduces dynamic graphs};
 \node[Box={col7!50},below=2 of B7](BB7){JAX introduces functional paradigms};
@@ -461,7 +461,7 @@ Because the framework has the complete graph before execution, it can perform op
 - **Dead code elimination**: Remove operations not needed to compute the requested outputs.
 - **Constant folding**: Pre-compute operations on constant values at graph construction time.
 
-Compilation frameworks like XLA[^fn-xla] (Accelerated Linear Algebra) take this further, compiling the TensorFlow graph to optimized machine code for specific hardware. For a transformer encoder block, XLA can achieve 1.5--2$\times$ speedup over unoptimized execution through aggressive fusion and hardware-specific code generation.
+Compilation frameworks like XLA[^fn-xla] (Accelerated Linear Algebra) [@GoogleXLA] take this further, compiling the TensorFlow graph to optimized machine code for specific hardware. For a transformer encoder block, XLA can achieve 1.5--2$\times$ speedup over unoptimized execution through aggressive fusion and hardware-specific code generation.
 
 **Systems Implications.** Static graphs achieve high performance through ahead-of-time optimization. Kernel fusion reduces memory bandwidth requirements (often the bottleneck for ML workloads), and hardware-specific compilation enables near-peak utilization.
 
@@ -942,7 +942,9 @@ Where:
 
 : **Training and Inference Throughput**: Representative throughput comparison across execution modes for common model architectures on NVIDIA A100 GPU with batch size 32. torch.compile typically provides 1.4-1.5$\times$ speedup over eager mode; TensorRT provides 2-3$\times$ speedup but requires longer compilation and is inference-only. Compile times vary based on model complexity and optimization level. {#tbl-training-benchmark}
 
-::: {.callout-lighthouse title="Framework Strategy by Archetype" collapse="true"}
+These throughput differences across execution modes raise a practical question: which *framework execution strategy* best serves each workload archetype?
+
+::: {.callout-lighthouse title="Framework Strategy by Archetype"}
 
 The optimal framework execution strategy depends on which Iron Law term dominates your workload:
 
@@ -1058,15 +1060,13 @@ The execution problem determines *when* computation happens. But neural network 
 
 ## The Differentiation Problem {#sec-ai-frameworks-differentiation-problem-8b8a}
 
-The second fundamental problem is computing gradients[^fn-gradient] automatically. Neural network training requires derivatives of a loss function with respect to millions or billions of parameters. Manual differentiation is error-prone and impractical at this scale. Frameworks must implement **automatic differentiation** (AD) systems that compute exact gradients for arbitrary compositions of operations [@baydin2018].
+The second fundamental problem is computing gradients[^fn-gradient] automatically. Neural network training requires derivatives of a scalar loss $L$ with respect to millions or billions of parameters, making manual differentiation impractical. Because a single scalar loss depends on all parameters, reverse-mode automatic differentiation (AD)[^fn-auto-diff] is the optimal strategy: one backward pass computes all parameter gradients simultaneously, while forward mode would require a separate pass for each parameter. All major ML frameworks therefore implement reverse-mode AD by default [@baydin2018].
 
 [^fn-gradient]: **Gradient**: From Latin "gradiens" (stepping/walking), related to "gradus" (step). The gradient points in the direction of steepest ascent, as if climbing steps up a hill. The term was introduced by Sylvester in 1854 for the vector of partial derivatives. In ML, we descend this slope toward lower loss, hence "gradient descent" as the algorithm that takes steps downhill.
 
-Building on the backpropagation fundamentals established in @sec-deep-learning-systems-foundations, this section examines how frameworks *implement* automatic differentiation. While @sec-deep-learning-systems-foundations introduced backpropagation as the algorithm for computing gradients via the chain rule, here we focus on the systems engineering: how frameworks represent computation graphs, manage memory for gradient computation, and optimize differentiation across diverse hardware.
+[^fn-auto-diff]: **Automatic Differentiation**: Technique computing exact derivatives by applying chain rule to elementary operations, formalized by Wengert (1964). Reverse-mode autodiff (backpropagation) computes all gradients in O(1) passes regardless of parameter count, making billion-parameter training feasible. Modern implementations like JAX's grad and PyTorch's autograd support higher-order derivatives and custom gradient rules.
 
-Neural network training computes gradients of a scalar loss $L$ with respect to millions of parameters. This structure makes reverse-mode automatic differentiation (AD) the optimal choice: one backward pass computes all parameter gradients simultaneously, while forward mode would require a separate pass for each parameter. All major ML frameworks therefore implement reverse-mode AD by default.
-
-The framework's role is not to perform calculus but to manage the bookkeeping: tracking which operations were performed, storing intermediate values needed for gradient computation, and orchestrating memory efficiently across accelerators. @lst-auto_diff_intro illustrates the challenge with a simple three-operation function:
+Building on the backpropagation algorithm introduced in @sec-deep-learning-systems-foundations, this section shifts focus from the mathematics of the chain rule to the systems engineering of differentiation: how frameworks represent computation graphs, manage memory for intermediate values, and orchestrate the backward pass efficiently across accelerators. The framework's role is not to perform calculus but to manage the bookkeeping at scale, which is required for the training algorithms detailed in @sec-ai-training. @lst-auto_diff_intro illustrates the core idea with a simple three-operation function:
 
 ::: {#lst-auto_diff_intro lst-cap="**Automatic Differentiation**: AD decomposes complex functions into elementary operations with known derivatives, enabling gradient computation through arbitrarily deep compositions in O(n) time where n is the number of operations."}
 ```{.python}
@@ -1077,11 +1077,7 @@ def f(x):
 ```
 :::
 
-Frameworks decompose this function into elementary operations, each with a known local derivative. The chain rule (covered in @sec-deep-learning-systems-foundations) combines these local derivatives to compute gradients through arbitrary compositions. The systems challenge is implementing this efficiently: frameworks must record the computation graph during the forward pass, store intermediate values, and execute the backward pass with minimal memory overhead.
-
-Automatic differentiation (AD)[^fn-auto-diff] addresses this by systematically applying the chain rule to programs. When implemented in frameworks like PyTorch or TensorFlow, AD enables automatic gradient computation through arbitrary neural network architectures, which is required for the training algorithms detailed in @sec-ai-training. The remainder of this section examines how frameworks implement AD, focusing on the system architecture implications and performance considerations that distinguish production-quality implementations.
-
-[^fn-auto-diff]: **Automatic Differentiation**: Technique computing exact derivatives by applying chain rule to elementary operations, formalized by Wengert (1964). Reverse-mode autodiff (backpropagation) computes all gradients in O(1) passes regardless of parameter count, making billion-parameter training feasible. Modern implementations like JAX's grad and PyTorch's autograd support higher-order derivatives and custom gradient rules.
+Frameworks decompose this function into elementary operations, each with a known local derivative, and then combine these local derivatives via the chain rule to compute gradients through arbitrary compositions. The systems challenge is implementing this efficiently: the framework must record the computation graph during the forward pass, store intermediate values, and execute the backward pass with minimal memory overhead. The remainder of this section examines how production frameworks solve each of these problems.
 
 #### Forward and Reverse Mode Differentiation {#sec-ai-frameworks-forward-reverse-mode-differentiation-f70a}
 
@@ -1388,7 +1384,7 @@ Another important optimization involves operation fusion[^fn-operation-fusion]. 
 
 [^fn-operation-fusion]: **Operation Fusion**: Compiler optimization that combines multiple sequential operations into a single kernel to reduce memory bandwidth and latency. For example, fusing matrix multiplication, bias addition, and ReLU activation can eliminate intermediate memory allocations and achieve 2--3$\times$ speedup on modern GPUs.
 
-The backward pass itself can be optimized by reordering computations to maximize hardware efficiency. Consider the gradient computation for a convolution layer - rather than directly translating the mathematical definition into code, frameworks implement specialized backward operations that take advantage of modern hardware capabilities.
+The backward pass itself can be optimized by reordering computations to maximize hardware efficiency. Consider the gradient computation for a convolution layer - rather than directly translating the mathematical definition into code, frameworks implement specialized backward operations that take advantage of modern hardware capabilities [@chetlur2014cudnn].
 
 These optimizations work together to make the training of large neural networks practical. Without them, many modern architectures would be prohibitively expensive to train, both in terms of memory usage and computation time.
 
@@ -1617,7 +1613,7 @@ Common hook use cases:
 
 #### Detach vs. Data: Breaking Gradient Flow {#sec-ai-frameworks-detach-vs-data-breaking-gradient-flow-c383}
 
-@lst-detach-vs-data contrasts the safe `.detach()` method with the deprecated `.data` attribute, revealing how in-place operations on `.data` can silently corrupt gradient computation:
+Not every tensor in a computation should contribute gradients. Transfer learning, for example, requires freezing pretrained features so that only new layers receive gradient updates. Frameworks therefore provide mechanisms to detach tensors from the computation graph. @lst-detach-vs-data contrasts the safe `.detach()` method with the deprecated `.data` attribute, revealing how in-place operations on `.data` can silently corrupt gradient computation:
 
 ::: {#lst-detach-vs-data lst-cap="**Detach vs Data**: Use .detach() to safely break gradient flow. Avoid .data which can silently break gradient computation with in-place operations."}
 ```{.python}
@@ -1809,7 +1805,7 @@ Modern frameworks handle this memory choreography automatically. They track the 
 
 This careful choreography provides a fundamental engineering lesson: the absolute necessity of **Memory Abstraction**. In a production environment, requesting memory directly from a GPU is a high-latency operation that can synchronize the entire device, creating a massive "Allocation Bottleneck" that stalls computation. To solve this, modern frameworks implement **Caching Allocators**. Instead of communicating with the hardware for every new tensor, the framework requests large blocks of memory upfront and manages its own internal pool. This abstraction is critical because it prevents **memory fragmentation**—the scenario where free memory is available but scattered in pieces too small to hold a large tensor—allowing models to push the physical limits of the hardware without constant system-level overhead.
 
-::: {.callout-perspective title="The Caching Allocator and the Utilization Term"}
+::: {.callout-perspective title="Caching Allocator and Utilization"}
 The **Caching Allocator** is the framework's primary mechanism for maximizing the **Utilization** term in the Iron Law ($\frac{1}{\text{Utilization}}$). Without it, two factors degrade performance significantly:
 
 1.  **Allocation Latency**: `cudaMalloc` is a synchronous operation that costs 10–100 $\mu$s. In a training loop with thousands of operations per second, this latency would dominate execution time. The caching allocator pays this cost once, then serves subsequent requests in nanoseconds from its pool.
@@ -1845,7 +1841,7 @@ def train_epoch(model, data_loader):
 
 This simple loop masks complex system interactions. The AD system must coordinate with multiple framework components including the memory allocator, the device manager, the operation scheduler, and the optimizer. Each gradient computation may trigger data movement between devices, memory allocation, and kernel launches on accelerators.
 
-The scheduling of AD operations on modern hardware accelerators is illustrated in @lst-parallel_ad.
+Beyond sequential execution, modern networks frequently contain independent branches whose gradients can be computed concurrently. Exploiting this parallelism requires the AD system to analyze the computation graph for independent subgraphs and schedule their backward passes on separate hardware execution units. @lst-parallel_ad illustrates a branching network where two convolutional paths process the same input independently before merging, creating an opportunity for concurrent gradient computation that the framework's scheduler must recognize.
 
 ::: {#lst-parallel_ad lst-cap="**Parallel Computation**: Independent branches can execute concurrently, requiring synchronization only when results are combined."}
 ```{.python}
@@ -1861,6 +1857,8 @@ def parallel_network(x):
 :::
 
 The AD system must track dependencies not just for correct gradient computation, but also for efficient hardware utilization, determining which gradient computations can run in parallel and which must wait for others. Modern frameworks handle these system-level concerns while maintaining a simple interface, making sophisticated decisions about operation scheduling, memory allocation, and data movement behind the scenes. This sophisticated engineering enables developers to focus on model design rather than low-level implementation details.
+
+The way frameworks implement automatic differentiation varies significantly, with consequences for both *optimization potential* and developer experience.
 
 ::: {.callout-perspective title="Tape-based vs. Transform-based Autodiff"}
 **PyTorch (Tape-based)**: Records operations on a dynamic "tape" during the forward pass. This is flexible and easy to debug but makes it hard for a compiler to see the whole graph at once for global optimization.
@@ -1940,6 +1938,8 @@ Design choices in data structures significantly influence framework capabilities
 
 #### Tensors {#sec-ai-frameworks-tensors-1cb7}
 
+At the foundation of every framework's data representation lies a single abstraction: the *tensor*.
+
 ::: {.callout-definition title="Tensor"}
 
 **Tensors** refer to multidimensional arrays that serve as the primary data structure in machine learning systems, providing _unified representation_ for scalars, vectors, matrices, and higher-dimensional data with _hardware-optimized operations_.
@@ -1949,6 +1949,8 @@ Design choices in data structures significantly influence framework capabilities
 Machine learning frameworks process and store numerical data as tensors.[^fn-tensor] Every computation in a neural network, from processing input data to updating model weights, operates on tensors. Training batches of images, activation maps in convolutional networks, and parameter gradients during backpropagation all take the form of tensors. This unified representation allows frameworks to implement consistent interfaces for data manipulation and optimize operations across different hardware architectures.
 
 [^fn-tensor]: **Tensor**: From Latin "tendere" (to stretch), originally describing stress distributions in elastic materials. Mathematicians Ricci and Levi-Civita formalized tensor calculus in 1900 for Einstein's general relativity, where tensors describe how spacetime curves. In ML, the term emphasizes that these arrays transform predictably under coordinate changes, though practitioners primarily use them as n-dimensional arrays with hardware-optimized operations.
+
+While tensors provide a clean abstraction for computation, the memory required to store model weights, gradients, and optimizer states in tensor form quickly accumulates beyond what practitioners expect. The following notebook exercise quantifies this hidden overhead, which we call the *administrative tax*.
 
 ::: {.callout-notebook title="The Administrative Tax"}
 **Problem**: Why does your GPU utilization drop when training small models?
@@ -3269,9 +3271,7 @@ The preceding discussion of TensorFlow, PyTorch, and JAX reveals distinct archit
 
 : **Framework Characteristics**: TensorFlow, PyTorch, and JAX differ in their graph construction (static, dynamic, or functional), which influences programming style and execution speed. Core distinctions include data mutability (arrays in JAX are immutable) and automatic differentiation capabilities, with JAX supporting both forward and reverse modes. GPU utilization varies significantly based on model architecture, batch size, and operation mix. JAX/XLA can achieve higher utilization for TPU workloads and certain operation patterns through aggressive fusion, while PyTorch and TensorFlow show similar characteristics for most deep learning workloads. Distributed scalability efficiency (typically 85-95% for well-optimized workloads) varies substantially by model size, communication patterns, and network topology. Students should profile their specific workloads rather than relying on framework-level generalizations. {#tbl-mlfm-comparison}
 
-These architectural differences manifest in distinct programming paradigms and API design choices. The following example illustrates how the same simple neural network (a single linear layer mapping 10 inputs to 1 output) varies dramatically across these major frameworks, revealing their core design philosophies.
-
-@lst-framework-hello-world illustrates the same simple neural network across major frameworks to highlight their distinct design philosophies:
+These architectural differences manifest in distinct programming paradigms and API design choices. @lst-framework-hello-world illustrates how the same simple neural network (a single linear layer mapping 10 inputs to 1 output) varies dramatically across these major frameworks, revealing their core design philosophies:
 
 ::: {#lst-framework-hello-world lst-cap="**Framework Comparison: Hello World**: The same simple neural network implemented in PyTorch (object-oriented), TensorFlow/Keras (declarative), and JAX (functional), illustrating each framework's distinct design philosophy."}
 ```{.python}
@@ -3435,7 +3435,7 @@ Framework selection can be characterized along three primary axes that define th
 
 **Axis 3: Ecosystem Breadth vs. Specialization.** General-purpose frameworks (PyTorch, TensorFlow) provide broad operation coverage and extensive tooling but may underperform specialized solutions. Domain-specific frameworks (TensorRT for inference, Megatron for large language models) achieve superior performance within their scope but impose constraints outside it. The ONNX ecosystem attempts to bridge this gap through standardized interchange, enabling training in general frameworks and deployment through specialized runtimes.
 
-:::{.callout-note title="Framework Selection as Constraint Satisfaction"}
+:::{.callout-note title="Framework Selection Constraints"}
 Rather than seeking the "best" framework, effective selection identifies the framework that satisfies hard constraints (deployment target, required operations, team expertise) while optimizing soft preferences (performance, development speed, ecosystem). Hard constraints eliminate options; soft preferences rank remaining candidates.
 :::
 
@@ -3469,6 +3469,8 @@ This systematic analysis enables engineers to select frameworks that align with 
 ### Model Requirements {#sec-ai-frameworks-model-requirements-2e01}
 
 The first dimension to evaluate is whether a framework can express the models your project requires. Model architecture capabilities vary significantly across TensorFlow variants, with clear trade-offs between functionality and efficiency. @tbl-tf-comparison quantifies these differences across four key dimensions: training capability, inference efficiency, operation support, and quantization features.
+
+A key factor in this evaluation is how each framework constructs and executes its *computational graph*, a design choice with cascading effects on debugging, optimization, and deployment.
 
 ::: {.callout-perspective title="Dynamic vs Static Computational Graphs"}
 A key architectural distinction between frameworks is their computational graph construction approach. Static graphs (TensorFlow 1.x) require defining the entire computation before execution, similar to compiling a program before running it. Dynamic graphs (PyTorch, TensorFlow 2.x eager mode) build the graph during execution, akin to interpreted languages. This affects debugging ease (dynamic graphs allow standard Python debugging), optimization opportunities (static graphs enable more aggressive optimization), and deployment complexity (static graphs simplify deployment but require more upfront design).

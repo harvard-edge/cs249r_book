@@ -25,15 +25,10 @@ A model trained in a datacenter encounters a world it has never seen when deploy
 ::: {.callout-tip title="Learning Objectives"}
 
 - Contrast centralized cloud training, on-device learning, and federated learning by analyzing their data flow, privacy properties, and operational trade-offs.
-
 - Quantify training overhead on edge devices by calculating memory amplification (3-5$\times$), compute costs (2-3$\times$), and energy impacts relative to inference-only deployment.
-
 - Select model adaptation strategies (weight freezing, LoRA, sparse updates) by comparing memory footprints, expressivity, and convergence for specific device capabilities.
-
 - Apply data efficiency techniques (few-shot learning, experience replay, contrastive learning) to enable effective learning from limited local datasets while preventing catastrophic forgetting.
-
 - Design federated learning systems that aggregate privacy-preserving updates across heterogeneous devices while managing non-IID data, communication efficiency, and stragglers.
-
 - Integrate on-device learning into production MLOps by implementing device-aware deployment, distributed validation, and privacy-preserving monitoring across heterogeneous populations.
 
 :::
@@ -62,6 +57,8 @@ The transition to on-device learning introduces fundamental tension in machine l
 Part III has now examined deployment at scale across the full spectrum: from centralized inference systems serving millions of requests per second (@sec-inference-scale) to the distributed edge deployments explored here. However, deploying models, whether to a GPU cluster or a fleet of smartphones, is only the beginning.
 
 Scaling these services creates operational complexity that grows exponentially with every model version, device type, and deployment region. How do we ensure a model update doesn't silently fail on 10% of budget Android phones? How do we monitor drift across a million private, local datasets? The next chapter, @sec-ops-scale, addresses the **Management Layer**: the MLOps practices, CI/CD pipelines, and observability frameworks required to sustain the Machine Learning Fleet across both Cloud and Edge.
+
+Throughout this chapter, we trace these constraints through our Archetype C lighthouse, where autonomy demands that learning happen on-device under severe resource limits. The following callout previews how these constraints manifest in practice.
 
 ::: {.callout-note title="Archetype C (Scaled Lighthouse): The Constraints of Autonomy"}
 **Archetype C (The Autonomous Health Monitor)** represents the extreme end of this spectrum. Operating on milliwatt power budgets, it cannot afford the energy cost of transmitting raw data to the cloud. For Archetype C, **Data Locality** is not just a privacy feature but a physical necessity imposed by the "Power Wall." This chapter's techniques, including quantized training, sparse updates, and federated coordination, are the survival strategies that allow Archetype C to exist.
@@ -772,10 +769,11 @@ Beyond the individual constraints of models, data, and computation, on-device le
 
 Energy and thermal management represent perhaps the most challenging aspect of on-device learning system design, as they directly impact user experience and device longevity. Mobile devices operate under strict power budgets that fundamentally determine feasible model complexity and training schedules. The thermal design power (TDP) of mobile processors creates hard constraints that shape every aspect of on-device learning strategies. Modern smartphones typically maintain sustained processing at 2-3 W for ML workloads to prevent thermal discomfort, but can burst to 5-10 W for brief periods before thermal throttling dramatically reduces performance by 50% or more. This thermal cycling behavior forces training algorithms to operate in carefully managed burst modes, utilizing peak performance for only 10-30 seconds before backing off to sustainable power levels, a constraint that fundamentally changes how training algorithms must be designed.
 
-::: {.callout-perspective title="Napkin Math: The Energy of Learning"}
+::: {.callout-notebook title="The Energy of Learning"}
 **Problem**: You want to fine-tune a small language model (1B parameters) on a user's smartphone overnight. Is this feasible within a **5% battery budget**?
 
 **The Math**:
+
 1.  **Phone Battery**: Typical capacity is 15 Wh (Watt-hours) $\approx$ 54,000 Joules.
 2.  **Budget**: 5% of 54,000 J = **2,700 Joules**.
 3.  **Training Cost**:
@@ -789,10 +787,13 @@ Energy and thermal management represent perhaps the most challenging aspect of o
 
 The mobile power budget hierarchy reveals the tight constraints under which on-device learning must operate. Smartphone sustained processing is limited to 2–3 W to prevent user-noticeable heating and maintain acceptable battery life throughout the day. Peak training burst mode can reach 10 W, but this power level is sustainable for only 10–30 seconds before thermal throttling kicks in to protect the hardware. Dedicated neural processing units consume 0.5–2 W for AI workloads, offering optimized power efficiency compared to general-purpose processors. CPU-based AI processing requires 3–5 W and demands aggressive thermal management with duty cycling to prevent overheating, making it the least power-efficient option for sustained on-device learning.
 
+The fundamental physics of energy consumption reveals why local processing is almost always preferable to cloud offloading for on-device learning.
+
 ::: {.callout-perspective title="The Energy Hierarchy"}
 **The Trade-off**: Should you process data locally or send it to the cloud? The physics of energy consumption provides a clear answer.
 
 **Energy Cost per Operation (Approximate):**
+
 *   **32-bit Integer Add**: 0.1 pJ
 *   **32-bit Float Mult**: 4.0 pJ
 *   **32-bit DRAM Read**: 640 pJ
@@ -1843,10 +1844,15 @@ Federated learning protocols define the rules and mechanisms by which devices co
 Local training refers to the process by which individual devices compute model updates based on their local data. This step is critical in federated learning, as it allows devices to adapt the shared model to their specific contexts without transferring raw data. The local training process involves the following steps:
 
 1. **Model Initialization**: Each device initializes its local model parameters, often by downloading the latest global model from the server.
+
 2. **Local Data Sampling**: The device samples a subset of its local data for training. This data may be non-IID, meaning that it may not be uniformly distributed across devices.
+
 3. **Local Training**: The device performs a number of training iterations on its local data, updating the model parameters based on the computed gradients.
+
 4. **Model Update**: After local training, the device computes a model update (e.g., the difference between the updated and initial parameters) and prepares to send it to the server.
+
 5. **Communication**: The device transmits the model update to the server, typically using a secure communication channel to protect user privacy.
+
 6. **Model Aggregation**: The server aggregates the updates from multiple devices to produce a new global model, which is then distributed back to the participating devices.
 
 This process is repeated iteratively, with devices periodically downloading the latest global model and performing local training. The frequency of these updates can vary based on system constraints, device availability, and communication costs.
@@ -2450,6 +2456,8 @@ Confidence-based quality gates provide an additional validation signal when labe
 Federated A/B testing enables validation of new adaptation strategies or model architectures across distributed device populations. To validate proposed changes, systems implement distributed experiments that randomly assign devices to treatment and control groups while maintaining statistical balance across device tiers and usage patterns. Both groups collect federated metrics using privacy-preserving aggregation protocols that prevent individual device data from being exposed while enabling population-level comparisons. The system compares adaptation success rates, measuring how frequently local adaptations improve over baseline models, along with convergence speed that indicates how quickly devices reach optimal performance, and final performance metrics that reflect ultimate model quality after adaptation completes. Successful strategies demonstrating clear improvements in treatment groups are rolled out gradually across the device population, starting with small percentages and expanding only after confirming that benefits generalize beyond the experimental cohort.
 
 These operational transformations necessitate new tooling and infrastructure that systematically extends traditional MLOps practices. The CI/CD pipelines, monitoring dashboards, A/B testing frameworks, and incident response procedures established for centralized deployments form the foundation for on-device learning operations. The federated learning protocols presented in @sec-edge-intelligence-federated-learning-6e7e provide the coordination mechanisms for distributed training, while @sec-edge-intelligence-distributed-system-observability-2270 addresses the observability gaps created by decentralized adaptation.
+
+The shadow validation approach described above can be visualized as a continuous comparison pipeline running on each device, where incoming data flows through both a frozen baseline and the locally adapted model before an arbiter decides whether to accept or roll back adaptations.
 
 ::: {.callout-note title="Figure: Shadow Mode Validation" collapse="false"}
 ```{.tikz}

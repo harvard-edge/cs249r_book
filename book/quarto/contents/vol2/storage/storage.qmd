@@ -22,15 +22,10 @@ Accelerators can compute faster than storage can feed them. A modern GPU process
 ::: {.callout-tip title="Learning Objectives"}
 
 - Analyze how ML workloads invert traditional storage assumptions and apply the data pipeline throughput equation to calculate required bandwidth for different training scenarios.
-
 - Compare distributed file system architectures and object storage systems for ML training workloads based on throughput, latency, and consistency requirements.
-
 - Apply the Young-Daly formula to determine optimal checkpoint intervals for different cluster sizes and model types.
-
 - Evaluate feature store architectures for online and offline serving, explaining point-in-time correctness requirements and latency constraints.
-
 - Design data format strategies using TFRecord, Parquet, or WebDataset based on model type and access patterns.
-
 - Analyze model registry architectures for versioning, lineage tracking, and reproducibility across experimental workflows.
 
 :::
@@ -246,7 +241,7 @@ The checkpoint write burst must complete before the next training step can safel
 
 ### Data Pipeline Throughput Requirements {#sec-storage-data-pipeline-throughput-requirements-50aa}
 
-The central quantitative question for ML storage is: what bandwidth does training require? The answer depends on cluster size, accelerator utilization targets, sample sizes, and iteration speed.
+The central quantitative question for ML storage is: what bandwidth does training require? The answer depends on cluster size, accelerator utilization targets, sample sizes, and iteration speed. We capture these dependencies in a single *data pipeline throughput equation*.
 
 ::: {.callout-definition title="Data Pipeline Throughput Equation"}
 
@@ -311,6 +306,8 @@ This dramatically lower bandwidth requirement (19 MB/s vs. 39 GB/s for ImageNet)
 
 :::
 
+While LLM training proved compute-bound rather than I/O-bound, recommendation systems tell a different story. Their sparse, random-access patterns create far higher storage demands.
+
 ::: {.callout-example title="Recommendation System Training Bandwidth (DLRM Lighthouse)"}
 
 Recommendation systems present unique challenges with massive embedding tables and sparse feature access [@naumov2019dlrm].
@@ -342,7 +339,7 @@ The CAP theorem, introduced in @sec-vol2-introduction as the fundamental constra
 
 [^fn-cap-theorem]: **CAP Theorem**: Proven by Eric Brewer in 2000 and formalized by Gilbert and Lynch in 2002, the CAP theorem states that during a network partition, a distributed system must choose between consistency (all nodes see the same data) and availability (every request receives a response). Since partitions are inevitable in distributed systems, the practical choice is between CP (consistent but may reject requests during partitions) and AP (available but may return stale data). For ML storage, training data and checkpoints favor CP (correctness over availability), while feature stores often accept AP (fresh-enough features are better than failed requests).
 
-Understanding consistency models enables correct storage system selection for different ML components.
+Understanding consistency models enables correct storage system selection for different ML components. Four levels of consistency form a spectrum from strongest to weakest.
 
 ::: {.callout-definition title="Consistency Model Definitions"}
 
@@ -714,7 +711,7 @@ Each stage has different compute and bandwidth characteristics. @tbl-pipeline-st
 
 #### Prefetching and Pipelining {#sec-storage-prefetching-pipelining-285e}
 
-The key to hiding latency is pipelining: while the GPU processes batch $N$, the CPU prepares batch $N+1$, and storage fetches data for batch $N+2$. This requires maintaining multiple batches in flight simultaneously.
+The key to hiding latency is pipelining: while the GPU processes batch $N$, the CPU prepares batch $N+1$, and storage fetches data for batch $N+2$. This requires maintaining multiple batches in flight simultaneously. When pipelining fails to fully hide I/O latency, the resulting idle time is captured by the *data stall ratio*.
 
 ::: {.callout-example title="Engineering Metric: Data Stall Ratio"}
 **The Problem**: Your GPU utilization is stuck at 80%. Is it a kernel issue or a storage issue?
@@ -724,6 +721,7 @@ $$ T_{step} = \max(T_{compute}, T_{io}) $$
 $$ \text{Data Stall \%} = \frac{T_{step} - T_{compute}}{T_{step}} \times 100 $$
 
 **Scenario**: ResNet-50 training.
+
 *   **GPU Compute Time ($T_{compute}$)**: 200 ms per batch.
 *   **I/O Load Time ($T_{io}$)**: 250 ms (due to slow HDD or network).
 
@@ -822,6 +820,8 @@ Shuffling is essential for training: without shuffling, the model sees samples i
 **Reservoir sampling:** When the dataset is too large to shuffle in memory, reservoir sampling maintains a random subset. Each new sample has probability $k/n$ of entering the reservoir, where $k$ is reservoir size and $n$ is samples seen.
 
 **Epoch boundary shuffle:** At epoch boundaries, workers exchange file assignments. This adds randomness across epochs without per-batch communication.
+
+Combining these techniques into a complete data loading architecture requires careful coordination of sharding, caching, and prefetching across all nodes.
 
 ::: {.callout-example title="Distributed Data Loading for 1024-GPU Training"}
 
@@ -939,6 +939,8 @@ The performance gap between sequential and random access has profound implicatio
 
 #### Worked Example: ImageNet Data Loading Bottleneck Analysis {#sec-storage-worked-example-imagenet-data-loading-bottleneck-analysis-8b6c}
 
+To see how storage format and device choice interact, we walk through a complete I/O bottleneck analysis for a standard vision training workload.
+
 ::: {.callout-example title="ImageNet I/O Bottleneck Analysis for ResNet-50"}
 
 Consider training ResNet-50 [@he2016resnet] on ImageNet [@deng2009imagenet] with a single NVIDIA A100 GPU. We analyze whether I/O bottlenecks training and quantify the benefit of format optimization.
@@ -951,20 +953,20 @@ Consider training ResNet-50 [@he2016resnet] on ImageNet [@deng2009imagenet] with
 - Target throughput: 1000 images/second (achievable A100 throughput)
 - Preprocessing: Decode JPEG, random crop to 224x224, normalize, augment
 
-**Step 1: Calculate raw I/O requirement**
+#### Step 1: Calculate Raw I/O Requirement {.unnumbered}
 
 $$B_{raw} = 1000 \text{ images/s} \times 150 \text{ KB/image} = 150 \text{ MB/s}$$
 
 This 150 MB/s requirement seems modest. Even an HDD could sustain this rate for sequential reads.
 
-**Step 2: Account for access pattern**
+#### Step 2: Account for Access Pattern {.unnumbered}
 
 ImageNet stored as individual JPEG files (the common download format) creates a directory structure with 1000 class folders. Training with shuffling requires random access across the entire dataset:
 
 - HDD random read: ~100 IOPS = 100 images/s (10x slower than target)
 - NVMe random read: ~300K IOPS = 300K images/s (sufficient, with overhead)
 
-**Step 3: Account for preprocessing overhead**
+#### Step 3: Account for Preprocessing Overhead {.unnumbered}
 
 JPEG decoding and augmentation require CPU time. Typical preprocessing costs:
 
@@ -980,13 +982,13 @@ $$T_{preprocess} = 256 \times 5 \text{ ms} = 1280 \text{ ms (single-threaded)}$$
 
 Single-threaded preprocessing is 5x slower than GPU consumption. This requires 5 parallel workers to keep pace.
 
-**Step 4: Calculate effective I/O requirement**
+#### Step 4: Calculate Effective I/O Requirement {.unnumbered}
 
 With preprocessing parallelism, effective I/O bandwidth must support 5 concurrent streams reading ahead:
 
 $$B_{effective} = 5 \times 150 \text{ MB/s} = 750 \text{ MB/s}$$
 
-**Step 5: Format optimization impact**
+#### Step 5: Format Optimization Impact {.unnumbered}
 
 +------------------------------+------------------+----------------+--------------------+
 | **Configuration**            | **Read Pattern** | **Achievable** | **Bottleneck?**    |
@@ -1006,7 +1008,7 @@ $$B_{effective} = 5 \times 150 \text{ MB/s} = 750 \text{ MB/s}$$
 
 #### Prefetching Benefit Quantification {#sec-storage-prefetching-benefit-quantification-2af4}
 
-Prefetching overlaps I/O latency with GPU computation, but its benefit depends on the relationship between I/O latency, preprocessing time, and batch time.
+Prefetching overlaps I/O latency with GPU computation, but its benefit depends on the relationship between I/O latency, preprocessing time, and batch time. We quantify this benefit through *prefetch efficiency*.
 
 ::: {.callout-definition title="Prefetch Efficiency"}
 
@@ -1312,7 +1314,9 @@ With 1000+ workers, one slow worker can delay checkpoint completion by minutes, 
 *Strategies:*
 
 1. **Timeout with fallback**: If worker does not reach barrier in T seconds, assume failed, abort checkpoint, continue with previous
+
 2. **Async checkpointing**: Workers checkpoint when ready; coordinator tracks which steps have full coverage
+
 3. **Backup workers**: Redundant workers ensure N-k completion suffices (similar to gradient synchronization strategies)
 
 ### Optimal Checkpoint Interval: Young-Daly Formula {#sec-storage-optimal-checkpoint-interval-youngdaly-formula-07b1}
@@ -1331,15 +1335,19 @@ where $T_{save}$ is the time to save a checkpoint and $MTBF$ is the mean time be
 
 :::
 
-::: {.callout-perspective title="Napkin Math: The Checkpoint Tax"}
+The optimal interval formula above provides the theoretical answer; the following worked example applies it to a realistic large-scale scenario to reveal the practical *checkpoint tax*.
+
+::: {.callout-notebook title="The Checkpoint Tax"}
 **Problem**: You are training a model on **1,000 GPUs**. The cluster fails (on average) every **4 hours**. It takes **5 minutes** to save a checkpoint. How often should you checkpoint?
 
 **The Math (Young-Daly)**:
+
 1.  **Checkpoint Cost ($C$)**: 5 minutes.
 2.  **MTBF ($M$)**: 4 hours = 240 minutes.
 3.  **Optimal Interval**: $\tau_{opt} = \sqrt{2 \cdot C \cdot M} = \sqrt{2 \cdot 5 \cdot 240} = \sqrt{2400} \approx \mathbf{49 \text{ minutes}}$.
 
 **The Systems Conclusion**: You should checkpoint roughly every hour.
+
 *   **Too Frequent (every 10 mins)**: You spend 50% of your time writing to disk.
 *   **Too Rare (every 4 hours)**: You lose 2 hours of work on average per failure.
 *   **Optimal**: You waste only ~10% of total time on overhead + recovery.
@@ -1393,6 +1401,7 @@ This formula minimizes expected wasted work, accounting for both checkpoint over
 Consider training GPT-3 scale model on 1024 GPUs:
 
 **Given:**
+
 - Checkpoint size: 1 TB
 - Storage bandwidth: 100 GB/s aggregate
 - Checkpoint time: $T_{save} = 10$ seconds
@@ -1707,7 +1716,7 @@ def session_purchase_count(event: PurchaseEvent, state: State) -> int:
 
 ### Feature Lookup Latency Budget {#sec-storage-feature-lookup-latency-budget-2e90}
 
-Online serving imposes strict latency constraints. The feature lookup must fit within the overall inference latency budget.
+Online serving imposes strict latency constraints. The feature lookup must fit within the overall inference latency budget, expressed formally as a *feature lookup latency budget*.
 
 ::: {.callout-definition title="Feature Lookup Latency Budget"}
 
@@ -1721,6 +1730,8 @@ where:
 - $L_{margin}$ is safety margin for variance (e.g., 20ms)
 
 :::
+
+Applying this formula to a concrete recommendation serving scenario reveals how tight the feature budget becomes once other components claim their share.
 
 ::: {.callout-example title="Feature Latency Budget for Recommendation Serving"}
 
@@ -1961,9 +1972,14 @@ Reproducibility in ML requires tracking not just the model weights but the entir
 **Full lineage enables:**
 
 1. **Debugging**: When a model behaves unexpectedly, trace back to exact training conditions
+
 2. **Auditing**: Demonstrate to regulators exactly how a model was trained
+
 3. **Reproduction**: Train identical model from lineage information
+
 4. **Comparison**: Understand why two model versions differ
+
+These capabilities depend on the assumption that lineage information suffices for exact reproduction, but hardware non-determinism complicates that assumption.
 
 ::: {.callout-note title="Reproducibility in Practice"}
 

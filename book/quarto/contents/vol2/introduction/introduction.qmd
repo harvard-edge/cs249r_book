@@ -1,7 +1,7 @@
----
+--- 
 ---
 
-# Introduction {#sec-introduction}
+# Introduction {#sec-vol2-introduction}
 
 ::: {layout-narrow}
 \noindent
@@ -20,31 +20,71 @@ Everything changes when ML systems grow beyond what one machine can handle. Comm
 ::: {.callout-tip title="Learning Objectives"}
 
 - Explain why communication costs dominate computation as ML systems scale from single machines to distributed clusters
-
 - Analyze how ML compute requirements have grown 10-million-fold from AlexNet to GPT-4, identifying infrastructure implications
-
 - Compare synchronous versus asynchronous distributed training using the CAP theorem to evaluate consistency-availability trade-offs
-
 - Differentiate datacenter and edge distribution challenges in terms of connectivity, heterogeneity, and privacy constraints
-
 - Classify ML-specific security threats and explain why production scale amplifies attacker incentives
-
-- Apply the AI Triad framework to analyze how optimizing data, algorithms, or machines in isolation creates system-wide bottlenecks
-
+- Apply the AI Triad framework to analyze how optimizing data, algorithms, or infrastructure in isolation creates system-wide bottlenecks
 - Explain why routine hardware failures and network partitions require fault tolerance as a core design principle at scale
 
 :::
 
-## The Scale Transformation {#sec-introduction-scale-transformation}
+## The Scale Transformation {#sec-vol2-introduction-scale-transformation}
 
-The history of machine learning is defined by scale. Each major capability leap has come not from algorithmic breakthroughs alone, but from the ability to apply computation at previously impossible scales. Compute requirements have evolved over the past decade in ways that make systems engineering central to AI advancement.
+The history of machine learning is defined by scale. Each major capability leap has come not from algorithmic breakthroughs alone, but from the ability to apply computation at previously impossible scales. Compute requirements have evolved over the past decade in ways that make systems engineering central to AI advancement. Three qualitative changes emerge at production scale: communication dominance, routine failure, and governance requirements that accompany societal impact.
 
-Compute requirements have grown exponentially. AlexNet (2012) trained on two GTX 580 GPUs for approximately 5-6 days. BERT (2018) required 64 TPU chips for 4 days. GPT-4 (2023) reportedly trained on approximately 25,000 A100 GPUs over 90-100 days. This progression represents approximately a 10-million-fold increase in training compute over a single decade.
+Compute requirements have grown exponentially. AlexNet (2012) trained on two GTX 580 GPUs for approximately 5-6 days [@krizhevsky2012imagenet]. BERT (2018) required 64 TPU[^fn-tpu] chips for 4 days, roughly 6,144 chip hours [@devlin2018bert].
 
-::: {.callout-perspective title="Napkin Math: The Bisection Bandwidth Wall"}
+[^fn-tpu]: **Tensor Processing Unit (TPU)**: Google's custom-designed ASIC optimized specifically for neural network computation. Unlike general-purpose GPUs, TPUs implement a systolic array architecture that excels at the matrix multiplications dominating deep learning workloads. TPU v4 chips deliver approximately 275 TFLOPS of bfloat16 performance at 175 watts, roughly 2.5× the performance per watt of contemporary GPUs for transformer training. The latest TPU v5p chips are interconnected via Inter-Core Interconnect (ICI) providing 4,800 Gb/s of bandwidth per chip, enabling tight coupling for distributed training across TPU pods containing thousands of chips. While GPUs offer broader flexibility for varied workloads, TPUs demonstrate how hardware-software co-design enables significant efficiency gains for specific computational patterns.
+
+GPT-3 (2020) consumed an estimated 3.14×10²³ FLOPS during training, requiring thousands of V100 GPUs running for weeks [@brown2020language]. PaLM (2022) trained on 6,144 TPU v4 chips for roughly 60 days, consuming approximately 10²⁴ FLOPS [@chowdhery2022palm]. GPT-4 (2023) reportedly trained on approximately 25,000 A100 GPUs over 90-100 days [@openai2023gpt4]. This progression represents approximately a 10-million-fold increase in training compute over a single decade, from roughly 10¹⁸ FLOPS for AlexNet to 10²⁵ FLOPS for GPT-4 [@sevilla2022compute; @amodei2018ai].
+
+::: {.callout-example title="Training Compute Evolution"}
+
++----------------+----------+---------------+-------------------+---------------------+
+| **Model**      | **Year** | **GPUs/TPUs** | **Training Time** | **Estimated FLOPS** |
++:===============+:=========+:==============+:==================+:====================+
+| **AlexNet**    | 2012     | 2 GPUs        | 5-6 days          | ~10¹⁸               |
++----------------+----------+---------------+-------------------+---------------------+
+| **BERT-Large** | 2018     | 64 TPUs       | 4 days            | ~10²⁰               |
++----------------+----------+---------------+-------------------+---------------------+
+| **GPT-3**      | 2020     | ~1000 GPUs    | ~30 days          | ~10²³               |
++----------------+----------+---------------+-------------------+---------------------+
+| **PaLM**       | 2022     | 6144 TPUs     | ~60 days          | ~10²⁴               |
++----------------+----------+---------------+-------------------+---------------------+
+| **GPT-4**      | 2023     | ~25000 GPUs   | ~100 days         | ~10²⁵               |
++----------------+----------+---------------+-------------------+---------------------+
+
+:::
+
+Throughout this volume, recurring *lighthouse examples* ground abstract principles in concrete, quantifiable workloads. The following callout introduces these examples and explains how they evolve from their Volume I counterparts.
+
+::: {.callout-note title="How to Use This Book: Lighthouse Examples at Scale"}
+
+Volume II extends the **Lighthouse Examples** from Volume I to the regime of massive scale. We revisit our canonical workloads, but now examining their behavior when distributed across thousands of devices:
+
+*   **GPT-4 / Llama-3 (Language Lighthouse)**: The evolution of GPT-2. We move from single-GPU memory bounds to multi-node **Model Parallelism** and **Pipeline Parallelism**.
+*   **DLRM at Scale (Recommendation Lighthouse)**: We move from fitting embedding tables in memory to **Embedding Sharding** across hundreds of nodes, creating massive all-to-all communication bottlenecks.
+*   **Federated MobileNet (Edge Lighthouse)**: We move from single-device inference to **Federated Learning** across billions of devices, introducing privacy and straggler challenges.
+
+**Systems Perspectives** continue to appear as sidebars, now focusing on the physics of data centers, network topology, and distributed consistency (CAP theorem).
+:::
+
+This exponential growth has transformed ML from a discipline where algorithms dominate to one where systems engineering determines success. A sophisticated algorithm that cannot scale often provides less practical value than a simpler algorithm deployed efficiently across scalable infrastructure.
+
+The transition from single-machine to distributed training introduces qualitative changes in system behavior. The unit of compute is no longer a single server, but a **Machine Learning Fleet**—a massive, interconnected distributed system that must act as a single coherent engine.
+
+::: {.callout-definition title="The Machine Learning Fleet"}
+***The Machine Learning Fleet*** is a distributed system of thousands of interconnected accelerators (GPUs/TPUs), storage arrays, and network fabrics designed to operate as a single coherent computer. Unlike traditional clusters that manage independent jobs, the Fleet coordinates synchronous states across all nodes, where a failure in any single component can stall the entire system.
+:::
+
+As systems scale beyond a single node, a fundamental physical constraint emerges: the *bisection bandwidth wall*, which limits how fast data can cross the network midpoint. The following worked example quantifies this constraint for a realistic training scenario.
+
+::: {.callout-notebook title="The Bisection Bandwidth Wall"}
 **Problem**: You are training a **175B parameter model** (GPT-3 scale). After each batch, you must synchronize **700 GB of gradients** (FP16) across the cluster. If you want this synchronization to take less than **100ms** (to maintain high GPU utilization), what network bandwidth do you need?
 
 **The Math**:
+
 1.  **Data ($D$)**: $700 \text{ GB}$.
 2.  **Time ($T$)**: $0.1 \text{ s}$.
 3.  **Required Bandwidth ($B$)**: $D / T = 700 \text{ GB} / 0.1 \text{ s} = \mathbf{7,000 \text{ GB/s}}$ (or 56 Tbps).
@@ -52,162 +92,1017 @@ Compute requirements have grown exponentially. AlexNet (2012) trained on two GTX
 **The Systems Conclusion**: A standard 10Gbps Ethernet link provides only **1.25 GB/s**. To train a model of this scale, your cluster needs a **Fat-Tree topology** or **Rail-Optimized network** (@sec-networking) capable of moving 7 TB/s of aggregate traffic. This is why networking, not just compute, determines the "speed" of your model.
 :::
 
-### Why Scale Changes Everything
+On a single GPU, training proceeds deterministically: the same code, data, and random seed produce identical results. At the scale of thousands of GPUs, new phenomena emerge. Network partitions can split clusters into groups that train independently, causing model divergence[^fn-network-partition]. Stragglers (workers that process data slower than peers due to hardware variation or thermal throttling) can bottleneck entire training runs[^fn-straggler-problem]. Hardware failures that occur once per machine-year become daily events when operating 10,000 machines. Systems must checkpoint frequently enough that losing a day's progress becomes acceptable rather than catastrophic[^fn-failure-rates].
 
-Scale is not just "more of the same." Systems that work perfectly at modest scale exhibit qualitatively different behaviors at production scale.
+[^fn-network-partition]: **Network Partition in Distributed Training**: When network failures isolate groups of workers, each group may continue training independently with different gradient updates, causing models to diverge. In synchronous distributed training, partitions typically halt progress until connectivity restores. In asynchronous training, partitions can cause split brain scenarios where different model versions evolve in parallel. Production systems implement partition detection through heartbeat mechanisms and quorum protocols. Google's approach with TPU pods uses dedicated high-bandwidth interconnects (ICI providing 4,800 Gb/s per chip for TPU v5p) to minimize partition probability, while software-level protocols detect and recover from rare partitions within minutes rather than allowing extended divergent training.
 
-*   **Communication Dominates**: At small scale, computation is the bottleneck. At large scale, moving data between machines becomes the limiter. The **Communication-Computation Ratio** shifts, forcing architectures to optimize for interconnect bandwidth (AllReduce) rather than just FLOPs.
-*   **Failure is Routine**: With 10,000 GPUs, hardware failures transition from rare exceptions to daily events. Systems must implement **Checkpointing** and **Redundancy** as core primitives, not afterthoughts.
-*   **Heterogeneity Emerges**: Large fleets inevitably contain mixed hardware generations, requiring load balancing that accounts for stragglers and varied capabilities.
+[^fn-straggler-problem]: **The Straggler Problem**: In synchronous distributed training, all workers must complete their computation before proceeding to the next iteration. If one worker runs 10% slower due to thermal throttling, memory pressure, or background processes, the entire cluster waits, reducing effective utilization. At 1,000 workers, the probability of at least one straggler per iteration approaches certainty. Solutions include backup workers that redundantly compute slow partitions, gradient coding that tolerates missing results, bounded staleness that allows proceeding with partial results, and careful hardware provisioning that minimizes variation. Meta's research found that stragglers can reduce large-scale training throughput by 20-30% without mitigation strategies.
 
-## The Distribution and Governance Challenge {#sec-introduction-distribution-governance}
+[^fn-failure-rates]: **Hardware Failure Rates at Scale**: Individual server components fail infrequently. Enterprise SSDs show annual failure rates of 0.5-2% [@pinheiro2007failure]; GPUs fail at roughly 1-2% annually under typical datacenter conditions, though rates can exceed 9% under intensive AI training workloads; memory DIMMs fail at 1-2% per year [@schroeder2009dram]. These rates seem manageable until multiplied by scale. A cluster of 10,000 GPUs with 2% annual failure rate experiences 200 GPU failures per year, or roughly one every two days. A training run lasting 100 days will statistically encounter 50 or more GPU failures. Production systems implement automatic detection, workload migration, and checkpoint-based recovery to handle failures as routine events rather than emergencies. Meta reported that during LLaMA 3 training on 16,384 H100 GPUs, they experienced hardware failures roughly every three hours, requiring automated recovery systems to maintain over 90% effective training time [@dubey2024llama3].
 
-Scale forces distribution: no single machine provides the thousands of GPUs that frontier training requires. Coordinating this distribution introduces fundamental constraints.
+These scale-induced challenges drive infrastructure investment by the largest AI organizations. Meta's Research SuperCluster (RSC) contains 16,000 NVIDIA A100 GPUs connected by 200 Gb/s InfiniBand[^fn-infiniband] networking [@meta2022rsc]. Google's TPU v4 pods contain 4,096 chips with 1.1 exaFLOPS[^fn-exaflops] of aggregate compute capacity. Microsoft's Azure AI infrastructure spans multiple datacenters with tens of thousands of GPUs dedicated to AI workloads. Frontier AI capabilities require frontier infrastructure.
 
-### The Physics of Distribution
+[^fn-infiniband]: **InfiniBand**: A high-performance, low-latency networking technology purpose-built for data centers and supercomputing. While standard Ethernet reaches 100-400 Gb/s with 1-5 microsecond latencies, InfiniBand achieves 200-400 Gb/s with sub-microsecond latencies through features including Remote Direct Memory Access (RDMA), which bypasses the operating system to transfer data directly between application memory on different machines. For distributed ML training, InfiniBand's RDMA support enables NVIDIA Collective Communications Library (NCCL) to achieve near-optimal gradient synchronization bandwidth. The 200 Gb/s HDR InfiniBand links common in 2024 AI clusters deliver approximately 25 GB/s of usable bandwidth, while the newer 400 Gb/s NDR generation reaches 50 GB/s. These speeds determine whether training becomes communication-bound or compute-bound for large models.
 
-*   **The CAP Theorem Reality**: Distributed systems must choose between Consistency and Availability during partitions. Synchronous training chooses Consistency (halting on failure), while Asynchronous training chooses Availability (accepting staleness).
-*   **Coordination Overhead**: Every synchronization point introduces latency. The **Iron Law of Scale** dictates that as node count ($N$) increases, the synchronization tax ($L_{overhead}$) grows, eventually yielding diminishing returns.
-*   **Edge Complexity**: Extending to the edge (billions of devices) introduces intermittent connectivity and extreme heterogeneity, demanding approaches like **Federated Learning**.
+[^fn-exaflops]: **ExaFLOPS**: One quintillion (10^18) floating-point operations per second. For context, a single NVIDIA H100 GPU delivers approximately 2,000 TFLOPS (teraFLOPS, or 10^12 FLOPS) of FP16 compute; achieving 1 exaFLOPS thus requires roughly 500 such GPUs operating in parallel with perfect efficiency. Google's TPU v4 pods reaching 1.1 exaFLOPS represent one of the first single-system installations to cross this threshold. The scale progression from megaFLOPS (10^6, 1980s workstations) through gigaFLOPS (10^9, 1990s servers), teraFLOPS (10^12, 2000s GPUs), petaFLOPS (10^15, 2010s supercomputers), to exaFLOPS (10^18, 2020s AI clusters) illustrates the exponential growth enabling modern ML capabilities.
 
-### Governance as a Control Plane
+## AI Scaling Laws {#sec-vol2-intro-ai-scaling-laws-a043}
 
-At production scale, the impact of ML systems amplifies, creating governance requirements that function as engineering constraints.
+The infrastructure investments described in the preceding section did not arise from arbitrary organizational ambitions. They emerged from an empirical discovery: machine learning performance follows predictable mathematical relationships with scale. Understanding these scaling laws explains why distributed systems have become essential and reveals the constraints that shape their design.
 
-*   **Security**: Threats like model extraction and adversarial attacks become economically viable against high-value models.
-*   **Regulation**: Compliance (GDPR, EU AI Act) requires technical capabilities for audit trails, explanation, and data deletion.
-*   **Responsibility**: Fairness and safety are not abstract ideals but stability conditions for systems serving millions of users.
+Machine learning systems have followed a consistent pattern: increasing model scale through parameters, training data, and computational resources typically improves performance. Progress across natural language processing, computer vision, and speech recognition has confirmed this empirical observation, with larger models trained on extensive datasets consistently achieving state-of-the-art results.
 
-## Foundational Concepts {#sec-introduction-foundational-concepts}
+Scaling laws quantify the "Bitter Lesson" articulated by Rich Sutton: performance in machine learning is primarily driven by leveraging general methods at massive scale rather than encoding human knowledge into algorithms. The predictable power-law relationships show *how* computation, when scaled, yields better models.
 
-To reason systematically about these challenges, we use the **Systems Sandwich** framework.
+As computational demands grow exponentially and data requirements increase, questions emerge about efficiency and sustainability: when do scaling costs outweigh performance benefits? Researchers have developed scaling laws that quantify how model performance relates to training resources, revealing why efficiency becomes increasingly important as systems expand in complexity.
 
-::: {#fig-systems-sandwich fig-env="figure" fig-pos="htb" fig-cap="**The Systems Sandwich**. The organizing framework for Volume II. We build from the **Physical Layer** (constraints of atoms and energy) up to the **Operational Layer** (distributed logic and algorithms) and finally to the **Societal Layer** (human impact and governance). Engineering decisions at the bottom constrain possibilities at the top." fig-alt="Three-layer stack diagram. Bottom: Physical Layer with silicon, power, cooling. Middle: Operational Layer with algorithms and communication. Top: Societal Layer with safety and regulation. Arrow shows constraints flowing upward."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
-  \definecolor{Layer1}{RGB}{230, 230, 250} % Physical (Lavender)
-  \definecolor{Layer2}{RGB}{220, 240, 255} % Operational (Blue)
-  \definecolor{Layer3}{RGB}{220, 255, 230} % Societal (Green)
+::: {.callout-definition title="Scaling Laws"}
 
-  % Layer 3: Societal (Top Bun)
-  \node[draw, rounded corners=5pt, fill=Layer3, minimum width=8cm, minimum height=1.5cm, align=center] (l3) at (0, 3) {\textbf{Societal Layer (The Control Plane)}\\Safety, Ethics, Regulation, Stability};
+**Scaling Laws** refer to empirical relationships discovered by OpenAI showing that language model performance follows predictable _power-law relationships_ with _model size (N)_, _dataset size (D)_, and _compute budget (C)_. These laws enable researchers to predict performance and optimal resource allocation before expensive training runs.
 
-  % Layer 2: Operational (Meat)
-  \node[draw, rounded corners=5pt, fill=Layer2, minimum width=8cm, minimum height=1.5cm, align=center] (l2) at (0, 1.2) {\textbf{Operational Layer (Distribution)}\\Algorithms, Communication, Fault Tolerance};
-
-  % Layer 1: Physical (Bottom Bun)
-  \node[draw, rounded corners=5pt, fill=Layer1, minimum width=8cm, minimum height=1.5cm, align=center] (l1) at (0, -0.6) {\textbf{Physical Layer (The Warehouse-Scale Computer)}\\Silicon, Power, Cooling, Network Physics};
-
-  % Labels
-  \node[anchor=east, font=\itshape] at (-4.2, 3) {Volume II, Part V};
-  \node[anchor=east, font=\itshape] at (-4.2, 1.2) {Volume II, Part I, III};
-  \node[anchor=east, font=\itshape] at (-4.2, -0.6) {Volume II, Part II, IV};
-
-  % Arrow
-  \draw[->, ultra thick, gray] (4.5, -0.6) -- node[right, align=left] {Constraint Flow:\\Physics limits Logic\\Logic limits Society} (4.5, 3);
-
-\end{tikzpicture}
-```
 :::
 
-1.  **The Physical Layer (The Warehouse-Scale Computer)**: The foundation. It deals with hard constraints: power density, cooling, bandwidth, and silicon limits.
-    *   **Iron Law Mapping**: Determines **Bandwidth ($B$)** and **Power ($P$)** ceilings.
-2.  **The Operational Layer (Distribution)**: The logic of scale. It partitions training (algorithms) and manages state across unreliable nodes.
-    *   **Iron Law Mapping**: Minimizes **Data ($D$)** movement and maximizes **Efficiency ($\eta$)**.
-3.  **The Societal Layer (The Control Plane)**: The objective function. It ensures safety, legality, and ethics.
-    *   **Iron Law Mapping**: Governs the **Stability** of system outputs.
+Understanding why efficiency becomes increasingly important as systems expand in complexity requires examining how scaling laws manifest across different dimensions. We analyze their implications for system design, establishing why the multi-dimensional efficiency optimization framework is essential at production scale.
 
-::: {#fig-vol2-ai-triad fig-cap="**The AI Triad at Scale**. At production scale, the three components of the triad become a high-stakes coordination problem. **Data** scales to petabytes requiring parallel I/O; **Algorithms** scale to 3D Parallelism; and **Infrastructure** scales to warehouse-sized computers. Optimizing one in isolation triggers bottlenecks in the others."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=1.1, transform shape]
-  % Define colors
-  \definecolor{DataColor}{RGB}{70,130,180} % SteelBlue
-  \definecolor{AlgColor}{RGB}{205,92,92}  % IndianRed
-  \definecolor{InfraColor}{RGB}{60,179,113}% MediumSeaGreen
+### Empirical Evidence for Scaling Laws {#sec-vol2-intro-empirical-evidence-scaling-laws-0105}
 
-  % Nodes
-  \node[draw, circle, minimum size=2.5cm, fill=DataColor!15, text width=2cm, align=center, line width=1pt] (Data) at (90:2.5) {\textbf{DATA}\\Petabyte I/O\\Coreset Selection\\Lineage};
-  
-  \node[draw, circle, minimum size=2.5cm, fill=AlgColor!15, text width=2cm, align=center, line width=1pt] (Alg) at (210:2.5) {\textbf{ALGORITHM}\\3D Parallelism\\Consensus\\Quantization};
-  
-  \node[draw, circle, minimum size=2.5cm, fill=InfraColor!15, text width=2cm, align=center, line width=1pt] (Infra) at (330:2.5) {\textbf{INFRA}\\Liquid Cooling\\InfiniBand\\Fault Tolerance};
+The rapid evolution in AI capabilities over the past decade exemplifies this scaling trajectory. GPT-1 (2018) contained 117 million parameters and demonstrated basic sentence completion capabilities. GPT-2 (2019) scaled to 1.5 billion parameters and achieved coherent paragraph generation. GPT-3 (2020) expanded to 175 billion parameters and demonstrated sophisticated text generation across diverse domains. Each increase in model size brought dramatically improved capabilities, but at exponentially increasing costs.
 
-  % Connecting arrows
-  \draw[<->, ultra thick, gray!60] (Data) -- node[left, black, font=\footnotesize, xshift=-2pt] {Data-Parallel\\Bottleneck} (Alg);
-  \draw[<->, ultra thick, gray!60] (Alg) -- node[below, black, font=\footnotesize, yshift=-4pt] {Compute-Bandwidth\\Mismatch} (Infra);
-  \draw[<->, ultra thick, gray!60] (Infra) -- node[right, black, font=\footnotesize, xshift=2pt] {I/O\\Saturation} (Data);
+This pattern extends beyond language models. In computer vision, doubling neural network size typically yields consistent accuracy gains when training data increases proportionally. AlexNet (2012) had 60 million parameters, VGG-16 (2014) scaled to 138 million, and large modern vision transformers can exceed 600 million parameters. Each generation achieved better image recognition accuracy but required proportionally more computational resources and training data.
 
-  % Center Label
-  \node[align=center, font=\bfseries] at (0,0) {ML FLEET\\OPTIMIZATION};
+The scaling hypothesis underlies this progress. Larger models possess increased capacity to capture intricate data patterns, facilitating improved accuracy and generalization. However, this scaling trajectory introduces critical resource constraints. Training GPT-3 required approximately 314 sextillion[^fn-sextillion] floating-point operations (314 followed by 21 zeros), equivalent to running a modern gaming PC continuously for hundreds of years at substantial financial and environmental costs.
 
-\end{tikzpicture}
-```
+[^fn-sextillion]: **Sextillion**: A number with 21 zeros (10²¹), representing an almost incomprehensible scale. To put this in perspective, there are estimated 10²² to 10²⁴ stars in the observable universe, making GPT-3's training computation roughly 1/22nd of counting every star in the cosmos.
+
+These resource demands reveal why understanding scaling laws is necessary for efficiency. @fig-compute-trends traces how computational demands of training state-of-the-art models have escalated at an unsustainable rate, growing faster than Moore's Law improvements in hardware.
+
+![**Model Training Compute Trends**: Training compute has grown exponentially, accelerating dramatically in the deep learning era. Between 2012 and 2019, compute requirements doubled approximately every 3.4 months, far exceeding Moore's Law (~2 years). This trajectory explains why efficiency has become a strategic imperative rather than an optional optimization. Source: [@Sevilla_Heim_Ho_Besiroglu_Hobbhahn_Villalobos_2022.]](images/png/compute-trends.png){#fig-compute-trends fig-alt="Scatter plot of training compute from 1950 to 2020 on log scale. Points show exponential growth accelerating after 2012, with compute doubling every 3.4 months versus Moore's Law at 2 years."}
+
+Scaling laws provide a quantitative framework for understanding these trade-offs. They reveal that model performance exhibits predictable patterns as resources increase, following power-law relationships where performance improves consistently but with diminishing returns[^fn-diminishing-returns]. These laws show that optimal resource allocation calls for coordinating model size, dataset size, and computational budget rather than scaling any single dimension in isolation.
+
+[^fn-diminishing-returns]: **Diminishing Returns**: Economic principle where each additional input yields progressively smaller output gains. In ML, doubling compute from 1 to 2 hours might improve accuracy by 5%, but doubling from 100 to 200 hours might improve it by only 0.5%.
+
+Before examining how these workloads stress distributed infrastructure, we review the computational characteristics that drive their resource demands.
+
+::: {.callout-note collapse="true" title="Refresher: Transformer Computational Characteristics"}
+
+Transformers process sequences using self-attention mechanisms that compute relationships between all token pairs. This architecture's computational cost scales quadratically with sequence length ($O(n^2)$ where $n$ is sequence length), making resource allocation particularly critical for language models. The term "FLOPs" (floating-point operations) quantifies total computational work, while "tokens" represent the individual text units (typically subwords) that models process during training.
 :::
 
-## The Physics of Scale {#sec-introduction-physics-of-scale}
+### Compute-Optimal Resource Allocation {#sec-vol2-intro-computeoptimal-resource-allocation-541a}
 
-The infrastructure investments in this volume are driven by empirical **Scaling Laws**: machine learning performance follows predictable power-law relationships with scale ($N$, $D$, $C$).
+Empirical studies of large language models (LLMs) reveal a key insight. For any fixed computational budget, there exists an optimal balance between model size and dataset size (measured in tokens[^fn-tokens]) that minimizes training loss.
 
-### Compute-Optimal Allocation (Chinchilla)
+[^fn-tokens]: **Tokens**: Individual units of text that language models process, created by breaking text into subword pieces using algorithms like Byte-Pair Encoding (BPE). GPT-3 trained on 300 billion tokens while PaLM used 780 billion tokens, requiring text corpora equivalent to millions of books from web crawls and digitized literature.
 
-For any compute budget, there is an optimal balance between model size ($N$) and training data ($D$). The **Chinchilla** scaling laws demonstrate that many models are under-trained; optimal performance often comes from smaller models trained on more data, rather than simply increasing parameter count. This shifts the engineering challenge from just "fitting the model in memory" to "feeding the model data fast enough" (@fig-compute-optimal).
+This principle emerges clearly in @fig-compute-optimal through three related views. The left panel shows 'IsoFLOP curves' where each curve corresponds to a constant number of floating-point operations (FLOPs[^fn-efficient-flops]) during transformer[^fn-transformer] training. The valleys in these curves identify the most efficient model size for each computational budget when training autoregressive[^fn-autoregressive] language models. The center and right panels reveal how the optimal number of parameters and tokens scales predictably as computational budgets increase, demonstrating the necessity for coordinated scaling to maximize resource utilization.
 
-### Scaling Regimes
+[^fn-efficient-flops]: **FLOPs (Floating-Point Operations)**: Measure of computational work independent of hardware. GPT-3 required 3.14×10²³ FLOPs—equivalent to a gaming PC running 350 years. Chinchilla scaling laws suggest optimal FLOP allocation between model size and training tokens. FLOPs/second (FLOPS) measures hardware throughput; A100 delivers 312 TF32 TFLOPS.
 
-We operate in different regimes depending on our primary constraint:
-*   **Compute-Limited**: Hardware is the bottleneck. Optimization focus: Mixed Precision, Utilization.
-*   **Data-Limited**: High-quality tokens are the bottleneck. Optimization focus: Multi-epoch training, Synthetic data.
-*   **Latency-Limited**: Inference time is the bottleneck. Optimization focus: Quantization, Distillation.
+[^fn-transformer]: **Transformer**: Neural network architecture introduced by Vaswani et al. [@vaswani2017attention] that revolutionized NLP through self-attention mechanisms. Unlike sequential RNNs, transformers enable parallel processing during training, forming the foundation of modern large language models including GPT, BERT, T5, and their derivatives.
 
-### Optimization Limits and Moore's Law
+[^fn-autoregressive]: **Autoregressive Models**: Language models that generate text by predicting each token based on all preceding tokens in the sequence. GPT-family models exemplify this approach, generating text left-to-right with causal attention masks to ensure each position only attends to previous positions.
 
-Optimization is not infinite. As illustrated by the economics of Moore's Law (@fig-moores-law-plot), we eventually hit **Diminishing Returns**.
-*   **The Light Barrier**: Bisection bandwidth limits how fast the cluster can "think" as a single unit.
-*   **The Power Wall**: Power density (kW/rack) limits how densely we can pack compute.
-*   **The Memory Wall**: The gap between FLOPs and Memory Bandwidth continues to widen, making transformer inference memory-bound.
+![**Optimal Compute Allocation**: For fixed computational budgets, language model performance depends on balancing model size and training data volume; the left panel maps training loss across parameter counts, identifying an efficiency sweet spot for each FLOP level. The center and right panels quantify how optimal parameter counts and token requirements scale predictably with increasing compute, demonstrating the need for coordinated scaling of both model and data to maximize resource utilization in large language models. Source: [@hoffmann2022training].](images/png/compute_optimal.png){#fig-compute-optimal fig-alt="Three-panel figure. Left: IsoFLOP curves with U-shaped valleys identifying optimal model sizes. Center: optimal parameters scaling with compute. Right: optimal tokens scaling with compute. Both follow power-law relationships."} 
 
-Efficient AI is about navigating these walls—using **Algorithm Efficiency** (better models), **Compute Efficiency** (better utilization), and **Data Efficiency** (better curriculum) to sustain progress when brute-force scaling hits physical limits.
+@kaplan2020scaling demonstrated that transformer-based language models scale predictably with three factors: the number of model parameters, the volume of the training dataset (measured in tokens), and the total computational budget (measured in floating-point operations). When these factors are augmented proportionally, models exhibit consistent performance improvements without requiring architectural modifications or task-specific tuning.
 
-## Three Systems Archetypes {#sec-introduction-three-systems-archetypes}
+@fig-kaplan-scaling presents test loss curves for models spanning from $10^3$ to $10^9$ parameters, revealing two key insights. First, larger models demonstrate superior sample efficiency, achieving target performance levels with fewer training tokens. Second, as computational resources increase, the optimal model size correspondingly grows, with loss decreasing predictably when compute is allocated efficiently.
 
-To bridge abstract principles and concrete engineering, this textbook employs a longitudinal narrative strategy. Rather than using isolated examples in each chapter, we trace the engineering evolution of three distinct system archetypes. These archetypes represent the fundamental constraint regimes of modern ML systems: throughput-bound, latency-bound, and power/privacy-bound. By revisiting these same three systems across different chapters, you will see how the physics of distribution manifests differently depending on the primary constraint.
+![**Scaling Laws & Compute Optimality**: Larger models consistently achieve better performance with increased training data and compute, but diminishing returns necessitate careful resource allocation during training. Optimal model size and training duration depend on the available compute budget, as evidenced by the convergence of loss curves at different parameter scales and training token counts. Source: [@kaplan2020scaling].](images/png/kaplan_scaling_data_compute.png){#fig-kaplan-scaling fig-alt="Two log-scale plots. Left: test loss versus parameters from 10^3 to 10^9, showing larger models achieve lower loss. Right: loss versus compute, showing convergence at different parameter scales."} 
 
-### Archetype A: The Scaled Lighthouse (GPT-4 / Llama-3) {#sec-introduction-archetype-scaled-lighthouse-gpt4-llama3-7008}
-*   **The System**: A generative foundation model (like GPT-4 or Gemini) trained on internet-scale text and served via API.
-*   **The Constraint**: **Throughput**. Training requires ExaFLOPS of compute; serving requires massive memory bandwidth.
-*   **Key Challenges**:
-    *   *Distributed Training*: Requires 3D parallelism (Data + Tensor + Pipeline) to fit in memory and scale to thousands of GPUs.
-    *   *Infrastructure*: Demands high-bandwidth interconnects (InfiniBand/NVLink) and burst-buffer storage for checkpointing.
-    *   *Ops*: Failures are catastrophic to training progress; checkpoint/restore is the critical loop.
-    *   *Sustainability*: Energy consumption per training run is the dominant metric.
+Optimal compute allocation follows from the theoretical scaling relationship $D 
+able N^{0.74}$ [@hoffmann2022training], which shows that dataset size $D$ and model size $N$ must grow in coordinated proportions for a fixed budget. As model size increases, the dataset should grow at roughly three-quarters the rate to maintain compute-optimal efficiency.
 
-### Archetype B: The Scaled Lighthouse (DLRM at Scale) {#sec-introduction-archetype-b-scaled-lighthouse-dlrm-scale-18cd}
-*   **The System**: A personalized feed (like TikTok or Instagram) serving billions of users with sub-second freshness.
-*   **The Constraint**: **Latency & Volume**. Must process millions of queries per second (QPS) with <100ms tail latency.
-*   **Key Challenges**:
-    *   *Inference*: Throughput is high, but latency budget is strict. Requires sophisticated batching and caching.
-    *   *Data*: Feature stores must handle massive read rates with point-in-time correctness.
-    *   *Ops*: A/B testing and continuous deployment are constant; "model staleness" allows for rapid performance degradation.
-    *   *Distribution*: Embedding tables (10TB+) exceed single-machine memory, requiring specialized parameter servers or embedding sharding.
+These theoretical predictions assume perfect compute utilization, which becomes challenging in distributed training scenarios. Real-world implementations face communication overhead that scales unfavorably with system size, creating bandwidth bottlenecks that reduce effective utilization. Beyond 100 nodes, communication overhead can reduce expected performance gains by 20-40% depending on workload and interconnect [@narayanan2021efficient].
 
-### Archetype C: The Scaled Lighthouse (Federated MobileNet) {#sec-introduction-archetype-c-scaled-lighthouse-federated-mobilenet-e2b2}
-*   **The System**: A fleet of wearable devices detecting cardiac anomalies locally, using federated learning for improvement.
-*   **The Constraint**: **Power & Privacy**. Compute budget is milliwatts; raw data cannot leave the device.
-*   **Key Challenges**:
-    *   *Edge Intelligence*: Models must be aggressively quantized (int8/int4) to fit on microcontrollers.
-    *   *Training*: Federated Learning coordinates updates across millions of unreliable devices without centralizing data.
-    *   *Communication*: Bandwidth is scarce and intermittent.
-    *   *Privacy*: Differential privacy is not optional; it is a core requirement for regulatory compliance.
+### Mathematical Foundations and Operational Regimes {#sec-vol2-intro-mathematical-foundations-operational-regimes-9afe}
 
-Throughout this volume, we use Archetype A to explain distributed training protocols, Archetype B to derive inference load-balancing theorems, and Archetype C to motivate edge security architectures. This approach ensures that you understand not just how a technique works, but why it is the right choice for a specific set of constraints.
+The predictable patterns observed in scaling behavior can be expressed mathematically using power-law relationships, though understanding the intuition behind these patterns proves more important than precise mathematical formulation for most practitioners.
 
-## The Structure of This Textbook {#sec-introduction-structure-textbook-87a1}
+::: {.callout-note collapse="true" title="Formal Mathematical Formulation"}
 
-This textbook organizes around the three imperatives, progressing from algorithmic foundations through physical infrastructure to governance practices. We adopt this "Logic First" pedagogical approach because the communication patterns and synchronization requirements of distributed algorithms (Part I) fundamentally determine the design constraints of the physical supercomputers (Part II) required to run them. One cannot effectively architect a datacenter without understanding the traffic patterns of the workloads it must support.
+For readers interested in the formal mathematical framework, scaling laws can be expressed as power-law relationships. The general formulation is:
 
-Examine @tbl-vol2-structure for the complete five-part organization, which maps the progression from foundational algorithms to societal governance.
+$$ 
+\mathcal{L}(N) = A N^{-\alpha} + B 
+$$
 
-::: {#fig-vol2-roadmap fig-env="figure" fig-pos="htb" fig-cap="**Volume 2 Roadmap**. The textbook structure follows the system lifecycle. **Part I** establishes the mathematical and physical foundations of scale. **Part II** applies these to build the distributed training \"fleet\". **Part III** covers the deployment of trained models to global users. **Part IV** addresses the operational hardening required for production. **Part V** elevates to the governance layer, ensuring systems are responsible and beneficial." fig-alt="Vertical flowchart with five stacked boxes: Part I Foundations, Part II Distributed Training, Part III Deployment, Part IV Production Concerns, Part V Responsible AI. Arrows connect parts sequentially."}
+where loss $\mathcal{L}$ decreases as resource quantity $N$ increases, following a power-law decay with rate $\alpha$, plus a baseline constant $B$. Here, $\mathcal{L}(N)$ represents the loss achieved with resource quantity $N$, $A$ and $B$ are task-dependent constants, and $\alpha$ is the scaling exponent that characterizes the rate of performance improvement. A larger value of $\alpha$ signifies more efficient performance improvements with respect to scaling.
+
+:::
+
+These theoretical predictions find strong empirical support across multiple model configurations. @fig-loss-vs-n-d demonstrates how early-stopped test loss varies predictably with both dataset size and model size, revealing that learning curves across configurations can be aligned through appropriate parameterization.
+
+#### Resource-Constrained Scaling Regimes {#sec-vol2-intro-resourceconstrained-scaling-regimes-062d}
+
+Applying scaling laws in practice calls for recognizing three distinct resource allocation regimes that emerge from trade-offs between compute budget, data availability, and optimal resource allocation. These regimes provide practical guidance for system designers navigating resource constraints.
+
+Compute-limited regimes characterize scenarios where available computational resources restrict scaling potential despite abundant training data. Organizations with limited hardware budgets or strict training time constraints operate within this regime. The optimal strategy involves training smaller models for longer periods, maximizing utilization of available compute through extended training schedules rather than larger architectures. This approach proves particularly relevant for academic institutions, startups, and projects with constrained infrastructure access.
+
+Data-limited regimes emerge when computational resources exceed what can be effectively utilized given dataset constraints. High-resource organizations working with specialized domains, proprietary datasets, or privacy-constrained data often encounter this regime. The optimal strategy involves training larger models for fewer optimization steps, leveraging model capacity to extract maximum information from limited training examples. This regime commonly appears in specialized applications like medical imaging or proprietary commercial datasets.
+
+Optimal regimes (Chinchilla Frontier) represent the balanced allocation of compute and data resources following compute-optimal scaling laws. This regime achieves maximum performance efficiency by scaling model size and training data proportionally, as demonstrated by DeepMind's Chinchilla model, which outperformed much larger models through optimal resource allocation [@hoffmann2022training]. Operating within this regime requires sophisticated resource planning but delivers superior performance per unit of computational investment.
+
+Recognizing these regimes enables practitioners to make informed decisions about resource allocation strategies, avoiding common inefficiencies such as over-parameterized models with insufficient training data or under-parameterized models that fail to utilize available computational resources effectively.
+
+::: {#fig-loss-vs-n-d fig-env="figure" fig-pos="htb" fig-alt="Log-scale scatter plot of loss versus tokens in dataset. Six curves for model sizes from 393K to 708M parameters. Larger models achieve lower loss, and all curves plateau at high token counts."} 
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+
+\definecolor{myblue}{RGB}{31,119,180}
+\definecolor{myorange}{RGB}{255,127,14}
+\definecolor{mygreen}{RGB}{44,160,44}
+\definecolor{myred}{RGB}{214,39,40}
+\definecolor{mypurple}{RGB}{148,103,189}
+\definecolor{mybrown}{RGB}{140,86,75}
+
+\tikzset{% 
+    LineD/.style={line width=1.0pt,dashed,dash pattern=on 3pt off 2pt]}
+}
+
+\pgfplotsset{myaxis/.style={
+  /pgf/number format/.cd,
+  1000 sep={},
+   legend style={at={(0.1,0.45)}, anchor=north},
+   legend cell align=left,
+   legend style={fill=BrownL!30,draw=BrownLine,row sep=-0.5pt,
+   font=\fontsize{6pt}{6}\selectfont\usefont{T1}{phv}{m}{n}},
+   width=120mm,
+   height=67.2mm,
+   yticklabel style={xshift=1mm,font=\fontsize{7pt}{7}\selectfont\usefont{T1}{phv}{m}{n},
+   /pgf/number format/.cd, fixed, fixed zerofill, precision=1},
+   xticklabel style={font=\fontsize{7pt}{7}\selectfont\usefont{T1}{phv}{m}{n}},
+   ylabel style={font=\fontsize{7pt}{7}\selectfont\usefont{T1}{phv}{m}{n},align=center,yshift=-1.2mm},
+   xlabel style={font=\fontsize{7pt}{7}\selectfont\usefont{T1}{phv}{m}{n}},
+   tick align=outside,
+   major tick length=1mm,
+   title style={yshift=-4pt},
+   minor x tick  style={thin,black!60},
+   major tick  style={thin,black!60},
+   log basis y=10,
+   x tick label style={rotate=0, anchor=north,yshift=1pt},
+    }}
+
+\begin{axis}[myaxis,
+  title={Loss vs Model and Dataset Size},
+  xmin=0.5e7,
+  xmax=4e10,
+  ymin=2.3, ymax=4.8,
+   ytick={2.5,3.0,3.5,4.0,4.5},
+  yticklabels={2.5,3,3.5,4.0,4.5},
+  xmode=log,
+  xtick={1e7,1e8,1e9,1e10},
+  xticklabels={10\textsuperscript{7},10\textsuperscript{8},10\textsuperscript{9},10\textsuperscript{10}},
+  xlabel={Tokens in Dataset},
+  ylabel={Loss},
+  grid=both,
+  major grid style={black!30},
+  minor grid style={draw=none},
+  minor x tick num=4,
+  xtick pos=left,
+   ytick pos=left,
+  cycle list={
+    {myblue,mark=*,only marks,mark options={line width=1pt},mark size=1.75pt},
+    {myorange,mark=*,only marks,mark options={line width=1pt},mark size=1.75pt},
+    {mygreen,mark=*,only marks,mark options={line width=1pt},mark size=1.75pt},
+    {myred,mark=*,only marks,mark options={line width=1pt},mark size=1.75pt},
+    {mypurple,mark=*,only marks,mark options={line width=1pt},mark size=1.75pt},
+    {mybrown,mark=*,only marks,mark options={line width=1pt},mark size=1.75pt},
+    {myblue},
+    {myorange},
+    {mygreen},
+    {myred},
+    {mypurple},
+    {mybrown}
+  }
+]
+%393.2K
+\addplot+[] coordinates{
+(3.05e7,4.645)(3.05e7,4.48)(5.9e7,4.415)(1.14e8,4.34)(8.3e8,4.29)(2.3e10,4.28)
+};
+\addlegendentry{393.2K}
+%2M
+\addplot+[]
+coordinates{
+(3.05e7,4.25)(5.9e7,4.1)(1.14e8,3.93)(2.2e8,3.867)(4.3e8,3.837)(8.3e8,3.8)(2.3e10,3.77)
+};
+\addlegendentry{3M}
+%25M
+\addplot+[]
+coordinates{
+(3.05e7,4.25)(5.9e7,3.941)(1.14e8,3.735)(2.2e8,3.567)(4.3e8,3.415)(8.3e8,3.325)(2.3e10,3.27)
+};
+\addlegendentry{25M}
+%85M
+\addplot+[]
+coordinates{
+(3.05e7,4.21)(5.9e7,3.941)(1.14e8,3.69)(2.2e8,3.472)(4.3e8,3.31)(8.3e8,3.12)(1.61e9,3.04)(2.3e10,2.97)
+};
+\addlegendentry{85M}
+%302M
+\addplot+[]
+coordinates{
+(3.05e7,4.21)(5.9e7,3.941)(1.14e8,3.69)(2.2e8,3.46)(4.3e8,3.28)(8.3e8,3.01)(1.61e9,2.84)(2.3e10,2.62)
+};
+\addlegendentry{302M}
+%708M
+\addplot+[]
+coordinates{
+(3.05e7,4.31)(5.9e7,3.941)(1.14e8,3.69)(2.2e8,3.46)(4.3e8,3.28)(8.3e8,3.05)(1.61e9,2.80)(2.3e10,2.42)
+};
+\addlegendentry{708M}
+%%%approximation
+%393.2K
+\addplot+[LineD,smooth]coordinates{
+(1.5e7,4.595) (3.05e7,4.47) (5.9e7,4.395) (1.14e8,4.35) (8.3e8,4.3) (3e10,4.290)
+};
+%2M
+\addplot+[LineD,smooth] coordinates{
+(1.5e7,4.46) (3.05e7,4.25) (5.9e7,4.08) (1.14e8,3.96) (2.2e8,3.867) (4.3e8,3.814) (8.3e8,3.789) (3e10,3.756)
+};
+%25M
+\addplot+[LineD,smooth]  coordinates{
+(1.5e7,4.42) (3.05e7,4.17)(5.9e7,3.95)(1.14e8,3.75)(2.2e8,3.58)(4.3e8,3.444)(8.3e8,3.345)(3e9,3.253)(3e10,3.213)};
+%85M
+\addplot+[LineD,smooth,samples=200]  coordinates{
+(1.5e7,4.42) (3.05e7,4.17)(5.9e7,3.93)(1.14e8,3.7)(2.2e8,3.499)(4.3e8,3.32)(8.3e8,3.17)
+(1.61e9,3.064)(5e9,2.955)(1e10,2.92)(3e10,2.913)};
+%30M
+\addplot+[LineD,smooth,samples=200]  coordinates{
+(1.5e7,4.42) (3.05e7,4.17)(5.9e7,3.93)(1.14e8,3.7)(2.2e8,3.467)(4.3e8,3.25)(8.3e8,3.054)
+(1.61e9,2.89)(4e9,2.73)(1e10,2.64)(3e10,2.59)};
+%708M
+\addplot+[LineD,smooth,samples=200]  coordinates{
+(1.5e7,4.42) (3.05e7,4.17)(5.9e7,3.93)(1.14e8,3.7)(2.2e8,3.456)(4.3e8,3.223)(8.3e8,3.013)
+(1.61e9,2.82)(4e9,2.61)(1e10,2.47)(3e10,2.39)};
+\node[font=\fontsize{7pt}{7}\selectfont\usefont{T1}{phv}{m}{n},
+anchor=south,above=0pt,fill=white]at(axis description cs:0.1,0.45){Params};
+\end{axis}
+\end{tikzpicture}
+```
+: **Loss vs Model and Dataset Size**: Early-stopped test loss varies predictably with both dataset size (10^7 to 10^10 tokens) and model size (393K to 708M parameters). The curves show that larger models achieve lower loss at any given dataset size, but all models eventually plateau as data becomes the limiting factor. This demonstrates the importance of balanced scaling: doubling model size without proportionally increasing data yields diminishing returns.
+:::
+
+Scaling laws show that performance improvements follow predictable patterns that change depending on resource availability and exhibit distinct behaviors across different dimensions. Two important types of scaling regimes emerge: **data-driven regimes** that describe how performance changes with dataset size, and **temporal regimes** that describe when in the ML lifecycle we apply additional compute.
+
+#### Data-Limited Scaling Regimes {#sec-vol2-intro-datalimited-scaling-regimes-ba1d}
+
+The relationship between generalization error and dataset size exhibits three distinct regimes. When limited examples are available, high generalization error results from inadequate statistical estimates. As data availability increases, generalization error decreases predictably as a function of dataset size, following a power-law relationship that provides the most practical benefit from data scaling. Eventually, performance reaches saturation, approaching a floor determined by inherent data limitations or model capacity, beyond which additional data yields negligible improvements. @fig-data-scaling-regimes maps these transitions across the three regimes.
+
+::: {#fig-data-scaling-regimes fig-env="figure" fig-pos="htb" fig-alt="Log-scale plot of generalization error versus dataset size with three shaded regions: Small Data, Power-Law, and Irreducible Error. Curve shows transition between regimes."} 
+```{.tikz}
+\scalebox{0.7}{
+\begin{tikzpicture}[line join=round,line cap=round,font=\small\usefont{T1}{phv}{m}{n}]
+\def\hi{5.5}
+\def\wi{11}
+\def\hl{5/7*\hi}
+\draw[thick](0,-1)coordinate(O)--node[below=3pt]{Training Data Set Size (Log-Scale)}(\wi,-1)coordinate(E);
+\draw[thick](0,-1)--node[above=3pt,midway,sloped]{Generalization Error (Log-Scale)}(0,\hi);
+%
+\draw[dashed,violet,thick](0,0)--(\wi,0);
+\draw[dashed,red,thick](0,\hl)--(\wi,\hl);
+%
+\coordinate(A)at(3,-0.7);
+\coordinate(A1)at(3,-1);
+\coordinate(B)at(8,-0.7);
+\coordinate(G1)at($(0,\hl)+(0,-0.1)$);
+\coordinate(G2)at($(\wi,0)+(0,0.1)$);
+\coordinate(GG1)at($(G1)+(1.5,0)$);
+\coordinate(GG2)at($(G2)+(-1.5,0)$);
+
+\path[thick](A)--++(90:\hi)coordinate(LG1);
+\path[thick](B)--++(90:\hi)coordinate(LG2);
+
+\draw[smooth,blue,line width=2pt](G1)--
+node[above=2pt,align=center,text=black,pos=0.98]{Best Guess Error}(GG1)
+ to[out=360,in=180](GG2)--
+node[below=2pt,align=center,text=black,pos=0.1]{Irreducible Error}(G2);
+
+\scoped[on background layer]
+\node[draw=none,inner xsep=0mm,
+line width=0.75pt,inner ysep=0mm,
+fill=magenta!05,fit=(O)(LG1)](BB){};
+\node[above=1pt of BB.north,anchor=south,align=center]{Small Data\ Region};
+%
+\scoped[on background layer]
+\node[draw=none,inner xsep=0mm,
+line width=0.75pt,inner ysep=0mm,
+fill=green!10,fit=(A1)(LG2)](BB1){};
+\node[above=1pt of BB1.north,anchor=south,align=center]{Power-Law\ Region};
+
+\scoped[on background layer]
+\node[draw=none,inner xsep=0mm,
+line width=0.75pt,inner ysep=0mm,
+fill=magenta!05,fit=(LG2)(E)](BB2){};
+\node[above=1pt of BB2.north,anchor=south,align=center]{Irreducible Error\ Region};
+%
+\end{tikzpicture}}
+```
+: **Data Scaling Regimes**: The relationship between dataset size and generalization error follows distinct scaling regimes. Increasing dataset size initially reduces generalization error following a power-law relationship, but eventually plateaus at an irreducible error floor determined by inherent data limitations or model capacity [@hestness2017deep]. This behavior exposes diminishing returns from data scaling and informs practical decisions about data collection efforts in machine learning systems.
+:::
+
+This three-regime pattern manifests across different resource dimensions beyond data alone. Operating within the power-law region provides the most reliable return on resource investment. Reaching this regime requires minimum resource thresholds, while maintaining operation within it demands careful allocation to avoid premature saturation.
+
+#### Temporal Scaling Regimes {#sec-vol2-intro-temporal-scaling-regimes-e118}
+
+The data-driven regimes just described characterize performance across dataset sizes, revealing where scaling becomes inefficient. A complementary perspective asks: when during the ML lifecycle should we invest computational resources? Rather than focusing on how much data, this temporal lens examines whether to invest in pre-training, post-training adaptation, or inference-time computation. Recent research has identified three distinct **temporal scaling regimes** that reveal additional optimization opportunities beyond data scaling alone.
+
+**Pre-training scaling** encompasses the traditional domain of scaling laws, characterizing how model performance improves with larger architectures, expanded datasets, and increased compute during initial training. Extensive study in foundation models has established clear power-law relationships between resources and capabilities.
+
+**Post-training scaling** characterizes improvements achieved after initial training through techniques including fine-tuning, prompt engineering, and task-specific adaptation. This regime has gained prominence with foundation models, where adaptation rather than retraining frequently provides the most efficient path to enhanced performance under moderate resource requirements.
+
+**Test-time scaling** characterizes how performance improvements result from additional compute allocation during inference without modifying model parameters. This encompasses methods including ensemble prediction, chain-of-thought prompting, and iterative refinement, enabling models to allocate additional processing time per input.
+
+These temporal regimes exhibit distinct characteristics in computational resource allocation for performance improvement. @fig-scaling-regimes illustrates how pre-training demands massive resources while providing broad capabilities, post-training offers targeted enhancements under moderate requirements, and test-time scaling enables flexible performance-compute trade-offs adjustable per inference.
+
+::: {#fig-scaling-regimes fig-env="figure" fig-pos="htb" fig-alt="Plot of intelligence versus compute with ascending curve through three labeled phases: pre-training, post-training, and test-time scaling. Dashed lines extend beyond each phase."} 
+```{.tikz}
+\scalebox{0.75}{
+\begin{tikzpicture}[line join=round,line cap=round,font=\small\usefont{T1}{phv}{m}{n},yscale=0.8]
+\tikzset{Line/.style={line width=2.5pt,RedLine},
+LineD/.style={Line,line width=0.75pt,dashed}
+}
+\def\hi{7.5}
+\def\wi{11}
+\draw[thick](0,0)coordinate(O)--node[below=3pt]{Compute}(\wi,0);
+\draw[thick](0,0)--node[above=3pt,midway,sloped]{Intelligence}(0,\hi)coordinate(Y);
+%
+
+\coordinate(O)at(0.03,0.03);
+\coordinate(T1)at(2,0.88);
+\coordinate(T2)at(4.2,3.0);
+\coordinate(T3)at(6,5.2);
+\coordinate(T4)at(7.7,6.35);
+\draw[Line](O)
+ to (T1)
+ to [out=30,in=210](T2)
+ to [out=55,in=220](T3)
+ to [out=40,in=210](T4);
+\draw[Line,-latex](O)--++(23:3.6)node[below right,text=black]{Pre-training scaling};
+\draw[blue,-latex,LineD](O)--++(23:7.0);
+%
+\draw[Line,-latex](T2)--++(27:1.6)node[below right,text=black]{Post-training scaling};
+\draw[-latex,LineD](T2)--++(27:4.0);
+\draw[Line,-latex](T3)to [out=40,in=210]($(T4)+(0.15,0.09)$)
+ node[below right,text=black,align=center]{Test-time scaling\ "long thinking};
+\draw[-latex,LineD](T4)--++(29:2.0);
+\node[below right=of Y,align=center,font=\normalsize\usefont{T1}{phv}{m}{n}]{From one to three \ scaling laws};
+\end{tikzpicture}}
+```
+: **Temporal Scaling Regimes**: Different temporal scaling regimes offer distinct approaches to improving model performance with varying compute investments. Pre-training establishes broad capabilities through large-scale training from scratch, post-training refines existing models through additional training phases, and test-time scaling dynamically allocates compute during inference to enhance per-sample results. Understanding these regimes clarifies the trade-offs between upfront investment and flexible, on-demand resource allocation for optimal system performance.
+:::
+
+Data-driven and temporal scaling regimes inform system design by revealing multiple paths to performance improvement beyond scaling training resources alone. For resource-constrained deployments, post-training and test-time scaling may provide more practical approaches than complete model retraining, while data-efficient techniques enable effective system operation within the power-law regime using smaller datasets.
+
+### Practical Applications in System Design {#sec-vol2-intro-practical-applications-system-design-5c97}
+
+Understanding scaling laws informs practical system design and resource planning. Consistent observation of power-law trends indicates that within well-defined operational regimes, model performance depends predominantly on scale rather than idiosyncratic architectural innovations. However, diminishing returns phenomena indicate that each additional improvement demands exponentially increased resources while delivering progressively smaller benefits.
+
+OpenAI's development of GPT-3 demonstrates this principle. Rather than conducting expensive architecture searches, the authors applied scaling laws derived from earlier experiments to determine optimal training dataset size and model parameter count [@brown2020language]. They scaled an established transformer architecture along the compute-optimal frontier to 175 billion parameters and approximately 300 billion tokens, enabling advance prediction of model performance and resource requirements.
+
+Scaling laws serve multiple practical functions in system design. They enable practitioners to estimate returns on investment for different resource allocations during resource budgeting. Under fixed computational budgets, designers can utilize empirical scaling curves to determine optimal performance improvement strategies across model size, dataset expansion, or training duration.
+
+System designers can utilize scaling trends to identify when architectural changes yield significant improvements relative to gains achieved through scaling alone, thereby avoiding exhaustive architecture search. When a model family exhibits favorable scaling behavior, scaling the existing architecture may prove more effective than transitioning to more complex but unvalidated designs.
+
+In edge and embedded environments with constrained resource budgets, understanding performance degradation under model scaling enables designers to select smaller configurations delivering acceptable accuracy within deployment constraints. By quantifying scale-performance trade-offs, scaling laws identify when brute-force scaling becomes inefficient and indicate the necessity for alternative approaches including model compression, efficient knowledge transfer, sparsity techniques, and hardware-aware design.
+
+Scaling laws also function as diagnostic instruments. Performance plateaus despite increased resources may indicate dimensional saturation—such as inadequate data relative to model size—or inefficient computational resource utilization. This diagnostic capability renders scaling laws both predictive and prescriptive, facilitating systematic bottleneck identification and resolution.
+
+### Sustainability and Cost Implications {#sec-vol2-intro-sustainability-cost-implications-0473}
+
+Scaling laws illuminate pathways to performance enhancement while revealing rapidly escalating resource demands. As models expand, training and deployment resource requirements grow disproportionately, creating tension between performance gains through scaling and system efficiency. 
+
+Training large-scale models necessitates substantial processing power, typically requiring distributed infrastructures[^fn-distributed-infrastructure] comprising hundreds or thousands of accelerators. State-of-the-art language model training may require tens of thousands of GPU-days, consuming millions of kilowatt-hours of electricity. @sec-distributed-training examines how these distributed training systems introduce additional complexity around communication overhead, synchronization, and scaling efficiency.
+
+[^fn-distributed-infrastructure]: **Distributed Infrastructure**: Computing systems spreading ML workloads across machines connected by high-speed networks (InfiniBand 400Gb/s, NVLink 900GB/s). GPT-4 training reportedly used 10,000+ GPUs coordinated across clusters. Communication overhead (AllReduce synchronization) can consume 30-60% of training time, making network topology and parallelism strategy critical design decisions.
+
+Large models require extensive, high-quality, diverse datasets to achieve their full potential. Data collection, cleansing, and labeling processes consume considerable time and resources. As models approach saturation of available high-quality data, particularly in natural language processing, additional performance gains through data scaling become increasingly difficult to achieve. This reality underscores data efficiency as a necessary complement to brute-force scaling approaches.
+
+The financial and environmental implications compound these challenges. Training runs for large foundation models can incur millions of dollars in computational expenses. Associated carbon footprints[^fn-carbon-emissions] have garnered increasing scrutiny. Published estimates suggest that training large language models can emit on the order of $10^2$ to $10^3$ tons of CO$_2$ equivalent, though estimates vary widely with assumptions about hardware, utilization, and electricity mix. These costs limit accessibility to cutting-edge research and exacerbate disparities in access to advanced AI systems.
+
+[^fn-carbon-emissions]: **Carbon Emissions**: ML carbon footprint depends on training duration, hardware efficiency, and grid carbon intensity. GPT-3 training emitted ~552 tons CO₂—equivalent to 120 cars annually. Grid location matters 10$	imes$: training in Quebec (hydropower) vs. Poland (coal) differs dramatically. Tools like CodeCarbon and ML CO2 Impact enable carbon-aware ML development.
+
+While scaling laws provide valuable frameworks for understanding performance growth, they do not constitute unencumbered paths to improvement. Each incremental performance gain demands evaluation against corresponding resource requirements. As systems approach practical scaling limits, emphasis must transition from scaling alone to efficient scaling—a comprehensive approach balancing performance, cost, energy consumption, and environmental impact.
+
+### Scaling Law Breakdown Conditions {#sec-vol2-intro-scaling-law-breakdown-conditions-1f8c}
+
+Scaling laws exhibit remarkable consistency within specific operational regimes but possess inherent limitations. As systems expand, they inevitably encounter boundaries where underlying assumptions of smooth, predictable scaling cease to hold. These breakdown points expose critical inefficiencies and emphasize the necessity for refined system design approaches.
+
+For scaling laws to remain valid, model size, dataset size, and computational budget must be augmented in coordinated fashion. Over-investment in one dimension while maintaining others constant often results in suboptimal outcomes. Increasing model size without expanding training datasets may induce overfitting. Increasing computational resources without model redesign may lead to inefficient utilization [@hoffmann2022training].
+
+Large-scale models require carefully tuned training schedules and learning rates to fully utilize available resources. When compute is insufficiently allocated due to premature stopping, batch size misalignment, or ineffective parallelism, models may fail to reach performance potential despite significant infrastructure investment.
+
+Scaling laws presuppose continued performance improvement with sufficient training data. However, in numerous domains, availability of high-quality, human-annotated data is finite. As models consume increasingly large datasets, they reach points of diminishing marginal utility where additional data contributes minimal new information. Beyond this threshold, larger models may exhibit memorization rather than generalization.
+
+As models grow, they demand greater memory bandwidth[^fn-memory-bandwidth], interconnect capacity, and I/O throughput. These hardware limitations become increasingly challenging even with specialized accelerators. Distributing trillion-parameter models across clusters necessitates meticulous management of data parallelism, communication overhead, and fault tolerance.
+
+[^fn-memory-bandwidth]: **Memory Bandwidth**: The rate at which data can be read from or written to memory, measured in GB/s. In representative systems, datacenter accelerators can provide bandwidth on the order of TB/s, while general-purpose CPU memory subsystems are often on the order of tens to low hundreds of GB/s. This gap is a key reason why large models can be memory-bound.
+
+At extreme scales, models may approach limits of what can be learned from training distributions. Performance on benchmarks may continue improving, but these improvements may no longer reflect meaningful gains in generalization or understanding. Models may become increasingly brittle, susceptible to adversarial examples, or prone to generating plausible but inaccurate outputs.
+
+@tbl-scaling-breakdown categorizes the primary causes of scaling failure, mapping each breakdown type to its underlying cause and providing representative scenarios that guide practitioners in anticipating inefficiencies and designing balanced systems.
+
++------------------------+-------------------------+------------------------------------------------+-----------------------------------------------+ 
+| **Dimension Scaled**   | **Type of Breakdown**   | **Underlying Cause**                           | **Example Scenario**                          | 
++:=======================+:========================+:===============================================+:==============================================+
+| **Model Size**         | Overfitting             | Model capacity exceeds available data          | Billion-parameter model on limited dataset    | 
++------------------------+-------------------------+------------------------------------------------+-----------------------------------------------+ 
+| **Data Volume**        | Diminishing Returns     | Saturation of new or diverse information       | Scaling web text beyond useful threshold      | 
++------------------------+-------------------------+------------------------------------------------+-----------------------------------------------+ 
+| **Compute Budget**     | Underutilized Resources | Insufficient training steps or inefficient use | Large model with truncated training duration  | 
++------------------------+-------------------------+------------------------------------------------+-----------------------------------------------+ 
+| **Imbalanced Scaling** | Inefficiency            | Uncoordinated increase in model/data/compute   | Doubling model size without more data or time | 
++------------------------+-------------------------+------------------------------------------------+-----------------------------------------------+ 
+| **All Dimensions**     | Semantic Saturation     | Exhaustion of learnable patterns in the domain | No further gains despite scaling all inputs   | 
++------------------------+-------------------------+------------------------------------------------+-----------------------------------------------+ 
+
+: **Scaling Breakdown Types**: Unbalanced scaling across model size, data volume, and compute resources leads to specific failure modes, such as overfitting or diminishing returns, impacting system performance and efficiency. The table categorizes these breakdowns, identifies their root causes, and provides representative scenarios to guide more effective system design and resource allocation. {#tbl-scaling-breakdown}
+
+These breakdown points demonstrate that scaling laws describe empirical regularities under specific conditions that become increasingly difficult to maintain at scale. As machine learning systems continue evolving, discerning where and why scaling ceases to be effective becomes necessary, driving development of strategies that enhance performance without relying solely on scale.
+
+### Integrating Efficiency with Scaling {#sec-vol2-intro-integrating-efficiency-scaling-a513}
+
+Scaling laws reveal the walls; efficiency engineering builds the paths around them. Data saturation, infrastructure bottlenecks, and diminishing returns set hard limits on what brute-force scaling can achieve. But these same constraints point toward solutions: if we cannot always add more data, we must extract more value from existing data. If compute becomes the bottleneck, we must use compute more effectively. If larger models become impractical, we must make smaller models smarter.
+
+Three interconnected dimensions address the specific limitations that scaling analysis revealed, working together to achieve what scaling alone cannot. The efficiency framework that structures the remainder of this chapter builds on this insight.
+
+## Real-World Efficiency Strategies {#sec-vol2-intro-realworld-efficiency-strategies-8387}
+
+The scaling constraints identified above manifest differently depending on deployment context. A cloud training cluster faces different bottlenecks than an edge inference device, and the efficiency strategies appropriate for each diverge accordingly. This section examines how algorithmic efficiency (model architecture and complexity), compute efficiency (hardware utilization and throughput), and data efficiency (training data requirements and quality) interact within specific operational environments. @sec-inference-at-scale develops the infrastructure considerations for model serving in these environments, covering latency optimization, batching strategies, and runtime selection.
+
+### Context-Specific Efficiency Requirements {#sec-vol2-intro-contextspecific-efficiency-requirements-47e6}
+
+The specific priorities and trade-offs vary dramatically across deployment environments. As our opening examples illustrated, these range from cloud systems with abundant resources to edge devices with severe memory and power constraints. @tbl-deployment-efficiency-priorities maps each deployment context to its primary constraints, efficiency priorities, and representative applications, providing a systematic framework for matching optimization strategies to operational requirements.
+
++------------------------+--------------------------------------+-------------------------------------------------+---------------------------------------------------------------------+
+| **Deployment Context** | **Primary Constraints**              | **Efficiency Priorities**                       | **Representative Applications**                                     |
++:=======================+:=====================================+:================================================+:====================================================================+
+| **Cloud**              | Cost at scale, energy consumption    | Throughput, scalability, operational efficiency | Large language model APIs, recommendation engines, video processing |
++------------------------+--------------------------------------+-------------------------------------------------+---------------------------------------------------------------------+
+| **Edge**               | Latency, local compute capacity,     | Real-time performance, power efficiency         | Autonomous vehicles, industrial automation, smart cameras           |
+|                        | connectivity                         |                                                 |                                                                     |
++------------------------+--------------------------------------+-------------------------------------------------+---------------------------------------------------------------------+
+| **Mobile**             | Battery life, memory, thermal limits | Energy efficiency, model size, responsiveness   | Voice assistants, photo enhancement, augmented reality              |
++------------------------+--------------------------------------+-------------------------------------------------+---------------------------------------------------------------------+
+| **TinyML**             | Extreme power/memory constraints     | Ultra-low power, minimal model size             | IoT sensors, wearables, environmental monitoring                    |
++------------------------+--------------------------------------+-------------------------------------------------+---------------------------------------------------------------------+
+
+: **Efficiency Optimization Priorities by Deployment Context**: Each environment demands different trade-offs between algorithmic, compute, and data optimization strategies based on unique constraints. Cloud systems prioritize scalability, edge deployments focus on real-time performance, mobile applications balance performance with battery life, and TinyML demands extreme resource efficiency. {#tbl-deployment-efficiency-priorities}
+
+Understanding these context-specific patterns enables designers to make informed decisions about which efficiency dimensions to prioritize and how to address inevitable trade-offs.
+
+### Scalability and Sustainability {#sec-vol2-intro-scalability-sustainability-4d30}
+
+System efficiency serves as a driver of environmental sustainability. When systems are optimized for efficiency, they can be deployed at scale while minimizing environmental footprint. @fig-virtuous-efficiency-cycle illustrates this positive feedback loop. Efficiency enables scalability. Scalability amplifies impact. Sustainable practices reinforce the commitment to efficiency, creating a self-reinforcing cycle that drives long-term system improvement.
+
+::: {#fig-virtuous-efficiency-cycle fig-env="figure" fig-pos="htb" fig-alt="Circular diagram with three nodes labeled Efficiency, Scalability, and Sustainability. Colored arrows in violet, cyan, and orange form continuous clockwise cycle connecting all nodes."} 
+```{.tikz}
+\scalebox{0.7}{
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\def\ra{40mm}
+\draw (90: 0.5*\ra) node[yshift=-2pt](EF){Efficiency};
+\draw (210: 0.5*\ra) node(SC){Scalability};
+\draw (330: 0.5*\ra) node(SU){Sustainability};
+\node[right=of EF]{};
+
+\draw[-{Triangle[width=18pt,length=8pt]}, line width=10pt,violet!60] (340:0.5*\ra)
+arc[radius=0.5*\ra, start angle=-20, end angle= 67];
+
+\draw[-{Triangle[width=18pt,length=8pt]}, line width=10pt,cyan!80!black!90] (113:0.5*\ra)
+arc[radius=0.5*\ra, start angle=113, end angle= 200];
+
+\draw[-{Triangle[width=18pt,length=8pt]}, line width=10pt,orange!70] (220:0.5*\ra)
+arc[radius=0.5*\ra, start angle=220, end angle= 320];
+\end{tikzpicture}}
+```
+: **Efficiency and Sustainability Feedback Loop**: The virtuous cycle connecting efficiency, scalability, and sustainability. Efficient systems require fewer resources per operation, enabling broader deployment (scalability). Scaled deployment amplifies the impact of efficiency gains, making sustainable design economically viable. Each improvement reinforces the others, creating a self-strengthening cycle that drives long-term progress in ML system design.
+:::
+
+Efficient systems are inherently scalable. Reducing resource demands through lightweight models, targeted datasets, and optimized compute utilization allows systems to deploy broadly. When efficient systems scale, they amplify their contribution to sustainability by reducing overall energy consumption and computational waste. Sustainability reinforces the need for efficiency, creating a feedback loop that strengthens the entire system.
+
+## Efficiency Trade-offs and Challenges {#sec-vol2-intro-efficiency-tradeoffs-challenges-946d}
+
+The three efficiency dimensions can work synergistically under favorable conditions, but real-world systems often face scenarios where improving one dimension degrades another. The same resource constraints that make efficiency necessary force difficult choices. Reducing model size may sacrifice accuracy. Optimizing for real-time performance may increase energy consumption. Curating smaller datasets may limit generalization.
+
+### Fundamental Sources of Efficiency Trade-offs {#sec-vol2-intro-fundamental-sources-efficiency-tradeoffs-d16f}
+
+These tensions manifest in various ways across machine learning systems. Understanding their root causes is essential for addressing design challenges. Each efficiency dimension influences the others, creating a dynamic interplay that shapes system performance.
+
+#### Algorithmic Efficiency vs. Compute Requirements {#sec-vol2-intro-algorithmic-efficiency-vs-compute-requirements-83a7}
+
+Algorithmic efficiency focuses on designing compact models that minimize computational and memory demands. By reducing model size or complexity, deployment on resource-limited devices becomes feasible. Overly simplifying a model can reduce accuracy, especially for complex tasks. To compensate for this loss, additional computational resources may be required during training or deployment, placing strain on compute efficiency.
+
+#### Compute Efficiency vs. Real-Time Needs {#sec-vol2-intro-compute-efficiency-vs-realtime-needs-a269}
+
+Compute efficiency aims to minimize resources required for training and inference, reducing energy consumption, processing time, and memory use. In scenarios requiring real-time responsiveness (autonomous vehicles, augmented reality), compute efficiency becomes harder to maintain. Real-time systems often require high-performance hardware to process data instantly, conflicting with energy efficiency goals or increasing system costs. @fig-efficiency-vs-latency quantifies this tension: at 120 km/h, a 100ms processing delay translates to 3.33 meters of uncertainty in vehicle position, directly impacting safety margins and braking distance calculations.
+
+::: {#fig-efficiency-vs-latency fig-env="figure" fig-pos="htb" fig-alt="System diagram with car traveling at 120 km/h, simulator block labeled 100ms latency, and two car positions 3.33m apart showing position uncertainty due to processing delay."} 
+```{.tikz}
+\begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
+\tikzset{% 
+    Line/.style={line width=1.0pt,violet!50,text=black},
+    stop/.style = {regular polygon, regular polygon sides=8,
+      draw=red, double, double distance=1.0mm,  thick,
+      fill=red, font=\usefont{T1}{phv}{m}{n}\Huge\bfseries, text=white,
+      inner sep=0mm},
+    warning/.style = {regular polygon, regular polygon sides=3,line width=1.5pt,
+      draw=red,
+      fill=white, font=\Huge\bfseries, text=black,
+      inner ysep=3pt, node contents={!}},
+ pics/car/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+            \begin{scope}[shift={(0,0)},rotate=0,scale=\scalefac,, every node/.append style={transform shape}]
+                % 
+                \draw[\drawchannelcolor,line width=\Linewidth,x=1mm,y=1mm,yscale=-1,xscale=-1,fill=\channelcolor!50] (59.9429,0.0029) .. controls
+                (58.2798,0.0161) and (56.5224,0.0709) .. (54.6592,0.1699) .. controls (51.8698,0.3182) and (49.2785,0.7036) ..
+                (46.8955,1.2407) .. controls (46.9004,1.2391) and (46.9067,1.2365) .. (46.9116,1.2349) .. controls
+                (35.0588,3.3135) and (25.0020,10.1030) .. (25.0020,10.1030) -- (24.1113,10.1660) .. controls
+                (22.2803,10.1061) and (21.6259,10.2123) .. (17.5122,11.0391) .. controls (15.2265,11.1391) and
+                (13.1653,11.4703) .. (11.3730,11.9180) .. controls (11.2904,11.9383) and (11.2097,11.9609) ..
+                (11.1284,11.9824) .. controls (8.6666,12.6223) and (6.7447,13.4848) .. (5.6074,14.3101) ..
+                controls (2.5699,14.9763) and (0.3984,16.7520) .. (0.3984,16.7520) .. controls (-0.1586,17.2949) and
+                (0.0797,17.2023) .. (0.0044,17.6191) .. controls (-0.0709,18.0360) and (0.7119,21.0322) .. (0.7119,21.0322) ..
+                controls (0.7119,21.0322) and (0.0821,22.9131) .. (0.5215,23.0918) .. controls (0.9609,23.2703) and (1.0903,23.4957) ..
+                (1.4604,24.4233) .. controls (-0.8220,25.6494) and (0.4983,26.3315) .. (1.5059,26.9150) .. controls
+                (2.5136,27.4983) and (5.1650,28.1973) .. (6.5098,27.9229) .. controls (6.4949,27.8726) and
+                (6.4886,27.8209) .. (6.4746,27.7705) -- (8.3862,26.9062) -- (23.4346,26.2646) -- (25.2979,27.3164) ..
+                controls (25.3045,27.3313) and (25.3242,27.3955) .. (25.3242,27.3955) .. controls (25.3242,27.3955)
+                and (25.5918,27.6023) .. (26.2236,27.4849) .. controls (27.8013,27.0856) and (67.5264,26.7188) ..
+                (67.5264,26.7188) .. controls (67.5264,26.7188) and (71.0655,26.7059) .. (72.3955,27.2095) ..
+                controls (72.9263,27.4105) and (73.2239,27.3453) .. (73.4019,27.1245) .. controls (73.7709,27.0085)
+                and (75.1701,26.5817) .. (75.4629,26.5400) .. controls (75.7840,26.4940) and (90.4210,25.8970) ..
+                (90.3750,25.8970) .. controls (90.3293,25.8970) and (92.2559,26.6777) .. (92.2559,26.6777) ..
+                controls (92.2559,26.6777) and (92.3225,26.6082) .. (92.3320,26.5986) .. controls (92.5830,26.6361)
+                and (92.9367,26.6106) .. (93.4336,26.4961) .. controls (95.4068,26.0414) and (96.8291,25.3066) ..
+                (96.8291,25.3066) .. controls (96.8291,25.3066) and (98.1069,23.5919) .. (98.3862,22.9688) ..
+                controls (98.6655,22.3454) and (98.4976,22.1118) .. (98.4976,22.1118) .. controls (98.4976,22.1118)
+                and (98.8375,20.8511) .. (99.2549,19.8252) .. controls (99.6719,18.8000) and (99.6148,18.6385) ..
+                (98.9854,18.0322) .. controls (98.2215,17.0284) and (97.8547,14.8710) .. (98.0010,13.9409) ..
+                controls (98.0616,13.5558) and (98.0431,13.1384) .. (98.0083,12.7661) .. controls (98.0515,11.7298)
+                and (97.7331,10.8516) .. (97.4692,10.3418) .. controls (97.3419,9.9538) and (97.2028,9.5918) ..
+                (97.0620,9.4497) .. controls (96.6727,9.0568) and (97.2353,8.9554) .. (97.7930,8.6543) ..
+                controls (98.3509,8.3530) and (97.8727,8.0535) .. (97.5088,8.0420) .. controls (97.1451,8.0305)
+                and (96.4688,7.9805) .. (96.4688,7.9805) .. controls (95.4388,7.9064) and (92.8843,6.7387) ..
+                (85.3447,4.1309) -- (85.3271,4.1133) .. controls (85.3259,4.1146) and (85.3240,4.1207) ..
+                (85.3228,4.1221) .. controls (85.3044,4.1157) and (85.2943,4.1123) .. (85.2759,4.1060) .. controls
+                (78.6238,1.8073) and (71.5847,-0.0896) .. (59.9429,0.0029) -- cycle;
+% 
+                \draw [\drawchannelcolor,fill=\channelcolor!50!gray,line width=2*\Linewidth] (-2,-2.55) coordinate (w1)  circle (0.8);
+                \draw [\drawchannelcolor,fill=\channelcolor!99!gray,line width=2*\Linewidth] (-2,-2.55) coordinate (w1)  circle (0.25);
+                \draw [\drawchannelcolor,fill=\channelcolor!50!gray,line width=2*\Linewidth] (-8,-2.55) coordinate (w2)  circle (0.8);
+                \draw [\drawchannelcolor,fill=\channelcolor!99!gray,line width=2*\Linewidth] (-8,-2.55) coordinate (w2)  circle (0.25);
+                \draw[\drawchannelcolor,fill=\channelcolor!20,line width=\Linewidth] (-9.8,-0.85) -- (-2.52,-0.99)
+                 to[out=150,in=345](-4.5,-0.16) to[out=170,in=7](-7.5,-0.12)to[out=190,in=17](-9.8,-0.85);
+                \draw[\drawchannelcolor,line width=2*\Linewidth](-5,-0.96)--(-5,-0.1);
+                \draw[\drawchannelcolor,line width=2*\Linewidth](-8,-0.9)--(-8,-0.22);
+            \end{scope}
+   }
+  }
+}
+
+\tikzset{% 
+ pics/danger/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=DANGER1,shift={(0,0)},rotate=0,scale=\scalefac,every node/.append style={transform shape}]
+\node[red]{$\triangle$};
+\node[yshift=0.125ex, scale=0.5]{!};
+\end{scope}
+   }
+  }
+}
+
+\pgfkeys{
+  /channel/.cd,
+  channelcolor/.store in=\channelcolor,
+  drawchannelcolor/.store in=\drawchannelcolor,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  channelcolor=BrownLine,
+  drawchannelcolor=BrownLine,
+  scalefac=1,
+  Linewidth=1.6pt,
+  picname=C
+}
+% #1 number of teeth
+% #2 radius intern
+% #3 radius extern
+% #4 angle from start to end of the first arc
+% #5 angle to decale the second arc from the first
+% #6 inner radius to cut off
+\newcommand{\gear}[6]{%
+  (0:#2)
+  \foreach \i [evaluate=\i as \n using {(\i-1)*360/#1}] in {1,...,#1}{
+    arc (\n:\n+#4:#2) {[rounded corners=1.5pt] -- (\n+#4+#5:#3)
+    arc (\n+#4+#5:\n+360/#1-#5:#3)} --  (\n+360/#1:#2)
+  }
+  (0,0) circle[radius=#6];
+}
+\begin{scope}[local bounding box=CAR1,shift={($(0,0)+(1,1.5)$)},scale=0.8, every node/.append style={transform shape}]
+\pic[shift={(0,0)}] at  (0,0){car={scalefac=0.5,picname=1,Linewidth=0.7pt,
+ channelcolor=BlueLine,drawchannelcolor=black!70}};
+ \end{scope}
+  \node[below=of CAR1]{120 km/h};
+
+\begin{scope}[local bounding box=WAY1,shift={($(CAR1)+(0.5,-0.7)$)},scale=1, every node/.append style={transform shape}]
+\draw[draw=none,fill=brown!60](1.4,0)--(1.9,-0.35)to[out=330,in=30](1.5,-0.8)to[out=210,in=150,distance=9](1.5,-1.3)--(2.3,-1.9)
+to[out=330,in=30,distance=9](2.25,-2.37)--(-0.8,-3.75)--(1.6,-3.75)to[out=10,in=250,distance=5] (3.45,-2.5)
+to[out=55,in=310,distance=9](3.4,-1.9)to[out=140,in=340](2.32,-1.3)to[out=160,in=220](1.92,-0.8)
+to[out=35,in=330](2.1,-0.35)--(1.4,0);
+\draw[white,line width=1.5pt](2.0,-0.35)to[out=330,in=30](1.72,-0.8)
+to[out=210,in=150,distance=9](1.9,-1.3)--(2.9,-1.9)to[out=330,in=30,distance=9](2.7,-2.5)--(0.45,-3.75);
+ \end{scope}
+  \scoped[on background layer]
+\node[draw=BackLine,inner xsep=2mm,inner ysep=5mm,minimum height=64mm,
+yshift=2.5mm,fill=BackColor!30,fit=(CAR1)(WAY1),line width=1pt](BB2){};
+\node[below=4pt of  BB2.north,inner sep=0pt,anchor=north]{\textbf{Driving Simulator}};
+%gears
+\begin{scope}[local bounding box=GEAR,shift={($(BB2)+(8.5,0.55)$)},
+scale=4.5,every node/.append style={transform shape}]
+\colorlet{black}{brown!50!black}
+\fill[draw=none,fill=black,even odd rule,xshift=-2mm]coordinate(GE1)\gear{10}{0.23}{0.28}{10}{2}{0.1};
+\fill[draw=none,fill=black,even odd rule,xshift=1.9mm,yshift=-3.0mm]coordinate(GE2)\gear{10}{0.18}{0.22}{10}{2}{0.08};
+\end{scope}
+   \scoped[on background layer]
+\node[draw=BrownLine,inner xsep=8,inner ysep=8,yshift=1.5mm,
+minimum width=55mm,minimum height=64mm,
+           fill=BrownL!50,fit=(GE1)(GE2),line width=1.0pt](BB1){};
+\node[above=6pt of BB1.south,align=center]{Latency = 100 ms};
+\node[below=2pt of BB1.north,align=center]{\textbf{XYZ Simulator}\ (e.g. GNSS)};
+%%
+\node[below=5pt of BB2.south,align=center](DS){120 km/h = 3.33 m/s\ 1 s: 33.33 m\ 
+\textbf{1 ms: 0.033 m}};
+\node[below=5pt of BB1.south,align=center](DS1){\vphantom{120 km/h = 3.33 m/s}\
+\vphantom{1 s: 33.33 m}\ \textbf{100 ms: 3.33 m}};
+\draw[Line,-latex]([yshift=2mm]DS.south east)--([yshift=2mm]DS1.south west);
+\draw[Line,-latex](BB2)--node[above]{Vehicle}node[below]{Dynamics}(BB1);
+\draw[Line,latex-](BB2.west)--++(-1,0)--++(0,-5)--node[below=2mm,scale=0.23,stop,pos=0.44](STOP){\textbf{STOP}}++(16.5,0)|-
+(BB1.east);
+
+\begin{scope}[local bounding box=DANGER,shift={($(BB2.north)+(0,0.5)$)},scale=0.8, every node/.append style={transform shape}]
+\pic[shift={(0,0)}] at  (0,0){danger={scalefac=4.0,picname=1,Linewidth=0.7pt,
+ channelcolor=BlueLine,drawchannelcolor=black!70}}node[left=6mm,red]{\large Obstacle ahead};
+ \end{scope}
+\node[anchor=west,red] at ($(STOP.east) + (0.2,0)$) {Avoid Collision};
+%%
+\begin{scope}[local bounding box=CAR2,shift={($(BB1.east)+(6,1.5)$)},scale=0.8, every node/.append style={transform shape}]
+\pic[shift={(0,0)}] at  (0,0){car={scalefac=0.5,picname=1,Linewidth=0.7pt,
+ channelcolor=BlueLine,drawchannelcolor=black!70}};
+ \end{scope}
+ \begin{scope}[local bounding box=CAR3,shift={($(CAR2.south)+(4,-3.5)$)},scale=0.8, every node/.append style={transform shape}]
+\pic[shift={(0,0)}] at  (0,0){car={scalefac=0.5,picname=1,Linewidth=0.7pt,
+ channelcolor=BlueLine!30!,drawchannelcolor=black!10}};
+ \end{scope}
+ \node[above=18pt of CAR2,align=center]{Where were you in\ a real life scenario?};
+ \draw[Line,latex-latex](CAR2)--node[left]{Uncertainty = 3.33 m}(CAR3);
+ \node[above=13pt of $(BB2.north east)!0.5!(BB1.north west)$]{\large Why latency matters?};
+\end{tikzpicture}
+```
+: **Real-Time System Constraints**: Latency directly impacts safety in autonomous systems. At 120 km/h (33.3 m/s), a vehicle travels 3.33 meters during 100ms of processing delay, creating position uncertainty that compounds braking distance calculations. This quantifies the tension between compute efficiency (lower power, lower cost) and real-time performance (faster processing, higher power). Safety-critical systems cannot simply optimize for efficiency; they must meet hard latency bounds.
+:::
+
+#### Data Efficiency vs. Model Generalization {#sec-vol2-intro-data-efficiency-vs-model-generalization-044a}
+
+Data efficiency seeks to minimize the amount of data required to train a model without sacrificing performance. By curating smaller, high-quality datasets, training becomes faster and less resource-intensive. Ideally, this reinforces both algorithmic and compute efficiency. However, reducing dataset size can limit diversity, making it harder for models to generalize to unseen scenarios. To address this, additional compute resources or model complexity may be required, creating tension between data efficiency and broader system goals.
+
+### Recurring Trade-off Patterns in Practice {#sec-vol2-intro-recurring-tradeoff-patterns-practice-c205}
+
+The trade-offs between efficiency dimensions become particularly evident when examining specific scenarios. Complex models with millions or billions of parameters can achieve higher accuracy by capturing intricate patterns, but require significant computational power and memory. A recommendation system in a cloud data center might use a highly complex model for better recommendations, but at the cost of higher energy consumption and operating costs. On resource-constrained devices like smartphones or autonomous vehicles, compact models may operate efficiently but require more sophisticated data preprocessing or training procedures to compensate for reduced capacity.
+
+Energy efficiency and real-time performance often pull systems in opposite directions. Real-time systems like autonomous vehicles or augmented reality applications rely on high-performance hardware to process large volumes of data quickly, but this typically increases energy consumption. An autonomous vehicle must process sensor data from cameras, LiDAR, and radar in real time to make navigation decisions, requiring specialized accelerators that consume significant energy. In edge deployments with battery power or limited energy sources, this trade-off becomes even more critical.
+
+Larger datasets generally provide greater diversity and coverage, enabling models to capture subtle patterns and reduce overfitting risk. However, computational and memory demands of training on large datasets can be substantial. In resource-constrained environments like TinyML deployments, an IoT device monitoring environmental conditions might need a model that generalizes well across varying conditions, but collecting extensive datasets may be impractical due to storage and computational limitations. Smaller, carefully curated datasets or synthetic data may be used to reduce computational strain, but this risks missing key edge cases.
+
+These trade-offs are not merely academic concerns but practical realities that shape system design decisions across all deployment contexts.
+
+## Strategic Trade-off Management {#sec-vol2-intro-strategic-tradeoff-management-0ac8}
+
+The trade-offs inherent in machine learning system design require thoughtful strategies. Achieving the right balance involves difficult decisions heavily influenced by specific goals and constraints of the deployment environment. Designers can adopt a range of strategies that address unique requirements of different contexts.
+
+### Environment-Driven Efficiency Priorities {#sec-vol2-intro-environmentdriven-efficiency-priorities-4057}
+
+Efficiency goals are rarely universal. The specific demands of an application or deployment scenario heavily influence which dimension—algorithmic, compute, or data—takes precedence. Prioritizing the right dimensions based on context is the first step in effectively managing trade-offs.
+
+In Mobile ML deployments, battery life is often the primary constraint, placing a premium on compute efficiency. Energy consumption must be minimized to preserve operational time, so lightweight models are prioritized even if it means sacrificing some accuracy or requiring additional data preprocessing.
+
+In Cloud ML systems, scalability and throughput are paramount. These systems must process large volumes of data and serve millions of users simultaneously. While compute resources are more abundant, energy efficiency and operational costs remain important. Algorithmic efficiency plays a critical role in ensuring systems can scale without overwhelming infrastructure.
+
+Edge ML systems present different priorities. Autonomous vehicles or real-time monitoring systems require low-latency processing for safe and reliable operation, making real-time performance and compute efficiency paramount, often at the expense of energy consumption. However, hardware constraints mean these systems must still carefully manage energy and computational resources.
+
+TinyML deployments demand extreme efficiency due to severe hardware and energy limitations. Algorithmic and data efficiency are top priorities, with models highly compact and capable of operating on microcontrollers with minimal memory and compute power, while training relies on small, carefully curated datasets.
+
+### Dynamic Resource Allocation at Inference {#sec-vol2-intro-dynamic-resource-allocation-inference-d6bc}
+
+System adaptability can be enhanced through dynamic resource allocation during inference. This approach recognizes that resource needs may fluctuate even within specific deployment contexts. By adjusting computational effort at inference time, systems can fine-tune performance to meet immediate demands.
+
+For example, a cloud-based video analysis system might process standard streams with a streamlined model to maintain high throughput, but when a critical event is detected, dynamically allocate more resources to a complex model for higher precision. Similarly, mobile voice assistants might use lightweight models for routine commands to conserve battery, but temporarily activate resource-intensive models for complex queries.
+
+Implementing test-time compute introduces new challenges. Dynamic resource allocation requires sophisticated monitoring and control mechanisms. There are diminishing returns—increasing compute beyond certain thresholds may not yield significant performance improvements. The ability to dynamically increase compute can also create disparities in access to high-performance AI, raising equity concerns. Despite these challenges, test-time compute offers a valuable strategy for enhancing system adaptability.
+
+### End-to-End Co-Design and Automated Optimization {#sec-vol2-intro-endtoend-codesign-automated-optimization-1220}
+
+Efficient machine learning systems are rarely the product of isolated optimizations. Achieving balance across efficiency dimensions requires an end-to-end co-design perspective where each system component is designed in tandem with others. This holistic approach aligns model architectures, hardware platforms, and data pipelines to work seamlessly together.
+
+Co-design becomes essential in resource-constrained environments. Models must align precisely with hardware capabilities. 8-bit models require hardware support for efficient integer operations, while pruned models benefit from sparse tensor operations. Edge accelerators often optimize specific operations like convolutions, influencing model architecture choices. @sec-infrastructure develops these hardware architecture considerations comprehensively for distributed systems, including cluster topologies, accelerator selection, and network fabric design.
+
+**Automation and optimization tools** help manage the complexity of these trade-offs. Automated machine learning (AutoML)[^fn-automl] enables exploration of different model architectures and hyperparameter configurations. At production scale, AutoML tools extend to distributed hyperparameter search across GPU clusters, automating many efficiency optimization decisions that traditionally required extensive manual tuning.
+
+[^fn-automl]: **AutoML**: Automated ML pipeline optimization covering feature engineering, model selection, and hyperparameter tuning. Google's AutoML Vision achieved 84.3% ImageNet accuracy vs. experts' 78.5% with minimal manual intervention. Tools like Auto-sklearn, H2O AutoML, and Amazon SageMaker Autopilot democratize ML, though understanding the search space remains crucial for practitioners.
+
+Neural architecture search (NAS)[^fn-nas] takes automation further by designing model architectures tailored to specific hardware or deployment scenarios, evaluating a wide range of architectural possibilities to maximize performance while minimizing computational demands.
+
+[^fn-nas]: **Neural Architecture Search (NAS)**: Automated architecture discovery through reinforcement learning, evolution, or gradient-based methods. Early NAS required 2,000 GPU-days; weight-sharing (DARTS, 2019) reduced this to 1-4 GPU-days. NAS-discovered EfficientNet surpasses hand-designed architectures, demonstrating that search over discrete architecture spaces is tractable and often superior to human expertise.
+
+Data efficiency also benefits from automation. Tools that automate dataset curation, augmentation, and active learning reduce training dataset size without sacrificing performance, prioritizing high-value data points to speed up training and reduce computational overhead [@settles2009active]. Modern ML frameworks incorporate these automation capabilities through built-in distributed data loading, augmentation pipelines, and experiment tracking that scale across cluster deployments.
+
+### Measuring and Monitoring Efficiency Trade-offs {#sec-vol2-intro-measuring-monitoring-efficiency-tradeoffs-fd5b}
+
+Beyond technical automation lies the broader challenge of systematic evaluation. Efficiency optimization necessitates a structured approach assessing trade-offs that extends beyond purely technical considerations. As systems transition from research to production, success criteria must encompass algorithmic performance, economic viability, and operational sustainability.
+
+Costs associated with efficiency improvements manifest across engineering effort (research, experimentation, integration), balanced against ongoing operational expenses of running less efficient systems. Benefits span multiple domains—beyond direct cost reductions, efficient systems often enable qualitatively new capabilities like real-time processing in resource-constrained environments or deployment to edge devices.
+
+This evaluation framework must be complemented by ongoing assessment mechanisms. The dynamic nature of ML systems in production necessitates continuous monitoring of efficiency characteristics. As models evolve, data distributions shift, and infrastructure changes, efficiency properties can degrade. Real-time monitoring enables rapid detection of efficiency regressions, while historical analysis provides insight into longer-term trends, revealing whether efficiency improvements are sustainable under changing conditions.
+
+## Engineering Principles for Efficient AI {#sec-vol2-intro-engineering-principles-efficient-ai-1206}
+
+Designing an efficient machine learning system requires a holistic approach. True efficiency emerges when the entire system is considered as a whole, ensuring trade-offs are balanced across all stages of the ML pipeline from data collection to deployment. This end-to-end perspective transforms system design.
+
+### Holistic Pipeline Optimization {#sec-vol2-intro-holistic-pipeline-optimization-5bcc}
+
+Efficiency is achieved not through isolated optimizations but by considering the entire pipeline as a unified whole. Each stage (data collection, model training, hardware deployment, and inference) contributes to overall system efficiency. Decisions at one stage ripple through the rest, influencing performance, resource use, and scalability.
+
+Data collection and preprocessing are starting points. Data pipeline design decisions cascade through the entire system, from storage architecture through feature engineering to training-serving consistency. At distributed scale, these decisions determine whether data ingestion can keep pace with accelerator throughput. @sec-storage examines how storage hierarchies and data formats must be designed to sustain petabyte-scale datasets. Curating smaller, high-quality datasets can reduce computational costs during training while simplifying model design. However, insufficient data diversity may affect generalization, necessitating compensatory measures.
+
+Model training is another critical stage. Architecture choice, optimization techniques, and hyperparameters must consider deployment hardware constraints. A model designed for high-performance cloud systems may emphasize accuracy and scalability, while models for edge devices must balance accuracy with size and energy efficiency.
+
+Deployment and inference demand precise hardware alignment. Each platform offers distinct capabilities—GPUs excel at parallel matrix operations, TPUs optimize specific neural network computations, and microcontrollers provide energy-efficient processing. A smartphone speech recognition system might leverage an NPU's dedicated convolution units for millisecond-level inference at low power, while an autonomous vehicle's FPGA processes multiple sensor streams with microsecond-level latency.
+
+An end-to-end perspective ensures trade-offs are addressed holistically rather than shifting inefficiencies between pipeline stages. This systems thinking approach becomes particularly critical when deploying to resource-constrained environments, as explored in this chapter.
+
+### Lifecycle and Environment Considerations {#sec-vol2-intro-lifecycle-environment-considerations-3abc}
+
+Efficiency needs differ significantly depending on lifecycle stage and deployment environment, from research prototypes to production systems and from high-performance cloud to resource-constrained edge.
+
+In research, the primary focus is often model performance, with efficiency taking a secondary role. Prototypes are trained using abundant compute resources, enabling exploration of large architectures and extensive hyperparameter tuning. Production systems must prioritize efficiency to operate within practical constraints, often involving significant optimization like model pruning, quantization, or retraining. @sec-ops-scale develops comprehensive production efficiency management strategies for distributed deployments, covering monitoring frameworks, deployment automation, and operational trade-off management at organizational scale.
+
+Cloud-based systems handle massive workloads with relatively abundant resources, though energy efficiency and operational costs remain critical. The infrastructure principles developed throughout this volume provide architectural foundations for building scalable, efficiency-optimized distributed deployments. In contrast, edge and mobile systems operate under strict constraints detailed in our efficiency framework, demanding solutions prioritizing efficiency over raw performance. @sec-edge-intelligence examines how federated learning and edge-cloud coordination address these constraints.
+
+Some systems like recommendation engines require frequent retraining to remain effective, depending heavily on data efficiency with actively labeled datasets and sampling strategies. Other systems like embedded models in medical devices require long-term stability with minimal updates. Reliability requirements in critical applications significantly influence efficiency optimization strategies.
+
+### Optimization Limits {#sec-vol2-intro-optimization-limits-20f0}
+
+The tensions between equity, innovation, and efficiency ultimately stem from a core characteristic of optimization: diminishing returns. Optimization is central to building efficient ML systems but is not infinite. As systems become more refined, each additional improvement requires exponentially more effort, time, or resources while delivering increasingly smaller benefits.
+
+The No Free Lunch (NFL) theorems[^fn-nfl-theorems] for optimization illustrate inherent limitations. According to NFL theorems, no single optimization algorithm can outperform all others across every possible problem, implying optimization technique effectiveness is highly problem-specific [@wolpert1997no].
+
+[^fn-nfl-theorems]: **No Free Lunch (NFL) Theorems**: Mathematical proof by Wolpert and Macready (1997) showing that averaged over all possible optimization problems, every algorithm performs equally well. In ML context, no universal optimization technique exists—methods must be tailored to specific problem domains.
+
+Compressing an ML model can initially reduce memory and compute requirements significantly with minimal accuracy loss. However, as compression progresses, maintaining performance becomes increasingly challenging. Achieving additional gains may necessitate sophisticated techniques like hardware-specific optimizations or extensive retraining, increasing complexity and cost. These costs extend beyond financial investment to include time, expertise, iterative testing, and potential trade-offs in robustness and generalizability.
+
+The NFL theorems highlight that no universal optimization solution exists, emphasizing need to balance efficiency pursuits with practical considerations. Over-optimization risks wasted resources and reduced adaptability, complicating future updates. Identifying when a system is "good enough" ensures resources are allocated effectively.
+
+Similarly, optimizing datasets for training efficiency may initially save resources, but excessively reducing dataset size risks compromising diversity and weakening generalization. Pushing hardware to performance limits may improve metrics like latency, yet associated reliability concerns and engineering costs can outweigh gains.
+
+Understanding optimization limits is essential for creating systems balancing efficiency with practicality and sustainability. This perspective helps avoid over-optimization and ensures resources are invested in areas with meaningful returns.
+
+#### Moore's Law Case Study {#sec-vol2-intro-moores-law-case-study-5767}
+
+One of the most insightful examples of optimization limits appears in Moore's Law and the economic curve underlying it. While Moore's Law is celebrated as a predictor of exponential computational power growth, its success relied on intricate economic balance, one that ultimately collapsed with *the end of Dennard scaling*. The relationship between integration and cost provides a compelling analogy for diminishing returns in ML optimization.
+
+::: {.callout-perspective title="The End of Dennard Scaling"}
+**The Hard Wall**: For decades, Moore's Law worked in tandem with **Dennard Scaling**, which allowed transistor frequency to increase as they got smaller without increasing power density. Around 2005, this "free lunch" ended due to leakage current and thermal limits. Computers could no longer get faster just by making transistors smaller; they had to get more efficient through **parallelism** and **architectural specialization**. This historical pivot in computer architecture is now repeating in AI: we have hit the power wall of brute-force scaling, and the next decade of progress will be defined not by who can build the largest model, but by who can build the most efficient one. Efficiency is no longer an optimization; it is the new scaling law.
+:::
+
+Relative manufacturing cost per component decreases initially as the number of components in an integrated circuit increases. Higher integration reduces need for packaging and interconnects through economies of scale. Moving from hundreds to thousands of components drastically reduced costs and improved performance [@moore2021cramming]. @fig-moores-law-plot reveals the U-shaped cost curve across three eras (1962, 1965, 1970), showing how the inflection point shifted rightward over time as manufacturing technology improved, yet the fundamental pattern of diminishing returns persisted.
+
+::: {#fig-moores-law-plot fig-env="figure" fig-pos="htb" fig-alt="Log-log plot of manufacturing cost versus components per circuit for years 1962, 1965, and 1970. U-shaped curves show optimal integration points shifting rightward over time."} 
+```{.tikz}
+\scalebox{0.8}{
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\begin{loglogaxis}
+[width=84mm,
+tick label style={/pgf/number format/assume math mode=true},
+xlabel=Number of components per integrated circuit,
+ylabel style={font=\footnotesize\usefont{T1}{phv}{m}{n}},
+xlabel style={font=\footnotesize\usefont{T1}{phv}{m}{n}},
+ylabel=Relative manufacturing cost/component,
+tick label style={font=\footnotesize},
+clip=false,
+minor tick style={draw=none},
+major tick style={draw=black},
+xmin=1.0e0,
+xmax=1.0e5,
+ymax=1.0e5,
+ymin=1.0e0,
+]
+\draw[VioletLine,line width=1.5pt,smooth] (axis cs:2.4, 29000)
+to [out=315,in=250,distance=26]node[above=5pt,pos=0.45]{1962}(axis cs:31, 29600);
+%
+\draw[RedLine,line width=1.5pt,smooth] (axis cs:2.4,5800)
+to [out=320,in=255,distance=55]node[above=5pt,pos=0.45]{1965}(axis cs:198, 6700);
+%
+\draw[BlueLine,line width=1.5pt,smooth] (axis cs:2.4,1400)
+to [out=320,in=250,distance=85]node[above=5pt,pos=0.45]{1970}(axis cs:24800.4, 1200);
+\end{loglogaxis}
+\end{tikzpicture}}
+```
+: **Moore's Law Economics**: Declining per-component manufacturing costs initially drove exponential growth in integrated circuit complexity, but diminishing returns eventually limited further cost reductions. This relationship mirrors optimization challenges in machine learning, where increasing model complexity yields diminishing gains in performance relative to computational expense. [@moore2021cramming].
+:::
+
+However, as integration continues, the curve begins to rise. Components packed closer together face reliability issues like increased heat dissipation and signal interference. Addressing these requires more sophisticated manufacturing techniques such as advanced lithography, error correction, and improved materials, increasing complexity and cost. This U-shaped curve captures the fundamental trade-off: early improvements yield substantial benefits, but beyond a certain point, each additional gain comes at greater cost.
+
+The dynamics mirror ML optimization challenges. Compressing a deep learning model to reduce size and energy consumption follows a similar trajectory. Initial optimizations like pruning redundant parameters or reducing precision often lead to significant savings with minimal accuracy impact. However, as compression progresses, performance losses become harder to recover. Techniques like quantization or hardware-specific tuning can restore some performance, but these add complexity and cost.
+
+Similarly, in data efficiency, reducing training dataset size often improves computational efficiency initially. Yet as datasets shrink further, they may lose diversity, compromising generalization. Addressing this often involves synthetic data or sophisticated augmentation, demanding additional engineering effort.
+
+This parallel between semiconductor scaling and ML optimization is more than analogy. The Moore's Law plot serves as a visual reminder that optimization is not infinite. The cost-benefit balance is always context-dependent, and the point of diminishing returns varies based on system goals and constraints. ML practitioners, like semiconductor engineers, must identify when further optimization ceases to provide meaningful benefits. Over-optimization can lead to wasted resources, reduced adaptability, and systems overly specialized to initial conditions.
+
+## Fallacies and Pitfalls {#sec-vol2-intro-fallacies-pitfalls-f804}
+
+Efficiency optimization involves counterintuitive trade-offs where improvements in one dimension degrade others. The mathematical elegance of scaling laws creates false confidence in predictable optimization, while practitioners assume techniques transfer across deployment contexts. These fallacies waste resources on misguided optimizations and lead to production failures when systems encounter real-world constraints.
+
+**Fallacy:** _Efficiency optimizations always improve system performance across all metrics._
+
+Engineers assume efficiency techniques provide universal benefits. In production, each optimization introduces specific trade-offs that constrain other dimensions. INT8 quantization achieves 4$	imes$ memory reduction and 1.5–2$	imes$ inference speedup on GPUs with tensor core support (up to 3–4$	imes$ under optimal conditions), but typically incurs 1–2% accuracy loss. Structured pruning guarantees 2–4$	imes$ speedup on standard hardware but sacrifices 1–3% accuracy. Knowledge distillation enables 2–4$	imes$ compression (DistilBERT achieves 97% of BERT's performance with 40% fewer parameters) but demands expensive teacher model training and careful temperature tuning. A team optimizing mobile inference through aggressive INT4 quantization might achieve 8$	imes$ memory reduction but suffer 5–8% accuracy degradation that renders the model unusable, wasting weeks of optimization effort on a technique inappropriate for their accuracy requirements.
+
+**Pitfall:** _Assuming scaling laws predict efficiency requirements linearly across all model sizes._
+
+Teams extrapolate resource requirements using power-law relationships: $\mathcal{L}(N) = A N^{-\alpha} + B$, where loss decreases predictably with model size. This works within validated ranges but fails at boundaries. @sec-vol2-intro-scaling-law-breakdown-conditions-1f8c identifies breakdowns: data quality degradation when exhausting high-quality sources, architectural saturation where model capacity exceeds task complexity, and hardware constraints where communication overhead dominates computation. A team training 100B-parameter models by extrapolating from 10B-parameter experiments might predict 3$	imes$ improvement but achieve only 1.3$	imes$ due to communication overhead consuming 40% of compute time at that scale. Production systems designed assuming linear scaling have experienced 2–3$	imes$ cost overruns and missed deployment deadlines when empirical performance deviated from power-law predictions beyond validated thresholds.
+
+**Fallacy:** _Edge deployment efficiency requirements are simply scaled-down versions of cloud requirements._
+
+This belief treats edge systems as resource-constrained cloud systems. Edge devices face qualitatively different constraints that necessitate distinct optimization strategies. @sec-vol2-intro-contextspecific-efficiency-requirements-47e6 demonstrates that autonomous vehicles at 120 km/h convert every 100ms processing delay into 3.33 meters of positional uncertainty, directly impacting safety margins. Edge systems operate under 5–15 W power budgets (versus kilowatt-scale cloud deployments), demanding energy-proportional architectures where unused components power down. Thermal constraints limit sustained performance: a smartphone throttles to 60% peak throughput after 30 seconds of intensive inference. A team deploying a cloud-optimized model that achieves 95% accuracy at 50ms latency might find it unusable on edge devices where thermal throttling increases latency to 200ms and drains battery in 45 minutes instead of the 8-hour requirement.
+
+**Pitfall:** _Focusing on algorithmic efficiency while ignoring system-level efficiency factors._
+
+Engineers optimize FLOPs and parameter counts assuming these metrics predict deployment performance. Real efficiency depends on hardware characteristics that algorithmic complexity ignores. INT8 quantization provides 2–4$	imes$ speedup on NVIDIA Turing GPUs with tensor core support but negligible benefit on CPUs lacking integer SIMD instructions. Unstructured pruning achieves 80% sparsity but delivers no speedup on dense hardware, while structured pruning at 50% sparsity guarantees 2$	imes$ speedup. Memory-bound operations see throughput determined by bandwidth (A100: 2 TB/s HBM2e) rather than compute (312 TFLOPS). A model reduced from 10B to 3B parameters (70% FLOPs reduction) might achieve only 20% latency improvement because memory bandwidth bottlenecks dominate and the pruning pattern lacks hardware-friendly structure.
+
+## Why Scale Changes Everything {#sec-vol2-introduction-why-scale-changes}
+
+Scale is not just "more of the same." Systems that work perfectly at modest scale exhibit qualitatively different behaviors at production scale. Understanding scaling laws and efficiency constraints sets the *requirements*. But fulfilling them requires a fundamental shift in architecture. This is why we move from single machines to the Machine Learning Fleet.
+
+### ML Workloads Are Unique
+
+Why do we need specialized infrastructure for machine learning? Why not simply use established distributed systems like Apache Spark or Hadoop? The answer lies in the fundamental characteristics of ML training workloads.
+
+Traditional distributed data processing optimizes for **throughput** on largely independent tasks. A MapReduce job processes terabytes of logs where each record is handled separately. If one node fails, only its task needs re-execution.
+
+Distributed ML training, by contrast, is **iterative, stateful, and tightly coupled**.
+
+*   **Iterative**: The system repeats the same computation (forward/backward pass) millions of times.
+*   **Stateful**: All workers must maintain and synchronize a shared state (the model parameters).
+*   **Tightly Coupled**: Progress is often blocked until *all* workers complete their update.
+
+This unique profile creates different engineering constraints. While a web server optimizes for request latency and a database for transaction consistency, an ML cluster must optimize for **all-to-all bandwidth**. A 10% performance drop on one node doesn't just reduce total throughput by a fraction; in synchronous training, it slows down the entire cluster. This distinct workload profile dictates the design of the specialized "ML Fleets" we examine in Part II.
+
+### Communication Becomes Dominant
+
+At small scale, computation dominates. Training a model on a single GPU spends most time performing matrix multiplications. Communication overhead (moving data between CPU and GPU memory) represents a small fraction of total time.
+
+At large scale, communication often dominates. Distributed training requires synchronizing gradients across workers after each batch. For a model with 175 billion parameters using 32-bit gradients, each synchronization must transfer 700GB of data (175 billion parameters × 4 bytes per parameter). Using the ring all-reduce algorithm[^fn-all-reduce] across 1,000 workers connected by 200 Gb/s InfiniBand (25 GB/s), theoretical completion time for the full synchronization approaches 56 seconds ($2 \times 700 \text{ GB} / 25 \text{ GB/s}$). Practical implementations achieve 60-80% of theoretical bandwidth, making communication consume a significant fraction of total training time even with optimized networks.
+
+[^fn-all-reduce]: **Ring All-Reduce**: An efficient collective communication algorithm for gradient synchronization that achieves near-optimal bandwidth utilization regardless of worker count. For large models, this synchronization can consume a significant fraction of training time. @sec-communication examines AllReduce algorithms and their trade-offs.
+
+This ratio explains why distributed training systems optimize communication aggressively. Gradient compression[^fn-gradient-compression] reduces transfer volume by 10$	imes$ to 100$	imes$ at the cost of some accuracy [@lin2018deep]. Overlapping communication with computation hides transfer latency during the next batch's forward pass. Hierarchical aggregation reduces cross-rack traffic by combining gradients locally first. These optimizations, unnecessary at small scale, become essential at production scale. @sec-communication examines these techniques in depth, developing the quantitative framework for reasoning about when communication becomes the bottleneck and how to address it.
+
+[^fn-gradient-compression]: **Gradient Compression**: Techniques that reduce gradient data volume during distributed training, including sparsification and quantization, achieving 10–100$	imes$ compression with minimal accuracy impact. @sec-communication examines compression algorithms and their trade-offs.
+
+The balance between transfer time and compute time is captured by the *communication-computation ratio*, which we now define formally.
+
+::: {.callout-definition title="Communication-Computation Ratio"}
+***Communication-Computation Ratio*** describes the relative time spent transferring data versus performing computation in distributed systems. A ratio of 1:1 means equal time on each; higher ratios indicate communication-bound workloads. Modern distributed training systems typically achieve ratios between 1:3 and 1:1, making communication optimization critical for efficiency. The ratio depends on model size (larger models have more gradients to synchronize), batch size (larger batches amortize communication over more computation), and network bandwidth (faster networks reduce communication time).
+:::
+
+Communication optimization addresses one scale-induced challenge, but the machines generating and consuming that communication present their own transformation. As systems grow from dozens to thousands of components, the probability model for hardware reliability changes fundamentally.
+
+### Failure Becomes Routine
+
+At small scale, failure is exceptional. A well-maintained server might run for years without hardware issues. Software bugs, once fixed, stay fixed. Administrators can manually investigate and remediate problems.
+
+At large scale, failure becomes statistical certainty. With 10,000 GPUs, multiple failures occur weekly. With 100,000 concurrent user sessions, software edge cases that occur once in a million times happen hundreds of times daily. Manual intervention becomes impossible; systems must self-heal. This transition requires architectural changes from the beginning. Small-scale systems optimize for the common case and handle failures through manual recovery, while large-scale systems embed failure handling into their core design:
+
+- **Checkpointing**[^fn-checkpointing]: Saving model state frequently enough that losing hours of progress is acceptable when failures occur
+- **Redundancy**: Running extra workers that can absorb failed workers' tasks without restart
+- **Isolation**: Containing failures so that one component's crash does not cascade through the system
+- **Detection**: Monitoring that identifies failures within seconds
+- **Recovery**: Automated procedures that restore service without human intervention
+
+@sec-fault-tolerance develops these principles systematically, showing how to design training systems that treat failure as expected rather than exceptional.
+
+[^fn-checkpointing]: **Checkpointing in Distributed Training**: Periodically saving model state to persistent storage, enabling recovery from failures. For frontier models, checkpoints reach terabytes, making checkpoint management a systems challenge. @sec-fault-tolerance examines checkpointing strategies.
+
+### Heterogeneity Emerges
+
+At small scale, systems are homogeneous. A single GPU training job runs on one type of hardware with one software configuration. Behavior is predictable and reproducible.
+
+At large scale, heterogeneity becomes unavoidable. A fleet of 10,000 GPUs contains multiple hardware generations purchased over years. Different racks have different thermal characteristics affecting clock speeds. Software updates roll out gradually, creating version skew. Network paths vary in latency and bandwidth.
+
+This heterogeneity creates engineering challenges absent at small scale. Load balancing must account for hardware capability differences. Gradient aggregation must handle workers completing at different rates. Inference routing must direct requests to servers with appropriate model versions. Testing must verify behavior across configuration variants that grow combinatorially.
+
+Managing heterogeneity is necessary but not sufficient. Even with perfect load balancing and configuration management, a deeper challenge remains: distribution itself introduces fundamental constraints from the physics of information transfer. These constraints exist regardless of scale, though they become inescapable as systems grow beyond single machines.
+
+## Why Distribution is Hard {#sec-vol2-introduction-why-distribution-hard}
+
+Scale forces distribution: no single machine provides the thousands of GPUs that frontier training requires, no single datacenter serves global user bases with acceptable latency, and no centralized system can collect the distributed data that edge devices generate. Coordinating computation across physically separated machines connected by finite-bandwidth, non-zero-latency networks creates constraints that no amount of engineering can eliminate. These constraints manifest in three forms: the impossibility theorems that bound what distributed systems can guarantee, the coordination overhead that taxes every synchronization point, and the amplified complexity when distribution extends beyond the datacenter to edge devices.
+
+### The CAP Theorem Reality
+
+The CAP theorem[^fn-cap-theorem] establishes that distributed systems can provide at most two of three properties: consistency (all nodes see the same data), availability (every request receives a response), and partition tolerance (the system continues operating despite network failures). Since network partitions can always occur, practical systems must choose between consistency and availability during partitions.
+
+[^fn-cap-theorem]: **CAP Theorem**: Proven by Eric Brewer and formalized by Gilbert and Lynch [@gilbert2002brewer], the CAP theorem states that a distributed data store cannot simultaneously provide more than two of Consistency (every read receives the most recent write), Availability (every request receives a non-error response), and Partition tolerance (the system continues operating despite network partitions). Since partitions are unavoidable in distributed systems, the practical choice is between CP (consistent but potentially unavailable during partitions) and AP (available but potentially inconsistent). Distributed ML systems make different choices. Synchronous training is CP (training halts during partitions to maintain model consistency), while asynchronous training is AP (training continues with potentially stale gradients). Understanding this trade-off informs architecture decisions throughout distributed ML systems.
+
+Distributed ML systems make different CAP trade-offs depending on their requirements. Synchronous distributed training chooses consistency: all workers see the same model state, but training halts if any worker becomes unreachable. Asynchronous training chooses availability: training continues even with stragglers or failures, but workers may operate on slightly stale model versions [@dean2012large]. Federated learning often chooses availability with eventual consistency: edge devices train locally and periodically synchronize, accepting temporary inconsistency for continuous operation.
+
+### Coordination Overhead
+
+Beyond the impossibility theorems, distributed systems pay a practical tax on every operation that demands agreement across machines. Every synchronization point introduces latency. Every consensus protocol necessitates network round-trips. Every distributed lock limits parallelism.
+
+Consider the overhead of distributed training synchronization. Each training iteration requires:
+
+1. Forward pass computation (parallelizable)
+2. Loss computation (local to each worker)
+3. Backward pass computation (parallelizable)
+4. Gradient aggregation (requires network communication)
+5. Parameter update (can parallelize with next iteration)
+
+Steps 1-3 and 5 parallelize efficiently. Step 4, gradient aggregation, requires global coordination. Even with optimized AllReduce algorithms and high-bandwidth networks, this coordination can consume a substantial fraction of total training time for large models [@shoeybi2019megatron]. This overhead is fundamental: no algorithm can aggregate globally distributed values without communication proportional to the data volume.
+
+### Edge Distribution Complexity
+
+The coordination challenges discussed so far assume datacenter distribution, where all machines run in managed facilities with reliable power, cooling, and networking. Administrators can access any machine for diagnosis and repair. These assumptions fail entirely when distribution extends to edge devices.
+
+Edge distribution amplifies every challenge. Billions of smartphones, IoT devices, and embedded systems operate in uncontrolled environments with unreliable connectivity, limited power, and heterogeneous capabilities. Google's Gboard keyboard runs on over 1 billion Android devices, each potentially participating in federated learning[^fn-federated-learning] to improve predictions [@hard2018federated]. This deployment context introduces unique constraints:
+
+[^fn-federated-learning]: **Federated Learning**: A distributed machine learning approach where models train across many decentralized devices holding local data samples, without exchanging the raw data. Instead of collecting user data to a central server, federated learning sends the model to devices, trains locally, and aggregates only the model updates (gradients or weight differences). This preserves data privacy while enabling learning from distributed sources. Challenges include handling heterogeneous device capabilities, intermittent connectivity, and ensuring convergence despite non-uniform data distributions. Federated learning is covered in detail in @sec-edge-intelligence.
+
+- **Intermittent connectivity**: Devices may be reachable only when on WiFi and charging
+- **Heterogeneous hardware**: Model must run efficiently across devices spanning a 100$	imes$ performance range
+- **Privacy requirements**: Raw data cannot leave devices, requiring on-device processing
+- **Update complexity**: Pushing model updates to billions of devices takes weeks
+- **Monitoring limitations**: Cannot install arbitrary diagnostics on user devices
+
+These constraints require architectural approaches that differ from datacenter ML in essential ways. Federated learning aggregates model updates without collecting data. On-device inference optimizes for varied hardware capabilities. Differential privacy[^fn-differential-privacy] (which adds calibrated noise to protect individual data points while preserving aggregate statistical properties) provides mathematical guarantees about information leakage [@dwork2014algorithmic]. These techniques become essential for edge deployment.
+
+Distribution multiplies engineering complexity. When ML systems operate at the scale of billions of users across distributed infrastructure, their impact on society demands consideration beyond engineering excellence.
+
+[^fn-differential-privacy]: **Differential Privacy**: A mathematical framework providing provable privacy guarantees by ensuring query results are nearly identical whether or not any individual's data is included. @sec-security-privacy examines differential privacy implementation and trade-offs.
+
+## Why Governance Matters at Scale {#sec-vol2-introduction-why-governance-matters}
+
+Scale and distribution do not just create engineering challenges; they amplify impact. Systems serving billions of users at millisecond latencies affect society in ways that demand governance beyond technical excellence. A bug in a small system affects few users; a bug in a system serving billions affects society. This amplification creates governance requirements that small-scale systems can ignore.
+
+### Security Threats Intensify
+
+ML systems face unique security threats beyond traditional software vulnerabilities[^fn-ml-security-threats]. Model extraction attacks can steal proprietary models through query access. Researchers demonstrated extracting functionally equivalent copies of production ML models using only API access [@tramer2016stealing]. Membership inference attacks can determine whether specific data was used in training, creating privacy violations from seemingly innocuous model access [@shokri2017membership]. Adversarial examples can cause misclassification with perturbations imperceptible to humans, demonstrated against production systems including Tesla Autopilot and content moderation systems [@goodfellow2014explaining].
+
+[^fn-ml-security-threats]: **ML-Specific Security Threats**: Traditional software security focuses on preventing unauthorized code execution and data access. ML systems face additional threats that exploit the learned behavior of models. Data poisoning attacks inject malicious training examples that cause targeted misbehavior. Researchers demonstrated that controlling 0.1% of training data can implant backdoors that cause misclassification on specific inputs. Model inversion attacks reconstruct training data from model access. Facial recognition models can leak enough information to reconstruct recognizable images of training individuals. Adversarial reprogramming hijacks models to perform unintended tasks through specially crafted inputs. These threats require defenses beyond traditional security including differential privacy, certified robustness, and continuous monitoring of model behavior in production.
+
+At production scale, these threats become economically attractive to attackers. A model serving millions of users represents substantial intellectual property worth stealing. A model making consequential decisions (loans, hiring, content moderation) offers high-value manipulation targets. A model processing sensitive data (health records, financial information) provides valuable inference targets.
+
+Defending against these threats demands systematic approaches including access controls that limit query rates and patterns, output perturbation that provides differential privacy guarantees, adversarial training that improves robustness to perturbations, and monitoring that detects anomalous query patterns indicative of attacks. These defenses impose overhead unnecessary for small-scale systems but essential for production deployment.
+
+### Regulatory Requirements Emerge
+
+Systems operating at scale attract regulatory attention. The European Union's General Data Protection Regulation (GDPR) imposes obligations for systems processing EU residents' data, including the right to explanation for automated decisions [@gdpr2016]. The EU AI Act establishes risk-based requirements for AI systems, with high-risk applications (healthcare, employment, law enforcement) requiring conformity assessments, human oversight, and accuracy documentation [@euaiact2024]. Similar regulations exist or are developing in jurisdictions worldwide.
+
+Meeting these regulatory requirements demands technical capabilities:
+
+- **Audit trails**: Recording inputs, outputs, and model versions for every decision
+- **Explanation generation**: Producing human-interpretable justifications for model outputs
+- **Consent management**: Tracking and honoring user preferences for data usage
+- **Data deletion**: Removing specific users' data from training sets and retraining affected models
+- **Bias testing**: Evaluating model performance across protected demographic groups
+
+These capabilities impose engineering costs absent for unregulated systems but mandatory for production deployment in regulated contexts. Regulatory compliance represents only one dimension of governance; the broader question concerns how systems affecting billions of lives should be built and operated.
+
+### Societal Impact Demands Responsibility
+
+Beyond legal compliance, systems affecting billions of users carry ethical obligations. Recommendation algorithms shape public discourse. Researchers have documented how engagement-optimizing systems can amplify misinformation and polarization [@ribeiro2020auditing]. Hiring algorithms affect employment opportunities. Amazon discontinued an AI recruiting tool that exhibited bias against women [@dastin2018amazon]. Content moderation systems determine what speech is visible. Errors can suppress legitimate expression or fail to remove harmful content. Responsible engineering practices must address these impacts:
+
+- **Fairness evaluation**: Testing for disparate impact across demographic groups before deployment
+- **Impact assessment**: Analyzing potential harms before launching new capabilities
+- **Human oversight**: Maintaining human review for high-stakes decisions
+- **Incident response**: Processes for rapidly addressing identified harms
+- **Transparency**: Documentation of system capabilities, limitations, and decision factors
+
+These obligations converge under the umbrella of *Responsible AI*, which we define as follows.
+
+::: {.callout-definition title="Responsible AI"}
+***Responsible AI*** encompasses the practices, frameworks, and technical approaches that ensure ML systems operate in ways that are fair, transparent, accountable, and beneficial to society. Responsible AI addresses the ethical implications of automated decision making, the potential for algorithmic bias, the environmental impact of large-scale computation, and the governance structures needed to maintain human oversight over consequential systems. Unlike traditional software quality assurance focused on correctness and performance, responsible AI evaluates systems against societal values and human rights considerations.
+:::
+
+Governance challenges cannot be addressed in isolation from the infrastructure and distribution decisions that precede them. A security vulnerability in gradient aggregation affects both training efficiency and model confidentiality. A storage architecture decision shapes both compliance capabilities and inference latency. The communication bottlenecks that dominate large-scale training also determine what audit logging is feasible without degrading throughput. Scale, distribution, and governance form an integrated system where decisions in one domain cascade through others.
+
+## Foundational Concepts {#sec-vol2-introduction-foundational-concepts}
+
+To reason systematically about these interconnections, we need organizing frameworks that operate at different levels of analysis. The AI Triad reveals component interdependencies at the system level. The Five-Pillar Framework organizes the engineering discipline itself, distinguishing data engineering from model development from deployment infrastructure. The Six Principles guide individual design decisions. Together, these frameworks provide a multi-scale lens: system-level for understanding trade-offs, discipline-level for organizing expertise, and decision-level for guiding implementation choices.
+
+@fig-systems-sandwich organizes the complexity of Volume II into **The Systems Sandwich**, a three-layer framework where engineering decisions at the bottom constrain possibilities at the top.
+
+::: {#fig-systems-sandwich fig-env="figure" fig-pos="htb" fig-cap="**The Systems Sandwich**. The organizing framework for Volume II. We build from the **Physical Layer** (constraints of atoms and energy) up to the **Operational Layer** (distributed logic and algorithms) and finally to the **Societal Layer** (human impact and governance). Engineering decisions at the bottom constrain possibilities at the top." fig-alt="Three-layer stack diagram. Bottom: Physical Layer with silicon, power, cooling. Middle: Operational Layer with algorithms and communication. Top: Societal Layer with safety and regulation. Arrow shows constraints flowing upward."} 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
   \tikzset{
@@ -224,11 +1119,215 @@ Examine @tbl-vol2-structure for the complete five-part organization, which maps 
   \definecolor{P5Color}{RGB}{255, 230, 230} % Light Red
 
   % Nodes
-  \node[part, fill=P1Color] (p1) at (0, 0) {Part I: Foundations of Scale\\Algorithms \& Logic};
-  \node[part, fill=P2Color, below=1cm of p1] (p2) {Part II: Building the ML Fleet\\Hardware \& Infrastructure};
-  \node[part, fill=P3Color, below=1cm of p2] (p3) {Part III: Deployment\\Serving at Scale};
-  \node[part, fill=P4Color, below=1cm of p3] (p4) {Part IV: Production Concerns\\Security, Robustness, Sustainability};
-  \node[part, fill=P5Color, below=1cm of p4] (p5) {Part V: Responsible AI\\Governance \& Society};
+  \node[part, fill=P1Color] (p1) at (0, 0) {Part I: Foundations of Scale\Algorithms \& Logic};
+  \node[part, fill=P2Color, below=1cm of p1] (p2) {Part II: Building the ML Fleet\Hardware \& Infrastructure};
+  \node[part, fill=P3Color, below=1cm of p2] (p3) {Part III: Deployment\Serving at Scale};
+  \node[part, fill=P4Color, below=1cm of p3] (p4) {Part IV: Production Concerns\Security, Robustness, Sustainability};
+  \node[part, fill=P5Color, below=1cm of p4] (p5) {Part V: Responsible AI\Governance \& Society};
+
+  % Arrows
+  \draw[arrow] (p1) -- node[right, label] {Enables} (p2);
+  \draw[arrow] (p2) -- node[right, label] {Produces Models For} (p3);
+  \draw[arrow] (p3) -- node[right, label] {Requires} (p4);
+  \draw[arrow] (p4) -- node[right, label] {Demands} (p5);
+
+  % Optional: Side brackets or flow indicators if needed, but simple vertical flow is clear.
+
+\end{tikzpicture}
+```
+:::
+
+1.  **The Physical Layer (The Warehouse-Scale Computer)**: This is the foundation. It deals with the hard constraints of physics—power density, cooling, interconnect bandwidth, and silicon limits. This is where we build the "Machine Learning Fleet."
+
+2.  **The Operational Layer (Distribution)**: This is the logic of scale. It covers how we distribute training (algorithms), serve predictions (inference), and manage state across thousands of unreliable nodes. This bridges the physical hardware with the software application.
+
+3.  **The Societal Layer (The Control Plane)**: This is the objective function of the system. It ensures the system operates safely, legally, and ethically. It includes security, privacy, and responsible AI as stability constraints.
+
+This layered progression structures the textbook's five Parts, each corresponding to a different tier of the system stack, as @fig-vol2-roadmap illustrates.
+
+**The AI Triad** provides the organizing framework for understanding ML systems. Every machine learning system comprises three interdependent components: data that guides behavior, algorithms that learn patterns, and computational infrastructure that enables both training and inference. These components exist in dynamic tension. Larger models require more data and compute. Larger datasets enable more sophisticated models but demand storage and processing infrastructure.
+
+At production scale, these interdependencies intensify. The 10^25^ FLOPS required for GPT-4 training demanded infrastructure architecture that enabled efficient gradient synchronization across 25,000 GPUs. The terabytes of training data required distributed storage systems with access patterns optimized for ML workloads. The 175 billion parameters required partitioning strategies that balance computation against communication overhead. Understanding these interdependencies helps you predict when a change to one Triad component will cascade through the others.
+
+@fig-vol2-ai-triad visualizes these dependencies between data, algorithms, and infrastructure, revealing the optimization landscape that ML systems engineers must address.
+
+::: {#fig-vol2-ai-triad fig-env="figure" fig-pos="htb" fig-cap="**The AI Triad at Scale**: The three interdependent components of every ML system. At production scale, each component's requirements intensify: data pipelines must handle petabytes with consistent quality; algorithms demand 10^25^ FLOPS for frontier training; and infrastructure must coordinate thousands of accelerators while maintaining fault tolerance. Changes to any vertex cascade through the others, creating the multi-dimensional optimization challenge that defines ML systems engineering." fig-alt="Triangle diagram with three circles at vertices labeled Algorithm, Data, and Infrastructure. Double-headed purple arrows connect all three nodes, showing bidirectional dependencies with scale annotations."}
+```{.tikz}
+\scalebox{0.8}{
+\begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
+\tikzset{
+ Line/.style={line width=0.35pt,black!50,text=black},
+ ALineA/.style={violet!80!black!50,line width=3pt,shorten <=2pt,shorten >=2pt,
+  {Triangle[width=1.1*6pt,length=0.8*6pt]}-{Triangle[width=1.1*6pt,length=0.8*6pt]}},
+LineD/.style={line width=0.75pt,black!50,text=black,dashed,dash pattern=on 5pt off 3pt},
+Circle/.style={inner xsep=2pt,
+  circle,
+    draw=BrownLine,
+    line width=0.75pt,
+    fill=BrownL!40,
+    minimum size=20mm
+  },
+ circles/.pic={
+\pgfkeys{/channel/.cd, #1}
+\node[circle,draw=\channelcolor,line width=\Linewidth,fill=\channelcolor!10,
+minimum size=2.5mm](\picname){};
+        }
+}
+\pgfkeys{
+  /channel/.cd,
+  channelcolor/.store in=\channelcolor,
+  drawchannelcolor/.store in=\drawchannelcolor,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  channelcolor=BrownLine,
+  drawchannelcolor=BrownLine,
+  scalefac=1,
+  Linewidth=0.5pt,
+  picname=C
+}
+% Main nodes - triangle layout
+\node[Circle](AL){};
+\node[Circle,below left=1.2 and 2.8 of AL,draw=GreenLine,fill=GreenL!40](IN){};
+\node[Circle,below right=1.2 and 2.8 of AL,draw=OrangeLine,fill=OrangeL!40](DA){};
+
+% Bidirectional arrows
+\draw[ALineA](AL)--(IN);
+\draw[ALineA](AL)--(DA);
+\draw[ALineA](DA)--(IN);
+
+% Labels
+\node[below=2pt of AL]{\textbf{Algorithm}};
+\node[below=2pt of IN]{\textbf{Infrastructure}};
+\node[below=2pt of DA]{\textbf{Data}};
+
+% Scale annotations (positioned along arrows)
+\node[font=\fontsize{7pt}{7}\selectfont,rotate=30,above left=0.3 and 0.3 of AL,anchor=south east,text=black!70]{10\textsuperscript{25} FLOPS};
+\node[font=\fontsize{7pt}{7}\selectfont,rotate=-30,above right=0.3 and 0.3 of AL,anchor=south west,text=black!70]{Petabytes};
+\node[font=\fontsize{7pt}{7}\selectfont,below=0.8 of $(IN)!0.5!(DA)$,text=black!70]{25,000 GPUs};
+
+% Inner icons - neural network pattern for Algorithm
+\begin{scope}[local bounding box=CIRCLE1,shift={($(AL)+(0.04,-0.24)$)},
+scale=0.55, every node/.append style={transform shape}]
+\foreach \j in {1,2,3} {
+  \pgfmathsetmacro{\y}{(1.5-\j)*0.43 + 0.7}
+  \pic at (-0.8,\y) {circles={channelcolor=RedLine,picname=1CD\j}};
+}
+\foreach \i in {1,...,4} {
+  \pgfmathsetmacro{\y}{(2-\i)*0.43+0.7}
+  \pic at (0,\y) {circles={channelcolor=RedLine, picname=2CD\i}};
+}
+\foreach \j in {1,2} {
+  \pgfmathsetmacro{\y}{(1-\j)*0.43 + 0.7}
+  \pic at (0.8,\y) {circles={channelcolor=RedLine,picname=3CD\j}};
+}
+\foreach \i in {1,2,3}{
+  \foreach \j in {1,2,3,4}{
+\draw[Line](1CD\i)--(2CD\j);
+}}
+\foreach \i in {1,2,3,4}{
+  \foreach \j in {1,2}{
+\draw[Line](2CD\i)--(3CD\j);
+}}
+\end{scope}
+
+% Inner icon for Infrastructure - server rack pattern
+\begin{scope}[shift={($(IN)+(-0.15,-0.1)$)},scale=0.3]
+\draw[GreenLine,fill=GreenL!20,line width=0.5pt,rounded corners=1pt] (-0.8,-0.8) rectangle (0.8,0.8);
+\foreach \y in {-0.4,0,0.4} {
+  \draw[GreenLine,fill=white,line width=0.4pt] (-0.6,\y-0.12) rectangle (0.6,\y+0.12);
+  \fill[GreenLine] (-0.4,\y) circle (0.06);
+  \fill[GreenLine] (0.4,\y) circle (0.06);
+}
+\end{scope}
+
+% Inner icon for Data - cylinder/database pattern  
+\begin{scope}[shift={($(DA)+(0,-0.15)$)},scale=0.25]
+\draw[OrangeLine,fill=OrangeL!30,line width=0.5pt] (0,0.6) ellipse (0.7 and 0.2);
+\draw[OrangeLine,fill=OrangeL!20,line width=0.5pt] (-0.7,0.6) -- (-0.7,-0.2) arc (180:360:0.7 and 0.2) -- (0.7,0.6);
+\draw[OrangeLine,fill=OrangeL!10,line width=0.5pt] (0,-0.2) ellipse (0.7 and 0.2);
+\draw[OrangeLine,fill=OrangeL!30,line width=0.5pt] (0,-0.6) ellipse (0.5 and 0.15);
+\draw[OrangeLine,fill=OrangeL!20,line width=0.5pt] (-0.5,-0.6) -- (-0.5,-1.2) arc (180:360:0.5 and 0.15) -- (0.5,-0.6);
+\end{scope}
+
+\end{tikzpicture}}
+```
+::: 
+
+**The Five-Pillar Framework** structures the ML systems engineering discipline into interconnected domains: data engineering establishes pipelines for collecting, processing, and serving training and inference data; model development encompasses architecture design, training procedures, and validation methodologies; optimization techniques compress and accelerate models for deployment constraints; deployment infrastructure spans cloud platforms, edge devices, and embedded systems; and operations practices ensure systems remain reliable, secure, and effective throughout their lifecycle. This textbook extends each pillar to production scale, where the engineering challenges multiply.
+
+**The Six Systems Engineering Principles** provide guidance for design decisions across all five pillars:
+
+1. *Measure Everything*: At scale, measurement itself becomes a systems challenge requiring distributed monitoring infrastructure
+2. *Design for 10$	imes$ Scale*: Production deployment reveals whether 10$	imes$ design was adequate or optimistic
+3. *Optimize the Bottleneck*: Scale shifts bottlenecks from compute to communication to coordination
+4. *Plan for Failure*: At scale, failure is not exceptional but routine
+5. *Design Cost-Consciously*: Scale makes efficiency improvements worth millions of dollars
+6. *Co-Design for Hardware*: Distributed hardware introduces network topology and storage hierarchy as co-design considerations
+
+These frameworks assume familiarity with single-machine ML systems: how models are trained, optimized, and deployed on individual devices. This textbook teaches you to scale, distribute, and govern them across distributed infrastructure.
+
+## Three Systems Archetypes {#sec-vol2-introduction-archetypes}
+
+To bridge abstract principles and concrete engineering, this textbook employs a longitudinal narrative strategy. Rather than using isolated examples in each chapter, we trace the engineering evolution of three distinct system archetypes. These archetypes represent the fundamental constraint regimes of modern ML systems: throughput-bound, latency-bound, and power/privacy-bound. By revisiting these same three systems across different chapters, you will see how the physics of distribution manifests differently depending on the primary constraint.
+
+### Archetype A: The Scaled Lighthouse (GPT-4 / Llama-3)
+*   **The System**: A generative foundation model (like GPT-4 or Gemini) trained on internet-scale text and served via API.
+*   **The Constraint**: **Throughput**. Training requires ExaFLOPS of compute; serving requires massive memory bandwidth.
+*   **Key Challenges**:
+    *   *Distributed Training*: Requires 3D parallelism (Data + Tensor + Pipeline) to fit in memory and scale to thousands of GPUs.
+    *   *Infrastructure*: Demands high-bandwidth interconnects (InfiniBand/NVLink) and burst-buffer storage for checkpointing.
+    *   *Ops*: Failures are catastrophic to training progress; checkpoint/restore is the critical loop.
+    *   *Sustainability*: Energy consumption per training run is the dominant metric.
+
+### Archetype B: The Scaled Lighthouse (DLRM at Scale)
+*   **The System**: A personalized feed (like TikTok or Instagram) serving billions of users with sub-second freshness.
+*   **The Constraint**: **Latency & Volume**. Must process millions of queries per second (QPS) with <100ms tail latency.
+*   **Key Challenges**:
+    *   *Inference*: Throughput is high, but latency budget is strict. Requires sophisticated batching and caching.
+    *   *Data*: Feature stores must handle massive read rates with point-in-time correctness.
+    *   *Ops*: A/B testing and continuous deployment are constant; "model staleness" allows for rapid performance degradation.
+    *   *Distribution*: Embedding tables (10TB+) exceed single-machine memory, requiring specialized parameter servers or embedding sharding.
+
+### Archetype C: The Scaled Lighthouse (Federated MobileNet)
+*   **The System**: A fleet of wearable devices detecting cardiac anomalies locally, using federated learning for improvement.
+*   **The Constraint**: **Power & Privacy**. Compute budget is milliwatts; raw data cannot leave the device.
+*   **Key Challenges**:
+    *   *Edge Intelligence*: Models must be aggressively quantized (int8/int4) to fit on microcontrollers.
+    *   *Training*: Federated Learning coordinates updates across millions of unreliable devices without centralizing data.
+    *   *Communication*: Bandwidth is scarce and intermittent.
+    *   *Privacy*: Differential privacy is not optional; it is a core requirement for regulatory compliance.
+
+Throughout this volume, we use Archetype A to explain distributed training protocols, Archetype B to derive inference load-balancing theorems, and Archetype C to motivate edge security architectures. This approach ensures that you understand not just how a technique works, but why it is the right choice for a specific set of constraints.
+
+## The Structure of This Textbook {#sec-vol2-introduction-structure}
+
+This textbook organizes around the three imperatives, progressing from algorithmic foundations through physical infrastructure to governance practices. We adopt this "Logic First" pedagogical approach because the communication patterns and synchronization requirements of distributed algorithms (Part I) fundamentally determine the design constraints of the physical supercomputers (Part II) required to run them. One cannot effectively architect a datacenter without understanding the traffic patterns of the workloads it must support.
+
+Examine @tbl-vol2-structure for the complete five-part organization, which maps the progression from foundational algorithms to societal governance.
+
+::: {#fig-vol2-roadmap fig-env="figure" fig-pos="htb" fig-cap="**Volume 2 Roadmap**. The textbook structure follows the system lifecycle. **Part I** establishes the mathematical and physical foundations of scale. **Part II** applies these to build the distributed training \"fleet\". **Part III** covers the deployment of trained models to global users. **Part IV** addresses the operational hardening required for production. **Part V** elevates to the governance layer, ensuring systems are responsible and beneficial." fig-alt="Vertical flowchart with five stacked boxes: Part I Foundations, Part II Distributed Training, Part III Deployment, Part IV Production Concerns, Part V Responsible AI. Arrows connect parts sequentially."} 
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
+  \tikzset{
+    part/.style={draw, rounded corners=3pt, minimum width=6cm, minimum height=1.2cm, align=center, font=\bfseries, thick},
+    arrow/.style={->, >=stealth, thick, gray!80},
+    label/.style={font=\scriptsize\itshape, text=gray}
+  }
+
+  % Colors for Parts (Subtle Gold/Blue/Green scheme)
+  \definecolor{P1Color}{RGB}{230, 230, 250} % Lavender
+  \definecolor{P2Color}{RGB}{220, 240, 255} % Light Blue
+  \definecolor{P3Color}{RGB}{220, 255, 230} % Light Green
+  \definecolor{P4Color}{RGB}{255, 245, 220} % Light Orange/Yellow
+  \definecolor{P5Color}{RGB}{255, 230, 230} % Light Red
+
+  % Nodes
+  \node[part, fill=P1Color] (p1) at (0, 0) {Part I: Foundations of Scale\Algorithms \& Logic};
+  \node[part, fill=P2Color, below=1cm of p1] (p2) {Part II: Building the ML Fleet\Hardware \& Infrastructure};
+  \node[part, fill=P3Color, below=1cm of p2] (p3) {Part III: Deployment\Serving at Scale};
+  \node[part, fill=P4Color, below=1cm of p3] (p4) {Part IV: Production Concerns\Security, Robustness, Sustainability};
+  \node[part, fill=P5Color, below=1cm of p4] (p5) {Part V: Responsible AI\Governance \& Society};
 
   % Arrows
   \draw[arrow] (p1) -- node[right, label] {Enables} (p2);
@@ -258,25 +1357,25 @@ Examine @tbl-vol2-structure for the complete five-part organization, which maps 
 
 : **Volume II Organization**: The five parts progress from algorithmic foundations through physical infrastructure and deployment to production concerns and responsible governance. Each Part addresses a different system layer, enabling mastery of one level before advancing to the next. {#tbl-vol2-structure}
 
-### Part I: Foundations of Scale {#sec-introduction-part-foundations-scale-9738}
+### Part I: Foundations of Scale
 
 The scale transformation we examined demands fundamentally different software architectures. Training a model across thousands of GPUs requires partitioning computations, synchronizing states, and recovering from inevitable failures. Part I establishes these algorithmic foundations, creating the logical system that must run upon physical hardware.
 
 **Distributed Training** develops techniques for training models across devices and machines. Data parallelism[^fn-data-parallelism], model parallelism[^fn-model-parallelism], and pipeline parallelism[^fn-pipeline-parallelism] each address different constraints. You will understand when each applies, how they combine, and what synchronization and consistency they require.
 
-[^fn-data-parallelism]: **Data Parallelism**: A distributed training strategy where each worker processes different data batches while maintaining synchronized model copies. @sec-distributed-training-systems examines data parallelism implementation in detail.
+[^fn-data-parallelism]: **Data Parallelism**: A distributed training strategy where each worker processes different data batches while maintaining synchronized model copies. @sec-distributed-training examines data parallelism implementation in detail.
 
-[^fn-model-parallelism]: **Model Parallelism**: Distributes model parameters across multiple devices, enabling training of models too large for single-device memory. @sec-distributed-training-systems examines tensor parallelism and other model partitioning strategies.
+[^fn-model-parallelism]: **Model Parallelism**: Distributes model parameters across multiple devices, enabling training of models too large for single-device memory. @sec-distributed-training examines tensor parallelism and other model partitioning strategies.
 
-[^fn-pipeline-parallelism]: **Pipeline Parallelism**: Partitions the model by layers across devices, with computation flowing through stages. @sec-distributed-training-systems examines pipeline scheduling and its trade-offs.
+[^fn-pipeline-parallelism]: **Pipeline Parallelism**: Partitions the model by layers across devices, with computation flowing through stages. @sec-distributed-training examines pipeline scheduling and its trade-offs.
 
 **Communication** analyzes the collective operations that coordinate distributed training. AllReduce, AllGather[^fn-allgather], and other primitives dominate training communication. You will understand algorithms, topologies, and optimization techniques that minimize communication overhead and maximize bandwidth utilization.
 
-[^fn-allgather]: **AllGather**: A collective operation where each worker contributes data and receives the concatenation of all contributions, essential for model parallelism. @sec-communication-collective-operations examines collective operations in detail.
+[^fn-allgather]: **AllGather**: A collective operation where each worker contributes data and receives the concatenation of all contributions, essential for model parallelism. @sec-communication examines collective operations in detail.
 
 **Fault Tolerance** ensures distributed systems continue operating despite failures. At production scale, failures occur daily. Checkpointing, redundancy, and recovery procedures enable training to continue despite inevitable component failures.
 
-### Part II: Building the Machine Learning Fleet {#sec-introduction-part-ii-building-machine-learning-fleet-9ca2}
+### Part II: Building the Machine Learning Fleet
 
 With the algorithmic foundations established, we turn to the physical reality. The communication and reliability requirements defined in Part I must be satisfied by concrete hardware. The terabytes of gradient synchronization and the checkpointing demands require a massive, interconnected supercomputer (a Warehouse-Scale Computer where the network is the system bus and power density is the thermodynamic speed limit). Part II examines the Fleet that executes modern ML workloads.
 
@@ -288,7 +1387,7 @@ With the algorithmic foundations established, we turn to the physical reality. T
 
 **Orchestration** builds the brain of the fleet. You will examine gang scheduling algorithms, bin-packing strategies, and the differences between HPC schedulers (Slurm) and cloud-native orchestrators (Kubernetes) that manage resources for thousands of concurrent jobs.
 
-### Part III: Deployment at Scale {#sec-introduction-part-iii-deployment-scale-db4c}
+### Part III: Deployment at Scale
 
 Training produces models; deployment delivers value to users. The edge distribution complexity we examined, where billions of heterogeneous devices operate in uncontrolled environments, requires techniques that extend far beyond datacenter serving.
 
@@ -298,7 +1397,7 @@ Training produces models; deployment delivers value to users. The edge distribut
 
 **ML Operations at Scale** encompasses practices that maintain large ML systems in production. Monitoring, debugging, deployment pipelines, and incident response adapt for ML-specific requirements at production scale.
 
-### Part IV: Production Concerns {#sec-introduction-part-iv-production-concerns-3a4e}
+### Part IV: Production Concerns
 
 The security threats and regulatory requirements we examined create operational challenges that require systematic approaches. At production scale, the economic incentives for attacks, the regulatory scrutiny, and the environmental impact all intensify.
 
@@ -308,7 +1407,7 @@ The security threats and regulatory requirements we examined create operational 
 
 **Sustainable AI** addresses environmental impact. Efficient algorithms, appropriate model sizing, and renewable energy sourcing minimize the environmental footprint of large-scale ML.
 
-### Part V: Responsible AI at Scale {#sec-introduction-part-v-responsible-ai-scale-abde}
+### Part V: Responsible AI at Scale
 
 When recommendation algorithms shape public discourse and hiring algorithms affect employment opportunities, governance practices must transcend technical excellence. Technical excellence is insufficient for systems affecting human lives at scale.
 
@@ -320,7 +1419,7 @@ When recommendation algorithms shape public discourse and hiring algorithms affe
 
 This progression from algorithmic logic through physical hardware to societal governance reflects how production ML systems are actually built: software requirements determine what hardware is necessary, and hardware capabilities enable the services that governance must oversee. For detailed guidance on reading paths, prerequisite knowledge, and navigation strategies, refer to the [About](../../frontmatter/about/about.qmd) section.
 
-## The Journey Ahead {#sec-introduction-journey-ahead-17a5}
+## The Journey Ahead {#sec-vol2-introduction-journey-ahead}
 
 Having mapped the territory from algorithmic foundations through governance practices, consider what mastering this material means for your professional growth. The six systems engineering principles provide a vision for building ML systems that matter. This textbook extends that vision to the scale at which most consequential ML systems operate.
 
@@ -330,35 +1429,51 @@ Throughout this volume, you will learn to partition computation across thousands
 
 The engineering challenges are substantial, and so is the impact of addressing them correctly.
 
-The path forward begins with the physical foundations of scale. @sec-compute examines datacenter infrastructure, from power delivery and cooling to GPU cluster architectures and network fabric design. @sec-storage addresses the storage hierarchy that must sustain petabyte-scale datasets and terabyte checkpoints. Once we have built the metal and the memory, we will then explore the distributed logic that coordinates these resources into a single global engine.
+The path forward begins with the physical foundations of scale. @sec-infrastructure examines datacenter infrastructure, from power delivery and cooling to GPU cluster architectures and network fabric design. @sec-storage addresses the storage hierarchy that must sustain petabyte-scale datasets and terabyte checkpoints. Once we have built the metal and the memory, we will then explore the distributed logic that coordinates these resources into a single global engine.
 
 Let us begin.
 
-## Fallacies and Pitfalls {#sec-introduction-fallacies-pitfalls}
-
-The transition from a single machine to a distributed fleet is rife with counterintuitive traps.
-
-*   **Fallacy: Efficiency optimizations are "free" wins.** In production, every optimization introduces a stability trade-off. INT8 quantization reduces memory by 4$\times$, but can degrade accuracy by 1–2%, rendering safety-critical models (like medical diagnostics) unusable.
-*   **Pitfall: Extrapolating linear scaling beyond the "Bisection Wall."** Teams often assume that if a model scales linearly from 1 to 8 GPUs (NVLink), it will continue to 128 GPUs. At the node boundary, the physics shifts from memory-bus speeds to network-switch latencies, often collapsing efficiency from 90% to 40%.
-*   **Fallacy: Edge intelligence is just "Cloud-Lite."** Edge devices face hard thermal and power envelopes. A smartphone throttles to 60% performance after 30 seconds of heavy inference. Designing for the edge requires **energy-proportional architectures**, not just smaller versions of cloud models.
-*   **Pitfall: Optimizing FLOPs while ignoring structure.** A model with 70% fewer parameters might achieve 0% latency improvement if the pruning pattern is unstructured. Hardware throughput is determined by **Memory Bandwidth** and **Tiling**, not just operation counts.
-
 ## Summary {#sec-vol2-intro-summary-66bb}
 
-This chapter has established why production ML systems require different engineering approaches than single-machine systems. Scale creates qualitative changes: communication dominates computation, failure becomes routine rather than exceptional, and governance requirements emerge from societal impact. The CAP theorem constrains what distributed systems can guarantee, coordination overhead taxes every synchronization point, and edge distribution amplifies complexity through heterogeneous devices and intermittent connectivity.
+This volume opened with a fundamental challenge: the engineering principles that enable success on single machines become the obstacles that prevent success at scale. We have moved from the controlled environment of the laboratory to the chaotic reality of the **Machine Learning Fleet**, where communication costs dominate computation, failures are a statistical certainty, and societal impact demands rigorous governance.
 
-Scaling laws reveal the mathematical relationships that drive infrastructure investment. Performance improvements follow predictable power-law relationships with model size, data volume, and compute budget, but these gains encounter breakdown conditions including data saturation, hardware bottlenecks, and diminishing returns. Efficiency optimization across algorithmic, compute, and data dimensions provides paths around scaling walls, though trade-offs between dimensions require context-aware strategies that match deployment constraints.
+This transformation requires reframing ML development as a multi-dimensional optimization problem. We explored the **AI Scaling Laws**, which provide the "physics" of deep learning by predicting how performance improves with model size, data volume, and compute budget. Yet, we also identified the breakdown points where these laws encounter the hard walls of data saturation and hardware bottlenecks. Efficiency engineering—spanning algorithmic, compute, and data dimensions—provides the paths around these walls.
 
-The three imperatives of scale, distribution, and governance are interdependent. Infrastructure decisions constrain what distribution strategies are feasible; distribution choices shape what governance is achievable; and governance requirements inform infrastructure design. Mastering these interdependencies distinguishes engineers who build laboratory demonstrations from those who build systems that transform industries.
+The progression of this textbook follows the three imperatives of scale, distribution, and governance. We build from the logical foundations of distributed training up to the physical infrastructure of the datacenter, eventually reaching the control plane of responsible AI. Mastering these interdependencies distinguishes those who build prototypes from those who build the systems that define the modern era.
 
 ::: {.callout-important title="Key Takeaways"}
-* This textbook addresses the shift from single-machine ML to distributed systems where communication costs, routine failures, and governance requirements become dominant engineering concerns
-* Scale creates qualitative, not merely quantitative, changes: techniques that work for 8 GPUs may fail at 8,000 GPUs due to emergent phenomena like network congestion, straggler effects, and coordination overhead
-* The three pillars of this textbook (scaling infrastructure, distributing computation, and governing responsibly) are interdependent: infrastructure determines what distribution strategies are feasible, and governance constraints shape both
-* Scaling laws predict performance improvements but have breakdown conditions that efficiency optimization must address
-* The CAP theorem, coordination overhead, and edge distribution complexity impose hard constraints on distributed systems
-* Infrastructure, distribution, and governance decisions cascade through each other, requiring integrated system design
-* Production ML systems diverge from research prototypes in their requirements for fault tolerance, security, privacy, and accountability to stakeholders beyond the development team
+
+* **Scale creates qualitative change**: Techniques that work for 8 GPUs may fail at 8,000 GPUs due to network congestion, straggler effects, and coordination overhead. Scale is not "more of the same"—it is fundamentally different engineering terrain.
+* **Communication dominates computation at scale**: The physics of data movement determines the "speed" of frontier models. As models scale, network bandwidth replaces FLOPs as the primary system bottleneck.
+* **Failure is a design constraint, not an edge case**: In a 10,000-GPU cluster, hardware fails every few hours. Production systems must be designed to absorb failures continuously without human intervention.
+* **The Scaling Laws define the ROI**: Power-law relationships enable researchers to predict performance and resource requirements before starting expensive training runs, identifying the "Compute-Optimal" frontier.
+* **Efficiency is the new scaling law**: When brute-force scaling hits the power or data wall, success depends on multi-dimensional optimization across model architecture, hardware selection, and data quality.
+* **The CAP theorem limits distribution**: Distributed ML systems must choose between consistency (halts on partition) and availability (accepts staleness). Synchronous training is CP; asynchronous training is AP.
+
+:::
+
+Throughout this volume, we trace these imperatives across three distinct system archetypes, each representing a different constraint regime.
+
+::: {.callout-lighthouse title="Volume II Archetypes across the Spectrum"}
+The challenges of scale manifest differently depending on whether a system is throughput-bound, latency-bound, or resource-constrained:
+
+| Archetype | Primary Constraint | Key Scaling Challenge |
+|-----------|--------------------|-----------------------|
+| **Archetype A (GPT-4)** | Throughput | 3D Parallelism; high-bandwidth interconnects (NVLink) |
+| **Archetype B (RecSys)** | Latency & Volume | Embedding sharding; $O(N^2)$ AllToAll contention |
+| **Archetype C (Fed. MobileNet)** | Power & Privacy | Federated updates on unreliable, heterogeneous edge devices |
+
+The common thread: **scale is not a single problem but a series of trade-offs** tailored to the system's objective function.
+:::
+
+The transition from single-node to fleet-scale systems represents a qualitative shift in engineering practice, not merely a quantitative increase in resources. The principles established in Volume I—measure everything, optimize the bottleneck, design for failure—remain essential, but their application changes fundamentally when the "system" spans thousands of interconnected nodes. Network topology becomes as important as memory hierarchy, distributed consensus replaces local synchronization, and failure becomes a statistical certainty rather than an exceptional event.
+
+::: {.callout-chapter-connection title="From Requirements to Logic"}
+
+We have established the *requirements* of scale: we know why we must distribute and what the costs will be. But how do we actually split the math across thousands of independent processors?
+
+In **Distributed Training** (@sec-distributed-training-systems), we explore the logic of partitioning. We move from the "Why" of scale to the "How," examining the specific algorithms that allow a single massive model to live and learn across an entire cluster of GPUs.
+
 :::
 
 ::: { .quiz-end }

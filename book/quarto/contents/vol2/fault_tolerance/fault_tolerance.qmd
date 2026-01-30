@@ -22,15 +22,10 @@ A single GPU fails perhaps once per year. A thousand GPUs experience failures da
 ::: {.callout-tip title="Learning Objectives"}
 
 - Calculate system-level MTBF from component failure rates and derive optimal checkpoint intervals using the Young-Daly formula to minimize wasted work
-
 - Design distributed checkpoint and recovery strategies that coordinate state across thousands of GPUs while managing multi-terabyte checkpoint sizes
-
 - Implement serving redundancy, replication, and failover mechanisms that maintain availability within millisecond latency requirements under partial failures
-
 - Apply graceful degradation strategies including model fallback, feature fallback, and load shedding to maintain partial service when full capability is unavailable
-
 - Construct observability infrastructure using metrics, logs, and distributed traces to diagnose non-deterministic failures and silent accuracy degradation
-
 - Evaluate fault tolerance trade-offs across training and serving workloads by analyzing their distinct latency tolerances, state requirements, and recovery strategies
 
 :::
@@ -73,10 +68,11 @@ The system failure rate becomes $N\lambda$, and @eq-system-mtbf expresses how th
 
 $$ MTBF_{system} = \frac{1}{N\lambda} = \frac{MTBF_{component}}{N} $$ {#eq-system-mtbf}
 
-::: {.callout-perspective title="Napkin Math: The 9s of Reliability"}
+::: {.callout-notebook title="The 9s of Reliability"}
 **Problem**: You have a cluster of **10,000 GPUs**. Each GPU is incredibly reliable, with **99.99%** availability (only 52 minutes of downtime per year). What is the probability that the **entire cluster** is up for **1 hour**?
 
 **The Math**:
+
 1.  **Single GPU Success Probability ($P_{1h}$)**: A GPU failing once per year (8760 hours) has hourly survival prob $\approx 1 - (1/8760) = 0.99988$.
 2.  **Cluster Success Probability ($P_{cluster}$)**: $P_{cluster} = (P_{1h})^{10,000}$.
 3.  **Calculation**: $0.99988^{10000} \approx \mathbf{0.30}$.
@@ -131,7 +127,7 @@ Consider a training cluster designed for large language model development with t
 - Each node contains 8 GPUs with shared power supply (MTBF: 100,000 hours)
 - Network infrastructure per node (NIC, cables): MTBF 150,000 hours
 
-**Step 1: Calculate failure rate per GPU subsystem**
+#### Step 1: Calculate Failure Rate per GPU Subsystem {.unnumbered}
 
 Each GPU operates within a failure domain that includes the GPU itself, its PCIe connection, and proportional shares of the power supply and network infrastructure.
 
@@ -143,11 +139,11 @@ $$ \lambda_{power/GPU} = \frac{1}{8} \times \frac{1}{100,000} = 0.125 \times 10^
 
 $$ \lambda_{network/GPU} = \frac{1}{8} \times \frac{1}{150,000} = 0.083 \times 10^{-5} \text{ failures/hour} $$
 
-**Step 2: Calculate total per-GPU failure rate**
+#### Step 2: Calculate Total Per-GPU Failure Rate {.unnumbered}
 
 $$ \lambda_{total/GPU} = (2.0 + 0.5 + 0.125 + 0.083) \times 10^{-5} = 2.708 \times 10^{-5} \text{ failures/hour} $$
 
-**Step 3: Calculate cluster failure rate and MTBF**
+#### Step 3: Calculate Cluster Failure Rate and MTBF {.unnumbered}
 
 $$ \lambda_{cluster} = 10,000 \times 2.708 \times 10^{-5} = 0.2708 \text{ failures/hour} $$
 
@@ -220,6 +216,7 @@ While fail-stop failures are relatively straightforward to handle because the co
 At the nanometer scale of modern transistors, hardware is not deterministic; it is probabilistic. Two primary mechanisms drive **Silent Data Corruption (SDC)**:
 
 1.  **Single-Event Upsets (SEUs)**: High-energy particles (cosmic rays at sea level, alpha particles from packaging materials) strike memory cells or logic gates, flipping a bit from 0 to 1. At 10,000+ GPUs, this is a statistical certainty.
+
 2.  **Manufacturing Variances**: "Marginal" chips that pass initial QA may exhibit bit flips only under specific voltage/temperature conditions (e.g., during the intense $di/dt$ swings of a backward pass).
 
 **Case Study: Facebook's Compression SDC**
@@ -695,12 +692,12 @@ $$ \frac{\partial C_{ft}}{\partial x} < \frac{\partial (E[N_{failures}] \times C
 
 where $x$ represents investment in fault tolerance mechanisms. In practice, this means investing in fault tolerance until the marginal cost of additional protection exceeds the marginal reduction in failure costs.
 
+Before diving into specific mechanisms, three foundational principles should guide every design decision.
+
 ::: {.callout-note title="The 3 Things Students Must Remember About Failure at Scale"}
 
 1. **At scale, failures are continuous, not exceptional.** A 10,000-GPU cluster experiences failures every few hours. Systems must be designed expecting failure as normal operation.
-
 2. **The optimal checkpoint interval is $\sqrt{2 \times T_{save} \times MTBF}$.** The Young-Daly formula provides quantitative guidance for checkpoint frequency. We derive this formula in @sec-fault-tolerance-reliability-checkpoint-restart-fundamentals-0ac2.
-
 3. **Training and serving have fundamentally different fault tolerance requirements.** Training tolerates minutes of recovery time; serving requires milliseconds. This difference demands entirely different approaches.
 
 :::
@@ -725,6 +722,7 @@ The Young-Daly formula developed in @sec-storage provides the optimal checkpoint
 Let's apply the Young-Daly formula to a real-world scenario.
 
 **Scenario**: You are training Llama-3 on a cluster of 16,000 GPUs.
+
 *   **Checkpoint Cost ($C$)**: It takes **2 minutes** to save the model state to shared storage.
 *   **Mean Time Between Failures ($M$)**: At this scale, you experience a silent data corruption or node failure every **3 hours** (180 minutes).
 
@@ -739,6 +737,7 @@ $$
 $$
 
 **Result**: You should checkpoint roughly every **27 minutes**.
+
 *   **If you checkpoint every 10 mins**: You waste too much time writing to disk ($17\%$ overhead).
 *   **If you checkpoint every 60 mins**: You lose too much work when the inevitable crash happens ($15\%$ overhead).
 *   **At 27 mins**: You minimize the combined cost of overhead and recovery ($7\%$ total overhead).
@@ -756,13 +755,9 @@ This result demonstrates why failure analysis matters: without knowing the syste
 The Young-Daly formula provides valuable intuition but rests on assumptions that may not hold in practice:
 
 1. **Exponentially distributed failures**: Assumes constant failure rate. Real systems exhibit "bathtub curve" behavior with higher rates during burn-in and wear-out phases.
-
 2. **Deterministic checkpoint time**: Assumes $T_{save}$ is constant. In practice, checkpoint time varies 2–3$\times$ due to storage contention, network congestion, and memory pressure.
-
 3. **Recovery time equals checkpoint time**: Assumes recovery reads same data written during checkpoint. Often recovery takes 3–5$\times$ longer due to job scheduling delays, topology reconstruction, and warmup.
-
 4. **Single failure mode**: Assumes one failure at a time. Correlated failures (power, cooling, shared switch) violate this assumption.
-
 5. **Infinite timeline**: Optimal for long training runs. Short runs (where total time is comparable to MTBF) require different analysis.
 
 When assumptions are violated, the optimal interval may shift significantly. As a rule of thumb, if restart overhead significantly exceeds checkpoint time, use $\sqrt{2 \times (T_{save} + T_{restart}) \times MTBF}$ instead.
@@ -806,6 +801,8 @@ If checkpoints occur hourly, the system wastes **$24,000 per day** simply waitin
 +------------------------+---------------------+---------------------------+---------------------------------+--------------+
 
 : **Checkpoint Overhead by Model Type**: Larger models with correspondingly larger checkpoints require longer save times but also benefit from longer optimal checkpoint intervals. The percentage overhead remains manageable (under 5%) for most configurations. {#tbl-checkpoint-overhead-by-model}
+
+While @tbl-checkpoint-overhead-by-model suggests modest overhead percentages, real deployments often encounter checkpoint times far exceeding these theoretical estimates. Diagnosing such discrepancies requires examining the full system stack.
 
 ::: {.callout-example title="Systems Sandwich: Debugging Checkpoint Overhead"}
 
@@ -897,7 +894,7 @@ In distributed checkpointing, each worker writes its portion of the checkpoint t
 5. Coordinator writes checkpoint metadata after all confirmations
 6. Coordinator broadcasts checkpoint complete, training resumes
 
-This protocol ensures that either all workers complete their writes or the checkpoint is incomplete. Valid checkpoints have complete metadata. Incomplete checkpoints have missing metadata and can be detected. Partial checkpoints can be garbage collected.
+This protocol ensures that either all workers complete their writes or the checkpoint is incomplete. Valid checkpoints have complete metadata. Incomplete checkpoints have missing metadata and can be detected. Partial checkpoints can be garbage collected. In practice, the strictness of this coordination defines distinct *checkpoint consistency models*.
 
 ::: {.callout-note title="Checkpoint Consistency Models"}
 The idealized protocol above assumes step 2 completes quickly. At scale, this barrier synchronization becomes the dominant checkpoint cost because there is almost always at least one slow worker in a 10,000+ GPU cluster.
@@ -964,6 +961,8 @@ Silent hardware errors often fail to crash the process but corrupt the mathemati
 
 **Training dynamics monitoring**: Monitoring loss values, gradient norms, and other training statistics can detect Byzantine failures that do not cause explicit errors. Sudden loss spikes or gradient explosions may indicate silent corruption.
 
+In practice, the gap between theoretical heartbeat timeouts and actual detection latencies is substantial, because distinguishing genuine failures from temporary stragglers remains an inherently difficult problem.
+
 ::: {.callout-warning title="Realistic Failure Detection Latencies"}
 Production experience shows that failure detection takes significantly longer than theoretical heartbeat timeouts suggest. The core challenge is distinguishing failures from stragglers:
 
@@ -984,10 +983,15 @@ These latencies exist because aggressive timeouts cause false positives (killing
 Upon failure detection, the recovery procedure executes:
 
 1. **Job termination**: Stop all remaining workers to prevent inconsistent state
+
 2. **Resource reclamation**: Release failed nodes, request replacement resources
+
 3. **Job restart**: Launch new worker processes with recovered configuration
+
 4. **Checkpoint loading**: Each worker loads its state shard from the latest valid checkpoint
+
 5. **State synchronization**: Workers synchronize to ensure consistent starting state
+
 6. **Training resumption**: Resume training from the checkpoint step
 
 **Automatic recovery** systems perform these steps without human intervention. Modern training frameworks integrate with cluster managers to automate recovery. DeepSpeed's `deepspeed.launch` can be configured for automatic restart on failure. PyTorch's `torchrun` (elastic launch) provides similar capabilities.
@@ -1393,8 +1397,11 @@ When primary model is unavailable or overloaded, fall back to secondary. Continu
 **Example cascade for image classification**:
 
 1. **Primary**: ViT-Large (307M params, 88% ImageNet top-1)
+
 2. **Secondary**: EfficientNet-B4 (19M params, 83% ImageNet top-1)
+
 3. **Tertiary**: MobileNet-V3-Large (5.4M params, 75% ImageNet top-1)
+
 4. **Fallback**: Return "classification unavailable" or cached results
 
 Model fallback requires:
@@ -1618,7 +1625,8 @@ ML computations are prone to numerical issues:
 [^fn-nan-propagation]: **NaN Propagation**: In floating-point arithmetic, NaN (Not a Number) values propagate through computations: any operation involving NaN produces NaN. This makes a single NaN in gradient computation corrupt all downstream parameters. Common causes include division by zero (e.g., in normalization layers with zero variance), log of zero or negative numbers, and overflow to infinity followed by subtraction. Early NaN detection prevents wasted training iterations.
 
 ```python
-# Check tensor for NaN values (propagate from any corrupted computation)
+# Check tensor for NaN values
+# (propagate from any corrupted computation)
 if torch.isnan(output).any():
     log.error("NaN detected in output", input_hash=hash(input))
     # Log input hash for reproducibility, then fallback or fail fast
@@ -1681,6 +1689,8 @@ The observability pillars above enable detection of recurring failure patterns t
 **Silent quality degradation**: Model drift, feature degradation, or data pipeline issues. Requires quality monitoring to detect.
 
 **Cascade failure**: One failing component causes others to fail through timeout exhaustion, resource depletion, or error propagation. Requires circuit breakers and isolation.
+
+Cascade failures are particularly insidious because the root cause is obscured by the symptoms it generates. The following example illustrates how the three observability pillars work together to trace a cascade back to its origin.
 
 ::: {.callout-tip title="Worked Example: Diagnosing a Cascade Failure"}
 Consider a recommendation system experiencing sudden latency spikes. The three observability pillars work together to diagnose the root cause:
@@ -1816,8 +1826,11 @@ Reliability engineering must identify and mitigate correlation through diversity
 While the Young-Daly formula accounts for checkpoint save time, practitioners often forget restart overhead:
 
 1. **Job scheduling delay**: Acquiring replacement GPUs takes minutes in shared clusters
+
 2. **Checkpoint loading**: Reading distributed checkpoint from storage
+
 3. **Warmup time**: Learning rate warmup, batch normalization statistics recalculation
+
 4. **Communication re-establishment**: NCCL ring topology reconstruction
 
 Total restart time can be 3–5$\times$ checkpoint save time. A 5-minute checkpoint save followed by 20-minute restart means effective failure cost is 25 minutes, not 5 minutes. The modified Young-Daly formula should use $T_{save} + T_{restart}$ for the overhead term, significantly increasing optimal checkpoint intervals.
@@ -1831,8 +1844,11 @@ Engineers often treat all failures as "node crashed, restart from checkpoint," b
 Modern frameworks checkpoint transparently, creating the illusion of automatic consistency. In practice, distributed checkpoints require coordination that can fail subtly:
 
 1. **Rank desynchronization**: If rank 0 checkpoints iteration 1000 while rank 1 checkpoints iteration 1001, the checkpoint is inconsistent
+
 2. **Partial writes**: Storage failure mid-checkpoint leaves incomplete shards
+
 3. **Optimizer state lag**: Sharded optimizer state may not match model weights if captured at different times
+
 4. **In-flight gradients**: AllReduce in progress during checkpoint may or may not be included
 
 Production systems must implement checkpoint validation: verify all shards exist, verify iteration numbers match, verify optimizer state matches model state. Organizations that discover corrupted checkpoints during recovery from a failure have no recourse except restarting from an earlier (potentially much earlier) checkpoint.

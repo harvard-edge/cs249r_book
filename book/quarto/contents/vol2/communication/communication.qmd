@@ -22,15 +22,10 @@ Computation scales by adding processors; communication scales by moving data bet
 ::: {.callout-tip title="Learning Objectives"}
 
 - Apply the $\alpha$-$\beta$ model to quantify when communication becomes the dominant bottleneck by deriving the bandwidth and latency bounds for distributed training at different cluster scales.
-
 - Compare AllReduce algorithms (ring, tree, hierarchical) by analyzing their time complexity and identifying the crossover points where each becomes optimal based on message size and cluster scale.
-
 - Select appropriate collective primitives (AllReduce, AlltoAll, AllGather, ReduceScatter) for different model architectures by matching communication patterns to workload requirements.
-
 - Evaluate gradient compression techniques by analyzing bandwidth reduction versus convergence impact trade-offs for quantization, sparsification, and error feedback mechanisms.
-
 - Design topology-aware communication strategies by mapping collective operations to network architectures (fat-tree, rail-optimized, torus) to maximize bisection bandwidth utilization.
-
 - Implement communication-computation overlap using pipelining and asynchronous operations to hide network latency behind gradient computation.
 
 :::
@@ -118,7 +113,7 @@ The **critical message size** $n^* = \alpha \cdot \beta$ marks the crossover poi
 
 : **Interconnect Performance Parameters**: Typical latency and bandwidth values for modern datacenter interconnects. The critical size shows the crossover point where communication transitions from latency-bound to bandwidth-bound. {#tbl-interconnect-parameters}
 
-::: {.callout-perspective title="Napkin Math: The Critical Message Size"}
+::: {.callout-notebook title="The Critical Message Size"}
 **Problem**: Your cluster uses InfiniBand NDR 400G with $\alpha = 2\ \mu s$ and $\beta = 50\ \text{GB/s}$. At what message size does optimizing for bandwidth start to matter more than optimizing for latency?
 
 **The Math**:
@@ -130,9 +125,10 @@ $$n^* = \alpha \cdot \beta = 2 \times 10^{-6}\ \text{s} \times 50 \times 10^9\ \
 This reveals two distinct operating regimes:
 
 1.  **Latency-Bound ($n < n^*$)**: For small messages (e.g., MoE routing tokens, scalar reductions), time is dominated by $\alpha$. Optimization focuses on **fusion** (batching small messages), **topology** (reducing hop count), and **software stack tuning** (kernel bypass via RDMA).
+
 2.  **Bandwidth-Bound ($n \gg n^*$)**: For large messages (e.g., LLM gradients, optimizer states), time is dominated by $n/\beta$. Optimization focuses on **compression** (FP8, Top-K sparsity), **algorithm choice** (Ring vs Tree), and **link aggregation** (multi-rail NICs).
 
-::: {.callout-perspective title="Napkin Math: Latency vs. Bandwidth Dominance"}
+::: {.callout-notebook title="Latency vs. Bandwidth Dominance"}
 **Problem**: You are synchronizing a 1 MB buffer versus a 1 GB buffer on InfiniBand NDR with $\alpha = 2\ \mu s$ and $\beta = 50\ \text{GB/s}$. How does the bottleneck shift?
 
 **Case A: 1 MB Message**
@@ -161,7 +157,7 @@ The α-β model assumes the processor is idle during communication. For **pipeli
 
 The key insight of LogP is distinguishing **network latency** (L, which can be hidden) from **processor overhead** (o, which cannot). A system can overlap communication with computation only if the compute kernel runs longer than the overhead.
 
-::: {.callout-perspective title="Napkin Math: Can You Hide the Communication?"}
+::: {.callout-notebook title="Can You Hide the Communication?"}
 **Problem**: You want to overlap gradient AllReduce with the next layer's backward pass. The backward pass takes 500 μs. The AllReduce has network latency $L = 100\ \mu s$ but processor overhead $o = 50\ \mu s$ to initiate and $o = 50\ \mu s$ to receive. Can you hide the communication?
 
 **The Math**:
@@ -227,6 +223,8 @@ Understanding these primitives is essential because different model architecture
 [^fn-moe-primitive]: **MoE Communication Pattern**: In Mixture of Experts, each token must reach its assigned expert(s), which may reside on different workers. This requires AllToAll to route tokens dynamically based on gating decisions.
 
 [^fn-dlrm]: **DLRM (Deep Learning Recommendation Model)**: Meta's architecture for click-through rate prediction. Embedding tables are sharded across workers, requiring AllToAll to exchange sparse embedding lookups during each forward pass.
+
+The contrast between AllToAll and AllReduce highlights a fundamental difference in how collective operations scale with cluster size.
 
 ::: {.callout-perspective title="AlltoAll vs AllReduce: Why Scale Differs"}
 While **AllReduce** scales efficiently because it can be pipelined in a ring (where each node only talks to its neighbor), **AlltoAll** is fundamentally harder to scale.
@@ -353,7 +351,7 @@ $$ T_{tree} = \underbrace{2\log_2 N \cdot \alpha}_{\text{Latency}} + \underbrace
 
 When should we use Ring vs. Tree? We can derive the crossover point by setting $T_{ring} = T_{tree}$ and solving for $M$.
 
-**Step 1: Write the full time equations.**
+#### Step 1: Write the Full Time Equations {.unnumbered}
 
 For Ring (from above):
 $$ T_{ring} = 2(N-1)\alpha + 2\frac{N-1}{N}\frac{M}{\beta} $$
@@ -361,12 +359,12 @@ $$ T_{ring} = 2(N-1)\alpha + 2\frac{N-1}{N}\frac{M}{\beta} $$
 For Tree:
 $$ T_{tree} = 2\log_2 N \cdot \alpha + 2\log_2 N \cdot \frac{M}{\beta} $$
 
-**Step 2: Simplify for large $N$.**
+#### Step 2: Simplify for Large N {.unnumbered}
 
 When $N$ is large, $(N-1) \approx N$ and $\frac{N-1}{N} \approx 1$, so:
 $$ T_{ring} \approx 2N\alpha + \frac{2M}{\beta}, \quad T_{tree} \approx 2\log_2 N \cdot \alpha + \frac{2\log_2 N \cdot M}{\beta} $$
 
-**Step 3: Set $T_{ring} = T_{tree}$ and solve for $M$.**
+#### Step 3: Solve for the Crossover Point {.unnumbered}
 
 $$ 2N\alpha + \frac{2M}{\beta} = 2\log_2 N \cdot \alpha + \frac{2\log_2 N \cdot M}{\beta} $$
 
@@ -393,7 +391,7 @@ $$ M_{crossover} \approx 100 \times 5\cdot 10^{-6} \times 50\cdot 10^9 \approx 2
 
 Gradients smaller than 25 MB use Tree; larger use Ring.
 
-::: {.callout-perspective title="Napkin Math: The Ring vs. Tree Crossover"}
+::: {.callout-notebook title="The Ring vs. Tree Crossover"}
 **Problem**: You are synchronizing a **1 MB** buffer across **64 GPUs**. The network has latency $\alpha = 10 \mu s$ and bandwidth $\beta = 10 \text{ GB/s}$. Should you use Ring or Tree?
 
 **The Math**:
@@ -439,18 +437,21 @@ Real clusters are **hierarchical**, with fundamentally different bandwidths at e
 
 A naive flat Ring AllReduce ignores this structure—it might route data across InfiniBand when NVLink would suffice, wasting the scarce inter-node bandwidth. **Hierarchical AllReduce** decomposes the global operation into three phases that respect the bandwidth hierarchy:
 
-**Step 1: Intra-Node ReduceScatter (NVLink)**
+#### Step 1: Intra-Node ReduceScatter (NVLink) {.unnumbered}
+
 Each node performs a local ReduceScatter among its $G$ GPUs using the fast NVLink mesh. After this step, each GPU holds $1/G$ of the partially reduced data. The key insight: this step uses only the abundant intra-node bandwidth.
 
-**Step 2: Inter-Node AllReduce (InfiniBand)**
+#### Step 2: Inter-Node AllReduce (InfiniBand) {.unnumbered}
+
 GPUs at the same position across nodes (e.g., all GPU-0s) perform an AllReduce using InfiniBand. Because Step 1 already reduced the data by $G\times$, each GPU only sends $M/G$ bytes instead of $M$ bytes—reducing inter-node traffic by a factor of $G$.
 
-**Step 3: Intra-Node AllGather (NVLink)**
+#### Step 3: Intra-Node AllGather (NVLink) {.unnumbered}
+
 Each node performs a local AllGather to distribute the final result to all $G$ GPUs. Again, this uses only NVLink, leaving inter-node bandwidth untouched.
 
 The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node), effectively **multiplying the apparent inter-node bandwidth by $G$**.
 
-::: {.callout-perspective title="Napkin Math: The Hierarchical Bandwidth Multiplier"}
+::: {.callout-notebook title="The Hierarchical Bandwidth Multiplier"}
 **Problem**: You have a cluster of 8 nodes, each with 8 GPUs (64 GPUs total). You need to AllReduce a 1 GB gradient buffer. Compare flat Ring AllReduce vs. Hierarchical AllReduce.
 
 **Flat Ring AllReduce (ignoring hierarchy)**:
@@ -464,9 +465,10 @@ The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node)
 
 1. **Intra-Node ReduceScatter**: Each GPU sends 875 MB at 900 GB/s → ~1 ms
 2. **Inter-Node AllReduce**: Each GPU sends $1\ \text{GB}/8 = 125\ \text{MB}$ at 50 GB/s → ~5 ms  
-   *(Only 1/8 of the data crosses InfiniBand!)*
-3. **Intra-Node AllGather**: Each GPU receives 875 MB at 900 GB/s → ~1 ms
 
+   *(Only 1/8 of the data crosses InfiniBand!)*
+
+3. **Intra-Node AllGather**: Each GPU receives 875 MB at 900 GB/s → ~1 ms
 - **Total Time**: $\approx 1 + 5 + 1 = 7\ \text{ms}$
 
 **The Systems Insight**: Hierarchical AllReduce achieves a **5.7× speedup** by reducing inter-node traffic from 1 GB to 125 MB per GPU. With 8 GPUs per node, we effectively get $8\times$ the apparent inter-node bandwidth. This is why NVIDIA's NCCL and similar libraries default to hierarchical algorithms on multi-node clusters.
@@ -638,7 +640,7 @@ The long-run average of transmitted gradients equals the long-run average of tru
 
 This property—that compression error telescopes across time—is why error feedback transforms a biased, non-convergent method into an unbiased, convergent one. Theoretical analysis shows that with error feedback, compressed SGD converges at the same asymptotic rate as uncompressed SGD, with only constant-factor slowdowns [@stich2018sparsified; @karimireddy2019error].
 
-::: {.callout-notebook title="Worked Example: Error Feedback Mechanism" collapse="false"}
+::: {.callout-notebook title="Error Feedback Mechanism" collapse="false"}
 **Scenario**: We have a single parameter receiving small gradients over 5 training steps. We use aggressive compression that only transmits values $\geq 0.5$ (rounding to nearest integer: values in $[0, 0.5) \to 0$, values in $[0.5, 1.5) \to 1$, etc.).
 
 **Without Error Feedback** (Naive Compression):
@@ -779,15 +781,10 @@ When even the fastest wires are not enough, **Gradient Compression** provides th
 ::: {.callout-important title="Key Takeaways"}
 
 * **The α-β model reveals the bottleneck**: The critical message size $n^* = \alpha \cdot \beta$ determines whether you should optimize software latency (small messages) or hardware bandwidth (large payloads).
-
 * **Algorithm choice is scale-dependent**: Ring AllReduce is bandwidth-optimal but pays $O(N)$ latency; Tree AllReduce is latency-optimal ($O(\log N)$) but bandwidth-inefficient. Use the crossover formula $M_{crossover} \approx N \alpha \beta$ to choose.
-
 * **Hierarchical algorithms multiply bandwidth**: By performing local reductions over fast NVLink before crossing the slow InfiniBand bridge, hierarchical collectives effectively multiply inter-node bandwidth by the number of GPUs per node.
-
 * **AlltoAll is the contention king**: Unlike AllReduce, AlltoAll creates $O(N^2)$ logical connections. This makes Expert Parallelism (MoE) and Recommendation Systems fundamentally harder to scale than dense LLMs.
-
 * **Error Feedback makes lossy compression safe**: You can throw away 99% of gradients via sparsification, provided you accumulate the "error" locally and add it to the next step. This turns biased estimators into unbiased ones over time.
-
 * **Topology discovery is not optional**: Modern libraries like NCCL dynamically map logical rings to physical wires to avoid "hot spots" and maximize bisection bandwidth.
 
 :::
@@ -804,6 +801,8 @@ The "Travel Manifest" for a gradient depends on the system's objective function 
 | **Archetype C (Edge)** | P2P / Async | Connectivity & Latency | Aggressive quantization; Error Feedback |
 
 :::
+
+The communication patterns established in this chapter reveal that distributed training is fundamentally a network engineering problem disguised as a machine learning problem. Understanding the $\alpha$-$\beta$ cost model, collective algorithm selection, and compression techniques transforms practitioners from users of distributed frameworks into engineers who can diagnose bottlenecks, optimize topology configurations, and achieve the scaling efficiency that determines whether trillion-parameter training runs complete in weeks or months.
 
 ::: {.callout-chapter-connection title="From Logic to Resilience"}
 
