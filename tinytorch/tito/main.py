@@ -16,6 +16,11 @@ import sys
 from pathlib import Path
 from typing import Dict, Type, Optional, List
 
+# Fix encoding issues on Windows (emoji/unicode output)
+# See: https://github.com/harvard-edge/cs249r_book/discussions/1145
+if sys.platform == "win32" or os.name == "nt":
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
 # Set TINYTORCH_QUIET before any tinytorch imports to suppress autograd messages
 os.environ['TINYTORCH_QUIET'] = '1'
 
@@ -37,11 +42,24 @@ from .commands.community import CommunityCommand
 from .commands.dev import DevCommand
 from .commands.olympics import OlympicsCommand
 
-# Import version from tinytorch package
-try:
-    from tinytorch import __version__
-except ImportError:
-    __version__ = "unknown"
+# Get version from pyproject.toml (single source of truth)
+def _get_version() -> str:
+    """Read version from pyproject.toml."""
+    try:
+        # Try to find pyproject.toml relative to this file
+        tito_dir = Path(__file__).parent
+        pyproject_path = tito_dir.parent / "pyproject.toml"
+        if pyproject_path.exists():
+            content = pyproject_path.read_text()
+            for line in content.splitlines():
+                if line.strip().startswith("version"):
+                    # Parse: version = "0.1.4"
+                    return line.split("=")[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return "unknown"
+
+__version__ = _get_version()
 
 # Configure logging
 logging.basicConfig(
@@ -84,7 +102,7 @@ class TinyTorchCLI:
 
         # Command categorization for help display
         self.student_commands = ['module', 'milestone', 'community', 'benchmark', 'olympics']
-        self.developer_commands = ['dev', 'system', 'src', 'package', 'nbgrader']
+        self.developer_commands = ['dev', 'system', 'package', 'nbgrader']
 
         # Welcome screen sections (used for both tito and tito --help)
         self.welcome_sections = {
@@ -303,12 +321,47 @@ The best way to learn:
 
         return 0
 
+    def _check_invalid_command(self, args: Optional[List[str]]) -> Optional[int]:
+        """Check for invalid commands and provide a helpful error message.
+
+        Returns exit code if handled, None to continue normal parsing.
+        """
+        if not args:
+            return None
+
+        first_arg = args[0]
+
+        # Skip flags (--help, --version, etc.)
+        if first_arg.startswith('-'):
+            return None
+
+        # Check if it's an invalid command
+        if first_arg.lower() not in self.commands:
+            from rich.panel import Panel
+
+            self.console.print()
+            self.console.print(Panel(
+                f"[yellow]'{first_arg}' is not a valid command.[/yellow]\n\n"
+                f"[dim]Run 'tito --help' to see all available commands.[/dim]",
+                title="[bold]Command Not Found[/bold]",
+                border_style="yellow"
+            ))
+            self.console.print()
+            return 1
+
+        return None
+
     def run(self, args: Optional[List[str]] = None) -> int:
         """Run the CLI application."""
         try:
             # Check for help flag before argparse to use Rich formatting
             if args and ('-h' in args or '--help' in args) and len(args) == 1:
                 return self._show_help()
+
+            # Check for invalid commands before argparse (cleaner error message)
+            mistake_result = self._check_invalid_command(args)
+            if mistake_result is not None:
+                return mistake_result
 
             parser = self.create_parser()
             parsed_args = parser.parse_args(args)

@@ -9,8 +9,17 @@
 :::
 
 `````{only} html
-````{grid} 1 2 3 3
+````{grid} 1 2 2 2
 :gutter: 3
+
+```{grid-item-card} 🎧 Audio Overview
+
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; height: 54px; margin-top: auto;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/05_dataloader.mp3" type="audio/mpeg">
+</audio>
+```
 
 ```{grid-item-card} 🚀 Launch Binder
 
@@ -23,16 +32,14 @@ Run interactively in your browser.
 
 Browse the source code on GitHub.
 
-<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/05_dataloader/05_dataloader.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #6b7280; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
+<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/05_dataloader/05_dataloader.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #14b8a6; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
 ```
 
-```{grid-item-card} 🎧 Audio Overview
+```{grid-item-card} 📊 Slide Deck
 
-Listen to an AI-generated overview.
+Download the lecture PDF.
 
-<audio controls style="width: 100%; height: 54px; margin-top: auto;">
-  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/05_dataloader.mp3" type="audio/mpeg">
-</audio>
+<a href="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-slides-v0.1.0/05_dataloader.pdf" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #0ea5e9; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Download PDF →</a>
 ```
 
 ````
@@ -324,7 +331,7 @@ The generator also enables infinite datasets. If your dataset generates samples 
 
 The combination of Dataset abstraction and DataLoader iteration creates a memory-efficient pipeline regardless of dataset size.
 
-For in-memory datasets like TensorDataset, all data is pre-loaded, but DataLoader still provides memory benefits by controlling how much data is active at once. Your training loop processes one batch, computes gradients, updates weights, then discards that batch before loading the next. Peak memory is `batch_size × sample_size`, not `dataset_size × sample_size`.
+For in-memory datasets like TensorDataset, all data is preloaded, but DataLoader still provides memory benefits by controlling how much data is active at once. Your training loop processes one batch, computes gradients, updates weights, then discards that batch before loading the next. Peak memory is `batch_size × sample_size`, not `dataset_size × sample_size`.
 
 For disk-backed datasets, the benefits are dramatic. Consider an ImageDataset that loads JPEGs on-demand:
 

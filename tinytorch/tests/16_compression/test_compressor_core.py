@@ -21,7 +21,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear
+from tinytorch.core.layers import Linear, Sequential
+from tinytorch.perf.compression import (
+    Compressor,
+    measure_sparsity,
+    magnitude_prune,
+    structured_prune,
+)
 
 
 class TestCompressionBasics:
@@ -29,11 +35,7 @@ class TestCompressionBasics:
 
     def test_compressor_import(self):
         """Verify Compressor can be imported."""
-        try:
-            from tinytorch.perf.compression import Compressor
-            assert Compressor is not None
-        except ImportError as e:
-            pytest.skip(f"Compressor not yet exported: {e}")
+        assert Compressor is not None
 
     def test_measure_sparsity(self):
         """
@@ -42,11 +44,6 @@ class TestCompressionBasics:
         WHY: Sparsity = fraction of zeros. This is how we measure compression.
         50% sparsity means half the weights are zero.
         """
-        try:
-            from tinytorch.perf.compression import Compressor
-        except ImportError:
-            pytest.skip("Compressor not yet exported")
-
         # Create a simple model with known sparsity
         class SimpleModel:
             def __init__(self):
@@ -79,11 +76,6 @@ class TestCompressionBasics:
         WHY: Pruning should set small weights to zero.
         After pruning, sparsity should increase.
         """
-        try:
-            from tinytorch.perf.compression import Compressor
-        except ImportError:
-            pytest.skip("Compressor not yet exported")
-
         # Create model with random weights (low sparsity)
         class SimpleModel:
             def __init__(self):
@@ -117,11 +109,6 @@ class TestCompressionAdvanced:
         WHY: If we request 80% sparsity, we should get close to 80% zeros.
         Large deviations indicate the pruning algorithm is broken.
         """
-        try:
-            from tinytorch.perf.compression import measure_sparsity, magnitude_prune
-        except ImportError:
-            pytest.skip("Compression functions not yet exported")
-
         # Create model
         class SimpleModel:
             def __init__(self):
@@ -152,11 +139,6 @@ class TestCompressionAdvanced:
         WHY: Magnitude pruning should keep the largest weights. If large
         weights are removed, model accuracy would collapse.
         """
-        try:
-            from tinytorch.perf.compression import magnitude_prune
-        except ImportError:
-            pytest.skip("magnitude_prune not yet exported")
-
         # Create model with one very large weight
         class SimpleModel:
             def __init__(self):
@@ -191,11 +173,6 @@ class TestCompressionAdvanced:
         WHY: This is an edge case - requesting no pruning should leave
         all weights unchanged.
         """
-        try:
-            from tinytorch.perf.compression import magnitude_prune
-        except ImportError:
-            pytest.skip("magnitude_prune not yet exported")
-
         class SimpleModel:
             def __init__(self):
                 self.layer = Linear(4, 4, bias=False)
@@ -219,11 +196,7 @@ class TestStructuredPruning:
 
     def test_structured_prune_import(self):
         """Verify structured_prune function can be imported."""
-        try:
-            from tinytorch.perf.compression import structured_prune
-            assert structured_prune is not None
-        except ImportError:
-            pytest.skip("structured_prune not yet exported")
+        assert structured_prune is not None
 
     def test_structured_prune_reduces_effective_neurons(self):
         """
@@ -232,12 +205,6 @@ class TestStructuredPruning:
         WHY: Unlike magnitude pruning which creates sparse matrices,
         structured pruning removes whole neurons for actual speedups.
         """
-        try:
-            from tinytorch.perf.compression import structured_prune
-            from tinytorch.core.layers import Sequential
-        except ImportError:
-            pytest.skip("structured_prune not yet exported")
-
         # Create model using Sequential (required for structured_prune)
         layer = Linear(10, 10, bias=False)
         model = Sequential(layer)

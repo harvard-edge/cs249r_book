@@ -33,8 +33,8 @@ class NbdevCommand(BaseCommand):
 
         if args.export:
             # Use the export command logic
-            from ..export import ExportCommand
-            export_cmd = ExportCommand(self.config)
+            from ..dev.export import DevExportCommand
+            export_cmd = DevExportCommand(self.config)
             export_args = ArgumentParser()
             export_cmd.add_arguments(export_args)
 

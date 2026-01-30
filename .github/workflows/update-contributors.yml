@@ -1,0 +1,142 @@
+name: '👥 Update Contributors'
+
+# =============================================================================
+# CONTRIBUTOR UPDATE WORKFLOW
+# =============================================================================
+# Automatically updates contributor recognition across all projects.
+#
+# TRIGGERS:
+#   - push: When any .all-contributorsrc file changes on dev or main
+#   - workflow_dispatch: Manual trigger from Actions UI
+#   - workflow_call: Called by other workflows
+#
+# WHAT IT DOES:
+#   1. Updates root .all-contributorsrc from GitHub API
+#   2. Generates sectioned contributor tables in main README.md
+#   3. Updates per-project README.md files (book, tinytorch, kits, labs)
+#   4. Commits and pushes changes automatically
+#
+# ADDING CONTRIBUTORS:
+#   Option 1: Comment on any issue/PR with:
+#             @all-contributors please add @username for doc, code, bug, ideas
+#   Option 2: Manually edit the .all-contributorsrc file for the project
+#
+# SCRIPTS (in .github/workflows/contributors/):
+#   - update_contributors.py    : Fetches contributors from GitHub API
+#   - generate_main_readme.py   : Builds sectioned main README
+#   - generate_readme_tables.py : Updates per-project READMEs
+#   - scan_contributors.py      : Scans git history (manual use)
+#
+# See .github/workflows/contributors/README.md for full documentation.
+# =============================================================================
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches: [dev, main]
+    paths:
+      - '.all-contributorsrc'
+      - 'book/.all-contributorsrc'
+      - 'tinytorch/.all-contributorsrc'
+      - 'kits/.all-contributorsrc'
+      - 'labs/.all-contributorsrc'
+
+jobs:
+  update-contributors:
+    name: Update Contributors List
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r .github/workflows/contributors/requirements.txt
+          pip install requests>=2.31.0
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update root contributors config
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BOOK_QUARTO: ${{ vars.BOOK_QUARTO }}
+        run: python ${{ github.workspace }}/.github/workflows/contributors/update_contributors.py
+
+      - name: Generate sectioned main README
+        run: python ${{ github.workspace }}/.github/workflows/contributors/generate_main_readme.py
+
+      - name: Generate per-project README tables
+        run: |
+          # Generate tables for each project README from their configs
+          python ${{ github.workspace }}/.github/workflows/contributors/generate_readme_tables.py --update 2>/dev/null || true
+
+      - name: Check for changes
+        id: update
+        run: |
+          FILES_TO_CHECK=(
+            ".all-contributorsrc"
+            "README.md"
+            "book/.all-contributorsrc"
+            "book/README.md"
+            "tinytorch/.all-contributorsrc"
+            "tinytorch/README.md"
+            "kits/.all-contributorsrc"
+            "kits/README.md"
+            "labs/.all-contributorsrc"
+            "labs/README.md"
+          )
+          
+          # Add acknowledgements file if it exists (using BOOK_QUARTO variable for consistency)
+          if [ -f "${{ vars.BOOK_QUARTO }}/contents/frontmatter/acknowledgements/acknowledgements.qmd" ]; then
+            FILES_TO_CHECK+=("${{ vars.BOOK_QUARTO }}/contents/frontmatter/acknowledgements/acknowledgements.qmd")
+          fi
+          
+          if git status "${FILES_TO_CHECK[@]}" --porcelain 2>/dev/null | grep .; then
+            echo "changes_made=true" >> $GITHUB_OUTPUT
+          else
+            echo "changes_made=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit Changes
+        if: steps.update.outputs.changes_made == 'true'
+        run: |
+          BRANCH_NAME=${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD)}
+
+          # Add all contributor-related files
+          git add -A .all-contributorsrc README.md \
+            book/.all-contributorsrc book/README.md \
+            tinytorch/.all-contributorsrc tinytorch/README.md \
+            kits/.all-contributorsrc kits/README.md \
+            labs/.all-contributorsrc labs/README.md \
+            2>/dev/null || true
+          
+          # Add acknowledgements file if it exists (using BOOK_QUARTO variable for consistency)
+          if [ -f "${{ vars.BOOK_QUARTO }}/contents/frontmatter/acknowledgements/acknowledgements.qmd" ]; then
+            git add "${{ vars.BOOK_QUARTO }}/contents/frontmatter/acknowledgements/acknowledgements.qmd" 2>/dev/null || true
+          fi
+          
+          git commit -m "Update contributors list [skip ci]"
+          git pull --rebase origin "$BRANCH_NAME"
+          git push origin "$BRANCH_NAME"
+
+      - name: Report Status
+        run: |
+          if [ "${{ steps.update.outputs.changes_made }}" = "true" ]; then
+            echo "✅ Contributors list has been updated"
+          else
+            echo "ℹ️ No changes were needed for contributors list"
+          fi

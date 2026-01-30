@@ -42,8 +42,8 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from tinytorch.core.tensor import Tensor
-from tinytorch.nn import Conv2d, Linear
-import tinytorch.nn.functional as F
+from tinytorch.core.spatial import Conv2d, MaxPool2d
+from tinytorch.core.layers import Linear
 
 
 def calculate_conv_output_size(input_size, kernel_size, stride=1, padding=0):
@@ -80,7 +80,7 @@ def test_conv_to_linear_dimension_match():
     assert x.shape == (batch_size, 32, h1, h1), f"Conv1 output shape mismatch: {x.shape}"
     print(f"After Conv1: {x.shape}")
 
-    x = F.max_pool2d(x, kernel_size=2)
+    x = MaxPool2d(kernel_size=2)(x)
     h2 = h1 // 2  # 15
     assert x.shape == (batch_size, 32, h2, h2), f"Pool1 output shape mismatch: {x.shape}"
     print(f"After Pool1: {x.shape}")
@@ -91,7 +91,7 @@ def test_conv_to_linear_dimension_match():
     assert x.shape == (batch_size, 64, h3, h3), f"Conv2 output shape mismatch: {x.shape}"
     print(f"After Conv2: {x.shape}")
 
-    x = F.max_pool2d(x, kernel_size=2)
+    x = MaxPool2d(kernel_size=2)(x)
     h4 = h3 // 2  # 6
     assert x.shape == (batch_size, 64, h4, h4), f"Pool2 output shape mismatch: {x.shape}"
     print(f"After Pool2: {x.shape}")
@@ -160,14 +160,14 @@ def test_typical_cnn_architectures():
     conv1 = Conv2d(3, 6, kernel_size=5)
     x = conv1(x)  # -> (16, 6, 28, 28)
     assert x.shape == (batch_size, 6, 28, 28)
-    x = F.max_pool2d(x, 2)  # -> (16, 6, 14, 14)
+    x = MaxPool2d(kernel_size=2)(x)  # -> (16, 6, 14, 14)
     assert x.shape == (batch_size, 6, 14, 14)
 
     # Conv block 2: 6->16 channels
     conv2 = Conv2d(6, 16, kernel_size=5)
     x = conv2(x)  # -> (16, 16, 10, 10)
     assert x.shape == (batch_size, 16, 10, 10)
-    x = F.max_pool2d(x, 2)  # -> (16, 16, 5, 5)
+    x = MaxPool2d(kernel_size=2)(x)  # -> (16, 16, 5, 5)
     assert x.shape == (batch_size, 16, 5, 5)
 
     # Flatten and FC layers

@@ -14,9 +14,9 @@
 
 # %% [markdown]
 """
-# Activations - Intelligence Through Nonlinearity
+# Module 02: Activations - Intelligence Through Nonlinearity
 
-Welcome to Activations! Today you'll add the secret ingredient that makes neural networks intelligent: **nonlinearity**.
+Welcome to Module 02! Today you'll add the secret ingredient that makes neural networks intelligent: **nonlinearity**.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Tensor with data manipulation and basic operations
@@ -104,7 +104,7 @@ __all__ = ['Sigmoid', 'ReLU', 'Tanh', 'GELU', 'Softmax']
 
 # %% [markdown]
 """
-## 💡 Introduction - What Makes Neural Networks Intelligent?
+## 💡 Introduction: What Makes Neural Networks Intelligent?
 
 Consider two scenarios:
 
@@ -158,9 +158,9 @@ Let's implement each one with clear explanations and immediate testing!
 
 # %% [markdown]
 """
-## 🏗️ Implementation - Building Activation Functions
+## 🏗️ Implementation: Building Activation Functions
 
-### 🏗️ Implementation Pattern
+### Implementation Pattern
 
 Each activation follows this structure:
 ```python
@@ -173,7 +173,7 @@ class ActivationName:
 
 # %% [markdown]
 """
-## 🏗️ Sigmoid - The Probability Gatekeeper
+### Sigmoid - The Probability Gatekeeper
 
 Sigmoid maps any real number to the range (0, 1), making it perfect for probabilities and binary decisions.
 
@@ -240,23 +240,21 @@ class Sigmoid:
         """
         ### BEGIN SOLUTION
         # Apply sigmoid: 1 / (1 + exp(-x))
-        # Clip extreme values to prevent overflow (sigmoid(-500) ≈ 0, sigmoid(500) ≈ 1)
-        # Clipping at ±500 ensures exp() stays within float64 range
-        z = np.clip(x.data, -500, 500)
+        x_data = x.data
 
         # Use numerically stable sigmoid
         # For positive values: 1 / (1 + exp(-x))
         # For negative values: exp(x) / (1 + exp(x)) = 1 / (1 + exp(-x)) after clipping
-        result_data = np.zeros_like(z)
+        result_data = np.zeros_like(x_data)
 
         # Positive values (including zero)
-        pos_mask = z >= 0
-        result_data[pos_mask] = 1.0 / (1.0 + np.exp(-z[pos_mask]))
+        pos_mask = x_data >= 0
+        result_data[pos_mask] = 1.0 / (1.0 + np.exp(-x_data[pos_mask]))
 
         # Negative values
-        neg_mask = z < 0
-        exp_z = np.exp(z[neg_mask])
-        result_data[neg_mask] = exp_z / (1.0 + exp_z)
+        neg_mask = x_data < 0
+        exp_x = np.exp(x_data[neg_mask])
+        result_data[neg_mask] = exp_x / (1.0 + exp_x)
 
         return Tensor(result_data)
         ### END SOLUTION
@@ -267,8 +265,10 @@ class Sigmoid:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Sigmoid
+### 🧪 Unit Test: Sigmoid
+
 This test validates sigmoid activation behavior.
+
 **What we're testing**: Sigmoid maps inputs to (0, 1) range
 **Why it matters**: Ensures proper probability-like outputs
 **Expected**: All outputs between 0 and 1, sigmoid(0) = 0.5
@@ -276,8 +276,8 @@ This test validates sigmoid activation behavior.
 
 # %% nbgrader={"grade": true, "grade_id": "test-sigmoid", "locked": true, "points": 10}
 def test_unit_sigmoid():
-    """🔬 Test Sigmoid implementation."""
-    print("🔬 Unit Test: Sigmoid...")
+    """🧪 Test Sigmoid implementation."""
+    print("🧪 Unit Test: Sigmoid...")
 
     sigmoid = Sigmoid()
 
@@ -304,7 +304,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ ReLU - The Sparsity Creator
+### ReLU - The Sparsity Creator
 
 ReLU (Rectified Linear Unit) is the most popular activation function. It simply removes negative values, creating sparsity that makes neural networks more efficient.
 
@@ -382,17 +382,19 @@ class ReLU:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: ReLU
+### 🧪 Unit Test: ReLU
+
 This test validates ReLU activation behavior.
+
 **What we're testing**: ReLU zeros negative values, preserves positive
 **Why it matters**: ReLU's sparsity helps neural networks train efficiently
-**Expected**: Negative → 0, positive unchanged, zero → 0
+**Expected**: Negative becomes 0, positive unchanged, zero becomes 0
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-relu", "locked": true, "points": 10}
 def test_unit_relu():
-    """🔬 Test ReLU implementation."""
-    print("🔬 Unit Test: ReLU...")
+    """🧪 Test ReLU implementation."""
+    print("🧪 Unit Test: ReLU...")
 
     relu = ReLU()
 
@@ -425,7 +427,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Tanh - The Zero-Centered Alternative
+### Tanh - The Zero-Centered Alternative
 
 Tanh (hyperbolic tangent) is like sigmoid but centered around zero, mapping inputs to (-1, 1). This zero-centering helps with gradient flow during training.
 
@@ -500,8 +502,10 @@ class Tanh:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Tanh
+### 🧪 Unit Test: Tanh
+
 This test validates tanh activation behavior.
+
 **What we're testing**: Tanh maps inputs to (-1, 1) range, zero-centered
 **Why it matters**: Zero-centered activations can help with gradient flow
 **Expected**: All outputs in (-1, 1), tanh(0) = 0, symmetric behavior
@@ -509,8 +513,8 @@ This test validates tanh activation behavior.
 
 # %% nbgrader={"grade": true, "grade_id": "test-tanh", "locked": true, "points": 10}
 def test_unit_tanh():
-    """🔬 Test Tanh implementation."""
-    print("🔬 Unit Test: Tanh...")
+    """🧪 Test Tanh implementation."""
+    print("🧪 Unit Test: Tanh...")
 
     tanh = Tanh()
 
@@ -544,7 +548,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ GELU - The Smooth Modern Choice
+### GELU - The Smooth Modern Choice
 
 GELU (Gaussian Error Linear Unit) is a smooth approximation to ReLU that's become popular in modern architectures like transformers. Unlike ReLU's sharp corner, GELU is smooth everywhere.
 
@@ -628,17 +632,19 @@ class GELU:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: GELU
+### 🧪 Unit Test: GELU
+
 This test validates GELU activation behavior.
+
 **What we're testing**: GELU provides smooth ReLU-like behavior
 **Why it matters**: GELU is used in modern transformers like GPT and BERT
-**Expected**: Smooth curve, GELU(0) ≈ 0, positive values preserved roughly
+**Expected**: Smooth curve, GELU(0) approximately 0, positive values preserved roughly
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-gelu", "locked": true, "points": 10}
 def test_unit_gelu():
-    """🔬 Test GELU implementation."""
-    print("🔬 Unit Test: GELU...")
+    """🧪 Test GELU implementation."""
+    print("🧪 Unit Test: GELU...")
 
     gelu = GELU()
 
@@ -672,7 +678,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Softmax - The Probability Distributor
+### Softmax - The Probability Distributor
 
 Softmax converts any vector into a valid probability distribution. All outputs are positive and sum to exactly 1.0, making it essential for multi-class classification.
 
@@ -742,20 +748,18 @@ class Softmax:
         """
         ### BEGIN SOLUTION
         # Numerical stability: subtract max to prevent overflow
-        x_max_data = np.max(x.data, axis=dim, keepdims=True)
-        x_max = Tensor(x_max_data)
-        x_shifted = x - x_max  # Tensor subtraction
+        x_max = np.max(x.data, axis=dim, keepdims=True)
+        x_shifted = x.data - x_max
 
         # Compute exponentials
-        exp_values = Tensor(np.exp(x_shifted.data))
+        exp_values = np.exp(x_shifted)
 
         # Sum along dimension
-        exp_sum_data = np.sum(exp_values.data, axis=dim, keepdims=True)
-        exp_sum = Tensor(exp_sum_data)
+        exp_sum = np.sum(exp_values, axis=dim, keepdims=True)
 
         # Normalize to get probabilities
         result = exp_values / exp_sum
-        return result
+        return Tensor(result)
         ### END SOLUTION
 
     def __call__(self, x: Tensor, dim: int = -1) -> Tensor:
@@ -764,8 +768,10 @@ class Softmax:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Softmax
+### 🧪 Unit Test: Softmax
+
 This test validates softmax activation behavior.
+
 **What we're testing**: Softmax creates valid probability distributions
 **Why it matters**: Essential for multi-class classification outputs
 **Expected**: Outputs sum to 1.0, all values in (0, 1), largest input gets highest probability
@@ -773,8 +779,8 @@ This test validates softmax activation behavior.
 
 # %% nbgrader={"grade": true, "grade_id": "test-softmax", "locked": true, "points": 10}
 def test_unit_softmax():
-    """🔬 Test Softmax implementation."""
-    print("🔬 Unit Test: Softmax...")
+    """🧪 Test Softmax implementation."""
+    print("🧪 Unit Test: Softmax...")
 
     softmax = Softmax()
 
@@ -818,7 +824,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Integration - Bringing It Together
+## 🔧 Integration: Bringing It Together
 
 Now let's test how all our activation functions work together and understand their different behaviors.
 """
@@ -872,7 +878,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test 1: All activations preserve tensor properties
-    print("🔬 Integration Test: Tensor property preservation...")
+    print("🧪 Integration Test: Tensor property preservation...")
     test_data = Tensor([[1, -1], [2, -2]])  # 2D tensor
 
     activations = [Sigmoid(), ReLU(), Tanh(), GELU()]
@@ -884,7 +890,7 @@ def test_module():
     print("✅ All activations preserve tensor properties!")
 
     # Test 2: Softmax works with different dimensions
-    print("🔬 Integration Test: Softmax dimension handling...")
+    print("🧪 Integration Test: Softmax dimension handling...")
     data_3d = Tensor([[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]])  # (2, 2, 3)
     softmax = Softmax()
 
@@ -899,7 +905,7 @@ def test_module():
     print("✅ Softmax handles different dimensions correctly!")
 
     # Test 3: Activation chaining (simulating neural network)
-    print("🔬 Integration Test: Activation chaining...")
+    print("🧪 Integration Test: Activation chaining...")
 
     # Simulate: Input → Linear → ReLU → Linear → Softmax (like a simple network)
     x = Tensor([[-1, 0, 1, 2]])  # Batch of 1, 4 features
@@ -929,234 +935,219 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🤔 ML Systems Thinking
+## 🤔 ML Systems Reflection Questions
 
-Now that you've built activation functions, let's think about their systems-level characteristics.
-Understanding computational cost and numerical stability helps you make informed choices when
-building neural networks.
+Answer these to deepen your understanding of activation functions and their systems implications:
 
-### Computational Cost Analysis
+### 1. Computational Cost Comparison
+**Question**: ReLU is the most popular activation function in hidden layers. Given what you implemented, why is ReLU computationally cheaper than Sigmoid or GELU?
 
-Different activations have different computational profiles:
+**Consider**:
+- What mathematical operations does ReLU require? (hint: just max(0, x))
+- What operations does Sigmoid require? (hint: exponentials)
+- If you have a hidden layer with 1 million neurons, how many exp() calls does each activation require?
 
-**ReLU: O(n) comparisons**
-- Simple element-wise comparison: max(0, x)
-- Fastest activation function (baseline)
-- No exponentials, no divisions
-- Ideal for large hidden layers
+**Real-world context**: In production models with billions of parameters, even small per-element costs add up. ReLU's simplicity makes it 3-4x faster than Sigmoid.
 
-**Sigmoid/Tanh: O(n) exponentials**
-- Each element requires exp() computation
-- 3-4× slower than ReLU
-- Exponentials are expensive operations
-- Use sparingly in hidden layers
+---
 
-**GELU: O(n) exponentials + multiplications**
-- Approximation involves sigmoid (exponential)
-- 4-5× slower than ReLU
-- Worth the cost in transformers (better gradients)
-- Trade-off: performance vs. optimization quality
+### 2. Numerical Stability
+**Question**: Look at your Softmax implementation. Why did we subtract the maximum value before computing exponentials?
 
-**Softmax: O(n) exponentials + O(n) sum + O(n) divisions**
-- Most expensive: exp, sum, divide for entire vector
-- Use only for output layers (not hidden layers)
-- Requires synchronization across dimension
-- Numerical stability tricks add overhead
+**Consider**:
+- What happens when you compute exp(1000)?
+- What about exp(1000) / (exp(1000) + exp(1001))?
+- Does subtracting a constant from all inputs change the final softmax output?
 
-### Numerical Stability Considerations
+**Mathematical insight**: exp(x - max) / sum(exp(x - max)) = exp(x) / sum(exp(x)) because the constant cancels.
 
-Activations can fail catastrophically without proper handling:
+---
 
-**Sigmoid/Tanh overflow:**
-```
-Problem: exp(1000) = inf, exp(-1000) = 0
-Solution: Clip inputs to reasonable range (±500)
-Your implementation: Uses stable computation for Sigmoid
-```
+### 3. Sparsity and Efficiency
+**Question**: ReLU creates "sparsity" by zeroing negative values. Why might having many zero activations be beneficial for neural networks?
 
-**Softmax catastrophic overflow:**
-```
-Problem: exp(1000) = inf, causing NaN
-Solution: Subtract max before exp (doesn't change result)
-Your implementation: Uses max subtraction in Softmax.forward()
-```
+**Consider**:
+- Memory: Do zeros need to be stored differently than non-zeros?
+- Computation: What happens when you multiply by zero?
+- Learning: If 50% of neurons are "off" for a given input, what does that mean for the representation?
 
-**ReLU dying neurons:**
-```
-Problem: Neurons with always-negative inputs output 0 permanently
-Solution: Monitor dead neuron percentage, use LeakyReLU variants
-Your implementation: Basic ReLU (watch for this in later training modules)
-```
+**Think about**:
+- Sparse matrix representations and their memory benefits
+- How GPUs handle sparse operations
+- Whether sparsity helps or hurts different types of neural networks
 
-### Memory Considerations
+---
 
-**Forward pass memory:**
-- All activations: Same size as input (element-wise operations)
-- Softmax temporary buffers: exp array + sum array (small overhead)
+### 4. Activation Selection for Different Layers
+**Question**: Why do we typically use different activations for hidden layers vs. output layers?
 
-### Key Insights for Module 02
+**Consider the requirements**:
+- Hidden layers: Need to preserve gradients, be efficient, add nonlinearity
+- Binary classification output: Need values in (0, 1) representing probability
+- Multi-class classification output: Need probability distribution (sum = 1)
 
-**For early modules, focus on correctness:**
-- Your activations work correctly (test_module validates this)
-- Numerical stability is handled (Sigmoid clipping, Softmax max-subtraction)
-- Integration ready (Module 03 will use these in layers)
+**Match the activation to the use case**:
+- ReLU for hidden layers (why?)
+- Sigmoid for binary output (why?)
+- Softmax for multi-class output (why?)
 
-**Systems awareness for later:**
-- ReLU is fastest, use for hidden layers by default
-- Sigmoid/Tanh: Output layers only (or special cases like gates)
-- GELU: Worth the cost in transformers (Module 13)
-- Softmax: Output layer for classification only
+---
 
-You've built activations that are both correct AND production-ready!
+### 5. The "Dying ReLU" Problem
+**Question**: A neuron's output is always zero if its input is always negative. What situations might cause this, and why is it a problem?
+
+**Consider**:
+- If weights are initialized poorly, could all inputs to a neuron be negative?
+- Once a ReLU neuron "dies" (always outputs 0), can it recover during training?
+- How does the gradient flow through a ReLU that outputs 0?
+
+**Solutions used in practice**:
+- LeakyReLU: f(x) = max(0.01*x, x) - small slope for negatives
+- PReLU: Learnable slope for negative values
+- GELU: Smooth approximation with no sharp corner
+
+---
+
+### Bonus Challenge: Memory Analysis
+
+**Scenario**: You're running inference on a model with a hidden layer of size (batch=32, features=4096) using different activations.
+
+**Calculate for each activation**:
+1. How many bytes of output memory are needed? (assume float32)
+2. How many temporary buffers does Softmax need vs ReLU?
+3. If you switch from float32 to float16, what's the memory savings?
+
+**Key insight**: Activation functions are memory-light (output same size as input), but the choice affects computational speed and numerical precision significantly.
 """
 
 
 # %% [markdown]
 """
-## 📊 Real-World Production Context
+## 📊 Systems Analysis: Activation Computation Costs
 
-Now that you've implemented these activations, let's understand how they're used in real ML systems.
+Let's understand ONE key systems concept: **computational cost differences between activations**.
 
-### Activation Selection Guide
-
-**When to Use Each Activation:**
-
-**Sigmoid**
-- **Use case**: Binary classification output layers, gates in LSTMs/GRUs
-- **Production example**: Spam detection (output: probability of spam)
-- **Why**: Outputs valid probabilities in (0, 1)
-- **Avoid**: Hidden layers in deep networks (vanishing gradients)
-
-**ReLU**
-- **Use case**: Hidden layers in CNNs, feedforward networks
-- **Production example**: Image classification networks (ResNet, VGG)
-- **Why**: Fast computation, prevents vanishing gradients, creates sparsity
-- **Avoid**: Output layers (can't output negative values or probabilities)
-
-**Tanh**
-- **Use case**: RNN hidden states, when zero-centered outputs matter
-- **Production example**: Sentiment analysis RNNs, time series prediction
-- **Why**: Zero-centered helps with gradient flow in recurrent networks
-- **Avoid**: Very deep networks (still suffers from vanishing gradients)
-
-**GELU**
-- **Use case**: Transformer models, modern architectures
-- **Production example**: GPT, BERT, modern language models
-- **Why**: Smooth approximation of ReLU, better gradient flow, state-of-the-art results
-- **Avoid**: When computational efficiency is critical (slightly slower than ReLU)
-
-**Softmax**
-- **Use case**: Multi-class classification output layers
-- **Production example**: ImageNet classification (1000 classes), NLP token prediction
-- **Why**: Converts logits to valid probability distribution (sums to 1)
-- **Avoid**: Hidden layers (loses information through normalization)
-
-### Common Production Patterns
-
-**Pattern 1: CNN Image Classification**
-```
-Input → Conv+ReLU → Conv+ReLU → ... → Linear → Softmax → Class Probabilities
-```
-
-**Pattern 2: Binary Classifier**
-```
-Input → Linear+ReLU → Linear+ReLU → Linear → Sigmoid → Binary Probability
-```
-
-**Pattern 3: Modern Transformer**
-```
-Input → Attention → Linear+GELU → Linear+GELU → Output
-```
-
-### Common Pitfalls and Debugging
-
-**Sigmoid/Tanh Pitfalls:**
-- **Vanishing gradients**: Gradients near 0 for extreme inputs
-- **Saturation**: Outputs plateau, learning slows
-- **Debug tip**: Check activation distribution - avoid all values near 0 or 1
-
-**ReLU Pitfalls:**
-- **Dying ReLU**: Neurons output 0 forever after large negative gradient
-- **No negative outputs**: Can't represent negative relationships
-- **Debug tip**: Monitor % of dead neurons (always output 0)
-
-**Softmax Pitfalls:**
-- **Numerical overflow**: exp(x) explodes for large x (solved by max subtraction)
-- **Dimension confusion**: Must apply along correct axis for batched data
-- **Debug tip**: Verify outputs sum to 1.0 along correct dimension
-
-**GELU Pitfalls:**
-- **Approximation error**: Using wrong approximation constant
-- **Speed**: Slightly slower than ReLU
-- **Debug tip**: Compare outputs to reference implementation
-
-### Performance Characteristics
-
-**Computational Cost (relative to ReLU = 1.0):**
-- ReLU: 1.0× (fastest - just comparison and max)
-- Sigmoid: ~3×-4× (exponential computation)
-- Tanh: ~3×-4× (two exponentials)
-- GELU: ~4×-5× (exponential in approximation)
-- Softmax: ~5×+ (exponentials + division across all elements)
-
-**Memory Impact:**
-- All activations: Minimal memory overhead (output same size as input)
-- Softmax: Slightly higher (temporary buffers for exp and sum)
-
-### Integration with TinyTorch
-
-Your activation functions integrate seamlessly with other modules:
-
-**Module 03 (Layers)**: Will use these activations
-```python
-# Coming in Module 03
-class Linear:
-    def __init__(self, in_features, out_features, activation=None):
-        self.activation = activation  # Your ReLU, Sigmoid, etc.
-
-    def forward(self, x):
-        out = self.compute_linear(x)
-        if self.activation:
-            out = self.activation(out)  # Uses your forward()
-        return out
-```
+This analysis reveals why ReLU dominates hidden layers while more expensive activations are reserved for specific use cases.
 """
+
+# %%
+def analyze_activation_performance():
+    """Demonstrate computational cost differences between activation functions."""
+    print("Analyzing Activation Computation Costs...")
+    print("=" * 60)
+
+    import time
+
+    # Create test data (realistic hidden layer size)
+    size = 1000000  # 1 million elements (like a large hidden layer)
+    test_data = Tensor(np.random.randn(size).astype(np.float32))
+
+    print(f"\nTesting with {size:,} elements (simulating large hidden layer)")
+    print("-" * 60)
+
+    # Initialize activations
+    relu = ReLU()
+    sigmoid = Sigmoid()
+    tanh = Tanh()
+    gelu = GELU()
+
+    # Warm up
+    _ = relu(test_data)
+    _ = sigmoid(test_data)
+
+    # Time each activation (multiple runs for accuracy)
+    n_runs = 10
+
+    # ReLU timing
+    start = time.time()
+    for _ in range(n_runs):
+        _ = relu(test_data)
+    relu_time = (time.time() - start) / n_runs * 1000
+
+    # Sigmoid timing
+    start = time.time()
+    for _ in range(n_runs):
+        _ = sigmoid(test_data)
+    sigmoid_time = (time.time() - start) / n_runs * 1000
+
+    # Tanh timing
+    start = time.time()
+    for _ in range(n_runs):
+        _ = tanh(test_data)
+    tanh_time = (time.time() - start) / n_runs * 1000
+
+    # GELU timing
+    start = time.time()
+    for _ in range(n_runs):
+        _ = gelu(test_data)
+    gelu_time = (time.time() - start) / n_runs * 1000
+
+    print("\n🧪 Activation Performance Results:")
+    print(f"   ReLU:    {relu_time:.2f}ms (baseline)")
+    print(f"   Sigmoid: {sigmoid_time:.2f}ms ({sigmoid_time/relu_time:.1f}x slower)")
+    print(f"   Tanh:    {tanh_time:.2f}ms ({tanh_time/relu_time:.1f}x slower)")
+    print(f"   GELU:    {gelu_time:.2f}ms ({gelu_time/relu_time:.1f}x slower)")
+
+    print("\n" + "=" * 60)
+    print("KEY INSIGHTS:")
+    print("   1. ReLU is fastest: Just max(0, x) - no exponentials")
+    print("   2. Sigmoid/Tanh require exp() - expensive operation")
+    print("   3. GELU uses sigmoid internally - inherits its cost")
+    print("   4. For hidden layers: ReLU's speed advantage adds up!")
+
+    print("\nREAL-WORLD IMPLICATIONS:")
+    print("   - ResNet uses ReLU: billions of activations per forward pass")
+    print("   - GPT uses GELU: worth the cost for better gradients")
+    print("   - Sigmoid/Tanh: reserved for output layers or gates")
+    print("=" * 60)
+
+# Run the analysis
+if __name__ == "__main__":
+    analyze_activation_performance()
 
 # %% [markdown]
 """
-## ⭐ Aha Moment: Activations Transform Data
+## ⭐ Aha Moment: Activations Add Intelligence
 
 **What you built:** Five activation functions that introduce nonlinearity to neural networks.
 
-**Why it matters:** Without activations, stacking layers would just be matrix multiplication—
+**Why it matters:** Without activations, stacking layers would just be matrix multiplication -
 a linear operation. ReLU's simple "zero out negatives" rule is what allows networks to learn
 complex patterns like recognizing faces or understanding language.
 
-In the next module, you'll combine these activations with Linear layers to build complete
-neural network architectures. The nonlinearity you just implemented is the secret sauce!
+Your activations are ready to be combined with Linear layers in Module 03!
 """
 
 # %%
 def demo_activations():
-    """🎯 See how activations transform data."""
-    print("🎯 AHA MOMENT: Activations Transform Data")
+    """See how activations transform data."""
+    print("AHA MOMENT: Activations Add Intelligence")
     print("=" * 45)
 
     # Test input with positive and negative values
     x = Tensor(np.array([-2.0, -1.0, 0.0, 1.0, 2.0]))
-    print(f"Input: {x.data}")
+    print(f"Input:   {x.data}")
 
     # ReLU - zeros out negatives
     relu = ReLU()
     relu_out = relu(x)
-    print(f"ReLU:  {relu_out.data}  ← Negatives become 0!")
+    print(f"ReLU:    {relu_out.data}")
+    print("         Negatives become 0, positives unchanged!")
 
     # Sigmoid - squashes to (0, 1)
     sigmoid = Sigmoid()
     sigmoid_out = sigmoid(x)
-    print(f"Sigmoid: {np.round(sigmoid_out.data, 2)}  ← Squashed to (0,1)")
+    print(f"\nSigmoid: {np.round(sigmoid_out.data, 2)}")
+    print("         All values squashed to (0, 1) range!")
 
-    print("\n✨ Activations add nonlinearity—the key to deep learning!")
+    # Softmax - probability distribution
+    softmax = Softmax()
+    softmax_out = softmax(x)
+    print(f"\nSoftmax: {np.round(softmax_out.data, 3)}")
+    print(f"         Sum = {softmax_out.data.sum():.1f} (valid probability distribution!)")
+
+    print("\n" + "=" * 45)
+    print("Activations add nonlinearity - the key to deep learning!")
 
 # %%
 if __name__ == "__main__":
@@ -1171,13 +1162,17 @@ if __name__ == "__main__":
 Congratulations! You've built the intelligence engine of neural networks!
 
 ### Key Accomplishments
-- Built 5 core activation functions with distinct behaviors and use cases
-- Implemented forward passes for Sigmoid, ReLU, Tanh, GELU, and Softmax
-- Discovered how nonlinearity enables complex pattern learning
-- All tests pass ✅ (validated by `test_module()`)
+- **Built 5 core activation functions** with distinct behaviors and use cases
+- **Implemented forward passes** for Sigmoid, ReLU, Tanh, GELU, and Softmax
+- **Discovered computational cost differences** between activations (ReLU fastest)
+- **Handled numerical stability** with clipping and max subtraction techniques
+- **All tests pass** (validated by `test_module()`)
 
-### Ready for Next Steps
-Your activation implementations enable neural network layers to learn complex, nonlinear patterns instead of just linear transformations.
+### Systems Insights Discovered
+- **ReLU efficiency**: Simple max operation makes it 3-4x faster than exponential-based activations
+- **Numerical stability**: Softmax's max subtraction prevents overflow without changing results
+- **Sparsity benefits**: ReLU's zero outputs create sparse representations
+- **Activation selection**: Different layers need different activations (ReLU for hidden, Softmax for output)
 
 Export with: `tito module complete 02`
 

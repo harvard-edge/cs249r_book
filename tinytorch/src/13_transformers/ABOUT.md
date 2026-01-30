@@ -9,8 +9,17 @@
 :::
 
 `````{only} html
-````{grid} 1 2 3 3
+````{grid} 1 2 2 2
 :gutter: 3
+
+```{grid-item-card} 🎧 Audio Overview
+
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; height: 54px; margin-top: auto;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/13_transformers.mp3" type="audio/mpeg">
+</audio>
+```
 
 ```{grid-item-card} 🚀 Launch Binder
 
@@ -23,16 +32,14 @@ Run interactively in your browser.
 
 Browse the source code on GitHub.
 
-<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/13_transformers/13_transformers.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #6b7280; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
+<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/13_transformers/13_transformers.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #14b8a6; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
 ```
 
-```{grid-item-card} 🎧 Audio Overview
+```{grid-item-card} 📊 Slide Deck
 
-Listen to an AI-generated overview.
+Download the lecture PDF.
 
-<audio controls style="width: 100%; height: 54px; margin-top: auto;">
-  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/13_transformers.mp3" type="audio/mpeg">
-</audio>
+<a href="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-slides-v0.1.0/13_transformers.pdf" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #0ea5e9; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Download PDF →</a>
 ```
 
 ````

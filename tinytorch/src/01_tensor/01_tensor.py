@@ -453,16 +453,26 @@ class Tensor:
         """
         ### BEGIN SOLUTION
         if not isinstance(other, Tensor):
-            raise TypeError(f"Expected Tensor for matrix multiplication, got {type(other)}")
-        if self.shape == () or other.shape == ():
-            return Tensor(self.data * other.data)
+            raise TypeError(
+                f"Matrix multiplication requires Tensor, got {type(other).__name__}\n"
+                f"  ❌ Cannot perform: Tensor @ {type(other).__name__}\n"
+                f"  💡 Matrix multiplication (@) only works between two Tensors\n"
+                f"  🔧 Wrap your data: Tensor({other}) @ other_tensor"
+            )
         if len(self.shape) == 0 or len(other.shape) == 0:
-            return Tensor(self.data * other.data)
+            raise ValueError(
+                f"Matrix multiplication requires at least 1D tensors\n"
+                f"  ❌ Got shapes: {self.shape} @ {other.shape}\n"
+                f"  💡 Scalars (0D tensors) cannot be matrix-multiplied; use * for element-wise\n"
+                f"  🔧 Reshape scalar to 1D: tensor.reshape(1) or use tensor * scalar"
+            )
         if len(self.shape) >= 2 and len(other.shape) >= 2:
             if self.shape[-1] != other.shape[-2]:
                 raise ValueError(
-                    f"Cannot perform matrix multiplication: {self.shape} @ {other.shape}. "
-                    f"Inner dimensions must match: {self.shape[-1]} ≠ {other.shape[-2]}"
+                    f"Matrix multiplication shape mismatch: {self.shape} @ {other.shape}\n"
+                    f"  ❌ Inner dimensions don't match: {self.shape[-1]} vs {other.shape[-2]}\n"
+                    f"  💡 For A @ B, A's last dim must equal B's second-to-last dim\n"
+                    f"  🔧 Try: other.transpose() to get shape {other.shape[::-1]}, or reshape self"
                 )
 
         # Educational implementation: explicit loops to show what matrix multiplication does
@@ -558,7 +568,12 @@ class Tensor:
             new_shape = shape
         if -1 in new_shape:
             if new_shape.count(-1) > 1:
-                raise ValueError("Can only specify one unknown dimension with -1")
+                raise ValueError(
+                    f"Cannot reshape {self.shape} with multiple unknown dimensions\n"
+                    f"  ❌ Found {new_shape.count(-1)} dimensions set to -1 in {new_shape}\n"
+                    f"  💡 Only one dimension can be inferred; others must be specified\n"
+                    f"  🔧 Replace all but one -1 with explicit sizes (total elements: {self.size})"
+                )
             known_size = 1
             unknown_idx = new_shape.index(-1)
             for i, dim in enumerate(new_shape):
@@ -571,7 +586,10 @@ class Tensor:
         if np.prod(new_shape) != self.size:
             target_size = int(np.prod(new_shape))
             raise ValueError(
-                f"Total elements must match: {self.size} ≠ {target_size}"
+                f"Cannot reshape {self.shape} to {new_shape}\n"
+                f"  ❌ Element count mismatch: {self.size} elements vs {target_size} elements\n"
+                f"  💡 Reshape preserves data, so total elements must stay the same\n"
+                f"  🔧 Use -1 to infer a dimension: reshape(-1, {new_shape[-1] if len(new_shape) > 0 else 1}) lets NumPy calculate"
             )
         reshaped_data = np.reshape(self.data, new_shape)
         return Tensor(reshaped_data)
@@ -612,7 +630,14 @@ class Tensor:
                 transposed_data = np.transpose(self.data, axes)
         else:
             if dim0 is None or dim1 is None:
-                raise ValueError("Both dim0 and dim1 must be specified")
+                provided = f"dim0={dim0}" if dim1 is None else f"dim1={dim1}"
+                missing = "dim1" if dim1 is None else "dim0"
+                raise ValueError(
+                    f"Transpose requires both dimensions to be specified\n"
+                    f"  ❌ Got {provided}, but {missing} is None\n"
+                    f"  💡 Either provide both dims or neither (default swaps last two)\n"
+                    f"  🔧 Use transpose({dim0 if dim0 is not None else 0}, {dim1 if dim1 is not None else 1}) or just transpose()"
+                )
             axes = list(range(len(self.shape)))
             axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
             transposed_data = np.transpose(self.data, axes)
@@ -911,15 +936,15 @@ Matrix Multiplication Process:
     A (2×3)      B (3×2)         C (2×2)
    ┌       ┐    ┌     ┐       ┌         ┐
    │ 1 2 3 │    │ 7 8 │       │ 1×7+2×9+3×1 │   ┌      ┐
-   │       │ ×  │ 9 1 │  =    │             │ = │ 28 13│
-   │ 4 5 6 │    │ 1 2 │       │ 4×7+5×9+6×1 │   │ 79 37│
+   │       │ ×  │ 9 1 │  =    │             │ = │ 28 16│
+   │ 4 5 6 │    │ 1 2 │       │ 4×7+5×9+6×1 │   │ 79 49│
    └       ┘    └     ┘       └             ┘   └      ┘
 
 Computation Breakdown:
 C[0,0] = A[0,:] · B[:,0] = [1,2,3] · [7,9,1] = 1×7 + 2×9 + 3×1 = 28
-C[0,1] = A[0,:] · B[:,1] = [1,2,3] · [8,1,2] = 1×8 + 2×1 + 3×2 = 13
+C[0,1] = A[0,:] · B[:,1] = [1,2,3] · [8,1,2] = 1×8 + 2×1 + 3×2 = 16
 C[1,0] = A[1,:] · B[:,0] = [4,5,6] · [7,9,1] = 4×7 + 5×9 + 6×1 = 79
-C[1,1] = A[1,:] · B[:,1] = [4,5,6] · [8,1,2] = 4×8 + 5×1 + 6×2 = 37
+C[1,1] = A[1,:] · B[:,1] = [4,5,6] · [8,1,2] = 4×8 + 5×1 + 6×2 = 49
 
 Key Rule: Inner dimensions must match!
 A(m,n) @ B(n,p) = C(m,p)
@@ -1024,8 +1049,8 @@ def test_unit_matrix_multiplication():
         incompatible_a.matmul(incompatible_b)  # 1×2 @ 3×1 should fail (2 ≠ 3)
         assert False, "Should have raised ValueError for incompatible shapes"
     except ValueError as e:
-        assert "Inner dimensions must match" in str(e)
-        assert "2 ≠ 3" in str(e)  # Should show specific dimensions
+        assert "Inner dimensions don't match" in str(e)
+        assert "2 vs 3" in str(e)  # Should show specific dimensions
 
     print("✅ Matrix multiplication works correctly!")
 
@@ -1168,8 +1193,8 @@ def test_unit_shape_manipulation():
         tensor.reshape(2, 2)  # 6 elements can't fit in 2×2=4
         assert False, "Should have raised ValueError"
     except ValueError as e:
-        assert "Total elements must match" in str(e)
-        assert "6 ≠ 4" in str(e)
+        assert "Element count mismatch" in str(e)
+        assert "6 elements vs 4 elements" in str(e)
 
     # Test matrix transpose (most common case)
     matrix = Tensor([[1, 2, 3], [4, 5, 6]])  # (2, 3)
@@ -1384,7 +1409,7 @@ def analyze_memory_layout():
 
     # Test 1: Row-wise access (cache-friendly)
     # Memory layout: [row0][row1][row2]... stored contiguously
-    print("\n🔬 Test 1: Row-wise Access (Cache-Friendly)")
+    print("\nTest 1: Row-wise Access (Cache-Friendly)")
     start = time.time()
     row_sums = []
     for i in range(size):
@@ -1392,11 +1417,11 @@ def analyze_memory_layout():
         row_sums.append(row_sum)
     row_time = time.time() - start
     print(f"   Time: {row_time*1000:.1f}ms")
-    print(f"   Access pattern: Sequential (follows memory layout)")
+    print("   Access pattern: Sequential (follows memory layout)")
 
     # Test 2: Column-wise access (cache-unfriendly)
     # Must jump between rows, poor spatial locality
-    print("\n🔬 Test 2: Column-wise Access (Cache-Unfriendly)")
+    print("\nTest 2: Column-wise Access (Cache-Unfriendly)")
     start = time.time()
     col_sums = []
     for j in range(size):
@@ -1409,22 +1434,22 @@ def analyze_memory_layout():
     # Calculate slowdown
     slowdown = col_time / row_time
     print("\n" + "=" * 60)
-    print(f"📊 PERFORMANCE IMPACT:")
+    print("📊 PERFORMANCE IMPACT:")
     print(f"   Slowdown factor: {slowdown:.2f}× ({col_time/row_time:.1f}× slower)")
     print(f"   Cache misses cause {(slowdown-1)*100:.0f}% performance loss")
 
     # Educational insights
     print("\n💡 KEY INSIGHTS:")
-    print(f"   1. Memory layout matters: Row-major (C-style) storage is sequential")
-    print(f"   2. Cache lines are ~64 bytes: Row access loads nearby elements \"for free\"")
-    print(f"   3. Column access misses cache: Must reload from DRAM every time")
+    print("   1. Memory layout matters: Row-major (C-style) storage is sequential")
+    print("   2. Cache lines are ~64 bytes: Row access loads nearby elements \"for free\"")
+    print("   3. Column access misses cache: Must reload from DRAM every time")
     print(f"   4. This is O(n) algorithm but {slowdown:.1f}× different wall-clock time!")
 
     print("\n🚀 REAL-WORLD IMPLICATIONS:")
-    print(f"   • CNNs use NCHW format (channels sequential) for cache efficiency")
-    print(f"   • Matrix multiplication optimized with blocking (tile into cache-sized chunks)")
+    print("   • CNNs use NCHW format (channels sequential) for cache efficiency")
+    print("   • Matrix multiplication optimized with blocking (tile into cache-sized chunks)")
     print(f"   • Transpose is expensive ({slowdown:.1f}×) because it changes memory layout")
-    print(f"   • This is why GPU frameworks obsess over memory coalescing")
+    print("   • This is why GPU frameworks obsess over memory coalescing")
 
     print("\n" + "=" * 60)
 
@@ -1466,12 +1491,12 @@ Step 1: Matrix Multiply
 [[1, 2, 3]] @ [[0.1, 0.2]] = [[1×0.1+2×0.3+3×0.5, 1×0.2+2×0.4+3×0.6]]
 [[4, 5, 6]]   [[0.3, 0.4]]   [[4×0.1+5×0.3+6×0.5, 4×0.2+5×0.4+6×0.6]]
               [[0.5, 0.6]]
-                           = [[1.6, 2.6],
-                              [4.9, 6.8]]
+                           = [[2.2, 2.8],
+                              [4.9, 6.4]]
 
 Step 2: Add Bias (Broadcasting)
-[[1.6, 2.6]] + [0.1, 0.2] = [[1.7, 2.8],
- [4.9, 6.8]]                 [5.0, 7.0]]
+[[2.2, 2.8]] + [0.1, 0.2] = [[2.3, 3.0],
+ [4.9, 6.4]]                 [5.0, 6.6]]
 
 This is the foundation of every neural network layer!
 ```
@@ -1602,117 +1627,73 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🤔 ML Systems Reflection Questions
+## 🤔 ML Systems Thinking: Tensor Operations
 
-Answer these to deepen your understanding of tensor operations and their systems implications:
+Now that you've built a complete Tensor class, let's think about its systems-level implications.
+Understanding memory layout, scaling behavior, and computational costs helps you make informed
+decisions when building production ML systems.
 
-### 1. Memory Layout and Cache Performance
-**Question**: How does row-major vs column-major storage affect cache performance in tensor operations?
+### Question 1: Memory Layout and Cache Performance
+
+How does row-major vs column-major storage affect cache performance in tensor operations?
 
 **Consider**:
 - What happens when you access matrix elements sequentially vs. with large strides?
-- Why did our analysis show column-wise access being ~2-3× slower than row-wise?
+- Why did our analysis show column-wise access being slower than row-wise?
 - How would this affect the design of a convolutional neural network's memory layout?
 
-**Real-world context**: PyTorch uses NCHW (batch, channels, height, width) format specifically because accessing channels sequentially has better cache locality than NHWC format.
+**Key Insight**: PyTorch uses NCHW (batch, channels, height, width) format specifically because
+accessing channels sequentially has better cache locality than NHWC format.
 
----
+### Question 2: Batch Processing and Scaling
 
-### 2. Batch Processing and Scaling
-**Question**: If you double the batch size in a neural network, what happens to memory usage? What about computation time?
+If you double the batch size in a neural network, what happens to memory usage? What about
+computation time?
 
 **Consider**:
 - A linear layer with input (batch, features): y = xW + b
 - Memory for: input tensor, weight matrix, output tensor, intermediate results
-- How does matrix multiplication time scale with batch size?
-
-**Think about**:
 - If (32, 784) @ (784, 256) takes 10ms, how long does (64, 784) @ (784, 256) take?
-- Does doubling batch size double memory usage? Why or why not?
-- What are the trade-offs between large and small batch sizes?
 
----
+**Key Insight**: Input/output memory scales linearly with batch size, but weight memory stays constant.
+Computation time also scales linearly for matrix multiplication.
 
-### 3. Data Type Precision and Memory
-**Question**: What's the memory difference between float64 and float32 for a (1000, 1000) tensor? When would you choose each?
+### Question 3: Data Type Precision and Memory
 
-**Calculate**:
-- float64: 8 bytes per element
-- float32: 4 bytes per element
-- Total elements in (1000, 1000): ___________
-- Memory difference: ___________
-
-**Trade-offs to consider**:
-- Training accuracy vs. memory consumption
-- GPU memory limits (often 8-16GB for consumer GPUs)
-- Numerical stability in gradient computation
-- Inference speed on mobile devices
-
----
-
-### 4. Production Scale: Memory Requirements
-**Question**: A GPT-3-scale model has 175 billion parameters. How much RAM is needed just to store the weights in float32? What about with an optimizer like Adam?
+What's the memory difference between float64 and float32 for a (1000, 1000) tensor?
 
 **Calculate**:
-- Parameters: 175 × 10^9
+- float64: 8 bytes per element, float32: 4 bytes per element
+- Total elements: 1,000,000
+- Memory: float64 = 8MB, float32 = 4MB (2x difference)
+
+**Key Insight**: Production systems often use float16 or bfloat16 for 4x memory savings over float32,
+trading precision for capacity. GPU memory limits (8-16GB) make this critical.
+
+### Question 4: Production Scale Memory
+
+A GPT-3-scale model has 175 billion parameters. How much RAM is needed just to store the weights?
+
+**Calculate**:
+- Parameters: 175 x 10^9
 - Bytes per float32: 4
-- Weight memory: ___________GB
+- Weight memory: 700 GB
 
-**Additional memory for Adam optimizer**:
-- Adam stores: parameters, gradients, first moment (m), second moment (v)
-- Total multiplier: 4× the parameter count
-- Total with Adam: ___________GB
+With Adam optimizer (stores parameters, gradients, momentum, velocity): 4x = 2,800 GB
 
-**Real-world implications**:
-- Why do we need 8× A100 GPUs (40GB each) for training?
-- What is mixed-precision training (float16/bfloat16)?
-- How does gradient checkpointing help?
+**Key Insight**: This is why training large models requires distributed systems across many GPUs.
+Mixed-precision training (float16/bfloat16) and gradient checkpointing help manage memory.
 
----
+### Question 5: Hardware Awareness
 
-### 5. Hardware Awareness: GPU Efficiency
-**Question**: Why do GPUs strongly prefer operations on large tensors over many small ones?
+Why do GPUs strongly prefer operations on large tensors over many small ones?
 
-**Consider these scenarios**:
-- **Scenario A**: 1000 separate (10, 10) matrix multiplications
-- **Scenario B**: 1 batched (1000, 10, 10) matrix multiplication
+**Compare**:
+- Scenario A: 1000 separate (10, 10) matrix multiplications
+- Scenario B: 1 batched (1000, 10, 10) matrix multiplication
 
-**Think about**:
-- GPU kernel launch overhead (~5-10 microseconds per launch)
-- Thread parallelism utilization (GPUs have 1000s of cores)
-- Memory transfer costs (CPU→GPU has ~10GB/s bandwidth, GPU memory has ~900GB/s)
-- When is the GPU actually doing computation vs. waiting?
-
-**Design principle**: Batch operations together to amortize overhead and maximize parallelism.
-
----
-
-### Bonus Challenge: Optimization Analysis
-
-**Scenario**: You're implementing a custom activation function that will be applied to every element in a tensor. You have two implementation choices:
-
-**Option A**: Python loop over each element
-```python
-def custom_activation(tensor):
-    result = np.empty_like(tensor.data)
-    for i in range(tensor.data.size):
-        result.flat[i] = complex_math_function(tensor.data.flat[i])
-    return Tensor(result)
-```
-
-**Option B**: NumPy vectorized operation
-```python
-def custom_activation(tensor):
-    return Tensor(complex_math_function(tensor.data))
-```
-
-**Questions**:
-1. For a (1000, 1000) tensor, estimate the speedup of Option B vs Option A
-2. Why is vectorization faster even though both are O(n) operations?
-3. What if the tensor is tiny (10, 10) - does the answer change?
-4. How would this change if we move to GPU computation?
-
-**Key insight**: Algorithmic complexity (Big-O) doesn't tell the whole performance story. Constant factors from vectorization, cache behavior, and parallelism dominate in practice.
+**Key Insight**: GPU kernel launch overhead (~5-10 microseconds per launch) dominates for small operations.
+Batching amortizes this overhead and maximizes parallelism across GPU cores.
 """
 
 # %% [markdown]
@@ -1770,17 +1751,21 @@ if __name__ == "__main__":
 Congratulations! You've built the foundational Tensor class that powers all machine learning operations!
 
 ### Key Accomplishments
-- **Built a complete Tensor class** with arithmetic operations, matrix multiplication, and shape manipulation
-- **Implemented broadcasting semantics** that match NumPy for automatic shape alignment
-- **Created reduction operations** (sum, mean, max) for loss computation and pooling
-- **Added comprehensive ASCII diagrams** showing tensor operations visually
-- **All tests pass ✅** (validated by `test_module()`)
+- Built a complete Tensor class with arithmetic operations, matrix multiplication, and shape manipulation
+- Implemented broadcasting semantics that match NumPy for automatic shape alignment
+- Created reduction operations (sum, mean, max) for loss computation and pooling
+- Discovered cache performance implications through memory layout analysis
+- All tests pass (validated by `test_module()`)
 
 ### Systems Insights Discovered
-- **Memory scaling**: Matrix operations create new tensors (3× memory during computation)
-- **Broadcasting efficiency**: NumPy's automatic shape alignment vs. explicit operations
-- **Cache behavior**: Row-wise access is faster than column-wise due to memory layout
-- **Shape validation trade-offs**: Clear errors vs. performance in tight loops
+- Memory layout matters: Row-wise access is faster than column-wise due to cache locality
+- Broadcasting efficiency: NumPy handles shape alignment without explicit data copying
+- Matrix multiplication is the computational foundation of neural networks
+- Shape validation provides clear error messages at minimal performance cost
 
+### Ready for Next Steps
+Your Tensor implementation enables all future neural network operations.
 Export with: `tito module complete 01_tensor`
+
+**Next**: Module 02 will add Activations that introduce nonlinearity to your tensors!
 """

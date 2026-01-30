@@ -174,6 +174,10 @@ Walk through ML history by rebuilding its greatest breakthroughs with YOUR TinyT
 
 ## Why Build Instead of Use?
 
+<p style="text-align: center; font-size: 1.3rem; font-style: italic; color: #475569; margin: 0 0 1.5rem 0; max-width: 600px; margin-left: auto; margin-right: auto;">
+"Building systems creates irreversible understanding."
+</p>
+
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin: 1.5rem 0 2rem 0; max-width: 1000px;">
 
 <div style="background: #fef2f2; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #ef4444;">

@@ -14,8 +14,17 @@ This module introduces optimization techniques that make production language mod
 :::
 
 `````{only} html
-````{grid} 1 2 3 3
+````{grid} 1 2 2 2
 :gutter: 3
+
+```{grid-item-card} 🎧 Audio Overview
+
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; height: 54px; margin-top: auto;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/18_memoization.mp3" type="audio/mpeg">
+</audio>
+```
 
 ```{grid-item-card} 🚀 Launch Binder
 
@@ -28,16 +37,14 @@ Run interactively in your browser.
 
 Browse the source code on GitHub.
 
-<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/18_memoization/18_memoization.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #6b7280; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
+<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/18_memoization/18_memoization.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #14b8a6; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
 ```
 
-```{grid-item-card} 🎧 Audio Overview
+```{grid-item-card} 📊 Slide Deck
 
-Listen to an AI-generated overview.
+Download the lecture PDF.
 
-<audio controls style="width: 100%; height: 54px; margin-top: auto;">
-  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/18_memoization.mp3" type="audio/mpeg">
-</audio>
+<a href="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-slides-v0.1.0/18_kvcache.pdf" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #0ea5e9; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Download PDF →</a>
 ```
 
 ````
@@ -454,7 +461,7 @@ outputs = model.generate(
 
 Let's examine each approach to understand the similarities and differences:
 
-- **Line 1-2 (Imports)**: TinyTorch uses an explicit `enable_kv_cache()` function to opt-in to caching. PyTorch's Transformers library integrates caching directly into the model architecture.
+- **Line 1-2 (Imports)**: TinyTorch uses an explicit `enable_kv_cache()` function to opt in to caching. PyTorch's Transformers library integrates caching directly into the model architecture.
 - **Line 4-5 (Setup)**: TinyTorch requires manually enabling the cache and storing the reference. PyTorch handles this transparently when you call `generate()`.
 - **Line 7-12 (Generation)**: TinyTorch's loop explicitly manages token generation with the cache working behind the scenes. PyTorch's `generate()` method encapsulates the entire loop and automatically uses caching when `use_cache=True`.
 - **Line 14-15 (Reset)**: TinyTorch requires manual cache reset between sequences. PyTorch automatically resets the cache at the start of each `generate()` call.

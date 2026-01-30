@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
+from tinytorch.perf.profiling import Profiler
 
 
 class TestProfilerBasics:
@@ -44,11 +45,7 @@ class TestProfilerBasics:
 
         WHY: Basic sanity check that the module exists and exports correctly.
         """
-        try:
-            from tinytorch.perf.profiling import Profiler
-            assert Profiler is not None
-        except ImportError as e:
-            pytest.skip(f"Profiler not yet exported: {e}")
+        assert Profiler is not None
 
     def test_profiler_can_instantiate(self):
         """
@@ -56,12 +53,8 @@ class TestProfilerBasics:
 
         WHY: The profiler must be instantiable to use.
         """
-        try:
-            from tinytorch.perf.profiling import Profiler
-            profiler = Profiler()
-            assert profiler is not None
-        except ImportError:
-            pytest.skip("Profiler not yet exported")
+        profiler = Profiler()
+        assert profiler is not None
 
     def test_profiler_can_count_parameters(self):
         """
@@ -72,11 +65,6 @@ class TestProfilerBasics:
         - Larger models need more compute
         - This is the first thing you check about a model
         """
-        try:
-            from tinytorch.perf.profiling import Profiler
-        except ImportError:
-            pytest.skip("Profiler not yet exported")
-
         # Create a simple model
         class SimpleModel:
             def __init__(self):
@@ -108,11 +96,6 @@ class TestLatencyMeasurement:
 
         WHY: Execution time must be positive and non-zero.
         """
-        try:
-            from tinytorch.perf.profiling import Profiler
-        except ImportError:
-            pytest.skip("Profiler not yet exported")
-
         class SimpleModel:
             def __init__(self):
                 self.weight = Tensor(np.random.randn(10, 10))

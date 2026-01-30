@@ -40,9 +40,9 @@ class TestPythonEnvironment:
         )
 
         if not in_venv:
-            pytest.skip("Virtual environment not active (optional but recommended)")
-
-        print(f"✅ Virtual environment active: {sys.prefix}")
+            print("⚠️  Virtual environment not active (optional but recommended)")
+        else:
+            print(f"✅ Virtual environment active: {sys.prefix}")
 
     def test_pip_available(self):
         """pip must be available for package management."""
@@ -84,16 +84,16 @@ class TestCoreDependencies:
         print("✅ NumPy operations work correctly")
 
     def test_matplotlib_import(self):
-        """Matplotlib is optional - skip if not installed."""
+        """Matplotlib is optional - warn if not installed."""
         try:
             import matplotlib
             import matplotlib.pyplot as plt
             print(f"✅ Matplotlib {matplotlib.__version__} imported (optional)")
         except ImportError:
-            pytest.skip("Matplotlib not installed (optional dependency)")
+            print("⚠️  Matplotlib not installed (optional dependency)")
 
     def test_matplotlib_plotting(self):
-        """Matplotlib plotting is optional - skip if not installed."""
+        """Matplotlib plotting is optional - warn if not installed."""
         try:
             import matplotlib
             matplotlib.use('Agg')  # Non-GUI backend for testing
@@ -111,7 +111,7 @@ class TestCoreDependencies:
             plt.close(fig)
             print("✅ Matplotlib can create and save plots (optional)")
         except ImportError:
-            pytest.skip("Matplotlib not installed (optional dependency)")
+            print("⚠️  Matplotlib not installed - plotting tests skipped (optional dependency)")
 
     def test_pytest_available(self):
         """pytest must be available for testing."""
@@ -223,12 +223,10 @@ class TestTinyTorchPackage:
         print(f"✅ TinyTorch version: {tinytorch.__version__}")
 
     def test_tinytorch_tensor_import(self):
-        """Tensor class must be importable (if Module 01 completed)."""
-        try:
-            from tinytorch import Tensor
-            print("✅ Tensor class available (Module 01 completed)")
-        except ImportError:
-            pytest.skip("Tensor not yet implemented (Module 01 not completed)")
+        """Tensor class must be importable."""
+        from tinytorch import Tensor
+        assert Tensor is not None, "Tensor class not available"
+        print("✅ Tensor class available")
 
 
 class TestProjectStructure:
@@ -308,12 +306,12 @@ class TestSystemResources:
             free_gb = mem.available / (1024**3)
             total_gb = mem.total / (1024**3)
 
-            print(f"✅ Memory: {free_gb:.1f}GB free / {total_gb:.1f}GB total")
-
             if free_gb < 2.0:
-                pytest.skip(f"Low memory: {free_gb:.1f}GB (may cause issues)")
+                print(f"⚠️  Low memory: {free_gb:.1f}GB free / {total_gb:.1f}GB total (may cause issues)")
+            else:
+                print(f"✅ Memory: {free_gb:.1f}GB free / {total_gb:.1f}GB total")
         except ImportError:
-            pytest.skip("psutil not available (optional)")
+            print("⚠️  psutil not available - memory check skipped (optional)")
 
     def test_python_interpreter_architecture(self):
         """Check Python interpreter architecture."""
@@ -366,18 +364,18 @@ class TestGitConfiguration:
         )
 
         if name_result.returncode != 0 or email_result.returncode != 0:
-            pytest.skip("Git user not configured (optional but recommended)")
-
-        print(f"✅ Git user configured: {name_result.stdout.strip()} <{email_result.stdout.strip()}>")
+            print("⚠️  Git user not configured (optional but recommended)")
+        else:
+            print(f"✅ Git user configured: {name_result.stdout.strip()} <{email_result.stdout.strip()}>")
 
     def test_git_repository_initialized(self):
         """Project should be a git repository."""
         git_dir = Path(".git")
 
         if not git_dir.exists():
-            pytest.skip("Not a git repository (optional)")
-
-        print(f"✅ Git repository initialized")
+            print("⚠️  Not a git repository (optional)")
+        else:
+            print("✅ Git repository initialized")
 
 
 class TestStudentProtection:

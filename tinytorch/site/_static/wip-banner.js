@@ -34,8 +34,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         <span class="link-icon">↓</span>
                         <span class="link-text">Guide</span>
                     </a>
-                    <a href="${siteRoot}_static/downloads/TinyTorch-Paper.pdf" class="download-link" title="Download Research Paper (PDF)">
-                        <span class="link-icon">↓</span>
+                    <a href="https://arxiv.org/abs/2601.19107" target="_blank" class="download-link" title="Read Research Paper on arXiv">
+                        <span class="link-icon">↗</span>
                         <span class="link-text">Paper</span>
                     </a>
                     <a href="https://mlsysbook.ai" target="_blank">

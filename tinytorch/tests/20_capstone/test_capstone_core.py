@@ -28,83 +28,42 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
+from tinytorch.perf.benchmarking import BenchmarkSuite, BenchmarkResult
 
 
-class TestBenchmarkReport:
-    """Test the benchmark report generation."""
+class TestBenchmarkSuite:
+    """Test the benchmark suite functionality."""
 
-    def test_report_import(self):
-        """Verify BenchmarkReport can be imported."""
-        try:
-            from tinytorch.perf.benchmarking import BenchmarkReport
-            assert BenchmarkReport is not None
-        except ImportError as e:
-            pytest.skip(f"BenchmarkReport not yet exported: {e}")
+    def test_benchmark_suite_import(self):
+        """Verify BenchmarkSuite can be imported."""
+        assert BenchmarkSuite is not None
 
-    def test_report_can_instantiate(self):
-        """Verify BenchmarkReport can be created."""
-        try:
-            from tinytorch.perf.benchmarking import BenchmarkReport
-            report = BenchmarkReport()
-            assert report is not None
-        except ImportError:
-            pytest.skip("BenchmarkReport not yet exported")
+    def test_benchmark_suite_can_instantiate(self):
+        """Verify BenchmarkSuite can be created with models and datasets."""
+        # BenchmarkSuite requires models and datasets lists
+        class MockModel:
+            def __init__(self, name):
+                self.name = name
+            def forward(self, x):
+                return x
 
-    def test_report_can_add_metrics(self):
-        """
-        WHAT: Verify report can record benchmark metrics.
+        models = [MockModel("test_model")]
+        datasets = [{"name": "test", "data": np.random.randn(10, 4)}]
+        suite = BenchmarkSuite(models=models, datasets=datasets)
+        assert suite is not None
 
-        WHY: The report aggregates all performance data.
-        Students need to see their results.
-        """
-        try:
-            from tinytorch.perf.benchmarking import BenchmarkReport
-        except ImportError:
-            pytest.skip("BenchmarkReport not yet exported")
-
-        report = BenchmarkReport()
-
-        # Add some metrics
-        if hasattr(report, 'add_metric'):
-            report.add_metric("latency_ms", 15.5)
-            report.add_metric("throughput", 1000)
-            report.add_metric("memory_mb", 256)
-
-            # Verify metrics were recorded
-            if hasattr(report, 'get_metric'):
-                assert report.get_metric("latency_ms") == 15.5
-
-    def test_report_can_generate_summary(self):
-        """
-        WHAT: Verify report can generate a summary.
-
-        WHY: Students need a readable summary of their results.
-        """
-        try:
-            from tinytorch.perf.benchmarking import BenchmarkReport
-        except ImportError:
-            pytest.skip("BenchmarkReport not yet exported")
-
-        report = BenchmarkReport()
-
-        if hasattr(report, 'summary'):
-            summary = report.summary()
-            assert isinstance(summary, (str, dict)), (
-                "summary() should return string or dict"
-            )
+    def test_benchmark_result_import(self):
+        """Verify BenchmarkResult can be imported."""
+        assert BenchmarkResult is not None
 
 
-class TestSubmissionHarness:
-    """Test the submission harness for capstone validation."""
+class TestCapstoneValidation:
+    """Test the capstone validation components."""
 
-    def test_submission_harness_import(self):
-        """Verify submission harness can be imported."""
-        try:
-            from tinytorch.perf.benchmarking import SubmissionHarness
-            assert SubmissionHarness is not None
-        except ImportError:
-            # This might be named differently
-            pytest.skip("SubmissionHarness not yet exported")
+    def test_benchmarking_available(self):
+        """Verify benchmarking module is available."""
+        from tinytorch.perf import benchmarking
+        assert benchmarking is not None
 
     def test_validate_tensor_operations(self):
         """

@@ -52,9 +52,9 @@ XOR (Exclusive OR) outputs 1 when inputs DIFFER, 0 when they're the SAME:
 
     Try 1: Vertical line?      Try 2: Horizontal line?    Try 3: Diagonal line?
     1 │ ○   │ ●                1 │ ○     ●                1 │ ○     ●
-      │     │                    │───────────               │  ╲
+      │     │                    │───────────               │   ╲
     0 │ ●   │ ○                0 │ ●     ○                0 │ ●   ╲ ○
-      └─────┼──                  └───────────               └────────╲
+      └─────┼──                  └───────────               └───────╲
         0   │ 1                    0       1                  0       1
     ❌ Wrong: (0,1) with (0,0) ❌ Wrong: (0,1) with (1,1) ❌ Wrong: (0,0) with (1,0)
 

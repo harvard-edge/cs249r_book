@@ -304,12 +304,23 @@ class Optimizer:
 
         This is abstract - each optimizer implements its own update rule.
         """
-        raise NotImplementedError("Subclasses must implement step()")
+        raise NotImplementedError(
+            f"Abstract method step() not implemented\n"
+            f"  ❌ {self.__class__.__name__} inherits from Optimizer but doesn't define step()\n"
+            f"  💡 Each optimizer must implement its own update rule (SGD, Adam, etc.)\n"
+            f"  🔧 Override step() in your optimizer subclass:\n"
+            f"      def step(self):\n"
+            f"          for param in self.params:\n"
+            f"              if param.grad is not None:\n"
+            f"                  param.data -= self.lr * param.grad.data"
+        )
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Base Optimizer
+### 🧪 Unit Test: Base Optimizer
+
 This test validates our base Optimizer class works correctly.
+
 **What we're testing**: Parameter validation and zero_grad functionality
 **Why it matters**: Foundation for all specific optimizer implementations
 **Expected**: Proper parameter storage and gradient clearing
@@ -317,18 +328,14 @@ This test validates our base Optimizer class works correctly.
 
 # %% nbgrader={"grade": true, "grade_id": "test-optimizer-base", "locked": true, "points": 10}
 def test_unit_optimizer_base():
-    """🔬 Test base Optimizer functionality."""
-    print("🔬 Unit Test: Base Optimizer...")
+    """🧪 Test base Optimizer functionality."""
+    print("🧪 Unit Test: Base Optimizer...")
 
     # Create test parameters
     param1 = Tensor([1.0, 2.0], requires_grad=True)
     param2 = Tensor([[3.0, 4.0], [5.0, 6.0]], requires_grad=True)
 
-    # Add some gradients
-    param1.grad = Tensor([0.1, 0.2])
-    param2.grad = Tensor([[0.3, 0.4], [0.5, 0.6]])
-
-    # Create optimizer
+    # Create optimizer first (optimizer.__init__ resets grad to None)
     optimizer = Optimizer([param1, param2])
 
     # Test parameter storage
@@ -336,6 +343,10 @@ def test_unit_optimizer_base():
     assert optimizer.params[0] is param1
     assert optimizer.params[1] is param2
     assert optimizer.step_count == 0
+
+    # Add gradients AFTER creating optimizer to test zero_grad properly
+    param1.grad = Tensor([0.1, 0.2])
+    param2.grad = Tensor([[0.3, 0.4], [0.5, 0.6]])
 
     # Test zero_grad
     optimizer.zero_grad()
@@ -519,8 +530,12 @@ class SGD(Optimizer):
 
         if len(state) != len(self.momentum_buffers):
             raise ValueError(
-                f"State length {len(state)} doesn't match "
-                f"optimizer parameters {len(self.momentum_buffers)}"
+                f"Momentum state length mismatch\n"
+                f"  ❌ State has {len(state)} buffers, but optimizer has {len(self.momentum_buffers)} parameters\n"
+                f"  💡 Checkpoint was saved with a different model architecture or parameter count\n"
+                f"  🔧 Ensure you're loading state into an optimizer with the same number of parameters:\n"
+                f"      # Check parameter counts match before restoring\n"
+                f"      assert len(saved_state) == len(optimizer.params)"
             )
 
         for i, buf in enumerate(state):
@@ -586,8 +601,10 @@ class SGD(Optimizer):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: SGD Optimizer
+### 🧪 Unit Test: SGD Optimizer
+
 This test validates our SGD implementation works correctly.
+
 **What we're testing**: SGD updates with and without momentum
 **Why it matters**: Core optimization algorithm used in neural network training
 **Expected**: Correct parameter updates following SGD formulas
@@ -595,28 +612,28 @@ This test validates our SGD implementation works correctly.
 
 # %% nbgrader={"grade": true, "grade_id": "test-sgd", "locked": true, "points": 15}
 def test_unit_sgd_optimizer():
-    """🔬 Test SGD optimizer implementation."""
-    print("🔬 Unit Test: SGD Optimizer...")
+    """🧪 Test SGD optimizer implementation."""
+    print("🧪 Unit Test: SGD Optimizer...")
 
     # Test basic SGD without momentum
     param = Tensor([1.0, 2.0], requires_grad=True)
-    param.grad = Tensor([0.1, 0.2])
-
     optimizer = SGD([param], lr=0.1)
+    # Set gradient AFTER creating optimizer (optimizer.__init__ resets grad to None)
+    param.grad = Tensor([0.1, 0.2])
     original_data = param.data.copy()
 
     optimizer.step()
 
     # Expected: param = param - lr * grad = [1.0, 2.0] - 0.1 * [0.1, 0.2] = [0.99, 1.98]
-    expected = original_data - 0.1 * param.grad.data
+    expected = original_data - 0.1 * np.array([0.1, 0.2])
     assert np.allclose(param.data, expected)
     assert optimizer.step_count == 1
 
     # Test SGD with momentum
     param2 = Tensor([1.0, 2.0], requires_grad=True)
-    param2.grad = Tensor([0.1, 0.2])
-
     optimizer_momentum = SGD([param2], lr=0.1, momentum=0.9)
+    # Set gradient AFTER creating optimizer
+    param2.grad = Tensor([0.1, 0.2])
 
     # First step: v = 0.9 * 0 + [0.1, 0.2] = [0.1, 0.2]
     optimizer_momentum.step()
@@ -633,9 +650,9 @@ def test_unit_sgd_optimizer():
 
     # Test weight decay
     param3 = Tensor([1.0, 2.0], requires_grad=True)
-    param3.grad = Tensor([0.1, 0.2])
-
     optimizer_wd = SGD([param3], lr=0.1, weight_decay=0.01)
+    # Set gradient AFTER creating optimizer
+    param3.grad = Tensor([0.1, 0.2])
     optimizer_wd.step()
 
     # grad_with_decay = [0.1, 0.2] + 0.01 * [1.0, 2.0] = [0.11, 0.22]
@@ -830,8 +847,10 @@ class Adam(Optimizer):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Adam Optimizer
+### 🧪 Unit Test: Adam Optimizer
+
 This test validates our Adam implementation works correctly.
+
 **What we're testing**: Adam updates with adaptive learning rates and bias correction
 **Why it matters**: Most popular optimizer for modern neural networks
 **Expected**: Correct parameter updates following Adam formulas
@@ -839,14 +858,14 @@ This test validates our Adam implementation works correctly.
 
 # %% nbgrader={"grade": true, "grade_id": "test-adam", "locked": true, "points": 20}
 def test_unit_adam_optimizer():
-    """🔬 Test Adam optimizer implementation."""
-    print("🔬 Unit Test: Adam Optimizer...")
+    """🧪 Test Adam optimizer implementation."""
+    print("🧪 Unit Test: Adam Optimizer...")
 
     # Test basic Adam functionality
     param = Tensor([1.0, 2.0], requires_grad=True)
-    param.grad = Tensor([0.1, 0.2])
-
     optimizer = Adam([param], lr=0.01, betas=(0.9, 0.999), eps=1e-8)
+    # Set gradient AFTER creating optimizer (optimizer.__init__ resets grad to None)
+    param.grad = Tensor([0.1, 0.2])
     original_data = param.data.copy()
 
     # First step
@@ -885,9 +904,9 @@ def test_unit_adam_optimizer():
 
     # Test with weight decay
     param2 = Tensor([1.0, 2.0], requires_grad=True)
-    param2.grad = Tensor([0.1, 0.2])
-
     optimizer_wd = Adam([param2], lr=0.01, weight_decay=0.01)
+    # Set gradient AFTER creating optimizer
+    param2.grad = Tensor([0.1, 0.2])
     optimizer_wd.step()
 
     # Weight decay should modify the effective gradient
@@ -1077,8 +1096,10 @@ class AdamW(Optimizer):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: AdamW Optimizer
+### 🧪 Unit Test: AdamW Optimizer
+
 This test validates our AdamW implementation with decoupled weight decay.
+
 **What we're testing**: AdamW updates with proper weight decay decoupling
 **Why it matters**: State-of-the-art optimizer for transformer models
 **Expected**: Correct separation of gradient updates and weight decay
@@ -1086,20 +1107,21 @@ This test validates our AdamW implementation with decoupled weight decay.
 
 # %% nbgrader={"grade": true, "grade_id": "test-adamw", "locked": true, "points": 20}
 def test_unit_adamw_optimizer():
-    """🔬 Test AdamW optimizer implementation."""
-    print("🔬 Unit Test: AdamW Optimizer...")
+    """🧪 Test AdamW optimizer implementation."""
+    print("🧪 Unit Test: AdamW Optimizer...")
 
     # Test AdamW vs Adam difference in weight decay
     # Create identical parameters for comparison
     param_adam = Tensor([1.0, 2.0], requires_grad=True)
     param_adamw = Tensor([1.0, 2.0], requires_grad=True)
 
-    param_adam.grad = Tensor([0.1, 0.2])
-    param_adamw.grad = Tensor([0.1, 0.2])
-
     # Create optimizers with same settings
     adam = Adam([param_adam], lr=0.01, weight_decay=0.01)
     adamw = AdamW([param_adamw], lr=0.01, weight_decay=0.01)
+
+    # Set gradients AFTER creating optimizers (optimizer.__init__ resets grad to None)
+    param_adam.grad = Tensor([0.1, 0.2])
+    param_adamw.grad = Tensor([0.1, 0.2])
 
     # Take one step
     adam.step()
@@ -1110,9 +1132,9 @@ def test_unit_adamw_optimizer():
 
     # Test AdamW basic functionality
     param = Tensor([1.0, 2.0], requires_grad=True)
-    param.grad = Tensor([0.1, 0.2])
-
     optimizer = AdamW([param], lr=0.01, weight_decay=0.01)
+    # Set gradient AFTER creating optimizer
+    param.grad = Tensor([0.1, 0.2])
     original_data = param.data.copy()
 
     optimizer.step()
@@ -1129,11 +1151,12 @@ def test_unit_adamw_optimizer():
     param1 = Tensor([1.0, 2.0], requires_grad=True)
     param2 = Tensor([1.0, 2.0], requires_grad=True)
 
-    param1.grad = Tensor([0.1, 0.2])
-    param2.grad = Tensor([0.1, 0.2])
-
     adam_no_wd = Adam([param1], lr=0.01, weight_decay=0.0)
     adamw_no_wd = AdamW([param2], lr=0.01, weight_decay=0.0)
+
+    # Set gradients AFTER creating optimizers
+    param1.grad = Tensor([0.1, 0.2])
+    param2.grad = Tensor([0.1, 0.2])
 
     adam_no_wd.step()
     adamw_no_wd.step()
@@ -1223,17 +1246,19 @@ def analyze_optimizer_memory_usage():
     for size in param_sizes:
         # Create parameter
         param = Tensor(np.random.randn(size), requires_grad=True)
-        param.grad = Tensor(np.random.randn(size))
 
         # SGD memory (parameter + momentum buffer)
         sgd = SGD([param], momentum=0.9)
+        # Set gradient AFTER creating optimizer
+        param.grad = Tensor(np.random.randn(size))
         sgd.step()  # Initialize buffers
         sgd_memory = size * 2  # param + momentum buffer
 
         # Adam memory (parameter + 2 moment buffers)
         param_adam = Tensor(np.random.randn(size), requires_grad=True)
-        param_adam.grad = Tensor(np.random.randn(size))
         adam = Adam([param_adam])
+        # Set gradient AFTER creating optimizer
+        param_adam.grad = Tensor(np.random.randn(size))
         adam.step()  # Initialize buffers
         adam_memory = size * 3  # param + m_buffer + v_buffer
 
@@ -1348,7 +1373,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test realistic neural network optimization scenario
-    print("🔬 Integration Test: Multi-layer Network Optimization...")
+    print("🧪 Integration Test: Multi-layer Network Optimization...")
 
     # Import components from TinyTorch package (previous modules must be completed and exported)
     from tinytorch.core.layers import Linear
@@ -1366,18 +1391,19 @@ def test_module():
 
     params = [W1, b1, W2, b2]
 
-    # Add realistic gradients
-    W1.grad = Tensor(np.random.randn(3, 4) * 0.01)
-    b1.grad = Tensor(np.random.randn(4) * 0.01)
-    W2.grad = Tensor(np.random.randn(4, 2) * 0.01)
-    b2.grad = Tensor(np.random.randn(2) * 0.01)
-
     # Test all optimizers on same network
+    # Create optimizers BEFORE setting gradients (optimizer.__init__ resets grad to None)
     optimizers = [
         SGD(params, lr=0.01, momentum=0.9),
         Adam([p for p in params], lr=0.001),  # Fresh param list for Adam
         AdamW([p for p in params], lr=0.001, weight_decay=0.01)  # Fresh param list for AdamW
     ]
+
+    # Add realistic gradients AFTER creating optimizers
+    W1.grad = Tensor(np.random.randn(3, 4) * 0.01)
+    b1.grad = Tensor(np.random.randn(4) * 0.01)
+    W2.grad = Tensor(np.random.randn(4, 2) * 0.01)
+    b2.grad = Tensor(np.random.randn(2) * 0.01)
 
     # Save original parameter values
     original_params = [p.data.copy() for p in params]
@@ -1435,12 +1461,12 @@ def test_module():
     print("✅ Multi-layer network optimization works!")
 
     # Test optimizer state management
-    print("🔬 Integration Test: Optimizer State Management...")
+    print("🧪 Integration Test: Optimizer State Management...")
 
     param = Tensor([1.0, 2.0], requires_grad=True)
-    param.grad = Tensor([0.1, 0.2])
-
     optimizer = Adam([param], lr=0.001)
+    # Set gradient AFTER creating optimizer
+    param.grad = Tensor([0.1, 0.2])
 
     # First step should initialize buffers
     optimizer.step()
@@ -1462,73 +1488,100 @@ def test_module():
 
 # %% [markdown]
 """
-## 🤔 ML Systems Thinking
+## 🤔 ML Systems Reflection Questions
 
-Now that your optimizers work, let's explore the systems trade-offs between them. Every optimizer choice affects memory usage, convergence speed, and training stability.
+Answer these to deepen your understanding of optimizer operations and their systems implications:
 
-### Questions to Consider
+### 1. Memory vs Performance
+**Question**: You've implemented SGD (2x memory) and Adam (3x memory). For a model with 10 billion parameters at float32 (4 bytes each):
 
-**Q1: Memory vs Performance**
-You've implemented SGD (2× memory) and Adam (3× memory). For a model with 10 billion parameters at float32 (4 bytes each):
+**Consider**:
 - How much total memory does each optimizer require?
 - At what model size does Adam's extra 50% memory overhead become prohibitive?
 - What real-world constraints might force you to choose SGD over Adam?
 
-**Q2: Learning Rate Sensitivity**
-SGD uses a fixed learning rate for all parameters, while Adam adapts per-parameter:
+**Calculate**:
+- Parameters: 10 x 10^9
+- Bytes per float32: 4
+- SGD memory (2x): ___________GB
+- Adam memory (3x): ___________GB
+
+---
+
+### 2. Learning Rate Sensitivity
+**Question**: SGD uses a fixed learning rate for all parameters, while Adam adapts per-parameter.
+
+**Consider**:
 - Why might Adam converge faster on problems with parameters at different scales?
 - When might SGD's uniform learning rate actually be an advantage?
 - How does momentum in SGD relate to Adam's first moment estimation?
 
-**Q3: Optimizer State Management**
-Adam and AdamW maintain momentum buffers (m, v) that persist across training steps:
+**Real-world context**: Large language models often have embedding layers with very different gradient magnitudes than attention layers. Adam's adaptive rates help balance these naturally.
+
+---
+
+### 3. Optimizer State Management
+**Question**: Adam and AdamW maintain momentum buffers (m, v) that persist across training steps.
+
+**Consider**:
 - What happens to these buffers when you checkpoint during training?
 - If you resume training with different hyperparameters, should you restore the old buffers?
 - How does optimizer state affect distributed training across multiple GPUs?
 
-**Q4: Weight Decay Trade-offs**
-AdamW decouples weight decay from gradient updates:
+**Think about**:
+- Checkpoint size: Adam stores 2 additional tensors per parameter
+- Resume behavior: Warm vs cold restart implications
+- Distributed sync: How do you aggregate optimizer state across workers?
+
+---
+
+### 4. Weight Decay Trade-offs
+**Question**: AdamW decouples weight decay from gradient updates.
+
+**Consider**:
 - Why does Adam's coupled weight decay behave inconsistently?
 - In what scenarios would AdamW's consistent regularization matter most?
 - How does weight decay interact with learning rate schedules?
 
-### Systems Implications
+**Real-world context**: The AdamW paper showed that proper decoupling leads to better generalization on ImageNet and language models.
 
-**Memory Hierarchy:**
-```
-Model Size: 1B parameters (4GB)
-├─ SGD:     8GB total (4GB params + 4GB momentum)
-├─ Adam:    12GB total (4GB params + 4GB m + 4GB v)
-└─ Impact:  May not fit in GPU memory, forcing:
-            • Smaller batch sizes
-            • Model parallelism
-            • Optimizer state sharding (ZeRO optimization)
-```
+---
 
-**Convergence Patterns:**
-- **SGD + Momentum:** Steady progress, may need learning rate tuning
-- **Adam:** Fast initial convergence, may overfit without proper regularization
-- **AdamW:** Adam's speed + better generalization, standard for transformers
+### 5. Production Scale: Memory Requirements
+**Question**: For training a GPT-scale model with 1 billion parameters, calculate the memory requirements:
 
-**Production Considerations:**
-- **Training cost:** Adam's extra memory means fewer models per GPU
-- **Hyperparameter tuning:** SGD more sensitive to learning rate choice
-- **Model generalization:** AdamW often generalizes better than Adam
-- **Checkpoint size:** Adam checkpoints are 1.5× larger than SGD
+**Calculate**:
+- Parameters: 1 x 10^9
+- Bytes per float32: 4
+- Parameter memory: ___________GB
 
-### Performance Analysis
+**With Adam optimizer (3x memory)**:
+- Total: ___________GB
 
-Our earlier analysis functions revealed:
-- `analyze_optimizer_memory_usage()`: Adam requires exactly 1.5× SGD's memory
-- `analyze_optimizer_convergence_behavior()`: Adam often converges in fewer steps
+**With gradient checkpointing and mixed precision**:
+- How does this change the equation?
 
-**The Key Insight:**
-Optimizer choice is a systems trade-off between:
-- **Memory budget** (can you afford 3× parameter memory?)
-- **Convergence speed** (how many training steps can you afford?)
-- **Generalization quality** (does your model perform well on unseen data?)
+**Real-world implications**:
+- Why do we need multiple GPUs for training large models?
+- What is ZeRO optimization and how does it help?
+- When would you choose SGD over Adam despite slower convergence?
 
-There's no universally best optimizer—only the right choice for your constraints!
+---
+
+### Bonus Challenge: Optimization Analysis
+
+**Scenario**: You're training a transformer model and observing the following:
+- Loss decreases rapidly for first 1000 steps
+- Loss plateaus between steps 1000-5000
+- Loss suddenly increases at step 5000
+
+**Questions**:
+1. What might cause the plateau? How would momentum help?
+2. What might cause the sudden increase? Is this an optimizer issue?
+3. How would you diagnose whether this is a learning rate problem vs. data problem?
+4. Would switching from Adam to AdamW help in this scenario?
+
+**Key insight**: Optimization is not just about algorithms - it's about understanding the interaction between data, model architecture, and training dynamics.
 """
 
 # %% [markdown]
@@ -1552,13 +1605,15 @@ def demo_optimizers():
 
     # Create a parameter with a gradient
     weight = Tensor(np.array([5.0]), requires_grad=True)
+
+    # SGD takes a step in the opposite direction
+    optimizer = SGD([weight], lr=0.5)
+    # Set gradient AFTER creating optimizer (optimizer.__init__ resets grad to None)
     weight.grad = np.array([1.0])  # Gradient pointing "uphill"
 
     print(f"Initial weight: {weight.data[0]:.2f}")
     print(f"Gradient:       {weight.grad[0]:.2f} (pointing uphill)")
 
-    # SGD takes a step in the opposite direction
-    optimizer = SGD([weight], lr=0.5)
     optimizer.step()
 
     print(f"\nAfter SGD step: {weight.data[0]:.2f}")
@@ -1579,11 +1634,17 @@ if __name__ == "__main__":
 Congratulations! You've built sophisticated optimization algorithms that power modern neural network training!
 
 ### Key Accomplishments
-- Built SGD optimizer with momentum for stable gradient descent and oscillation reduction
-- Implemented Adam optimizer with adaptive learning rates and bias correction for different parameter scales
-- Created AdamW optimizer with decoupled weight decay for proper regularization
-- Analyzed memory trade-offs: SGD (2×), Adam/AdamW (3× parameter memory)
-- All tests pass ✅ (validated by `test_module()`)
+- **Built SGD optimizer** with momentum for stable gradient descent and oscillation reduction
+- **Implemented Adam optimizer** with adaptive learning rates and bias correction for different parameter scales
+- **Created AdamW optimizer** with decoupled weight decay for proper regularization
+- **Analyzed memory trade-offs**: SGD (2x), Adam/AdamW (3x parameter memory)
+- **All tests pass** (validated by `test_module()`)
+
+### Systems Insights Discovered
+- **Memory scaling**: SGD needs 2x parameter memory (momentum), Adam needs 3x (two moment buffers)
+- **Adaptive learning**: Adam automatically adjusts step sizes per parameter for faster convergence
+- **Weight decay coupling**: AdamW fixes Adam's inconsistent regularization by decoupling weight decay
+- **State management**: Optimizer buffers must be checkpointed for training resume
 
 ### Ready for Next Steps
 Your optimizer implementations enable sophisticated neural network training! With gradients from Module 06 and optimizers from Module 07, you're ready to build complete training loops.
