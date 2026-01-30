@@ -60,6 +60,8 @@ Your "Source Code" is the model architecture (the **$Ops$** term). The framework
 Choosing a framework means choosing the compiler that determines how efficiently your model utilizes hardware.
 :::
 
+With these three problems in mind, we can now define what a machine learning framework fundamentally is.
+
 :::: {.callout-definition title="Machine Learning Frameworks"}
 
 **Machine Learning Frameworks** refer to *software platforms* that solve the *execution*, *differentiation*, and *abstraction* problems, providing *standardized interfaces* for model development, training, and deployment across *diverse computational infrastructure*.
@@ -868,9 +870,9 @@ The trade-offs between static and dynamic graphs extend beyond the dimensions sh
 
 These trade-offs are not binary choices. Modern frameworks offer a spectrum of options, which raises the quantitative question: where on this spectrum should your project operate?
 
-### The Compilation Continuum Principle {#sec-ai-frameworks-compilation-continuum-principle-c106}
+### Quantitative Principles of Execution {#sec-ai-frameworks-compilation-continuum-principle-c106}
 
-The Execution Problem demands a quantitative principle: **when should you compile?**
+**The Compilation Continuum Principle.** The Execution Problem demands a quantitative principle: **when should you compile?**
 
 The execution models form a continuum from maximum flexibility to maximum optimization:
 
@@ -996,9 +998,7 @@ For ImageNet (1.28M training images), compilation pays off within the first epoc
 ```
 :::
 
-### The Dispatch Overhead Law {#sec-ai-frameworks-dispatch-overhead-law-518a}
-
-A second principle emerges from the Dispatch Overhead Equation (@eq-dispatch-overhead): when does framework overhead—rather than compute or memory—dominate execution time? Framework overhead dominates when operations are small relative to dispatch cost:
+**The Dispatch Overhead Law.** A second principle emerges from the Dispatch Overhead Equation (@eq-dispatch-overhead): when does framework overhead---rather than compute or memory---dominate execution time? Framework overhead dominates when operations are small relative to dispatch cost:
 
 $$
 \text{Overhead Ratio} = \frac{N_{\text{ops}} \cdot t_{\text{dispatch}}}{T_{\text{compute}} + T_{\text{memory}}}
@@ -1006,20 +1006,27 @@ $$ {#eq-dispatch-overhead}
 
 When Overhead Ratio $> 1$, the model is **overhead-bound**. Compilation provides maximum benefit for overhead-bound workloads because it eliminates per-operation dispatch.
 
-From the case study in @sec-ai-frameworks-putting-together-anatomy-training-step-c7f1, a small MLP with 6 operations:
+From the case study in @sec-ai-frameworks-putting-together-anatomy-training-step-c7f1, we can quantify this effect.
 
-- $T_{\text{compute}} + T_{\text{memory}} \approx 2.6\mu s$
-- $T_{\text{overhead}} = 6 \times 5\mu s = 30\mu s$
-- Overhead Ratio = $30/2.6 \approx 11.5$
+::: {.callout-notebook title="Napkin Math: The Dispatch Tax"}
+**Problem**: When does Python overhead kill performance?
 
-This model is **heavily overhead-bound**—compilation can provide 10×+ speedup by fusing operations and eliminating dispatch.
+**Scenario 1: Small MLP (Overhead Bound)**
 
-For large models (GPT-3 scale):
+*   **Compute**: 6 small matrix/element-wise operations.
+*   **Hardware Time**: $T_{hw} \approx 2.6 \mu s$ (mostly memory latency).
+*   **Software Overhead**: $T_{sw} \approx 6 \text{ ops} \times 5 \mu s/\text{op} = 30 \mu s$.
+*   **Ratio**: $\frac{30}{2.6} \approx \mathbf{11.5}$.
+*   **Conclusion**: You spend 92% of time waiting for Python. Compilation yields **10x speedup**.
 
-- Single attention layer: $T_{\text{compute}} \approx 100$ms, $T_{\text{overhead}} \approx 50\mu s$
-- Overhead Ratio = $0.0005$
+**Scenario 2: GPT-3 Layer (Compute Bound)**
 
-Large models are **compute-bound**—compilation still helps via kernel fusion, but dispatch overhead is negligible.
+*   **Compute**: Huge matrix multiplications.
+*   **Hardware Time**: $T_{hw} \approx 100 \text{ ms} = 100,000 \mu s$.
+*   **Software Overhead**: $T_{sw} \approx 50 \mu s$.
+*   **Ratio**: $\frac{50}{100,000} \approx \mathbf{0.0005}$.
+*   **Conclusion**: Python overhead is negligible. Compilation helps only via kernel fusion (memory bandwidth), not dispatch elimination.
+:::
 
 **The Principle's Implication**: Small models benefit *disproportionately* from compilation. A 100-parameter toy model might see 10× speedup from torch.compile, while a 175B-parameter model sees only 1.3×. This explains why compilation matters most for efficient inference on smaller, deployed models.
 
@@ -2190,7 +2197,7 @@ prof.export_chrome_trace("trace.json")
 ```
 :::
 
-**GPU-Level Profiling with NVIDIA Nsight.** {#sec-ai-frameworks-nsight-profiling} For hardware-level bottleneck diagnosis, NVIDIA provides two complementary tools. Nsight Systems captures system-wide timelines correlating CPU activity, GPU kernel execution, and memory transfers:
+**GPU-Level Profiling with NVIDIA Nsight.** For hardware-level bottleneck diagnosis, NVIDIA provides two complementary tools. Nsight Systems captures system-wide timelines correlating CPU activity, GPU kernel execution, and memory transfers:
 
 ```bash
 # Profile entire training script
@@ -3104,17 +3111,15 @@ The TensorFlow ecosystem illustrates how these axes interact concretely. Its thr
 
 The principle is progressive constraint leading to progressive optimization: fewer supported operations enable smaller binaries, tighter memory budgets, and native quantization. Three dimensions structure this analysis: model requirements (what operations must the framework support?), software dependencies (what runtime environment is available?), and hardware constraints (what are the physical limits?).
 
-### Model Requirements {#sec-ai-frameworks-model-requirements-2e01}
+### Framework Selection Criteria {#sec-ai-frameworks-model-requirements-2e01}
 
-The first question is whether a framework can express the models your project requires. As @tbl-tf-comparison shows, operator count drops from approximately $10^3$ (full TensorFlow) to $10^2$ (TensorFlow Lite) to $10^1$ (TensorFlow Lite Micro). Each reduction eliminates training capability and general-purpose operations while adding native quantization tooling. The engineering principle is that expressiveness and efficiency trade against each other: fewer supported operations enable tighter code generation, smaller binaries, and hardware-specific optimization paths. This progressive constraint model applies to any framework family, not just TensorFlow. The choice between *dynamic and static computational graphs* further shapes which optimizations each constraint level permits.
+**Model Requirements.** The first question is whether a framework can express the models your project requires. As @tbl-tf-comparison shows, operator count drops from approximately $10^3$ (full TensorFlow) to $10^2$ (TensorFlow Lite) to $10^1$ (TensorFlow Lite Micro). Each reduction eliminates training capability and general-purpose operations while adding native quantization tooling. The engineering principle is that expressiveness and efficiency trade against each other: fewer supported operations enable tighter code generation, smaller binaries, and hardware-specific optimization paths. This progressive constraint model applies to any framework family, not just TensorFlow. The choice between *dynamic and static computational graphs* further shapes which optimizations each constraint level permits.
 
 ::: {.callout-perspective title="Dynamic vs Static Computational Graphs"}
 The static-versus-dynamic graph distinction (examined in @sec-ai-frameworks-execution-problem-e1e1) has direct implications for model requirements analysis. Static graphs constrain which operations are expressible but enable ahead-of-time optimization for deployment. Dynamic graphs support arbitrary Python control flow but require explicit compilation steps (e.g., `torch.compile`, `tf.function`) to recover optimization potential.
 :::
 
-### Software Dependencies {#sec-ai-frameworks-software-dependencies-e2ad}
-
-Once model requirements are satisfied, the framework must integrate with the target software environment. @tbl-tf-sw-comparison reveals how operating system requirements, memory management, and accelerator support vary across TensorFlow variants.
+**Software Dependencies.** Once model requirements are satisfied, the framework must integrate with the target software environment. @tbl-tf-sw-comparison reveals how operating system requirements, memory management, and accelerator support vary across TensorFlow variants.
 
 +--------------------------------+----------------+---------------------+------------------------------------------+
 |                                | **TensorFlow** | **TensorFlow Lite** | **TensorFlow Lite for Microcontrollers** |
@@ -3130,9 +3135,7 @@ Once model requirements are satisfied, the framework must integrate with the tar
 
 The key distinctions follow the same progressive constraint pattern. TensorFlow Lite Micro eliminates the OS requirement entirely, enabling bare-metal execution on microcontrollers (though it integrates with RTOSes like FreeRTOS and Zephyr when available). Both Lite variants support memory-mapped model access from flash storage, avoiding the RAM overhead of loading full models. Accelerator delegation drops out at the microcontroller tier, where specialized hardware is rarely available. Each software dependency removed is a deployment target gained.
 
-### Hardware Constraints {#sec-ai-frameworks-hardware-constraints-123d}
-
-Software compatibility alone does not guarantee deployment; the framework must fit within physical hardware limits. @tbl-tf-hw-comparison quantifies this final constraint dimension.
+**Hardware Constraints.** Software compatibility alone does not guarantee deployment; the framework must fit within physical hardware limits. @tbl-tf-hw-comparison quantifies this final constraint dimension.
 
 +-----------------------------+-------------------------------------------------------+------------------------+------------------------------------------+
 |                             | **TensorFlow**                                        | **TensorFlow Lite**    | **TensorFlow Lite for Microcontrollers** |
@@ -3148,9 +3151,7 @@ Software compatibility alone does not guarantee deployment; the framework must f
 
 Binary size spans three orders of magnitude: from MB (full TensorFlow) to tens of KB (TensorFlow Lite Micro). Memory footprint follows the same pattern. Processor architecture support shifts correspondingly from x86/GPU/TPU (data center) through Arm Cortex-A (mobile/edge) to Arm Cortex-M, DSPs, and MCUs (embedded). The engineering lesson generalizes beyond TensorFlow: every framework family that spans deployment tiers makes analogous trade-offs between capability and resource footprint.
 
-### Production-Ready Evaluation Factors {#sec-ai-frameworks-productionready-evaluation-factors-7049}
-
-The engineering principle underlying production evaluation is that expressiveness and efficiency trade against each other: fewer supported operations enable tighter code generation, smaller binaries, and hardware-specific optimization paths. Technical specifications establish necessary but not sufficient conditions for selection. Production deployments also require evaluating operational factors: migration cost (typically 3-6 engineer-months for production systems, as noted in the Fallacies section), maintenance burden, and deployment success rates.
+**Production-Ready Evaluation Factors.** The engineering principle underlying production evaluation is that expressiveness and efficiency trade against each other: fewer supported operations enable tighter code generation, smaller binaries, and hardware-specific optimization paths. Technical specifications establish necessary but not sufficient conditions for selection. Production deployments also require evaluating operational factors: migration cost (typically 3-6 engineer-months for production systems, as noted in the Fallacies section), maintenance burden, and deployment success rates.
 
 **Performance Optimization.** Embedded performance spans four coupled dimensions: inference latency (tens of milliseconds for mobile image classification, sub-millisecond for industrial control), memory footprint (MB for full TensorFlow down to tens of KB for TensorFlow Lite Micro), power consumption (INT8 inference consuming several-fold less energy than FP32 on mobile hardware), and hardware utilization (operator fusion improving FLOPS utilization from 10--20% to 60--80% of peak). These metrics are not independent: quantization simultaneously reduces memory, latency, and energy at the cost of precision. Framework selection determines which optimization levers are available.
 
@@ -3191,9 +3192,7 @@ optimizer.step()
 ```
 :::
 
-### Phase 1: Forward Pass (Solving the Execution Problem) {#sec-ai-frameworks-phase-1-forward-pass-solving-execution-problem-c816}
-
-When `h = torch.relu(x @ W1 + b1)` executes, PyTorch's eager execution triggers immediate computation:
+**Phase 1: Forward Pass (Solving the Execution Problem).** When `h = torch.relu(x @ W1 + b1)` executes, PyTorch's eager execution triggers immediate computation:
 
 1. **Python Dispatch** (~1μs): Python interpreter calls `torch.matmul`, which routes through PyTorch's dispatcher to select the CUDA backend.
 
@@ -3212,9 +3211,7 @@ When `h = torch.relu(x @ W1 + b1)` executes, PyTorch's eager execution triggers 
 
 The bias addition and ReLU follow similar patterns, each adding a node to the autograd tape.
 
-### Phase 2: Backward Pass (Solving the Differentiation Problem) {#sec-ai-frameworks-phase-2-backward-pass-solving-differentiation-problem-a51f}
-
-When `loss.backward()` executes:
+**Phase 2: Backward Pass (Solving the Differentiation Problem).** When `loss.backward()` executes:
 
 1. **Tape Traversal**: The autograd engine traverses the recorded graph in reverse topological order.
 
@@ -3228,9 +3225,7 @@ When `loss.backward()` executes:
 
 4. **Memory Management**: After each backward node completes, its saved tensors are freed, allowing memory reuse.
 
-### Phase 3: Memory Traffic Analysis (The Physics at Work) {#sec-ai-frameworks-phase-3-memory-traffic-analysis-physics-work-fc1f}
-
-Applying the Dispatch Overhead Equation (@eq-dispatch-overhead) to this step:
+**Phase 3: Memory Traffic Analysis (The Physics at Work).** Applying the Dispatch Overhead Equation (@eq-dispatch-overhead) to this step:
 
 +---------------------------+----------------------+--------------------+--------------------------+
 | **Component**             | **FLOPs**            | **Memory Traffic** | **Arithmetic Intensity** |
@@ -3258,9 +3253,7 @@ Total: ~40M FLOPs, ~5MB memory traffic. On an A100:
 - Batch size increases help amortize per-batch overhead
 - Production training uses much larger models where compute dominates
 
-### Phase 4: Hardware Abstraction (Solving the Abstraction Problem) {#sec-ai-frameworks-phase-4-hardware-abstraction-solving-abstraction-problem-5042}
-
-The same Python code runs on different hardware through abstraction layers:
+**Phase 4: Hardware Abstraction (Solving the Abstraction Problem).** The same Python code runs on different hardware through abstraction layers:
 
 - **CUDA GPU**: cuBLAS GEMM kernels, CUDA streams for async execution
 - **CPU**: Intel MKL or OpenBLAS, OpenMP for parallelism

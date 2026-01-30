@@ -106,6 +106,7 @@ Memory limits motivated gradient checkpointing; bandwidth limits motivated Flash
 To ground the abstract principles of training systems in concrete engineering decisions, we use GPT-2 as a recurring worked example throughout this chapter. This *lighthouse model* is large enough to expose real systems bottlenecks yet small enough to reason about without massive cluster infrastructure.
 
 ::: {.callout-lighthouse title="Lighthouse Example: Training GPT-2"}
+
 **Why this model?**
 GPT-2 (1.5B) serves as our primary case study for **large-scale training** because it sits at the "sweet spot" of systems complexity. It is large enough to require distributed training and serious memory optimizations, yet small enough to comprehend without the massive infrastructure complexity of trillion-parameter clusters.
 
@@ -244,12 +245,10 @@ $$
 
 :::
 
-##### Matrix-Vector Operations {#sec-ai-training-matrixvector-operations-2e9c}
-
+**Matrix-Vector Operations.**
 Beyond matrix-matrix operations, matrix-vector multiplication became essential with the introduction of normalization techniques in neural architectures. Although computationally simpler than matrix-matrix multiplication, these operations present system challenges. They exhibit lower hardware utilization due to their limited parallelization potential. This characteristic influences hardware design and model architecture decisions, particularly in networks processing sequential inputs or computing layer statistics.
 
-##### Batched Operations {#sec-ai-training-batched-operations-9745}
-
+**Batched Operations.**
 Recognizing the limitations of matrix-vector operations, the introduction of batching[^fn-batching-transformation] transformed matrix computation in neural networks. By processing multiple inputs simultaneously, training systems convert matrix-vector operations into more efficient matrix-matrix operations. This approach improves hardware utilization but increases memory demands for storing intermediate results. Modern implementations must balance batch sizes against available memory, leading to specific optimizations in memory management and computation scheduling.
 
 [^fn-batching-transformation]: **Batching in Neural Networks**: Unlike traditional programming where data is processed one item at a time, ML systems process multiple examples simultaneously to maximize GPU utilization. A single example might achieve only 5-10% GPU utilization, while batches of 32-256 can reach 80-95%. This shift from scalar to tensor operations explains why ML systems require different programming patterns and hardware optimizations than traditional applications.
@@ -257,6 +256,7 @@ Recognizing the limitations of matrix-vector operations, the introduction of bat
 The progression from matrix-vector to batched matrix-matrix operations explains the hardware design choices in modern accelerators. Hardware accelerators like Google's TPU [@jouppi2017tpu] reflect this evolution, incorporating specialized matrix units and memory hierarchies optimized for batched operations. These hardware adaptations enable training of large-scale models like GPT-3 [@brown2020language] through efficient handling of the matrix-matrix multiplication patterns that batching produces.
 
 ::: {.callout-perspective title="Why GPUs Dominate Training" collapse="false"}
+
 The matrix operations described above directly explain modern training hardware architecture. GPUs dominate training for three reasons. First, matrix multiplication's independent element calculations map perfectly to thousands of GPU cores (NVIDIA A100 has 6,912 CUDA cores). Second, specialized hardware units like Tensor Cores accelerate matrix operations by 10–20× through dedicated hardware for the dominant workload. Third, blocked matrix computation patterns enable efficient use of GPU memory hierarchy (L1/L2 cache, shared memory, global memory).
 
 When GPT-2 examples later show why V100 GPUs achieve 2.4x speedup with mixed precision, this acceleration comes from Tensor Cores executing the matrix multiplications we just analyzed. Matrix operation characteristics are prerequisite for appreciating why pipeline optimizations like mixed-precision training provide such substantial benefits.
@@ -317,20 +317,17 @@ The selection of an activation function directly influences training throughput 
 
 In production environments, modern hardware accelerators like GPUs alter these relative performance characteristics through specialized hardware units. System architects must consider three primary implementation factors:
 
-#### Computational Complexity (Arithmetic Intensity) {.unnumbered}
-
+**Computational Complexity (Arithmetic Intensity).**
 Functions requiring transcendental operations (exponential, logarithmic) are significantly more expensive than simple thresholding. In software, `exp()` takes 10--20 clock cycles compared to 1 cycle for basic arithmetic[^fn-sigmoid-cost]. Modern GPUs and TPUs mitigate this through lookup tables (LUTs) or piece-wise linear approximations, but even optimized hardware-based sigmoid/tanh remains 3--4$\times$ slower than ReLU.
 
 [^fn-sigmoid-cost]: **Sigmoid Computational Cost**: Computing sigmoid requires expensive exponential operations. On CPU, `exp()` takes 10--20 clock cycles vs. 1 cycle for basic arithmetic. GPU implementations use 32-entry lookup tables with linear interpolation, reducing cost to 3--4 cycles but still 3$\times$ slower than ReLU. This overhead compounds in deep networks with millions of activations per forward pass.
 
-#### Hardware Implementation and Branching {.unnumbered}
-
+**Hardware Implementation and Branching.**
 ReLU represents a shift toward hardware-optimized design. Its $\max(0,x)$ operation requires only a single comparison and conditional set, which translates to minimal circuit complexity[^fn-relu-hardware]. GPUs can implement ReLU using a simple multiplexer that checks the sign bit of the input. This simplicity enables extremely high parallel throughput, allowing ReLU to operate at near-peak FLOPs while complex functions achieve only 30--40% hardware utilization.
 
 [^fn-relu-hardware]: **ReLU Hardware Efficiency**: ReLU requires just 1 instruction (`max(0,x)`) vs. sigmoid's 10+ operations including exponentials. On NVIDIA GPUs, ReLU runs at 95% of peak FLOPS while sigmoid achieves only 30--40%. ReLU's sparsity (typically 50% zeros) enables additional optimizations: sparse matrix operations, reduced memory bandwidth, and compressed gradients during backpropagation.
 
-#### Memory Access and Sparsity {.unnumbered}
-
+**Memory Access and Sparsity.**
 The memory footprint of activations is proportional to the batch size and network depth. ReLU's characteristic of producing many zeros (typically 50% sparsity) enables system-level optimizations that other functions cannot exploit. Sparse matrix operations and gradient compression techniques can reduce memory bandwidth requirements, which is the primary bottleneck in large-scale training. In contrast, global normalization functions like Softmax[^fn-softmax-etymology] create unique challenges; they require access to the entire input vector simultaneously to compute the denominator, preventing the independent element-wise parallelization possible with Sigmoid or ReLU.
 
 [^fn-softmax-etymology]: **Softmax**: A "soft" (differentiable) approximation to the argmax function. While argmax returns a hard one-hot vector (1 for the maximum, 0 elsewhere), softmax returns a probability distribution that smoothly approximates this behavior. The name, coined by John Bridle in 1990, reflects this relationship: as temperature approaches zero, softmax converges to argmax. This differentiability enables gradient-based learning for classification tasks.
@@ -397,6 +394,7 @@ This approximation reduces computational cost to approximately 1.5$\times$ ReLU 
 The GELU approximation highlights a broader pattern: compute cost is not always the dominant concern. For activation functions, the real bottleneck is often memory bandwidth rather than arithmetic operations. This distinction between compute-bound and memory-bound operations has important implications for optimization priorities and will recur throughout our analysis of training bottlenecks.
 
 ::: {.callout-perspective title="Memory Bandwidth Bottlenecks" collapse="false"}
+
 Activation functions reveal a critical systems principle: not all operations are compute-bound. While matrix multiplications saturate GPU compute units, activation functions often become memory-bandwidth-bound for three reasons. First, element-wise operations perform few calculations per memory access (ReLU performs 1 operation per load). Second, simple operations complete faster than memory transfer time, limiting parallelism benefits. Third, modern GPUs have 10–100× more compute throughput than memory bandwidth.
 
 This explains why activation function choice matters less than expected. ReLU versus sigmoid shows only 2-3x difference despite vastly different computational complexity, because both are bottlenecked by memory access. The forward pass must carefully manage activation storage to prevent memory bandwidth from limiting overall training throughput.
@@ -469,18 +467,15 @@ This establishes a central theme in training systems: the hardware-software trad
 
 SGD computes correct gradients but struggles with ill-conditioned loss landscapes where some dimensions are steep (requiring small steps) while others are shallow (benefiting from large steps). A single learning rate either oscillates dangerously in steep dimensions or moves glacially in shallow ones. Each subsequent optimizer we examine solves a specific limitation of its predecessors: momentum smooths oscillations by averaging gradient history, RMSprop adapts step sizes per parameter, and Adam combines both strategies. Understanding this progression clarifies why Adam became the default choice for transformer training while revealing the system costs, specifically memory and computation, that each refinement introduces [@kingma2014adam].
 
-##### Momentum-Based Methods {#sec-ai-training-momentumbased-methods-6fc9}
-
+**Momentum-Based Methods.**
 Momentum methods[^fn-momentum-etymology] address SGD's oscillation problem by accumulating a velocity vector across iterations, smoothing out noisy gradient directions. From a systems perspective, this smoothing comes at a cost: the training system must maintain a velocity vector with the same dimensionality as the parameter vector, effectively doubling the memory needed for optimization state.
 
 [^fn-momentum-etymology]: **Momentum**: Borrowed directly from physics, where momentum (mass times velocity) describes an object's tendency to continue moving. In optimization, the metaphor is apt: just as a ball rolling downhill accumulates momentum and can roll through small bumps, gradient updates accumulate velocity to overcome local irregularities in the loss surface. The physics analogy, introduced by Polyak in 1964, made this abstract optimization concept intuitive to researchers.
 
-##### Adaptive Learning Rate Methods {#sec-ai-training-adaptive-learning-rate-methods-aa26}
-
+**Adaptive Learning Rate Methods.**
 While momentum smooths gradient direction, it does not address the different scales of gradients across parameters. RMSprop solves this by maintaining a moving average of squared gradients for each parameter, automatically reducing step sizes for parameters with historically large gradients. This per-parameter adaptation requires storing the moving average $s_t$, creating memory overhead similar to momentum methods. The element-wise operations in RMSprop also introduce additional computational steps compared to basic gradient descent.
 
-##### Adam Optimization {#sec-ai-training-adam-optimization-9ab5}
-
+**Adam Optimization.**
 Adam[^fn-adam-optimizer] combines the benefits of both momentum and RMSprop: momentum's gradient smoothing addresses noisy updates, while RMSprop's adaptive scaling handles parameter-specific step sizes. This combination maintains two moving averages for each parameter:
 \begin{gather*}
 m_t = \beta_1 m_{t-1} + (1-\beta_1)\nabla L(\theta_t)
@@ -496,8 +491,7 @@ The system implications of Adam are more substantial than previous methods. The 
 
 #### Optimization Algorithm System Implications {#sec-ai-training-optimization-algorithm-system-implications-f9f2}
 
-##### Optimization Trade-offs {#sec-ai-training-optimization-tradeoffs-77c5}
-
+[]{#sec-ai-training-optimization-tradeoffs-77c5}
 The choice of optimization algorithm creates specific patterns of computation and memory access that influence training efficiency. Memory requirements increase progressively from SGD ($1\times$ model size) through Momentum ($2\times$) to Adam ($3\times$), as quantified in @tbl-optimizer-properties. These memory costs must be balanced against convergence[^fn-convergence-etymology] benefits. While Adam often requires fewer iterations to reach convergence, its per-iteration memory and computation overhead may impact training speed on memory-constrained systems. The concrete scale of these *GPT-2 optimizer memory requirements* illustrates just how significant this overhead becomes for large models.
 
 [^fn-convergence-etymology]: **Convergence**: From Latin "convergere" (to incline together), combining "con-" (together) + "vergere" (to bend, turn). In optimization, convergence describes the process by which iterative algorithms approach a stable solution, where successive updates become smaller until parameters stabilize at a minimum. Training is said to converge when the loss stops decreasing meaningfully, typically requiring 10,000-100,000 iterations for large models.
@@ -533,8 +527,7 @@ Adam's memory overhead is a necessary trade-off for convergence. GPT-2 converges
 
 :::
 
-##### Implementation Considerations {#sec-ai-training-implementation-considerations-baea}
-
+**Implementation Considerations.**
 The efficient implementation of optimization algorithms in training frameworks hinges on strategic system-level considerations that directly influence performance. Key factors include memory bandwidth management, operation fusion techniques, and numerical precision optimization. These elements collectively determine the computational efficiency, memory utilization, and scalability of optimizers across diverse hardware architectures.
 
 Memory bandwidth presents the primary bottleneck in optimizer implementation. Modern frameworks address this through operation fusion, which reduces memory access overhead by combining multiple operations into a single kernel. For example, the Adam optimizer’s memory access requirements can grow linearly with parameter size when operations are performed separately:
@@ -554,8 +547,7 @@ Mixed-precision training (@sec-ai-training-mixedprecision-training-9218) has bee
 
 The above implementation factors determine the practical performance of optimization algorithms in deep learning systems, emphasizing the importance of tailoring memory, computational, and numerical strategies to the underlying hardware architecture [@chen2015mxnet].
 
-##### Optimizer Trade-offs {#sec-ai-training-optimizer-tradeoffs-d4c5}
-
+**Optimizer Trade-offs.**
 Optimization algorithms in neural network training sit at the intersection of algorithmic efficiency and system performance. While optimizers were developed to improve model convergence, their implementation significantly impacts memory usage, computational requirements, and hardware utilization.
 
 A deeper examination of popular optimization algorithms reveals their varying impacts on system resources. Examine @tbl-optimizer-properties to see how memory costs scale from 1x for SGD to 3x for Adam, with corresponding differences in hardware efficiency and convergence speed that directly influence training system design decisions. SGD maintains minimal memory overhead, requiring storage only for model parameters and current gradients. This lightweight memory footprint comes at the cost of slower convergence and potentially poor hardware utilization due to its sequential update nature.
@@ -586,7 +578,7 @@ Adam combines the benefits of momentum and adaptive learning rates, but at the h
 
 Training system designers must balance these trade-offs when selecting optimization strategies. GPUs excel at the parallel computations required by adaptive methods, while memory-constrained systems might favor simpler optimizers. The choice of optimizer affects not only training dynamics but also maximum feasible model size, achievable batch size, hardware utilization efficiency, and overall training time to convergence. Training frameworks continue developing techniques like optimizer state sharding, mixed-precision storage, and fused operations to better balance these competing demands.
 
-#### Framework Optimizer Interface {#sec-ai-training-framework-optimizer-interface-82ff}
+#### Framework Optimizer Interface and Scheduling {#sec-ai-training-framework-optimizer-interface-82ff}
 
 Frameworks provide standardized interfaces that abstract optimization algorithms into practical training loops. The framework optimizer interface follows a consistent pattern that separates gradient computation from parameter updates. @lst-adam-training demonstrates how Adam optimization integrates into a standard training loop.
 
@@ -674,8 +666,7 @@ for param in model.parameters():
 
 Framework implementations also handle the memory management challenges in optimizer trade-offs. The optimizer automatically allocates storage for momentum terms and squared gradient statistics, managing the 2--3$\times$ memory overhead transparently while providing efficient memory access patterns optimized for the underlying hardware.
 
-##### Learning Rate Scheduling Integration {#sec-ai-training-learning-rate-scheduling-integration-4c81}
-
+**Learning Rate Scheduling Integration.**
 Frameworks integrate learning rate scheduling directly into the optimizer interface, enabling dynamic adjustment of the learning rate α during training. This integration demonstrates how frameworks compose multiple optimization techniques through modular design patterns.
 
 Learning rate schedulers modify the optimizer's learning rate according to predefined schedules, such as cosine annealing, exponential decay, or step-wise reductions. @lst-cosine-annealing demonstrates how to integrate cosine annealing with Adam optimization.
@@ -914,6 +905,7 @@ Consider the GPT-2 Attention Layer where Q, K, V projections with dimensions (B 
 GPUs have characteristic hardware ridge points where operations transition from memory-bound to compute-bound. The A100 with 312 TFLOPS FP16 Tensor Core and 2.0 TB/s bandwidth has a ridge point of 156 FLOP/byte. The H100 SXM with 989 TFLOPS TF32 Tensor Core and 3.35 TB/s bandwidth has a ridge point of approximately 295 FLOP/byte. Operations below the ridge point are memory-bound; above are compute-bound.
 
 ::: {.callout-perspective title="Peak FLOPS vs. Sustained Performance"}
+
 Hardware vendors often market "Peak TFLOPS," but for a systems engineer, this number is often a theoretical limit that is rarely reached. The intensity gap reveals that most neural network operations—especially in the backward pass—have arithmetic intensities well below the hardware's ridge point. When an operation is memory-bound (like LayerNorm or Softmax), doubling the hardware's peak TFLOPS does *nothing* for performance. This is why **Mixed-Precision (FP16/BF16)** is so effective: it doesn't just enable faster arithmetic; it halves the bytes moved per operation, effectively doubling the "Data Supply Rate" and allowing the system to reach a much higher percentage of its peak computational capability. Successful optimization is the art of increasing arithmetic intensity through kernel fusion and reducing data movement through precision management.
 :::
 
@@ -973,12 +965,10 @@ The mathematical operations examined above define what training systems must com
 
 As @fig-training-pipeline illustrates, the system-level orchestration described above organizes into three interconnected components. The data pipeline ingests raw data and transforms it into a format suitable for the model. This data passes to the training loop, where the model performs its core computations. Periodically, the evaluation pipeline assesses performance using a separate validation dataset. This modular organization enables efficient resource utilization and clear separation of concerns.
 
-#### Data Pipeline {#sec-ai-training-data-pipeline-dd5d}
-
+**Data Pipeline.**
 The data pipeline manages the ingestion, preprocessing, and batching of data for training. Raw data is loaded from storage and transformed dynamically during training, with image datasets undergoing preprocessing steps like normalization, resizing, and augmentation [@lecun1998efficient]. Once processed, the data is packaged into batches and handed off to the training loop.
 
-#### Training Loop {#sec-ai-training-training-loop-d98f}
-
+**Training Loop.**
 The training loop is the computational core of the pipeline, where the model learns from the prepared data. @fig-training-loop illustrates how this process unfolds through three sequential steps on a single GPU: the forward pass generates predictions from input data, gradient computation propagates error signals backward through the network, and parameter updates apply the optimizer to minimize the loss function.
 
 ::: {#fig-training-loop fig-env="figure" fig-pos="htb" fig-cap="**GPU-Accelerated Training**: Modern deep learning relies on gpus to parallelize matrix operations, significantly accelerating the forward and backward passes required for parameter updates during training. This single-GPU workflow iteratively refines model parameters by computing gradients from loss functions and applying them to minimize prediction errors." fig-alt="Neural network diagram showing data cylinders feeding into a network of connected nodes. A GPU box at bottom processes the forward and backward pass computations."}
@@ -1126,12 +1116,10 @@ This process repeats iteratively across multiple batches and epochs[^fn-epoch-et
 
 [^fn-epoch-etymology]: **Epoch**: Borrowed from astronomy, where it denotes a reference point in time from which celestial measurements are calculated. In ML, one epoch equals one complete pass through the training dataset. The astronomical metaphor fits: just as astronomers measure time from fixed reference points, ML practitioners measure training progress in complete dataset cycles. Typical training requires 10-100 epochs, with each epoch providing the model another opportunity to learn from every example.
 
-#### Evaluation Pipeline {#sec-ai-training-evaluation-pipeline-5084}
-
+**Evaluation Pipeline.**
 The evaluation pipeline provides periodic feedback on the model's performance during training. Using a separate validation dataset, predictions are compared against known outcomes to compute metrics such as accuracy or loss. These metrics help monitor progress and detect issues like overfitting or underfitting.
 
-#### Component Integration {#sec-ai-training-component-integration-1088}
-
+**Component Integration.**
 These three components are tightly integrated to ensure an efficient workflow. Data preparation often overlaps with computation, preprocessing the next batch while the current batch is processed in the training loop. This integration minimizes idle time for system resources and ensures training proceeds without interruptions.
 
 ### Data Pipeline {#sec-ai-training-data-pipeline-8e71}
@@ -1293,6 +1281,7 @@ Text tokenization is CPU-bound (unlike image preprocessing which is I/O-bound). 
 While data pipeline throughput determines how fast training data reaches the GPU, multi-GPU training introduces a second bottleneck: the network communication required to synchronize gradients across devices. The following exercise quantifies when this communication overhead dominates.
 
 ::: {.callout-notebook title="The Network Wall"}
+
 **Problem**: You are training a large model on 8 GPUs. You want to know if the network is the bottleneck.
 
 **The Math**: For a 7B parameter model with FP16 gradients:
@@ -1406,6 +1395,7 @@ These hardware utilization patterns reinforce the efficiency principles establis
 Memory management is a critical challenge in general, but it is particularly important during the forward pass when intermediate activations must be stored for subsequent backward propagation. Before examining how frameworks manage forward-pass memory, it is useful to estimate the total VRAM required for training. The following calculation reveals why *memory management* is so critical.
 
 ::: {.callout-notebook title="Estimating VRAM Requirements"}
+
 **Problem**: Will your 7B parameter model fit on a 24GB GPU for training?
 
 **Given**: 7B parameters, mixed-precision training (FP16 weights/gradients, FP32 optimizer), Adam optimizer, 24 GB GPU memory.
@@ -1581,6 +1571,7 @@ Determining the optimal batch size involves balancing these factors within hardw
 Beyond batch size tuning, practitioners must also confront the economic reality of large-scale training. The compute cost itself becomes a binding constraint that shapes every training decision, from hardware selection to cluster sizing, a phenomenon best understood by examining *the utility bill* of a realistic training run.
 
 ::: {.callout-notebook title="The Utility Bill"}
+
 **Problem**: Is it cheaper to rent an H100 or buy it for training Llama-2-70B?
 
 **The Math**:
@@ -2378,15 +2369,13 @@ The online softmax algorithm enables this decomposition. Traditional softmax req
 
 Flash Attention achieves asymptotic improvements in both memory footprint and memory IO operations, the true bottleneck in bandwidth-limited scenarios.
 
-#### Memory Complexity {.unnumbered}
-
+**Memory Complexity.**
 - **Standard Attention**: $O(n^2)$ memory for storing $S$ and $P$ matrices across all sequence positions
 - **Flash Attention**: $O(n)$ memory, storing only input/output tensors $(Q, K, V, O)$ plus a small constant SRAM buffer
 
 For $n = 4096$, $d = 64$: Standard attention requires $4096^2 \times 4 \text{ bytes} = 64 \text{ MB}$ per head. Flash Attention requires only $(3 \times 4096 \times 64) \times 4 \text{ bytes} \approx 3 \text{ MB}$ per head, a **21× reduction**.
 
-#### IO Complexity (Memory Reads/Writes) {.unnumbered}
-
+**IO Complexity (Memory Reads/Writes).**
 Standard attention performs:
 
 - Forward pass: Read $Q, K, V$ from HBM, write $S, P, O$ to HBM: $O(n \cdot d + n^2)$ bytes
@@ -2397,8 +2386,7 @@ Flash Attention performs different memory operations. In the forward pass, it re
 
 For large sequence lengths where $n \gg d$, Flash Attention reduces memory traffic by a factor of $n$. With $n = 4096$ and $d = 64$, this represents a **64× reduction** in memory bandwidth consumption.
 
-#### Computational Complexity {.unnumbered}
-
+**Computational Complexity.**
 Both approaches require $O(n^2 d)$ FLOPs for attention computation. Flash Attention performs additional recomputation during backward pass (regenerating $S$ and $P$ from saved $Q, K, V$), adding roughly 20% more FLOPs. However, by converting the workload from bandwidth-bound to compute-bound, Flash Attention achieves net speedups despite higher FLOP counts since modern GPUs have abundant compute capacity but limited memory bandwidth.
 
 #### Implementation and Hardware Utilization {#sec-ai-training-implementation-hardware-utilization-20a8}
@@ -3039,6 +3027,7 @@ The optimization techniques examined throughout this chapter extend single-devic
 Scaling to multiple devices also amplifies the energy consumption and environmental impact of training. The *carbon footprint of training* grows proportionally with cluster size, making efficiency optimization not just a performance concern but an environmental one.
 
 ::: {.callout-notebook title="The Carbon Footprint of Training"}
+
 **Scaling the Utility Bill**: 
 Training large models is not just a compute challenge; it's a massive energy sink. We can quantify the environmental impact of scaling training using the **Energy Corollary** to the Iron Law:
 
@@ -3253,6 +3242,30 @@ inner ysep=18, fill=BackColor,yshift=6, fit=(B4)(G4)](BB4){};
 
 Within a single node, GPUs communicate via high-bandwidth interconnects like NVLink[^fn-nvlink] (up to 900 GB/s on modern systems), making gradient synchronization and activation transfers fast. This intra-node parallelism forms the building block for larger distributed systems.
 
+::: {.callout-notebook title="Napkin Math: Data vs. Model Parallelism"}
+
+**The Physics of Splitting**: How do you split a model that is too big or too slow?
+
+**Scenario**: Training a model with parameters $P$ and batch size $B$ across $N$ GPUs.
+
+**1. Data Parallelism (Split the Batch)**
+*   **Compute ($O$)**: Split by $N$ (Each GPU does $1/N$ of the batch).
+*   **Memory ($D$)**: **Replicated**. Every GPU must hold the full model weights $P$.
+*   **Communication**: **Gradients**. Size $\propto P$. Occurs at end of backward pass.
+*   **Bottleneck**: When Model Size $P >$ GPU Memory.
+
+**2. Model Parallelism (Split the Weights)**
+*   **Compute ($O$)**: Split by $N$ (Each GPU computes part of the layer).
+*   **Memory ($D$)**: **Split**. Each GPU holds $P/N$ weights.
+*   **Communication**: **Activations**. Size $\propto B \times \text{Width}$. Occurs at every layer boundary.
+*   **Bottleneck**: When Activation Size is large (high communication frequency).
+
+**The Systems Conclusion**:
+
+*   Use **Data Parallel** when the model fits in memory but training is too slow.
+*   Use **Model Parallel** when the model is too big to fit in a single GPU's memory.
+:::
+
 [^fn-nvlink]: **NVLink**: NVIDIA's high-bandwidth GPU interconnect, introduced in 2016 with Pascal architecture. NVLink provides 50-900 GB/s bidirectional bandwidth (depending on generation), compared to 16-64 GB/s for PCIe. For training, this 10-50x bandwidth advantage enables efficient gradient synchronization and model parallelism within a node. A DGX H100 system uses NVLink to achieve 900 GB/s between any pair of 8 GPUs, making intra-node communication nearly as fast as local memory access.
 
 ### Scaling Beyond a Single Node {#sec-ai-training-scaling-beyond-single-node-a671}
@@ -3260,6 +3273,7 @@ Within a single node, GPUs communicate via high-bandwidth interconnects like NVL
 When single-node multi-GPU training remains insufficient, distributed training extends across multiple machines. This introduces network communication bottlenecks (typically 10-100 Gbps between nodes vs. 900 GB/s within a node) and fault tolerance requirements absent from single-node setups. Understanding *the physics of synchronization* explains why this bandwidth gap is so consequential.
 
 ::: {.callout-perspective title="The Physics of Synchronization"}
+
 Recall the **Energy-Movement Invariant** from @sec-data-engineering-ml: moving data is 100–1,000× more expensive than computing on it. In distributed training, this physical law manifests as the **Communication Tax**.
 
 When you synchronize gradients across a fleet of GPUs, you are moving megabytes of data across a network or PCIe bus for every few milliseconds of computation. If the energy required for communication ($E_{net}$) exceeds the energy for computation ($E_{compute}$), your system efficiency ($\eta$) collapses. This is why techniques like **Mixed Precision** (@sec-ai-training-mixed-precision-training-0984) and **Gradient Compression** are essential: they aren't just "speedups"; they are fundamental tools for managing the physical limits of distributed scaling.

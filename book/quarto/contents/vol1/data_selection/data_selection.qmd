@@ -282,7 +282,29 @@ The most counterintuitive insight in data selection is that training on *less* d
 - **CIFAR-10**: Because CIFAR-10 is smaller and more redundant, aggressive pruning works even better. Experiments report that 10–30% of samples (selected by forgetting scores [@toneva2019empirical] or margin-based methods) can match 90%+ of original accuracy, a 3–10$\times$ reduction.
 - **Large Language Model Corpora**: Web-scraped datasets like The Pile and C4 contain substantial exact and near-duplicate content. Deduplication studies [@lee2022deduplicating] report 10–30% redundancy ratios, with deduplicated training yielding *better* downstream performance (less memorization, more generalization).
 
-These numbers are benchmark-specific, of course. Gains from pruning depend on the dataset's intrinsic redundancy, the selection algorithm, and the model architecture—always validate on your specific task before deploying aggressive pruning in production. Nevertheless, the key insight remains: not all data points provide equal value for training. Some samples are highly informative, capturing decision boundaries or rare patterns, while others are repetitive or trivially easy. Training on redundant data wastes compute without improving the model. The practical question then becomes: how do we identify which samples to keep?
+These numbers are benchmark-specific, of course. Gains from pruning depend on the dataset's intrinsic redundancy, the selection algorithm, and the model architecture—always validate on your specific task before deploying aggressive pruning in production. Nevertheless, the key insight remains: not all data points provide equal value for training. The following analysis quantifies exactly how data quality affects learning efficiency.
+
+::: {.callout-notebook title="Napkin Math: The Data Quality Multiplier"}
+**The Physics of Noise**: Why is one clean sample worth 100 noisy ones?
+
+**The Math**: Learning theory tells us that convergence rates depend on label noise.
+1.  **Clean Data**: Convergence rate is typically $O(1/N)$. To halve the error, you need **2x** data.
+2.  **Noisy Data**: Convergence rate drops to $O(1/\sqrt{N})$. To halve the error, you need **4x** data.
+
+**The Multiplier**:
+To reach a target error $\epsilon$:
+*   $N_{clean} \propto 1/\epsilon$
+*   $N_{noisy} \propto 1/\epsilon^2$
+
+**Example**: For target error $\epsilon = 0.01$ (1%):
+*   $N_{clean} \approx 100$
+*   $N_{noisy} \approx 10,000$
+*   **Ratio**: $100\times$ more data required if noisy.
+
+**The Systems Conclusion**: Cleaning your data (removing label noise) is a **100x compute accelerator**.
+:::
+
+The practical question then becomes: how do we identify which samples to keep?
 
 ### Coreset Selection Algorithms {#sec-data-selection-coreset-selection-algorithms-a520}
 
@@ -407,7 +429,7 @@ These gradient-based approaches generally outperform geometry-based methods in s
 ```
 :::
 
-Given these trade-offs, most practitioners find that EL2N with a small proxy model offers the best balance of selection quality and computational cost. The approach is straightforward: train a lightweight model (for example, ResNet-18 instead of ResNet-50) for 5 to 10 epochs, compute EL2N scores for all samples, then select the highest-scoring subset. The proxy does not need to be accurate; it only needs to identify which samples are hard. This upfront investment in proxy training typically yields substantial returns when the coreset reduces subsequent training by 50% or more.
+Given these trade-offs, most practitioners find that EL2N with a small proxy model offers the best balance of selection quality and computational cost. The approach is straightforward: train a lightweight model (for example, ResNet-18 instead of ResNet-50) for 5 to 10 epochs, compute EL2N scores for all samples, then select the highest-scoring subset. The proxy does not need to be accurate; it only needs to identify which samples are hard. This upfront investment in proxy training typically yields substantial returns when the coreset reduces subsequent training by 50% or more. The following example illustrates this workflow in a concrete scenario.
 
 ::: {.callout-example title="Coreset Selection in Practice"}
 **Scenario**: You have 1 million training images and want to reduce to 100,000 (10%) for faster experimentation.
@@ -839,9 +861,7 @@ Our **MobileNet Lighthouse model** (@sec-dnn-architectures) exemplifies how data
 The solution is **aggressive augmentation**. MobileNet training typically uses stronger augmentation than ResNet-50 training, including RandAugment with higher magnitude, more aggressive cropping, and longer training schedules. The augmentation effectively increases dataset diversity without increasing model capacity, allowing MobileNet to achieve near-ResNet accuracy at a fraction of the parameter count. For edge deployment where both data collection and model size are constrained, augmentation is essential rather than optional.
 :::
 
-### Generative Synthesis: Creating New Samples {#sec-data-selection-generative-synthesis-creating-new-samples-3873}
-
-While augmentation transforms existing samples, synthetic data generation extends this approach by creating entirely new examples using generative models. This capability becomes essential in three common scenarios: when real data is privacy-sensitive (as with medical records or financial transactions), when edge cases are rare (such as autonomous driving failure scenarios that must be covered but seldom occur), or when data collection is prohibitively expensive (as in robotics or scientific experiments where each sample requires physical resources).
+**Generative Synthesis: Creating New Samples.** While augmentation transforms existing samples, synthetic data generation extends this approach by creating entirely new examples using generative models. This capability becomes essential in three common scenarios: when real data is privacy-sensitive (as with medical records or financial transactions), when edge cases are rare (such as autonomous driving failure scenarios that must be covered but seldom occur), or when data collection is prohibitively expensive (as in robotics or scientific experiments where each sample requires physical resources).
 
 Three classes of generative approaches address these needs, each with distinct cost and fidelity trade-offs. Generative Adversarial Networks (GANs) train a generator against a discriminator in an adversarial setup, producing realistic images through competition; StyleGAN, for instance, generates photorealistic faces that have augmented facial recognition datasets. Diffusion models use iterative denoising to produce high-quality images; systems like Stable Diffusion enable text-to-image synthesis, allowing you to generate targeted training examples from natural language descriptions. Finally, simulation engines such as CARLA for autonomous driving or Unity and Unreal for robotics offer physics-based rendering that generates unlimited labeled data with perfect ground-truth annotations, making them particularly valuable for safety-critical applications where edge case coverage is essential.
 
@@ -1052,13 +1072,9 @@ With many techniques available, practitioners need a systematic approach to sele
 
 The following text-based decision tree elaborates on each path, guiding practitioners from initial bottleneck identification through implementation.
 
-#### Step 1: Assess Your Bottleneck {.unnumbered}
+**Step 1: Assess Your Bottleneck.** The first step is identifying which resource constraint most severely limits your training pipeline. If labeling cost dominates your budget, consider label efficiency techniques such as Active Learning, Semi-Supervised, or Self-Supervised learning. These methods maximize the value extracted from each human annotation. When compute cost is the primary concern, prioritize dataset reduction through Coreset selection, Deduplication, and Curriculum Learning, all of which reduce the number of training iterations required. Finally, if data scarcity is the fundamental problem, pursue data creation through Augmentation, Synthesis, and Distillation to expand your effective training set beyond what raw collection provides.
 
-The first step is identifying which resource constraint most severely limits your training pipeline. If labeling cost dominates your budget, consider label efficiency techniques such as Active Learning, Semi-Supervised, or Self-Supervised learning. These methods maximize the value extracted from each human annotation. When compute cost is the primary concern, prioritize dataset reduction through Coreset selection, Deduplication, and Curriculum Learning, all of which reduce the number of training iterations required. Finally, if data scarcity is the fundamental problem, pursue data creation through Augmentation, Synthesis, and Distillation to expand your effective training set beyond what raw collection provides.
-
-#### Step 2: Check Prerequisites {.unnumbered}
-
-Once you have identified your bottleneck, verify that the corresponding techniques are feasible given your infrastructure and data. Each approach carries specific requirements that must be met before implementation can begin (@tbl-technique-prerequisites).
+**Step 2: Check Prerequisites.** Once you have identified your bottleneck, verify that the corresponding techniques are feasible given your infrastructure and data. Each approach carries specific requirements that must be met before implementation can begin (@tbl-technique-prerequisites).
 
 | Technique | Prerequisites |
 |-----------|---------------|
@@ -1072,9 +1088,7 @@ Once you have identified your bottleneck, verify that the corresponding techniqu
 
 : Prerequisites for each data selection technique. Verify these requirements are met before committing to implementation. {#tbl-technique-prerequisites .striped .hover}
 
-#### Step 3: Estimate ROI {.unnumbered}
-
-Meeting the prerequisites is necessary but not sufficient. Before committing engineering resources, estimate the return on investment for each candidate technique. The following formula captures the key trade-off:
+**Step 3: Estimate ROI.** Meeting the prerequisites is necessary but not sufficient. Before committing engineering resources, estimate the return on investment for each candidate technique. The following formula captures the key trade-off:
 
 $$
 \text{ROI} = \frac{\text{(Baseline Cost)} - \text{(Technique Cost + Implementation Cost)}}{\text{Technique Cost + Implementation Cost}}
@@ -1082,9 +1096,7 @@ $$
 
 A technique with high theoretical gains but high implementation cost may deliver lower ROI than a simpler approach. Deduplication, for example, often achieves the highest ROI because implementation cost is minimal and gains are immediate. Active Learning, by contrast, requires oracle access, retraining infrastructure, and selection algorithm development, so its ROI depends heavily on how many labeling cycles you expect to amortize that investment across.
 
-#### Step 4: Combine Techniques Strategically {.unnumbered}
-
-The techniques in this chapter are not mutually exclusive; in practice, the most effective pipelines combine multiple approaches. A typical production workflow begins by deduplicating the raw corpus for immediate gains at minimal cost. This cleaned dataset then undergoes coreset selection to identify the most informative samples. During training, curriculum learning orders these samples to optimize gradient quality, while data augmentation increases effective diversity at runtime. Finally, starting from a self-supervised foundation model rather than random initialization allows the pipeline to leverage knowledge learned from massive unlabeled corpora.
+**Step 4: Combine Techniques Strategically.** The techniques in this chapter are not mutually exclusive; in practice, the most effective pipelines combine multiple approaches. A typical production workflow begins by deduplicating the raw corpus for immediate gains at minimal cost. This cleaned dataset then undergoes coreset selection to identify the most informative samples. During training, curriculum learning orders these samples to optimize gradient quality, while data augmentation increases effective diversity at runtime. Finally, starting from a self-supervised foundation model rather than random initialization allows the pipeline to leverage knowledge learned from massive unlabeled corpora.
 
 Each stage compounds the efficiency gains of previous stages, turning individual percentage improvements into multiplicative savings.
 
@@ -1104,7 +1116,7 @@ For a selection strategy to be systems-efficient, it must satisfy the **Selectio
 
 $$ T_{selection} + T_{train}(N_{subset}) < T_{train}(N_{total}) $$
 
-Where $T_{selection}$ is the time spent scoring the pool and $T_{train}$ is the compute time. If $f(x)$ requires a forward pass of a large model, the cost of selection can exceed the cost of training, leading to a negative ROI.
+Where $T_{selection}$ is the time spent scoring the pool and $T_{train}$ is the compute time. If $f(x)$ requires a forward pass of a large model, the cost of selection can exceed the cost of training, leading to a negative ROI. A concrete scenario illustrates this trade-off.
 
 ::: {.callout-example title="Selection Inequality in Practice"}
 **Scenario**: You have 1 million training images and want to select a 100k coreset (10%) using EL2N scoring.
@@ -1222,11 +1234,9 @@ Beyond selection algorithms, data loaders themselves require architectural adapt
 
 To maintain GPU utilization, data loaders must be architected for sharded random access. Modern formats like WebDataset or FFCV group thousands of samples into `tar` or `record` shards, enabling efficient bulk reads even when the target samples are scattered across the logical dataset. Complementing this, shuffle buffers provide a practical approximation to true random access: the loader reads large sequential shards into a memory buffer and samples randomly from within the buffer. This design preserves the sequential I/O throughput that storage hardware delivers best while still achieving the statistical benefits of random sampling that many data selection algorithms require.
 
-### Augmented Pipeline Parallelism {#sec-data-selection-augmented-pipeline-parallelism-ee1b}
-
-The optimizations discussed so far address I/O bandwidth, but modern data selection pipelines introduce another bottleneck: CPU computation. Synthetic data generation and heavy augmentation shift the constraint from disk speed to augmentation throughput. Heavy augmentations like 3D rotations and MixUp, or on-the-fly generative synthesis, can starve the GPU if the CPU cannot keep pace with sample production. When the data pipeline cannot produce samples as fast as the GPU can consume them, GPU utilization drops and training time extends, negating the efficiency gains from smarter data selection.
-
 ### Data Echoing: Amortizing I/O Costs {#sec-data-selection-data-echoing-amortizing-io-costs-24e3}
+
+[]{#sec-data-selection-augmented-pipeline-parallelism-ee1b}The optimizations discussed so far address I/O bandwidth, but modern data selection pipelines introduce another bottleneck: CPU computation. Synthetic data generation and heavy augmentation shift the constraint from disk speed to augmentation throughput. Heavy augmentations like 3D rotations and MixUp, or on-the-fly generative synthesis, can starve the GPU if the CPU cannot keep pace with sample production. When the data pipeline cannot produce samples as fast as the GPU can consume them, GPU utilization drops and training time extends, negating the efficiency gains from smarter data selection.
 
 Data echoing [@choi2020dataechoing] offers an elegant solution to this CPU-GPU imbalance. The technique reuses batches of data multiple times before fetching new samples, effectively trading sample diversity for GPU utilization. When the data pipeline (reading, decoding, augmenting) is slower than GPU processing, the GPU idles waiting for data. Data echoing fills this gap by "echoing" (repeating) each batch $e$ times, applying different augmentations to each repetition so that the model still sees varied inputs.
 
@@ -1236,7 +1246,7 @@ $$
 R = \frac{T_{\text{data pipeline}}}{T_{\text{GPU training}}}
 $$
 
-If $R > 1$ (data pipeline is the bottleneck), set echo factor $e \leq R$ to fully utilize GPU capacity. If $R < 1$ (GPU is the bottleneck), data echoing provides no benefit.
+If $R > 1$ (data pipeline is the bottleneck), set echo factor $e \leq R$ to fully utilize GPU capacity. If $R < 1$ (GPU is the bottleneck), data echoing provides no benefit. The following worked example calculates these trade-offs for a realistic scenario.
 
 ::: {.callout-example title="Worked Example: Data Echoing ROI"}
 **Scenario**: Training ResNet-50 on ImageNet with heavy augmentation (RandAugment + MixUp).
@@ -1279,7 +1289,7 @@ These engineering patterns provide production-ready implementations of data sele
 
 The systems framing of data selection demands quantitative answers: *Should I label 10,000 more samples or buy more GPU hours? When does active learning pay for itself? What's the ROI of investing in deduplication infrastructure?*
 
-### The Total Cost of Training Data {#sec-data-selection-total-cost-training-data-92b9}
+### Quantifying Data Costs and ROI {#sec-data-selection-total-cost-training-data-92b9}
 
 To answer these questions, practitioners must first understand what training data actually costs. Total expense encompasses the full lifecycle of data acquisition, preparation, and utilization, extending well beyond storage fees:
 
@@ -1311,9 +1321,7 @@ For a concrete example, consider training a vision model:
 This ratio, where data costs dominate, is typical for supervised learning. The ratio inverts for self-supervised learning on web-scraped data, where compute dominates.
 :::
 
-### ROI Framework for Data Selection Techniques {#sec-data-selection-roi-framework-data-selection-techniques-03cd}
-
-Understanding total costs enables rational decisions about which efficiency techniques merit investment. Every technique carries both a cost (implementation effort, compute overhead) and a benefit (reduced data requirements, faster training). Comparing these trade-offs requires a common framework: **Return on Investment** (ROI).
+**ROI Framework for Data Selection Techniques.** Understanding total costs enables rational decisions about which efficiency techniques merit investment. Every technique carries both a cost (implementation effort, compute overhead) and a benefit (reduced data requirements, faster training). Comparing these trade-offs requires a common framework: **Return on Investment** (ROI).
 
 $$
 \text{ROI} = \frac{\text{Savings} - \text{Investment}}{\text{Investment}} \times 100\%
@@ -1389,7 +1397,7 @@ $$
 | 10 runs | +82% (positive) |
 | 50 runs | +809% (highly profitable) |
 
-This pattern reveals which circumstances favor infrastructure investment. Data selection investments deliver the highest returns under three conditions: training runs are repeated frequently during hyperparameter search, model iterations, or scheduled retraining; datasets are shared across multiple teams or model architectures; and the technique generalizes broadly. Deduplication exemplifies a high-transfer investment: it benefits all models trained on the cleaned dataset. Task-specific coresets, by contrast, may not transfer across architectures, limiting their amortization potential. For one-off training runs, simple techniques like random sampling or basic augmentation often yield better ROI than sophisticated methods requiring substantial infrastructure investment.
+This pattern reveals which circumstances favor infrastructure investment. Data selection investments deliver the highest returns under three conditions: training runs are repeated frequently during hyperparameter search, model iterations, or scheduled retraining; datasets are shared across multiple teams or model architectures; and the technique generalizes broadly. Deduplication exemplifies a high-transfer investment: it benefits all models trained on the cleaned dataset. Task-specific coresets, by contrast, may not transfer across architectures, limiting their amortization potential. For one-off training runs, simple techniques like random sampling or basic augmentation often yield better ROI than sophisticated methods requiring substantial infrastructure investment. The following guidelines summarize these considerations.
 
 ::: {.callout-tip title="When to Invest in Data Selection"}
 **High ROI scenarios:**
@@ -1413,9 +1421,9 @@ Everything we have discussed so far assumes a single-machine view: one process c
 
 The distributed training infrastructure that underlies these challenges is covered in depth in @sec-distributed-training. This section focuses specifically on how data selection techniques adapt to distributed settings, and where they fail to do so.
 
-### The Distributed Selection Problem {#sec-data-selection-distributed-selection-problem-24b5}
+### Strategies for Distributed Selection {#sec-data-selection-strategies-distributed-selection-fcd6}
 
-In standard distributed training, data parallelism is straightforward: shard the dataset across workers, each processes its shard independently. Data selection techniques, however, introduce **selection dependencies**:
+[]{#sec-data-selection-distributed-selection-problem-24b5}In standard distributed training, data parallelism is straightforward: shard the dataset across workers, each processes its shard independently. Data selection techniques, however, introduce **selection dependencies**:
 
 | Technique | Single-Node Assumption | Distributed Challenge |
 |-----------|------------------------|----------------------|
@@ -1423,8 +1431,6 @@ In standard distributed training, data parallelism is straightforward: shard the
 | Active Learning | Centralized uncertainty scoring | Scoring requires model synchronization |
 | Curriculum Learning | Global difficulty ordering | Workers may have different "hardest" samples |
 | Deduplication | Hash table fits in memory | Distributed hash tables add latency |
-
-### Strategies for Distributed Selection {#sec-data-selection-strategies-distributed-selection-fcd6}
 
 These selection dependencies admit several architectural solutions, each navigating a different point in the consistency-scalability trade-off space.
 
@@ -1454,7 +1460,7 @@ When even hierarchical approaches prove too expensive, approximate global select
 
 The approximate selection strategies above assume static selection criteria, but active learning introduces an additional complication: the model changes during selection. Consider what happens when Worker A scores samples using the model at step $t$, while Worker B simultaneously updates the model to step $t+1$. Worker A's scores are now stale, potentially selecting samples that the updated model would rank differently.
 
-Several strategies mitigate this staleness problem, each with distinct overhead characteristics. Synchronous scoring forces all workers to pause training and score simultaneously, guaranteeing consistency but at substantial cost in GPU utilization. Periodic score refresh offers a middle ground by re-scoring every $k$ epochs rather than every batch, trading freshness for reduced overhead. The most robust approach selects samples that exhibit high uncertainty under multiple model checkpoints, ensuring that selection decisions remain valid even as the model evolves.
+Several strategies mitigate this staleness problem, each with distinct overhead characteristics. Synchronous scoring forces all workers to pause training and score simultaneously, guaranteeing consistency but at substantial cost in GPU utilization. Periodic score refresh offers a middle ground by re-scoring every $k$ epochs rather than every batch, trading freshness for reduced overhead. The most robust approach selects samples that exhibit high uncertainty under multiple model checkpoints, ensuring that selection decisions remain valid even as the model evolves. The following example demonstrates how these distributed selection strategies combine in practice.
 
 ::: {.callout-example title="Distributed Coreset Selection"}
 **Scenario**: Select a 10% coreset from ImageNet (1.2M images) using 8 workers with 4 GPUs each.
@@ -1528,9 +1534,7 @@ The preceding sections treated data selection as an isolated optimization: techn
 
 Data selection does not exist in isolation. Its interactions with other optimization techniques range from complementary to conflicting. Understanding these interactions helps practitioners design end-to-end efficient systems rather than optimizing components in isolation.
 
-### Data Selection × Model Compression {#sec-data-selection-data-selection-model-compression-3d6d}
-
-Model compression (@sec-model-compression) reduces the size of the trained model through pruning, quantization, and distillation. The training dataset directly affects how compressible the resulting model becomes, and perhaps counterintuitively, models trained on smaller, higher-quality datasets may be *more* compressible than those trained on larger, noisier ones.
+**Data Selection and Model Compression.** Model compression (@sec-model-compression) reduces the size of the trained model through pruning, quantization, and distillation. The training dataset directly affects how compressible the resulting model becomes, and perhaps counterintuitively, models trained on smaller, higher-quality datasets may be *more* compressible than those trained on larger, noisier ones.
 
 The mechanism behind this effect relates to how models encode information. A model trained on repetitive data learns redundant features that pruning later removes. The training compute required to learn those features was wasted, only to be discarded during compression. By contrast, a model trained on diverse, informative samples learns compact, non-redundant representations from the start, making subsequent compression more effective.
 
@@ -1538,9 +1542,7 @@ Empirical evidence supports this relationship. In experiments on ImageNet, model
 
 Data selection and model compression are therefore *complementary*. The techniques in this chapter can reduce both training cost *and* post-training compression effort. When planning an efficiency pipeline, apply data selection first; the resulting model will be easier to compress.
 
-### Data Selection × Hardware Acceleration {#sec-data-selection-data-selection-hardware-acceleration-be6d}
-
-While model compression affects what happens after training, hardware acceleration determines how efficiently training itself proceeds. Hardware acceleration (@sec-ai-acceleration) increases throughput through specialized accelerators, kernel optimization, and parallelization. Data selection affects which hardware bottlenecks dominate, and this relationship is more nuanced than simple speedup calculations suggest:
+**Data Selection and Hardware Acceleration.** While model compression affects what happens after training, hardware acceleration determines how efficiently training itself proceeds. Hardware acceleration (@sec-ai-acceleration) increases throughput through specialized accelerators, kernel optimization, and parallelization. Data selection affects which hardware bottlenecks dominate, and this relationship is more nuanced than simple speedup calculations suggest:
 
 | Scenario | Likely Bottleneck | Hardware Optimization |
 |----------|-------------------|----------------------|
@@ -1550,9 +1552,7 @@ While model compression affects what happens after training, hardware accelerati
 
 Data selection can therefore shift the system from one bottleneck regime to another. A technique that reduces dataset size by 80% may move the bottleneck from I/O to GPU compute, requiring different hardware optimizations. Before applying aggressive data reduction, profile your system to understand which bottleneck you're targeting.
 
-### Data Selection × Distributed Training {#sec-data-selection-data-selection-distributed-training-b34a}
-
-The hardware bottleneck analysis above assumes single-machine training, but the interactions become more complex when scaling to multiple machines. Data selection affects different parallelism strategies in distinct ways.
+**Data Selection and Distributed Training.** The hardware bottleneck analysis above assumes single-machine training, but the interactions become more complex when scaling to multiple machines. Data selection affects different parallelism strategies in distinct ways.
 
 Under strong scaling, where a fixed dataset is distributed across more workers, data selection reduces communication overhead by reducing gradient updates per epoch. Fewer samples means fewer synchronization points, and communication costs often dominate at large worker counts. Under weak scaling, where each worker processes more data as the cluster grows, data selection techniques can maintain accuracy while adding workers without proportionally increasing total data. This capability proves essential when data collection rather than compute is the bottleneck. Even within straightforward data parallelism, smaller curated datasets reduce the per-worker shard size, potentially improving cache utilization and reducing I/O stalls on each node.
 
@@ -1741,7 +1741,7 @@ Just as the compute Roofline model diagnoses whether a system is compute-bound o
 
 **The practical question** for practitioners: At what point should you stop collecting data and start curating it? When does adding more samples waste compute rather than improve accuracy? These questions require rigorous metrics: ways to quantify diminishing returns, compare selection strategies, and evaluate the cost-effectiveness of different data sources. Data selection techniques—coreset selection, active learning, deduplication—all make implicit claims about the value of different samples. Validating that a curated dataset actually preserves model quality requires systematic benchmarking: coverage metrics validate that coreset selection preserved representation across classes and demographic groups; distribution alignment metrics detect if the curated training set drifted from the deployment distribution; and label quality metrics (inter-annotator agreement, confident learning) validate that active learning didn't introduce systematic labeling errors. A 50% dataset reduction is only valuable if benchmarking confirms the model maintains target accuracy, calibration, and robustness.
 
-For a comprehensive treatment of data selection metrics and benchmarking methodologies, including how initiatives like DataPerf are standardizing evaluation protocols, see @sec-benchmarking-ai. That chapter provides the measurement framework needed to quantify the ROI of the techniques introduced here.
+For a comprehensive treatment of data selection metrics and benchmarking methodologies, including how initiatives like DataPerf are standardizing evaluation protocols, see @sec-benchmarking-ai. That chapter provides the measurement framework needed to quantify the ROI of the techniques introduced here. Before concluding, let us revisit how data selection applies to our lighthouse models.
 
 ::: {.callout-lighthouse title="Lighthouse Data Selection"}
 This chapter has applied data selection principles to all five Lighthouse models, demonstrating that the techniques are universal but the priorities differ by bottleneck:

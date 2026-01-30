@@ -1043,6 +1043,8 @@ Stale Synchronous Parallel (SSP) relaxes this constraint by allowing workers to 
 
 Asynchronous SGD eliminates synchronization barriers entirely as workers update parameters independently. This maximizes hardware utilization but introduces gradient staleness that can degrade convergence. When a worker computes gradients on parameters that are already $\tau$ steps stale, the effective learning rate decreases. Compensation techniques include learning rate scaling with $\eta' = \eta / \sqrt{\tau}$ or momentum correction.
 
+The following table summarizes the key trade-offs across synchronization models.
+
 ::: {.callout-note title="Synchronization Model Trade-offs"}
 +-----------+-------------------+---------------------------+---------------------------------+--------------------------------------+
 | **Model** | **Consistency**   | **Throughput**            | **Convergence**                 | **Use Case**                         |
@@ -1080,14 +1082,18 @@ This process, which involves splitting data, performing computations, synchroniz
 Data parallelism is the default strategy for a reason: it scales **throughput** linearly with device count, provided the model fits in memory and communication is not the bottleneck. However, it hits a hard ceiling defined by the **Communication-Computation Ratio**.
 
 **The Advantages**:
+
 *   **Linear Throughput Scaling**: For compute-bound models (like ResNet-50 on ImageNet), scaling from 1 to 256 GPUs yields near-linear speedup because the gradient exchange is small relative to the compute time.
 *   **Implementation Simplicity**: The model architecture remains unchanged. You simply wrap the model in `DistributedDataParallel`, and the framework handles the gradient synchronization hooks.
 *   **High Utilization**: Unlike model parallelism, there are no pipeline bubbles. All GPUs work on the forward/backward pass simultaneously.
 
 **The Limitations**:
+
 *   **The Memory Wall**: Every GPU must hold a full copy of the model parameters, gradients, and optimizer states. For a 175B parameter model, this requires $>1$TB of memory per GPU, which is physically impossible on today's hardware without ZeRO sharding.
 *   **The Bandwidth Wall**: As $N$ grows, the AllReduce cost $2(N-1)/N \times M/B$ eventually dominates. For large language models, gradient synchronization can consume 50%+ of the step time, collapsing efficiency.
 *   **The Batch Size Trap**: To scale to thousands of GPUs, you must increase the global batch size ($B_{global} = N \times B_{local}$). Eventually, you hit the **Critical Batch Size**, where adding more data per step yields diminishing returns in convergence.
+
+The following practical example illustrates how these scaling characteristics manifest in a real training scenario.
 
 ::: {.callout-notebook title="GPT-2 Data Parallel Scaling" collapse="true"}
 
@@ -1726,11 +1732,13 @@ This distinction dictates fundamentally different cluster designs: dense GPU pod
 Model parallelism breaks the memory wall but introduces sequential dependencies that reduce hardware utilization. The engineering challenge is balancing **pipeline bubbles** (idle time) against **all-to-all bandwidth** (communication time).
 
 **The Advantages**:
+
 *   **Memory Scaling**: Enables training of models that exceed single-device memory. With 8-way tensor parallelism, a 175B model fits comfortably on A100s.
 *   **Efficient Large Batch Training**: By splitting the model, each GPU processes a smaller slice, effectively allowing larger global batch sizes without OOM.
 *   **Architectural Flexibility**: Maps naturally to the physical structure of transformers (Attention heads split via Tensor Parallelism, Layers split via Pipeline Parallelism).
 
 **The Limitations**:
+
 *   **Pipeline Bubbles**: In pipeline parallelism, GPUs sit idle while filling and draining the pipeline. The bubble fraction is $(P-1)/M$, where $P$ is pipeline stages and $M$ is microbatches. To achieve >90% efficiency, you need $M \gg P$, which increases activation memory.
 *   **Communication Intensity**: Tensor parallelism requires 2 AllReduce operations *per layer* in the critical path. This demands extremely high-bandwidth, low-latency interconnects (NVLink). It typically cannot scale beyond a single node (8 GPUs) without hitting the bandwidth wall.
 *   **Implementation Complexity**: Requires invasive changes to the model definition (replacing `nn.Linear` with `ColumnParallelLinear`), unlike Data Parallelism which wraps the model externally.
@@ -1802,11 +1810,13 @@ This configuration allows for dynamic allocation of resources, adapting to the s
 Hybrid parallelism is the only viable path for training frontier models (100B+ parameters), but it introduces massive configuration complexity.
 
 **The Advantages**:
+
 *   **Orthogonal Scaling**: Addresses all three bottlenecks simultaneously. Tensor parallelism fits the layer in memory. Pipeline parallelism fits the depth. Data parallelism scales the throughput.
 *   **Hierarchical Bandwidth Matching**: Maps logical communication patterns to physical hardware topology. High-bandwidth NVLink handles tensor parallelism; medium-bandwidth InfiniBand handles pipeline and data parallelism.
 *   **Maximum Utilization**: By overlapping pipeline stages with data parallel communication, hybrid systems can achieve 50-55% Model FLOPS Utilization (MFU) at scale, compared to <40% for pure strategies.
 
 **The Limitations**:
+
 *   **The Cartesian Product of Complexity**: Debugging requires tracing errors through a 3D coordinate system (Data rank, Pipeline stage, Tensor slice). A NaN in one microbatch can propagate backward and crash a different GPU in a different pipeline stage.
 *   **Straggler Amplification**: In a synchronous 3D mesh, a single slow GPU stalls the entire cluster. The probability of a straggler event approaches 100% as $N \rightarrow 10,000$.
 *   **Rigid Topologies**: Requires homogeneous clusters. You cannot easily mix NVIDIA A100s and H100s, or varying network bandwidths, without destroying efficiency.

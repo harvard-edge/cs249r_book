@@ -638,11 +638,59 @@ class BuildCommand:
         except Exception as e:
             console.print(f"[yellow]⚠️ Error removing render section: {e}[/yellow]")
 
+    @staticmethod
+    def _reset_config_comments(content: str) -> str:
+        """Reset a config file by uncommenting all .qmd chapter lines.
+
+        This ensures a clean starting state regardless of whether a previous
+        build was interrupted and left the config in a partially-commented state.
+
+        Handles patterns like:
+            # - contents/vol1/chapter/chapter.qmd  →  - contents/vol1/chapter/chapter.qmd
+            #- contents/vol1/chapter/chapter.qmd   →  - contents/vol1/chapter/chapter.qmd
+
+        Also uncomments structural lines (part declarations, chapters: keys)
+        that may have been commented out by a previous fast build.
+
+        Args:
+            content: Raw config file content
+
+        Returns:
+            Content with all .qmd lines and their structural containers uncommented
+        """
+        lines = content.split('\n')
+        reset_lines = []
+
+        for line in lines:
+            stripped = line.strip()
+
+            if stripped.startswith('#') and '.qmd' in line:
+                # Uncomment .qmd lines: preserve leading whitespace
+                indent = len(line) - len(line.lstrip())
+                # Strip the comment prefix from the stripped content
+                uncommented = stripped.lstrip('#').lstrip()
+                # Ensure it starts with '- ' (YAML list item)
+                if not uncommented.startswith('-'):
+                    uncommented = '- ' + uncommented
+                reset_lines.append(' ' * indent + uncommented)
+            elif stripped.startswith('#') and ('part:' in stripped or stripped.lstrip('#').strip().startswith('chapters:')):
+                # Uncomment structural lines (part declarations, chapters keys)
+                indent = len(line) - len(line.lstrip())
+                uncommented = stripped.lstrip('#').lstrip()
+                reset_lines.append(' ' * indent + uncommented)
+            else:
+                reset_lines.append(line)
+
+        return '\n'.join(reset_lines)
+
     def _setup_fast_build_mode(self, config_file: Path, chapter_files: List[Path]) -> None:
         """Setup fast build mode by modifying config for selective chapter builds.
 
         For HTML: Uses render field to specify which files to build
         For PDF/EPUB: Comments out chapters not being built
+
+        Always resets the config to a clean state first (all chapters uncommented)
+        to handle cases where a previous build was interrupted.
         """
         console.print("[dim]⚡ Setting up fast build mode...[/dim]")
 
@@ -659,19 +707,22 @@ class BuildCommand:
         with open(backup_file, 'w', encoding='utf-8') as f:
             f.write(original_content)
 
+        # Reset to clean state: uncomment all .qmd lines so we start fresh
+        clean_content = self._reset_config_comments(original_content)
+
         # Determine format and call appropriate setup function
         config_name = str(config_file).lower()
 
         if 'html' in config_name:
-            self._setup_html_fast_build(config_file, chapter_files, original_content)
+            self._setup_html_fast_build(config_file, chapter_files, clean_content)
         elif 'pdf' in config_name:
-            self._setup_pdf_fast_build(config_file, chapter_files, original_content)
+            self._setup_pdf_fast_build(config_file, chapter_files, clean_content)
         elif 'epub' in config_name:
-            self._setup_epub_fast_build(config_file, chapter_files, original_content)
+            self._setup_epub_fast_build(config_file, chapter_files, clean_content)
         else:
             # Fallback to PDF/EPUB approach for unknown formats
             console.print(f"[yellow]⚠️ Unknown config format, using PDF approach: {config_file}[/yellow]")
-            self._setup_pdf_fast_build(config_file, chapter_files, original_content)
+            self._setup_pdf_fast_build(config_file, chapter_files, clean_content)
 
     def _setup_html_fast_build(self, config_file: Path, chapter_files: List[Path], original_content: str) -> None:
         """Setup HTML fast build using render field."""

@@ -113,6 +113,8 @@ The **critical message size** $n^* = \alpha \cdot \beta$ marks the crossover poi
 
 : **Interconnect Performance Parameters**: Typical latency and bandwidth values for modern datacenter interconnects. The critical size shows the crossover point where communication transitions from latency-bound to bandwidth-bound. {#tbl-interconnect-parameters}
 
+The following example illustrates how to apply the critical message size formula to determine which optimization strategy matters most for a given workload:
+
 ::: {.callout-notebook title="The Critical Message Size"}
 **Problem**: Your cluster uses InfiniBand NDR 400G with $\alpha = 2\ \mu s$ and $\beta = 50\ \text{GB/s}$. At what message size does optimizing for bandwidth start to matter more than optimizing for latency?
 
@@ -127,6 +129,8 @@ This reveals two distinct operating regimes:
 1.  **Latency-Bound ($n < n^*$)**: For small messages (e.g., MoE routing tokens, scalar reductions), time is dominated by $\alpha$. Optimization focuses on **fusion** (batching small messages), **topology** (reducing hop count), and **software stack tuning** (kernel bypass via RDMA).
 
 2.  **Bandwidth-Bound ($n \gg n^*$)**: For large messages (e.g., LLM gradients, optimizer states), time is dominated by $n/\beta$. Optimization focuses on **compression** (FP8, Top-K sparsity), **algorithm choice** (Ring vs Tree), and **link aggregation** (multi-rail NICs).
+
+To see how dramatically the bottleneck shifts between these regimes, consider this comparison:
 
 ::: {.callout-notebook title="Latency vs. Bandwidth Dominance"}
 **Problem**: You are synchronizing a 1 MB buffer versus a 1 GB buffer on InfiniBand NDR with $\alpha = 2\ \mu s$ and $\beta = 50\ \text{GB/s}$. How does the bottleneck shift?
@@ -155,7 +159,7 @@ The α-β model assumes the processor is idle during communication. For **pipeli
 *   **g (Gap)**: The minimum time interval between consecutive message injections (inverse of message rate). This models **link contention**.
 *   **P (Processors)**: The number of processors in the system.
 
-The key insight of LogP is distinguishing **network latency** (L, which can be hidden) from **processor overhead** (o, which cannot). A system can overlap communication with computation only if the compute kernel runs longer than the overhead.
+The key insight of LogP is distinguishing **network latency** (L, which can be hidden) from **processor overhead** (o, which cannot). A system can overlap communication with computation only if the compute kernel runs longer than the overhead. The following example demonstrates this distinction in practice:
 
 ::: {.callout-notebook title="Can You Hide the Communication?"}
 **Problem**: You want to overlap gradient AllReduce with the next layer's backward pass. The backward pass takes 500 μs. The AllReduce has network latency $L = 100\ \mu s$ but processor overhead $o = 50\ \mu s$ to initiate and $o = 50\ \mu s$ to receive. Can you hide the communication?
@@ -280,6 +284,8 @@ The vector of size $M$ is split into $N$ chunks.
 1.  **Scatter-Reduce Phase**: In $N-1$ steps, chunks flow around the ring, accumulating sums. At the end, each node holds the complete sum for *one* chunk ($1/N$ of the total result).
 2.  **AllGather Phase**: In $N-1$ steps, the partial sums circulate the ring until every node has all chunks.
 
+The following figure visualizes how data chunks flow through the ring during Step 1:
+
 ::: {.callout-note title="Figure: Ring AllReduce Data Flow" collapse="false"}
 ```{.tikz fig-alt="Three GPUs arranged in ring topology. Each GPU holds three colored data chunks. Blue arrows show Step 1 clockwise transfers between neighbors."} 
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -389,7 +395,7 @@ $$ \boxed{M_{crossover} \approx N \cdot \alpha \cdot \beta} $$
 Communication libraries like NCCL dynamically select the algorithm based on this threshold. For a cluster with $\alpha=5 \mu s$, $\beta=50$ GB/s, and $N=100$:
 $$ M_{crossover} \approx 100 \times 5\cdot 10^{-6} \times 50\cdot 10^9 \approx 25 \text{ MB} $$
 
-Gradients smaller than 25 MB use Tree; larger use Ring.
+Gradients smaller than 25 MB use Tree; larger use Ring. Let's work through a concrete example to see this crossover in action:
 
 ::: {.callout-notebook title="The Ring vs. Tree Crossover"}
 **Problem**: You are synchronizing a **1 MB** buffer across **64 GPUs**. The network has latency $\alpha = 10 \mu s$ and bandwidth $\beta = 10 \text{ GB/s}$. Should you use Ring or Tree?
@@ -449,7 +455,7 @@ GPUs at the same position across nodes (e.g., all GPU-0s) perform an AllReduce u
 
 Each node performs a local AllGather to distribute the final result to all $G$ GPUs. Again, this uses only NVLink, leaving inter-node bandwidth untouched.
 
-The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node), effectively **multiplying the apparent inter-node bandwidth by $G$**.
+The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node), effectively **multiplying the apparent inter-node bandwidth by $G$**. The following example quantifies this bandwidth multiplication effect:
 
 ::: {.callout-notebook title="The Hierarchical Bandwidth Multiplier"}
 **Problem**: You have a cluster of 8 nodes, each with 8 GPUs (64 GPUs total). You need to AllReduce a 1 GB gradient buffer. Compare flat Ring AllReduce vs. Hierarchical AllReduce.
@@ -640,7 +646,7 @@ $$\frac{1}{T}\sum_{t=1}^{T} v_t \to \frac{1}{T}\sum_{t=1}^{T} g_t$$
 
 The long-run average of transmitted gradients equals the long-run average of true gradients. **No gradient information is permanently lost**—it is merely delayed. Small gradients that are repeatedly dropped will eventually accumulate in $e_t$ until they exceed the compression threshold and get transmitted.
 
-This property—that compression error telescopes across time—is why error feedback transforms a biased, non-convergent method into an unbiased, convergent one. Theoretical analysis shows that with error feedback, compressed SGD converges at the same asymptotic rate as uncompressed SGD, with only constant-factor slowdowns [@stich2018sparsified; @karimireddy2019error].
+This property—that compression error telescopes across time—is why error feedback transforms a biased, non-convergent method into an unbiased, convergent one. Theoretical analysis shows that with error feedback, compressed SGD converges at the same asymptotic rate as uncompressed SGD, with only constant-factor slowdowns [@stich2018sparsified; @karimireddy2019error]. The following step-by-step trace illustrates how error feedback preserves gradient information that naive compression would lose:
 
 ::: {.callout-notebook title="Error Feedback Mechanism" collapse="false"}
 **Scenario**: We have a single parameter receiving small gradients over 5 training steps. We use aggressive compression that only transmits values $\geq 0.5$ (rounding to nearest integer: values in $[0, 0.5) \to 0$, values in $[0.5, 1.5) \to 1$, etc.).

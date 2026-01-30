@@ -72,12 +72,58 @@ class ChapterDiscovery:
                 return parts[0], parts[1]
         return None, chapter_spec
 
+    @staticmethod
+    def _match_score(query: str, candidate: str) -> int:
+        """Score how well a query matches a candidate chapter name.
+
+        Higher score = better match. Uses longest common substring length
+        as primary metric, with shorter candidate names preferred as tiebreaker.
+
+        Args:
+            query: The search term (e.g., 'dnn_')
+            candidate: The chapter file stem (e.g., 'dnn_architectures')
+
+        Returns:
+            Match score (higher is better), 0 if no match
+        """
+        q = query.lower()
+        c = candidate.lower()
+
+        # Exact match gets highest score
+        if q == c:
+            return 10000
+
+        # Starts-with match gets high score, weighted by coverage
+        if c.startswith(q):
+            return 5000 + int(1000 * len(q) / len(c))
+
+        # Contains match gets medium score, weighted by coverage
+        if q in c:
+            return 2000 + int(1000 * len(q) / len(c))
+
+        # Partial overlap: find longest common substring
+        best = 0
+        for i in range(len(q)):
+            for j in range(i + 1, len(q) + 1):
+                sub = q[i:j]
+                if sub in c and len(sub) > best:
+                    best = len(sub)
+        if best >= 2:
+            return 500 + int(1000 * best / len(c))
+
+        return 0
+
     def find_chapter_file(self, chapter_spec: str) -> Optional[Path]:
-        """Find a chapter file by name or partial match.
+        """Find a chapter file by name, using best-match scoring.
 
         Supports volume-prefixed names (e.g., 'vol1/intro') for disambiguation.
         Raises AmbiguousChapterError if chapter exists in multiple volumes
         without a volume prefix.
+
+        Matching strategy (in order of priority):
+        1. Exact stem match (e.g., 'dl_primer' → dl_primer.qmd)
+        2. Best fuzzy match scored by: starts-with > contains > partial overlap,
+           with higher coverage (query length / candidate length) preferred.
 
         Args:
             chapter_spec: Chapter name to search for, optionally with volume prefix
@@ -111,34 +157,28 @@ class ChapterDiscovery:
         chapter_matches = []
         for match in exact_matches:
             vol = self._get_volume_from_path(match)
-            if vol or volume_filter:  # Either in a volume or we're filtering by volume
+            if vol or volume_filter:
                 chapter_matches.append(match)
 
         if not chapter_matches:
-            # Try "starts with" matches first (e.g., "ops" matches "ops_scale.qmd")
-            starts_with_matches = []
+            # No exact match — score all .qmd files and pick the best
             all_qmd_files = list(search_dir.rglob("*.qmd"))
 
+            scored = []
             for match in all_qmd_files:
                 vol = self._get_volume_from_path(match)
-                if vol or volume_filter:
-                    # Check if filename starts with the search term
-                    if match.stem.startswith(chapter_name):
-                        starts_with_matches.append(match)
+                if not (vol or volume_filter):
+                    continue
+                score = self._match_score(chapter_name, match.stem)
+                if score > 0:
+                    scored.append((score, match))
 
-            if starts_with_matches:
-                chapter_matches = starts_with_matches
-            else:
-                # Fall back to partial matches (contains anywhere)
-                pattern = f"*{chapter_name}*.qmd"
-                partial_matches = list(search_dir.rglob(pattern))
-
-                # Filter to volume directories
-                for match in partial_matches:
-                    vol = self._get_volume_from_path(match)
-                    if vol or volume_filter:
-                        if chapter_name in match.stem or chapter_name in match.parent.name:
-                            chapter_matches.append(match)
+            if scored:
+                # Sort by score descending
+                scored.sort(key=lambda x: x[0], reverse=True)
+                best_score = scored[0][0]
+                # Collect all matches with the same best score
+                chapter_matches = [m for s, m in scored if s == best_score]
 
         if not chapter_matches:
             return None
