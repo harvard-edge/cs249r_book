@@ -174,11 +174,11 @@ To understand why execution strategy matters so much, consider the **Memory Wall
 
 This creates a fundamental classification: operations are either **compute-bound** (limited by arithmetic throughput, like large matrix multiplications) or **memory-bound** (limited by data movement, like activation functions and normalization). Most neural network operations are memory-bound.
 
-The key optimization for memory-bound operations is **kernel fusion**—combining multiple operations into a single GPU function (called a *kernel*)[^fn-kernel] to avoid intermediate memory traffic. Fusing `LayerNorm → Dropout → ReLU` into one kernel can yield 5× speedup. FlashAttention[^fn-flashattention] fuses the entire attention computation for 10-20× speedup.
+The key optimization for memory-bound operations is **kernel fusion**—combining multiple operations into a single GPU function (called a *kernel*)[^fn-kernel] to avoid intermediate memory traffic. Fusing `LayerNorm → Dropout → ReLU` into one kernel can yield 5× speedup. FlashAttention[^fn-flashattention-frameworks] fuses the entire attention computation for 10-20× speedup.
 
 [^fn-kernel]: **Kernel**: From German "Kern" (core/nucleus), borrowed from operating systems where it denotes the core program with full hardware access. In GPU programming, a kernel is the function that executes in parallel across thousands of threads. The metaphor extends: just as an OS kernel mediates between software and hardware, a GPU kernel is the fundamental unit where algorithms meet silicon.
 
-[^fn-flashattention]: FlashAttention (introduced in @sec-dnn-architectures) exemplifies kernel fusion taken to its logical extreme. By fusing the entire attention computation into a single kernel that tiles data to fit in SRAM, it reduces HBM traffic by orders of magnitude. The 10-20x speedup demonstrates that frameworks enabling such fusions can transform memory-bound operations into compute-bound ones.
+[^fn-flashattention-frameworks]: FlashAttention (introduced in @sec-dnn-architectures) exemplifies kernel fusion taken to its logical extreme. By fusing the entire attention computation into a single kernel that tiles data to fit in SRAM, it reduces HBM traffic by orders of magnitude. The 10-20x speedup demonstrates that frameworks enabling such fusions can transform memory-bound operations into compute-bound ones.
 
 **The critical constraint**: a framework can only fuse operations it can see together. If operations execute immediately one at a time (eager execution), the framework cannot fuse them. If operations are recorded first into a graph (deferred execution), the framework can analyze and optimize the entire computation. This is why execution strategy matters so much—it determines what optimizations are even possible.
 
@@ -301,9 +301,10 @@ Neither approach dominates; each embodies different trade-offs between **flexibi
 **PyTorch (Eager Execution)**:
 ```python
 import torch
+
 x = torch.tensor([1.0, 2.0])
 y = x * 2
-print(f"Intermediate value: {y}") # Works immediately
+print(f"Intermediate value: {y}")  # Works immediately
 z = y.sum()
 ```
 
@@ -314,6 +315,7 @@ z = y.sum()
 
 ```python
 import tensorflow as tf
+
 x = tf.placeholder(tf.float32)
 y = x * 2
 # print(y) -> Prints Tensor("mul:0"...), not value!
@@ -977,7 +979,7 @@ These throughput differences across execution modes raise a practical question: 
 
 ::: {.callout-lighthouse title="Framework Strategy by Archetype"}
 
-The optimal framework execution strategy depends on which Iron Law term dominates your workload:
+The optimal framework execution strategy depends on which Iron Law term dominates your workload. @tbl-framework-archetype-strategy aligns each archetype to its recommended execution strategy:
 
 +-------------------+------------------------------------------+------------------------------------------+--------------------------------------------+
 | **Archetype**     | **Dominant Iron Law Term**               | **Optimal Framework Strategy**           | **Rationale**                              |
@@ -1272,22 +1274,23 @@ The critical observation is that this single backward pass computed dc/dx regard
 ::: {#lst-reverse_simple_nn lst-cap="**Reverse Mode in a Neural Network**: The forward pass computes and stores intermediate values; the backward pass walks the computation in reverse to produce gradients for every parameter."}
 ```{.python}
 def simple_network(x, w1, w2):
-    hidden = x * w1              # First layer
-    activated = max(0, hidden)   # ReLU activation
-    output = activated * w2      # Second layer
+    hidden = x * w1  # First layer
+    activated = max(0, hidden)  # ReLU activation
+    output = activated * w2  # Second layer
     return output
+
 
 # --- Forward pass stores intermediates ---
 # x=1.0, w1=2.0, w2=3.0
 # hidden=2.0, activated=2.0, output=6.0
 
 # --- Backward pass consumes them ---
-d_output = 1.0                          # Seed gradient
-d_w2 = activated                        # = 2.0
-d_activated = w2                        # = 3.0
+d_output = 1.0  # Seed gradient
+d_w2 = activated  # = 2.0
+d_activated = w2  # = 3.0
 d_hidden = d_activated * (1 if hidden > 0 else 0)  # ReLU gate: 3.0
-d_w1 = x * d_hidden                    # = 3.0
-d_x  = w1 * d_hidden                   # = 6.0
+d_w1 = x * d_hidden  # = 3.0
+d_x = w1 * d_hidden  # = 6.0
 ```
 :::
 
@@ -1396,9 +1399,11 @@ y = x * 3
 z = y.pow(2)
 
 # Traverse the reverse-linked graph
-print(z.grad_fn)                                    # PowBackward0
-print(z.grad_fn.next_functions)                      # -> MulBackward0
-print(z.grad_fn.next_functions[0][0].next_functions)  # -> AccumulateGrad (leaf)
+print(z.grad_fn)  # PowBackward0
+print(z.grad_fn.next_functions)  # -> MulBackward0
+print(
+    z.grad_fn.next_functions[0][0].next_functions
+)  # -> AccumulateGrad (leaf)
 ```
 :::
 
@@ -2264,7 +2269,7 @@ nsys profile \
 ```
 :::
 
-Nsight Compute provides kernel-level analysis with hardware counters, as @lst-nsight-compute demonstrates.
+Nsight Compute provides kernel-level analysis with hardware counters, as @lst-nsight-compute demonstrates. @tbl-nsight-metrics lists the key metrics to examine when optimizing ML kernels.
 
 ::: {#lst-nsight-compute lst-cap="**Nsight Compute Profiling**: Profile specific kernels with detailed hardware metrics for optimization analysis."}
 ```{.bash}
@@ -2307,9 +2312,9 @@ loader = DataLoader(
     dataset,
     batch_size=64,
     shuffle=True,
-    num_workers=4,         # Parallel worker processes (mechanism 1)
-    prefetch_factor=2,     # Batches prepared ahead per worker (mechanism 2)
-    pin_memory=True,       # Page-locked memory for DMA (mechanism 3)
+    num_workers=4,  # Parallel worker processes (mechanism 1)
+    prefetch_factor=2,  # Batches prepared ahead per worker (mechanism 2)
+    pin_memory=True,  # Page-locked memory for DMA (mechanism 3)
     worker_init_fn=seed_worker,  # Reproducible augmentation per worker
 )
 
@@ -2497,7 +2502,6 @@ pics/square/.style = {
 ```
 :::
 
-
 ### Core Operations {#sec-ai-frameworks-core-operations-914f}
 
 When you write `y = torch.matmul(x, w)`, what actually happens between Python and the GPU? The answer involves three distinct layers working in coordination. @fig-mlfm-core-ops illustrates how hardware abstraction operations manage computing platform complexity, basic numerical operations implement mathematical computations, and system-level operations coordinate resources and execution.
@@ -2605,7 +2609,9 @@ import torch.nn as nn
 class CustomLayer(nn.Module):
     def __init__(self, input_size, output_size):
         super().__init__()
-        self.weight = nn.Parameter(torch.randn(output_size, input_size))
+        self.weight = nn.Parameter(
+            torch.randn(output_size, input_size)
+        )
         self.bias = nn.Parameter(torch.randn(output_size))
         self.register_buffer("running_mean", torch.zeros(output_size))
 
@@ -3251,11 +3257,11 @@ optimizer.step()
 3. **Kernel Launch** (~5μs): The selected kernel is queued to the GPU's command buffer. The CPU continues immediately (asynchronous execution).
 
 4. **GPU Execution** (~15μs):
-   - Load W1 from HBM[^fn-hbm] to L2 cache (~200GB/s effective bandwidth)
+   - Load W1 from HBM[^fn-hbm-frameworks] to L2 cache (~200GB/s effective bandwidth)
    - Perform matrix multiply in tensor cores (if available)
    - Write result to HBM
 
-[^fn-hbm]: HBM (introduced in @sec-dnn-architectures) provides 2-3 TB/s bandwidth on modern GPUs. For framework execution, HBM bandwidth determines whether operations are memory-bound or compute-bound. The 80GB capacity on an A100 sets practical limits on model size, as weights, activations, and gradients must all fit in HBM during execution.
+[^fn-hbm-frameworks]: HBM (introduced in @sec-dnn-architectures) provides 2-3 TB/s bandwidth on modern GPUs. For framework execution, HBM bandwidth determines whether operations are memory-bound or compute-bound. The 80GB capacity on an A100 sets practical limits on model size, as weights, activations, and gradients must all fit in HBM during execution.
 
 5. **Autograd Recording**: Simultaneously, PyTorch's autograd engine records a `MmBackward` node on the tape, storing references to `x` and `W1` for gradient computation.
 

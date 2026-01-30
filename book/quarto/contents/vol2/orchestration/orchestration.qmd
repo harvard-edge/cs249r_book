@@ -145,7 +145,6 @@ Ordering without global time presents the fourth fundamental issue. Without a gl
 
 [^fn-cap]: **CAP theorem**: As introduced in @sec-vol2-introduction, a fundamental distributed systems result proving that no system can simultaneously guarantee Consistency (all nodes see the same data), Availability (every request receives a response), and Partition tolerance (the system operates despite network failures). First conjectured by Eric Brewer in 2000 and formally proven by Gilbert and Lynch in 2002 [@gilbert2002brewer], CAP forces designers to choose which property to sacrifice when partitions occur. Most modern systems choose availability over strict consistency, using eventual consistency models.
 
-
 Production schedulers make different trade-offs. Slurm prioritizes consistency, blocking allocations during uncertainty. Kubernetes prioritizes availability, using eventual consistency with reconciliation loops. Custom ML schedulers often accept bounded inconsistency for performance.
 
 **Failure Rates at Scale.** At scale, failure is normal operation, not exceptional. With 99.9% annual GPU reliability (typical for datacenter hardware), a 4096-GPU cluster experiences:
@@ -164,7 +163,6 @@ Slurm[^fn-slurm] (Simple Linux Utility for Resource Management) [@yoo2003slurm] 
 
 [^fn-slurm]: **Slurm**: An open-source job scheduler originating from Lawrence Livermore National Laboratory (2002) that manages compute resources across thousands of nodes. Slurm's design prioritizes predictability and fairness for long-running scientific workloads. Unlike Kubernetes' declarative model, Slurm uses imperative job submission with explicit resource requests, making it easier to reason about allocation guarantees but less flexible for dynamic workloads.
 
-
 A typical ML cluster configuration defines partitions by accelerator type and interconnect:
 
 +---------------+---------------+------------------+--------------------+
@@ -182,7 +180,6 @@ A typical ML cluster configuration defines partitions by accelerator type and in
 GPU allocation strategies significantly impact utilization. The `--gres=gpu:N`[^fn-gres] flag requests N GPUs, but naive allocation can fragment nodes. Consider a 64-node cluster with 8 GPUs each, totaling 512 GPUs. If jobs request 6 GPUs, each job wastes 2 GPUs per node, reducing effective capacity to 75 percent. Slurm's `SelectTypeParameters=CR_GPU` enables GPU-level scheduling, while `--gpus-per-node` ensures jobs receive full nodes when beneficial for NVLink communication.
 
 [^fn-gres]: **GRES (Generic Resource Scheduling)**: Slurm's mechanism for scheduling non-CPU resources like GPUs, FPGAs, or specialized accelerators. GRES tracks resource availability per node and enforces exclusive allocation. The gres.conf file defines available resources, while jobs request them via `--gres=resource_type:count`. This abstraction allows Slurm to manage diverse accelerator types without code changes.
-
 
 Fair-share scheduling prevents any single user or project from monopolizing resources. The classic fair-share formula computes effective priority as:
 
@@ -224,11 +221,9 @@ This binary allocation model wastes resources when workloads need less than a fu
 | **7g.80gb**     | 80 GB          | 98 SMs       | Training             |
 +-----------------+----------------+--------------+----------------------+
 
-
 Gang scheduling[^fn-gang] ensures distributed training jobs receive all requested resources simultaneously. Without gang scheduling, a job requesting 32 GPUs might receive 24 immediately while waiting indefinitely for the remaining 8, wasting the already-allocated resources. The Volcano batch scheduler and scheduler plugins like Coscheduling implement gang semantics through PodGroup abstractions. Jobs specify minimum member counts, and the scheduler delays placement until all pods can be scheduled together.
 
 [^fn-gang]: **Gang scheduling**: A scheduling policy that allocates resources for multi-component jobs atomically, ensuring all components start simultaneously or none do. First developed for parallel computing in the 1980s, gang scheduling prevents deadlock scenarios where jobs partially acquire resources and block each other. For ML training, gang scheduling ensures all workers are ready before training begins, avoiding wasted GPU cycles.
-
 
 Priority classes control preemption behavior. A typical hierarchy assigns training workloads medium priority, inference high priority, and development jobs low priority. The `preemptionPolicy: PreemptLowerPriority` setting enables inference pods to reclaim resources from training when latency SLOs are threatened, though organizations must balance this against training job completion times.
 
@@ -239,7 +234,6 @@ Research schedulers have demonstrated significant improvements over general-purp
 **Tiresias** [@gu2019tiresias] observes that ML training jobs have predictable resource requirements after initial epochs. Rather than requiring users to estimate job duration, often inaccurate by 2 to 5 times, Tiresias uses a two-dimensional attained service[^fn-attained-service] scheduler. Jobs accumulate "service" based on GPU-time consumed, with priority decreasing as service increases. A discretized version groups jobs into service bins, promoting short jobs without requiring duration estimates. Experiments show 40 to 60 percent reduction in average job completion time compared to FIFO scheduling.
 
 [^fn-attained-service]: **Attained service scheduling**: A scheduling discipline where job priority decreases with cumulative resource usage. Originally developed for processor sharing, attained service naturally prioritizes short jobs without requiring duration estimates. For ML workloads where job length correlates with model complexity, this approach provides near-optimal average completion times while remaining robust to inaccurate user estimates.
-
 
 **Gandiva** [@xiao2018gandiva] exploits the iterative nature of deep learning. Training alternates between GPU-intensive forward and backward passes and CPU-intensive data loading. Gandiva time-slices GPU access at iteration boundaries, enabling higher utilization through oversubscription. A cluster with 100 GPUs might support 120 concurrent jobs if each spends 20 percent of time waiting for data. Gandiva also implements grow-shrink elasticity, automatically adjusting data parallelism degree based on resource availability.
 
@@ -341,7 +335,6 @@ LLM inference requires specialized scaling due to the key-value cache[^fn-kv-cac
 
 [^fn-kv-cache]: **Key-Value (KV) cache**: Memory that stores computed attention key and value tensors from previous tokens during autoregressive generation. Without caching, each new token would require recomputing attention over the entire sequence. KV cache grows linearly with sequence length and batch size; for a 70B model with 128K context, the cache can exceed model weights in memory usage. PagedAttention (vLLM) manages this memory more efficiently through virtual memory techniques.
 
-
 #### Resource Isolation {#sec-orchestration-resource-management-resource-management-resource-isolation-0a3d}
 
 Noisy neighbor problems occur when colocated workloads interfere with each other. On GPUs, interference manifests through shared memory bandwidth, L2 cache contention, and PCIe bottlenecks. MIG provides hardware isolation but at the cost of flexibility. Software approaches include careful placement policies and time-based resource contracts.
@@ -350,11 +343,9 @@ GPU memory isolation prevents one model from consuming memory needed by another.
 
 [^fn-mps]: **CUDA MPS (Multi-Process Service)**: A CUDA feature that enables multiple processes to share a GPU with reduced context switching overhead. Unlike time-slicing where only one process accesses the GPU at a time, MPS allows concurrent kernel execution from different processes. MPS improves utilization for small workloads but provides limited isolation compared to MIG; a memory-intensive process can still impact colocated workloads through shared cache pressure.
 
-
 CPU pinning assigns specific cores to inference pods, preventing scheduler migration that causes cache invalidation. For latency-sensitive workloads, isolating cores using `isolcpus` kernel parameters and `taskset` affinity removes OS scheduling jitter. Combined with NUMA-aware[^fn-numa] placement, this reduces P99 latency by 10 to 30 percent for sub-millisecond inference tasks.
 
 [^fn-numa]: **NUMA (Non-Uniform Memory Access)**: A memory architecture where access time depends on memory location relative to the processor. Modern multi-socket servers have distinct memory controllers per CPU socket; accessing local memory takes approximately 100ns, while accessing remote memory via the interconnect takes 150-200ns. For ML inference, placing GPU workloads on CPU cores closest to the GPU's PCIe connection minimizes data transfer latency.
-
 
 ## Multi-Tenancy Considerations {#sec-orchestration-resource-management-resource-management-multitenancy-considerations-a540}
 

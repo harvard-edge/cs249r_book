@@ -33,11 +33,11 @@ _Machine Learning Systems_
 
 **Alt Text**: Timeline with three horizontal tracks from 1980 to 2023. Blue track shows Algorithmic Efficiency progressing through Deep Learning Era to Modern Efficiency. Yellow shows Compute Efficiency from General-Purpose through Accelerated to Sustainable Computing. Green shows Data Selection from Scarcity through Big Data to Data-Centric AI.
 
-### Figure 1.5: 
+### Figure 1.5:
 
 **Alt Text**: Scatter plot showing training efficiency factor from 2012 to 2020. Red dots mark models from AlexNet at 1x to EfficientNet at 44x. Dashed trend line curves upward. Labels identify VGG, ResNet, MobileNet, ShuffleNet versions at their positions.
 
-### Figure 1.6: 
+### Figure 1.6:
 
 **Alt Text**: Log-scale scatter plot showing petaflop/s-days from 2012 to 2018. Points range from AlexNet at 0.006 to AlphaGoZero at 1900. Dashed diagonal line shows exponential trend. Labels identify models including VGG, ResNet, DeepSpeech2, and AlphaZero.
 
@@ -47,7 +47,7 @@ _Machine Learning Systems_
 
 **Alt Text**: Flowchart showing cyclical ML lifecycle. Six boxes: Data Collection, Preparation, Model Training, Evaluation, Deployment, Monitoring. Two loops: evaluation returns to preparation; monitoring triggers collection.
 
-### Figure 1.8: 
+### Figure 1.8:
 
 **Alt Text**: Five pillars diagram: Data Engineering, Training Systems, Deployment Infrastructure, Operations and Monitoring, Ethics and Governance. Pillars rest on foundation labeled Performance Optimization and Hardware Acceleration.
 
@@ -67,7 +67,7 @@ _Machine Learning Systems_
 
 **Alt Text**: Tree diagram with Cloud ML branching to four categories: Characteristics, Benefits, Challenges, and Examples. Each lists items like computational power, scalability, vendor lock-in, and virtual assistants.
 
-### Figure 2.3: 
+### Figure 2.3:
 
 **Alt Text**: Aerial view of Google Cloud TPU data center with long rows of server racks illuminated by blue LEDs extending toward the horizon across a large facility floor.
 
@@ -77,7 +77,7 @@ _Machine Learning Systems_
 
 **Alt Text**: Tree diagram with Edge ML branching to four categories: Characteristics, Benefits, Challenges, and Examples, listing items like decentralized processing, reduced latency, security concerns, and industrial IoT.
 
-### Figure 2.5: 
+### Figure 2.5:
 
 **Alt Text**: Collection of IoT devices arranged on a surface: smart home sensors, fitness wearables, environmental monitors, and connected appliances in various sizes and form factors.
 
@@ -93,7 +93,7 @@ _Machine Learning Systems_
 
 **Alt Text**: Tree diagram with TinyML branching to four categories: Characteristics, Benefits, Challenges, and Examples, listing items like low-power operation, always-on capability, resource limitations, and predictive maintenance.
 
-### Figure 2.8: 
+### Figure 2.8:
 
 **Alt Text**: Small development boards including Arduino Nano BLE Sense and similar microcontroller kits arranged on a surface, each approximately 2-5 cm in length with visible chips and connectors.
 
@@ -143,7 +143,7 @@ _Machine Learning Systems_
 
 **Alt Text**: Linear flowchart with 6 boxes: Problem Definition, Data Collection, Model Development, Evaluation, Deployment, Monitoring. Feedback loop arrow curves from Monitoring back to Data Collection.
 
-### Figure 3.4: 
+### Figure 3.4:
 
 **Alt Text**: Two side-by-side retinal fundus images: left shows healthy retina, right shows diabetic retinopathy with dark red hemorrhage spots scattered across the retina.
 
@@ -169,7 +169,7 @@ _Machine Learning Systems_
 
 **Alt Text**: Four boxes labeled Quality, Reliability, Scalability, and Governance surround a central ML Data System circle. Solid arrows connect each box to center showing contributions; dashed lines between boxes indicate trade-offs.
 
-### Figure 4.3: 
+### Figure 4.3:
 
 **Alt Text**: Diagram showing voice-activated device with microphone, always-on wake word detector, and connection to main voice assistant that activates upon keyword detection.
 
@@ -179,7 +179,7 @@ _Machine Learning Systems_
 
 **Alt Text**: Five model boxes labeled A through E at center all connect upward to one central training dataset repository. Arrows downward show shared limitations, biases, and blind spots propagating to all models.
 
-### Figure 4.5: 
+### Figure 4.5:
 
 **Alt Text**: Historical black-and-white photograph from 1914 showing early traffic control with manual semaphore signals, illustrating how outdated images can appear in modern web scraping results.
 
@@ -201,7 +201,7 @@ _Machine Learning Systems_
 
 **Alt Text**: Side-by-side comparison showing ETL pipeline with extract, transform, then load sequence versus ELT pipeline with extract, load, then transform sequence within the data warehouse.
 
-### Figure 4.9: 
+### Figure 4.9:
 
 **Alt Text**: Two-panel visualization showing raw audio waveform on left transforming into spectrogram on right, with time on horizontal axis and frequency on vertical axis indicated by color intensity.
 
@@ -211,11 +211,11 @@ _Machine Learning Systems_
 
 **Alt Text**: Linear flow diagram showing TensorFlow Extended pipeline: data ingestion, validation, transformation, training, evaluation, and deployment stages connected by arrows from left to right.
 
-### Figure 4.11: 
+### Figure 4.11:
 
 **Alt Text**: Three versions of same street scene showing increasing annotation detail: simple classification label, bounding boxes around vehicles and pedestrians, and pixel-level semantic segmentation with distinct colors.
 
-### Figure 4.12: 
+### Figure 4.12:
 
 **Alt Text**: Grid of example images showing labeling challenges: blurred animal photos where species is unclear, rare specimens requiring expert knowledge, and ambiguous object boundaries causing annotator disagreement.
 
@@ -225,7 +225,7 @@ _Machine Learning Systems_
 
 **Alt Text**: Hierarchical diagram with question about getting labeled data at top. Four branches: traditional supervision, semi-supervised, weak supervision, and transfer learning. Active learning branches as cost-saving alternative.
 
-### Figure 4.14: 
+### Figure 4.14:
 
 **Alt Text**: Pipeline showing audio waveform and text transcript inputs processed through forced alignment stage, then segmented into individual one-second labeled keyword samples for KWS training.
 
@@ -251,7 +251,7 @@ _Machine Learning Systems_
 
 ## Chapter 5: Deep Learning Systems Foundations
 
-### Figure 5.1: 
+### Figure 5.1:
 
 **Alt Text**: Nested circles diagram showing AI as outermost circle containing Machine Learning, which contains Deep Learning, which contains Neural Networks at the center. Arrows indicate progression from broad AI concepts to specific neural network implementations.
 
@@ -267,11 +267,11 @@ _Machine Learning Systems_
 
 **Alt Text**: Flow diagram with three boxes: Rules and Data as inputs flowing into central Traditional Programming box, which outputs Answers. Arrows show data flow direction from inputs to output.
 
-### Figure 5.4: 
+### Figure 5.4:
 
 **Alt Text**: Decision tree flowchart for activity classification. Branches split on conditions like speed less than 4 mph leading to walking, 4-15 mph to running, greater than 15 mph to biking. Additional branches handle edge cases and transitions.
 
-### Figure 5.5: 
+### Figure 5.5:
 
 **Alt Text**: Three-panel image showing HOG feature extraction: original grayscale photo of person on left, gradient magnitude visualization in center, and HOG descriptor grid overlay on right showing edge orientation histograms per cell.
 
@@ -281,11 +281,11 @@ _Machine Learning Systems_
 
 **Alt Text**: Flow diagram with three boxes: Answers and Data as inputs flowing into central Machine Learning box, which outputs Rules. Arrows show inverted flow compared to traditional programming, with rules as output rather than input.
 
-### Figure 5.7: 
+### Figure 5.7:
 
 **Alt Text**: Side-by-side comparison of biological neuron and artificial neuron. Left shows biological cell with dendrites, cell body, and axon. Right shows mathematical model with inputs x, weights w, summation node, activation function, and output. Arrows map corresponding components between the two.
 
-### Figure 5.8: 
+### Figure 5.8:
 
 **Alt Text**: Log-scale scatter plot showing training compute in FLOPS from 1950 to 2022. Points represent AI models, with different colors for pre-deep-learning era, deep learning era, and large-scale models. Trend lines show 1.4x growth before 2010 and 3.4-month doubling after 2012.
 
@@ -343,7 +343,7 @@ _Machine Learning Systems_
 
 **Alt Text**: Two parallel diagrams comparing inference and training. Both show stacked rectangles representing batches feeding into network layers and output nodes. Inference section shows smaller varied batch sizes with dashed outlines. Training section shows larger fixed batches with solid outlines. Network architecture identical in both with fully connected layers.
 
-### Figure 5.18: 
+### Figure 5.18:
 
 **Alt Text**: Grid of handwritten digit samples from USPS dataset showing digits 0-9 in multiple rows. Each digit appears in several variations demonstrating different handwriting styles, stroke widths, slants, and character formations that OCR systems must recognize.
 
@@ -487,7 +487,7 @@ _Machine Learning Systems_
 
 **Alt Text**: Two-column diagram. Training: data preprocessing, tf.keras, TensorFlow Hub, Premade Estimators, Distribution Strategy across CPU/GPU/TPU. Deployment via SavedModel to TensorFlow Serving, Lite, JS, and language bindings.
 
-### Figure 7.13: 
+### Figure 7.13:
 
 **Alt Text**: Hub diagram with ONNX logo at center. Left side: PyTorch, TensorFlow, Keras with arrows pointing inward. Right side: TF Lite, ONNX Runtime with arrows outward.
 
@@ -531,7 +531,7 @@ _Machine Learning Systems_
 
 **Alt Text**: Stacked horizontal bar chart comparing memory usage across four optimizers for LLaMA-7B. Shows components: others, weight gradient, optimization, activation, and weight. Dashed red line marks RTX 4090 memory limit at 30 GB.
 
-### Figure 8.7: 
+### Figure 8.7:
 
 **Alt Text**: TensorFlow profiler screenshot showing GPU activity timeline. Colored blocks indicate computation periods with white gaps revealing idle time when GPU waits for data loading to complete.
 
@@ -599,7 +599,7 @@ _Machine Learning Systems_
 
 ## Chapter 9: Data Selection
 
-### Figure 9.1: 
+### Figure 9.1:
 
 **Alt Text**: Line chart showing dataset size in tokens on y-axis from 10^10 to 10^14 versus year on x-axis from 2010 to 2030. Blue line shows training data growth with markers for models like GPT-2, GPT-3, and Chinchilla. Orange shaded region shows projected high-quality text exhaustion in the near term.
 
@@ -751,7 +751,7 @@ _Machine Learning Systems_
 
 **Alt Text**: Two stacked bar charts comparing FP32 and INT8. Left chart shows inference time in milliseconds for Inception, MobileNet, and ResNet. Right chart shows model size in megabytes. INT8 consistently smaller and faster.
 
-### Figure 10.15: 
+### Figure 10.15:
 
 **Alt Text**: Histogram showing quantization error distribution weighted by probability density. Bell-shaped curve centered near zero with tails extending to positive and negative errors, illustrating typical quantization noise pattern.
 
@@ -773,7 +773,7 @@ _Machine Learning Systems_
 
 **Alt Text**: Vertical flowchart with four boxes connected by arrows. Pre-trained model and Calibration data feed into Calibration step, which feeds into Quantization step, producing final Quantized model output.
 
-### Figure 10.19: 
+### Figure 10.19:
 
 **Alt Text**: Histogram of ResNet50 activation values showing right-skewed distribution. Most values cluster near zero with long tail extending to outliers around 2.1, demonstrating challenge for quantization range selection.
 
@@ -843,11 +843,11 @@ _Machine Learning Systems_
 
 **Alt Text**: Two circular workflow diagrams side by side. Left shows traditional ML with five manual steps. Right shows AutoML with three steps where preprocessing, training, and evaluation are automated in a single AutoML node.
 
-### Figure 10.31: 
+### Figure 10.31:
 
 **Alt Text**: Grid of 96 small color images showing AlexNet first-layer convolutional kernels. Patterns include oriented edges, color blobs, and Gabor-like filters learned from ImageNet training.
 
-### Figure 10.32: 
+### Figure 10.32:
 
 **Alt Text**: Heatmap visualization of a pruned neural network with weight matrix blocks. Darker regions indicate higher sparsity where more weights have been removed. Lighter regions show retained weights.
 
@@ -867,7 +867,7 @@ _Machine Learning Systems_
 
 **Alt Text**: Block diagram showing AI accelerator architecture: CPU connects to DRAM stacks and processing element grid containing tensor cores, vector units, and local caches in hierarchical arrangement.
 
-### Figure 11.3: 
+### Figure 11.3:
 
 **Alt Text**: Line graph of NVIDIA GPU INT8 performance from 2012 to 2023 showing exponential growth from K20X at 4 TOPS to H100 at 4000 TOPS, a 1000x increase over the decade.
 
@@ -1049,15 +1049,15 @@ _Machine Learning Systems_
 
 ## Chapter 15: Responsible Engineering
 
-### Figure 15.1: 
+### Figure 15.1:
 
 **Alt Text**: Nested oval diagram showing governance layers from innermost to outermost: Team (reliable systems, software engineering), Organization (safety culture, organizational design), Industry (trustworthy certification, external reviews), and Government Regulation.
 
-### Figure 15.2: 
+### Figure 15.2:
 
 **Alt Text**: Diagram showing two subgroups A and B with different score distributions. Vertical threshold lines at 75% and 81.25% show how the same threshold produces different approval rates for each group.
 
-### Figure 15.3: 
+### Figure 15.3:
 
 **Alt Text**: Horizontal spectrum showing model types from more interpretable (decision trees, linear regression, logistic regression) to less interpretable (random forest, neural network, convolutional neural network).
 

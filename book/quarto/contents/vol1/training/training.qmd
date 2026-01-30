@@ -201,8 +201,6 @@ The hardware-software co-design principles discussed in @sec-ai-acceleration dem
 
 ## Mathematical Foundations {#sec-ai-training-mathematical-foundations-d894}
 
-
-
 @sec-deep-learning-systems-foundations established the mathematical mechanics of neural network training: forward propagation computes predictions through weighted sums and activation functions, backpropagation applies the chain rule to compute gradients, and optimization algorithms update parameters to minimize loss. Those explanations focused on *what* these operations compute and *why* they enable learning. This section shifts to *what they cost*—the FLOPs consumed, the memory required, and the bandwidth demanded when these conceptually simple operations execute at scale.
 
 Four dimensions of computational cost structure this analysis. First, the FLOP counts of matrix operations that dominate training. Second, the memory requirements for storing activations and optimizer states simultaneously. Third, the bandwidth demands that determine whether operations are compute-bound or memory-bound. Fourth, the arithmetic intensity classifications that guide optimization strategy selection. These dimensions provide the vocabulary for analyzing training bottlenecks systematically.
@@ -359,9 +357,9 @@ ReLU represents a shift toward hardware-optimized design. Its $\max(0,x)$ operat
 [^fn-relu-hardware]: **ReLU Hardware Efficiency**: ReLU requires just 1 instruction (`max(0,x)`) vs. sigmoid's 10+ operations including exponentials. On NVIDIA GPUs, ReLU runs at 95% of peak FLOPS while sigmoid achieves only 30--40%. ReLU's sparsity (typically 50% zeros) enables additional optimizations: sparse matrix operations, reduced memory bandwidth, and compressed gradients during backpropagation.
 
 **Memory Access and Sparsity.**
-The memory footprint of activations is proportional to the batch size and network depth. ReLU's characteristic of producing many zeros (typically 50% sparsity) enables system-level optimizations that other functions cannot exploit. Sparse matrix operations and gradient compression techniques can reduce memory bandwidth requirements, which is the primary bottleneck in large-scale training. In contrast, global normalization functions like Softmax[^fn-softmax-etymology] create unique challenges; they require access to the entire input vector simultaneously to compute the denominator, preventing the independent element-wise parallelization possible with Sigmoid or ReLU.
+The memory footprint of activations is proportional to the batch size and network depth. ReLU's characteristic of producing many zeros (typically 50% sparsity) enables system-level optimizations that other functions cannot exploit. Sparse matrix operations and gradient compression techniques can reduce memory bandwidth requirements, which is the primary bottleneck in large-scale training. In contrast, global normalization functions like Softmax[^fn-softmax-etymology-training] create unique challenges; they require access to the entire input vector simultaneously to compute the denominator, preventing the independent element-wise parallelization possible with Sigmoid or ReLU.
 
-[^fn-softmax-etymology]: **Softmax**: A "soft" (differentiable) approximation to the argmax function. While argmax returns a hard one-hot vector (1 for the maximum, 0 elsewhere), softmax returns a probability distribution that smoothly approximates this behavior. The name, coined by John Bridle in 1990, reflects this relationship: as temperature approaches zero, softmax converges to argmax. This differentiability enables gradient-based learning for classification tasks.
+[^fn-softmax-etymology-training]: **Softmax**: A "soft" (differentiable) approximation to the argmax function. While argmax returns a hard one-hot vector (1 for the maximum, 0 elsewhere), softmax returns a probability distribution that smoothly approximates this behavior. The name, coined by John Bridle in 1990, reflects this relationship: as temperature approaches zero, softmax converges to argmax. This differentiability enables gradient-based learning for classification tasks.
 
 @tbl-compare-activations synthesizes these system-level trade-offs, showing how mathematical behavior translates into operational constraints.
 
@@ -507,7 +505,7 @@ Momentum methods[^fn-momentum-etymology] address SGD's oscillation problem by ac
 While momentum smooths gradient direction, it does not address the different scales of gradients across parameters. RMSprop solves this by maintaining a moving average of squared gradients for each parameter, automatically reducing step sizes for parameters with historically large gradients. This per-parameter adaptation requires storing the moving average $s_t$, creating memory overhead similar to momentum methods. The element-wise operations in RMSprop also introduce additional computational steps compared to basic gradient descent.
 
 **Adam Optimization.**
-Adam[^fn-adam-optimizer] combines the benefits of both momentum and RMSprop: momentum's gradient smoothing addresses noisy updates, while RMSprop's adaptive scaling handles parameter-specific step sizes. This combination maintains two moving averages for each parameter:
+Adam[^fn-adam-optimizer-memory] combines the benefits of both momentum and RMSprop: momentum's gradient smoothing addresses noisy updates, while RMSprop's adaptive scaling handles parameter-specific step sizes. This combination maintains two moving averages for each parameter:
 \begin{gather*}
 m_t = \beta_1 m_{t-1} + (1-\beta_1)\nabla L(\theta_t)
 \\
@@ -518,7 +516,7 @@ v_t = \beta_2 v_{t-1} + (1-\beta_2)\big(\nabla L(\theta_t)\big)^2
 
 The system implications of Adam are more substantial than previous methods. The optimizer must store two additional vectors ($m_t$ and $v_t$) for each parameter, tripling the memory required for optimization state. For a model with 100 million parameters using 32-bit floating-point numbers, the additional memory requirement is approximately 800 MB.
 
-[^fn-adam-optimizer]: **Adam (Adaptive Moment Estimation)**: Introduced by Kingma and Ba in 2015, Adam became the default optimizer for deep learning due to its robust performance across diverse architectures. The algorithm maintains per-parameter learning rates using first and second moment estimates, requiring 3x the memory of SGD (parameters + two state vectors). For a 7B model in FP32, this means 84 GB for optimizer state alone, driving the adoption of memory-efficient variants like 8-bit Adam (2x compression) and GaLoRE (gradient low-rank projection).
+[^fn-adam-optimizer-memory]: **Adam (Adaptive Moment Estimation)**: Introduced by Kingma and Ba in 2015, Adam became the default optimizer for deep learning due to its robust performance across diverse architectures. The algorithm maintains per-parameter learning rates using first and second moment estimates, requiring 3x the memory of SGD (parameters + two state vectors). For a 7B model in FP32, this means 84 GB for optimizer state alone, driving the adoption of memory-efficient variants like 8-bit Adam (2x compression) and GaLoRE (gradient low-rank projection).
 
 #### Optimization Algorithm System Implications {#sec-ai-training-optimization-algorithm-system-implications-f9f2}
 
@@ -2800,9 +2798,9 @@ Optimal checkpointing (sqrt(48) approximately equals 7 checkpoints): Memory = 7 
 
 #### Memory and Computational Benefits {#sec-ai-training-memory-computational-benefits-9372}
 
-Gradient accumulation[^fn-gradient-accumulation] simulates larger batch sizes without increasing memory requirements for storing the full batch. Larger batch sizes improve gradient estimates, leading to more stable convergence and faster training. This flexibility proves particularly valuable when training on high-resolution data where even a single batch may exceed available memory.
+Gradient accumulation[^fn-gradient-accumulation-training] simulates larger batch sizes without increasing memory requirements for storing the full batch. Larger batch sizes improve gradient estimates, leading to more stable convergence and faster training. This flexibility proves particularly valuable when training on high-resolution data where even a single batch may exceed available memory.
 
-[^fn-gradient-accumulation]: **Gradient Accumulation Impact**: Enables effective batch sizes of 2048+ on single GPUs with only 32-64 micro-batch size, essential for transformer training. BERT-Large training uses effective batch size of 256 (accumulated over 8 steps) achieving 99.5% of full-batch performance while reducing memory requirements by 8x. The technique trades 10-15% compute overhead for massive memory savings.
+[^fn-gradient-accumulation-training]: **Gradient Accumulation Impact**: Enables effective batch sizes of 2048+ on single GPUs with only 32-64 micro-batch size, essential for transformer training. BERT-Large training uses effective batch size of 256 (accumulated over 8 steps) achieving 99.5% of full-batch performance while reducing memory requirements by 8x. The technique trades 10-15% compute overhead for massive memory savings.
 
 [^fn-training-activation-checkpointing]: **Activation Checkpointing Trade-offs**: Reduces memory usage by 50--90% at the cost of 15--30% additional compute time due to recomputation. For training GPT-3 on V100s, checkpointing enables 2.8$\times$ larger models (from 1.3 B to 3.7 B parameters) within 32 GB memory constraints, making it essential for memory-bound large model training despite the compute penalty.
 
@@ -3074,7 +3072,7 @@ Scaling to multiple devices also amplifies the energy consumption and environmen
 
 ::: {.callout-notebook title="The Carbon Footprint of Training"}
 
-**Scaling the Utility Bill**: 
+**Scaling the Utility Bill**:
 Training large models is not just a compute challenge; it's a massive energy sink. We can quantify the environmental impact of scaling training using the **Energy Corollary** to the Iron Law:
 
 1.  **Workload**: Training a 7B parameter model for 1 trillion tokens.
@@ -3089,7 +3087,6 @@ This single training run consumes as much electricity as an average US household
 - **The Optimization Dividend**: Improving **Utilization** from 30% to 60% doesn't just halve the time; it saves ~1,500 kWh of energy and reduces the carbon footprint by over **0.6 tons of CO₂** (assuming average grid intensity).
 - **The True Cost**: Training systems engineering is the primary lever for sustainable AI. Every 1% gain in efficiency at scale is equivalent to taking dozens of cars off the road for a year.
 :::
-
 
 ### The Evolution of Training Infrastructure {#sec-ai-training-evolution-training-infrastructure-f3a6}
 
@@ -3286,7 +3283,7 @@ inner ysep=18, fill=BackColor,yshift=6, fit=(B4)(G4)](BB4){};
 ```
 :::
 
-Within a single node, GPUs communicate via high-bandwidth interconnects like NVLink[^fn-nvlink] (up to 900 GB/s on modern systems), making gradient synchronization and activation transfers fast. This intra-node parallelism forms the building block for larger distributed systems.
+Within a single node, GPUs communicate via high-bandwidth interconnects like NVLink[^fn-nvlink-training] (up to 900 GB/s on modern systems), making gradient synchronization and activation transfers fast. This intra-node parallelism forms the building block for larger distributed systems.
 
 ::: {.callout-notebook title="Data vs. Model Parallelism"}
 
@@ -3314,7 +3311,7 @@ Within a single node, GPUs communicate via high-bandwidth interconnects like NVL
 *   Use **Model Parallel** when the model is too big to fit in a single GPU's memory.
 :::
 
-[^fn-nvlink]: **NVLink**: NVIDIA's high-bandwidth GPU interconnect, introduced in 2016 with Pascal architecture. NVLink provides 50-900 GB/s bidirectional bandwidth (depending on generation), compared to 16-64 GB/s for PCIe. For training, this 10-50x bandwidth advantage enables efficient gradient synchronization and model parallelism within a node. A DGX H100 system uses NVLink to achieve 900 GB/s between any pair of 8 GPUs, making intra-node communication nearly as fast as local memory access.
+[^fn-nvlink-training]: **NVLink**: NVIDIA's high-bandwidth GPU interconnect, introduced in 2016 with Pascal architecture. NVLink provides 50-900 GB/s bidirectional bandwidth (depending on generation), compared to 16-64 GB/s for PCIe. For training, this 10-50x bandwidth advantage enables efficient gradient synchronization and model parallelism within a node. A DGX H100 system uses NVLink to achieve 900 GB/s between any pair of 8 GPUs, making intra-node communication nearly as fast as local memory access.
 
 ### Scaling Beyond a Single Node {#sec-ai-training-scaling-beyond-single-node-a671}
 
