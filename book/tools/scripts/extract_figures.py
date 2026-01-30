@@ -18,7 +18,7 @@ Options:
     --alt-text  Extract fig-alt (visual descriptions for accessibility)
     --caption   Extract full fig-cap (explanatory caption text)
     
-    If no output type is specified, generates all three in separate sections.
+    If no output type is specified, generates all three grouped by figure.
 
 Output:
     Creates FIGURE_LIST_VOL{N}.md in the book/quarto directory.
@@ -79,113 +79,86 @@ def extract_chapter_title(qmd_path: Path) -> str:
     return qmd_path.stem.replace('_', ' ').title()
 
 
-def extract_figures(qmd_path: Path, extract_type: str) -> list[dict]:
+def extract_figures_all(qmd_path: Path) -> list[dict]:
     """
-    Extract all figures from a .qmd file.
+    Extract all figures from a .qmd file with all three attributes.
     
     Args:
         qmd_path: Path to the .qmd file
-        extract_type: 'label' for title only, 'alt-text' for fig-alt, 'caption' for full fig-cap
     
-    Returns a list of dicts with 'id' and 'text' keys.
+    Returns a list of dicts with 'id', 'label', 'caption', and 'alt_text' keys.
     """
     with open(qmd_path, 'r', encoding='utf-8') as f:
         content = f.read()
     
     figures = []
     
-    # Choose the attribute to extract
-    attr = 'fig-alt' if extract_type == 'alt-text' else 'fig-cap'
-    
-    # Pattern to match figure definitions with the chosen attribute
-    # Handles escaped quotes: \"text\"
-    # Format: {#fig-NAME ... fig-alt="TEXT" ...} or {#fig-NAME ... fig-cap="TEXT" ...}
-    fig_pattern = re.compile(
-        rf'\{{#(fig-[a-zA-Z0-9_-]+)[^}}]*{attr}="((?:[^"\\]|\\.)*)"',
+    # First, find all figure IDs with their full attribute blocks
+    # Pattern matches the entire {#fig-ID ...} block
+    fig_block_pattern = re.compile(
+        r'\{#(fig-[a-zA-Z0-9_-]+)([^}]*)\}',
         re.DOTALL
     )
     
-    for match in fig_pattern.finditer(content):
+    for match in fig_block_pattern.finditer(content):
         fig_id = match.group(1)
-        text = match.group(2)
+        attrs = match.group(2)
         
-        # Unescape quotes
-        text = text.replace('\\"', '"')
-        text = text.replace("\\'", "'")
+        # Extract fig-cap
+        cap_match = re.search(r'fig-cap="((?:[^"\\]|\\.)*)"', attrs)
+        caption_raw = cap_match.group(1) if cap_match else ''
         
-        # Clean up text - normalize whitespace
-        text = ' '.join(text.split())
+        # Extract fig-alt
+        alt_match = re.search(r'fig-alt="((?:[^"\\]|\\.)*)"', attrs)
+        alt_text = alt_match.group(1) if alt_match else ''
         
-        if extract_type == 'label':
-            # Extract just the bold title portion: **Title**: description -> Title
-            label_match = re.match(r'\*\*([^*]+)\*\*', text)
+        # Skip if neither caption nor alt-text
+        if not caption_raw and not alt_text:
+            continue
+        
+        # Clean up caption
+        caption_raw = caption_raw.replace('\\"', '"').replace("\\'", "'")
+        caption_raw = ' '.join(caption_raw.split())
+        
+        # Extract label from caption (bold title)
+        label = ''
+        if caption_raw:
+            label_match = re.match(r'\*\*([^*]+)\*\*', caption_raw)
             if label_match:
-                text = label_match.group(1).rstrip(':')
+                label = label_match.group(1).rstrip(':')
             else:
                 # If no bold markers, take text up to first colon or period
-                colon_pos = text.find(':')
-                period_pos = text.find('.')
+                colon_pos = caption_raw.find(':')
+                period_pos = caption_raw.find('.')
                 if colon_pos > 0 and (period_pos < 0 or colon_pos < period_pos):
-                    text = text[:colon_pos]
+                    label = caption_raw[:colon_pos]
                 elif period_pos > 0:
-                    text = text[:period_pos]
-        elif extract_type == 'caption':
-            # Remove bold markers but keep full text
-            text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
-        # For 'alt-text', keep as-is
+                    label = caption_raw[:period_pos]
+                else:
+                    label = caption_raw[:50] + '...' if len(caption_raw) > 50 else caption_raw
+        
+        # Clean caption (remove bold markers)
+        caption = re.sub(r'\*\*([^*]+)\*\*', r'\1', caption_raw)
+        
+        # Clean alt text
+        alt_text = alt_text.replace('\\"', '"').replace("\\'", "'")
+        alt_text = ' '.join(alt_text.split())
         
         figures.append({
             'id': fig_id,
-            'text': text
+            'label': label,
+            'caption': caption,
+            'alt_text': alt_text
         })
     
     return figures
-
-
-def generate_markdown_section(chapters_data: list[dict], extract_type: str, vol: str) -> list[str]:
-    """
-    Generate markdown lines for a single extraction type.
-    """
-    type_labels = {
-        'label': "Figure Labels (Titles Only)",
-        'alt-text': "Figure Alt Text (Visual Descriptions)",
-        'caption': "Figure Captions (Full Explanatory Text)"
-    }
-    type_label = type_labels.get(extract_type, extract_type)
-    
-    lines = [
-        f"## {type_label}",
-        "",
-    ]
-    
-    chapter_num = 0
-    total_figures = 0
-    
-    for chapter in chapters_data:
-        figures = chapter.get(f'figures_{extract_type}', [])
-        if not figures:
-            continue
-        
-        chapter_num += 1
-        
-        lines.append(f"### Chapter {chapter_num}: {chapter['title']}")
-        lines.append("")
-        
-        for i, fig in enumerate(figures, 1):
-            lines.append(f"**Figure {chapter_num}.{i}**: {fig['text']}")
-            lines.append("")
-            total_figures += 1
-        
-    lines.append(f"_Total: {total_figures} figures_")
-    lines.append("")
-    
-    return lines
 
 
 def generate_markdown_output(chapters_data: list[dict], output_path: Path, 
                             extract_types: list[str], vol: str) -> None:
     """
     Generate the Markdown output file with chapter and figure listings.
+    Figures are grouped together with all their attributes.
     """
     # Get volume title from YAML if possible
     vol_titles = {
@@ -194,23 +167,61 @@ def generate_markdown_output(chapters_data: list[dict], output_path: Path,
     }
     vol_title = vol_titles.get(vol, f'Volume {vol}')
     
+    type_descriptions = {
+        'label': 'Title',
+        'caption': 'Caption', 
+        'alt-text': 'Alt Text'
+    }
+    
     lines = [
         f"# Figure List - {vol_title}",
         "",
         "_Machine Learning Systems_",
         "",
         f"**Volume**: {vol}",
-        f"**Extraction Types**: {', '.join(extract_types)}",
+        f"**Includes**: {', '.join(type_descriptions[t] for t in extract_types)}",
         "",
         "---",
         "",
     ]
     
-    for extract_type in extract_types:
-        section_lines = generate_markdown_section(chapters_data, extract_type, vol)
-        lines.extend(section_lines)
+    chapter_num = 0
+    total_figures = 0
+    
+    for chapter in chapters_data:
+        figures = chapter.get('figures', [])
+        if not figures:
+            continue
+        
+        chapter_num += 1
+        
+        lines.append(f"## Chapter {chapter_num}: {chapter['title']}")
+        lines.append("")
+        
+        for i, fig in enumerate(figures, 1):
+            fig_num = f"{chapter_num}.{i}"
+            label = fig.get('label', '')
+            
+            # Figure header with label
+            lines.append(f"### Figure {fig_num}: {label}")
+            lines.append("")
+            
+            # Add requested fields
+            if 'caption' in extract_types and fig.get('caption'):
+                lines.append(f"**Caption**: {fig['caption']}")
+                lines.append("")
+            
+            if 'alt-text' in extract_types and fig.get('alt_text'):
+                lines.append(f"**Alt Text**: {fig['alt_text']}")
+                lines.append("")
+            
+            total_figures += 1
+        
         lines.append("---")
         lines.append("")
+    
+    lines.append(f"_Total: {total_figures} figures across {chapter_num} chapters_")
+    lines.append("")
     
     # Write output
     with open(output_path, 'w', encoding='utf-8') as f:
@@ -227,10 +238,9 @@ def main():
         epilog="""
 Examples:
     python extract_figures.py --vol 1                    # All types for vol1
-    python extract_figures.py --vol 2 --label            # Labels only for vol2
+    python extract_figures.py --vol 2 --caption          # Captions only for vol2
     python extract_figures.py --vol 1 --alt-text         # Alt text only for vol1
-    python extract_figures.py --vol 1 --caption          # Captions only for vol1
-    python extract_figures.py --vol 1 --label --caption  # Labels and captions for vol1
+    python extract_figures.py --vol 1 --caption --alt-text  # Both for vol1
         """
     )
     
@@ -241,19 +251,14 @@ Examples:
     )
     
     parser.add_argument(
-        '--label', 
-        action='store_true',
-        help='Extract just the figure title (bold text from fig-cap)'
-    )
-    parser.add_argument(
         '--alt-text', 
         action='store_true',
-        help='Extract fig-alt (visual descriptions for accessibility)'
+        help='Include fig-alt (visual descriptions for accessibility)'
     )
     parser.add_argument(
         '--caption', 
         action='store_true',
-        help='Extract full fig-cap (explanatory caption text)'
+        help='Include full fig-cap (explanatory caption text)'
     )
     
     args = parser.parse_args()
@@ -261,18 +266,17 @@ Examples:
     vol = args.vol
     
     # Determine extraction types (default to all if none specified)
-    extract_types = []
-    if args.label:
-        extract_types.append('label')
+    # Label is always included as the figure header
+    extract_types = ['label']  # Always include label as header
     if args.alt_text:
         extract_types.append('alt-text')
     if args.caption:
         extract_types.append('caption')
     
-    # If no types specified, use all three
-    if not extract_types:
+    # If no specific types requested, include both caption and alt-text
+    if not args.alt_text and not args.caption:
         extract_types = ['label', 'caption', 'alt-text']
-        print("No output type specified. Generating all three: label, caption, alt-text")
+        print("No output type specified. Generating all: label, caption, alt-text")
     
     print(f"Volume: {vol}")
     print(f"Extraction types: {', '.join(extract_types)}")
@@ -317,23 +321,15 @@ Examples:
         print(f"  Processing: {rel_path}")
         
         title = extract_chapter_title(qmd_path)
+        figures = extract_figures_all(qmd_path)
         
-        chapter_info = {
-            'path': rel_path,
-            'title': title,
-        }
-        
-        # Extract figures for each requested type
-        has_figures = False
-        for extract_type in extract_types:
-            figures = extract_figures(qmd_path, extract_type)
-            chapter_info[f'figures_{extract_type}'] = figures
-            if figures:
-                has_figures = True
-                print(f"    Found {len(figures)} figures ({extract_type})")
-        
-        if has_figures:
-            chapters_data.append(chapter_info)
+        if figures:
+            print(f"    Found {len(figures)} figures")
+            chapters_data.append({
+                'path': rel_path,
+                'title': title,
+                'figures': figures
+            })
     
     # Generate output
     output_path = yaml_path.parent.parent / f'FIGURE_LIST_VOL{vol}.md'
