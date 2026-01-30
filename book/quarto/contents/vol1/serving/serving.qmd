@@ -422,6 +422,26 @@ This breakdown reveals why straightforward optimization efforts often fail. Engi
 
 Moving preprocessing to GPU can reduce total latency by 6x in some pipelines by eliminating CPU-GPU data transfers between stages [@nvidia2024tritontutorial]. Effective optimization targets the largest time consumers first.
 
+**The Serving Tax Bill**
+
+Beyond the model execution itself, every request pays a "tax" to the serving infrastructure. @tbl-serving-tax quantifies these overheads for a typical high-performance inference request (e.g., ResNet-50 classification).
+
++---------------------+-------------------+------------------------+-------------------------------------+
+| **Tax Component**   | **Typical Cost**  | **Scaling Behavior**   | **Tax Evasion Strategy**            |
++:====================+:==================+:=======================+:====================================+
+| **Network I/O**     | 1-5 ms            | Linear with payload    | Compression, Region Colocation      |
++---------------------+-------------------+------------------------+-------------------------------------+
+| **Serialization**   | 50-500 $\mu$s     | Linear with payload    | gRPC/Protobuf (vs JSON)             |
++---------------------+-------------------+------------------------+-------------------------------------+
+| **Queuing**         | 0.1-10 ms         | Exponential w/ load    | Dynamic Batching, Autoscaling       |
++---------------------+-------------------+------------------------+-------------------------------------+
+| **Dispatch**        | 10-50 $\mu$s      | Constant per batch     | Kernel Fusion (reduce launches)     |
++---------------------+-------------------+------------------------+-------------------------------------+
+| **Data Copy**       | 100-500 $\mu$s    | Linear with tensor     | Zero-Copy / Shared Memory           |
++---------------------+-------------------+------------------------+-------------------------------------+
+
+: **The Serving Tax Bill**: A breakdown of non-inference latency sources. While individual components like serialization seem small ($<1$ ms), they compound. In a 5ms inference service, this "tax" can easily consume 50% of the latency budget. The primary engineering goal is to drive these costs to zero through architectural choices like gRPC and Zero-Copy data paths. {#tbl-serving-tax}
+
 #### The Killer Microseconds Problem {#sec-model-serving-systems-killer-microseconds-problem-bc00}
 
 Barroso, Patterson, and colleagues identified a critical gap in how systems handle latency at different time scales [@barroso2017attack]. Modern systems efficiently handle nanosecond-scale events (CPU cache access, DRAM reads) through hardware mechanisms like out-of-order execution, and millisecond-scale events (disk I/O, network calls) through software techniques like threading and asynchronous I/O. But microsecond-scale events fall into an uncomfortable middle ground where neither approach works well.
@@ -1492,6 +1512,26 @@ Optimization without measurement is guesswork. To truly master the ML node, you 
 4.  **Optimize**: Apply a specific fix (e.g., fusion, pinning).
 5.  **Verify**: Re-capture and confirm the gap is gone.
 :::
+
+**Optimization Technique Impact Matrix**
+
+To guide optimization efforts, @tbl-optimization-impact summarizes the key techniques available at the node level, their primary targets, and expected returns.
+
++--------------------------+---------------------+-------------------+---------------------+-------------------------+
+| **Technique**            | **Target Metric**   | **Typical Gain**  | **Implement. Cost** | **Best For**            |
++:=========================+:====================+:==================+:====================+:========================+
+| **Operator Fusion**      | Latency & Throughput| 2-5$\times$       | Medium (Compiler)   | Memory-bound layers     |
++--------------------------+---------------------+-------------------+---------------------+-------------------------+
+| **INT8 Quantization**    | Throughput          | 3-4$\times$       | High (Calibration)  | Inference-heavy nodes   |
++--------------------------+---------------------+-------------------+---------------------+-------------------------+
+| **Graph Compilation**    | Latency             | 1.5-3$\times$     | Low (One-line)      | Static graph models     |
++--------------------------+---------------------+-------------------+---------------------+-------------------------+
+| **Zero-Copy Loading**    | Startup Time        | 10-50$\times$     | Low (File format)   | Autoscaling / Cold Start|
++--------------------------+---------------------+-------------------+---------------------+-------------------------+
+| **CPU Pinning**          | Tail Latency (P99)  | 20-50% reduction  | Low (Config)        | Latency-critical apps   |
++--------------------------+---------------------+-------------------+---------------------+-------------------------+
+
+: **Node-Level Optimization Impact**: A decision matrix for selecting optimization techniques. High-impact techniques like quantization often carry higher implementation costs (calibration data requirements), while architectural changes like zero-copy loading offer dramatic gains for specific metrics (startup time) with low effort. {#tbl-optimization-impact}
 
 ## Economics and Capacity Planning {#sec-model-serving-systems-economics-capacity-planning-3e7e}
 
