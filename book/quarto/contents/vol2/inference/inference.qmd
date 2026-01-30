@@ -230,6 +230,8 @@ To organize the optimization techniques in this chapter, we introduce the servin
 
 **Platform level**: Optimizations across multiple services and tenants. Resource allocation, multi-tenancy, scheduling, and cluster management operate here. The target metric is overall resource efficiency while meeting diverse SLO requirements.
 
+The following figure illustrates *the serving hierarchy* and how these four levels relate to one another.
+
 ::: {.callout-note title="Figure: The Serving Hierarchy" collapse="false"}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -930,7 +932,9 @@ GPU inference systems can be modeled as **M/G/c/K queues**, a standard notation 
 - **c (Number of servers)**: The system has $c$ parallel GPU workers, each capable of serving requests independently.
 - **K (Queue capacity)**: The system maintains a finite queue of capacity $K$ requests. Requests arriving to a full queue are rejected (load shedding).
 
-::: {.callout-note title="Connection: Queuing Theory and Systems Performance"}
+This notation reflects a long tradition of *queuing theory and performance* analysis in systems engineering.
+
+::: {.callout-note title="Queuing Theory and Performance"}
 Queuing theory, developed by Agner Krarup Erlang in 1909 for telephone network analysis, remains foundational to systems performance engineering. The same mathematical framework that sized telephone exchanges now determines GPU cluster capacity. The M/G/c/K model is standard in systems textbooks, appearing in Jain's *The Art of Computer Systems Performance Analysis* [@jain1991art] and Kleinrock's *Queueing Systems* [@kleinrock1975queueing].
 :::
 
@@ -993,7 +997,7 @@ For our linear service time model with deterministic service (variance zero with
 
 $$E[W(B)] = \frac{\lambda \cdot S(B)^2}{2B(1 - \lambda \cdot S(B)/B)}$$
 
-Taking the derivative with respect to $B$ and setting equal to zero yields the optimal batch size. While the full derivation involves solving a cubic equation, the approximate solution for systems where $\alpha \gg \beta$ (high fixed overhead, typical of LLMs) is:
+Taking the derivative with respect to $B$ and setting equal to zero yields the optimal batch size. While the full derivation involves solving a cubic equation, the approximate solution for systems where $\alpha \gg \beta$ (high fixed overhead, typical of LLMs) reveals *the square root law for batch sizing*:
 
 $$B^* \approx \sqrt{\frac{2\alpha\lambda}{1 - \rho_{target}}}$$ {#eq-optimal-batch-approx}
 
@@ -1066,6 +1070,8 @@ However, this exceeds practical limits (memory constraints typically cap batch s
 3. **Batch size 32 minimizes total latency**: Despite longer service time (66ms vs 54ms), the dramatic reduction in queue wait time (8.9ms vs 42.3ms) yields lower total latency.
 
 4. **Diminishing returns beyond B=32**: Further batch size increases would reduce utilization but memory constraints prevent exploration.
+
+We can confirm these results by *applying Little's Law to verify* internal consistency.
 
 ::: {.callout-notebook title="Applying Little's Law to Verify" collapse="true"}
 **Verification using Little's Law**: $L = \lambda \cdot W$
@@ -1206,9 +1212,9 @@ Dynamic batching collects requests for a maximum time window $T_{window}$ or unt
 
 $$E[L_{total}] = E[L_{queue}] + L_{batch} + L_{inference}(B)$$ {#eq-dynamic-batch-latency}
 
-where $E[L_{queue}]$ is the expected queuing delay, $L_{batch}$ is the batch formation delay (up to $T_{window}$), and $L_{inference}(B)$ is the inference time for batch size $B$.
+where $E[L_{queue}]$ is the expected queuing delay, $L_{batch}$ is the batch formation delay (up to $T_{window}$), and $L_{inference}(B)$ is the inference time for batch size $B$. A concrete example of *dynamic batching for ResNet-50* illustrates how these components interact in practice.
 
-::: {.callout-example title="Worked Example: Dynamic Batching for ResNet-50 at Scale"}
+::: {.callout-example title="Dynamic Batching for ResNet-50"}
 
 Consider a vision classification service with the following requirements:
 
@@ -1273,9 +1279,9 @@ $$\text{Wasted compute} = \frac{(100 - 10) \times 1}{100 \times 8} = 11.25\%$$
 
 For realistic output length distributions with high variance, wasted compute can exceed 50%.
 
-Continuous batching (also called iteration-level batching) decouples batch membership from iteration boundaries. At each decode iteration, the system checks for completed sequences, removes completed sequences from the batch immediately, inserts waiting sequences into freed slots, and processes the reorganized batch for the next iteration.
+Continuous batching (also called iteration-level batching) decouples batch membership from iteration boundaries. At each decode iteration, the system checks for completed sequences, removes completed sequences from the batch immediately, inserts waiting sequences into freed slots, and processes the reorganized batch for the next iteration. This technique is central to the *throughput-latency* tradeoff that defines large-scale LLM serving.
 
-::: {.callout-note title="Archetype A (Scaled Lighthouse): The Throughput-Latency Decoupling"}
+::: {.callout-note title="Archetype A: Throughput-Latency"}
 **Archetype A (The Trillion-Parameter LLM)** relies on continuous batching to solve its primary efficiency paradox. The decode phase is memory-bandwidth bound, meaning the GPU compute cores are idle waiting for weights to load. Continuous batching saturates this bandwidth by processing unrelated requests together. Without this technique, serving Archetype A models would be economically unviable due to low GPU utilization.
 :::
 
@@ -1289,7 +1295,7 @@ With typical LLM output lengths having $CV \approx 1.0$, continuous batching ach
 
 These analytical gains translate directly into production systems. The following implementation study examines how *vLLM* realizes continuous batching through iteration-level scheduling, paged memory management, and preemption.
 
-::: {.callout-note title="Implementation: Continuous Batching in vLLM"}
+::: {.callout-note title="Continuous Batching in vLLM"}
 
 vLLM implements continuous batching with several key mechanisms. Iteration-level scheduling evaluates at each decode step which sequences have generated end-of-sequence tokens (remove from batch), which waiting sequences can fit in available KV cache slots (add to batch), and which sequences should be preempted if memory pressure exists (swap to CPU). Memory management uses PagedAttention (detailed in @sec-inference-scale-kv-cache-management-04ed), which enables dynamic allocation without fragmentation. When a sequence completes, its KV cache pages are immediately available for new sequences. The batched decode kernel processes all active sequences in a single batched operation despite dynamic batch composition. Sequences at different generation lengths are padded to a common shape within the kernel.
 
@@ -1396,9 +1402,9 @@ Request latencies with continuous batching (assuming no queuing delay):
 - Traditional: 4,000 ms (all requests)
 - Continuous: (1,000 + 2,000 + 3,000 + 4,000) / 4 = 2,500 ms
 
-This represents a **37.5% reduction in average latency**, exactly matching the waste ratio.
+This represents a **37.5% reduction in average latency**, exactly matching the waste ratio. The following figure contrasts *traditional vs. continuous batching* to visualize this difference.
 
-::: {.callout-note title="Figure: Traditional vs Continuous Batching Timeline" collapse="false"}
+::: {.callout-note title="Traditional vs. Continuous Batching" collapse="false"}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.65]
   \definecolor{R1Color}{RGB}{100,180,100}
@@ -1571,7 +1577,7 @@ Continuous batching's performance benefits come with implementation complexity t
 
 Even with modern frameworks, diagnosing tail latency anomalies requires systematic investigation across the system stack. The following case study applies the Systems Sandwich methodology to a real-world P99 latency regression.
 
-::: {.callout-tip title="Systems Sandwich: Debugging High P99 Latency"}
+::: {.callout-tip title="Debugging High P99 Latency"}
 
 **Problem**: An LLM serving system exhibits unexpectedly high tail latency. P50 latency is 100ms and P95 is 180ms, both within SLO, but P99 spikes to 500ms against a 200ms target. GPU utilization appears healthy at 85%. Where is the bottleneck?
 
@@ -1632,9 +1638,9 @@ Context features: [process(ctx_1), process(ctx_2), process(ctx_3)]  → parallel
 Then: Combine features per request for ranking
 ```
 
-This parallelization is natural when embeddings are sharded across servers: each embedding server handles lookups for its shard across all requests in the batch.
+This parallelization is natural when embeddings are sharded across servers: each embedding server handles lookups for its shard across all requests in the batch. To appreciate the scale at which this operates, consider *RecSys batching at Meta scale*.
 
-::: {.callout-example title="Worked Example: Recommendation System Batching at Meta Scale"}
+::: {.callout-example title="RecSys Batching at Meta Scale"}
 
 Consider Meta's recommendation infrastructure serving 10 million QPS across the platform:
 
@@ -1688,7 +1694,7 @@ For streaming applications, the relevant metric is not throughput but **time to 
 
 $$L_{streaming} = L_{capture} + L_{transfer} + L_{inference} + L_{action}$$
 
-where all components must complete within the inter-frame interval.
+where all components must complete within the inter-frame interval. A *streaming speech recognition pipeline* illustrates how these latency components compose under tight real-time constraints.
 
 ::: {.callout-note title="Streaming Speech Recognition Pipeline"}
 
@@ -1752,7 +1758,7 @@ This feedback loop maintains latency headroom while maximizing throughput during
 
 These adaptive principles are embodied in production serving infrastructure. The *NVIDIA Triton Inference Server* implements a configurable adaptive batching system that illustrates how SLO-aware and request-aware strategies operate in practice.
 
-::: {.callout-note title="Production Adaptive Batching: The NVIDIA Triton Approach"}
+::: {.callout-note title="Adaptive Batching: Triton"}
 
 Triton Inference Server implements adaptive batching with three configurable parameters:
 
@@ -1878,7 +1884,9 @@ where:
 - $P$ = precision (bytes per element)
 - Factor of 2 accounts for both keys and values
 
-::: {.callout-example title="Engineering Calculation: KV-Cache Capacity Estimator"}
+The following *KV-cache capacity estimator* applies this formula to determine the maximum serving batch size for a large model on production hardware.
+
+::: {.callout-example title="KV-Cache Capacity Estimator"}
 **The Problem**: You are serving Llama-3-70B (FP16 weights $\approx 140$ GB) on an 8xH100 node (640 GB total HBM). You want to determine the maximum batch size for a context length of 128K tokens.
 
 **Formula**:
@@ -2131,7 +2139,7 @@ Request B page table: [0, 1, 2, 3, 4, 5, 12, 13, 14]  <- shares prefix blocks
 Request C page table: [0, 1, 2, 3, 4, 5, 15]  <- shares prefix blocks
 ```
 
-All three requests reference the same physical blocks for the system prompt. Only when generating unique tokens do they allocate new blocks.
+All three requests reference the same physical blocks for the system prompt. Only when generating unique tokens do they allocate new blocks. The savings from *prefix caching at scale* can be substantial when many concurrent requests share the same system prompt.
 
 ::: {.callout-note title="Prefix Caching at Scale"}
 
@@ -2230,7 +2238,7 @@ Autoregressive generation is inherently sequential: each token depends on previo
 3. Accept prefix of correct tokens, reject from first incorrect token
 4. Continue from last accepted token
 
-**Why this works**: The draft model is much smaller (7B vs 70B) and can generate $k$ tokens in the time the target model generates 1 token. Verification is cheap because the target model can process all $k$ tokens in parallel (like prefill).
+**Why this works**: The draft model is much smaller (7B vs 70B) and can generate $k$ tokens in the time the target model generates 1 token. Verification is cheap because the target model can process all $k$ tokens in parallel (like prefill). The following *speculative decoding example* traces this process step by step.
 
 ::: {.callout-note title="Speculative Decoding Example"}
 
@@ -2524,7 +2532,7 @@ $$T_{inference} = \frac{T_{compute}}{P} + 2 \times T_{allreduce}\left(\frac{A}{P
 
 where $T_{compute}$ is the sequential compute time, $P$ is the parallelism degree, and $A$ is the activation size being reduced. The factor of 2 accounts for the two all-reduce operations per transformer layer (attention and feed-forward).
 
-::: {.callout-example title="Worked Example: Tensor Parallelism for Llama-70B"}
+::: {.callout-example title="Tensor Parallelism for Llama-70B"}
 
 Consider serving Llama-70B with the following configuration:
 
@@ -2870,7 +2878,7 @@ The choice of embedding sharding strategy depends on lookup patterns and communi
 
 These sharding strategies operate at massive scale in production. Meta's recommendation infrastructure provides a concrete example of how row-wise, column-wise, and hybrid approaches combine to serve trillion-entity embedding tables.
 
-::: {.callout-note title="Embedding Sharding at Scale: Meta Infrastructure"}
+::: {.callout-note title="Embedding Sharding at Meta"}
 
 Meta's recommendation infrastructure demonstrates embedding sharding at extreme scale:
 
@@ -2956,6 +2964,8 @@ where $L$ is the network latency and $M/B$ is the transfer time.
 
 $$T_{alltoall} = (P-1) \times \left(L + \frac{M/P}{B}\right)$$ {#eq-alltoall-time}
 
+These equations make clear that the achievable bandwidth $B$ and latency $L$ of the underlying interconnect determine real-world sharding performance. The following *interconnect technology comparison* quantifies these differences across production hardware.
+
 ::: {.callout-note title="Interconnect Technology Comparison"}
 
 Communication overhead depends heavily on the interconnect technology:
@@ -3013,7 +3023,7 @@ With models deployed across multiple replicas, the next challenge is distributin
 
 Load balancing determines which replica handles each request, directly impacting latency, throughput, and resource utilization. Seemingly simple choices, like random assignment versus informed selection, produce dramatically different performance at scale. This section develops the theory and practice of load balancing for inference, from basic algorithms through the power-of-two-choices insight that provides exponentially better performance with minimal overhead.
 
-::: {.callout-note title="Archetype B (Scaled Lighthouse): The Tail at Scale"}
+::: {.callout-note title="Archetype B: The Tail at Scale"}
 **Archetype B (The Global Real-Time Recommendation Engine)** is the canonical victim of tail latency. Processing 10 million QPS means that a 1-in-10,000 latency spike happens 1,000 times every second. For Archetype B, sophisticated load balancing (like Power-of-Two-Choices) is mandatory to suppress these outliers; simple Round-Robin would allow queues to build up, causing the 99th percentile latency to collapse into unacceptable slowness.
 :::
 
@@ -3068,7 +3078,7 @@ For 1,000 servers:
 
 The improvement is exponential: two choices with 1,000 servers achieves better balance than random with just 10 servers.
 
-::: {.callout-important title="Exponential Improvement from a Simple Change"}
+::: {.callout-important title="Exponential Gain from One Change"}
 
 The power-of-two-choices result is one of the most impactful findings in distributed systems theory. By examining just one additional server, maximum queue length improves from $O(\log n / \log \log n)$ to $O(\log \log n)$, an exponential improvement.
 
@@ -3103,7 +3113,9 @@ where $w_i$ is the weight (capacity) of server $i$.
 2. Query both for current load relative to their capacity
 3. Route to the server with lower relative load
 
-::: {.callout-example title="Worked Example: Heterogeneous GPU Cluster"}
+A *heterogeneous GPU cluster* example demonstrates how weighted routing handles mixed hardware in practice.
+
+::: {.callout-example title="Heterogeneous GPU Cluster"}
 
 Consider a cluster with mixed GPU types:
 
@@ -3224,6 +3236,8 @@ Key properties:
 - **Minimal disruption**: Adding/removing servers only remaps $K/N$ keys on average
 - **Load balancing**: With virtual nodes, load distributes evenly
 
+The following example illustrates *consistent hashing for KV cache affinity* in an LLM serving cluster.
+
 ::: {.callout-note title="Consistent Hashing for KV Cache Affinity"}
 
 Consider an LLM serving system where each user's conversation maintains KV cache state:
@@ -3338,7 +3352,9 @@ Body: {"prompt": "test"}
 Response: 200 OK with valid output, or error
 ```
 
-::: {.callout-note title="Health Check Configuration for GPU Inference"}
+Standard health checks are necessary but insufficient for GPU-accelerated servers, which face hardware-specific failure modes.
+
+::: {.callout-note title="Health Checks for GPU Inference"}
 
 GPU inference servers have unique health check considerations:
 
@@ -3443,6 +3459,8 @@ Server queue depth > threshold
     → If all servers degraded, apply admission control
 ```
 
+Without these mechanisms, a single degraded server can trigger a chain reaction that takes down the entire serving fleet. The following scenario illustrates the importance of *cascading failure prevention*.
+
 ::: {.callout-note title="Cascading Failure Prevention"}
 
 Consider a scenario where one server becomes slow (thermal throttling):
@@ -3537,7 +3555,7 @@ Impact: Tenants A and B see 62% reduction in batch size
 
 **Network bandwidth saturation**: A tenant streaming many large responses saturates network bandwidth, increasing latency for all tenants.
 
-**Compute interference**: GPU time-sharing between tenants introduces context-switching overhead and unpredictable latency.
+**Compute interference**: GPU time-sharing between tenants introduces context-switching overhead and unpredictable latency. *Quantifying noisy neighbor impact* requires measuring these interference effects across all three dimensions simultaneously.
 
 ::: {.callout-note title="Quantifying Noisy Neighbor Impact"}
 
@@ -3760,6 +3778,8 @@ Tenant A sends malformed input causing model error:
                  Other tenants continue normally
 ```
 
+In multi-tenant deployments, bulkhead boundaries typically align with service tiers, each with distinct resource guarantees.
+
 ::: {.callout-note title="Bulkhead Configuration for API Tiers"}
 
 Consider an LLM API with three service tiers:
@@ -3960,7 +3980,7 @@ $$T_{cold start} = T_{provision} + T_{load} + T_{warmup}$$ {#eq-cold-start-time}
 - Memory pool allocation
 - Cache population
 
-Warmup typically requires 10-30 dummy inferences, adding 5-30 seconds.
+Warmup typically requires 10-30 dummy inferences, adding 5-30 seconds. A detailed *cold start timeline for Llama-70B* shows how these phases accumulate in practice.
 
 ::: {.callout-note title="Cold Start Timeline for Llama-70B"}
 
@@ -4052,6 +4072,8 @@ $$\text{Desired replicas} = \left\lceil \frac{P99_{observed}}{P99_{target}} \tim
 2. Oscillation: Can create scale-up/scale-down cycles
 3. Over-provisioning: Must provision for worst-case during cold start
 
+A *reactive scaling response analysis* quantifies these limitations during a realistic traffic spike.
+
 ::: {.callout-note title="Reactive Scaling Response Analysis"}
 
 Consider traffic spike from 1000 to 3000 QPS:
@@ -4123,7 +4145,9 @@ scheduled_scaling:
 
 $$\text{Target replicas} = \max(\text{Predicted}, \text{Reactive}) + \text{Buffer}$$
 
-::: {.callout-note title="Predictive Scaling for Daily Traffic Patterns"}
+The following example of *predictive scaling for traffic* shows how daily patterns drive proactive capacity management.
+
+::: {.callout-note title="Predictive Scaling for Traffic"}
 
 A chatbot service shows predictable daily patterns:
 
@@ -4577,7 +4601,7 @@ This ensures decode latency remains bounded regardless of incoming prompt length
 
 The KV cache techniques we just examined address dynamic memory allocation during inference. But model weights themselves represent static memory consumption that persists regardless of batch size or sequence length. For a 70B model, weights alone consume 140GB in FP16, leaving limited capacity for KV cache on even the largest GPUs. Quantization offers a complementary approach: reduce the memory footprint of weights themselves.
 
-::: {.callout-note title="Assumed Prior Knowledge: Quantization Fundamentals"}
+::: {.callout-note title="Prior Knowledge: Quantization"}
 This section assumes familiarity with quantization fundamentals including **post-training quantization (PTQ)**, which quantizes a trained model without retraining, and **quantization-aware training (QAT)**, which incorporates quantization effects during training for higher accuracy. Readers should also understand precision formats (FP32, FP16, INT8) and the basic trade-off between numerical precision and memory/compute efficiency. These concepts are covered in standard deep learning optimization references and in Volume I's treatment of model compression.
 :::
 
@@ -5223,7 +5247,7 @@ While larger GPU memory enables larger batches for models that fit in memory, th
 
 **Pitfall: Neglecting multi-tenancy isolation until production.**
 
-In development and staging, single-tenant deployments work well. In production, noisy neighbors cause sudden, unpredictable performance degradation that is difficult to diagnose and resolve. A tenant bursting to 5x normal traffic can degrade latency for all other tenants on shared infrastructure. As emphasized in @sec-inference-scale-multitenancy-isolation-688c, resource quotas, priority scheduling, and bulkhead isolation must be designed into the system from the start, not retrofitted after production incidents.
+In development and staging, single-tenant deployments work well. In production, noisy neighbors cause sudden, unpredictable performance degradation that is difficult to diagnose and resolve. A tenant bursting to 5x normal traffic can degrade latency for all other tenants on shared infrastructure. As emphasized in @sec-inference-scale-multitenancy-isolation-688c, resource quotas, priority scheduling, and bulkhead isolation must be designed into the system from the start, not retrofitted after production incidents. To distill the most important lessons from this chapter, here are the *three things to remember*.
 
 ::: {.callout-important title="Three Things to Remember"}
 

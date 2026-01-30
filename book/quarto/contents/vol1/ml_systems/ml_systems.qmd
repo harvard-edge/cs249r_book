@@ -263,22 +263,40 @@ These physical laws explain *why* the four paradigms exist. But given a specific
 
 The Introduction established the **Iron Law of ML Systems**:
 
-$$L = \frac{D}{B} + \frac{Ops}{P \cdot \eta} + L_{fixed}$$
+$$
+\text{Time} = \frac{D}{B} + \frac{O}{P \cdot \eta} + L
+$$
 
-This equation decomposes total latency into three terms: data movement ($D/B$), compute ($Ops/P \cdot \eta$), and fixed overhead ($L_{fixed}$). But which term dominates? The answer depends entirely on the deployment environment. A model that is compute-bound during training may become memory-bound during inference[^fn-inference-etymology]; a system that runs efficiently in the cloud may hit power limits on mobile devices.
+This equation decomposes total latency into three terms: data movement ($D/B$), compute ($O / (P \cdot \eta)$), and fixed overhead ($L$). But which term dominates? The answer depends entirely on the deployment environment. A model that is compute-bound during training may become memory-bound during inference; a system that runs efficiently in the cloud may hit power limits on mobile devices.
 
 #### The Bottleneck Principle
 
-To navigate deployment environments, we apply the **Bottleneck Principle**. Unlike traditional software where optimizing the average case works, ML systems are dominated by their slowest component:
+To navigate deployment environments, we apply the **Bottleneck Principle**. Unlike traditional software where optimizing the average case works, ML systems are dominated by their slowest component. For pipelined execution (typical in serving), the total time is determined by the maximum of the stage latencies:
 
-$$ T_{system} = \max(T_{compute}, T_{memory}, T_{network}, T_{io}) + L_{overhead} $$
+$$ T_{system} = \max\left(\frac{D}{B}, \frac{O}{P \cdot \eta}, T_{network}\right) + L $$
 
-*   **$T_{compute}$**: Time to execute the calculations.
-*   **$T_{memory}$**: Time to move data between memory and processor.
-*   **$T_{network}$**: Time for network communication.
-*   **$T_{io}$**: Time to load data from storage.
+*   **$\frac{D}{B}$ (Memory)**: Time to move data between memory and processor.
+*   **$\frac{O}{P \cdot \eta}$ (Compute)**: Time to execute calculations.
+*   **$T_{network}$**: Time for network communication (if offloading).
+*   **$L$ (Overhead)**: Fixed latency (kernel launch, runtime overhead).
 
-This principle dictates that if your system is **Memory Bound** ($T_{memory} > T_{compute}$), buying faster processors yields exactly **0% speedup**. You must identify the dominant term before optimizing.
+This principle dictates that if your system is **Memory Bound** ($D/B > O/(P \cdot \eta)$), buying faster processors ($P$) yields exactly **0% speedup**. You must identify the dominant term before optimizing.
+
+::: {.callout-notebook title="Napkin Math: The Energy of Transmission"}
+**Problem**: Should a battery-powered sensor process data locally (TinyML) or send it to the cloud?
+
+**The Variables**:
+*   **Data ($D$)**: 1 MB (e.g., 1 second of audio).
+*   **Transmission Energy ($E_{tx}$)**: 100 mJ/MB (Wi-Fi/LTE).
+*   **Compute Energy ($E_{op}$)**: 0.1 mJ/inference (MobileNet on NPU).
+
+**The Calculation**:
+1.  **Cloud Approach**: $E_{cloud} \approx D \times E_{tx} = 1 \text{ MB} \times 100 \text{ mJ/MB} = \mathbf{100 \text{ mJ}}$.
+2.  **Local Approach**: $E_{local} \approx \text{Inference} = \mathbf{0.1 \text{ mJ}}$.
+
+**The Systems Conclusion**:
+Transmitting raw data is **1000x more expensive** than processing it locally. Even if the cloud had infinite speed ($Time \approx 0$), the **Energy Wall** makes cloud offloading physically impossible for always-on battery devices. The "Machine" constraint (Battery) dictates the "Algorithm" choice (TinyML).
+:::
 
 The Introduction presented the Iron Law as a sum. Why do we now use $\max()$? The distinction lies in whether operations happen sequentially or overlap. In **Serial Execution**, costs add up. However, modern accelerators use **Pipelined Execution** to overlap memory transfers with computation. With perfect overlap, the total time is determined by whichever operation is slower. The Iron Law tells you the *cost of each ingredient*; the Bottleneck Principle tells you the *speed of the assembly line*.
 
@@ -298,7 +316,7 @@ To navigate these constraints systematically, we categorize ML workloads into fo
 
 **Archetype IV: The Tiny Constraint.** Extreme power envelopes ($< 1$ mW) and memory limits ($< 256$ KB) characterize these workloads. The binding constraint is energy per inference—efficiency, not raw speed. Always-on sensing operates in this regime.
 
-These archetypes map naturally to deployment paradigms: **Compute Beasts** and **Sparse Scatter** workloads gravitate toward **Cloud ML** where resources are abundant. **Bandwidth Hogs** span Cloud and Edge depending on latency requirements. **Tiny Constraint** workloads are exclusively **TinyML** territory. To make these abstractions concrete, we anchor each archetype to a specific model that recurs throughout this book.
+These archetypes map naturally to deployment paradigms: **Compute Beasts** and **Sparse Scatter** workloads gravitate toward **Cloud ML** where resources are abundant. **Bandwidth Hogs** span Cloud and Edge depending on latency requirements. **Tiny Constraint** workloads are exclusively **TinyML** territory. To make these abstractions concrete, we anchor each archetype to a specific model that recurs throughout this book as one of *five reference workloads*.
 
 [^fn-archetype]: **Archetype**: From Greek *arkhetypon*, combining *arkhe* (beginning, origin) and *typos* (pattern, model). Plato used the term for the original forms from which all instances derive. In ML systems, archetypes represent the fundamental workload patterns from which all specific models derive their computational characteristics.
 
@@ -324,7 +342,7 @@ Throughout this book, we use five **Lighthouse Examples** introduced in @sec-int
 +----------------------------------+---------------------------+--------------------------------+
 | **DLRM**                         | Sparse Scatter            | Cloud only (distributed)       |
 +----------------------------------+---------------------------+--------------------------------+
-| **KWS (DS-CNN)**                 | Tiny Constraint           | TinyML, always-on              |
+| **Keyword Spotting (KWS)**       | Tiny Constraint           | TinyML, always-on              |
 +----------------------------------+---------------------------+--------------------------------+
 
 To orient readers who have not yet encountered these architectures, the following summaries describe each workload from a systems perspective.
@@ -337,7 +355,7 @@ To orient readers who have not yet encountered these architectures, the followin
 
 **DLRM** (Deep Learning Recommendation Model) maps users and items to embedding vectors stored in tables that can exceed 100 GB, making memory capacity rather than computation the binding constraint.
 
-**KWS (DS-CNN)** detects wake words ("Hey Siri") using a depthwise separable CNN with approximately 70,000 parameters fitting in under 100 KB, running continuously at under 1 milliwatt.
+**Keyword Spotting (KWS)** represents the always-on TinyML archetype. Used in applications like Smart Doorbells, it detects wake words ("Ding Dong", "Hello") using a depthwise separable CNN with approximately 70,000 parameters fitting in under 100 KB, running continuously at under 1 milliwatt.
 
 **Key insight**: The huge range in compute requirements (20 MFLOPs → 4 GFLOPs) and memory (800 KB → 100 GB) explains why no single deployment paradigm fits all workloads. A keyword spotter runs comfortably on a \$2 microcontroller; a recommendation system requires a warehouse-scale computer.
 :::
@@ -436,7 +454,7 @@ This shift between training and inference is fundamental. Recall the AI Triad fr
 
 : **DAM × Phase**: The same model imposes fundamentally different demands on Data, Algorithm, and Machine depending on whether the system is training or serving. When bottlenecks shift unexpectedly, check which phase you're optimizing for. {#tbl-dam-phase}
 
-The following worked example demonstrates how to apply this analysis quantitatively to the same model across two deployment targets.
+The following worked example demonstrates how to apply this analysis quantitatively by comparing *ResNet-50 on cloud vs mobile* deployment targets.
 
 ::: {.callout-notebook title="ResNet-50 on Cloud vs Mobile"}
 **Problem**: Determine whether ResNet-50 inference is compute-bound or memory-bound on (a) a high-end datacenter GPU (NVIDIA A100 class) and (b) a flagship mobile NPU (Apple/Qualcomm class).
@@ -588,7 +606,7 @@ above=1of $(B2.north east)!0.5!(B3.north west)$](B0){Cloud ML};
 ```
 :::
 
-The latency challenges listed above deserve quantification. The speed of light imposes hard physical limits that no amount of engineering can overcome.
+The latency challenges listed above deserve quantification. The speed of light imposes hard physical limits that no amount of engineering can overcome, creating what we call *the distance penalty*.
 
 ::: {.callout-notebook title="The Distance Penalty"}
 **Problem**: You are deploying a real-time safety monitor for a robotic arm. The safety logic requires a **10 ms** end-to-end response time to prevent injury. Your model runs in a high-performance cloud data center 1,500 km away.
@@ -630,7 +648,7 @@ Privacy and security present significant challenges when adopting cloud deployme
 
 [^fn-hipaa]: **HIPAA (Health Insurance Portability and Accountability Act)**: US healthcare privacy law (1996) mandating encryption, access controls, and audit trails for Protected Health Information. ML systems handling medical data require HIPAA-compliant infrastructure, adding 30-50% to development costs. Violations incur $100-50,000 per incident, with annual maximums up to $1.5M per category.
 
-Cost management introduces operational complexity requiring total cost of ownership (TCO) analysis rather than naive unit comparisons.
+Cost management introduces operational complexity requiring total cost of ownership (TCO) analysis rather than naive unit comparisons. A worked *cloud vs. edge TCO* comparison illustrates the gap between sticker price and true system cost.
 
 ::: {.callout-notebook title="Cloud vs. Edge TCO"}
 **Scenario**: A vision system serving 1 million daily inferences (ResNet-50 scale).
@@ -1501,7 +1519,7 @@ The decision framework above identifies technically feasible options—but feasi
 
 Successful deployment requires considering factors beyond pure engineering constraints. Organizational factors shape success by determining whether teams possess the capabilities to implement and maintain chosen paradigms. Team expertise must align with paradigm requirements: Cloud ML demands distributed systems knowledge, Edge ML requires device management capabilities, Mobile ML needs platform-specific optimization skills, and TinyML requires embedded systems expertise. Organizations lacking appropriate skills face extended development timelines and ongoing maintenance challenges that undermine technical advantages. Monitoring and maintenance capabilities similarly determine viability at scale: edge deployments require distributed device orchestration, while TinyML demands specialized firmware management that many organizations lack. Cost structures further complicate decisions through their temporal patterns: Cloud incurs recurring operational expenses favorable for unpredictable workloads, Edge requires substantial upfront investment offset by lower ongoing costs, Mobile leverages user-provided devices to minimize infrastructure expenses, and TinyML minimizes hardware and connectivity costs while demanding significant development investment.
 
-These organizational realities raise a broader question: given the infrastructure, expertise, and maintenance burden that ML systems require, is a machine learning approach always the right choice?
+These organizational realities raise a broader question: given the infrastructure, expertise, and maintenance burden that ML systems require, is a machine learning approach always the right choice? Every ML deployment carries a *complexity tax* that must be weighed against simpler alternatives.
 
 ::: {.callout-perspective title="The Complexity Tax"}
 Before committing to any ML deployment, weigh the **Complexity Tax** against simpler alternatives.
