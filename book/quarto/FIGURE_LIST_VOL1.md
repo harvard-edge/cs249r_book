@@ -595,7 +595,7 @@ _Machine Learning Systems_
 
 ### Figure 9.1: 
 
-**Alt Text**: Line chart showing dataset size in tokens on y-axis from 10^10 to 10^14 versus year on x-axis from 2010 to 2030. Blue line shows training data growth with markers for models like GPT-2, GPT-3, and Chinchilla. Orange shaded region shows projected high-quality text exhaustion between 2026 and 2032.
+**Alt Text**: Line chart showing dataset size in tokens on y-axis from 10^10 to 10^14 versus year on x-axis from 2010 to 2030. Blue line shows training data growth with markers for models like GPT-2, GPT-3, and Chinchilla. Orange shaded region shows projected high-quality text exhaustion in the near term.
 
 ### Figure 9.2: The Optimization Triad
 
