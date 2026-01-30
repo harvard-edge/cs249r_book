@@ -36,11 +36,27 @@ Compression reduces model complexity through fewer parameters, lower precision, 
 
 ## AI Hardware Acceleration Fundamentals {#sec-ai-acceleration-ai-hardware-acceleration-fundamentals-9b28}
 
-We have optimized the **Data** in @sec-data-selection and compressed the **Algorithm** (Model) in @sec-model-compression. Now we turn to the final component of the AI Triad: the **Machine**.
+We have optimized the **Data** in @sec-data-selection and compressed the **Algorithm** (Model) in @sec-model-compression. Now we turn to the final component of the AI Triad: the **Machine**. Hardware acceleration exists because of a fundamental asymmetry in modern computing: arithmetic is cheap, but moving data is expensive. In the time a modern GPU computes a thousand floating-point operations, a single value travels from main memory. This inversion, where computation is the abundant resource and bandwidth is the scarce one, is the reason specialized hardware matters for machine learning.
 
-Hardware acceleration is the engineering discipline of maximizing the **Throughput** and **Bandwidth** denominators in the **Iron Law of ML Systems** ($Time = \frac{Data}{Bandwidth} + \frac{Ops}{Throughput \times Utilization}$). While data selection reduced the total data and model compression reduced the ops per sample, hardware acceleration increases the speed at which those ops are executed.
+::: {.callout-definition title="Hardware Acceleration"}
 
-Before examining specific hardware architectures, we establish the governing law of all acceleration efforts.
+**Hardware Acceleration** is the architectural strategy of trading **General-Purpose Programmability** for **Compute Density**. By eliminating control logic (branch prediction, out-of-order execution) for predictable workloads, accelerators dedicate maximum silicon area to arithmetic units, achieving efficiency gains bounded only by the **Memory Wall**.
+
+:::
+
+This definition frames the chapter's central engineering tradeoff. General-purpose processors devote significant silicon area to branch prediction, speculative execution, and complex cache coherence protocols. Accelerators strip away that generality, filling the die with arithmetic units tuned to the regular, data-parallel patterns that characterize neural network computation. The result is order-of-magnitude improvements in throughput per watt for the workloads that match these patterns.
+
+Hardware alone, however, cannot achieve these gains. The algorithms must be designed to leverage what the hardware offers, and the hardware must be built to accelerate the operations algorithms actually use. This symbiosis motivates a complementary principle: *hardware-software co-design*.
+
+::: {.callout-definition title="Hardware-Software Co-design"}
+
+**Hardware-Software Co-design** is the practice of breaking abstraction layers to expose **Hardware Primitives** directly to **Algorithmic Logic**. By tailoring algorithms to physical constraints (e.g., quantization for INT8 accelerators) and tailoring silicon to algorithmic patterns (e.g., Sparse Tensor Cores), it bypasses the inefficiencies of general-purpose instruction sets.
+
+:::
+
+Co-design explains why the compression techniques introduced in @sec-model-compression deliver real speedups. Quantization from FP32 to INT8 yields 2-4x acceleration not because of fewer bits in the abstract, but because accelerators pack 4x more INT8 operations into the same silicon area. Structured pruning improves performance while unstructured pruning often does not, because structured patterns preserve the regular memory access patterns that hardware can optimize. Throughout this chapter, the physical constraints of silicon will reveal why some theoretically promising algorithmic optimizations succeed in practice and others fail.
+
+Hardware acceleration targets specific terms in the **Iron Law of ML Systems** ($Time = \frac{Data}{Bandwidth} + \frac{Ops}{Throughput \times Utilization}$). While data selection reduced the total data and model compression reduced the ops per sample, hardware acceleration increases the rate at which those ops execute by maximizing the Throughput and Bandwidth denominators. Yet acceleration has a hard ceiling, established by the following law.
 
 ::: {.callout-notebook title="The Iron Law of Acceleration"}
 
@@ -77,27 +93,9 @@ $$Speedup = \frac{1}{(1-0.80) + \frac{0.80}{500}} = \frac{1}{0.20 + 0.0016} \app
 The **Bandwidth Hog** archetype suffers more from serial bottlenecks. Even infinite accelerator speed yields only $1/(1-P) = 5\times$ maximum speedup. This is why LLM inference optimization focuses on reducing the serial fraction (batching, speculative decoding) rather than raw hardware speed.
 :::
 
-The Purpose section posed a straightforward question: why does moving data cost more than computing on it? This chapter answers that question by examining how specialized accelerators minimize data movement while maximizing compute throughput. Every architectural innovation examined here, from systolic arrays to tensor cores to memory hierarchies, represents a strategy for addressing the fundamental asymmetry between cheap arithmetic and expensive memory access.
+These Lighthouse Examples reveal that the critical question for any hardware optimization is not "how fast is the chip?" but rather: *is this workload limited by how fast we can compute, or how fast we can move data?* The answer determines which accelerator to choose, which optimizations matter, and whether a 10x more powerful chip will actually help. The **Roofline Model** (@sec-ai-acceleration-roofline-model) provides the analytical framework for answering this question. It plots an operation's **arithmetic intensity** (operations per byte of memory traffic) against hardware capabilities, revealing whether performance is capped by compute or bandwidth. A dense matrix multiplication with high arithmetic intensity benefits from more TFLOPS; a LayerNorm with low arithmetic intensity benefits from more memory bandwidth. ResNet-50's convolutions are compute-bound while GPT-2's attention layers are memory-bound, which is precisely why these architectures require different optimization strategies.
 
-@sec-model-compression introduced techniques that reduce computational requirements through algorithmic means: quantization shrinks precision from FP32 to INT8, pruning removes unnecessary weights, and knowledge distillation trains smaller networks. But *why* does reducing precision from 32 bits to 8 bits yield 2-4× speedup? Why does structured pruning improve performance while unstructured pruning often doesn't? The answers lie in hardware architecture. Quantization works because accelerators pack 4× more INT8 operations into the same silicon. Structured pruning works because it preserves memory access patterns that hardware can optimize. This chapter explains the physical constraints that make algorithmic optimizations effective and reveals why some theoretically promising techniques fail to deliver real-world speedups. We begin by defining the central concept of this chapter: *hardware acceleration*.
-
-::: {.callout-definition title="Hardware Acceleration"}
-
-**Hardware Acceleration** is the architectural strategy of trading **General-Purpose Programmability** for **Compute Density**. By eliminating control logic (branch prediction, out-of-order execution) for predictable workloads, accelerators dedicate maximum silicon area to arithmetic units, achieving efficiency gains bounded only by the **Memory Wall**.
-
-:::
-
-Hardware alone, however, cannot achieve these gains. The algorithms must be designed to leverage what the hardware offers, and the hardware must be built to accelerate the operations algorithms actually use. This symbiosis motivates a complementary principle: *hardware-software co-design*.
-
-::: {.callout-definition title="Hardware-Software Co-design"}
-
-**Hardware-Software Co-design** is the practice of breaking abstraction layers to expose **Hardware Primitives** directly to **Algorithmic Logic**. By tailoring algorithms to physical constraints (e.g., quantization for INT8 accelerators) and tailoring silicon to algorithmic patterns (e.g., Sparse Tensor Cores), it bypasses the inefficiencies of general-purpose instruction sets.
-
-:::
-
-One question recurs throughout this chapter: *Is this workload limited by how fast we can compute, or how fast we can move data?* The answer determines everything: which accelerator to choose, which optimizations matter, and whether a 10x more powerful chip will actually help. The **Roofline Model** (@sec-ai-acceleration-roofline-model) provides the analytical framework for answering this question. It plots an operation's **arithmetic intensity** (operations per byte of memory traffic) against hardware capabilities, revealing whether performance is capped by compute or bandwidth. A dense matrix multiplication with high arithmetic intensity benefits from more TFLOPS; a LayerNorm with low arithmetic intensity benefits from more memory bandwidth. Most real neural networks contain both types of operations, requiring careful analysis to optimize end-to-end performance. We will analyze this distinction through the Lighthouse Examples established in @sec-introduction: ResNet-50's convolutions are compute-bound while GPT-2's attention layers are memory-bound, explaining why these architectures require different optimization strategies.
-
-With this analytical lens in place, the chapter proceeds through four major topics. It begins with the historical evolution of domain-specific architectures, tracing design patterns from floating-point coprocessors through graphics processors to contemporary AI accelerators. It then examines the computational primitives that characterize ML workloads, including matrix multiplication, vector operations, and nonlinear activation functions, and analyzes how specialized hardware optimizes these operations through innovations such as systolic arrays and tensor cores. The discussion continues with memory hierarchy design, where data movement energy costs exceeding computation costs by more than 100x make on-chip buffer optimization and high-bandwidth memory interfaces critical. Finally, compiler optimization and runtime system support determine the extent to which theoretical hardware capabilities translate into measurable performance. Throughout, the focus remains on single-machine systems, with multi-chip scaling challenges addressed as awareness for Volume II.
+With this analytical lens in place, the chapter proceeds through four major topics. It begins with the historical evolution of domain-specific architectures, tracing design patterns from floating-point coprocessors through graphics processors to contemporary AI accelerators. It then examines the computational primitives that characterize ML workloads, including matrix multiplication, vector operations, and nonlinear activation functions, and analyzes how specialized hardware optimizes these operations through innovations such as systolic arrays and tensor cores. The discussion continues with memory hierarchy design, where data movement energy costs exceeding computation costs by more than 100x make on-chip buffer optimization and high-bandwidth memory interfaces critical. The software stack follows: compiler optimization and runtime system support determine the extent to which theoretical hardware capabilities translate into measurable performance. Throughout, the focus remains on single-machine systems; multi-machine coordination is covered in Volume II.
 
 
 ## Evolution of Hardware Specialization {#sec-ai-acceleration-evolution-hardware-specialization-fdb7}
