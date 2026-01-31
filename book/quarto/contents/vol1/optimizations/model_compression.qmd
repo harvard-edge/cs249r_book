@@ -25,13 +25,12 @@ Training produced a capable model. But capability alone does not guarantee deplo
 
 ::: {.callout-tip title="Learning Objectives"}
 
-- Explain the tripartite optimization framework and how model representation, numerical precision, and architectural efficiency address different deployment constraints
-- Apply pruning techniques to reduce model parameters while quantifying the accuracy-sparsity trade-off through L0-norm optimization
-- Evaluate quantization strategies by comparing precision formats in terms of memory reduction, energy consumption, and inference accuracy
+- Explain the tripartite optimization framework: model representation (pruning), numerical precision (quantization), and architectural efficiency (distillation)
+- Compare quantization strategies in terms of memory reduction, energy consumption, and inference accuracy
+- Apply pruning techniques to reduce model parameters while quantifying the accuracy-sparsity trade-off
 - Implement knowledge distillation to transfer capabilities from large teacher models to efficient student architectures
-- Analyze hardware-aware design principles to align model operations with target platform capabilities and memory hierarchies
-- Design integrated optimization pipelines combining multiple techniques to achieve deployment objectives under resource constraints
-- Assess AutoML approaches for automating optimization decisions and discovering technique combinations beyond manual exploration
+- Analyze hardware-aware design principles to align model operations with target platform capabilities
+- Design integrated optimization pipelines combining quantization, pruning, and distillation under resource constraints
 
 :::
 
@@ -39,7 +38,7 @@ Training produced a capable model. But capability alone does not guarantee deplo
 
 A 7-billion parameter language model requires 14 GB just to store its weights in FP16. Your deployment target is a smartphone with 6 GB of RAM shared across the operating system, applications, and your model. The math does not work. No amount of clever engineering changes this arithmetic: 14 GB cannot fit in 6 GB. Yet users expect the model to run: responsively, offline, without draining their battery in an hour. The gap between what training produces and what deployment permits is not a minor inconvenience but a five-orders-of-magnitude chasm that defines the field of model compression.
 
-Recall the **Silicon Contract** (@sec-silicon-contract): every model architecture makes an implicit agreement with the hardware about which resource it will saturate: compute throughput, memory bandwidth, or memory capacity. During training, this contract is negotiated upward. Researchers select larger architectures, higher numerical precision, and deeper layers because the training environment, typically a GPU cluster with hundreds of gigabytes of memory, can afford those demands. Deployment reverses these priorities. The production environment is smaller, power-constrained, and latency-sensitive, yet the model was designed for an environment with none of those limitations. Model compression is the systematic process of renegotiating that contract for its new execution context: reducing memory footprint, computational cost, and energy consumption while preserving the model's ability to perform its task.
+Recall the **Silicon Contract** (@principle-silicon-contract): every model architecture makes an implicit agreement with the hardware about which resource it will saturate: compute throughput, memory bandwidth, or memory capacity. During training, this contract is negotiated upward. Researchers select larger architectures, higher numerical precision, and deeper layers because the training environment, typically a GPU cluster with hundreds of gigabytes of memory, can afford those demands. Deployment reverses these priorities. The production environment is smaller, power-constrained, and latency-sensitive, yet the model was designed for an environment with none of those limitations. Model compression is the systematic process of renegotiating that contract for its new execution context: reducing memory footprint, computational cost, and energy consumption while preserving the model's ability to perform its task.
 
 The scale of this renegotiation makes model optimization an engineering discipline, not a collection of ad hoc tricks. A 175 billion parameter model consumes over 300 GB in FP16 representation alone, yet a smartphone provides 6 GB of RAM and a microcontroller offers 512 KB. Bridging five orders of magnitude between what training produces and what deployment permits requires systematic methods with predictable trade-offs, not trial and error. Every optimization technique removes something from the model, whether redundant parameters, numerical precision, or architectural complexity, and the engineer must understand exactly what is lost, what is preserved, and how these losses compose when techniques are combined.
 
@@ -107,6 +106,24 @@ According to the **Iron Law** ($L = \frac{D}{B} + \frac{Ops}{P \cdot \eta} + L_{
 
 These same physics apply at datacenter scale: distributed training systems use reduced precision to cut gradient communication overhead, a topic covered in @sec-ai-training.
 :::
+
+The following plot (@fig-quantization-free-lunch) visualizes this robustness, showing the "Free Lunch" where reducing precision has minimal impact on accuracy—until you hit the "Cliff."
+
+```{python}
+#| label: fig-quantization-free-lunch
+#| echo: false
+#| fig-cap: "**The Quantization Free Lunch.** Model accuracy vs. Bit-width. Most models exhibit a 'Free Lunch' plateau where reducing precision from FP32 to INT8 yields <1% accuracy loss. This robustness collapses at the 'Quantization Cliff' (typically 3-4 bits), where the noise overwhelms the signal. Transformers (red) are generally more sensitive to quantization outliers than CNNs (blue)."
+
+import sys
+import matplotlib.pyplot as plt
+# Ensure calc directory is in path
+sys.path.append('../../../calc')
+import viz
+
+viz.set_book_style()
+viz.plot_quantization_free_lunch()
+plt.show()
+```
 
 These physics-level savings translate directly into deployment capabilities. A model that cannot fit on a device at full precision may run comfortably, and faster, when quantized. The following calculation demonstrates the *quantization speedup* for a concrete LLM deployment scenario.
 
@@ -198,7 +215,7 @@ The tension between accuracy and efficiency drives optimization decisions across
 This tension manifests differently across deployment contexts. Training requires computational resources that scale with model size, while inference demands strict latency and power constraints in real-time applications. Navigating these trade-offs requires understanding where each optimization technique falls on the *compression-accuracy Pareto frontier*.
 
 ::: {.callout-perspective title="The Compression-Accuracy Tradeoff Curve"}
-Optimization is a search for the **Pareto Frontier**.
+Optimization is a search for the **Pareto Frontier** (@principle-pareto-frontier).
 
 *   **Region 1: The Free Lunch**. Techniques like "Operator Fusion" or "Dead Code Elimination" reduce latency without touching accuracy. Do these first.
 *   **Region 2: The Efficient Trade**. Techniques like "INT8 Quantization" might drop accuracy by 0.5% but improve speed by 400%. This is usually a winning trade.
@@ -736,7 +753,7 @@ Hardware-aware pruning strategies, such as N:M structured sparsity, enforce spec
 
 @fig-structured-unstructured illustrates the key differences between unstructured and structured pruning. On the left, unstructured pruning removes individual weights (depicted as dashed connections), creating a sparse weight matrix. This can disrupt the original network structure, as shown in the fully connected network where certain connections have been randomly pruned. While this reduces the number of active parameters, the resulting sparsity requires specialized execution kernels to fully utilize computational benefits.
 
-In contrast, structured pruning (depicted in the middle and right sections of the figure) removes entire neurons or filters while preserving the network's overall structure. In the middle section, a pruned fully connected network retains its fully connected nature but with fewer neurons. On the right, structured pruning is applied to a CNN by removing convolutional kernels or entire channels (dashed squares). This method maintains the CNN's core convolutional operations while reducing the computational load, making it more compatible with hardware accelerators.
+In contrast, structured pruning (depicted in the middle and right sections of @fig-structured-unstructured) removes entire neurons or filters while preserving the network's overall structure. In the middle section, a pruned fully connected network retains its fully connected nature but with fewer neurons. On the right, structured pruning is applied to a CNN by removing convolutional kernels or entire channels (dashed squares). This method maintains the CNN's core convolutional operations while reducing the computational load, making it more compatible with hardware accelerators.
 
 ::: {#fig-structured-unstructured fig-env="figure" fig-pos="htb" fig-cap="**Unstructured vs. Structured Pruning.** Unstructured pruning (left) achieves sparsity by removing individual weights, requiring specialized hardware, while structured pruning (middle, right) removes entire neurons or filters, preserving network structure for standard hardware acceleration. Source: [@qi2021efficient]." fig-alt="Three-panel diagram. Left shows unstructured pruning with dashed connections in a neural network. Middle and right show structured pruning: fully connected network with pruned neurons and CNN with pruned filters shown as dashed squares."}
 ```{.tikz}
@@ -6079,7 +6096,7 @@ The challenge is clear: with dozens of techniques across three optimization dime
 
 The preceding sections have equipped us with a toolkit of optimization techniques: pruning to eliminate redundant parameters, quantization to compress numerical precision, knowledge distillation to transfer capabilities efficiently, and sparsity exploitation to skip unnecessary computation. Each technique addresses specific efficiency challenges across our three-dimensional framework, and combining them strategically yields multiplicative benefits. However, as the BERT compression example demonstrated, determining which techniques to apply, in what order, and with what hyperparameters requires navigating an enormous configuration space. The number of possible combinations grows exponentially with technique count, while optimal configurations depend on target hardware, deployment constraints, and accuracy requirements that vary across applications.
 
-Automated Machine Learning (AutoML) aims to streamline this process by automating the search for optimal model configurations, building on the training methodologies from @sec-ai-training. AutoML frameworks leverage machine learning algorithms to optimize architectures, hyperparameters, model compression techniques, and other important parameters, reducing the need for human intervention [@Hutter2019]. By systematically exploring the vast design space of possible models, AutoML can improve efficiency while maintaining competitive accuracy, often discovering novel solutions that may be overlooked through manual tuning [@Zoph2017].
+Automated Machine Learning (AutoML) aims to streamline this process by automating the search for optimal model configurations, building on the training methodologies from @sec-ai-training. AutoML frameworks leverage machine learning algorithms to optimize architectures, hyperparameters, model compression techniques, and other important parameters, reducing the need for human intervention [@Hutter2019]. By systematically exploring the vast design space of possible models, AutoML can improve efficiency while maintaining competitive accuracy, often discovering novel solutions that may be overlooked through manual tuning [@zoph2016neural].
 
 AutoML does not replace human expertise but enhances it by providing a structured and scalable approach to model optimization. Rather than manually adjusting pruning thresholds, quantization strategies, or architecture designs, practitioners define high-level objectives (latency constraints, memory limits, accuracy targets) and allow AutoML systems to explore configurations that best satisfy these constraints [@Feurer2015]. As illustrated in @fig-automl-comparison, the key difference between traditional workflows and AutoML is that preprocessing, training, and evaluation are automated in the latter.
 
@@ -6167,7 +6184,7 @@ A critical caveat applies when translating profiling metrics into optimization e
 
 ::: {.callout-warning title="FLOPs Reduction ≠ Proportional Speedup"}
 
-Reducing a model's FLOPs by 50% does not guarantee 50% latency reduction. Memory-bound operations (common in LLM inference and normalization layers) see minimal benefit from compute reduction because they are bottlenecked by data movement, not arithmetic. Furthermore, Amdahl's Law applies at the system level: if model inference accounts for only 20% of end-to-end latency (with the rest spent on data loading, pre-processing, and post-processing), then even perfect model optimization yields at most 1.25x overall speedup. Always profile on target hardware before estimating optimization benefits.
+Reducing a model's FLOPs by 50% does not guarantee 50% latency reduction. Memory-bound operations (common in LLM inference and normalization layers) see minimal benefit from compute reduction because they are bottlenecked by data movement, not arithmetic. Furthermore, **Amdahl's Law** (@principle-amdahls-law) applies at the system level: if model inference accounts for only 20% of end-to-end latency (with the rest spent on data loading, pre-processing, and post-processing), then even perfect model optimization yields at most 1.25x overall speedup. Always profile on target hardware before estimating optimization benefits.
 :::
 
 Consider profiling a Vision Transformer (ViT) for edge deployment. Using PyTorch Profiler reveals three key findings: attention layers consume 65% of total FLOPs (highly amenable to structured pruning), layer normalization consumes 8% of latency despite only 2% of FLOPs (a memory-bound operation), and the final classification head consumes 1% of computation but 15% of parameter memory. This profile suggests a clear priority ordering: first, apply magnitude-based pruning to attention layers for high FLOP reduction; second, quantize the classification head to INT8 for large memory savings with minimal accuracy impact; third, fuse layer normalization operations to reduce the memory bandwidth bottleneck.
@@ -6295,23 +6312,23 @@ These techniques combine synergistically, with quantization often applied after 
 
 Model optimization involves counterintuitive interactions between techniques that appear independent. Engineers frequently assume optimization strategies compose linearly, that theoretical metrics predict deployment performance, or that aggressive compression maintains accuracy. These fallacies and pitfalls capture errors that waste optimization effort, degrade production accuracy, or fail to achieve deployment requirements despite substantial engineering investment.
 
-**Fallacy:** _Optimization techniques can be applied independently without considering their interactions._
+**Fallacy:** ***Optimization techniques can be applied independently without considering their interactions.***
 
 Engineers assume optimization strategies compose additively: 50% pruning plus 4× quantization yields combined benefits. In reality, techniques interact non-linearly and compound losses. A BERT model pruned to 70% parameters maintains 97.8% performance, but applying INT8 quantization afterward drops accuracy to 94.2%, while quantization-aware training on the pruned model achieves 96.5%. Knowledge distillation from heavily pruned teachers transfers degenerate attention patterns that reduce student accuracy by an additional 3-5% compared to distilling from dense models. As demonstrated in @sec-model-compression-optimization-strategies-f2f6, successful optimization requires coordinated application where techniques are sequenced and calibrated together rather than stacked independently. Organizations that apply aggressive combinations without measuring interactions waste weeks iterating to recover lost accuracy.
 
-**Pitfall:** _Optimizing for theoretical metrics rather than actual deployment performance._
+**Pitfall:** ***Optimizing for theoretical metrics rather than actual deployment performance.***
 
 Teams reduce FLOPs by 60% and celebrate efficiency gains without profiling deployment hardware. A pruned model with 40% fewer parameters shows irregular sparsity patterns that prevent vectorization, achieving only 12% latency reduction instead of the expected 40% on ARM processors. INT8 quantization reduces a transformer model from 440MB to 110MB, but dequantization overhead on GPUs without INT8 tensor cores increases inference latency by 15% despite the 4× size reduction. As shown in @sec-model-compression-profiling-opportunity-analysis-ad25, memory bandwidth, cache behavior, and instruction-level parallelism determine actual performance, not just operation counts. Production deployments require measuring wall-clock latency, throughput, and energy consumption on target hardware rather than trusting theoretical complexity metrics.
 
-**Fallacy:** _Aggressive quantization maintains model performance with minimal accuracy loss._
+**Fallacy:** ***Aggressive quantization maintains model performance with minimal accuracy loss.***
 
 Engineers assume quantization scales uniformly: if INT8 loses 1%, then INT4 loses 2%. In practice, precision reduction exhibits threshold effects where models collapse catastrophically. ResNet-50 quantized to INT8 maintains 76.1% vs 76.15% FP32 accuracy, but naive INT4 quantization can drop accuracy significantly (the exact degradation depends on the quantization method used, with modern techniques like GPTQ and AWQ recovering much of this loss). Binary weights achieve only approximately 51% on ImageNet. BERT with INT8 weights retains 99.1% of FP32 GLUE performance, but INT4 attention mechanisms cause numerical instability that reduces scores by 8-12%. LayerNorm and Softmax operations require FP16 minimum precision; quantizing them to INT8 causes training divergence. The quantization strategies in @sec-model-compression-precision-reduction-strategies-9cbc demonstrate that mixed-precision approaches maintain accuracy where uniform quantization fails, requiring per-layer analysis rather than blanket bit-width reduction.
 
-**Pitfall:** _Using post-training optimization without considering training-aware alternatives._
+**Pitfall:** ***Using post-training optimization without considering training-aware alternatives.***
 
 Teams apply post-training quantization to avoid retraining and achieve 96.8% of baseline BERT performance. However, quantization-aware training (QAT) on the same model retains 99.1% of performance, recovering the 3.2-point gap through learned quantization parameters. Post-training pruning of ResNet-50 to 70% parameters drops ImageNet accuracy to 73.8%, while gradual magnitude pruning during training maintains 75.6% accuracy at the same sparsity. Knowledge distillation integrated during student training achieves 97% of teacher performance, compared to 92-94% when distilling from a frozen teacher post-hoc. As detailed in @sec-model-compression-precision-reduction-strategies-9cbc, the 2-4% accuracy improvements from training-aware methods often determine whether optimized models meet production thresholds, justifying the additional training cost.
 
-**Pitfall:** _Focusing on individual model optimization without considering system-level performance bottlenecks._
+**Pitfall:** ***Focusing on individual model optimization without considering system-level performance bottlenecks.***
 
 Teams reduce model inference from 45ms to 15ms through aggressive quantization and celebrate 67% latency reduction. However, profiling reveals data preprocessing consumes 120ms, I/O operations add 35ms, and network overhead contributes 28ms, making total latency 198ms vs 228ms originally, only 13% improvement. A recommendation system optimizes its neural network to 8ms inference but remains memory-bandwidth bound, achieving only 15% throughput gain despite 60% computational reduction. As demonstrated in @sec-model-compression-profiling-opportunity-analysis-ad25 and @sec-benchmarking-ai, Amdahl's Law bounds speedup: if model inference represents only 20% of end-to-end latency, perfect model optimization yields at most 1.25× overall improvement. Production systems require whole-system profiling to identify whether model complexity, data pipelines, or infrastructure overhead dominates, ensuring optimization effort targets the actual bottleneck.
 
@@ -6323,7 +6340,7 @@ Combined with the data selection techniques from @sec-data-selection, these mode
 
 The emergence of AutoML frameworks represents a paradigm shift toward automated discovery of optimization strategies. These systems enable practitioners to explore vast optimization spaces more systematically than manual approaches, often uncovering novel technique combinations that achieve superior efficiency-accuracy trade-offs. However, AutoML is not a universal solution: computational cost, search bias, and interpretability challenges limit its applicability. Whether optimizing manually or through automation, rigorous profiling and measurement remain essential for validating that optimizations achieve their intended goals on target hardware.
 
-::: {.callout-important title="Key Takeaways"}
+::: {.callout-takeaways title="Key Takeaways"}
 
 * **Three dimensions of optimization**: Structural (what to compute), precision (how precisely), architectural (how efficiently). Combine all three for maximum compression.
 * **Start with PTQ quantization**: INT8 post-training quantization requires no retraining and delivers 4× compression. Consider QAT or distillation only if PTQ accuracy is insufficient for the application.

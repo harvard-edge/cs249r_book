@@ -284,7 +284,7 @@ The vector of size $M$ is split into $N$ chunks.
 1.  **Scatter-Reduce Phase**: In $N-1$ steps, chunks flow around the ring, accumulating sums. At the end, each node holds the complete sum for *one* chunk ($1/N$ of the total result).
 2.  **AllGather Phase**: In $N-1$ steps, the partial sums circulate the ring until every node has all chunks.
 
-The following figure visualizes how data chunks flow through the ring during Step 1:
+The data flow during Step 1 proceeds as follows:
 
 ::: {.callout-note title="Figure: Ring AllReduce Data Flow" collapse="false"}
 ```{.tikz fig-alt="Three GPUs arranged in ring topology. Each GPU holds three colored data chunks. Blue arrows show Step 1 clockwise transfers between neighbors."}
@@ -480,7 +480,7 @@ The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node)
 **The Systems Insight**: Hierarchical AllReduce achieves a **5.7× speedup** by reducing inter-node traffic from 1 GB to 125 MB per GPU. With 8 GPUs per node, we effectively get $8\times$ the apparent inter-node bandwidth. This is why NVIDIA's NCCL and similar libraries default to hierarchical algorithms on multi-node clusters.
 :::
 
-The following figure illustrates these three phases, showing how traffic is confined within each node before crossing the slower inter-node fabric.
+These three phases confine most traffic within each node before crossing the slower inter-node fabric.
 
 ::: {.callout-note title="Hierarchical AllReduce Phases" collapse="false"}
 ```{.tikz fig-alt="Three-phase hierarchical AllReduce showing two nodes with 4 GPUs each. Phase 1 shows intra-node ReduceScatter via NVLink. Phase 2 shows inter-node AllReduce via InfiniBand between corresponding GPUs. Phase 3 shows intra-node AllGather via NVLink."}
@@ -762,22 +762,22 @@ Gloo[^fn-gloo] is Meta's open-source collective communication library, integrate
 
 ## Fallacies and Pitfalls {#sec-communication-collective-operations-collective-operations-fallacies-pitfalls-9cd0}
 
-**Fallacy:** _Bandwidth is the only metric that matters._
+**Fallacy:** ***Bandwidth is the only metric that matters.***
 For small messages (pipeline parallelism activations, MoE tokens), **latency** ($\alpha$) dominates. Buying 400G networking won't help if your message takes 5 μs to serialize in software. The critical message size $n^* = \alpha \cdot \beta$ determines which metric to optimize—below $n^*$, reduce latency; above it, increase bandwidth.
 
-**Pitfall:** _Assuming AllReduce works for everything._
+**Pitfall:** ***Assuming AllReduce works for everything.***
 AllReduce creates a global barrier and assumes all participants contribute identical data shapes. In **Expert Parallelism (MoE)** and **Recommendation Systems**, where each worker needs to send distinct data to every other worker, AllReduce is fundamentally wrong. These workloads require AlltoAll, which has $O(N^2)$ logical connections and hits network contention limits at much smaller cluster sizes.
 
-**Fallacy:** _Ring AllReduce is always optimal._
+**Fallacy:** ***Ring AllReduce is always optimal.***
 Ring achieves bandwidth-optimal $2\frac{N-1}{N}\frac{M}{\beta}$ but pays $O(N)$ latency. For a 1 MB gradient across 64 GPUs with $\alpha = 10\ \mu s$, Tree AllReduce actually wins because Ring's 1,260 μs latency penalty exceeds Tree's 1,000 μs bandwidth penalty. The crossover formula $M_{crossover} \approx N \cdot \alpha \cdot \beta$ determines when to switch algorithms.
 
-**Pitfall:** _Compressing gradients without error feedback._
+**Pitfall:** ***Compressing gradients without error feedback.***
 Top-K sparsification can achieve 99% compression, but naively discarding small gradients causes divergence. Without error feedback ($e_{t+1} = (g_t + e_t) - v_t$), gradients below the threshold are lost forever, accumulating systematic bias that eventually destabilizes training.
 
-**Fallacy:** _Async collectives always hide latency._
+**Fallacy:** ***Async collectives always hide latency.***
 Python's `dist.all_reduce(..., async_op=True)` only returns control to the CPU. The LogP model distinguishes network latency $L$ (overlappable) from processor overhead $o$ (non-overlappable). If the GPU compute kernel is shorter than the communication overhead, the GPU still stalls. You can only hide communication when $T_{compute} > o$.
 
-**Pitfall:** _Silent data corruption in the network._
+**Pitfall:** ***Silent data corruption in the network.***
 Networks are not perfect. A bad cable can flip bits. Unlike TCP (which checksums everything), high-speed RDMA protocols sometimes have weaker guarantees or buggy NIC firmware. At 10,000 nodes running 24/7, "rare" bit flips (1 in $10^{15}$) happen multiple times per day, corrupting gradients without any error signal.
 
 ## Summary {#sec-communication-collective-operations-summary}
@@ -788,7 +788,7 @@ We explored the specialized "vehicles" of the datacenter—the **Collective Prim
 
 When even the fastest wires are not enough, **Gradient Compression** provides the final squeeze. By using **Error Feedback**, we ensure that while the journey may be compressed or delayed, no vital information is permanently lost, preserving the mathematical truth of the model's convergence.
 
-::: {.callout-important title="Key Takeaways"}
+::: {.callout-takeaways title="Key Takeaways"}
 
 * **The α-β model reveals the bottleneck**: The critical message size $n^* = \alpha \cdot \beta$ determines whether you should optimize software latency (small messages) or hardware bandwidth (large payloads).
 * **Algorithm choice is scale-dependent**: Ring AllReduce is bandwidth-optimal but pays $O(N)$ latency; Tree AllReduce is latency-optimal ($O(\log N)$) but bandwidth-inefficient. Use the crossover formula $M_{crossover} \approx N \alpha \beta$ to choose.

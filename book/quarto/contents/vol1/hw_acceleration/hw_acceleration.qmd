@@ -24,13 +24,13 @@ Compression reduces model complexity through fewer parameters, lower precision, 
 
 ::: {.callout-tip title="Learning Objectives"}
 
-- Calculate arithmetic intensity for neural network operations and use the roofline model to determine whether workloads are compute-bound or memory-bound on specific hardware
 - Explain why systolic arrays and tensor cores achieve 10-100× better efficiency than general-purpose processors for matrix operations
-- Predict performance bottlenecks by quantifying the memory wall: bandwidth limits, energy costs of data movement, and cache hierarchy trade-offs
-- Select appropriate dataflow strategies (weight-stationary, output-stationary, input-stationary) based on whether a workload prioritizes weight reuse, activation reuse, or accumulator locality
-- Identify compiler optimization opportunities including kernel fusion, tiling, and memory planning that translate high-level models into efficient hardware execution
-- Evaluate accelerator choices for specific deployment scenarios (training vs. inference, cloud vs. edge, latency vs. throughput) using quantitative cost-performance analysis
-- Recognize common pitfalls such as ignoring memory bandwidth limits, expecting linear multi-GPU scaling, or optimizing for peak FLOPS rather than sustained throughput
+- Calculate arithmetic intensity and use the roofline model to determine compute-bound versus memory-bound workloads
+- Predict performance bottlenecks by quantifying the memory wall: bandwidth limits, energy costs, and cache hierarchy trade-offs
+- Select appropriate dataflow strategies (weight-stationary, output-stationary, input-stationary) based on workload reuse priorities
+- Analyze compiler optimizations including kernel fusion, tiling, and memory planning for efficient hardware execution
+- Evaluate accelerator choices for specific deployment scenarios using quantitative cost-performance analysis
+- Identify common pitfalls such as ignoring bandwidth limits, expecting linear scaling, or optimizing for peak FLOPS
 
 :::
 
@@ -56,11 +56,11 @@ Hardware alone, however, cannot achieve these gains. The algorithms must be desi
 
 Co-design explains why the compression techniques introduced in @sec-model-compression deliver real speedups. Quantization from FP32 to INT8 yields 2-4x acceleration not because of fewer bits in the abstract, but because accelerators pack 4x more INT8 operations into the same silicon area. Structured pruning improves performance while unstructured pruning often does not, because structured patterns preserve the regular memory access patterns that hardware can optimize. Throughout this chapter, the physical constraints of silicon will reveal why some theoretically promising algorithmic optimizations succeed in practice and others fail.
 
-Hardware acceleration targets specific terms in the **Iron Law of ML Systems** ($Time = \frac{Data}{Bandwidth} + \frac{Ops}{Throughput \times Utilization}$). While data selection reduced the total data and model compression reduced the ops per sample, hardware acceleration increases the rate at which those ops execute by maximizing the Throughput and Bandwidth denominators. Yet acceleration has a hard ceiling, established by the following law.
+Hardware acceleration targets specific terms in the **Iron Law of ML Systems** (@principle-iron-law). While data selection reduced the total data and model compression reduced the ops per sample, hardware acceleration increases the rate at which those ops execute by maximizing the Throughput and Bandwidth denominators. Yet acceleration has a hard ceiling, established by the following law.
 
 ::: {.callout-notebook title="The Iron Law of Acceleration"}
 
-Hardware acceleration does not speed up the entire system; it only speeds up the parallelizable fraction ($P$). This is governed by **Amdahl's Law for AI**:
+Hardware acceleration does not speed up the entire system; it only speeds up the parallelizable fraction ($P$). This is governed by **Amdahl's Law for AI** (@principle-amdahls-law):
 
 $$ Speedup = \frac{1}{(1 - P) + \frac{P}{S}} $$
 
@@ -70,6 +70,24 @@ $$ Speedup = \frac{1}{(1 - P) + \frac{P}{S}} $$
 
 **The Pitfall:** If data loading takes 10% of the time ($P=0.9$), even an **infinite speed** accelerator ($S=\infty$) can only achieve a **10x** total speedup. The "boring" serial part dominates the "exciting" AI part.
 :::
+
+Amdahl's Law is not merely theoretical: it explains why many GPU upgrades disappoint in practice. The following heatmap (@fig-iron-law-heatmap) visualizes this "Acceleration Wall," showing that unless your workload is highly parallelizable ($P > 0.99$), investing in faster hardware yields diminishing returns.
+
+```{python}
+#| label: fig-iron-law-heatmap
+#| echo: false
+#| fig-cap: "**The Iron Law Heatmap.** Total system speedup as a function of Accelerator Speed ($S$) and Parallel Fraction ($P$). Notice the 'Accelerator Wall' at the top: if your workload is even slightly serial ($P < 0.9$), increasing hardware speed ($S$) from 100x to 1000x yields almost no benefit. You must be in the yellow/green zone (High $P$) to justify High $S$."
+
+import sys
+import matplotlib.pyplot as plt
+# Ensure calc directory is in path
+sys.path.append('../../../calc')
+import viz
+
+viz.set_book_style()
+viz.plot_iron_law_heatmap()
+plt.show()
+```
 
 Amdahl's Law is not merely theoretical: it explains why many GPU upgrades disappoint in practice. Before examining specific hardware architectures, test your intuition about these fundamental limits.
 
@@ -84,7 +102,7 @@ Hardware speedups are capped by sequential bottlenecks.
 
 To see Amdahl's Law in action, consider how the parallel fraction $P$ differs dramatically between workload archetypes on the same hardware.
 
-::: {.callout-lighthouse title="Amdahl's Law on H100"}
+::: {.callout-lighthouse #lighthouse-amdahl-h100 title="Amdahl's Law on H100"}
 
 **ResNet-50 inference on NVIDIA H100:**
 
@@ -104,7 +122,7 @@ $$Speedup = \frac{1}{(1-0.80) + \frac{0.80}{500}} = \frac{1}{0.20 + 0.0016} \app
 The **Bandwidth Hog** archetype suffers more from serial bottlenecks. Even infinite accelerator speed yields only $1/(1-P) = 5\times$ maximum speedup. This is why LLM inference optimization focuses on reducing the serial fraction (batching, speculative decoding) rather than raw hardware speed.
 :::
 
-These examples reveal that the critical question for any hardware optimization is not "how fast is the chip?" but rather: *is this workload limited by how fast we can compute, or how fast we can move data?* The answer determines which accelerator to choose, which optimizations matter, and whether a 10x more powerful chip will actually help. The **Roofline Model** (@sec-ai-acceleration-roofline-model) provides the analytical framework for answering this question. It plots an operation's **arithmetic intensity** (operations per byte of memory traffic) against hardware capabilities, revealing whether performance is capped by compute or bandwidth. A dense matrix multiplication with high arithmetic intensity benefits from more TFLOPS; a LayerNorm with low arithmetic intensity benefits from more memory bandwidth. ResNet-50's convolutions are compute-bound while GPT-2's attention layers are memory-bound, and this distinction is precisely why these architectures require different optimization strategies.
+These examples reveal that the critical question for any hardware optimization is not "how fast is the chip?" but rather: *is this workload limited by how fast we can compute, or how fast we can move data?* The answer determines which accelerator to choose, which optimizations matter, and whether a 10x more powerful chip will actually help. The **Roofline Model** (@sec-ai-acceleration-roofline-model) provides the analytical framework for answering this question. It plots an operation's **arithmetic intensity** (@principle-arithmetic-intensity) (operations per byte of memory traffic) against hardware capabilities, revealing whether performance is capped by compute or bandwidth. A dense matrix multiplication with high arithmetic intensity benefits from more TFLOPS; a LayerNorm with low arithmetic intensity benefits from more memory bandwidth. ResNet-50's convolutions are compute-bound while GPT-2's attention layers are memory-bound, and this distinction is precisely why these architectures require different optimization strategies.
 
 With this analytical lens in place, the chapter proceeds through four major topics. First, we trace the historical evolution of domain-specific architectures, from floating-point coprocessors through graphics processors to contemporary AI accelerators. Second, we examine the computational primitives that characterize ML workloads (matrix multiplication, vector operations, and nonlinear activation functions) and analyze how specialized hardware optimizes these operations through innovations such as systolic arrays and tensor cores. Third, we turn to memory hierarchy design, where data movement energy costs exceeding computation costs by more than 100x make on-chip buffer optimization and high-bandwidth memory interfaces critical. Fourth, the software stack: compiler optimization and runtime system support determine the extent to which theoretical hardware capabilities translate into measurable performance. Throughout, the focus remains on single-machine systems; multi-machine coordination is covered in Volume II.
 
@@ -218,13 +236,15 @@ These diverse domains share common characteristics: identification of domain-spe
 
 ### Emergence of Domain-Specific Architectures {#sec-ai-acceleration-emergence-domainspecific-architectures-e56e}
 
-These diverse acceleration patterns converged in a broader architectural shift. The emergence of domain-specific architectures (DSA)[^fn-dsa] marks a transition in computer system design, driven by two converging factors: the breakdown of traditional scaling laws and the increasing computational demands of specialized workloads. The slowdown of Moore's Law[^fn-moores-law-end], which previously ensured predictable enhancements in transistor density every 18 to 24 months, and the end of Dennard scaling[^fn-dennard-scaling], which permitted frequency increases without corresponding power increases, created a performance and efficiency bottleneck in general-purpose computing. As John Hennessy and David Patterson noted in their 2017 Turing Lecture [@HennessyPatterson2017Turing], these limitations signaled the onset of a new era in computer architecture centered on domain-specific solutions that optimize hardware for specialized workloads.
+These diverse acceleration patterns converged in a broader architectural shift. The emergence of domain-specific architectures (DSA)[^fn-dsa] marks a transition in computer system design, driven by two converging factors: the breakdown of traditional scaling laws and the increasing computational demands of specialized workloads. The slowdown of Moore's Law[^fn-moores-law-end], which previously ensured predictable enhancements in transistor density every 18 to 24 months, and the end of Dennard scaling[^fn-dennard-scaling], which permitted frequency increases without corresponding power increases, created a performance and efficiency bottleneck in general-purpose computing. As John Hennessy and David Patterson noted in their 2017 Turing Lecture [@HennessyPatterson2017Turing][^fn-hennessy-patterson], these limitations signaled the onset of a new era in computer architecture centered on domain-specific solutions that optimize hardware for specialized workloads.
 
 [^fn-dsa]: **Domain-Specific Architectures (DSA)**: Computing architectures optimized for specific application domains rather than general-purpose computation. Unlike CPUs designed for flexibility, DSAs sacrifice programmability for dramatic efficiency gains. Google's TPU achieves 15-30$\times$ better performance per watt than GPUs for neural networks, while video codecs provide 100-1000$\times$ improvements over software decoding. The 2018 Turing Award recognized this shift as the defining trend in modern computer architecture.
 
 [^fn-moores-law-end]: **Moore's Law**: Intel co-founder Gordon Moore's 1965 observation that transistor density doubles every 18-24 months. This exponential scaling drove computing progress for decades, enabling everything from smartphones to supercomputers. However, power density constraints and rising manufacturing complexity slowed the historical pace of cost-effective scaling. As advanced-node development costs rose from millions to billions of dollars, the industry shifted toward parallelism and specialization.
 
 [^fn-dennard-scaling]: **Dennard Scaling**: Robert Dennard's 1974 principle that as transistors shrink, their power density remains constant, allowing higher frequencies without increased power consumption. This enabled CPUs to reach 3+ GHz by 2005. However, quantum effects and leakage current ended Dennard scaling around 2005, forcing architects to prioritize efficiency over raw speed and leading to the multi-core revolution.
+
+[^fn-hennessy-patterson]: **Hennessy & Patterson**: John Hennessy (former President of Stanford) and David Patterson (UC Berkeley Professor) are the "godfathers" of modern computer architecture. They pioneered Reduced Instruction Set Computing (RISC), transforming processor design from an art into a quantitative science. Their textbook *Computer Architecture: A Quantitative Approach* is the definitive reference in the field. They received the 2017 ACM A.M. Turing Award for these contributions. Patterson later joined Google Brain to help design the TPU, directly applying their principles to AI acceleration.
 
 Historically, improvements in processor performance depended on semiconductor process scaling and increasing clock speeds. As power density limitations restricted further frequency scaling and transistor miniaturization encountered increasing physical and economic constraints, architects explored alternative approaches to sustain computational growth. The result was a shift toward domain-specific architectures, which dedicate silicon resources to optimize computation for specific application domains, trading flexibility for efficiency.
 
@@ -1027,7 +1047,7 @@ A systolic array is **250x more energy-efficient** than a naive vector unit for 
 
 A systolic array arranges processing elements in a grid pattern, where data flows rhythmically between neighboring units in a synchronized manner, enabling each operand to participate in multiple computations as it propagates through the array. This structured movement minimizes external memory accesses by maximizing local data reuse. A single weight value can contribute to dozens of operations as it moves through the processing elements, transforming the energy profile from memory-bound to compute-efficient execution.
 
-Kung and Leiserson[^fn-systolic-origin] [@kung1979systolic] first introduced systolic arrays, formalizing their use in parallel computing architectures for efficient matrix operations [@Kung1982]. Unlike general-purpose execution units, systolic arrays exploit spatial and temporal locality by reusing operands as they propagate through the grid. Google's TPU exemplifies this architectural approach: in the TPUv4, a $128\times128$ systolic array of multiply-accumulate units processes matrix operations by streaming data through the array in a pipelined manner. @fig-systolic-array captures this dataflow architecture.
+Kung and Leiserson[^fn-systolic-origin] [@kung1979systolic] first introduced systolic arrays, formalizing their use in parallel computing architectures for efficient matrix operations [@Kung1982]. Unlike general-purpose execution units, systolic arrays exploit spatial and temporal locality by reusing operands as they propagate through the grid. Google's TPU exemplifies this architectural approach: in the TPUv4, a $128\times128$ systolic array of multiply-accumulate units processes matrix operations by streaming data through the array in a pipelined manner [@jouppi2017datacenter]. @fig-systolic-array captures this dataflow architecture.
 
 [^fn-systolic-origin]: **Systolic Array**: Named from the Greek "systole" (contraction), referring to the rhythmic pumping of the heart. H.T. Kung and Charles Leiserson chose this term at CMU in 1979 because data pulses through the processing element grid in waves, like blood through cardiac chambers. Each element contracts (computes) and passes data to neighbors in a coordinated rhythm. Google's TPUs revived systolic designs for neural networks by pairing them with software stacks optimized for dense linear algebra, achieving high throughput when workloads map well to this rhythmic dataflow pattern.
 
@@ -1290,11 +1310,29 @@ The AI memory wall represents the primary bottleneck constraining modern acceler
 
 :::
 
+The underlying cause of this wall is physical: moving data costs orders of magnitude more energy than processing it. The following chart visualizes the "Horowitz Numbers," the fundamental energy constants of silicon.
+
+```{python}
+#| label: fig-energy-hierarchy
+#| echo: false
+#| fig-cap: "**The Energy Hierarchy.** Energy cost per operation (Log Scale). Fetching data from off-chip DRAM costs ~128x more energy than an SRAM access and ~20,000x more than an INT8 addition. This energy disparity drives the design of every AI accelerator: data must be kept local (in SRAM/Registers) to be processed efficiently."
+
+import sys
+import matplotlib.pyplot as plt
+# Ensure calc directory is in path
+sys.path.append('../../calc')
+import viz
+
+viz.set_book_style()
+viz.plot_energy_hierarchy()
+plt.show()
+```
+
 #### Quantifying the Compute-Memory Performance Gap {#sec-ai-acceleration-quantifying-computememory-performance-gap-1526}
 
 The severity of this constraint becomes apparent when examining scaling trends. Over the past two decades, peak computational capabilities have grown substantially faster than DRAM bandwidth [@gholami2024ai]. This divergence creates a widening gap where accelerators possess massive computational power but cannot access data quickly enough to utilize it. Representative high-end accelerators can deliver on the order of \(10^3\) TFLOPS of peak tensor throughput while providing only a few TB/s of memory bandwidth [@nvidia2022h100]. This implies a ridge point on the order of \(10^2\) operations per byte to fully utilize compute, which can exceed the arithmetic intensity of many practical neural network workloads.
 
-The memory wall manifests through three critical constraints. First, the energy disparity: accessing DRAM can consume orders of magnitude more energy than a multiply-accumulate operation [@Horowitz2014], which often shifts bottlenecks from raw compute to power and data movement. Second, the bandwidth limitation: even TB/s memory systems may not feed large parallel compute arrays continuously on memory-bound workloads, leaving compute underutilized. Third, the latency hierarchy: off-chip memory access can require hundreds of cycles, creating pipeline stalls that cascade through parallel execution units.
+The memory wall manifests through three critical constraints. First, the energy disparity: accessing DRAM can consume orders of magnitude more energy than a multiply-accumulate operation [@Horowitz2014; @sze2017efficient], which often shifts bottlenecks from raw compute to power and data movement. Second, the bandwidth limitation: even TB/s memory systems may not feed large parallel compute arrays continuously on memory-bound workloads, leaving compute underutilized. Third, the latency hierarchy: off-chip memory access can require hundreds of cycles, creating pipeline stalls that cascade through parallel execution units.
 
 @fig-compute-memory-imbalance illustrates this "AI Memory Wall," which continues to widen, making memory bandwidth rather than compute the primary constraint in AI acceleration.
 
@@ -1785,7 +1823,7 @@ Convolutional Neural Networks (CNNs) are widely used in image processing and com
 
 CNN accelerators benefit from on-chip memory optimizations, as convolution filters exhibit extensive reuse, allowing weights to be stored in fast local SRAM instead of frequently accessing off-chip memory. However, activation maps require careful management due to their size. Since accessing main memory over interconnects like PCIe introduces latency and bandwidth bottlenecks, CNN accelerators employ tiling techniques to divide feature maps into smaller regions that fit within on-chip buffers. This minimizes costly external memory transfers, improving overall efficiency [@Chen2016].
 
-While CNN workloads are more memory-efficient than MLPs, managing intermediate activations remains a challenge. Accelerators use hierarchical caching strategies and DMA engines to optimize memory movement, ensuring that computations are not stalled by inefficient host-accelerator data transfers. These memory optimizations help CNN accelerators maintain high throughput by reducing reliance on off-chip memory bandwidth [@Chen2016].
+While CNN workloads are more memory-efficient than MLPs, managing intermediate activations remains a challenge. Accelerators use hierarchical caching strategies and DMA engines to optimize memory movement, ensuring that computations are not stalled by inefficient host-accelerator data transfers. These memory optimizations help CNN accelerators maintain high throughput by reducing reliance on off-chip memory bandwidth. Pioneering architectures like Eyeriss introduced row-stationary dataflows to maximize data reuse for convolutional workloads [@chen2016eyeriss].
 
 #### Transformer Networks {#sec-ai-acceleration-transformer-networks-638c}
 
@@ -1923,15 +1961,15 @@ Given these ridge point values, we can work through a concrete calculation to de
 
 To see how these intensity values translate into real performance predictions, we can work through a complete transformer layer and compute the arithmetic intensity of each sub-operation.
 
-::: {.callout-notebook title="Transformer Layer Analysis"}
+::: {.callout-notebook #notebook-transformer-layers title="Transformer Layer Analysis"}
 
 For a transformer with hidden_dim=768, batch=32, seq=512:
 
 *Attention QKV Projection*:
 
 - FLOPs: $3 \times 32 \times 512 \times 768 \times 768 = 29$ billion FLOPs
-- Bytes: (input + weights + output) $= (32 \times 512 \times 768 + 3 \times 768 \times 768 + 32 \times 512 \times 768 \times 3) \times 2 = 127$ MB
-- AI $= 29B / 127M = 228$ FLOP/byte, which is **compute-bound on A100** (above 156 threshold)
+- Bytes: (input + weights + output) $= (32 \times 512 \times 768 + 3 \times 768 \times 768 + 32 \times 512 \times 768 \times 3) \times 2 \approx 104$ MB
+- AI $= 29B / 104M = 278$ FLOP/byte, which is **compute-bound on A100** (above 156 threshold)
 
 *Softmax*:
 
@@ -1956,7 +1994,7 @@ $$P_{\text{attainable}} = \text{Peak Bandwidth} \times \text{AI}$$
 
 A *convolutional layer analysis* demonstrates how these formulas apply in practice.
 
-::: {.callout-notebook title="Convolutional Layer Analysis"}
+::: {.callout-notebook #notebook-conv-analysis title="Convolutional Layer Analysis"}
 
 Consider a Conv2D layer with input shape (batch=32, channels=128, height=56, width=56), output channels=256, kernel size 3×3 on an A100 GPU:
 
@@ -1969,12 +2007,12 @@ Consider a Conv2D layer with input shape (batch=32, channels=128, height=56, wid
 *Memory Traffic Analysis*:
 
 - Input: $32 \times 128 \times 56 \times 56 \times 2 = 25.7$ MB (FP16)
-- Weights: $256 \times 128 \times 3 \times 3 \times 2 = 1.2$ MB (FP16)
+- Weights: $256 \times 128 \times 3 \times 3 \times 2 \approx 0.6$ MB (FP16)
 - Output: $32 \times 256 \times 56 \times 56 \times 2 = 51.4$ MB (FP16)
-- Total: $78.3$ MB
+- Total: $77.7$ MB
 
 *Arithmetic Intensity*:
-$$\text{AI} = \frac{59.2 \text{ GFLOPs}}{78.3 \text{ MB}} = 756 \text{ FLOP/byte}$$
+$$\text{AI} = \frac{59.2 \text{ GFLOPs}}{77.7 \text{ MB}} = 761 \text{ FLOP/byte}$$
 
 This is **well above** A100's ridge point of 156 FLOP/byte, making this operation **compute-bound**. The layer will achieve near-peak performance of ~312 TFLOPS (FP16 with Tensor Cores).
 :::
@@ -3276,27 +3314,27 @@ The complexity of hardware acceleration, spanning data center architectures to h
 
 Hardware acceleration involves counterintuitive performance characteristics where impressive specifications mask underlying bottlenecks. The fallacies and pitfalls below capture hardware selection and optimization errors that waste expensive accelerator resources and lead to deployments that achieve only 10-30% of theoretical performance.
 
-**Fallacy:** *More specialized hardware always provides better performance than general-purpose alternatives.*
+**Fallacy:** ***More specialized hardware always provides better performance than general-purpose alternatives.***
 
 Engineers assume specialized accelerators automatically outperform general-purpose processors for all AI workloads. In reality, specialized hardware achieves peak performance only when workloads match architectural assumptions. As demonstrated in @sec-ai-acceleration-roofline-model, operations must exceed the accelerator's ridge point to be compute-bound; an A100 GPU has a ridge point of 156 FLOP/byte, meaning operations with arithmetic intensity below this threshold are memory-bound regardless of the accelerator's 312 TFLOPS peak compute. A transformer attention softmax with AI = 2-5 FLOP/byte achieves only 4-10 TFLOPS (3% utilization) on an A100, while achieving 80-90% of a CPU's lower peak because CPUs have ridge points of 10-20 FLOP/byte. Models with irregular memory access, small batch sizes, or dynamic computation graphs may perform better on flexible processors. Effective hardware selection requires matching workload arithmetic intensity to architectural ridge points, not assuming specialization always wins.
 
-**Pitfall:** *Ignoring memory bandwidth limitations when selecting acceleration strategies.*
+**Pitfall:** ***Ignoring memory bandwidth limitations when selecting acceleration strategies.***
 
 Practitioners focus on peak TFLOPS without analyzing whether their workloads can achieve compute-bound performance. As quantified in @sec-ai-acceleration-understanding-ai-memory-wall-3ea9, accessing DRAM consumes 100-200 pJ per access versus 1-10 pJ for on-chip memory, creating orders-of-magnitude energy penalties. An accelerator advertising 300 TFLOPS with 2 TB/s bandwidth has a ridge point of 150 FLOP/byte; LayerNorm operations with AI = 1.5 FLOP/byte achieve only 3 TFLOPS (1% utilization). Organizations deploy expensive high-compute accelerators for memory-bound workloads, achieving 10-20% utilization when lower-cost, bandwidth-optimized alternatives would perform identically. Teams must calculate workload arithmetic intensity and compare against hardware ridge points before purchasing accelerators.
 
-**Fallacy:** *Hardware acceleration benefits scale linearly with additional accelerators.*
+**Fallacy:** ***Hardware acceleration benefits scale linearly with additional accelerators.***
 
 Teams expect 8 GPUs to train 8× faster than 1 GPU. Multi-accelerator scaling introduces communication overhead that violates linear scaling assumptions. As noted in @sec-ai-acceleration-scaling-beyond-single, AllReduce operations for gradient synchronization can require exchanging hundreds of gigabytes per training step for large models. With NVLink at 600 GB/s bidirectional, synchronizing 1 GB of gradients requires 1.67 ms; for a 50 ms training step, this represents 3.3% overhead with perfect overlap. Without overlap, 8-GPU setups achieve 7.5× speedup (94% efficiency) at best, and typical workloads see 6-7× (75-87% efficiency) due to load imbalance and synchronization barriers. Small models with insufficient parallel work achieve even worse scaling, sometimes seeing 3-4× speedup on 8 GPUs (37-50% efficiency).
 
-**Fallacy:** *Peak FLOPS specifications determine real-world accelerator performance.*
+**Fallacy:** ***Peak FLOPS specifications determine real-world accelerator performance.***
 
 Vendors advertise peak FLOPS as the definitive measure of accelerator capability, but real-world performance equals Peak FLOPS $\times$ Utilization, where utilization is dictated by the Roofline Model. An A100 advertises 312 TFLOPS at FP16, yet transformer training typically achieves only 120 to 180 TFLOPS (40 to 60% utilization) because memory-bound operations such as attention and LayerNorm drag down the average throughput. Recommendation models fare even worse, often reaching only 10 to 30 TFLOPS (3 to 10% utilization) due to sparse, irregular memory access patterns that leave compute units idle. Engineers should budget projects based on sustained throughput, measured or estimated via the Roofline Model, rather than peak marketing specifications.
 
-**Pitfall:** *Deploying small-batch inference workloads on high-compute accelerators.*
+**Pitfall:** ***Deploying small-batch inference workloads on high-compute accelerators.***
 
 Teams deploy high-throughput training accelerators (A100, H100) for latency-sensitive inference with batch size 1-4. Small batches severely reduce arithmetic intensity: a dense layer with M=N=2048 achieves AI = 2 FLOP/byte at batch=1 versus AI = 186 FLOP/byte at batch=256. At batch=1, an A100 achieves 4 TFLOPS (1.3% utilization) due to memory bottlenecks, while a lower-cost T4 achieves 3.5 TFLOPS. For FP16 Tensor Core operations, the T4's peak is 65 TFLOPS with a ridge point of approximately 203 FLOP/byte (65 TFLOPS / 320 GB/s); for FP32 operations, the peak drops to 8.1 TFLOPS with a ridge point of only 25 FLOP/byte. Either way, small-batch inference remains memory-bound, but the T4's lower cost makes it more economical for these workloads. The cost difference is substantial: A100 instances cost 3-4× more than T4 instances for identical latency. Inference deployments should match batch size to accelerator characteristics, using high-compute accelerators only for batched serving where arithmetic intensity exceeds ridge points.
 
-**Pitfall:** *Vendor-specific optimizations without considering long-term portability.*
+**Pitfall:** ***Vendor-specific optimizations without considering long-term portability.***
 
 Organizations optimize exclusively for specific vendors to maximize performance without considering system flexibility. As discussed in @sec-ai-acceleration-compiler-support-172e, deep integration with vendor-specific libraries (CUDA, TensorRT, XLA) and custom kernels creates lock-in. A codebase with 50+ hand-written CUDA kernels requires 6-12 engineer-months to port to a different accelerator vendor, delaying hardware upgrades and preventing multi-vendor deployments. While vendor-specific optimizations provide 20-40% performance gains, they should be isolated behind hardware abstraction layers. Maintaining portable code paths enables vendor competition, hardware flexibility, and faster adoption of emerging accelerators while still capturing most performance benefits through framework-level optimizations.
 
@@ -3375,7 +3413,7 @@ The technical challenges of AI acceleration span multiple layers of the computin
 
 Building on these foundational concepts, the emergence of multi-chip and distributed acceleration systems introduces additional complexities around communication overhead, memory coherence, and workload partitioning that require careful system-level optimization.
 
-::: {.callout-important title="Key Takeaways"}
+::: {.callout-takeaways title="Key Takeaways"}
 
 * **The Roofline model identifies performance bottlenecks**: Plotting arithmetic intensity against throughput reveals whether workloads are memory-bound (attention, embeddings) requiring bandwidth optimization, or compute-bound (convolutions, GEMMs) requiring FLOPS optimization.
 

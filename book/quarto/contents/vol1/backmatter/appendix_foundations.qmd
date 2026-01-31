@@ -10,31 +10,19 @@ This appendix provides the foundational knowledge—spanning hardware, data engi
 
 Before diving in, @tbl-appendix-overview provides a map of what this appendix covers and where each concept appears in the main text.
 
-+----------------------------+--------------------------------------------+--------------------------------------------------------------+
-| **Topic**                  | **What It Helps You Do**                   | **Where It Appears**                                         |
-+:===========================+:===========================================+:=============================================================+
-| **Performance Models**     | Determine if a workload is memory-bound    | @sec-ai-acceleration, @sec-ai-training,                      |
-|                            | or compute-bound                           | @sec-model-serving-systems                                   |
-+----------------------------+--------------------------------------------+--------------------------------------------------------------+
-| **Memory Hierarchy**       | Optimize data movement and cache usage     | @sec-ai-acceleration, @sec-model-compression                 |
-+----------------------------+--------------------------------------------+--------------------------------------------------------------+
-| **Data Engineering**       | Choose storage formats and design          | @sec-data-engineering-ml                                     |
-|                            | reliable pipelines                         |                                                              |
-+----------------------------+--------------------------------------------+--------------------------------------------------------------+
-| **System Statistics**      | Measure data drift and monitor tail        | @sec-data-engineering-ml, @sec-machine-learning-operations-mlops |
-|                            | latencies                                  |                                                              |
-+----------------------------+--------------------------------------------+--------------------------------------------------------------+
-| **Numerical Formats**      | Choose precision for training vs inference | @sec-model-compression, @sec-model-serving-systems           |
-+----------------------------+--------------------------------------------+--------------------------------------------------------------+
-| **Linear Algebra (GEMM)**  | Understand core neural network computation | @sec-deep-learning-systems-foundations, @sec-ai-acceleration |
-+----------------------------+--------------------------------------------+--------------------------------------------------------------+
-| **Tensor Programming**     | Write efficient code and avoid shape bugs  | @sec-ai-frameworks, @sec-ai-training                         |
-+----------------------------+--------------------------------------------+--------------------------------------------------------------+
-| **Backpropagation**        | Debug gradient issues and memory usage     | @sec-deep-learning-systems-foundations, @sec-ai-training     |
-+----------------------------+--------------------------------------------+--------------------------------------------------------------+
-| **Computational Graphs**   | Understand compiler and hardware           | @sec-ai-frameworks, @sec-ai-acceleration                     |
-|                            | optimizations                              |                                                              |
-+----------------------------+--------------------------------------------+--------------------------------------------------------------+
++---------------------------+----------------------------------------------------------+--------------------------------------------------------------------+
+| **Topic**                 | **What It Helps You Do**                                 | **Where It Appears**                                               |
++:==========================+:=========================================================+:===================================================================+
+| **Performance Models**    | Determine if a workload is memory-bound or compute-bound | @sec-ai-acceleration, @sec-ai-training, @sec-model-serving-systems |
+| **Memory Hierarchy**      | Optimize data movement and cache usage                   | @sec-ai-acceleration, @sec-model-compression                       |
+| **Data Engineering**      | Choose storage formats and design reliable pipelines     | @sec-data-engineering-ml                                           |
+| **System Statistics**     | Measure data drift and monitor tail latencies            | @sec-data-engineering-ml, @sec-machine-learning-operations-mlops   |
+| **Numerical Formats**     | Choose precision for training vs inference               | @sec-model-compression, @sec-model-serving-systems                 |
+| **Linear Algebra (GEMM)** | Understand core neural network computation               | @sec-deep-learning-systems-foundations, @sec-ai-acceleration       |
+| **Tensor Programming**    | Write efficient code and avoid shape bugs                | @sec-ai-frameworks, @sec-ai-training                               |
+| **Backpropagation**       | Debug gradient issues and memory usage                   | @sec-deep-learning-systems-foundations, @sec-ai-training           |
+| **Computational Graphs**  | Understand compiler and hardware optimizations           | @sec-ai-frameworks, @sec-ai-acceleration                           |
++---------------------------+----------------------------------------------------------+--------------------------------------------------------------------+
 
 : **Appendix Quick Reference**: Foundational concepts, the engineering decisions they inform, and their primary chapters. {#tbl-appendix-overview}
 
@@ -97,23 +85,55 @@ This explains why modern frameworks fuse operations: combining ReLU with the pre
 
 ### Amdahl's Law and Gustafson's Law {#sec-system-foundations-amdahls-law-gustafsons-law-2f5c}
 
-Parallelization is the primary tool for scaling ML, but it has limits.
+Parallelization is the primary tool for scaling ML, but its limits depend on *how* you scale.
 
-**Amdahl's Law** [@amdahl1967validity] captures the limit of *strong scaling*: trying to finish the same task faster by adding more processors ($n$). If a fraction $s$ of your task is serial (cannot be parallelized), your maximum speedup is capped:
+#### Strong Scaling (Amdahl's Law)
+
+**Strong scaling** answers the question: *If I add more processors to a fixed-size problem, how much faster will it run?*
+
+**Amdahl's Law** [@amdahl1967validity] states that the speedup is limited by the serial portion of the task.^[Gene Amdahl (1922–2015) was a legendary computer architect at IBM, where he was the chief architect of the System/360. He later founded Amdahl Corporation to compete with IBM in the mainframe market.] If a fraction $s$ of your task is serial (cannot be parallelized) and $p = 1-s$ is parallelizable, the maximum speedup with $n$ processors is:
 
 $$ \text{Speedup}(n) = \frac{1}{s + \frac{1-s}{n}} $$
 
-As $n \to \infty$, speedup approaches $1/s$. If 10% of your training step is serial (e.g., data loading), you can never go faster than 10x, no matter how many GPUs you add.
+As $n \to \infty$, the term $\frac{1-s}{n} \to 0$, and the speedup converges to $1/s$.
 
-**Gustafson's Law** [@gustafson1988reevaluating] captures *weak scaling*: using more processors to do a *larger* task in the same amount of time. This is more common in large-scale ML, where more compute allows training larger models.
+**Example**: If 5% of your training step is serial overhead (e.g., Python GIL, kernel launch latency) and 95% is parallelizable matrix math:
+
+*   With $n=1$, speedup is 1.
+*   With $n=8$, speedup is $\frac{1}{0.05 + 0.95/8} \approx 5.9\times$.
+*   With $n=\infty$, speedup is capped at $1/0.05 = 20\times$.
+
+No matter how many GPUs you buy, you cannot make this fixed workload run faster than 20x.
+
+#### Weak Scaling (Gustafson's Law)
+
+**Weak scaling** answers the question: *If I add more processors, how much larger of a problem can I solve in the same amount of time?*
+
+This is the reality of Large Language Models. We don't use 1,000 GPUs to train GPT-4 on a laptop-sized dataset in milliseconds; we use them to train on a dataset 1,000x larger in reasonable time.
+
+**Gustafson's Law** [@gustafson1988reevaluating] models this "scaled speedup":^[John Gustafson is a computer scientist known for his work in parallel computing and for introducing the Unum (universal number) format. His law was a direct response to the perceived "limits" of Amdahl's Law when applied to massive scale.]
+
+$$ \text{Scaled Speedup}(n) = n - s(n - 1) $$
+
+Here, the parallel part of the workload grows linearly with $n$, while the serial part $s$ remains fixed.
+
+**Example**: Using the same 5% serial overhead ($s=0.05$):
+
+*   With $n=1$, speedup is 1.
+*   With $n=8$, Scaled Speedup is $8 - 0.05(7) = 8 - 0.35 = 7.65\times$.
+*   With $n=1000$, Scaled Speedup is $1000 - 0.05(999) \approx 950\times$.
+
+In weak scaling, efficiency remains high because the useful work (training the model) scales up to dwarf the fixed overheads.
 
 ### Little's Law {#sec-system-foundations-littles-law-9c4c}
 
-For capacity planning in inference systems, **Little's Law** [@little1961proof] relates concurrency ($L$), arrival rate ($\lambda$), and latency ($W$):
+For capacity planning in inference systems, **Little's Law** [@little1961proof] relates concurrency ($L$), arrival rate ($\lambda$), and latency ($W$):^[John Little is an Institute Professor at MIT and a pioneer in the field of operations research. His law, proved in 1961, is fundamental to queuing theory and is used across fields from manufacturing to computer network analysis.]
 
 $$ L = \lambda \times W $$
 
-To sustain 1,000 queries per second (QPS) with 50ms average latency, your system must support $1000 \times 0.05 = 50$ concurrent requests. This tells you exactly how to size your inference worker pools.
+**Example**: To sustain 1,000 queries per second (QPS) with 50ms average latency, your system must support $1000 \times 0.05 = 50$ concurrent requests.
+
+**Implication for Memory**: This tells you exactly how to size your inference worker pools. If serving one request requires 1 GB of temporary memory (KV cache, activations), handling 50 concurrent requests requires 50 GB of memory. If your GPU only has 24 GB, you are physically limited to 24 concurrent requests. Your maximum throughput is capped at $L/W = 24 / 0.05 = 480$ QPS, regardless of how many requests arrive.
 
 ***
 
@@ -152,6 +172,18 @@ Bandwidth (throughput) and latency (delay) are distinct constraints. Total trans
 $$ T = \text{Latency} + \frac{\text{Data Size}}{\text{Bandwidth}} $$
 
 For small transfers (e.g., single-token inference), latency dominates. For large transfers (e.g., loading weights), bandwidth dominates.
+
+**Example**: Sending data over a 10 Gbps link with 10ms ping (latency).
+
+*   **Latency-Bound (1KB Packet)**:
+    *   Transmission: $1\text{KB} / 10\text{Gbps} \approx 0.8 \mu s$.
+    *   Total Time $\approx 10\text{ms} + 0.8\mu s \approx 10\text{ms}$.
+    *   *Result*: The bandwidth is irrelevant; the speed of light (ping) is the bottleneck.
+
+*   **Bandwidth-Bound (1GB Checkpoint)**:
+    *   Transmission: $1\text{GB} / 10\text{Gbps} \approx 800\text{ms}$.
+    *   Total Time $\approx 10\text{ms} + 800\text{ms} = 810\text{ms}$.
+    *   *Result*: The ping is negligible; the pipe size is the bottleneck.
 
 ***
 
@@ -210,11 +242,17 @@ The choice of file format determines the "physics" of how your data is read.
 
 Feature engineering is built on three SQL primitives. Understanding their computational cost prevents pipeline bottlenecks.
 
-1.  **Selection ($\sigma$)**: Filtering rows. Cheap if indexed; expensive if full scan.
+1.  **Selection ($\sigma$)**: Filtering rows (e.g., `WHERE age > 30`).
+    *   *Cost*: Cheap ($O(\log N)$) if indexed; expensive ($O(N)$) if full scan.
 
-2.  **Projection ($\pi$)**: Selecting columns. Free in columnar formats; linear cost in row formats.
+2.  **Projection ($\pi$)**: Selecting columns (e.g., `SELECT age`).
+    *   *Cost*: **Free** in columnar formats (only read relevant blocks). In row formats, you must read the entire 1KB row just to extract the 4-byte integer, wasting 99% of I/O bandwidth.
 
-3.  **Join ($\bowtie$)**: Combining tables. The most expensive operation. A **Shuffle Join** (moving data across network to match keys) creates massive network traffic. A **Broadcast Join** (sending a small table to all workers) avoids the shuffle but requires one table to fit in memory.
+3.  **Join ($\bowtie$)**: Combining tables. The most expensive operation.
+    *   **Shuffle Join**: Both tables are partitioned by key and exchanged over the network.
+        *   *Cost*: Massive network traffic. Joining two 1 TB tables requires moving ~2 TB over the network.
+    *   **Broadcast Join**: One small table is sent to all workers.
+        *   *Cost*: Minimal network, but the small table *must* fit in RAM.
 
 ***
 
@@ -232,7 +270,7 @@ In systems, the **mean** is often misleading. Latency distributions are almost a
 
 How do we know if serving data ($Q$) has drifted from training data ($P$)? We measure the "distance" between their distributions.
 
-**KL Divergence** measures how much information is lost if we approximate $P$ with $Q$:
+**KL Divergence** measures how much information is lost if we approximate $P$ with $Q$ [@kullback1951information]:
 $$ D_{KL}(P || Q) = \sum P(x) \log \frac{P(x)}{Q(x)} $$
 
 **Population Stability Index (PSI)** is a symmetric, industry-standard metric derived from KL divergence. A PSI > 0.2 typically triggers an alert for retraining.
@@ -243,7 +281,7 @@ Neural networks output **logits** (unnormalized scores), not probabilities. We c
 $$ \text{Softmax}(z_i) = \frac{e^{z_i}}{\sum e^{z_j}} $$
 
 **The Problem**: If $z_i$ is large (e.g., 100), $e^{100}$ overflows floating-point range.
-**The Solution**: We compute in **log-space**. The "Log-Sum-Exp" trick allows us to compute $\log(\sum e^{z_j})$ without ever calculating the massive exponentials directly, preserving numerical precision.
+**The Solution**: We compute in **log-space**. The "Log-Sum-Exp" trick allows us to compute $\log(\sum e^{z_j})$ without ever calculating the massive exponentials directly, preserving numerical precision.^[This is implemented as `torch.logsumexp` in PyTorch and `scipy.special.logsumexp` in SciPy. It relies on the identity $\log(\sum e^{x_i}) = a + \log(\sum e^{x_i - a})$, where $a = \max(x_i)$. Shifted values $x_i - a$ are $\le 0$, ensuring exponentials never overflow.]
 
 ***
 
@@ -278,7 +316,7 @@ The IEEE 754 standard and its AI-specific derivatives define different trade-off
 
 : **Numerical Format Comparison**: Each format trades off precision, dynamic range, memory footprint, and compute throughput. BF16 has emerged as the preferred training format because it matches FP32's range while using half the memory. {#tbl-numerical-formats}
 
-**Brain Float 16 (BF16)** deserves special attention. It matches FP32's 8-bit exponent (preserving dynamic range) while truncating the mantissa to 7 bits. This avoids the gradient underflow problems that plague FP16 training, eliminating the need for complex loss scaling. Most modern training uses BF16 for this reason.
+**Brain Float 16 (BF16)** deserves special attention [@wang_bfloat16_2019]. It matches FP32's 8-bit exponent (preserving dynamic range) while truncating the mantissa to 7 bits. This avoids the gradient underflow problems that plague FP16 training, eliminating the need for complex loss scaling. Most modern training uses BF16 for this reason.^[BF16 was originally introduced with the Google TPUv2 and has since been adopted by Intel, Arm, and NVIDIA (starting with Ampere architectures).]
 
 ### Integer Quantization {#sec-system-foundations-integer-quantization-9d02}
 
@@ -304,7 +342,7 @@ Every neural network, regardless of architecture, spends most of its time doing 
 
 ### Tensor Operations and Notation {#sec-system-foundations-tensor-operations-notation-de17}
 
-We use **Einstein summation** notation throughout this book because it makes complex operations explicit. Matrix multiplication $C = AB$ becomes:
+We use **Einstein summation** notation throughout this book because it makes complex operations explicit.^[Implemented as `torch.einsum` in PyTorch and `np.einsum` in NumPy. It provides a unified DSL for dot products, outer products, transposes, and matrix multiplications.] Matrix multiplication $C = AB$ becomes:
 
 $$ C_{ij} = \sum_k A_{ik} B_{kj} $$
 
@@ -329,7 +367,11 @@ In deep learning, this is our primary tool for measuring **similarity**. In Atte
 
 GEMM is the computational workhorse of deep learning. For matrices of size $M \times K$ and $K \times N$, GEMM performs $2MNK$ floating-point operations (multiply-accumulate counts as two operations).
 
-The arithmetic intensity of GEMM scales linearly with matrix dimension. For square $n \times n$ matrices, intensity is approximately $n/3$ FLOP/byte. This explains several important phenomena:
+The arithmetic intensity of GEMM scales linearly with matrix dimension. For square $n \times n$ matrices in **FP16** (2 bytes/element):
+
+$$ \text{Intensity} = \frac{\text{Ops}}{\text{Bytes}} = \frac{2n^3}{3n^2 \times 2} = \frac{n}{3} \text{ FLOP/byte} $$
+
+This explains several important phenomena:
 
 - **Larger batches improve efficiency**: Batching increases the effective matrix dimensions, pushing workloads toward the compute-bound region of the roofline.
 - **Power-of-two dimensions help**: Hardware tensor cores are optimized for specific tile sizes (typically 16x16 or 32x32). Dimensions that align with these sizes avoid padding overhead.
@@ -345,7 +387,12 @@ The **Compressed Sparse Row (CSR)** format uses three arrays:
 - `Col_Idx`: The column index of each non-zero element
 - `Row_Ptr`: The starting position in `Values` for each row (length = num_rows + 1)
 
-CSR is essential for recommendation systems (sparse embedding tables) and pruned models. For a matrix with $N$ elements and $K$ non-zeros, CSR uses $O(K)$ storage instead of $O(N)$, saving massive memory when sparsity exceeds 90%.
+CSR is essential for recommendation systems (sparse embedding tables) and pruned models. For a matrix with $N$ elements and $K$ non-zeros, CSR uses $O(K)$ storage instead of $O(N)$.
+
+**Example**: A vocabulary embedding matrix of size $100,000 \times 10,000$ (1 billion parameters).
+*   **Dense (FP32)**: $10^9 \times 4$ bytes = **4 GB**.
+*   **Sparse (1% density)**: Storing only non-zeros requires roughly $10^7 \times (4 \text{ bytes value} + 4 \text{ bytes index}) \approx$ **80 MB**.
+*   *Result*: A 50x reduction in memory footprint, fitting a model that would otherwise OOM (Out of Memory).
 
 ***
 
@@ -432,12 +479,10 @@ To compute $\frac{\partial L}{\partial W_2}$, you need to know how $W_2$ affecte
 
 To continue backward to $W_1$, you need $\frac{\partial L}{\partial h}$, then multiply by the cached input $x$. Each step backward requires the activations cached during the forward pass.
 
-**Memory Implication**: Cached activations dominate memory usage. Storing activations for a 100-layer network consumes huge memory, motivating **Gradient Checkpointing** (recomputing activations to save memory).
+**Memory Implication**: Cached activations dominate memory usage. Storing activations for a 100-layer network consumes huge memory, motivating **Gradient Checkpointing** [@chen2016training] (recomputing activations to save memory).^[Gradient checkpointing trades compute for memory. Instead of storing all activations, you store only a subset (checkpoints) and recompute the missing ones during the backward pass. This reduces memory usage from $O(N)$ to $O(\sqrt{N})$ at the cost of $33\%$ more compute.]
 
 ### Computational Graphs and Optimization {#sec-system-foundations-computational-graphs-optimization-b49d}
 
 ML compilers represent models as directed acyclic graphs (DAGs). This representation enables hardware-independent optimizations.
 
 **Static Single Assignment (SSA)**: Compilers transform graphs into SSA form where each variable is assigned exactly once. This makes data dependencies explicit, enabling safe optimizations like **Operator Fusion** (combining `Conv -> ReLU` into one kernel to avoid memory round-trips).
-
-```

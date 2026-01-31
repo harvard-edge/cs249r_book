@@ -428,6 +428,24 @@ Synchronization frequency presents a trade-off between communication efficiency 
 
 Just as the Iron Law of Processor Performance governs single-thread execution, distributed training is governed by an extended version of Amdahl's Law that explicitly accounts for communication overhead. The time to complete one training step on $N$ devices is not simply $T_{single} / N$, but is constrained by the sequential nature of synchronization.
 
+The following plot, the **Scaling Tax** (@fig-scaling-tax), visualizes this divergence from ideal linear scaling. It shows how communication overhead ($r$) acts as a drag on performance, creating a "Communication Wall" where adding more GPUs yields diminishing returns.
+
+```{python}
+#| label: fig-scaling-tax
+#| echo: false
+#| fig-cap: "**The Scaling Tax.** Effective speedup vs. number of GPUs. While ideal scaling (dashed black) is linear, real-world systems pay a 'tax' for communication. Compute-bound models like ResNet (green) scale well because they have high arithmetic intensity. Bandwidth-bound models like GPT-3 (red) hit a 'Communication Wall' where adding more GPUs yields diminishing returns (efficiency < 50%)."
+
+import sys
+import matplotlib.pyplot as plt
+# Ensure calc directory is in path
+sys.path.append('../../../calc')
+import viz
+
+viz.set_book_style()
+viz.plot_scaling_tax()
+plt.show()
+```
+
 We can formalize the **Distributed Step Time** equation and map it directly to our Iron Law variables:
 
 $$ T_{step}(N) = \underbrace{\frac{T_{compute}}{N}}_{\text{FLOPS Term}} + \underbrace{T_{comm}(N)}_{\text{Bandwidth Term}} - T_{overlap} $$
@@ -2011,11 +2029,11 @@ A detailed analysis of these physical systems—including TPU Pods, SuperPODs, a
 
 Distributed training involves counterintuitive behavior that leads to common misconceptions. These fallacies and pitfalls capture errors that waste compute resources and delay research progress.
 
-**Fallacy:** _Linear speedup is achievable with sufficient engineering effort._
+**Fallacy:** ***Linear speedup is achievable with sufficient engineering effort.***
 
 Amdahl's Law establishes hard limits: any sequential component bounds maximum speedup regardless of parallelism. In distributed training, gradient synchronization is inherently sequential since all gradients must be collected before any update proceeds. As @sec-distributed-training-systems-efficiency-metrics demonstrates, the scaling efficiency equation $\text{Efficiency}(N) = 1/(1 + N(T_{comm}(N) - T_{overlap})/T_{compute})$ reveals how communication overhead dominates as $N$ increases. Even with perfect overlap and optimal algorithms, communication overhead grows with cluster size. For data parallelism, AllReduce time increases logarithmically with tree algorithms or linearly in the latency term with ring algorithms as GPU count grows. A 1000-GPU cluster will never train 1000x faster than a single GPU; achieving 500x speedup would be exceptional, and 100-200x is more typical for communication-heavy workloads. Organizations that budget projects assuming linear scaling inevitably miss deadlines and overspend on compute.
 
-**Pitfall:** _Hyperparameters tuned on small clusters transfer directly to large-scale training._
+**Pitfall:** ***Hyperparameters tuned on small clusters transfer directly to large-scale training.***
 
 Engineers tune hyperparameters on 8-GPU workstations then deploy to 256-GPU clusters expecting identical behavior. In production, convergence patterns change fundamentally with scale. The most critical hyperparameter is learning rate: as @sec-distributed-training-systems-data-parallelism explains, batch size increases proportionally with GPU count in data parallelism, requiring learning rate adjustments. The "linear scaling rule"[^fn-linear-scaling] [@goyal2017accurate] suggests $\eta_{large} = \eta_{base} \times (B_{large}/B_{base})$, but this relationship holds only within bounds.
 
@@ -2023,27 +2041,27 @@ Engineers tune hyperparameters on 8-GPU workstations then deploy to 256-GPU clus
 
 Beyond the critical batch size (model and dataset dependent, often 8K to 32K for vision models), this relationship breaks down. A team training ResNet-50 on ImageNet with batch size 256 and learning rate 0.1 achieves 76.2% top-1 accuracy. Scaling to 1024 GPUs with batch size 32K and learning rate 12.8 (following linear scaling) produces 74.8% accuracy and slower convergence due to gradient noise reduction. Warmup schedules, weight decay adjustment, and careful momentum tuning recover most lost accuracy, but require systematic experimentation at target scale. Organizations that skip these scaling studies waste thousands of GPU-hours on suboptimal runs.
 
-**Fallacy:** _Data parallelism scales indefinitely by adding more GPUs._
+**Fallacy:** ***Data parallelism scales indefinitely by adding more GPUs.***
 
 Engineers assume more GPUs always accelerate training. In production, statistical efficiency limits overwhelm hardware gains. As @sec-distributed-training-systems-data-parallelism establishes, data parallelism increases effective batch size proportionally with GPU count ($B_{total} = N \times B_{local}$), but gradient quality grows sublinearly beyond model-specific thresholds. A 100K-sample batch may provide only 2x the gradient information of a 10K-sample batch, not 10x, because samples become redundant within the loss landscape. The critical batch size defines where marginal returns collapse: for BERT-Base it occurs near 8K samples, for ResNet-50 near 32K samples. Beyond this threshold, doubling GPU count doubles cost but provides minimal convergence acceleration. A major cloud provider trained a large language model using 1024 GPUs that converged in 18 hours at $45,000 compute cost; the same model on 512 GPUs converged in 19 hours at $22,000 cost, demonstrating how exceeding critical batch size wastes resources without meaningful time savings.
 
-**Pitfall:** _Choosing parallelism strategy based solely on memory constraints._
+**Pitfall:** ***Choosing parallelism strategy based solely on memory constraints.***
 
 Engineers see that a 70B model exceeds 80GB GPU memory and immediately choose tensor parallelism or pipeline parallelism to split weights. In production, the optimal strategy depends on the interaction between memory pressure, computation patterns, and communication topology. As @sec-distributed-training-systems-parallelism-strategy-comparison explains, tensor parallelism splits each layer across devices with AllReduce synchronization per layer, achieving even memory distribution but placing communication on the critical path. Pipeline parallelism assigns complete layers to stages with point-to-point transfers between stages, reducing per-step communication but introducing pipeline bubble overhead that wastes 10-30% of cycles. For a 175B model on 64 A100 GPUs where tensor parallelism degree-8 enables training, pipeline parallelism with 8 stages achieves 23% higher throughput due to reduced all-to-all communication despite similar memory footprints. The decision requires profiling communication patterns and bubble overhead, not just checking if weights fit in memory.
 
-**Fallacy:** _FSDP and ZeRO always improve training efficiency._
+**Fallacy:** ***FSDP and ZeRO always improve training efficiency.***
 
 Engineers adopt FSDP (Fully Sharded Data Parallel) universally after reading that it "reduces memory and enables larger models". In production, sharding introduces 10-25% communication overhead that only pays off when memory pressure justifies it. FSDP reduces memory footprint by sharding optimizer state, gradients, and optionally parameters across GPUs, but requires AllGather operations before each forward pass and ReduceScatter after backward pass. For a 7B model on A100-80GB GPUs with batch size 4, standard DDP achieves 145 samples/second while FSDP achieves only 118 samples/second (19% slower) because the model fits comfortably without sharding and the added communication overhead provides no benefit. FSDP provides value when model plus optimizer state exceeds single-GPU memory, when enabling larger per-GPU batch sizes justifies the overhead, or when ZeRO-Offload to CPU memory extends capacity. A 65B model that cannot fit on 80GB GPUs becomes trainable with FSDP ZeRO-3, accepting 15% throughput loss to enable training at all. Applying FSDP universally without measuring memory pressure wastes performance.
 
-**Fallacy:** _Parallelism overhead is roughly constant regardless of model size._
+**Fallacy:** ***Parallelism overhead is roughly constant regardless of model size.***
 
 Engineers benchmark parallelism strategies on convenient small models then apply conclusions to large-scale training. In production, the ratio between computation and communication time changes dramatically with model size, inverting strategic decisions. AllReduce communication time depends primarily on gradient tensor size and network bandwidth, growing roughly linearly with parameter count, while forward and backward pass computation time grows superlinearly due to larger matrix operations. For a 1B parameter model where forward/backward pass takes 50ms and AllReduce takes 25ms, communication overhead consumes 33% of step time. For a 70B parameter model where forward/backward takes 2400ms and AllReduce takes 180ms, communication overhead drops to 7% despite the gradient size being 70x larger. Decisions made on small models ("pipeline parallelism's 15% bubble overhead makes it always slower than data parallelism") completely invert at scale where data parallelism's communication overhead reaches 25-40%. Reliable strategy selection requires either profiling at target scale or analytical models that account for how computation scales as $O(n^2)$ to $O(n^3)$ while communication scales as $O(n)$.
 
-**Pitfall:** _Gradient accumulation is free._
+**Pitfall:** ***Gradient accumulation is free.***
 
 Engineers use gradient accumulation to simulate larger batch sizes, reducing synchronization frequency from every step to every $K$ steps. The technique appears cost-free since it eliminates $(K-1)/K$ of communication overhead. In production, accumulation introduces memory consumption, latency expansion, and numerical precision risks. Accumulated gradients consume additional memory throughout the accumulation window: for a 7B model, each accumulated step requires 14GB of FP16 gradient storage, limiting how many steps can accumulate before memory exhaustion. Effective step time increases proportionally with accumulation steps, so accumulating 8 steps means optimizer updates occur 8x less frequently, potentially slowing convergence despite higher throughput. Most critically, accumulated FP16 gradients risk overflow when summing hundreds of gradient tensors, particularly in early training when loss values are large. A team training a transformer model with 16-step gradient accumulation in FP16 experienced loss spikes and divergence at step 1200; switching to 4-step accumulation with more frequent synchronization resolved the instability despite higher communication costs. Gradient accumulation trades communication for memory and numerical stability.
 
-**Pitfall:** _Using fixed checkpoint intervals regardless of system characteristics._
+**Pitfall:** ***Using fixed checkpoint intervals regardless of system characteristics.***
 
 Engineers checkpoint distributed training "every hour" or "every 1000 steps" based on intuition rather than analysis. In production, optimal checkpoint frequency depends on the mathematical relationship between checkpoint cost and failure rate. The Young-Daly formula establishes the optimal checkpoint interval as $T_{opt} = \sqrt{2 \times C \times MTBF}$, where $C$ is checkpoint time and MTBF is mean time between failures. For a 512-GPU cluster with 4-hour MTBF and 5-minute checkpoint time, the optimal interval is $T_{opt} = \sqrt{2 \times 5 \times 240} = \sqrt{2400} \approx 49$ minutes. Checkpointing every 15 minutes "to be safe" wastes 5.4% of compute time on unnecessary checkpoint overhead, while checkpointing every 2 hours risks losing 1.8 hours of work on failure (2 hours minus 49 minutes since last checkpoint). For larger models where checkpoint time increases to 15 minutes due to model size and storage bandwidth, optimal interval becomes 85 minutes, not the "more frequent is better" assumption that drives some teams to checkpoint every 30 minutes and waste 33% more time on checkpointing than necessary. The cost of suboptimal checkpointing scales with cluster size: a 1024-GPU cluster at $2/GPU-hour loses $3400 per day to excessive checkpointing when using 30-minute intervals instead of optimal 85-minute intervals.
 
@@ -2062,7 +2080,7 @@ We explored the **3D Parallelism Cube** (@fig-3d-parallelism-cube-summary), the 
 
 Ultimately, the choice of parallelism is a **loop transformation** applied by the cluster-level compiler. By matching logical communication patterns to physical hardware hierarchies, we move from the "linear scaling regime" of small clusters to the "communication-bound" reality of the exascale supercomputer.
 
-::: {.callout-important title="Key Takeaways"}
+::: {.callout-takeaways title="Key Takeaways"}
 
 * **Communication-Computation Ratio is the ceiling**: Distributed training is governed by an extended Amdahl's Law. Speedup is limited by the sequential nature of synchronization (AllReduce) relative to the parallel work of computation.
 * **Data parallelism is the default, but hits the batch trap**: Scaling replicas improves throughput linearly until you hit the "Critical Batch Size," beyond which larger batches yield diminishing returns in convergence.

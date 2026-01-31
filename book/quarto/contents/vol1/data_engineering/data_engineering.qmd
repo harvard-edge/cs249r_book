@@ -24,19 +24,12 @@ In conventional software, programmers write logic that computers execute. In mac
 
 ::: {.callout-tip title="Learning Objectives"}
 
-- Apply the Four Pillars framework to evaluate data engineering trade-offs across quality, reliability, scalability, and governance
-
-- Design data acquisition strategies combining datasets, crowdsourcing, and synthetic generation based on quantitative cost-quality trade-offs
-
+- Explain the Four Pillars framework for evaluating data engineering trade-offs across quality, reliability, scalability, and governance
+- Design data acquisition strategies combining datasets, crowdsourcing, and synthetic generation based on cost-quality trade-offs
 - Architect data pipelines with validation, monitoring, and graceful degradation for operational reliability
-
-- Implement training-serving consistency through idempotent transformations and detect drift using PSI and statistical methods
-
-- Evaluate storage architectures by matching ML workload patterns to databases, warehouses, lakes, and feature stores
-
-- Build data labeling systems balancing accuracy, throughput, and cost with quality control and consensus mechanisms
-
-- Apply governance practices for lineage tracking, privacy protection, and regulatory compliance throughout the data lifecycle
+- Implement training-serving consistency through idempotent transformations and drift detection
+- Build data labeling systems balancing accuracy, throughput, and cost with quality control mechanisms
+- Evaluate storage and governance architectures for ML workloads including lineage tracking and regulatory compliance
 
 :::
 
@@ -119,7 +112,7 @@ These failure modes require systematic engineering approaches. To understand why
 
 ### The Physics of Data: Entropy and Gravity {#sec-data-engineering-ml-physics-of-data}
 
-To engineer data systems effectively, we must move beyond the "data as code" metaphor and treat data as a physical substance with measurable properties. Just as diverse materials have density and viscosity, datasets have **Information Entropy** and **Data Gravity**.
+To engineer data systems effectively, we must move beyond the "data as code" (@principle-data-as-code) metaphor and treat data as a physical substance with measurable properties. Just as diverse materials have density and viscosity, datasets have **Information Entropy** and **Data Gravity** (@principle-data-gravity).
 
 **Data Gravity** is the cost of movement. It is a function of volume ($V$) and network bandwidth ($BW$). The time to move a petabyte dataset across a 10 Gbps link is fixed by physics ($T = V/BW \approx 10 \text{ days}$). This gravity dictates architecture: because moving 1PB to the compute is slow and expensive, we must move the compute to the data. This explains the rise of "Data Lakehouse" architectures where processing engines (Spark, Presto) run directly on storage nodes.
 
@@ -1533,7 +1526,13 @@ This pattern catches approximately 60% of production data issues before they rea
 
 ML models fundamentally assume that production data resembles training data. When this assumption breaks, model performance degrades silently without obvious errors or system failures. Data drift detection provides early warning before accuracy drops become severe, enabling proactive response rather than reactive recovery after users experience degraded service. Unlike the validation and monitoring techniques we have examined that catch immediate data quality issues, drift detection identifies gradual statistical changes in data distributions that compound over time to undermine model effectiveness.
 
-The **Degradation Equation** from @sec-introduction formalizes this relationship: $\text{Accuracy}(t) \approx \text{Accuracy}_0 - \lambda \cdot D(P_t \| P_0)$. The distributional divergence term $D(P_t \| P_0)$ directly measures drift—as serving data $P_t$ diverges from training data $P_0$, accuracy erodes proportionally. The detection metrics examined below (PSI, KL divergence, statistical tests) operationalize this divergence measurement, transforming the theoretical equation into actionable monitoring infrastructure. When PSI exceeds 0.2 or KL divergence crosses threshold, the system signals that $D$ has grown large enough to materially impact $\text{Accuracy}(t)$.
+The **Degradation Equation** from @sec-introduction formalizes this relationship:
+
+$$
+\text{Accuracy}(t) \approx \text{Accuracy}_0 - \lambda \cdot D(P_t \| P_0)
+$$
+
+The distributional divergence term $D(P_t \| P_0)$ directly measures drift---as serving data $P_t$ diverges from training data $P_0$, accuracy erodes proportionally. The detection metrics examined below (PSI, KL divergence, statistical tests) operationalize this divergence measurement, transforming the theoretical equation into actionable monitoring infrastructure. When PSI exceeds 0.2 or KL divergence crosses threshold, the system signals that $D$ has grown large enough to materially impact $\text{Accuracy}(t)$.
 
 This subsection provides comprehensive coverage of drift detection because production experience reveals that drift detection and response consume 30–40% of ongoing ML operations effort, making this a core data engineering responsibility rather than an optional advanced topic. We examine drift types, quantitative detection metrics, monitoring infrastructure, and response strategies here; @sec-machine-learning-operations-mlops builds on this foundation to address operational response orchestration and automated retraining pipelines at scale. The insidious nature of drift-induced failures motivates systematic detection: model accuracy degrades gradually over weeks or months rather than failing catastrophically, making problems difficult to attribute to specific causes without quantitative distribution monitoring.
 
@@ -1647,7 +1646,31 @@ With comprehensive pipeline architecture established—quality through validatio
 
 ## Data Ingestion {#sec-data-engineering-ml-data-ingestion-8efc}
 
-Ingestion is the boundary where externally acquired data enters the controlled pipeline environment. The choice of ingestion pattern determines how quickly new data reaches the model, how much infrastructure the system requires, and how errors are detected and recovered. This section examines the two fundamental ingestion patterns, batch and streaming, along with the ETL and ELT processing paradigms that govern how transformations are applied during ingestion. Together, these choices shape the cost, latency, and reliability profile of every downstream pipeline stage.
+Ingestion is the boundary where externally acquired data enters the controlled pipeline environment. The choice of ingestion pattern determines how quickly new data reaches the model, how much infrastructure the system requires, and how errors are detected and recovered.
+
+A critical, often overlooked constraint in ingestion design is the **Input/Output (IO) Bottleneck**. Training speed is governed by a simple inequality:
+$ T_{step} = \max(T_{compute}, T_{io}) $
+If your data pipeline cannot decode images fast enough to keep the GPU busy, your expensive accelerator sits idle. This phenomenon creates a "Choke Point" where adding more GPUs yields zero speedup.
+
+The following plot (@fig-dataloader-choke-point) visualizes this **Dataloader Choke Point**, showing the "Starvation Region" where the CPU limits performance.
+
+```{python}
+#| label: fig-dataloader-choke-point
+#| echo: false
+#| fig-cap: "**The Dataloader Choke Point.** Training Throughput (img/s) vs. Number of DataLoader Workers. The blue curve shows CPU throughput scaling linearly with workers until hitting disk limits. The red dashed line is the GPU's consumption capacity (e.g., ResNet-50 consuming 3,000 img/s). The system is bottlenecked by whichever is lower. In the 'Starvation Region' (left), the GPU is idle waiting for data. In the 'Saturated Region' (right), the GPU is fully utilized, and adding more workers wastes CPU memory."
+
+import sys
+import matplotlib.pyplot as plt
+# Ensure calc directory is in path
+sys.path.append('../../../calc')
+import viz
+
+viz.set_book_style()
+viz.plot_dataloader_choke_point()
+plt.show()
+```
+
+This section examines the two fundamental ingestion patterns, batch and streaming, along with the ETL and ELT processing paradigms that govern how transformations are applied during ingestion. Together, these choices shape the cost, latency, and reliability profile of every downstream pipeline stage.
 
 ### Batch vs. Streaming Ingestion Patterns {#sec-data-engineering-ml-batch-vs-streaming-ingestion-patterns-e1b2}
 
@@ -1987,7 +2010,7 @@ Outlier detection and treatment is another important aspect of data cleaning, bu
 
 Quality assessment goes hand in hand with data cleaning, providing a systematic approach to evaluating the reliability and usefulness of data. This process involves examining various aspects of data quality, including accuracy, completeness, consistency, and timeliness. In production systems, data quality degrades in subtle ways that basic metrics miss: fields that never contain nulls suddenly show sparse patterns, numeric distributions drift from their training ranges, or categorical values appear that weren't present during model development.
 
-To address these subtle degradation patterns, production quality monitoring requires specific metrics beyond simple missing value counts as discussed in @sec-data-engineering-ml-quality-validation-monitoring-498f. Critical indicators include null value patterns by feature (sudden increases suggest upstream failures), count anomalies (10x increases often indicate data duplication or pipeline errors), value range violations (prices becoming negative, ages exceeding realistic bounds), and join failure rates between data sources. Statistical drift detection[^fn-data-drift] becomes essential by monitoring means, variances, and quantiles of features over time to catch gradual degradation before it impacts model performance. For example, in an e-commerce recommendation system, the average user session length might gradually increase from 8 minutes to 12 minutes over six months due to improved site design, but a sudden drop to 3 minutes suggests a data collection bug.
+To address these subtle degradation patterns, production quality monitoring requires specific metrics beyond simple missing value counts as discussed in @sec-data-engineering-ml-quality-validation-monitoring-498f. Critical indicators include null value patterns by feature (sudden increases suggest upstream failures), count anomalies (10x increases often indicate data duplication or pipeline errors), value range violations (prices becoming negative, ages exceeding realistic bounds), and join failure rates between data sources. **Statistical Drift** (@principle-statistical-drift) detection[^fn-data-drift] becomes essential by monitoring means, variances, and quantiles of features over time to catch gradual degradation before it impacts model performance. For example, in an e-commerce recommendation system, the average user session length might gradually increase from 8 minutes to 12 minutes over six months due to improved site design, but a sudden drop to 3 minutes suggests a data collection bug.
 
 [^fn-data-drift]: **Data Drift**: The term "drift" comes from Old Norse "drifa" (to drive or push), originally describing slow movement caused by external forces like wind or current. In ML, data drift describes the gradual movement of production data distributions away from training baselines, pushed by forces like changing user behavior or evolving systems. Unlike model decay (degradation from unchanged data), drift specifically denotes distribution shift requiring monitoring of feature statistics to detect before accuracy degrades.
 
@@ -2062,7 +2085,7 @@ Single-machine processing suffices for surprisingly large workloads when enginee
 
 [^fn-parquet]: **Parquet**: Named after the herringbone wood flooring pattern, this columnar storage format (developed by Cloudera and Twitter, 2013) stores data in nested column structures that visually resemble parquet flooring tiles. The name reflects how data is interlocked column-by-column rather than row-by-row. For ML systems, this columnar layout enables reading only required features and achieves 5-10x I/O reduction compared to row-based formats like CSV.
 
-Distributed processing frameworks become necessary when data volumes or computational requirements exceed single-machine capacity, but the speedup achievable through parallelization faces inherent limits described by Amdahl's Law:
+Distributed processing frameworks become necessary when data volumes or computational requirements exceed single-machine capacity, but the speedup achievable through parallelization faces inherent limits described by **Amdahl's Law** (@principle-amdahls-law):
 
 $$\text{Speedup} \leq \frac{1}{S + \frac{P}{N}}$$
 
@@ -2268,7 +2291,7 @@ $$\text{Total Cost} = N \times \text{Cost}_{\text{label}} \times (1 + R_{\text{r
 
 where $N$ represents the number of examples, $\text{Cost}_{\text{label}}$ is the base cost per label, $R_{\text{review}}$ is the fraction requiring expert review (typically 0.05-0.15), and $R_{\text{rework}}$ accounts for labels requiring correction (typically 0.10-0.30). This equation reveals how quality requirements compound costs: a dataset requiring 1 million labels at $0.10 per label with 10% expert review (costing 5x more, or $0.50) and 20% rework reaches $138,000, not the $100,000 that naive calculation suggests. For comparison, training a ResNet-50 model on this data might cost only $50 for compute—nearly 3,000x less than labeling, demonstrating why labeling economics dominate total system costs yet receive insufficient attention during planning phases. Amdahl's Law formalizes this serial bottleneck principle.
 
-::: {.callout-notebook title="Amdahl's Law for Data Pipelines"}
+::: {.callout-notebook #notebook-amdahl-pipelines title="Amdahl's Law for Data Pipelines"}
 **The Serial Bottleneck Principle**: Amdahl's Law reveals why labeling dominates data engineering costs and why parallelization alone cannot solve the problem.
 
 The maximum speedup from parallelization is bounded by the serial fraction:
@@ -2634,7 +2657,9 @@ To build engineering judgment, practitioners must internalize the orders of magn
 | **Internet (CA to VA)**  | 100,000,000      | 6 years         | Global user experience       |
 +--------------------------+------------------+-----------------+------------------------------+
 
-: **Latency Numbers Every ML Systems Engineer Should Know**: Understanding the quantitative disparities in the storage hierarchy is essential for diagnosing bottlenecks. If a CPU cycle were 1 second, fetching data from local SSD would be like waiting 2 days, while a cross-country network request would take 6 years. Source: Adapted from Jeff Dean's "Numbers Every Programmer Should Know". {#tbl-ml-latencies}
+: **Latency Numbers Every ML Systems Engineer Should Know**: Understanding the quantitative disparities in the storage hierarchy is essential for diagnosing bottlenecks. If a CPU cycle were 1 second, fetching data from local SSD would be like waiting 2 days, while a cross-country network request would take 6 years. Source: Adapted from Jeff Dean's[^fn-jeff-dean] "Numbers Every Programmer Should Know". {#tbl-ml-latencies}
+
+[^fn-jeff-dean]: **Jeff Dean**: Google Senior Fellow and co-founder of Google Brain. He is the systems architect behind many of the technologies that define modern distributed computing, including MapReduce, BigTable, Spanner, and TensorFlow. His focus on "systems that scale" and "numbers everyone should know" established the quantitative engineering culture that allowed ML to transition from academic research to planetary-scale deployment.
 
 Beyond the core storage capabilities we have examined, ML workloads introduce unique requirements that conventional databases and warehouses were not designed to handle. Understanding these ML-specific needs and their performance implications shapes infrastructure decisions that cascade through the entire development lifecycle, from experimental notebooks to production serving systems handling millions of requests per second.
 
@@ -3469,27 +3494,27 @@ Debugging the model before verifying data consistency wastes engineering cycles 
 
 Data engineering involves managing complex distributed systems where statistical properties dominate correctness more than traditional software guarantees. The scale and stochastic nature of ML data pipelines create counterintuitive failure modes that differ fundamentally from conventional software systems. Engineers transferring intuition from traditional backend development encounter misconceptions about data quality, pipeline reliability, and distribution stability. These fallacies lead to systematic underinvestment in data infrastructure, resulting in silent model degradation, failed production deployments, and wasted compute resources on training with corrupted data.
 
-**Fallacy:** _More data always leads to better model performance._
+**Fallacy:** ***More data always leads to better model performance.***
 
 Learning theory emphasizes sample complexity, creating the intuition that larger datasets reduce overfitting. However, this assumes constant quality as quantity scales. Research on ImageNet found label errors in 3.4% of validation set examples despite extensive curation [@northcutt2021pervasive], meaning a 10-million-example dataset contains 340,000 mislabeled instances. Empirical studies show 10% label noise reduces model accuracy by 5 to 8 percentage points for typical vision tasks, with the degradation compounding during training. As @sec-data-engineering-ml-data-quality-code-1cca establishes, a curated 100,000-example dataset covering diverse demographics and edge cases outperforms a haphazard 1-million-example dataset skewed toward common cases. Training on 10x more data requires 10x more GPU hours while potentially achieving worse accuracy, meaning teams that prioritize curation over collection achieve better performance at lower infrastructure costs.
 
-**Pitfall:** _Treating data labeling as a simple mechanical task that can be outsourced without oversight._
+**Pitfall:** ***Treating data labeling as a simple mechanical task that can be outsourced without oversight.***
 
 Teams assume labeling is conceptually simple (show image, get label), but @sec-data-engineering-ml-scaling-aiassisted-labeling-9360 reveals labeling economics dominate total costs. Expert review costs 10 to 50x more than crowdsourcing ($0.50-2.00 vs $0.01-0.05 per label), yet skipping oversight triggers expensive rework. A 1-million-label dataset at $0.10 per label with 10% expert review and 20% rework costs $138,000, not the naive $100,000 estimate. Training a ResNet-50 on this data costs approximately $50 in compute, meaning labeling exceeds training costs by 2,760x. Quality degradation compounds the economic waste: annotators scoring below 85% on gold standards introduce systematic errors that models amplify. Without consensus mechanisms (3 to 5 labels per example, Fleiss' kappa greater than 0.4), ambiguous cases receive arbitrary labels causing 8 to 15% accuracy drops on production edge cases that require costly relabeling and retraining cycles.
 
-**Fallacy:** _Data engineering is a one-time setup that can be completed before model development begins._
+**Fallacy:** ***Data engineering is a one-time setup that can be completed before model development begins.***
 
 Traditional software infrastructure precedes application development and remains stable, but ML systems face continuous distribution drift that static pipelines cannot handle. As @sec-data-engineering-ml-detecting-responding-data-drift-509a explains, drift detection and response consume 30 to 40% of ongoing ML operations effort. Data distributions shift through covariate drift (demographics evolve), label shift (seasonal class frequencies), and concept drift (feature-label relationships change). The Population Stability Index (PSI) quantifies retraining triggers: PSI greater than or equal to 0.2 signals significant changes requiring model updates, while 0.1 to 0.2 demands investigation. A recommendation system might observe PSI = 0.19 as users age from 25-35 to 35-45 over six months, requiring pipeline adaptation. Systems designed as static infrastructure lack monitoring, alerting, and automated response mechanisms that production deployments require. Teams must budget 30 to 40% of ongoing engineering capacity for continuous evolution, not treat data engineering as a phase that completes before modeling.
 
-**Fallacy:** _Training and test data splitting is sufficient to ensure model generalization._
+**Fallacy:** ***Training and test data splitting is sufficient to ensure model generalization.***
 
 ML education emphasizes train/test splitting to prevent overfitting, creating the belief that validation accuracy predicts production performance. This assumes training, testing, and production data share the same distribution, which rarely holds. As @sec-data-engineering-ml-ensuring-trainingserving-consistency-c683 explains, training-serving skew causes silent production failures. A recommendation system computing "user_lifetime_purchases" by joining complete transaction histories during training but using weekly-updated materialized views during serving creates 15% feature discrepancy, causing observed 12% accuracy drops in A/B tests. Geographic shifts compound the problem: models achieving 95% accuracy on North American test sets drop to 73% in Southeast Asian markets due to demographic and linguistic differences. These distribution shifts manifest as accuracy degradation for specific user segments, creating fairness violations. Production systems require continuous monitoring using metrics like the Kolmogorov-Smirnov test (statistically significant drift at $p < 0.05$), detecting issues before they affect users rather than relying solely on development-time validation.
 
-**Pitfall:** _Building data pipelines without considering failure modes and recovery mechanisms._
+**Pitfall:** ***Building data pipelines without considering failure modes and recovery mechanisms.***
 
 Engineers from traditional request-response services design pipelines assuming data arrives in expected formats at expected rates, but production pipelines face fundamentally different failure modes. As @sec-data-engineering-ml-quality-validation-monitoring-498f establishes, severity-based monitoring distinguishes complete failures (zero throughput for greater than 5 minutes) from gradual degradation (throughput dropping to 80% of baseline, error rates exceeding 5%, quality metrics drifting more than 2 standard deviations). A recommendation system processing 50,000 events per second sets throughput alerts at 40,000 events per second sustained for more than 10 minutes, catching capacity problems with headroom for normal variation. Feature quality monitoring tracks null rates: when user_age shows nulls in more than 5% of records despite training data containing less than 1% nulls, upstream sources have failed. Failures cascade across multiple dimensions simultaneously: database failovers reduce throughput to 35,000 events per second while increasing null rates to 8% and duplicating 3% of records. Data quality validation catches approximately 60% of issues through executable assertions, but the remaining 40% require runtime monitoring with automated alerting and graceful degradation.
 
-**Pitfall:** _Choosing storage architecture based solely on capacity cost without considering access patterns and performance requirements._
+**Pitfall:** ***Choosing storage architecture based solely on capacity cost without considering access patterns and performance requirements.***
 
 Teams compare raw storage costs (S3 Standard at $23 per TB per month vs Glacier Deep Archive at $1 per TB per month) and select the cheapest option without analyzing access patterns. However, @sec-data-engineering-ml-ml-storage-systems-architecture-options-67fa establishes that total cost of ownership includes retrieval costs, access latency, and throughput limitations. Glacier Deep Archive charges $0.02 per GB for retrieval plus 12-hour access latency, meaning a single full retrieval of 100 TB costs $2,000, equivalent to 87 months of S3 Standard storage for that data. Training workloads requiring random access to 10% of a 100 TB dataset daily would spend $600 per day on Glacier retrievals versus $230 per month for S3 Standard storage with 3,500 MB/s sustained read throughput. Local NVMe storage at $0.10 per GB ($100 per TB) appears expensive but delivers 7,000 MB/s sequential reads and sub-millisecond random access latency, completing training epochs 15 to 30x faster than S3 for I/O-bound workloads. Organizations must match storage tiers to access patterns: cold archival data to Glacier, training datasets requiring sequential scans to S3, and active training data with random access patterns to local SSDs or high-performance networked storage.
 
@@ -3501,7 +3526,7 @@ Data engineering provides the foundational infrastructure that transforms raw in
 
 The technical architecture of data systems demonstrates how engineering decisions compound across the pipeline to create either reliable, scalable foundations or brittle, maintenance-heavy technical debt. Data acquisition strategies must navigate the reality that perfect datasets rarely exist in nature, requiring sophisticated approaches ranging from crowdsourcing and synthetic generation to careful curation and active learning. Storage architectures from traditional databases to modern data lakes and feature stores represent fundamental choices about how data flows through the system, affecting everything from training speed to serving latency.
 
-::: {.callout-important title="Key Takeaways"}
+::: {.callout-takeaways title="Key Takeaways"}
 
 * **Data is code: version it, test it, review it.** The dataset is the source code of an ML system. Apply the same rigor: version control, unit tests (validation), and code review (data review).
 

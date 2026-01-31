@@ -24,11 +24,12 @@ Architectures define *what* computations neural networks must perform, but knowi
 
 ::: {.callout-tip title="Learning Objectives"}
 
-- Explain how ML frameworks enable practical development through computational graphs, automatic differentiation, and hardware-optimized operations
+- Explain how ML frameworks solve three core problems: execution (computational graphs), differentiation (automatic differentiation), and abstraction (hardware-optimized operations)
 - Compare static and dynamic computational graph execution models in terms of debugging capability, optimization potential, and deployment efficiency
+- Describe the nn.Module abstraction pattern for hierarchical composition, automatic parameter discovery, and mode-dependent behavior
 - Analyze how memory bandwidth constraints drive framework optimization strategies including kernel fusion and operation scheduling
-- Evaluate major framework architectures (TensorFlow, PyTorch, JAX) based on their design philosophies, execution models, and performance trade-offs
-- Apply systematic framework selection methodology by matching model requirements, hardware constraints, and deployment contexts to framework capabilities
+- Evaluate major framework architectures (TensorFlow, PyTorch, JAX) based on their design philosophies and performance trade-offs
+- Apply systematic framework selection methodology by matching model requirements, hardware constraints, and deployment contexts
 
 :::
 
@@ -73,7 +74,7 @@ The choice of execution mode determines both developer velocity and model perfor
 This tension between debuggability and performance shapes how frameworks should be evaluated more broadly. The following perspective reframes what a framework actually does.
 
 ::: {.callout-perspective title="The ML Compiler"}
-In the context of the **Iron Law**, a framework is fundamentally a **Compiler for the Silicon Contract**.
+In the context of the **Iron Law** (@principle-iron-law), a framework is fundamentally a **Compiler for the Silicon Contract**.
 
 Your "Source Code" is the model architecture (the **$Ops$** term). The framework's job is to take this high-level math and compile it into a series of hardware-specific kernel launches that:
 
@@ -88,7 +89,7 @@ With these three problems in mind, we can now define what a machine learning fra
 
 :::: {.callout-definition title="Machine Learning Frameworks"}
 
-***Machine Learning Frameworks*** are the **Compilers** for the Silicon Contract. They translate high-level mathematical definitions into hardware-specific execution plans, managing the **Abstraction Gap** between algorithmic logic and physical silicon constraints (memory layout, kernel dispatch, differentiation).
+***Machine Learning Frameworks*** are the **Compilers** for the Silicon Contract (@principle-silicon-contract). They translate high-level mathematical definitions into hardware-specific execution plans, managing the **Abstraction Gap** between algorithmic logic and physical silicon constraints (memory layout, kernel dispatch, differentiation).
 
 ::::
 
@@ -106,11 +107,11 @@ Understanding why modern frameworks are designed as they are requires tracing th
 
 [^fn-numpy]: **NumPy**: Contraction of "Numerical Python," created by Travis Oliphant in 2005 by merging two earlier projects (Numeric and Numarray). Released publicly in 2006, NumPy established the n-dimensional array as Python's standard numerical container. Its array-oriented computing model, borrowed from APL and MATLAB, remains the conceptual foundation for PyTorch tensors and TensorFlow arrays.
 
-3. **Automatic Differentiation (2015–present)**: While NumPy required engineers to manually derive and code gradients, modern frameworks like **TensorFlow** and **PyTorch** automated this through the **computational graph**. This architectural shift, separating the *definition* of the model from the *computation* of its derivatives, enabled the scaling of deep learning.
+3. **Automatic Differentiation (2015–present)**: While NumPy required engineers to manually derive and code gradients, modern frameworks like **TensorFlow** [@abadi2016tensorflow] and **PyTorch** automated this through the **computational graph**. This architectural shift, separating the *definition* of the model from the *computation* of its derivatives, enabled the scaling of deep learning.
 
 This evolution highlights a critical engineering lesson: scaling ML development required turning the mathematical chain rule into a software primitive. The transition from manual gradients to static graphs (Theano [@al2016theano], TensorFlow 1.x), and eventually to dynamic graphs (PyTorch), reflects the industry's search for the optimal balance between performance and developer velocity. @fig-mlfm-timeline visualizes this progression from foundational libraries to modern frameworks.
 
-::: {#fig-mlfm-timeline fig-env="figure" fig-pos="htb" fig-cap="**Computational Library Evolution**: Modern machine learning frameworks build upon decades of numerical computing advancements, transitioning from low-level routines like BLAS and LAPACK to high-level abstractions in NumPy, SciPy,[^fn-scipy-date] and finally to deep learning frameworks such as TensorFlow and PyTorch." fig-alt="Horizontal timeline from 1979 to 2018 with colored boxes marking key years. Dashed arrows connect to milestones below: 1979 BLAS introduced, 1992 LAPACK extends BLAS, 2006 NumPy becomes Python's numerical backbone, 2007 SciPy and Theano introduce computational graphs, 2015 TensorFlow revolutionizes distributed ML, 2016 PyTorch introduces dynamic graphs, 2018 JAX introduces functional paradigms."}
+::: {#fig-mlfm-timeline fig-env="figure" fig-pos="htb" fig-cap="**Computational Library Evolution**: Modern machine learning frameworks build upon decades of numerical computing advancements, transitioning from low-level routines like BLAS and LAPACK to high-level abstractions in NumPy, SciPy,[^fn-scipy-date] and finally to deep learning frameworks such as Theano [@bergstra2010theano], TensorFlow, and PyTorch." fig-alt="Horizontal timeline from 1979 to 2018 with colored boxes marking key years. Dashed arrows connect to milestones below: 1979 BLAS introduced, 1992 LAPACK extends BLAS, 2006 NumPy becomes Python's numerical backbone, 2007 SciPy and Theano introduce computational graphs, 2015 TensorFlow revolutionizes distributed ML, 2016 PyTorch introduces dynamic graphs, 2018 JAX introduces functional paradigms."}
 ```{.tikz}
 \begin{tikzpicture}[node distance=1mm,outer sep=0pt,font=\small\usefont{T1}{phv}{m}{n}]
 \tikzset{%
@@ -152,7 +153,7 @@ This evolution highlights a critical engineering lesson: scaling ML development 
 \node[Box={col2!50},below=2 of B2](BB2){LAPACK extends BLAS};
 \node[Box={col3!50},below=2 of B3](BB3){NumPy becomes Python's numerical backbone};
 \node[Box={col4!50},below=2 of B4](BB4){SciPy adds advanced computations};
-\node[Box={col4!50},below= 2mm of BB4](BBB4){Theano introduces computational graphs [@bergstra2010theano]};
+\node[Box={col4!50},below= 2mm of BB4](BBB4){Theano introduces computational graphs};
 \node[Box={col5!50},below=2 of B5](BB5){TensorFlow revolutionizes distributed ML};
 \node[Box={col6!50},below=2 of B6](BB6){PyTorch introduces dynamic graphs};
 \node[Box={col7!50},below=2 of B7](BB7){JAX introduces functional paradigms};
@@ -720,6 +721,24 @@ The compiler fuses this into one kernel: `FusedAddRelu`.
 Compilation is not magic; it is **overhead amortization**. For small, element-wise operations (like LayerNorm, GELU, Add), overhead often exceeds compute time by 10-100x. Fusing them is the only way to utilize the hardware.
 :::
 
+The following visualization demonstrates this tax in action. Eager execution (top) suffers from "gaps" where the GPU sits idle while Python dispatches the next kernel. Compilation (bottom) fuses these operations into a single kernel launch, eliminating the gaps.
+
+```{python}
+#| label: fig-python-tax
+#| echo: false
+#| fig-cap: "**The Python Tax.** Execution timeline for a sequence of small operations (e.g., LayerNorm). In Eager Mode (top), the GPU (blue) finishes quickly but must wait for the Python interpreter (red) to dispatch the next instruction. In Compiled Mode (bottom), the compiler fuses operations into a single kernel, eliminating dispatch overhead and keeping the GPU fully saturated."
+
+import sys
+import matplotlib.pyplot as plt
+# Ensure calc directory is in path
+sys.path.append('../../calc')
+import viz
+
+viz.set_book_style()
+viz.plot_python_tax()
+plt.show()
+```
+
 To achieve this fusion automatically without requiring users to write custom CUDA kernels, PyTorch 2.0 introduces a compiler stack designed to capture and optimize graphs dynamically.
 
 **Architecture: Three-Stage Compilation Pipeline.** torch.compile consists of three coordinated components:
@@ -1093,6 +1112,28 @@ From the case study in @sec-ai-frameworks-putting-together-anatomy-training-step
 **The Principle's Implication**: Small models benefit *disproportionately* from compilation. A 100-parameter toy model might see 10× speedup from torch.compile, while a 175B-parameter model sees only 1.3×. This explains why compilation matters most for efficient inference on smaller, deployed models.
 
 The execution problem determines *when* computation happens. But neural network training requires a capability that no amount of clever scheduling can provide: the ability to compute gradients automatically. A framework that executes efficiently but cannot differentiate is useless for training.
+
+### Frameworks for the Edge: TinyML and Micro-Runtimes {#sec-ai-frameworks-tinyml-micro-runtimes-2a1b}
+
+The compilation continuum reaches its extreme at the far edge. While cloud frameworks like PyTorch and TensorFlow 2.x prioritize flexibility through eager execution, **TinyML** systems operating on microcontrollers (MCUs) with kilobytes of memory cannot afford the overhead of a Python interpreter or a dynamic runtime.
+
+::: {.callout-lighthouse title="Lighthouse Example: TinyML Frameworks (KWS)"}
+
+**The Scenario**: Deploying our **Keyword Spotting (KWS)** model to an ARM Cortex-M4 microcontroller with 256 KB of RAM and 1 MB of Flash.
+
+**The Constraint**: A standard PyTorch runtime occupies ~500 MB. The Python interpreter itself occupies ~20 MB. Both are orders of magnitude larger than the entire device.
+
+**The Framework Solution**:
+Micro-frameworks like **TensorFlow Lite Micro (TFLM)** and **PyTorch ExecuTorch** solve this through **Extreme AOT Compilation**:
+
+1.  **Static Memory Planning**: The framework calculates the exact memory address for every tensor *at compile time*. There is no dynamic `malloc()` or garbage collection.
+2.  **Kernel Specialization**: Only the specific kernels used by the model (e.g., Conv2D, DepthwiseConv) are compiled into the binary. Unused code is stripped away.
+3.  **No-Interpreter Execution**: The model is converted into a flat sequence of function calls or a simple "Command Buffer" that the MCU executes directly in C/C++.
+
+**The Silicon Contract**: On TinyML devices, the contract is strictly **Memory-Bound**. The framework's primary job is to ensure the model's intermediate activations (the "working set") fit within the MCU's tiny SRAM.
+:::
+
+These micro-runtimes represent the "Pure AOT" endpoint of the continuum. By sacrificing all dynamic flexibility, they enable machine learning to run on devices consuming milliwatts of power, fulfilling the **Energy-Movement Invariant** (@principle-energy-movement) by keeping all data movement local to the chip.
 
 ## The Differentiation Problem {#sec-ai-frameworks-differentiation-problem-8b8a}
 
@@ -1739,11 +1780,11 @@ The way frameworks implement automatic differentiation varies significantly, wit
 
 **How Different Frameworks Implement AD.** The execution models covered in @sec-ai-frameworks-execution-problem-e1e1, namely eager, static graph, and hybrid, directly shape how each framework implements automatic differentiation:
 
-- **PyTorch** builds its autograd tape dynamically during forward execution, providing immediate debugging at the cost of graph-level optimization. The `grad_fn` chain mechanism detailed in @sec-ai-frameworks-pytorch-autograd-internals-4fa0 enables flexible control flow but requires storing the complete graph until backward pass completion.
+- **PyTorch** [@paszke2019pytorch] builds its autograd tape dynamically during forward execution, providing immediate debugging at the cost of graph-level optimization. The `grad_fn` chain mechanism detailed in @sec-ai-frameworks-pytorch-autograd-internals-4fa0 enables flexible control flow but requires storing the complete graph until backward pass completion.
 
 - **TensorFlow** (in its 1.x incarnation) performed symbolic differentiation during graph construction, enabling ahead-of-time optimization. Modern TensorFlow 2.x uses eager execution by default but provides `tf.function` for graph compilation when performance matters.
 
-- **JAX** transforms functions rather than tracking operations. The `jax.grad()` transformation returns a new function that computes gradients, enabling composition with `jax.vmap()` for vectorization and `jax.jit()` for compilation. This fundamentally different approach requires pure functions but enables powerful program transformations.
+- **JAX** [@frostig2018compiling] transforms functions rather than tracking operations. The `jax.grad()` transformation returns a new function that computes gradients, enabling composition with `jax.vmap()` for vectorization and `jax.jit()` for compilation. This fundamentally different approach requires pure functions but enables powerful program transformations.
 
 These implementation differences have direct practical consequences for framework selection, which @sec-ai-frameworks-major-framework-platform-analysis-fe96 examines in detail.
 
@@ -3332,31 +3373,31 @@ Understanding this flow enables informed optimization: fuse operations to reduce
 
 The training step analysis above demonstrates how abstract framework concepts translate to concrete system behavior. With this foundation, we can identify common reasoning errors, each accompanied by quantitative evidence from earlier sections.
 
-**Fallacy:** *"All frameworks provide equivalent performance for the same model architecture."*
+**Fallacy:** ***"All frameworks provide equivalent performance for the same model architecture."***
 
 Engineers assume that since ResNet-50 is mathematically identical across frameworks, performance must be equivalent. @tbl-framework-efficiency-matrix disproves this: PyTorch achieves 52ms inference at 32% hardware utilization, while TensorRT delivers 3ms at 88% utilization, a **17x performance gap** on identical hardware. The difference arises from kernel fusion, graph optimization depth, and memory access patterns. Organizations assuming framework equivalence routinely miss production targets by 5-10×.
 
-**Pitfall:** *Choosing frameworks based on popularity rather than project requirements.*
+**Pitfall:** ***Choosing frameworks based on popularity rather than project requirements.***
 
 @tbl-framework-efficiency-matrix shows the deployment spectrum: PyTorch Mobile requires 220MB memory, TensorFlow Lite needs 180MB, and TensorFlow Lite Micro runs in 32KB, a **7000x difference**. Teams building edge applications with PyTorch face either massive memory overhead or costly framework migration. Match framework capabilities to deployment constraints *before* development begins.
 
-**Fallacy:** *"Framework abstractions eliminate the need for systems knowledge."*
+**Fallacy:** ***"Framework abstractions eliminate the need for systems knowledge."***
 
 The Roofline Model disproves this fallacy. Element-wise operations like ReLU achieve arithmetic intensity of 0.125 FLOPS/byte, utilizing **under 0.1%** of an A100's peak compute regardless of framework. Understanding when operations are memory-bound vs. compute-bound and which sequences can be fused separates efficient implementations from those leaving 80-90% of hardware capacity unused. No framework can optimize away fundamental physics.
 
-**Pitfall:** *Ignoring vendor lock-in from framework-specific formats.*
+**Pitfall:** ***Ignoring vendor lock-in from framework-specific formats.***
 
 Converting TensorFlow SavedModel to PyTorch requires: rewriting custom operations, validating numerical equivalence across 10,000+ test cases, and retraining when operations lack exact equivalents, typically **3-6 engineer-months** for production systems. ONNX provides portability but supports only 80-85% of operations. Design for portability from the start by avoiding framework-specific features where standard alternatives exist.
 
-**Pitfall:** *Selecting development frameworks without evaluating production infrastructure.*
+**Pitfall:** ***Selecting development frameworks without evaluating production infrastructure.***
 
 Framework-infrastructure mismatches impose substantial operational overhead. TensorFlow Serving provides atomic model swaps with zero downtime; PyTorch deployments often require container restarts imposing 30-60 second outages. TensorFlow integrates natively with Prometheus/OpenTelemetry; PyTorch requires custom instrumentation adding 2-4 weeks of development. Evaluate the *complete deployment stack*, not just training APIs.
 
-**Fallacy:** *"Larger batch sizes always improve throughput."*
+**Fallacy:** ***"Larger batch sizes always improve throughput."***
 
 The Dispatch Overhead Equation (@eq-dispatch-overhead) reveals why this fails. A 7B parameter model in FP16 consumes 14GB, leaving 66GB on an A100-80GB. But increasing batch size from 8 to 32 quadruples activation memory for transformers (due to attention's $O(S^2)$ scaling), potentially triggering gradient checkpointing that **reduces throughput by 20-30%** despite the larger batch. The optimal batch size balances compute saturation (70-80% utilization), activation memory, and framework allocator overhead. Blindly maximizing batch size often achieves *lower* throughput than smaller batches.
 
-**Pitfall:** *Treating compilation overhead as negligible.*
+**Pitfall:** ***Treating compilation overhead as negligible.***
 
 @tbl-training-benchmark shows torch.compile achieves 48% higher ResNet-50 throughput than eager PyTorch, but incurs 15-60 seconds compilation overhead. For a 10,000-image experiment requiring 10 recompilations due to code changes:
 
@@ -3377,7 +3418,7 @@ Machine learning frameworks exist to solve three fundamental problems that would
 
 These problems are interconnected and constrained by physics, particularly the memory wall that makes data movement often more expensive than computation. Understanding these constraints explains why frameworks invest in kernel fusion, memory-efficient attention, and compilation pipelines.
 
-::: {.callout-important title="Key Takeaways"}
+::: {.callout-takeaways title="Key Takeaways"}
 
 * **Three problems define every framework**: Execution (how to run), differentiation (how to train), and abstraction (how to express). Design choices in each area determine framework behavior.
 * **The memory wall drives optimization**: Compute has grown approximately 1000× faster than memory bandwidth. Kernel fusion, operator scheduling, and data layout optimizations are designed to mitigate memory latency.

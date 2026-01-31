@@ -2229,31 +2229,31 @@ Several themes emerge across these case studies:
 
 Even organizations operating at the scales described above encounter recurring misconceptions. The following fallacies and pitfalls represent hard-won lessons from production ML systems, where assumptions from traditional computing fail to transfer to ML workloads.
 
-**Fallacy:** _Object storage latency is acceptable for training data._
+**Fallacy:** ***Object storage latency is acceptable for training data.***
 
 Object stores like S3 and GCS offer seemingly infinite capacity at low cost, leading teams to treat them as drop-in replacements for file systems. However, first-byte latency of 50-200ms for object storage versus 1-10ms for distributed file systems means that small-batch access patterns incur unacceptable overhead. A training pipeline reading 1000 small files sequentially from S3 spends more time waiting for first bytes than transferring data. As @sec-storage-object-storage-scale-188b demonstrates, object storage remains the most cost-effective option for large datasets when pipelines are designed around its characteristics: large sequential reads (multi-MB), extensive prefetching, and local caching. Treating object storage as a transparent NFS replacement yields training throughput 3-5x lower than achievable with proper access pattern optimization.
 
-**Pitfall:** _Sizing checkpoint storage by capacity rather than bandwidth._
+**Pitfall:** ***Sizing checkpoint storage by capacity rather than bandwidth.***
 
 Organizations provision checkpoint storage based on model size: "Our model is 500GB, so we need 5TB for 10 checkpoints." This ignores the critical constraint identified in @sec-storage-optimal-checkpoint-interval-youngdaly-formula-07b1: bandwidth during checkpoint writes. A 500GB checkpoint written to NFS at 1 GB/s takes 8+ minutes. For a 1000-GPU training job with MTBF of 4 hours, the Young-Daly optimal interval is approximately 23 minutes: $T_{opt} = \sqrt{2 \times T_{save} \times MTBF}$. Spending 8 minutes (35% of the interval) on checkpoint writes is unacceptable overhead. The same checkpoint written to parallel file system at 100 GB/s takes 5 seconds (0.4% overhead). Capacity planning must start with bandwidth requirements: "We need to write 500GB in under 30 seconds" leads to radically different architecture than "we need 5TB of capacity."
 
-**Fallacy:** _Checkpoint storage is a solved problem._
+**Fallacy:** ***Checkpoint storage is a solved problem.***
 
 Modern frameworks checkpoint transparently, creating the illusion that checkpointing "just works." This masks the coordination overhead that dominates checkpoint time at scale. With 1000 GPUs each writing 500MB, the aggregate checkpoint is 500GB. As @sec-storage-distributed-checkpointing-sharded-models-7369 explains, achieving this requires all ranks reaching the checkpoint barrier synchronously, coordinated storage access avoiding hotspots, verification that all shards completed successfully, and atomic update of the "latest checkpoint" pointer. The actual wall-clock time often exceeds theoretical write time by 2-3x due to stragglers, coordination, and verification. Organizations that benchmark single-node checkpointing (5 seconds) and linearly extrapolate to distributed settings (expecting 5 seconds) are consistently surprised when distributed checkpoint overhead yields 12-15 second wall-clock times.
 
-**Pitfall:** _Assuming training data locality exists._
+**Pitfall:** ***Assuming training data locality exists.***
 
 Traditional storage optimization assumes data locality: frequently accessed data should be cached near compute. For training data, this assumption fails fundamentally. As @sec-storage-data-locality-principles-7419 demonstrates, each training sample is accessed once per epoch, and randomized shuffling ensures no sample is accessed more frequently than others. Caching strategies designed for hot data provide zero benefit because the working set equals the entire dataset. Prefetching strategies that predict future access based on past access fail because shuffling makes access unpredictable. Storage systems designed with "hot tier" (SSD) and "cold tier" (HDD) architectures find all training data equally tepid: every sample has identical access frequency. Effective training storage must optimize for sequential bandwidth (200+ GB/s aggregate) and prefetch depth (64+ batches ahead) rather than cache hit rates.
 
-**Fallacy:** _Feature store latency does not matter because serving latency is dominated by model inference._
+**Fallacy:** ***Feature store latency does not matter because serving latency is dominated by model inference.***
 
 Teams assume that feature lookup latency is negligible compared to model inference time. For LLMs, this is true: model inference of 50-500ms dwarfs any feature lookup. For recommendation systems, this is catastrophically false. As @sec-storage-feature-lookup-latency-budget-2e90 explains, a recommendation model inference might take 2ms. With 100 features requiring 50th-percentile lookup of 1ms each, feature retrieval consumes 100ms, dominating the serving budget by 50x. Production feature stores for recommendation systems must achieve sub-millisecond P50 and single-digit-millisecond P99 lookups. Organizations that treat feature stores as "just another cache" with relaxed latency targets (10-50ms typical for caches) discover too late that feature lookup sits directly on the critical path for serving latency.
 
-**Pitfall:** _Underestimating point-in-time correctness requirements._
+**Pitfall:** ***Underestimating point-in-time correctness requirements.***
 
 Training a recommendation model on features that include the label (using "user clicked on item X" as a feature when predicting "will user click on item X?") creates models that work perfectly during training and fail catastrophically in production. Point-in-time correctness requires that features used during training reflect only information available before the prediction event. This constraint is easy to state and deceptively difficult to enforce in @sec-storage-feature-store-architecture-5328 implementations. Feature pipelines that aggregate over time windows, join multiple data sources, or depend on asynchronous updates can all violate point-in-time correctness in subtle ways. As @fig-pit-correctness demonstrates, joining training labels with features requires careful timestamp filtering to prevent future information from contaminating training data. The failure mode is insidious: models train well (95% offline accuracy), validate well (94% holdout accuracy), and then underperform in production (78% online CTR) without clear explanation. Engineering teams often chase phantom bugs for weeks before identifying temporal leakage as the root cause.
 
-**Fallacy:** _SSDs eliminate I/O bottlenecks for ML training._
+**Fallacy:** ***SSDs eliminate I/O bottlenecks for ML training.***
 
 The transition from HDDs to SSDs represents a transformative improvement in storage performance: 100x better random access latency, 10-30x higher IOPS, and 10-30x greater sequential bandwidth. This leads teams to assume that NVMe storage eliminates I/O as a bottleneck. As @sec-storage-io-optimization-ml-data-pipelines-b1ff quantifies, this assumption fails for three reasons.
 
@@ -2281,7 +2281,7 @@ Model registries provide versioning, lineage tracking, and governance for model 
 
 The following points summarize the essential principles that should guide storage system design for machine learning workloads.
 
-::: {.callout-important title="Key Takeaways"}
+::: {.callout-takeaways title="Key Takeaways"}
 
 * Storage bandwidth, not capacity, typically limits ML training throughput: systems must be designed to saturate accelerator memory bandwidth with training data, requiring careful attention to prefetching, data format optimization, and parallel I/O
 * Storage requirements differ dramatically by model type: LLMs need massive text corpora and terabyte-scale checkpoints, recommendation systems require real-time feature stores with sub-millisecond latency, and vision models demand efficient image pipeline formats

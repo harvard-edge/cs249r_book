@@ -24,11 +24,11 @@ Architectures define the computational patterns; frameworks translate those patt
 
 ::: {.callout-tip title="Learning Objectives"}
 
-- Calculate computational requirements (FLOPs) and memory footprints (activation storage, optimizer states) for neural network training operations
+- Calculate computational requirements (FLOPs) and memory footprints (activation storage, optimizer states) for neural network training
+- Compare optimization algorithms (SGD, Adam, AdamW) based on convergence speed, memory overhead, and computational cost
 - Identify performance bottlenecks in training pipelines by analyzing profiling data to distinguish compute-bound, memory-bound, and data-bound scenarios
-- Construct efficient single-machine training pipelines using data prefetching, mixed-precision arithmetic, and gradient accumulation techniques
 - Apply memory optimization strategies including activation checkpointing and gradient accumulation to train large models within GPU memory constraints
-- Compare optimization algorithms (SGD, Adam, AdamW) based on convergence speed, memory overhead, and computational cost for different model architectures
+- Construct efficient single-machine training pipelines using data prefetching, mixed-precision arithmetic, and gradient accumulation
 - Analyze when single-machine training becomes infeasible due to memory exhaustion, unacceptable training duration, or dataset scale
 - Evaluate GPU and TPU architectures for training workloads by comparing throughput, memory bandwidth, and cost-performance trade-offs
 
@@ -70,7 +70,7 @@ Frameworks provide abstractions for expressing training algorithms, but training
 
 ::: {.callout-definition title="The Iron Law of Training Performance"}
 
-***The Iron Law of Training Performance*** states that training time is purely a function of **Arithmetic Intensity** and **Hardware Efficiency**. It decomposes performance into three orthogonal terms: the **Algorithmic Work** (Total Operations), the **Hardware Capability** (Peak Throughput), and the **System Efficiency** (Utilization), dictating that speedups must come from reducing Ops, increasing Peak, or improving Utilization.
+***The Iron Law of Training Performance*** states that training time is purely a function of **Arithmetic Intensity** (@principle-arithmetic-intensity) and **Hardware Efficiency**. It decomposes performance into three orthogonal terms: the **Algorithmic Work** (Total Operations), the **Hardware Capability** (Peak Throughput), and the **System Efficiency** (Utilization), dictating that speedups must come from reducing Ops, increasing Peak, or improving Utilization.
 
 $$\text{Training Time} = \frac{\text{Total Operations}}{\text{Peak Throughput} \times \text{Utilization}}$$
 
@@ -95,22 +95,22 @@ Training speed is governed by the utilization of hardware peaks.
 - [ ] **Mixed Precision**: How does FP16/BF16 double throughput? (Tensor Cores run 2x faster, and memory bandwidth effectively doubles).
 :::
 
-+---------------------------------+--------------------+-----------------------------------------------+
-| **Technique**                   | **Term Affected**  | **Mechanism**                                 |
-+:================================+:===================+:==============================================+
++---------------------------------+--------------------+-------------------------------------------------+
+| **Technique**                   | **Term Affected**  | **Mechanism**                                   |
++:================================+:===================+:================================================+
 | **Mixed Precision (FP16/BF16)** | Peak Throughput ↑  | Tensor Cores operate at up to 16× higher FLOP/s |
-+---------------------------------+--------------------+-----------------------------------------------+
-| **Data Prefetching**            | Utilization ↑      | Reduces GPU idle time waiting for data        |
-+---------------------------------+--------------------+-----------------------------------------------+
-| **Gradient Checkpointing**      | Total Operations ↑ | Adds recomputation, but enables larger models |
-+---------------------------------+--------------------+-----------------------------------------------+
-| **Gradient Accumulation**       | Utilization ↑      | Maintains high batch parallelism efficiency   |
-+---------------------------------+--------------------+-----------------------------------------------+
-| **Operator Fusion**             | Utilization ↑      | Reduces memory bandwidth bottlenecks          |
-+---------------------------------+--------------------+-----------------------------------------------+
-| **FlashAttention**              | Total Operations ↓ | Algorithmic improvement reduces FLOP count    |
-|                                 | Utilization ↑      | Tiling improves memory access patterns        |
-+---------------------------------+--------------------+-----------------------------------------------+
++---------------------------------+--------------------+-------------------------------------------------+
+| **Data Prefetching**            | Utilization ↑      | Reduces GPU idle time waiting for data          |
++---------------------------------+--------------------+-------------------------------------------------+
+| **Gradient Checkpointing**      | Total Operations ↑ | Adds recomputation, but enables larger models   |
++---------------------------------+--------------------+-------------------------------------------------+
+| **Gradient Accumulation**       | Utilization ↑      | Maintains high batch parallelism efficiency     |
++---------------------------------+--------------------+-------------------------------------------------+
+| **Operator Fusion**             | Utilization ↑      | Reduces memory bandwidth bottlenecks            |
++---------------------------------+--------------------+-------------------------------------------------+
+| **FlashAttention**              | Total Operations ↓ | Algorithmic improvement reduces FLOP count      |
+|                                 | Utilization ↑      | Tiling improves memory access patterns          |
++---------------------------------+--------------------+-------------------------------------------------+
 
 : **Iron Law Optimization Mapping.** Optimization techniques mapped to Iron Law terms. Understanding which term a technique affects guides optimization strategy selection. {#tbl-iron-law-mapping}
 
@@ -155,6 +155,32 @@ GPT-2 (1.5B) serves as our primary case study for **large-scale training** becau
 
 **Key Systems Challenge:**
 Training GPT-2 is primarily **memory-bound** (due to activation storage) and **compute-intensive** (requiring massive matrix multiplications). It forces us to move beyond simple training loops to sophisticated pipelines that manage data movement as carefully as computation.
+:::
+
+### Running Example: Training DLRM (Recommendation Systems) {#sec-ai-training-running-example-training-dlrm-4a2b}
+
+While GPT-2 illustrates dense, compute-intensive workloads, recommendation systems present a fundamentally different challenge: massive sparsity. The Deep Learning Recommendation Model (DLRM) serves as our lighthouse for **Scale-Out** systems issues.
+
+::: {.callout-lighthouse title="Lighthouse Example: Training DLRM"}
+
+**Why this model?**
+DLRM represents the "Sparse" regime of the Iron Law. Unlike GPT-2, which is bound by FLOPs and Activation Memory, DLRM is bound by **Parameter Capacity** and **Network Bandwidth**. It powers the revenue engines of major internet companies (ads, search, feed ranking).
+
++------------------+----------------------------+--------------------------------------------------------------+
+| **Property**     | **Specification**          | **Systems Implication**                                      |
++:=================+:===========================+:=============================================================+
+| **Parameters**   | 100 Billion to 10 Trillion | Embedding tables exceed single-node memory (requires TBs).   |
+|                  | (mostly embeddings)        |                                                              |
++------------------+----------------------------+--------------------------------------------------------------+
+| **Architecture** | Embedding Tables + MLP     | Low arithmetic intensity; highly memory-bandwidth bound.     |
++------------------+----------------------------+--------------------------------------------------------------+
+| **Inputs**       | Sparse Features (IDs)      | Random memory access patterns defy caching.                  |
++------------------+----------------------------+--------------------------------------------------------------+
+| **Compute**      | Low FLOPs per byte         | GPUs often underutilized; typically trained on CPU clusters. |
++------------------+----------------------------+--------------------------------------------------------------+
+
+**Key Systems Challenge:**
+Training DLRM requires **Model Parallelism** not for compute, but for capacity. The embedding tables are sharded across hundreds of devices. The bottleneck becomes the **All-to-All** communication pattern required to gather embeddings for the dense MLP top-stack.
 :::
 
 **Note on Precision:**
@@ -486,7 +512,7 @@ $$
 
 For concrete understanding, consider ResNet-50 training with different batch sizes. At batch size 32, the model requires approximately 8 GB of activation memory, 4 GB for gradients, and 200 MB for parameters per GPU. Doubling to batch size 64 doubles these memory requirements to 16 GB activations and 8 GB gradients. This linear scaling quickly exhausts GPU memory, with high-end training GPUs typically providing 40--80 GB of HBM.
 
-Larger batches enable more efficient computation through improved parallelism and better memory access patterns. GPU utilization efficiency demonstrates this trade-off: batch sizes of 256 or higher typically achieve over 90% hardware utilization on modern training accelerators, while smaller batches of 16--32 may only achieve 60--70% utilization due to insufficient parallelism to saturate the hardware.
+Larger batches enable more efficient computation through improved parallelism and better memory access patterns. GPU utilization efficiency demonstrates this trade-off: batch sizes of 256 or higher typically achieve over 90% hardware utilization on modern training accelerators, while smaller batches of 16--32 may only achieve 60--70% utilization due to insufficient parallelism to saturate the hardware. Linear scaling rules for large-batch training help maintain convergence speed [@goyal2017accurate].
 
 This establishes a central theme in training systems: the hardware-software trade-off between memory constraints and computational efficiency. Training systems must select batch sizes that maximize hardware utilization while fitting within available memory. The optimal choice often requires gradient accumulation when memory constraints prevent using efficiently large batches, trading increased computation for the same effective batch size.
 
@@ -523,7 +549,7 @@ The choice of optimization algorithm creates specific patterns of computation an
 
 [^fn-convergence-etymology]: **Convergence**: From Latin "convergere" (to incline together), combining "con-" (together) + "vergere" (to bend, turn). In optimization, convergence describes the process by which iterative algorithms approach a stable solution, where successive updates become smaller until parameters stabilize at a minimum. Training is said to converge when the loss stops decreasing meaningfully, typically requiring 10,000-100,000 iterations for large models.
 
-::: {.callout-notebook title="GPT-2 Optimizer Memory Requirements"}
+::: {.callout-notebook #notebook-gpt2-optimizer title="GPT-2 Optimizer Memory Requirements"}
 
 GPT-2 training uses the Adam optimizer with these hyperparameters:
 
@@ -570,7 +596,7 @@ Memory access patterns also affect the efficiency of cache utilization. Sequenti
 Numerical precision represents another key tradeoff in implementation. Empirical studies have shown that optimizer states remain stable even when reduced precision formats, such as 16-bit floating-point (FP16), are used. Transitioning from 32-bit to 16-bit formats reduces memory requirements, as illustrated for the Adam optimizer:
 $$ \text{Memory}_{\text{Adam-FP16}} = \frac{3}{2} \times \text{Size}_{\text{params}} $$
 
-Mixed-precision training (@sec-ai-training-mixedprecision-training-9218) has been shown to achieve comparable accuracy while significantly reducing memory consumption and computational overhead [@micikevicius2017mixed; @krishnamoorthi2018quantizing].
+Mixed-precision training (@sec-ai-training-mixedprecision-training-9218) has been shown to achieve comparable accuracy while significantly reducing memory consumption and computational overhead [@micikevicius2017mixed].
 
 These implementation factors determine the practical performance of optimization algorithms in deep learning systems, requiring careful alignment of memory, computational, and numerical strategies with the underlying hardware architecture [@chen2015mxnet].
 
@@ -955,7 +981,7 @@ Batch size directly influences arithmetic intensity. With batch=1, many operatio
 
 This analysis guides optimization strategy selection. For memory-bound operations, reducing data movement through operator fusion, reduced precision, or algorithmic improvements like FlashAttention provides the largest gains. For compute-bound operations, increasing throughput through Tensor Cores, parallelism, or quantization matters more. See @sec-ai-acceleration for detailed roofline model analysis and hardware-specific optimization strategies.
 
-@fig-training-roofline shows standard attention in the memory-bound region while FlashAttention appears in the compute-bound region—this shift represents the core insight of IO-aware algorithm design. By never materializing the full $N \times N$ attention matrix and instead processing in tiles that fit in fast SRAM, FlashAttention reduces memory traffic from $O(N^2)$ to $O(N)$, achieving 2-4× speedups. We examine the algorithm, its implementation, and when to use it in detail in @sec-ai-training-flash-attention-ioaware-attention-optimization-3da0.
+@fig-training-roofline shows standard attention in the memory-bound region while FlashAttention appears in the compute-bound region—this shift represents the core insight of IO-aware algorithm design. By never materializing the full $N \times N$ attention matrix and instead processing in tiles that fit in fast SRAM, FlashAttention reduces memory traffic from $O(N^2)$ to $O(N)$, achieving 2-4× speedups [@dao2022flashattention]. We examine the algorithm, its implementation, and when to use it in detail in @sec-ai-training-flash-attention-ioaware-attention-optimization-3da0.
 
 The arithmetic intensity analysis above reveals which operations constrain training performance and why: matrix multiplications are compute-bound while normalization and activation functions are memory-bound, each requiring different optimization strategies. FlashAttention exemplifies how understanding these bottlenecks enables algorithmic solutions that shift operations from one regime to another. But optimizing individual operations is insufficient. Training systems must orchestrate data loading, computation, and parameter updates as a unified pipeline, and the architecture of this pipeline determines whether optimizations like FlashAttention translate into actual throughput gains.
 
@@ -1322,7 +1348,7 @@ Text tokenization is CPU-bound (unlike image preprocessing which is I/O-bound). 
 
 While data pipeline throughput determines how fast training data reaches the GPU, multi-GPU training introduces a second bottleneck: the network communication required to synchronize gradients across devices. The following exercise quantifies when this communication overhead dominates.
 
-::: {.callout-notebook title="The Network Wall"}
+::: {.callout-notebook #notebook-network-wall title="The Network Wall"}
 
 **Problem**: You are training a large model on 8 GPUs. You want to know if the network is the bottleneck.
 
@@ -1593,6 +1619,26 @@ The choice of optimizer directly impacts both system memory requirements and com
 
 Batch size, a critical hyperparameter[^fn-hyperparameter-etymology] in machine learning systems, significantly influences the parameter update process, memory usage, and hardware efficiency. It determines the number of training examples processed in a single iteration before the model parameters are updated.
 
+A larger batch size provides a more accurate estimate of the true gradient, allowing for larger learning steps. However, simply increasing the batch size without adjusting the learning rate leads to the **"Linear Scaling Failure"**.
+
+If you double the batch size, you perform half as many updates per epoch. If the learning rate remains constant, the model effectively travels "half the distance" in weight space, causing underfitting. The following plot (@fig-linear-scaling-failure) visualizes this **Generalization Gap** and how the **Linear Scaling Rule** ($\text{LR}_{new} = k \times \text{LR}_{base}$) corrects it.
+
+```{python}
+#| label: fig-linear-scaling-failure
+#| echo: false
+#| fig-cap: "**The Linear Scaling Failure.** Training Loss vs. Steps. Curve A (Blue) represents a standard baseline batch size. Curve B (Gray) shows what happens when batch size is increased 8x without tuning: convergence slows dramatically because weight updates are too infrequent. Curve C (Green) restores convergence by scaling the learning rate linearly (8x LR), allowing the model to take larger steps to compensate for fewer updates."
+
+import sys
+import matplotlib.pyplot as plt
+# Ensure calc directory is in path
+sys.path.append('../../../calc')
+import viz
+
+viz.set_book_style()
+viz.plot_linear_scaling_failure()
+plt.show()
+```
+
 [^fn-hyperparameter-etymology]: **Hyperparameter**: From Greek "hyper" (over, beyond) + "parameter." While parameters (weights, biases) are learned from data during training, hyperparameters are set *before* training and control the learning process itself. The "hyper-" prefix indicates a higher level of abstraction: hyperparameters are parameters *about* parameters. Common examples include learning rate, batch size, and number of layers. The term emerged in Bayesian statistics where hyperparameters define prior distributions over model parameters.
 
 Larger batch sizes generally provide more accurate gradient estimates, potentially leading to faster convergence and more stable parameter updates. However, they also increase memory demands proportionally:
@@ -1612,7 +1658,7 @@ Determining the optimal batch size involves balancing these factors within hardw
 
 Beyond batch size tuning, practitioners must also confront the economic reality of large-scale training. The compute cost itself becomes a binding constraint that shapes every training decision, from hardware selection to cluster sizing, a phenomenon best understood by examining *the utility bill* of a realistic training run.
 
-::: {.callout-notebook title="The Utility Bill"}
+::: {.callout-notebook #notebook-utility-bill title="The Utility Bill"}
 
 **Problem**: Is it cheaper to rent an H100 or buy it for training Llama-2-70B?
 
@@ -1650,21 +1696,21 @@ The first step in diagnosis is establishing a meaningful measure of training eff
 
 Training bottlenecks fall into three categories, which map directly to the **DAM Taxonomy** (@tbl-dam-taxonomy). @tbl-dam-training-bottlenecks connects each DAM component to the corresponding training bottleneck, its observable symptoms, and the optimization techniques that address it.
 
-+-------------------+-------------------+------------------------------------------------+------------------------------------------+
-| **DAM Component** | **Bottleneck**    | **Symptoms**                                   | **Primary Solutions**                    |
-+:==================+:==================+:===============================================+:=========================================+
-| **Algorithm**     | Compute-bound     | GPU utilization >90%; low memory bandwidth     | FlashAttention, mixed precision,         |
-|                   |                   | usage; arithmetic units are the limiting       | faster hardware                          |
-|                   |                   | factor                                         |                                          |
-+-------------------+-------------------+------------------------------------------------+------------------------------------------+
-| **Machine**       | Memory-bound      | GPU utilization 50-80%; high memory bandwidth  | Operator fusion, memory-efficient        |
-|                   |                   | usage; arithmetic units idle waiting for data  | attention, reduced precision formats     |
-|                   |                   | from memory                                    |                                          |
-+-------------------+-------------------+------------------------------------------------+------------------------------------------+
-| **Data**          | Data-bound        | Periodic GPU utilization drops to near-zero;   | Prefetching, pipeline overlap,           |
-|                   |                   | CPU fully utilized during gaps; pipeline       | faster storage, DataLoader parallelism   |
-|                   |                   | cannot feed GPU fast enough                    |                                          |
-+-------------------+-------------------+------------------------------------------------+------------------------------------------+
++-------------------+----------------+-----------------------------------------------+----------------------------------------+
+| **DAM Component** | **Bottleneck** | **Symptoms**                                  | **Primary Solutions**                  |
++:==================+:===============+:==============================================+:=======================================+
+| **Algorithm**     | Compute-bound  | GPU utilization &gt;90%; low memory bandwidth | FlashAttention, mixed precision,       |
+|                   |                | usage; arithmetic units are the limiting      | faster hardware                        |
+|                   |                | factor                                        |                                        |
++-------------------+----------------+-----------------------------------------------+----------------------------------------+
+| **Machine**       | Memory-bound   | GPU utilization 50-80%; high memory bandwidth | Operator fusion, memory-efficient      |
+|                   |                | usage; arithmetic units idle waiting for data | attention, reduced precision formats   |
+|                   |                | from memory                                   |                                        |
++-------------------+----------------+-----------------------------------------------+----------------------------------------+
+| **Data**          | Data-bound     | Periodic GPU utilization drops to near-zero;  | Prefetching, pipeline overlap,         |
+|                   |                | CPU fully utilized during gaps; pipeline      | faster storage, DataLoader parallelism |
+|                   |                | cannot feed GPU fast enough                   |                                        |
++-------------------+----------------+-----------------------------------------------+----------------------------------------+
 
 : **DAM Taxonomy Applied to Training Bottlenecks.** Each component of the DAM Taxonomy (Data, Algorithm, Machine) maps to a distinct training bottleneck with characteristic symptoms. Profiling reveals which component is the limiting factor, guiding practitioners to the appropriate optimization technique. {#tbl-dam-training-bottlenecks}
 
@@ -2102,17 +2148,17 @@ A neural network trained in FP32 requires 4 bytes per parameter, while both FP16
 
 The numerical precision differences between these formats shape their use cases. @tbl-precision-comparison reveals that BF16's 8-bit exponent matches FP32's dynamic range ($10^{-45}$ minimum representable), while FP16's 5-bit exponent limits its range to $6 \times 10^{-8}$, explaining why gradients below this threshold underflow to zero without loss scaling. FP32 represents numbers from approximately $\pm1.18 \times 10^{-38}$ to $\pm3.4 \times 10^{38}$ with 7 decimal digits of precision. FP16 ranges from $\pm6.10 \times 10^{-5}$ to $\pm65,504$ with 3-4 decimal digits of precision. Bfloat16, developed by Google Brain, maintains the same dynamic range as FP32 ($\pm1.18 \times 10^{-38}$ to $\pm3.4 \times 10^{38}$) but with reduced precision (3-4 decimal digits). This range preservation makes bfloat16 particularly suited for deep learning training, as it handles large and small gradients more effectively than FP16.
 
-+-------------------------+----------+----------------+----------+
-| **Property**            | **FP32** | **FP16**       | **BF16** |
-+:========================+=========:+:==============:+=========:+
-| **Exponent bits**       | 8        | 5              | 8        |
-+-------------------------+----------+----------------+----------+
-| **Mantissa bits**       | 23       | 10             | 7        |
-+-------------------------+----------+----------------+----------+
-| **Min normal value**    | 10^-38   | 6.1 x 10^-5    | 10^-38   |
-+-------------------------+----------+----------------+----------+
-| **Tensor Core speedup** | 1x       | 16x            | 16x      |
-+-------------------------+----------+----------------+----------+
++-------------------------+----------+-------------+----------+
+| **Property**            | **FP32** | **FP16**    | **BF16** |
++:========================+=========:+============:+=========:+
+| **Exponent bits**       | 8        | 5           | 8        |
++-------------------------+----------+-------------+----------+
+| **Mantissa bits**       | 23       | 10          | 7        |
++-------------------------+----------+-------------+----------+
+| **Min normal value**    | 10^-38   | 6.1 x 10^-5 | 10^-38   |
++-------------------------+----------+-------------+----------+
+| **Tensor Core speedup** | 1x       | 16x         | 16x      |
++-------------------------+----------+-------------+----------+
 
 : **Precision Format Comparison.** The choice between FP16 and BF16 depends on whether dynamic range (BF16's strength) or precision (FP16's advantage) matters more for the specific workload. Minimum normal values shown are the practical thresholds for training, as subnormal values may flush to zero on many GPUs. {#tbl-precision-comparison}
 
@@ -2344,17 +2390,17 @@ This selective precision maximizes hardware utilization while maintaining numeri
 
 Optimal mixed-precision training requires matching the precision format to hardware capabilities. @tbl-hw-precision-strategy summarizes the recommended precision strategy for each GPU generation, reflecting the evolution from FP16-only support on Volta to native FP8 on Hopper.
 
-+-------------------+-------------------------------+----------------------------------------------+
-| **Architecture**  | **Recommended Precision**     | **Key Considerations**                       |
-+:==================+:==============================+:=============================================+
-| V100 (Volta)      | FP16 with loss scaling        | No BF16 support; gradient clipping essential |
-+-------------------+-------------------------------+----------------------------------------------+
-| A100 (Ampere)     | BF16 for transformers;        | TF32 mode provides automatic 2-3× speedup   |
-|                   | FP16 for CNNs                 | for legacy FP32 code                         |
-+-------------------+-------------------------------+----------------------------------------------+
-| H100 (Hopper)     | FP8 via TransformerEngine     | Requires FP8-aware training recipes;         |
-|                   |                               | 1,979 TFLOPs peak throughput                 |
-+-------------------+-------------------------------+----------------------------------------------+
++-------------------+---------------------------+----------------------------------------------+
+| **Architecture**  | **Recommended Precision** | **Key Considerations**                       |
++:==================+==========================:+=============================================:+
+| **V100 (Volta)**  | FP16 with loss scaling    | No BF16 support; gradient clipping essential |
++-------------------+---------------------------+----------------------------------------------+
+| **A100 (Ampere)** | BF16 for transformers;    | TF32 mode provides automatic 2-3× speedup    |
+|                   | FP16 for CNNs             | for legacy FP32 code                         |
++-------------------+---------------------------+----------------------------------------------+
+| **H100 (Hopper)** | FP8 via TransformerEngine | Requires FP8-aware training recipes;         |
+|                   |                           | 1,979 TFLOPs peak throughput                 |
++-------------------+---------------------------+----------------------------------------------+
 
 : **Precision Strategy by GPU Architecture.** Each generation introduces wider precision support, reducing the engineering burden of loss scaling while increasing throughput. {#tbl-hw-precision-strategy}
 
@@ -3375,27 +3421,27 @@ Advanced systems engineering explores the distributed engineering required to co
 
 Training involves counterintuitive resource trade-offs and scaling behavior that defy intuitions from traditional software systems. The following fallacies and pitfalls capture errors that waste compute resources, delay research progress, and cause production training failures.
 
-**Fallacy:** _Larger models always yield better performance._
+**Fallacy:** ***Larger models always yield better performance.***
 
 Engineers assume model scaling guarantees accuracy gains. In production, scaling without sufficient data causes severe overfitting. As established in @sec-ai-training-mathematical-foundations-d894, model capacity must match dataset size. A 20B parameter model requires approximately 120 GB memory (40 GB parameters FP16 + 80 GB optimizer states) but delivers worse accuracy than a 7B model when trained on datasets under 100M examples. Beyond critical thresholds, doubling model size while holding data constant typically degrades validation accuracy by 5 to 10 percent due to overfitting. Teams that pursue scale without data budgets waste months of compute on models that underperform smaller variants.
 
-**Pitfall:** _Assuming distributed training automatically accelerates development._
+**Pitfall:** ***Assuming distributed training automatically accelerates development.***
 
 Many practitioners add devices expecting proportional speedup. Communication overhead destroys this assumption. Small models on 8 GPUs with data parallelism spend 30 to 50 percent of time synchronizing gradients, achieving only 4 to 6x speedup instead of 8x. As @sec-ai-training-scaling-training-systems-adfd demonstrates, single-device training with optimized pipelines often beats poorly configured distributed setups. A 7B model training on a single A100 for 24 hours can outperform an 8-GPU cluster completing in 6 hours when synchronization overhead consumes theoretical speedup. Organizations that reflexively distribute training burn budget on infrastructure complexity without profiling whether data loading, memory, or computation is the actual bottleneck.
 
-**Fallacy:** _Hyperparameters scale linearly with model size and batch size._
+**Fallacy:** ***Hyperparameters scale linearly with model size and batch size.***
 
 This belief transfers learning rates from small experiments to large-scale training without adjustment. Large batch training requires the linear scaling rule: multiply learning rate by batch size ratio [@goyal2017accurate]. Training ResNet-50 with batch 512 uses learning rate 0.1; scaling to batch 4096 requires learning rate 0.8, not 0.1. Ignoring this relationship causes training instability or divergence. As discussed in @sec-ai-training-pipeline-optimizations-cd9d, large-scale training requires warmup schedules and adjusted momentum to maintain convergence. Teams that apply small-scale hyperparameters to large models experience training failures 3 to 5 days into multi-week runs, wasting substantial compute budgets.
 
-**Pitfall:** _Treating mixed precision training as a simple toggle without validation._
+**Pitfall:** ***Treating mixed precision training as a simple toggle without validation.***
 
 Practitioners enable FP16 training expecting automatic 2x speedup and memory savings. Numerical stability failures emerge unpredictably. As shown in @sec-ai-training-pipeline-optimizations-cd9d, mixed precision achieves 2.4x speedup on V100 Tensor Cores but requires loss scaling to prevent gradient underflow. Models with large activation magnitudes or small gradient values experience divergence when loss scaling is misconfigured. A language model training for 48 hours can diverge at step 10,000 due to accumulated numerical errors, forcing restarts that waste days. Production training systems must validate mixed precision convergence on representative workloads before deploying at scale.
 
-**Pitfall:** _Optimizing memory and computation independently._
+**Pitfall:** ***Optimizing memory and computation independently.***
 
 Engineers maximize batch size until GPU memory exhausts without considering computational efficiency. As @sec-ai-training-pipeline-optimizations-cd9d establishes, GPU utilization drops from 90 percent at batch 256 to 60-70 percent at batch 16 due to insufficient parallelism. Conversely, gradient accumulation simulates large batches within memory constraints by accumulating gradients over multiple passes before updating. Training ResNet-50 with gradient accumulation (effective batch 512, physical batch 64) achieves 85 percent utilization versus 90 percent for native batch 512, trading 5 percent efficiency for 8x memory reduction. Organizations that tune these parameters independently miss this trade-off, extending training time by 20 to 40 percent.
 
-**Pitfall:** _Neglecting data pipeline optimization until GPU utilization profiling._
+**Pitfall:** ***Neglecting data pipeline optimization until GPU utilization profiling.***
 
 Teams optimize model architecture and hyperparameters while data loading creates 30 to 50 percent idle time. As illustrated in @sec-ai-training-pipeline-optimizations-cd9d, sequential data fetching leaves GPUs waiting for I/O. Profiling reveals 40 percent training time spent in data loading, yet computation receives optimization attention first. Prefetching with pipeline parallelism reduces wall-clock time by 40 percent (90 seconds to 55 seconds for two epochs) by overlapping data loading with computation. Organizations that defer data pipeline optimization waste weeks of researcher time on models bottlenecked by preventable I/O stalls.
 
@@ -3415,7 +3461,7 @@ The training optimizations explored throughout this chapter provide the foundati
 
 [^fn-attention-mechanisms]: **Attention Mechanisms**: Dynamic weighting schemes enabling models to focus on relevant input regions. Introduced by Bahdanau et al. (2014) for machine translation, attention computes alignment scores between encoder/decoder states. Modern implementations include cross-attention (between sequences) and self-attention (within sequences), with softmax normalization ensuring weights sum to one.
 
-::: {.callout-important title="Key Takeaways"}
+::: {.callout-takeaways title="Key Takeaways"}
 
 * **The Iron Law governs training**: $\text{Training Time} = \frac{\text{Total Operations}}{\text{Peak Throughput} \times \text{Utilization}}$. Every optimization affects one of these terms—identifying which term is affected is essential for effective optimization.
 * **Profiling precedes optimization**: The iterative loop is: profile → identify bottleneck → apply targeted fix → re-profile. Optimization without profiling typically wastes effort on non-bottlenecks.
