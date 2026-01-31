@@ -2,6 +2,7 @@
 quiz: footnote_context_quizzes.json
 concepts: ml_systems_concepts.yml
 glossary: ml_systems_glossary.json
+engine: jupyter
 ---
 
 # ML System Architecture {#sec-ml-system-architecture}
@@ -281,7 +282,7 @@ These physical laws explain *why* the four paradigms exist. But given a specific
 
 ### Analyzing Workloads: The Iron Law and Archetypes {#sec-ml-system-architecture-analyzing-workloads}
 
-The Introduction established the **Iron Law of ML Systems**:
+The Introduction established the **Iron Law of ML Systems** (@principle-iron-law):
 
 $$
 \text{Time} = \frac{D}{B} + \frac{O}{P \cdot \eta} + L
@@ -504,34 +505,98 @@ This shift between training and inference is fundamental. Recall the AI Triad fr
 
 The following worked example demonstrates how to apply this analysis quantitatively by comparing *ResNet-50 on cloud vs mobile* deployment targets.
 
+```{python}
+#| echo: false
+#| label: resnet-setup
+from calc.constants import *
+
+# ResNet-50 model sizes at different precisions
+# Parameters are dimensionless counts (or 'param'), so we multiply by bytes explicitly.
+resnet_fp32_bytes = RESNET50_PARAMS.magnitude * 4 * byte
+resnet_fp16_bytes = RESNET50_PARAMS.magnitude * 2 * byte
+resnet_int8_bytes = RESNET50_PARAMS.magnitude * 1 * byte
+
+resnet_gflops  = f"{RESNET50_FLOPs.to(1e9 * flop).magnitude:.1f}"
+resnet_params_m = f"{RESNET50_PARAMS.to(1e6 * param).magnitude:.1f}"
+resnet_fp32_mb = f"{resnet_fp32_bytes.to(MB).magnitude:.0f}"
+resnet_fp16_mb = f"{resnet_fp16_bytes.to(MB).magnitude:.0f}"
+resnet_int8_mb = f"{resnet_int8_bytes.to(MB).magnitude:.0f}"
+```
+
 ::: {.callout-notebook title="ResNet-50 on Cloud vs Mobile"}
 **Problem**: Determine whether ResNet-50 inference is compute-bound or memory-bound on (a) a high-end datacenter GPU (NVIDIA A100 class) and (b) a flagship mobile NPU (Apple/Qualcomm class).
 
 **Given** (from Lighthouse Examples):
 
-- ResNet-50: 4.1 GFLOPs per inference, 25.6M parameters (102 MB at FP32, 51 MB at FP16)
+- ResNet-50: `{python} resnet_gflops` GFLOPs per inference, `{python} resnet_params_m`M parameters (`{python} resnet_fp32_mb` MB at FP32, `{python} resnet_fp16_mb` MB at FP16)
 
 **Analysis**:
 
+```{python}
+#| echo: false
+#| label: resnet-cloud
+from calc.formulas import calc_bottleneck
+
+# (a) Cloud: A100 FP16
+cloud_stats = calc_bottleneck(
+    ops=RESNET50_FLOPs,
+    model_bytes=resnet_fp16_bytes,
+    device_flops=A100_FLOPS_FP16_TENSOR,
+    device_bw=A100_MEM_BW
+)
+
+a100_tflops     = f"{A100_FLOPS_FP16_TENSOR / TB:.0f}"
+a100_bw_tbs     = f"{A100_MEM_BW / TB:.0f}"
+cloud_compute_ms = f"{cloud_stats['compute_ms']:.3f}"
+cloud_memory_ms = f"{cloud_stats['memory_ms']:.3f}"
+cloud_ratio_x   = f"{cloud_stats['ratio']:.0f}"
+cloud_ai        = f"{cloud_stats['intensity']:.0f}"
+cloud_bottleneck = cloud_stats['bottleneck']
+```
+
 **(a) Cloud: NVIDIA A100 (batch=1, FP16)**
 
-- Peak compute: 312 TFLOPS (FP16)
-- Memory bandwidth: 2 TB/s (HBM2e)
-- Compute time: $\frac{4.1 \times 10^9 \text{ FLOPs}}{312 \times 10^{12} \text{ FLOP/s}} = 0.013 \text{ ms}$
-- Memory time: $\frac{51 \times 10^6 \text{ bytes}}{2 \times 10^{12} \text{ B/s}} = 0.026 \text{ ms}$
-- **Bottleneck**: Memory (2× slower than compute)
-- **Arithmetic Intensity**: $\frac{4.1 \times 10^9}{51 \times 10^6} \approx 80$ FLOPs/byte
+- Peak compute: `{python} a100_tflops` TFLOPS (FP16)
+- Memory bandwidth: `{python} a100_bw_tbs` TB/s (HBM2e)
+- Compute time: $\frac{`{python} resnet_gflops` \times 10^9 \text{ FLOPs}}{`{python} a100_tflops` \times 10^{12} \text{ FLOP/s}} = `{python} cloud_compute_ms` \text{ ms}$
+- Memory time: $\frac{`{python} resnet_fp16_mb` \times 10^6 \text{ bytes}}{`{python} a100_bw_tbs` \times 10^{12} \text{ B/s}} = `{python} cloud_memory_ms` \text{ ms}$
+- **Bottleneck**: `{python} cloud_bottleneck` (`{python} cloud_ratio_x`× slower than compute)
+- **Arithmetic Intensity**: $\frac{`{python} resnet_gflops` \times 10^9}{`{python} resnet_fp16_mb` \times 10^6} \approx `{python} cloud_ai`$ FLOPs/byte
+
+```{python}
+#| echo: false
+#| label: resnet-mobile
+# (b) Mobile: NPU INT8
+mobile_stats = calc_bottleneck(
+    ops=RESNET50_FLOPs,
+    model_bytes=resnet_int8_bytes,
+    device_flops=MOBILE_NPU_TOPS_INT8,
+    device_bw=MOBILE_NPU_MEM_BW
+)
+
+mobile_tops       = f"{MOBILE_NPU_TOPS_INT8 / TB:.0f}"
+mobile_bw_gbs     = f"{MOBILE_NPU_MEM_BW / GB:.0f}"
+mobile_compute_ms = f"{mobile_stats['compute_ms']:.2f}"
+mobile_memory_ms  = f"{mobile_stats['memory_ms']:.2f}"
+mobile_ratio_x    = f"{mobile_stats['ratio']:.0f}"
+mobile_bottleneck = mobile_stats['bottleneck']
+
+# Cross-platform comparison
+bw_advantage_x    = f"{A100_MEM_BW / MOBILE_NPU_MEM_BW:.0f}"
+# Note: comparing memory times directly as both are memory bound
+inference_speed_x = f"{mobile_stats['memory_ms'] / cloud_stats['memory_ms']:.0f}"
+```
 
 **(b) Mobile: Flagship NPU (batch=1, INT8)**
 
-- Peak compute: ~35 TOPS (INT8) — representative of modern mobile NPUs
-- Memory bandwidth: ~100 GB/s (LPDDR5)
-- Model size: 25 MB (INT8 quantized)
-- Compute time: $\frac{4.1 \times 10^9 \text{ Ops}}{35 \times 10^{12} \text{ Op/s}} = 0.12 \text{ ms}$
-- Memory time: $\frac{25 \times 10^6 \text{ bytes}}{100 \times 10^{9} \text{ B/s}} = 0.25 \text{ ms}$
-- **Bottleneck**: Memory (2× slower than compute)
+- Peak compute: ~`{python} mobile_tops` TOPS (INT8) — representative of modern mobile NPUs
+- Memory bandwidth: ~`{python} mobile_bw_gbs` GB/s (LPDDR5)
+- Model size: `{python} resnet_int8_mb` MB (INT8 quantized)
+- Compute time: $\frac{`{python} resnet_gflops` \times 10^9 \text{ Ops}}{`{python} mobile_tops` \times 10^{12} \text{ Op/s}} = `{python} mobile_compute_ms` \text{ ms}$
+- Memory time: $\frac{`{python} resnet_int8_mb` \times 10^6 \text{ bytes}}{`{python} mobile_bw_gbs` \times 10^{9} \text{ B/s}} = `{python} mobile_memory_ms` \text{ ms}$
+- **Bottleneck**: `{python} mobile_bottleneck` (`{python} mobile_ratio_x`× slower than compute)
 
-**Key Insight**: Both platforms are memory-bound for single-image inference! The A100's faster memory bandwidth (2 TB/s vs 100 GB/s = 20×) translates to roughly 10× faster inference, not the 10,000× compute advantage. This explains why quantization (reducing bytes) often beats faster hardware (increasing FLOPS) for deployment.
+**Key Insight**: Both platforms are memory-bound for single-image inference! The A100's faster memory bandwidth (`{python} a100_bw_tbs` TB/s vs `{python} mobile_bw_gbs` GB/s = `{python} bw_advantage_x`×) translates to roughly `{python} inference_speed_x`× faster inference, not the 10,000× compute advantage. This explains why quantization (reducing bytes) often beats faster hardware (increasing FLOPS) for deployment.
 
 **When does ResNet-50 become compute-bound?** Increase batch size until $\frac{\text{Ops}}{\text{Compute}} > \frac{\text{Bytes}}{\text{Memory BW}}$. On A100, this occurs around batch=64, where activations dominate memory traffic and high arithmetic intensity is sustained.
 :::
@@ -656,14 +721,31 @@ above=1of $(B2.north east)!0.5!(B3.north west)$](B0){Cloud ML};
 
 The latency challenges listed above deserve quantification. The speed of light imposes hard physical limits that no amount of engineering can overcome, creating what we call *the distance penalty*.
 
+```{python}
+#| echo: false
+#| label: distance-penalty
+from calc.formulas import calc_network_latency_ms
+
+# Speed-of-light latency for safety-critical robotics
+distance_km = 1500
+safety_budget_ms = 10
+
+round_trip_ms = calc_network_latency_ms(distance_km)
+deficit_ms = safety_budget_ms - round_trip_ms
+
+sol_kms       = f"{SPEED_OF_LIGHT_FIBER_KM_S:,}"
+rtt_formatted = f"{round_trip_ms:.0f}"
+deficit       = f"{deficit_ms:.0f}"
+```
+
 ::: {.callout-notebook title="The Distance Penalty"}
-**Problem**: You are deploying a real-time safety monitor for a robotic arm. The safety logic requires a **10 ms** end-to-end response time to prevent injury. Your model runs in a high-performance cloud data center 1,500 km away.
+**Problem**: You are deploying a real-time safety monitor for a robotic arm. The safety logic requires a **`{python} safety_budget_ms` ms** end-to-end response time to prevent injury. Your model runs in a high-performance cloud data center `{python} f"{distance_km:,}"` km away.
 
 **The Physics**:
 
-1.  **Light in Fiber**: ~200,000 km/s.
-2.  **Round-trip Propagation**: $(1,500 \text{ km} \times 2) / 200,000 \text{ km/s} = \mathbf{15 \text{ ms}}$.
-3.  **The Result**: Your safety budget is already **negative** (-5 ms) before the model even starts its first calculation.
+1.  **Light in Fiber**: ~`{python} sol_kms` km/s.
+2.  **Round-trip Propagation**: $(`{python} f"{distance_km:,}"` \text{{ km}} \times 2) / `{python} sol_kms` \text{{ km/s}} = \mathbf{`{python} rtt_formatted` \text{{ ms}}}$.
+3.  **The Result**: Your safety budget is already **negative** (`{python} deficit` ms) before the model even starts its first calculation.
 
 **The Engineering Conclusion**: Physics has made Cloud ML **impossible** for this application. You must move to the Edge.
 :::
@@ -866,31 +948,67 @@ above=1of $(B2.north east)!0.5!(B3.north west)$](B0){Edge ML};
 
 The benefits of lower bandwidth usage and reduced latency become stark when we examine real-world data rates.
 
+```{python}
+#| echo: false
+#| label: bandwidth-bottleneck
+from calc.formulas import calc_monthly_egress_cost
+
+# Factory camera bandwidth calculation
+num_cameras = 100
+raw_bytes_per_frame = VIDEO_1080P_WIDTH * VIDEO_1080P_HEIGHT * VIDEO_BYTES_PER_PIXEL_RGB
+raw_bytes_per_sec = raw_bytes_per_frame * VIDEO_FPS_STANDARD
+total_bytes_per_sec = num_cameras * raw_bytes_per_sec
+
+monthly_cost = calc_monthly_egress_cost(total_bytes_per_sec, CLOUD_EGRESS_PER_GB)
+bw_shortage = total_bytes_per_sec / NETWORK_10G_BW
+
+cam_rate_mbs   = f"{raw_bytes_per_sec / MB:.0f}"
+total_rate_gbs = f"{total_bytes_per_sec / GB:.1f}"
+monthly_cost_m = f"{monthly_cost / 1e6:.1f}"
+net_cap_gbs    = f"{NETWORK_10G_BW / GB:.2f}"
+bw_short_x     = f"{bw_shortage:.0f}"
+```
+
 ::: {.callout-notebook title="The Bandwidth Bottleneck"}
-**Problem**: You are designing a quality control system for a factory floor with **100 cameras** running at **30 FPS** with **1080p resolution**. Should you stream to the cloud or process at the edge?
+**Problem**: You are designing a quality control system for a factory floor with **`{python} num_cameras` cameras** running at **`{python} int(VIDEO_FPS_STANDARD.magnitude)` FPS** with **1080p resolution**. Should you stream to the cloud or process at the edge?
 
 **The Physics**:
 
-1.  **Raw data rate per camera**: $1920 \times 1080 \times 3 \text{ bytes} \times 30 \text{ FPS} \approx \mathbf{187 \text{ MB/s}}$.
-2.  **Total data rate**: $100 \text{ cameras} \times 187 \text{ MB/s} = \mathbf{18.7 \text{ GB/s}}$.
-3.  **Cloud upload cost**: At $0.09/GB egress, streaming 24/7 costs $\mathbf{145{,}000/month}$.
-4.  **Network reality**: Even a dedicated 10 Gbps line (1.25 GB/s) cannot carry the load—you need **15× more bandwidth** than exists.
+1.  **Raw data rate per camera**: $1920 \times 1080 \times 3 \text{ bytes} \times 30 \text{ FPS} \approx \mathbf{`{python} cam_rate_mbs` \text{ MB/s}}$.
+2.  **Total data rate**: $`{python} num_cameras` \text{ cameras} \times `{python} cam_rate_mbs` \text{ MB/s} = \mathbf{`{python} total_rate_gbs` \text{ GB/s}}$.
+3.  **Cloud upload cost**: At $`{python} CLOUD_EGRESS_PER_GB.magnitude`/GB egress, streaming 24/7 costs $\mathbf{`{python} monthly_cost_m`M/month}$.
+4.  **Network reality**: Even a dedicated 10 Gbps line (`{python} net_cap_gbs` GB/s) cannot carry the load—you need **`{python} bw_short_x`× more bandwidth** than exists.
 
 **The Engineering Conclusion**: Physics has made cloud streaming **impossible** for this application. Edge processing is not optional—it is mandatory. An edge server running local inference transmits only defect metadata (~1 KB per detection), reducing bandwidth requirements by **1,000,000×**.
 :::
 
 The bandwidth calculation above reveals why edge processing is mandatory for high-volume sensor deployments. However, bandwidth is only half the story. For battery-powered edge devices (wireless cameras, drones, wearables), the energy cost of radio transmission creates an even more severe constraint. While a wired edge server can process unlimited data within its bandwidth budget, a battery-powered device faces a fundamental trade-off between connectivity and operational lifetime.
 
-::: {.callout-notebook title="The 1000x Energy Gap"}
+```{python}
+#| echo: false
+#| label: energy-gap
+# Energy: transmit vs compute for 1 MB of video
+data_size = 1 * MB
+tx_energy_total = NETWORK_5G_ENERGY_PER_MB_MJ * data_size
+npu_energy_total = ENERGY_MOBILENET_INF_MJ
+
+energy_gap_ratio = tx_energy_total / npu_energy_total
+
+tx_energy     = f"{tx_energy_total.to(ureg.millijoule).magnitude:.0f}"
+npu_energy    = f"{npu_energy_total.to(ureg.millijoule).magnitude}"
+energy_gap    = f"{energy_gap_ratio.magnitude:.0f}"
+```
+
+::: {.callout-notebook title="The `{python} energy_gap`x Energy Gap"}
 **Problem**: Should your smart camera process video locally or send it to the cloud?
 
 **The Physics (per 1MB of video)**:
 
-1.  **Transmission (5G)**: Sending 1MB consumes $\approx \mathbf{100 \text{ mJ}}$ (milli-Joules).
-2.  **Computation (Edge NPU)**: Running a MobileNet inference on that 1MB consumes $\approx \mathbf{0.1 \text{ mJ}}$.
-3.  **The Gap**: Transmitting data is **1000x more energy-expensive** than processing it locally.
+1.  **Transmission (5G)**: Sending 1MB consumes $\approx \mathbf{`{python} tx_energy` \text{ mJ}}$ (milli-Joules).
+2.  **Computation (Edge NPU)**: Running a MobileNet inference on that 1MB consumes $\approx \mathbf{`{python} npu_energy` \text{ mJ}}$.
+3.  **The Gap**: Transmitting data is **`{python} energy_gap`x more energy-expensive** than processing it locally.
 
-**The Engineering Conclusion**: In battery-powered nodes, the bottleneck is not just "Time" (latency); it is **Energy Bandwidth**. Even if the cloud had 0ms latency, the energy cost of transmission would kill the device's battery 1000x faster than Edge ML.
+**The Engineering Conclusion**: In battery-powered nodes, the bottleneck is not just "Time" (latency); it is **Energy Bandwidth**. Even if the cloud had 0ms latency, the energy cost of transmission would kill the device's battery `{python} energy_gap`x faster than Edge ML.
 :::
 
 []{#sec-ml-system-architecture-distributed-processing-architecture-7dae}
@@ -911,21 +1029,64 @@ These benefits carry corresponding limitations. Limited computational resources[
 
 [^fn-edge-coordination]: **Edge Network Coordination**: Managing distributed edge devices requires sophisticated orchestration to handle the communication complexity of many interconnected nodes. Hierarchical architectures reduce coordination overhead, and specialized frameworks manage models, data, and updates across heterogeneous devices. We examine these operational patterns in @sec-machine-learning-operations-mlops.
 
+![**Edge Device Deployment**: Diverse IoT devices, from wearables to home appliances, enable decentralized machine learning by performing inference locally, reducing reliance on cloud connectivity and improving response times. Source: Edge Impulse.](images/jpg/edge_ml_iot.jpg){#fig-edgeml-example fig-pos="t" fig-alt="Collection of IoT devices arranged on a surface: smart home sensors, fitness wearables, environmental monitors, and connected appliances in various sizes and form factors."}
+
 To make these trade-offs concrete, the following worked example applies *edge inference sizing* to a realistic retail deployment scenario.
 
+```{python}
+#| echo: false
+#| label: edge-sizing
+from calc.formulas import calc_fleet_tco
+
+# Edge inference sizing for retail deployment
+stores = 500
+cameras_per_store = 20
+fps = 15
+headroom = 2  # 2× engineering headroom
+
+inferences_per_sec = cameras_per_store * fps
+sustained_gflops = inferences_per_sec * (YOLOV8_NANO_FLOPs / GB)  # GFLOPs/sec
+required_tflops = sustained_gflops * headroom / 1000
+
+# Fleet costs
+coral_cost = 150
+coral_power_w = 2
+jetson_cost = 600
+jetson_power_w = 25  # midpoint of 10-40W
+years = 3
+
+# Calculate TCO using canonical formula
+coral_tco = calc_fleet_tco(coral_cost, coral_power_w, stores, years, CLOUD_ELECTRICITY_PER_KWH)
+jetson_tco = calc_fleet_tco(jetson_cost, jetson_power_w, stores, years, CLOUD_ELECTRICITY_PER_KWH)
+
+# Derived metrics for narrative
+coral_fleet = coral_cost * stores
+jetson_fleet = jetson_cost * stores
+coral_power_cost = coral_tco - coral_fleet
+
+inf_per_sec    = f"{inferences_per_sec}"
+yolo_gflops    = f"{YOLOV8_NANO_FLOPs / GB:.1f}"
+sustained_gf   = f"{sustained_gflops:.0f}"
+req_tflops     = f"{required_tflops:.0f}"
+coral_fleet_k  = f"{coral_fleet / 1000:.0f}"
+jetson_fleet_k = f"{jetson_fleet / 1000:.0f}"
+coral_pwr_k    = f"{coral_power_cost / 1000:.0f}"
+coral_tco_k    = f"{coral_tco / 1000:.0f}"
+```
+
 ::: {.callout-notebook title="Edge Inference Sizing"}
-**Scenario**: A smart retail chain deploying person detection across 500 stores, each with 20 cameras at 15 FPS.
+**Scenario**: A smart retail chain deploying person detection across `{python} stores` stores, each with `{python} cameras_per_store` cameras at `{python} fps` FPS.
 
 **Requirements Analysis**
 
 +--------------------------+-----------------------------------+--------------------+
 | **Metric**               | **Calculation**                   | **Result**         |
 +:=========================+==================================:+===================:+
-| **Inferences per store** | 20 cameras × 15 FPS               | 300 inferences/sec |
+| **Inferences per store** | `{python} cameras_per_store` cameras × `{python} fps` FPS               | `{python} inf_per_sec` inferences/sec |
 +--------------------------+-----------------------------------+--------------------+
-| **Model compute**        | YOLOv8-nano: 3.2 GFLOPs/inference | 960 GFLOPs/sec     |
+| **Model compute**        | YOLOv8-nano: `{python} yolo_gflops` GFLOPs/inference | `{python} sustained_gf` GFLOPs/sec     |
 +--------------------------+-----------------------------------+--------------------+
-| **Required throughput**  | 960 GFLOPs × 2 (headroom)         | ~2 TFLOPS          |
+| **Required throughput**  | `{python} sustained_gf` GFLOPs × `{python} headroom` (headroom)         | ~`{python} req_tflops` TFLOPS          |
 +--------------------------+-----------------------------------+--------------------+
 
 **Hardware Selection**
@@ -933,19 +1094,17 @@ To make these trade-offs concrete, the following worked example applies *edge in
 +---------------------------+---------------+-----------+---------------+----------------+
 | **Edge Device**           | **INT8 TOPS** | **Power** | **Unit Cost** | **Fleet Cost** |
 +:==========================+==============:+==========:+==============:+===============:+
-| **NVIDIA Jetson Orin NX** | 100 TOPS      | 10-40 W   | $600          | $300,000       |
+| **NVIDIA Jetson Orin NX** | 100 TOPS      | 10-40 W   | $`{python} jetson_cost`          | $`{python} jetson_fleet_k`,000       |
 +---------------------------+---------------+-----------+---------------+----------------+
 | **Intel NUC + Movidius**  | 4 TOPS        | 15 W      | $400          | $200,000       |
 +---------------------------+---------------+-----------+---------------+----------------+
-| **Google Coral Dev**      | 4 TOPS        | 2 W       | $150          | $75,000        |
+| **Google Coral Dev**      | 4 TOPS        | `{python} coral_power_w` W       | $`{python} coral_cost`          | $`{python} coral_fleet_k`,000        |
 +---------------------------+---------------+-----------+---------------+----------------+
 
-**Decision**: At 2 TFLOPS required and INT8 quantization providing ~4× effective throughput, the Coral Dev Board (4 TOPS) meets requirements at 1/4 the cost of Jetson, with 12× lower power consumption.
+**Decision**: At `{python} req_tflops` TFLOPS required and INT8 quantization providing ~4× effective throughput, the Coral Dev Board (4 TOPS) meets requirements at 1/4 the cost of Jetson, with `{python} f"{jetson_power_w / coral_power_w:.0f}"`× lower power consumption.
 
-**TCO over 3 years** (Coral): Hardware $75K + Power ($2×500×8760h×3yr×$0.12/kWh) = $75K + $16K = **$91,000 total** vs. cloud inference at ~$500K.
+**TCO over `{python} years` years** (Coral): Hardware $`{python} coral_fleet_k`K + Power ($`{python} coral_power_w`×`{python} stores`×8760h×`{python} years`yr×$`{python} CLOUD_ELECTRICITY_PER_KWH.magnitude`/kWh) = $`{python} coral_fleet_k`K + $`{python} coral_pwr_k`K = **$`{python} coral_tco_k`,000 total** vs. cloud inference at ~$500K.
 :::
-
-![**Edge Device Deployment**: Diverse IoT devices, from wearables to home appliances, enable decentralized machine learning by performing inference locally, reducing reliance on cloud connectivity and improving response times. Source: Edge Impulse.](images/jpg/edge_ml_iot.jpg){#fig-edgeml-example fig-pos="t" fig-alt="Collection of IoT devices arranged on a surface: smart home sensors, fitness wearables, environmental monitors, and connected appliances in various sizes and form factors."}
 
 ### Real-Time Industrial and IoT Systems {#sec-ml-system-architecture-realtime-industrial-iot-systems-373a}
 
@@ -1056,13 +1215,28 @@ above=1of $(B2.north east)!0.5!(B3.north west)$](B0){Mobile ML};
 
 The battery life and resource constraints listed above translate directly into engineering requirements. Consider the implications for always-on ML features.
 
+```{python}
+#| echo: false
+#| label: battery-tax
+# Battery life impact of always-on ML
+# runtime_h = 15 Wh / 2 W = 7.5 hours
+runtime_q = PHONE_BATTERY_WH / OBJECT_DETECTOR_POWER_W
+# If we run it for the full duration it can sustain
+daily_budget_pct_calc = (OBJECT_DETECTOR_POWER_W * runtime_q) / (PHONE_BATTERY_WH) * 100
+
+runtime    = f"{runtime_q.to(ureg.hour).magnitude:.1f}"
+pwr_w      = f"{OBJECT_DETECTOR_POWER_W.to(ureg.watt).magnitude:.0f}"
+batt_wh    = f"{PHONE_BATTERY_WH.to(ureg.watt * ureg.hour).magnitude:.0f}"
+budget_pct = f"{daily_budget_pct_calc.magnitude:.0f}"
+```
+
 ::: {.callout-notebook title="The Battery Tax"}
-**Problem**: You want to deploy a "real-time" background object detector on a smartphone. The model consumes **2 Watts** of continuous power when active. The phone has a standard **15 Watt-hour (Wh)** battery.
+**Problem**: You want to deploy a "real-time" background object detector on a smartphone. The model consumes **`{python} pwr_w` Watts** of continuous power when active. The phone has a standard **`{python} batt_wh` Watt-hour (Wh)** battery.
 
 **The Physics**:
 
-1.  **Ideal Runtime**: $15 \text{ Wh} / 2 \text{ W} = \mathbf{7.5 \text{ hours}}$.
-2.  **The Reality**: A user expects their phone to last 24 hours. Your single feature has just consumed **30%** of the entire daily energy budget in a few hours.
+1.  **Ideal Runtime**: $`{python} batt_wh` \text{ Wh} / `{python} pwr_w` \text{ W} = \mathbf{`{python} runtime` \text{ hours}}$.
+2.  **The Reality**: A user expects their phone to last 24 hours. Your single feature has just consumed **`{python} budget_pct`%** of the entire daily energy budget in a few hours.
 
 **The Engineering Conclusion**: You cannot simply "deploy" the model. You must use the techniques in @sec-model-compression (quantization, duty-cycling) to reduce the power to **<100 mW** if you want it to stay on all day.
 :::
@@ -1137,6 +1311,8 @@ TinyML brings intelligence to the smallest devices, from microcontrollers[^fn-mi
 [^fn-coin-cell]: **Coin-Cell Batteries**: Compact power sources (CR2032: 225mAh at 3V) enabling "deploy-and-forget" IoT devices. TinyML models consuming 10-50µW average power can operate 1-10 years on a single cell. Constrains models to <100KB (fitting in on-chip SRAM), driving innovation in efficient neural network architectures and intermittent computing paradigms.
 
 [^fn-ubiquitous]: **Ubiquitous**: From Latin *ubique* (everywhere), combining *ubi* (where) and the generalizing suffix *-que*. Mark Weiser at Xerox PARC coined "ubiquitous computing" in 1988 to describe technology so embedded in the environment that it becomes invisible. TinyML realizes this vision: when sensors cost dollars and run for years on a battery, intelligence can literally be *everywhere*, disappearing into the physical world.
+
+![**TinyML System Scale**: Small development boards, including Arduino Nano BLE Sense and similar microcontroller kits approximately 2 to 5 cm in length, with visible processor chips and pin connectors that enable sensor integration for always-on ML inference at milliwatt power budgets. Source: [@warden2018speech]](images/png/tiny_ml.png){#fig-TinyML-example fig-alt="Small development boards including Arduino Nano BLE Sense and similar microcontroller kits arranged on a surface, each approximately 2-5 cm in length with visible chips and connectors."}
 
 We define this paradigm formally as *TinyML*.
 
@@ -1243,8 +1419,6 @@ above=1of $(B2.north east)!0.5!(B3.north west)$](B0){TinyML};
 [^fn-on-device-training]: **On-Device Training Constraints**: Microcontrollers (256KB-2MB RAM) cannot support full backpropagation through large networks. Alternatives include on-device fine-tuning of final layers, federated learning with local gradient computation, and TinyTL (memory-efficient training using <50KB). Apple's on-device personalization adapts keyboard predictions without uploading typing data.
 
 [^fn-device-size]: **TinyML Device Scale**: ML-capable chips range from 5×5mm (Syntiant NDP: 140µW, 1MB SRAM) to full single-board computers (Coral Dev Board Mini: 40×48mm, 4 TOPS). This 100× size range reflects diverse deployment needs from implantable medical devices to industrial edge gateways processing multiple sensor streams simultaneously.
-
-![**TinyML System Scale**: Small development boards, including Arduino Nano BLE Sense and similar microcontroller kits approximately 2 to 5 cm in length, with visible processor chips and pin connectors that enable sensor integration for always-on ML inference at milliwatt power budgets. Source: [@warden2018speech]](images/png/tiny_ml.png){#fig-TinyML-example fig-alt="Small development boards including Arduino Nano BLE Sense and similar microcontroller kits arranged on a surface, each approximately 2-5 cm in length with visible chips and connectors."}
 
 TinyML's extreme resource constraints enable unique advantages that are difficult to achieve at other scales. Avoiding network transmission reduces end-to-end latency and eliminates communication overhead, enabling rapid local responses for sensing and control loops. The economics can be compelling for massive-scale deployments because per-node costs can be low enough to instrument large physical environments. Energy efficiency enables multi-year operation on small batteries, and energy harvesting can further extend lifetimes in some settings. Privacy improves because raw data can remain local, reducing transmission and central storage, though this does not automatically provide formal privacy guarantees without additional privacy and security mechanisms.
 
@@ -1818,7 +1992,8 @@ Beyond statistical decay, engineers also fall prey to common misconceptions abou
 
 The following fallacies and pitfalls capture architectural mistakes that waste development resources, miss performance targets, or deploy systems fundamentally mismatched to their operating constraints. Each represents a pattern we have seen repeatedly in production ML systems.
 
-**Fallacy:** _One deployment paradigm solves all ML problems._
+::: {.callout-fallacy title="One deployment paradigm solves all ML problems."}
+:::
 
 Physical constraints create hard boundaries that no single paradigm can span. As @sec-ml-system-architecture-framework-to-practice establishes, memory bandwidth scales as the square root of chip area while compute scales linearly, producing fundamentally different bottlenecks across paradigms. @tbl-big_vs_tiny quantifies this: cloud ML achieves 100--1000 ms latency while TinyML delivers 1--10 ms, a 100x difference rooted in speed-of-light limits, not implementation quality. A real-time robotics system requiring sub-10 ms response cannot use cloud inference regardless of optimization, and a billion-parameter language model cannot fit on a microcontroller with 256 KB RAM regardless of quantization. The optimal architecture typically combines paradigms, such as cloud training with edge inference or mobile preprocessing with cloud analysis.
 
@@ -1835,25 +2010,30 @@ A related misconception holds that moving computation closer to the user always 
 **The Engineering Conclusion**: The break-even point occurs only when local processing time plus reduced network distance falls below total cloud round-trip time. Teams deploying edge infrastructure without quantitative latency budgets often discover their solution increases tail latency while adding operational complexity and hardware costs.
 :::
 
-**Fallacy:** _Model optimization overcomes mobile device power and thermal limits._
+::: {.callout-fallacy title="Model optimization overcomes mobile device power and thermal limits."}
+:::
 
 Compression techniques do not scale indefinitely against physics. A smartphone with a 15 Wh battery running a 1 W inference workload depletes in 15 hours, but a 5 W workload (common for large on-device models) exhausts the battery in 3 hours while triggering thermal throttling that reduces performance by 40--60 percent. As @sec-ml-system-architecture-mobile-ml-benefits-resource-constraints-c568 establishes, sustained mobile inference cannot exceed 2--3 W without active cooling. Quantization from FP32 to INT8 reduces power by approximately 4x, but further compression to INT4 or binary networks often causes 5--10 percent accuracy loss. Applications requiring continuous inference beyond mobile thermal envelopes remain physically impossible regardless of algorithmic improvements.
 
-**Fallacy:** _TinyML represents scaled-down mobile ML._
+::: {.callout-fallacy title="TinyML represents scaled-down mobile ML."}
+:::
 
 The resource gaps are qualitative, not quantitative. As @sec-ml-system-architecture-tinyml-advantages-operational-tradeoffs-2d40 establishes, TinyML microcontrollers provide 256 KB to 1 MB of memory versus mobile devices with 4--12 GB, a 10,000x difference requiring fundamentally different algorithms. Mobile ML uses 8-bit quantization with minimal accuracy loss; TinyML requires binary or ternary networks that sacrifice 10--15 percent accuracy for 32x memory reduction. Mobile devices run models with millions of parameters; TinyML models contain 10,000--100,000 parameters, demanding distinct architectural choices such as depth-wise separable convolutions. Power budgets show similar discontinuities: mobile inference consumes 1--5 W, while TinyML targets 1--10 mW for battery-free energy harvesting. These thousand-fold gaps make TinyML a distinct problem class, not a smaller version of mobile ML.
 
-**Pitfall:** _Minimizing computational resources minimizes total cost._
+::: {.callout-pitfall title="Minimizing computational resources minimizes total cost."}
+:::
 
 Teams optimize per-unit resource consumption while ignoring operational overhead and development velocity. A cloud inference service costing $2,000 monthly in compute appears expensive versus $500 monthly edge hardware amortization, but edge deployments add network engineering ($3,000 monthly), hardware maintenance ($500 monthly), and reliability engineering ($2,000 monthly), totaling $6,000. Development velocity compounds the gap: cloud deployments reaching production in 2 months versus 6 months for custom edge infrastructure represent 4 months of delayed revenue. The optimal cost solution requires total cost of ownership analysis including development time, operational complexity, and opportunity costs, not merely minimizing compute expenses.
 
-**Fallacy:** _Optimizing the slowest component proportionally improves overall system performance._
+::: {.callout-fallacy title="Optimizing the slowest component proportionally improves overall system performance."}
+:::
 
-Amdahl's Law[^fn-amdahls-law] establishes hard limits: $Speedup_{overall} = \frac{1}{(1-p) + \frac{p}{s}}$ where $p$ is the fraction of work that can be improved and $s$ is the speedup of that fraction. For an ML pipeline where inference consumes 30 percent of total latency (preprocessing: 50 percent, postprocessing: 20 percent), a 10x inference speedup yields $\frac{1}{0.7 + \frac{0.3}{10}} = \frac{1}{0.73} = 1.37$x overall improvement, not 10x. Even eliminating inference entirely ($s = \infty$) achieves only $\frac{1}{0.7} = 1.43$x speedup. Effective optimization requires profiling the entire pipeline and addressing bottlenecks systematically, because system performance depends on the slowest unoptimized stage.
+**Amdahl's Law** (@principle-amdahls-law)[^fn-amdahls-law] establishes hard limits: $Speedup_{overall} = \frac{1}{(1-p) + \frac{p}{s}}$ where $p$ is the fraction of work that can be improved and $s$ is the speedup of that fraction. For an ML pipeline where inference consumes 30 percent of total latency (preprocessing: 50 percent, postprocessing: 20 percent), a 10x inference speedup yields $\frac{1}{0.7 + \frac{0.3}{10}} = \frac{1}{0.73} = 1.37$x overall improvement, not 10x. Even eliminating inference entirely ($s = \infty$) achieves only $\frac{1}{0.7} = 1.43$x speedup. Effective optimization requires profiling the entire pipeline and addressing bottlenecks systematically, because system performance depends on the slowest unoptimized stage.
 
 [^fn-amdahls-law]: **Amdahl's Law**: Formulated by Gene Amdahl in 1967 [@amdahl1967validity], this law quantifies theoretical speedup when only part of a system can be improved. The formula $S = 1/((1-p) + p/s)$ shows that even infinite speedup ($s \to \infty$) of the parallelizable fraction $p$ cannot exceed $1/(1-p)$. For ML systems, this explains why end-to-end optimization matters: a 10x faster GPU yields minimal gains if data loading or preprocessing dominates total latency.
 
-**Fallacy:** _More training data always improves deployed model performance._
+::: {.callout-fallacy title="More training data always improves deployed model performance."}
+:::
 
 Three constraints limit data scaling benefits. First, model capacity bounds learning: a keyword spotting model with 250K parameters achieves 95% accuracy on 50K samples but only 96.5% on 1M samples, a 0.3% gain for 5x more data, storage, and labeling cost. The model simply cannot represent more complex decision boundaries. Second, data quality dominates quantity: 1M curated samples often outperform 100M noisy web-scraped samples, because label noise and spurious correlations degrade performance even as dataset size grows. Third, deployment distribution matters more than training scale: a model trained on 1B web images may perform worse on medical imaging than one trained on 100K domain-specific samples. Effective data strategy requires understanding the capacity-data relationship for the target model and deployment domain, not simply maximizing dataset scale.
 
@@ -1863,7 +2043,7 @@ Machine learning deployment contexts shape every aspect of system design. From c
 
 The evolution from centralized cloud systems to distributed edge and mobile deployments illustrates how resource constraints drive innovation. Each paradigm emerged to address specific limitations: Cloud ML leverages centralized power for complex processing but must accept latency and privacy costs. Edge ML brings computation closer to data sources, reducing latency while introducing intermediate resource constraints. Mobile ML extends these capabilities to personal devices, balancing user experience with battery life and thermal management. TinyML enables ubiquitous sensing and intelligence with minimal resources.
 
-::: {.callout-important title="Key Takeaways"}
+::: {.callout-takeaway title="Key Takeaways"}
 
 * **Physical constraints are permanent**: Speed of light (5ms cross-country), power wall, and memory wall create hard boundaries that engineering cannot overcome—only navigate.
 * **Identify bottlenecks before optimizing**: The same model is compute-bound in training but memory-bound in inference. Use the Equation of System Balance first; analytical estimates often outperform prototype-based approaches.

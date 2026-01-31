@@ -39,7 +39,7 @@ The mathematical operators—matrix multiplications, activation functions, gradi
 
 Every neural network architecture answers one central question: *how should we structure computation to match the structure in our data?* Images have spatial locality, language has sequential dependencies, and tabular records have no inherent structure at all. The architecture encodes assumptions about these patterns directly into the computational graph, and those assumptions determine everything from parameter count to hardware utilization to deployment feasibility. Architecture selection is therefore a systems engineering problem, not merely a modeling decision.
 
-@sec-deep-learning-systems-foundations established the mathematical operators, matrix multiplication, activation functions, and gradient computation, that form the "verbs" of neural networks. This chapter examines how these operators assemble into **architectures**: specialized structures optimized for specific data types and computational constraints. As defined in the **Silicon Contract** (@sec-silicon-contract), every architecture makes an implicit agreement with hardware, trading computational patterns for efficiency on particular problem classes.
+@sec-deep-learning-systems-foundations established the mathematical operators, matrix multiplication, activation functions, and gradient computation, that form the "verbs" of neural networks. This chapter examines how these operators assemble into **architectures**: specialized structures optimized for specific data types and computational constraints. As defined in the **Silicon Contract** (@principle-silicon-contract), every architecture makes an implicit agreement with hardware, trading computational patterns for efficiency on particular problem classes.
 
 The structural assumptions that each architecture encodes are known as **inductive biases**, and they serve as the unifying concept for this entire chapter. A CNN's inductive bias is spatial locality: nearby pixels matter more than distant ones. A Transformer's inductive bias is that any element may attend to any other, enabling flexible long-range relationships at the cost of quadratic memory scaling. These biases are not incidental design choices; they are the mechanism through which architectures achieve efficiency by restricting the space of functions they can represent. We formalize this framework in @sec-dnn-architectures-unified-framework-inductive-biases-257d, after examining how each architecture's bias manifests in practice.
 
@@ -66,6 +66,24 @@ Each architectural choice creates distinct computational signatures that propaga
 ### Lighthouse Architectures: Recurring Systems Examples {#sec-dnn-architectures-lighthouse-architectures-recurring-systems-examples-7d9c}
 
 Throughout this book, we will use five specific model architectures as recurring **Lighthouse Examples**. These serve as consistent reference points to ground abstract concepts in concrete systems reality. We introduce them here with both their qualitative roles and quantitative characteristics, then define their architectures in detail within their respective sections. These examples are concrete implementations of the **Workload Archetypes** (Compute Beast, Bandwidth Hog, etc.) introduced in @sec-ml-system-architecture.
+
+To understand why these specific models were chosen, it is helpful to look at the history of model evolution through the lens of the **Efficiency Frontier**.
+
+```{python}
+#| label: fig-efficiency-frontier
+#| echo: false
+#| fig-cap: "**The Efficiency Frontier.** ImageNet Top-1 Accuracy vs. Computational Cost (GFLOPs). The 'Pareto Frontier' (dashed line) represents the optimal trade-off at any given time. Note the shift from dense CNNs (blue) to efficient Mobile architectures (green) and finally to Transformers (red) which push accuracy at higher compute costs. This frontier illustrates the trade-off between representational power and computational efficiency that defines modern architecture selection."
+
+import sys
+import matplotlib.pyplot as plt
+# Ensure calc directory is in path
+sys.path.append('../../calc')
+import viz
+
+viz.set_book_style()
+viz.plot_efficiency_frontier()
+plt.show()
+```
 
 +------------------+-------------+------------+------------------+------------+----------------+------------------------------------------+
 | **Model**        | **Domain**  | **Params** | **FLOPs/Inf**    | **Memory** | **Bottleneck** | **Role in Textbook**                     |
@@ -122,7 +140,7 @@ The quantitative characteristics in @tbl-lighthouse-comparison reveal a critical
 
 ::: {.callout-notebook title="The Arithmetic Intensity Spectrum"}
 
-Architecture selection is ultimately an engineering trade-off between **Math** ($Ops$) and **Memory Movement** ($D$). We quantify this using **Arithmetic Intensity**: the ratio of operations performed per byte of data moved.
+Architecture selection is ultimately an engineering trade-off between **Math** ($Ops$) and **Memory Movement** ($D$). We quantify this using **Arithmetic Intensity** (@principle-arithmetic-intensity): the ratio of operations performed per byte of data moved.
 
 -   **ResNet-50 (Compute-Bound)**: High intensity ($\approx 100$ $Ops/Byte$). ResNet reuses each weight many times across the image. Its performance is limited by how fast the hardware can do math.
 -   **GPT-2 (Bandwidth-Bound)**: Low intensity ($\approx 1$ $Ops/Byte$). GPT-2 must load massive weights from memory just to perform a single token’s math. Its performance is limited by how fast memory can move bits.
@@ -731,7 +749,7 @@ at($(8-CH3.70)!0.3!(8-CH3.290)$){};
 ```
 :::
 
-The figure above illustrates how the CNN architecture introduced earlier in this chapter implements these spatial processing principles in practice. As pioneered by Yann LeCun[^fn-lecun-cnn] and @lecun1989backpropagation, the key innovations that make this possible are parameter sharing[^fn-parameter-sharing], local connectivity, and translation invariance[^fn-translation-invariance].
+@fig-cnn-spatial-processing illustrates how the CNN architecture introduced earlier in this chapter implements these spatial processing principles in practice. As pioneered by Yann LeCun[^fn-lecun-cnn] and @lecun1989backpropagation, the key innovations that make this possible are parameter sharing[^fn-parameter-sharing], local connectivity, and translation invariance[^fn-translation-invariance].
 
 [^fn-lecun-cnn]: **Yann LeCun and CNNs**: LeCun's 1989 LeNet architecture was inspired by Hubel and Wiesel's discovery of simple and complex cells in cat visual cortex [@hubel1962receptive]. LeNet-5 achieved approximately 0.9% error rate on MNIST in 1998 and was deployed by banks to read millions of checks daily, among the first large-scale commercial applications of neural networks.
 
@@ -2641,7 +2659,31 @@ Where:
 - $T$: Sequence length
 - $d$: Model dimensionality
 
-The memory requirements scale differently with architectural choices. The quadratic scaling of activation storage in Transformers, for instance, highlights the need for large memory capacities and efficient memory management in systems designed for Transformer-based workloads. In contrast, CNNs exhibit more favorable memory scaling due to their parameter sharing and localized processing. These memory access patterns complement the computational scaling behaviors examined later in @tbl-computational-complexity, completing the picture of each architecture's resource requirements. These memory complexity considerations inform system-level design decisions, such as choosing memory hierarchy configurations and developing memory optimization strategies.
+These memory access patterns complement the computational scaling behaviors summarized in @tbl-computational-complexity, completing the picture of each architecture's resource requirements.
+
++------------------+-------------------------+-------------------------+------------------------+-----------------------+------------------+
+| **Architecture** | **Parameters**          | **Forward Pass**        | **Memory**             | **Parallelization**   | **Bottleneck**   |
++:=================+:========================+:========================+:=======================+:======================+:=================+
+| **MLPs**         | $O(d_{\text{in}}\times$ | $O(d_{\text{in}}\times$ | $O(d^2)$ weights       | Excellent             | Memory bandwidth |
+|                  | $d_{\text{out}})$       | $d_{\text{out}})$       | $O(d\times b)$         | Matrix ops parallel   |                  |
+|                  | per&nbsp;layer          | per&nbsp;layer          | activations            |                       |                  |
++------------------+-------------------------+-------------------------+------------------------+-----------------------+------------------+
+| **CNNs**         | $O(k^2\times$           | $O(H\times W\times$     | $O(H\times W\times c)$ | Good                  | Memory bandwidth |
+|                  | $c_{\text{in}}\times$   | $k^2\times$             | features               | Spatial independence  |                  |
+|                  | $c_{\text{out}})$       | $c_{\text{in}}\times$   | $O(k^2\times c^2)$     |                       |                  |
+|                  | per layer               | $c_{\text{out}})$       | weights                |                       |                  |
++------------------+-------------------------+-------------------------+------------------------+-----------------------+------------------+
+| **RNNs**         | $O(h^2+h\times d)$      | $O(T\times h^2)$        | $O(h)$ hidden state    | Poor                  | Sequential deps  |
+|                  | total                   | for $T$ time&nbsp;steps | (constant)             | Sequential deps       |                  |
++------------------+-------------------------+-------------------------+------------------------+-----------------------+------------------+
+| **Transformers** | $O(d^2)$ projections    | $O(n^2\times d+n$       | $O(n^2)$ attention     | Excellent (positions) | Memory ($n^2$)   |
+|                  | $O(d^2\times h)$        | $\times d²)$ per layer  | $O(n\times d)$         | Limited by memory     |                  |
+|                  | multi-head              |                         | sequences              |                       |                  |
++------------------+-------------------------+-------------------------+------------------------+-----------------------+------------------+
+
+: **Computational Complexity Comparison**: Scaling behaviors and resource requirements for major neural network architectures. Variables: $d$ = dimension, $h$ = hidden size, $k$ = kernel size, $c$&nbsp;=&nbsp;channels, $H,W$ = spatial dimensions, $T$ = time steps, $n$ = sequence length, $b$ = batch size. The bottleneck column identifies the primary performance-limiting factor in typical deployments. {#tbl-computational-complexity}
+
+The memory requirements scale differently with architectural choices. The quadratic scaling of activation storage in Transformers, for instance, highlights the need for large memory capacities and efficient memory management in systems designed for Transformer-based workloads. In contrast, CNNs exhibit more favorable memory scaling due to their parameter sharing and localized processing. Together, these two tables provide a comprehensive view of each architecture's resource profile, informing system-level design decisions such as choosing memory hierarchy configurations and developing memory optimization strategies.
 
 The impact of these patterns becomes clear when we consider data reuse opportunities. In CNNs, each input pixel participates in multiple convolution windows (typically 9 times for a $3 \times 3$ filter), making effective data reuse necessary for performance. Modern GPUs provide multi-level cache hierarchies (L1, L2, shared memory) to capture this reuse, while software techniques like loop tiling ensure data remains in cache once loaded.
 
@@ -2924,31 +2966,7 @@ Beyond data type matching, computational constraints often determine final feasi
 
 Architecture selection must account for computational and memory trade-offs that determine deployment feasibility. Each architecture exhibits distinct scaling behaviors that create different bottlenecks as problem size increases, and understanding these patterns allows realistic resource planning.
 
-The computational profile of each architecture reflects its underlying design philosophy. Dense architectures like MLPs prioritize representational capacity through full connectivity, while structured architectures like CNNs achieve efficiency through parameter sharing and locality assumptions. Sequential architectures like RNNs trade parallelization for memory efficiency, while attention-based architectures like Transformers exchange memory for computational flexibility. @tbl-arch-complexity (presented earlier in the memory access section) complements this analysis, as examining these same architectures from both computational scaling and memory access perspectives reveals different optimization opportunities and system design considerations.
-
-@tbl-computational-complexity summarizes the key computational characteristics of each architecture, including scaling behaviors that determine deployment feasibility:
-
-+------------------+-------------------------+-------------------------+------------------------+-----------------------+------------------+
-| **Architecture** | **Parameters**          | **Forward Pass**        | **Memory**             | **Parallelization**   | **Bottleneck**   |
-+:=================+:========================+:========================+:=======================+:======================+:=================+
-| **MLPs**         | $O(d_{\text{in}}\times$ | $O(d_{\text{in}}\times$ | $O(d^2)$ weights       | Excellent             | Memory bandwidth |
-|                  | $d_{\text{out}})$       | $d_{\text{out}})$       | $O(d\times b)$         | Matrix ops parallel   |                  |
-|                  | per&nbsp;layer          | per&nbsp;layer          | activations            |                       |                  |
-+------------------+-------------------------+-------------------------+------------------------+-----------------------+------------------+
-| **CNNs**         | $O(k^2\times$           | $O(H\times W\times$     | $O(H\times W\times c)$ | Good                  | Memory bandwidth |
-|                  | $c_{\text{in}}\times$   | $k^2\times$             | features               | Spatial independence  |                  |
-|                  | $c_{\text{out}})$       | $c_{\text{in}}\times$   | $O(k^2\times c^2)$     |                       |                  |
-|                  | per layer               | $c_{\text{out}})$       | weights                |                       |                  |
-+------------------+-------------------------+-------------------------+------------------------+-----------------------+------------------+
-| **RNNs**         | $O(h^2+h\times d)$      | $O(T\times h^2)$        | $O(h)$ hidden state    | Poor                  | Sequential deps  |
-|                  | total                   | for $T$ time&nbsp;steps | (constant)             | Sequential deps       |                  |
-+------------------+-------------------------+-------------------------+------------------------+-----------------------+------------------+
-| **Transformers** | $O(d^2)$ projections    | $O(n^2\times d+n$       | $O(n^2)$ attention     | Excellent (positions) | Memory ($n^2$)   |
-|                  | $O(d^2\times h)$        | $\times d²)$ per layer  | $O(n\times d)$         | Limited by memory     |                  |
-|                  | multi-head              |                         | sequences              |                       |                  |
-+------------------+-------------------------+-------------------------+------------------------+-----------------------+------------------+
-
-: **Computational Complexity Comparison**: Scaling behaviors and resource requirements for major neural network architectures. Variables: $d$ = dimension, $h$ = hidden size, $k$ = kernel size, $c$&nbsp;=&nbsp;channels, $H,W$ = spatial dimensions, $T$ = time steps, $n$ = sequence length, $b$ = batch size. The bottleneck column identifies the primary performance-limiting factor in typical deployments. {#tbl-computational-complexity}
+The computational profile of each architecture reflects its underlying design philosophy. Dense architectures like MLPs prioritize representational capacity through full connectivity, while structured architectures like CNNs achieve efficiency through parameter sharing and locality assumptions. Sequential architectures like RNNs trade parallelization for memory efficiency, while attention-based architectures like Transformers exchange memory for computational flexibility. As @tbl-computational-complexity showed earlier alongside @tbl-arch-complexity, examining these same architectures from both computational scaling and memory access perspectives reveals different optimization opportunities and system design considerations.
 
 #### Scalability and Production Considerations {#sec-dnn-architectures-scalability-production-considerations-68dd}
 
@@ -3171,7 +3189,9 @@ Compare candidates against our Lighthouse models:
 #### Step 4: Systems Validation {.unnumbered}
 
 *Memory Check:*
-$$\text{Model: 2.5 MB} + \text{Activations: } 224 \times 224 \times 64 \times 4 \approx \text{12 MB} + \text{OS/Buffers: 50 MB} = \text{65 MB} \ll \text{512 MB} \checkmark$$
+$$
+\underbrace{\text{2.5 MB}}_{\text{Model}} + \underbrace{224 \times 224 \times 64 \times 4 \approx \text{12 MB}}_{\text{Activations}} + \underbrace{\text{50 MB}}_{\text{OS/Buffers}} = \text{65 MB} \ll \text{512 MB}~\checkmark
+$$
 
 *Compute Check:* Target device: ARM Cortex-A53 @ 1.2 GHz with NEON SIMD (~2 GOPS INT8)
 
@@ -3204,23 +3224,28 @@ This worked example demonstrates the systematic approach that transforms archite
 
 Organizations regularly deploy transformers for problems where CNNs would suffice at 10x lower cost, or select RNNs without accounting for sequential bottlenecks that cripple throughput. These mistakes stem from specific misconceptions about architecture performance that appear plausible but collapse under systems analysis. Recognizing these pitfalls transforms theoretical knowledge into practical engineering judgment.
 
-**Fallacy:** _More complex architectures always perform better than simpler ones._
+::: {.callout-fallacy title="More complex architectures always perform better than simpler ones."}
+:::
 
 Engineers assume that transformer-based models outperform simpler architectures across all tasks. In production, architectural sophistication must match problem complexity and available computational resources. As demonstrated in @sec-dnn-architectures-architectural-principles-engineering-tradeoffs-362e, a CNN achieves 99% accuracy on MNIST with 100K parameters while an MLP requires 20M parameters for 98% accuracy. The CNN uses 200x fewer parameters and trains substantially faster. For problems with clear structural patterns like spatial locality in images, CNNs exploit inductive biases that MLPs cannot match efficiently. Transformers excel at tasks requiring long-range dependencies but incur $O(n^2)$ memory costs for sequence length $n$, making them infeasible for resource-constrained deployments. Teams that default to transformers for tabular data or small-image classification waste 5--10x computational resources: a training job that could cost \$1,000 and complete in 2 hours becomes \$10,000 and 20 hours, with no accuracy benefit.
 
-**Pitfall:** _Selecting architectures based solely on accuracy metrics without analyzing computational requirements._
+::: {.callout-pitfall title="Selecting architectures based solely on accuracy metrics without analyzing computational requirements."}
+:::
 
 Many practitioners choose architectures from academic papers that report state-of-the-art accuracy, ignoring the computational and memory implications. A CNN achieves excellent image classification accuracy but requires specialized memory access patterns for sliding window operations. RNNs' sequential dependencies create serialization that limits parallelization; as shown in @sec-dnn-architectures-computational-complexity-considerations-08da, RNNs achieve only 30--50% of peak hardware performance compared to 80--90% for MLPs due to sequential constraints. Transformers deliver strong results but face quadratic memory scaling: a sequence length of 2048 requires 16× more memory than length 512. Production systems that ignore these characteristics encounter deployment failures: models miss latency SLAs (100ms target becomes 500ms reality, violating user-facing contracts), exceed memory budgets (8GB estimation becomes 32GB requirement, forcing expensive hardware upgrades), or achieve poor hardware utilization (expected 80% efficiency drops to 25%, wasting 75% of compute spend). These mismatches commonly add 2–6 months to deployment timelines as teams scramble to redesign systems that looked viable on paper.
 
-**Fallacy:** _Architecture performance transfers uniformly across different hardware platforms._
+::: {.callout-fallacy title="Architecture performance transfers uniformly across different hardware platforms."}
+:::
 
 This belief assumes benchmarks on high-end GPUs predict performance on edge devices. In reality, hardware-architecture alignment determines efficiency. As discussed in @sec-dnn-architectures-systemlevel-building-blocks-41c5, CNNs benefit from tensor cores achieving 80–95% of peak throughput, while RNNs' irregular memory access patterns yield only 30–50% efficiency. A model optimized for GPU tensor cores (exploiting $16 \times 16$ matrix tile sizes) may perform poorly on CPUs lacking specialized units or mobile processors with limited SIMD width. Mobile deployment particularly exposes mismatches: a transformer that runs at 50ms on an A100 GPU may require 2000ms on a mobile SoC due to lack of high-bandwidth memory and tensor acceleration, a 40x slowdown that renders the model unusable for interactive applications. Organizations that benchmark only on training hardware discover these performance gaps late in development, often requiring complete architecture redesigns that delay product launches by quarters, not weeks.
 
-**Pitfall:** _Combining architectural patterns without analyzing interaction effects at the system level._
+::: {.callout-pitfall title="Combining architectural patterns without analyzing interaction effects at the system level."}
+:::
 
 Engineers add attention mechanisms to CNNs or insert convolutional layers into transformers expecting additive benefits. Each architectural pattern creates distinct memory access characteristics: CNNs perform sliding window operations with spatial locality, while attention mechanisms require all-to-all communication with quadratic memory requirements. Naive combinations create memory bandwidth conflicts: attention layers may flush CNN feature maps from cache, eliminating spatial locality benefits. A ResNet achieving 250 images/second can drop to 80 images/second when attention layers disrupt the cache-optimized convolution pipeline, a 3x throughput reduction that may require tripling infrastructure costs to maintain the same capacity. Similarly, adding recurrent connections to transformer encoders reintroduces sequential dependencies that eliminate the parallelization advantages transformers provide. Successful hybrid architectures require profiling memory access patterns, cache behavior, and bandwidth utilization to ensure components cooperate rather than conflict.
 
-**Pitfall:** _Optimizing architectural decisions for training hardware without considering deployment constraints._
+::: {.callout-pitfall title="Optimizing architectural decisions for training hardware without considering deployment constraints."}
+:::
 
 Teams design architectures targeting high-end GPU clusters, then discover deployment failures on edge devices or cloud instances with different characteristics. An architecture exploiting 8x A100 GPUs with 80GB memory each (640GB total) cannot deploy to edge devices with 4GB memory; the 160x memory reduction requires fundamental architectural changes, not just quantization. As @sec-dnn-architectures-decision-framework-a889 emphasizes, effective architecture selection requires analyzing the full system stack: compute infrastructure, compiler optimization capabilities, target hardware characteristics, and operational constraints. A 500-layer ResNet trains efficiently on GPU clusters but compilation takes 45 minutes and generates 8GB of optimized kernels, making iterative development impractical. Edge deployment compounds these issues: models must fit in 10-100MB storage, execute in 50-200ms latency, and operate within 2-5W power budgets. Organizations that defer deployment considerations to "optimize later" encounter fundamental architectural mismatches requiring costly model redesigns.
 
@@ -3232,7 +3257,7 @@ Neural network architectures form specialized computational structures tailored 
 
 Despite their apparent diversity, these architectures share fundamental computational primitives that recur across different designs. Matrix multiplication operations form the computational core, whether in dense layers, convolutions, or attention mechanisms. Memory access patterns vary significantly between architectures, with some requiring sliding window operations for local processing while others demand global information aggregation. The five **Lighthouse Models** (ResNet-50, GPT-2/Llama, MobileNet, DLRM, and KWS) exemplify how different architectures create distinct system bottlenecks (compute, memory bandwidth, latency, memory capacity, and power), providing concrete reference points for systems reasoning throughout this book. The following key principles should guide your architecture decisions.
 
-::: {.callout-important title="Key Takeaways"}
+::: {.callout-takeaway title="Key Takeaways"}
 
 * **Match architecture to data structure**: MLPs for tabular, CNNs for spatial, RNNs for sequential, Transformers for relational, DLRM for high-cardinality categorical. Mismatched architectures incur 10--100x greater computational cost.
 * **Characterize performance bottlenecks before optimization**: ResNet-50 is compute-bound (optimize FLOPS), GPT-2 is memory-bandwidth-bound (optimize data movement), DLRM is memory-capacity-bound (optimize distribution).
