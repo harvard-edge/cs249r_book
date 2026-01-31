@@ -1,0 +1,168 @@
+---
+title: "Algorithm Foundations"
+---
+
+# Algorithm Foundations {#sec-algorithm-foundations}
+
+This appendix covers the mathematical and computational machinery that powers neural networks. From the linear algebra at the heart of every layer to the backpropagation algorithm that enables learning, these foundations explain *how* models compute and *why* certain implementation choices affect performance. The concepts here support the deep learning foundations in @sec-deep-learning-systems-foundations, the framework internals in @sec-ai-frameworks, and the training strategies in @sec-ai-training.
+
+## Linear Algebra for Neural Networks {#sec-system-foundations-linear-algebra-neural-networks-f606}
+
+Now that we know how numbers are stored, we must understand how they are manipulated. **Linear Algebra**, and specifically the General Matrix Multiply (GEMM), is the computational engine of Deep Learning.
+
+::: {.callout-perspective title="Why This Matters"}
+Every neural network, regardless of architecture, spends most of its time doing matrix multiplication. Understanding GEMM performance characteristics explains why batch size affects throughput, why certain layer dimensions are "better" than others, and how to interpret profiler output.
+:::
+
+### Tensor Operations and Notation {#sec-system-foundations-tensor-operations-notation-de17}
+
+We use **Einstein summation** notation throughout this book because it makes complex operations explicit.^[Implemented as `torch.einsum` in PyTorch and `np.einsum` in NumPy. It provides a unified DSL for dot products, outer products, transposes, and matrix multiplications.] Matrix multiplication $C = AB$ becomes:
+
+$$ C_{ij} = \sum_k A_{ik} B_{kj} $$
+
+Or in einsum notation: `ik,kj->ij`. This notation extends naturally to the multi-dimensional operations in attention mechanisms. For example, batched multi-head attention is `bhid,bhjd->bhij` (batch, head, sequence indices).
+
+### Memory Layouts and Performance {#sec-system-foundations-memory-layouts-performance-ae64}
+
+Data layout in memory (row-major vs. column-major) directly affects cache efficiency. When iterating over a matrix, accessing contiguous memory locations is dramatically faster than strided access. The difference can be 10x to 100x in effective bandwidth.
+
+A common optimization pattern: transpose tensors once before repeated operations to ensure contiguous access in the hot loop. The one-time transpose cost is amortized across many subsequent operations.
+
+### The Dot Product as Similarity {#sec-system-foundations-dot-product-similarity-879f}
+
+The dot product $\mathbf{a} \cdot \mathbf{b} = \sum a_i b_i$ is geometrically equivalent to $|\mathbf{a}| |\mathbf{b}| \cos \theta$.
+
+In deep learning, this is our primary tool for measuring **similarity**. In Attention mechanisms:
+*   Query ($Q$) and Key ($K$) vectors are dot-produced.
+*   A large positive result means they align (high similarity).
+*   A result of zero means they are orthogonal (unrelated).
+
+### General Matrix Multiply (GEMM) {#sec-system-foundations-general-matrix-multiply-gemm-5f92}
+
+GEMM is the computational workhorse of deep learning. For matrices of size $M \times K$ and $K \times N$, GEMM performs $2MNK$ floating-point operations (multiply-accumulate counts as two operations).
+
+The arithmetic intensity of GEMM scales linearly with matrix dimension. For square $n \times n$ matrices in **FP16** (2 bytes/element):
+
+$$ \text{Intensity} = \frac{\text{Ops}}{\text{Bytes}} = \frac{2n^3}{3n^2 \times 2} = \frac{n}{3} \text{ FLOP/byte} $$
+
+This explains several important phenomena:
+
+- **Larger batches improve efficiency**: Batching increases the effective matrix dimensions, pushing workloads toward the compute-bound region of the roofline.
+- **Power-of-two dimensions help**: Hardware tensor cores are optimized for specific tile sizes (typically 16x16 or 32x32). Dimensions that align with these sizes avoid padding overhead.
+- **Small matrices are inefficient**: A 64x64 GEMM may achieve only 10% of peak throughput because it cannot fully utilize the hardware.
+
+### Sparse Matrix Formats {#sec-system-foundations-sparse-matrix-formats-7920}
+
+When most elements in a matrix are zero, specialized storage formats avoid wasting memory on zeros and enable computations that skip them entirely.
+
+The **Compressed Sparse Row (CSR)** format uses three arrays:
+
+- `Values`: The non-zero elements, stored in row order
+- `Col_Idx`: The column index of each non-zero element
+- `Row_Ptr`: The starting position in `Values` for each row (length = num_rows + 1)
+
+CSR is essential for recommendation systems (sparse embedding tables) and pruned models. For a matrix with $N$ elements and $K$ non-zeros, CSR uses $O(K)$ storage instead of $O(N)$.
+
+**Example**: A vocabulary embedding matrix of size $100,000 \times 10,000$ (1 billion parameters).
+*   **Dense (FP32)**: $10^9 \times 4$ bytes = **4 GB**.
+*   **Sparse (1% density)**: Storing only non-zeros requires roughly $10^7 \times (4 \text{ bytes value} + 4 \text{ bytes index}) \approx$ **80 MB**.
+*   *Result*: A 50x reduction in memory footprint, fitting a model that would otherwise OOM (Out of Memory).
+
+## Tensor Programming Primitives {#sec-system-foundations-tensor-programming-primitives-7baf}
+
+The mathematical operations of linear algebra are implemented in software through **Tensor Programming**. This layer translates abstract math into concrete array manipulations, where bugs often manifest as shape mismatches rather than logical errors.
+
+::: {.callout-perspective title="Why This Matters"}
+Your logic is correct, but your code crashes with a shape mismatch error. Or worse, it runs but produces garbage because you broadcasted dimensions incorrectly. Mastering tensor shapes, strides, and broadcasting is the literacy of ML engineering.
+:::
+
+### Shapes and Strides {#sec-system-foundations-shapes-strides-bfd9}
+
+A tensor is a view over a contiguous block of memory.
+
+*   **Shape:** The dimensions of the tensor (e.g., `(3, 4)`).
+*   **Stride:** The number of elements to skip in memory to move to the next element in a dimension.
+
+**Key Insight:** Operations like `transpose()` or `view()` often just change the *strides*, not the data in memory. This is fast ($O(1)$) but can lead to non-contiguous tensors that fail in optimized kernels. `contiguous()` forces a memory copy to realign data.
+
+### Broadcasting {#sec-system-foundations-broadcasting-3387}
+
+Broadcasting allows arithmetic operations on tensors of different shapes. The rule is: compare dimensions from the last to the first. Two dimensions are compatible if:
+1.  They are equal.
+2.  One of them is 1.
+
+The dimension with size 1 is "stretched" to match the other. Note that this stretching is **virtual**: the data is not copied in memory. Instead, the stride for that dimension is set to 0, allowing the hardware to read the same value repeatedly with $O(1)$ memory overhead.
+
+**Example:**
+*   A: `(32, 1, 64)`  (Batch, Channels, Height)
+*   B: `(1, 128, 64)` (1, Width, Height)
+*   Result: `(32, 128, 64)`
+
+Visualizing this expansion prevents silent logic bugs where you accidentally create a massive tensor (e.g., `(Batch, Batch)` matrix instead of element-wise `(Batch,)` vector).
+
+## The Mechanics of Learning {#sec-system-foundations-mechanics-learning-78b6}
+
+With valid tensor programs, we can construct the training loops that power learning. **Backpropagation** is the algorithm that orchestrates these tensors to compute gradients, transforming a forward prediction into a backward learning signal.
+
+::: {.callout-perspective title="Why This Matters"}
+When training fails (loss goes to NaN, gradients explode, memory runs out), understanding what backpropagation actually does helps you diagnose the problem. This section gives you the mental model to reason about gradient flow and memory usage during training.
+:::
+
+### The Chain Rule and Automatic Differentiation {#sec-system-foundations-chain-rule-automatic-differentiation-e742}
+
+For a composed function $y = f(g(x))$, the derivative is $\frac{dy}{dx} = \frac{dy}{dg} \cdot \frac{dg}{dx}$.
+
+Modern frameworks use **reverse-mode automatic differentiation**, which computes gradients for all $N$ parameters in a single backward pass. This is why training (one forward + one backward pass) has similar compute cost to two inference passes, rather than $N$ passes.
+
+### The Backpropagation Algorithm {#sec-system-foundations-backpropagation-algorithm-3175}
+
+Backpropagation implements the chain rule efficiently through two passes: forward to compute outputs, backward to compute gradients.
+
+::: {#fig-backprop-graph fig-env="figure" fig-pos="htb" fig-cap="**Backpropagation Computational Graph**: A two-layer network showing the forward pass (black arrows) and backward pass (red dashed arrows). Each node caches values during the forward pass that are reused during the backward pass." fig-alt="A computational graph with four nodes labeled x, h, y, and L connected left to right. Solid black arrows show the forward pass with weights W1 and W2. Dashed red arrows curve backward showing gradient flow with partial derivative notation."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=3cm, auto, >=stealth, thick]
+  \tikzset{
+    Node/.style={circle, draw=BlueLine, fill=BlueFill, line width=0.8pt, minimum size=0.9cm, text=TextBlack},
+    Edge/.style={->, draw=GrayLine, line width=0.8pt},
+    BackEdge/.style={->, dashed, draw=RedLine, line width=0.8pt, bend right=50},
+    Label/.style={font=\footnotesize\usefont{T1}{phv}{m}{n}, text=TextBlack}
+  }
+  \node[Node] (x) {x};
+  \node[Node, right of=x] (h) {h};
+  \node[Node, right of=h] (y) {y};
+  \node[Node, right of=y, fill=RedLine!10, draw=RedLine] (L) {L};
+  \draw[Edge] (x) -- node[below, Label] {$W_1$} (h);
+  \draw[Edge] (h) -- node[below, Label] {$W_2$} (y);
+  \draw[Edge] (y) -- node[below, Label] {Loss} (L);
+  \draw[BackEdge] (L) to node[above, Label, text=RedLine] {$\frac{\partial L}{\partial y}$} (y);
+  \draw[BackEdge] (y) to node[above, Label, text=RedLine] {$\frac{\partial L}{\partial W_2}$} (h);
+  \draw[BackEdge] (h) to node[above, Label, text=RedLine] {$\frac{\partial L}{\partial W_1}$} (x);
+\end{tikzpicture}
+```
+:::
+
+**How to trace the computation.** @fig-backprop-graph shows a simple two-layer network. Practice tracing both passes to understand what happens during training:
+
+**Forward pass (black arrows, left to right)**: Start at $x$, your input. Multiply by $W_1$ to get hidden activation $h$. Cache $h$ because you will need it later. Multiply $h$ by $W_2$ to get output $y$. Cache $y$. Compare $y$ to the target label to compute loss $L$.
+
+At this point, you have computed the loss and your memory contains: the input $x$, the cached activation $h$, the cached output $y$, and the loss $L$. For a large model, these cached activations dominate memory usage.
+
+**Backward pass (red arrows, right to left)**: Now trace backward from $L$. The loss function tells you $\frac{\partial L}{\partial y}$, the gradient of loss with respect to your prediction. This is where the error signal enters the network.
+
+To compute $\frac{\partial L}{\partial W_2}$, you need to know how $W_2$ affected $y$. That requires the cached value of $h$. The chain rule gives you: $\frac{\partial L}{\partial W_2} = \frac{\partial L}{\partial y} \cdot h^T$.
+
+To continue backward to $W_1$, you need $\frac{\partial L}{\partial h}$, then multiply by the cached input $x$. Each step backward requires the activations cached during the forward pass.
+
+**Memory Implication**: Cached activations dominate memory usage. Storing activations for a 100-layer network consumes huge memory, motivating **Gradient Checkpointing** [@chen2016training] (recomputing activations to save memory).^[Gradient checkpointing trades compute for memory. Instead of storing all activations, you store only a subset (checkpoints) and recompute the missing ones during the backward pass. This reduces memory usage from $O(N)$ to $O(\sqrt{N})$ at the cost of $33\%$ more compute.]
+
+### Computational Graphs and Optimization {#sec-system-foundations-computational-graphs-optimization-b49d}
+
+ML compilers represent models as directed acyclic graphs (DAGs). This representation enables hardware-independent optimizations.
+
+**Static Single Assignment (SSA)**: Compilers transform graphs into SSA form where each variable is assigned exactly once. This makes data dependencies explicit, enabling safe optimizations like **Operator Fusion** (combining `Conv -> ReLU` into one kernel to avoid memory round-trips).
+
+## Fallacies and Pitfalls {#sec-algorithm-foundations-fallacies-pitfalls}
+
+::: {.callout-warning title="Pitfall: Assuming sparse matrices always save memory."}
+**The Reality**: Sparse formats (CSR, COO) add metadata overhead (indices). If a matrix is only 50% sparse, the overhead (storing indices) often exceeds the savings (skipping zeros). A rule of thumb: sparsity usually needs to exceed 90%–95% to be worthwhile for performance, though specialized hardware (like NVIDIA's 2:4 sparsity) changes this calculus.
+:::
