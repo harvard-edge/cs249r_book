@@ -31,6 +31,35 @@ Training a model is a one-time expense; serving it is perpetual. A model trained
 
 :::
 
+```{python}
+#| label: inference-setup
+#| echo: false
+
+from calc.constants import *
+from calc.formulas import fmt, sci
+
+# H100 specs
+h100_mem_gb = f"{H100_MEM_CAPACITY.to(GiB).magnitude:.0f}"       # "80"
+h100_mem_bw_tbs = f"{H100_MEM_BW.to(TB / second).magnitude}"     # "3.35"
+h100_tdp_w = f"{H100_TDP.to(watt).magnitude:.0f}"                # "700"
+
+# A100 specs
+a100_mem_gb = f"{A100_MEM_CAPACITY.to(GiB).magnitude:.0f}"       # "80"
+a100_mem_bw_tbs = f"{A100_MEM_BW.to(TB / second).magnitude:.0f}" # "2"
+a100_mem_bw_gbs = f"{A100_MEM_BW.to(GB / second).magnitude:.0f}" # "2039"
+
+# NVLink bandwidth
+nvlink_h100_gbs = f"{NVLINK_H100_BW.to(GB / second).magnitude:.0f}"  # "900"
+nvlink_a100_gbs = f"{NVLINK_A100_BW.to(GB / second).magnitude:.0f}"  # "600"
+
+# PCIe bandwidth
+pcie_gen4_gbs = f"{PCIE_GEN4_BW.to(GB / second).magnitude:.0f}"  # "32"
+pcie_gen5_gbs = f"{PCIE_GEN5_BW.to(GB / second).magnitude:.0f}"  # "64"
+
+# GPT-3
+gpt3_params_b = f"{GPT3_PARAMS.to(param).magnitude / 1e9:.0f}"   # "175"
+```
+
 ## Scaling Inference Beyond Single Machines {#sec-inference-scale-scaling-inference-beyond-single-machines-54e6}
 
 In the **Systems Sandwich** (@sec-vol2-introduction), Inference is the **Service Layer**—the interface where the model meets the user. While the **Operational Layer** (training) optimizes for throughput over weeks, the Service Layer must deliver predictions in milliseconds. If the **Iron Law** defines the speed limit of training, it defines the **deadline** of inference: $L_{inference} \le \text{SLO}$.
@@ -49,9 +78,9 @@ This chapter develops the principles and techniques for building inference syste
 
 Three distinct signals indicate when distributed inference becomes necessary rather than merely optional. @tbl-distribution-triggers categorizes these triggers by constraint type and corresponding strategy.
 
-**Memory exhaustion** occurs when model parameters, key-value caches, or embedding tables exceed single-device capacity. A single NVIDIA H100 GPU provides 80GB of HBM3[^fn-hbm3] memory. GPT-4 class models with hundreds of billions of parameters require 200–400GB just for weights in FP16 precision, forcing distribution across multiple GPUs regardless of throughput requirements. Recommendation systems with trillion-parameter embedding tables face similar constraints: Meta's DLRM[^fn-dlrm] model stores embedding tables that require multiple terabytes of memory.
+**Memory exhaustion** occurs when model parameters, key-value caches, or embedding tables exceed single-device capacity. A single NVIDIA H100 GPU provides `{python} h100_mem_gb`GB of HBM3[^fn-hbm3] memory. GPT-4 class models with hundreds of billions of parameters require 200–400GB just for weights in FP16 precision, forcing distribution across multiple GPUs regardless of throughput requirements. Recommendation systems with trillion-parameter embedding tables face similar constraints: Meta's DLRM[^fn-dlrm] model stores embedding tables that require multiple terabytes of memory.
 
-[^fn-hbm3]: **High Bandwidth Memory 3 (HBM3)**: A 3D-stacked DRAM technology providing 3.35 TB/s bandwidth on the H100, compared to 1 TB/s for HBM2e on the A100. This 3x bandwidth improvement directly enables larger batch sizes and faster token generation for memory-bandwidth-bound LLM decode operations.
+[^fn-hbm3]: **High Bandwidth Memory 3 (HBM3)**: A 3D-stacked DRAM technology providing `{python} h100_mem_bw_tbs` TB/s bandwidth on the H100, compared to `{python} a100_mem_bw_tbs` TB/s for HBM2e on the A100. This bandwidth improvement directly enables larger batch sizes and faster token generation for memory-bandwidth-bound LLM decode operations.
 
 [^fn-dlrm]: **Deep Learning Recommendation Model (DLRM)**: Meta's reference architecture (2019) for large-scale recommendation, processing hundreds of billions of inferences daily. DLRM separates dense features (MLP processing) from sparse features (embedding lookups), enabling hybrid CPU-GPU architectures. Embedding tables can exceed 100TB, requiring distributed storage and caching strategies for serving.
 
@@ -747,7 +776,7 @@ Start
 
 *Analysis*:
 
-1. **Memory**: Llama-70B requires ~140GB in FP16. With 4-bit quantization (AWQ), this drops to ~35GB, fitting on a single H100 (80GB) with room for KV cache.
+1. **Memory**: Llama-70B requires ~140GB in FP16. With 4-bit quantization (AWQ), this drops to ~35GB, fitting on a single H100 (`{python} h100_mem_gb`GB) with room for KV cache.
 
 2. **Throughput**: At 500 QPS peak with average 100 output tokens, the system must sustain 50,000 tokens/second. A single quantized Llama-70B on H100 achieves approximately 1,000 tokens/second with continuous batching, so 4 GPUs provide headroom.
 
@@ -1011,7 +1040,7 @@ This square root relationship explains why LLMs (high $\alpha$ from weight loadi
 
 #### Worked Example: GPT-3 Serving at 100 QPS {#sec-inference-scale-worked-example-gpt3-serving-100-qps-edcf}
 
-Consider serving a GPT-3 class model (175B parameters) with the following characteristics:
+Consider serving a GPT-3 class model (`{python} gpt3_params_b`B parameters) with the following characteristics:
 
 **System Parameters**:
 
@@ -1578,7 +1607,7 @@ Even with modern frameworks, diagnosing tail latency anomalies requires systemat
 
 **Physical Layer Analysis** (Hardware Constraints):
 
-The system runs on 4 A100-80GB GPUs connected via PCIe Gen4 (64 GB/s per GPU) rather than NVLink. The server has a dual-socket CPU with NUMA topology. Memory bandwidth per GPU is 2 TB/s (HBM2e), adequate for decode operations. However, PCIe bandwidth limits tensor parallelism communication to 64 GB/s versus NVLink's 600 GB/s. For a batch requiring 100MB activation transfers between GPUs, PCIe adds approximately 1.5ms per synchronization point versus 0.17ms for NVLink.
+The system runs on 4 A100-`{python} a100_mem_gb`GB GPUs connected via PCIe Gen4 (`{python} pcie_gen5_gbs` GB/s per GPU) rather than NVLink. The server has a dual-socket CPU with NUMA topology. Memory bandwidth per GPU is `{python} a100_mem_bw_tbs` TB/s (HBM2e), adequate for decode operations. However, PCIe bandwidth limits tensor parallelism communication to `{python} pcie_gen5_gbs` GB/s versus NVLink's `{python} nvlink_a100_gbs` GB/s. For a batch requiring 100MB activation transfers between GPUs, PCIe adds approximately 1.5ms per synchronization point versus 0.17ms for NVLink.
 
 **Operational Layer Analysis** (Algorithmic Behavior):
 
@@ -2172,7 +2201,7 @@ Beyond efficient allocation, reducing the size of cached values provides additio
 
 $$\text{Compressed size} = \text{Original size} \times \frac{b_{compressed}}{b_{original}}$$
 
-While weight quantization reduces model storage, the KV cache dominates memory consumption for long-context LLM serving. At 32K+ token context lengths, KV cache can exceed model weights in memory usage. For a 70B model with 32K context in FP16, a single sequence consumes 86GB, exceeding the 80GB H100 capacity.
+While weight quantization reduces model storage, the KV cache dominates memory consumption for long-context LLM serving. At 32K+ token context lengths, KV cache can exceed model weights in memory usage. For a 70B model with 32K context in FP16, a single sequence consumes 86GB, exceeding the `{python} h100_mem_gb`GB H100 capacity.
 
 This reveals a critical property: KV cache values exhibit different distributions than model weights, enabling targeted quantization strategies. Keys have relatively uniform distributions and tolerate aggressive quantization (2-4 bits), while Values are more sensitive and require careful calibration (4-6 bits).
 
@@ -2428,7 +2457,7 @@ A 70-billion parameter model in FP16 (16 bits) requires:
 
 $$\text{Memory} = 70 \times 10^9 \times \frac{16}{8} = 140 \text{ GB}$$
 
-This exceeds the 80GB capacity of an H100 GPU, requiring at minimum 2-way sharding.
+This exceeds the `{python} h100_mem_gb`GB capacity of an H100 GPU, requiring at minimum 2-way sharding.
 
 **Latency requirements**: Even when a model fits in memory, sharding can reduce latency by parallelizing computation. @eq-parallel-time formalizes the potential speedup as a function of parallelization efficiency:
 
@@ -2538,7 +2567,7 @@ Consider serving Llama-70B with the following configuration:
 
 $$\text{Memory}_{70B} = 70 \times 10^9 \times 2 = 140\text{ GB}$$
 
-**Minimum sharding**: 2-way (140GB / 80GB per H100)
+**Minimum sharding**: 2-way (140GB / `{python} h100_mem_gb`GB per H100)
 
 **Recommended sharding**: 8-way for optimal latency
 
@@ -2559,7 +2588,7 @@ $$\text{Memory}_{70B} = 70 \times 10^9 \times 2 = 140\text{ GB}$$
 - Sequential: 2,400ms per token
 - 8-way TP: 348ms per token
 
-The 6.9x speedup (vs theoretical 8x) reflects communication overhead. With 600 GB/s NVLink bandwidth, each 8MB activation all-reduce takes ~0.3ms.
+The 6.9x speedup (vs theoretical 8x) reflects communication overhead. With `{python} nvlink_h100_gbs` GB/s NVLink bandwidth, each 8MB activation all-reduce takes ~0.3ms.
 
 **Time-to-first-token** (1024-token prompt):
 
@@ -2989,7 +3018,7 @@ NVLink enables efficient tensor parallelism within a node. Cross-node tensor par
 
 NVLink bandwidth has evolved significantly over GPU generations.[^fn-nvlink]
 
-[^fn-nvlink]: **NVLink evolution**: NVLink bandwidth has grown from 160 GB/s (Pascal, 2016) to 900 GB/s bidirectional (Hopper, 2022) to 1.8 TB/s (Blackwell, 2024). This 10x improvement enables tensor parallelism across 8+ GPUs with less than 5% communication overhead, making large model inference practical.
+[^fn-nvlink]: **NVLink evolution**: NVLink bandwidth has grown from 160 GB/s (Pascal, 2016) to `{python} nvlink_h100_gbs` GB/s bidirectional (Hopper, 2022) to 1.8 TB/s (Blackwell, 2024). This 10x improvement enables tensor parallelism across 8+ GPUs with less than 5% communication overhead, making large model inference practical.
 
 ### Sharding Strategy Selection {#sec-inference-scale-sharding-strategy-selection-f69c}
 
@@ -4823,7 +4852,7 @@ TensorRT-LLM generates optimized kernels for specific GPU architectures, fuses o
 
 $$\text{Max batch} = \frac{\text{GPU Memory} - \text{Quantized Weights}}{\text{KV Cache per Sequence}}$$
 
-A 70B model with 4-bit weights requires approximately 35GB, leaving 45GB on an 80GB A100 for KV cache. With FP16 KV cache at 2.5MB per 1K tokens per sequence, this supports ~18 concurrent 1K-token sequences versus ~8 with FP16 weights.
+A 70B model with 4-bit weights requires approximately 35GB, leaving 45GB on an `{python} a100_mem_gb`GB A100 for KV cache. With FP16 KV cache at 2.5MB per 1K tokens per sequence, this supports ~18 concurrent 1K-token sequences versus ~8 with FP16 weights.
 
 ### Quantization Selection Guidelines {#sec-inference-scale-quantization-selection-guidelines-24fb}
 
@@ -5219,7 +5248,7 @@ Distributed inference introduces overhead absent from single-machine serving: ne
 
 **Fallacy: More GPU memory always means more batch size and throughput.**
 
-While larger GPU memory enables larger batches for models that fit in memory, the bottleneck often shifts before memory is exhausted. Memory bandwidth limits throughput for bandwidth-bound operations (LLM decode). Compute limits throughput for compute-bound operations (prefill, vision inference). A 7B LLM on an H100 with 80GB memory achieves ~2,000 tokens/sec decode throughput regardless of batch size beyond 128 requests because HBM3 bandwidth (3.35 TB/s) saturates first. Adding memory to a bandwidth-bound workload provides no benefit. Understanding whether the workload is compute-bound, memory-bandwidth-bound, or capacity-bound guides appropriate resource allocation.
+While larger GPU memory enables larger batches for models that fit in memory, the bottleneck often shifts before memory is exhausted. Memory bandwidth limits throughput for bandwidth-bound operations (LLM decode). Compute limits throughput for compute-bound operations (prefill, vision inference). A 7B LLM on an H100 with `{python} h100_mem_gb`GB memory achieves ~2,000 tokens/sec decode throughput regardless of batch size beyond 128 requests because HBM3 bandwidth (`{python} h100_mem_bw_tbs` TB/s) saturates first. Adding memory to a bandwidth-bound workload provides no benefit. Understanding whether the workload is compute-bound, memory-bandwidth-bound, or capacity-bound guides appropriate resource allocation.
 
 **Pitfall: Neglecting multi-tenancy isolation until production.**
 

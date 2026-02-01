@@ -34,6 +34,53 @@ Compression reduces model complexity through fewer parameters, lower precision, 
 
 :::
 
+```{python}
+#| label: hw-accel-setup
+#| echo: false
+
+from calc.constants import *
+from calc.formulas import fmt, sci
+
+# GPU specs for tables and prose
+v100_tflops = f"{V100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
+v100_bw = f"{V100_MEM_BW.to(GB/second).magnitude:.0f}"
+
+a100_tflops_fp16 = f"{A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
+a100_tflops_tf32 = f"{A100_FLOPS_TF32.to(TFLOPs/second).magnitude:.0f}"
+a100_tflops_fp32 = f"{A100_FLOPS_FP32.to(TFLOPs/second).magnitude:.1f}"
+a100_tflops_int8 = f"{A100_FLOPS_INT8.to(TFLOPs/second).magnitude:.0f}"
+a100_bw = f"{A100_MEM_BW.to(GB/second).magnitude:,.0f}"
+a100_bw_tbs = f"{A100_MEM_BW.to(TB/second).magnitude:.1f}"
+a100_mem = f"{A100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
+a100_tdp = f"{A100_TDP.to(watt).magnitude:.0f}"
+
+h100_tflops_fp16 = f"{H100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
+h100_tflops_fp8 = f"{H100_FLOPS_FP8_TENSOR.to(TFLOPs/second).magnitude:,.0f}"
+h100_tflops_tf32 = f"{H100_FLOPS_TF32.to(TFLOPs/second).magnitude:.0f}"
+h100_tflops_int8 = f"{H100_FLOPS_INT8.to(TFLOPs/second).magnitude:,.0f}"
+h100_bw = f"{H100_MEM_BW.to(GB/second).magnitude:,.0f}"
+h100_bw_tbs = f"{H100_MEM_BW.to(TB/second).magnitude:.2f}"
+h100_mem = f"{H100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
+h100_tdp = f"{H100_TDP.to(watt).magnitude:.0f}"
+
+t4_tflops = f"{T4_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
+t4_bw = f"{T4_MEM_BW.to(GB/second).magnitude:.0f}"
+
+tpuv4_tflops = f"{TPUV4_FLOPS_BF16.to(TFLOPs/second).magnitude:.0f}"
+tpuv4_bw = f"{TPUV4_MEM_BW.to(GB/second).magnitude:,.0f}"
+
+mobile_tops = f"{MOBILE_NPU_TOPS_INT8.to(TFLOPs/second).magnitude:.0f}"
+
+# Ridge points (FLOP/byte)
+v100_ridge = f"{(V100_FLOPS_FP16_TENSOR / V100_MEM_BW).to(flop/byte).magnitude:.0f}"
+a100_ridge = f"{(A100_FLOPS_FP16_TENSOR / A100_MEM_BW).to(flop/byte).magnitude:.0f}"
+h100_ridge = f"{(H100_FLOPS_FP16_TENSOR / H100_MEM_BW).to(flop/byte).magnitude:.0f}"
+a100_ridge_fp32 = f"{(A100_FLOPS_FP32 / A100_MEM_BW).to(flop/byte).magnitude:.0f}"
+
+# Energy
+dram_energy = f"{ENERGY_DRAM_ACCESS_PJ.magnitude:.0f}"
+```
+
 ## AI Hardware Acceleration Fundamentals {#sec-ai-acceleration-ai-hardware-acceleration-fundamentals-9b28}
 
 We have optimized the **Data** in @sec-data-selection and compressed the **Algorithm** (Model) in @sec-model-compression. Now we turn to the final component of the AI Triad: the **Machine**. Hardware acceleration exists because of a fundamental asymmetry in modern computing: arithmetic is cheap, but moving data is expensive. In the time a modern GPU computes a thousand floating-point operations, a single value travels from main memory. This inversion, where computation is the abundant resource and bandwidth is the scarce one, is the reason specialized hardware matters for machine learning.
@@ -107,7 +154,7 @@ To see Amdahl's Law in action, consider how the parallel fraction $P$ differs dr
 
 **ResNet-50 inference on NVIDIA H100:**
 
-- H100 delivers $S = 500\times$ speedup over CPU for matrix multiply (3,958 TOPS INT8 vs. ~8 TOPS on baseline CPU without AMX extensions)
+- H100 delivers $S = 500\times$ speedup over CPU for matrix multiply (`{python} h100_tflops_int8` TOPS INT8 vs. ~8 TOPS on baseline CPU without AMX extensions)
 - Typical inference has $P = 0.95$ (95% parallelizable, 5% serial: data loading, preprocessing, postprocessing)
 
 $$Speedup = \frac{1}{(1-0.95) + \frac{0.95}{500}} = \frac{1}{0.05 + 0.0019} = \frac{1}{0.0519} \approx 19.3\times$$
@@ -279,7 +326,7 @@ Machine learning constitutes a computational domain with unique characteristics 
 
 Machine learning computational requirements reveal limitations in traditional processors. CPUs achieve only 5-10% utilization on neural network workloads, delivering approximately 100 GFLOPS[^fn-gflops] while consuming hundreds of watts. This inefficiency results from architectural mismatches: CPUs optimize for single-thread performance and irregular memory access, while neural networks require massive parallelism and predictable data streams. The memory bandwidth[^fn-memory-bandwidth-accelerators] constraint becomes particularly severe: a single neural network layer may require accessing gigabytes of parameters, overwhelming CPU cache hierarchies[^fn-cache-hierarchy] designed for kilobyte-scale working sets.
 
-[^fn-gflops]: **GFLOPS/TOPS Performance Metrics**: GFLOPS (10⁹ floating-point ops/second) measures floating-point throughput; TOPS (10¹² ops/second) typically measures INT8 operations in AI accelerators. The A100 delivers 312 TFLOPS for FP16/BF16 Tensor Core operations (156 TFLOPS for TF32, or 312 TFLOPS with sparsity enabled); Apple A17 NPU achieves 35 INT8 TOPS. Real workload performance depends on memory bandwidth, achieving 10-30% of peak on typical ML models.
+[^fn-gflops]: **GFLOPS/TOPS Performance Metrics**: GFLOPS (10⁹ floating-point ops/second) measures floating-point throughput; TOPS (10¹² ops/second) typically measures INT8 operations in AI accelerators. The A100 delivers `{python} a100_tflops_fp16` TFLOPS for FP16/BF16 Tensor Core operations (`{python} a100_tflops_tf32` TFLOPS for TF32, or `{python} a100_tflops_fp16` TFLOPS with sparsity enabled); Apple A17 NPU achieves `{python} mobile_tops` INT8 TOPS. Real workload performance depends on memory bandwidth, achieving 10-30% of peak on typical ML models.
 
 [^fn-memory-bandwidth-accelerators]: Memory bandwidth (introduced in @sec-introduction) measures data transfer rate between memory and processors. For accelerator design, the gap between CPU memory (tens to hundreds of GB/s) and HBM (terabytes per second) explains why specialized hardware achieves 10-100x speedups on bandwidth-bound neural network operations.
 
@@ -1626,26 +1673,26 @@ These dynamics help explain the rapid adoption of newer accelerators despite hig
 +-------------------+----------------------+-----------------------+----------------------+-----------------------+
 | **Accelerator**   | **List Price (USD)** | **Peak FLOPS (FP16)** | **Memory Bandwidth** | **Price/Performance** |
 +:==================+=====================:+======================:+=====================:+======================:+
-| **NVIDIA V100**   | ~$9,000              | 125 TFLOPS            | 900 GB/s             | $72/TFLOP             |
+| **NVIDIA V100**   | ~$9,000              | `{python} v100_tflops` TFLOPS            | `{python} v100_bw` GB/s             | $72/TFLOP             |
 +-------------------+----------------------+-----------------------+----------------------+-----------------------+
-| **NVIDIA A100**   | ~$15,000             | 312 TFLOPS            | 1,935 GB/s           | $48/TFLOP             |
+| **NVIDIA A100**   | ~$15,000             | `{python} a100_tflops_fp16` TFLOPS            | `{python} a100_bw` GB/s           | $48/TFLOP             |
 +-------------------+----------------------+-----------------------+----------------------+-----------------------+
-| **NVIDIA H100**   | ~$25,000-30,000      | 756 TFLOPS (TF32)     | 3,350 GB/s           | ~$33/TFLOP            |
+| **NVIDIA H100**   | ~$25,000-30,000      | `{python} h100_tflops_tf32` TFLOPS (TF32)     | `{python} h100_bw` GB/s           | ~$33/TFLOP            |
 +-------------------+----------------------+-----------------------+----------------------+-----------------------+
-| **Google TPUv4**  | ~$8,000*             | 275 TFLOPS (BF16)     | 1,200 GB/s           | ~$29/TFLOP            |
+| **Google TPUv4**  | ~$8,000*             | `{python} tpuv4_tflops` TFLOPS (BF16)     | `{python} tpuv4_bw` GB/s           | ~$29/TFLOP            |
 +-------------------+----------------------+-----------------------+----------------------+-----------------------+
 | **Intel Gaudi 2** | ~$12,000             | 200 TFLOPS (INT8)     | 800 GB/s             | $60/TFLOP             |
 +-------------------+----------------------+-----------------------+----------------------+-----------------------+
 
 : **Accelerator Cost-Performance Comparison.** Hardware costs evaluated against computational capabilities for optimal deployment strategy selection. Newer accelerators offer better price-performance ratios, though total cost of ownership includes power consumption, cooling requirements, and infrastructure costs. Prices are approximate list prices and vary by region and volume; TPU pricing estimated from cloud rates. {#tbl-accelerator-economics}
 
-The table reveals several important patterns. First, price-performance improves with each generation, but the gains are not uniform across workload types. Second, memory bandwidth often improves faster than the price-performance ratio suggests, making newer accelerators disproportionately valuable for memory-bound workloads. Third, the "best" accelerator depends heavily on workload characteristics: a transformer training workload that is memory-bandwidth bound may benefit more from H100's 3,350 GB/s bandwidth than from raw FLOPS improvements. That bandwidth consistently emerges as the deciding economic factor raises a deeper question: what physical constraints make memory access, rather than arithmetic, the dominant cost in modern AI systems?
+The table reveals several important patterns. First, price-performance improves with each generation, but the gains are not uniform across workload types. Second, memory bandwidth often improves faster than the price-performance ratio suggests, making newer accelerators disproportionately valuable for memory-bound workloads. Third, the "best" accelerator depends heavily on workload characteristics: a transformer training workload that is memory-bandwidth bound may benefit more from H100's `{python} h100_bw` GB/s bandwidth than from raw FLOPS improvements. That bandwidth consistently emerges as the deciding economic factor raises a deeper question: what physical constraints make memory access, rather than arithmetic, the dominant cost in modern AI systems?
 
 Framework selection significantly impacts these economic decisions. Detailed hardware-framework optimization strategies are covered in @sec-ai-frameworks, while performance evaluation methodologies are discussed in @sec-benchmarking-ai.
 
-The preceding sections revealed impressive computational machinery: vector units achieving 8× parallelism through SIMD execution, matrix operations processing 256 elements simultaneously, and tensor cores executing 16×16×16 fused multiply-accumulate blocks in single cycles. An NVIDIA A100's tensor cores can execute 312 trillion operations per second, and an H100 pushes this further to nearly 2 petaFLOPS in FP8 precision. At these rates, the pure arithmetic for a ResNet-50 forward pass could complete in microseconds.
+The preceding sections revealed impressive computational machinery: vector units achieving 8× parallelism through SIMD execution, matrix operations processing 256 elements simultaneously, and tensor cores executing 16×16×16 fused multiply-accumulate blocks in single cycles. An NVIDIA A100's tensor cores can execute `{python} a100_tflops_fp16` trillion operations per second, and an H100 pushes this further to nearly 2 petaFLOPS in FP8 precision. At these rates, the pure arithmetic for a ResNet-50 forward pass could complete in microseconds.
 
-Yet real ResNet-50 inference takes milliseconds, not microseconds. The gap between theoretical capability and practical performance reveals the chapter's central tension, first posed in the Purpose section: computational capability has outpaced our ability to feed data to processors. Moving data from memory costs 100-1000× more energy than arithmetic, and memory bandwidth grows at roughly 20% annually while compute throughput doubles every two years. This disparity determines whether those 312 TFLOPS translate to 30 TFLOPS of sustained performance (10% utilization) or 250 TFLOPS (80% utilization). The memory systems examined next explain why this gap exists and what architectural innovations address it.
+Yet real ResNet-50 inference takes milliseconds, not microseconds. The gap between theoretical capability and practical performance reveals the chapter's central tension, first posed in the Purpose section: computational capability has outpaced our ability to feed data to processors. Moving data from memory costs 100-1000× more energy than arithmetic, and memory bandwidth grows at roughly 20% annually while compute throughput doubles every two years. This disparity determines whether those `{python} a100_tflops_fp16` TFLOPS translate to 30 TFLOPS of sustained performance (10% utilization) or 250 TFLOPS (80% utilization). The memory systems examined next explain why this gap exists and what architectural innovations address it.
 
 ## AI Memory Systems {#sec-ai-acceleration-ai-memory-systems-0057}
 
@@ -1780,7 +1827,7 @@ Recall the 1-second audio clip from @sec-ml-system-architecture. Here is its phy
 
 4.  **Registers**: The Tensor Core operates here.
     *   **Latency**: ~0 ns (single cycle).
-    *   **Throughput**: 312 TFLOPS.
+    *   **Throughput**: `{python} a100_tflops_fp16` TFLOPS.
     *   **Energy**: Cost is **~0.1 pJ/bit**.
 
 **The Systems Insight**: The "Speed of Light" limit means we cannot compute faster than we can move data from Step 1 to Step 4. The **Roofline** is determined by the bandwidth of the Step 1 $\rightarrow$ Step 2 link.
@@ -2267,9 +2314,9 @@ These ridge point values reveal a surprising trend: as hardware has become more 
 
 **The Evolution**:
 
-*   **V100 (2017)**: $125 \text{ TF} / 0.9 \text{ TB/s} \approx \mathbf{139 \text{ Ops/Byte}}$.
-*   **A100 (2020)**: $312 \text{ TF} / 2.0 \text{ TB/s} \approx \mathbf{156 \text{ Ops/Byte}}$.
-*   **H100 (2023)**: $990 \text{ TF} / 3.35 \text{ TB/s} \approx \mathbf{295 \text{ Ops/Byte}}$.
+*   **V100 (2017)**: $`{python} v100_tflops` \text{ TF} / 0.9 \text{ TB/s} \approx \mathbf{`{python} v100_ridge` \text{ Ops/Byte}}$.
+*   **A100 (2020)**: $`{python} a100_tflops_fp16` \text{ TF} / `{python} a100_bw_tbs` \text{ TB/s} \approx \mathbf{`{python} a100_ridge` \text{ Ops/Byte}}$.
+*   **H100 (2023)**: $`{python} h100_tflops_fp16` \text{ TF} / `{python} h100_bw_tbs` \text{ TB/s} \approx \mathbf{`{python} h100_ridge` \text{ Ops/Byte}}$.
 
 **The Systems Conclusion**: The "bar" for compute intensity has doubled.
 *   An algorithm with AI = 200 Ops/Byte was **compute-bound** (good) on A100.
@@ -2285,11 +2332,11 @@ Given these ridge point values, we can work through a concrete calculation to de
 
 **The Math**:
 
-1.  **Peak Compute**: 990 TFLOPS (FP16).
-2.  **Peak Bandwidth**: 3.4 TB/s.
-3.  **Ridge Point**: $990 \text{ TFLOPS} / 3.4 \text{ TB/s} \approx \mathbf{291 \text{ Ops/Byte}}$.
+1.  **Peak Compute**: `{python} h100_tflops_fp16` TFLOPS (FP16).
+2.  **Peak Bandwidth**: `{python} h100_bw_tbs` TB/s.
+3.  **Ridge Point**: $`{python} h100_tflops_fp16` \text{ TFLOPS} / `{python} h100_bw_tbs` \text{ TB/s} \approx \mathbf{`{python} h100_ridge` \text{ Ops/Byte}}$.
 
-**The Systems Conclusion**: To achieve 100% utilization of an H100, your code must perform **291 mathematical operations for every 1 byte** it pulls from memory.
+**The Systems Conclusion**: To achieve 100% utilization of an H100, your code must perform **`{python} h100_ridge` mathematical operations for every 1 byte** it pulls from memory.
 
 *   A standard **ReLU** performs 1 operation for every 8 bytes (0.125 Ops/Byte). It is **2,300x below the roofline**.
 *   A large **Dense MatMul** (batch=128) might reach 300 Ops/Byte. It is **Compute-Bound**.
@@ -2372,7 +2419,7 @@ Consider a Conv2D layer with input shape (batch=32, channels=128, height=56, wid
 *Arithmetic Intensity*:
 $$\text{AI} = \frac{59.2 \text{ GFLOPs}}{77.7 \text{ MB}} = 761 \text{ FLOP/byte}$$
 
-This is **well above** A100's ridge point of 156 FLOP/byte, making this operation **compute-bound**. The layer will achieve near-peak performance of ~312 TFLOPS (FP16 with Tensor Cores).
+This is **well above** A100's ridge point of `{python} a100_ridge` FLOP/byte, making this operation **compute-bound**. The layer will achieve near-peak performance of ~`{python} a100_tflops_fp16` TFLOPS (FP16 with Tensor Cores).
 :::
 
 The convolutional layer's high arithmetic intensity arises from its weight reuse pattern: the same 3×3 kernel is applied across all spatial locations, amortizing the cost of loading weights across millions of output computations. This is the architectural pattern that makes CNNs so efficient on modern accelerators.
@@ -2398,8 +2445,8 @@ Consider a fully connected layer: input (batch=32, features=2048) → output (ba
 *Arithmetic Intensity*:
 $$\text{AI} = \frac{274 \text{ MFLOPs}}{8.7 \text{ MB}} = 31.5 \text{ FLOP/byte}$$
 
-This is **below** A100's ridge point of 156 FLOP/byte, making this operation **memory-bound**. Attainable performance:
-$$P_{\text{attainable}} = 2000 \text{ GB/s} \times 31.5 \text{ FLOP/byte} = 63 \text{ TFLOPS}$$
+This is **below** A100's ridge point of `{python} a100_ridge` FLOP/byte, making this operation **memory-bound**. Attainable performance:
+$$P_{\text{attainable}} = `{python} a100_bw` \text{ GB/s} \times 31.5 \text{ FLOP/byte} = 63 \text{ TFLOPS}$$
 
 This is only 20% of peak compute capability, demonstrating the memory wall effect for small batch sizes.
 :::
@@ -2485,10 +2532,10 @@ For workloads where batching is impractical, such as interactive LLM generation 
 
 **1. The Hardware Constraints (The Denominators)**
 
-*   **Peak Compute:** 312 TFLOPS (FP16 Tensor Core).
-*   **Peak Bandwidth:** 2.0 TB/s (HBM2e).
-*   **Ridge Point (Compute/BW):** $312 / 2.0 = \mathbf{156 \text{ FLOPs/Byte}}$ (for FP16 Tensor Core).
-    *   *Meaning:* To saturate this chip at FP16 precision, you must perform 156 operations for every byte loaded. The ridge point varies by precision: FP32 operations (19.5 TFLOPS peak) have a ridge point of only ~10 FLOP/byte.
+*   **Peak Compute:** `{python} a100_tflops_fp16` TFLOPS (FP16 Tensor Core).
+*   **Peak Bandwidth:** `{python} a100_bw_tbs` TB/s (HBM2e).
+*   **Ridge Point (Compute/BW):** $`{python} a100_tflops_fp16` / `{python} a100_bw_tbs` = \mathbf{`{python} a100_ridge` \text{ FLOPs/Byte}}$ (for FP16 Tensor Core).
+    *   *Meaning:* To saturate this chip at FP16 precision, you must perform `{python} a100_ridge` operations for every byte loaded. The ridge point varies by precision: FP32 operations (`{python} a100_tflops_fp32` TFLOPS peak) have a ridge point of only ~`{python} a100_ridge_fp32` FLOP/byte.
 
 **2. The Workload Characteristics (The Numerator)**
 
@@ -2501,11 +2548,11 @@ For workloads where batching is impractical, such as interactive LLM generation 
 
 **3. The Prediction (Iron Law)**
 
-Since Actual Intensity ($1.0$) $\ll$ Ridge Point ($156$), the system is **Bandwidth Bound**.
+Since Actual Intensity ($1.0$) $\ll$ Ridge Point ($`{python} a100_ridge`$), the system is **Bandwidth Bound**.
 
-*   **Maximum Throughput:** $1.0 \text{ FLOP/Byte} \times 2.0 \text{ TB/s} = \mathbf{2.0 \text{ TFLOPS}}$.
+*   **Maximum Throughput:** $1.0 \text{ FLOP/Byte} \times `{python} a100_bw_tbs` \text{ TB/s} = \mathbf{`{python} a100_bw_tbs` \text{ TFLOPS}}$.
 *   **Utilization Ceiling:**
-    $$ \frac{2.0 \text{ TFLOPS (Actual)}}{312 \text{ TFLOPS (Peak)}} \approx \mathbf{0.6\%} $$
+    $$ \frac{`{python} a100_bw_tbs` \text{ TFLOPS (Actual)}}{`{python} a100_tflops_fp16` \text{ TFLOPS (Peak)}} \approx \mathbf{0.6\%} $$
 
 **The Systems Conclusion:**
 Without batching or caching, a \$15,000 GPU runs at **less than 1% efficiency** on LLM inference. This "Utilization Gap" drives the need for Key-Value Caching and Quantization.
@@ -3674,7 +3721,7 @@ Hardware acceleration involves counterintuitive performance characteristics wher
 
 **Fallacy:** ***More specialized hardware always provides better performance than general-purpose alternatives.***
 
-Engineers assume specialized accelerators automatically outperform general-purpose processors for all AI workloads. In reality, specialized hardware achieves peak performance only when workloads match architectural assumptions. As demonstrated in @sec-ai-acceleration-roofline-model, operations must exceed the accelerator's ridge point to be compute-bound; an A100 GPU has a ridge point of 156 FLOP/byte, meaning operations with arithmetic intensity below this threshold are memory-bound regardless of the accelerator's 312 TFLOPS peak compute. A transformer attention softmax with AI = 2-5 FLOP/byte achieves only 4-10 TFLOPS (3% utilization) on an A100, while achieving 80-90% of a CPU's lower peak because CPUs have ridge points of 10-20 FLOP/byte. Models with irregular memory access, small batch sizes, or dynamic computation graphs may perform better on flexible processors. Effective hardware selection requires matching workload arithmetic intensity to architectural ridge points, not assuming specialization always wins.
+Engineers assume specialized accelerators automatically outperform general-purpose processors for all AI workloads. In reality, specialized hardware achieves peak performance only when workloads match architectural assumptions. As demonstrated in @sec-ai-acceleration-roofline-model, operations must exceed the accelerator's ridge point to be compute-bound; an A100 GPU has a ridge point of `{python} a100_ridge` FLOP/byte, meaning operations with arithmetic intensity below this threshold are memory-bound regardless of the accelerator's `{python} a100_tflops_fp16` TFLOPS peak compute. A transformer attention softmax with AI = 2-5 FLOP/byte achieves only 4-10 TFLOPS (3% utilization) on an A100, while achieving 80-90% of a CPU's lower peak because CPUs have ridge points of 10-20 FLOP/byte. Models with irregular memory access, small batch sizes, or dynamic computation graphs may perform better on flexible processors. Effective hardware selection requires matching workload arithmetic intensity to architectural ridge points, not assuming specialization always wins.
 
 **Pitfall:** ***Ignoring memory bandwidth limitations when selecting acceleration strategies.***
 
@@ -3686,7 +3733,7 @@ Teams expect 8 GPUs to train 8× faster than 1 GPU. Multi-accelerator scaling in
 
 **Fallacy:** ***Peak FLOPS specifications determine real-world accelerator performance.***
 
-Vendors advertise peak FLOPS as the definitive measure of accelerator capability, but real-world performance equals Peak FLOPS $\times$ Utilization, where utilization is dictated by the Roofline Model. An A100 advertises 312 TFLOPS at FP16, yet transformer training typically achieves only 120 to 180 TFLOPS (40 to 60% utilization) because memory-bound operations such as attention and LayerNorm drag down the average throughput. Recommendation models fare even worse, often reaching only 10 to 30 TFLOPS (3 to 10% utilization) due to sparse, irregular memory access patterns that leave compute units idle. Engineers should budget projects based on sustained throughput, measured or estimated via the Roofline Model, rather than peak marketing specifications.
+Vendors advertise peak FLOPS as the definitive measure of accelerator capability, but real-world performance equals Peak FLOPS $\times$ Utilization, where utilization is dictated by the Roofline Model. An A100 advertises `{python} a100_tflops_fp16` TFLOPS at FP16, yet transformer training typically achieves only 120 to 180 TFLOPS (40 to 60% utilization) because memory-bound operations such as attention and LayerNorm drag down the average throughput. Recommendation models fare even worse, often reaching only 10 to 30 TFLOPS (3 to 10% utilization) due to sparse, irregular memory access patterns that leave compute units idle. Engineers should budget projects based on sustained throughput, measured or estimated via the Roofline Model, rather than peak marketing specifications.
 
 **Pitfall:** ***Deploying small-batch inference workloads on high-compute accelerators.***
 
@@ -3781,7 +3828,7 @@ Building on these foundational concepts, the emergence of multi-chip and distrib
 
 * **Tensor Cores require specific conditions**: FP16 inputs, appropriate tensor dimensions, and sufficient batch size are necessary for peak utilization. Batch size directly affects arithmetic intensity and determines whether workloads reach the compute-bound regime.
 
-* **Arithmetic intensity determines optimization strategy**: Operations with low arithmetic intensity (1–2 FLOP/byte, like LayerNorm) are memory-bound; operations with high intensity (50–200 FLOP/byte, like convolutions) are compute-bound. The ridge point (e.g., 156 FLOP/byte for A100) marks the transition.
+* **Arithmetic intensity determines optimization strategy**: Operations with low arithmetic intensity (1–2 FLOP/byte, like LayerNorm) are memory-bound; operations with high intensity (50–200 FLOP/byte, like convolutions) are compute-bound. The ridge point (e.g., `{python} a100_ridge` FLOP/byte for A100) marks the transition.
 
 :::
 

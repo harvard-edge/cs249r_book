@@ -33,6 +33,22 @@ Architectures define *what* computations neural networks must perform, but knowi
 
 :::
 
+```{python}
+#| label: frameworks-setup
+#| echo: false
+
+from calc.constants import *
+from calc.formulas import fmt, sci
+
+# GPU specs
+a100_mem = f"{A100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
+a100_bw_tbs = f"{A100_MEM_BW.to(TB/second).magnitude:.1f}"
+
+# Model specs
+resnet_params_m = f"{RESNET50_PARAMS.to(Mparam).magnitude:.1f}"
+gpt3_params_b = f"{GPT3_PARAMS.to(Mparam).magnitude/1000:.0f}"
+```
+
 ## The Three Problems Every Framework Must Solve {#sec-ai-frameworks-three-problems-every-framework-must-solve-317d}
 
 Two lines of code: `model = Transformer(...)` followed by `loss.backward()`. Between them, invisible to the programmer, the framework orchestrates billions of floating-point operations across memory hierarchies, computes exact gradients through millions of parameters using automatic differentiation, schedules thousands of GPU kernel launches, and manages gigabytes of intermediate state. The simplicity is an illusion. Those two lines trigger machinery as complex as a compiler, because that is exactly what a modern ML framework is.
@@ -300,7 +316,7 @@ Neither approach dominates; each embodies different trade-offs between **flexibi
 
 ::: {.callout-example title="Eager vs. Graph Execution Code Comparison"}
 **PyTorch (Eager Execution)**:
-```python
+```{.python}
 import torch
 
 x = torch.tensor([1.0, 2.0])
@@ -314,7 +330,7 @@ z = y.sum()
 
 **TensorFlow 1.x (Static Graph)**:
 
-```python
+```{.python}
 import tensorflow as tf
 
 x = tf.placeholder(tf.float32)
@@ -1110,7 +1126,7 @@ From the case study in @sec-ai-frameworks-putting-together-anatomy-training-step
 *   **Conclusion**: Python overhead is negligible. Compilation helps only via kernel fusion (memory bandwidth), not dispatch elimination.
 :::
 
-**The Principle's Implication**: Small models benefit *disproportionately* from compilation. A 100-parameter toy model might see 10× speedup from torch.compile, while a 175B-parameter model sees only 1.3×. This explains why compilation matters most for efficient inference on smaller, deployed models.
+**The Principle's Implication**: Small models benefit *disproportionately* from compilation. A 100-parameter toy model might see 10× speedup from torch.compile, while a `{python} gpt3_params_b`B-parameter model sees only 1.3×. This explains why compilation matters most for efficient inference on smaller, deployed models.
 
 The execution problem determines *when* computation happens. But neural network training requires a capability that no amount of clever scheduling can provide: the ability to compute gradients automatically. A framework that executes efficiently but cannot differentiate is useless for training.
 
@@ -1305,7 +1321,7 @@ dc/dx = (2 * x * dc/da) + (cos(x) * dc/db)
 ```
 :::
 
-The critical observation is that this single backward pass computed dc/dx regardless of how many paths connect $x$ to $c$. In a neural network, each weight can affect the loss through thousands of paths across layers, and reverse mode handles them all in one traversal. This is why training a 175B parameter model like GPT-3 is feasible at all: reverse mode's $O(1)$ backward passes (relative to parameter count) keeps gradient computation tractable.
+The critical observation is that this single backward pass computed dc/dx regardless of how many paths connect $x$ to $c$. In a neural network, each weight can affect the loss through thousands of paths across layers, and reverse mode handles them all in one traversal. This is why training a `{python} gpt3_params_b`B parameter model like GPT-3 is feasible at all: reverse mode's $O(1)$ backward passes (relative to parameter count) keeps gradient computation tractable.
 
 **Implementation Structure.** Translating this mathematical elegance into a working system requires solving a concrete engineering problem: the backward pass needs values computed during the forward pass, so the framework must decide what to store, when to store it, and when to free it. Modern frameworks accomplish this through computational graphs and automatic gradient accumulation[^fn-gradient-accumulation].
 
@@ -1338,7 +1354,7 @@ d_x = w1 * d_hidden  # = 6.0
 
 Three implementation requirements emerge from this example. First, the framework must track dependencies between operations to determine the correct reverse traversal order. Second, intermediate values (hidden, activated) must persist in memory until the backward pass consumes them. Third, every operation needs both a forward implementation and a corresponding backward rule. These requirements define the engineering surface of any AD system, and the second requirement, memory persistence, turns out to be the dominant cost.
 
-**Memory Management Strategies.** []{#sec-ai-frameworks-memory-management-strategies-b008} A 175B parameter model in FP16 requires 350 GB just for weights, far exceeding any single GPU's memory. But weights are only the beginning: reverse mode AD also stores every intermediate activation from the forward pass for use during the backward pass. For a 100-layer network processing a batch of 64 images, these stored activations can consume 8 to 12 GB on top of the model weights, gradients, and optimizer state. Memory, not compute, is the binding constraint on what models a framework can train.
+**Memory Management Strategies.** []{#sec-ai-frameworks-memory-management-strategies-b008} A `{python} gpt3_params_b`B parameter model in FP16 requires 350 GB just for weights, far exceeding any single GPU's memory. But weights are only the beginning: reverse mode AD also stores every intermediate activation from the forward pass for use during the backward pass. For a 100-layer network processing a batch of 64 images, these stored activations can consume 8 to 12 GB on top of the model weights, gradients, and optimizer state. Memory, not compute, is the binding constraint on what models a framework can train.
 
 The problem scales linearly with depth. @lst-reverse_memory shows how each layer in a deeper network adds another activation tensor that must persist until the backward pass reaches that layer.
 
@@ -1811,7 +1827,7 @@ We examine this problem through three lenses. First, we explore how frameworks r
 
 ### Data Structures and Tensor Abstractions {#sec-ai-frameworks-data-structures-tensor-abstractions-9cbf}
 
-A ResNet-50 forward pass touches 25 million parameters, produces intermediate activations at every layer, and must coordinate memory across CPU and GPU address spaces. How do frameworks organize all of this data so that a single Python call like `model(input)` executes millions of operations without the programmer managing a single pointer?
+A ResNet-50 forward pass touches `{python} resnet_params_m` million parameters, produces intermediate activations at every layer, and must coordinate memory across CPU and GPU address spaces. How do frameworks organize all of this data so that a single Python call like `model(input)` executes millions of operations without the programmer managing a single pointer?
 
 The answer lies in a hierarchy of specialized data structures. Computational graphs specify the logical flow of operations, but data structures determine how those operations access and manipulate data in physical memory. This distinction matters because the same mathematical operation can differ by an order of magnitude in throughput depending on whether data is contiguous in cache, pinned for DMA transfer, or scattered across pages.
 
@@ -2427,7 +2443,7 @@ loader = DataLoader(dataset, collate_fn=collate_variable_length)
 ```
 :::
 
-**Parameter Structures.** A GPT-3 scale model stores 175 billion parameters, occupying 350 GB in FP16. Managing these parameters across devices, keeping gradients synchronized, and maintaining optimizer state (which can triple the memory footprint, as the Administrative Tax notebook showed) is a core framework responsibility.
+**Parameter Structures.** A GPT-3 scale model stores `{python} gpt3_params_b` billion parameters, occupying 350 GB in FP16. Managing these parameters across devices, keeping gradients synchronized, and maintaining optimizer state (which can triple the memory footprint, as the Administrative Tax notebook showed) is a core framework responsibility.
 
 Unlike dataset samples, which flow through the pipeline transiently, parameters persist throughout training and inference. Frameworks organize them into compact structures that minimize memory while enabling fast read and write access [@li2014communication]. During multi-GPU training, frameworks may replicate parameters across devices for parallel computation while keeping a synchronized master copy. Synchronizing multi-billion parameter models can require transferring tens of GB of gradients per step, which is why frameworks implement gradient compression and efficient communication patterns like ring all-reduce.
 
@@ -3289,7 +3305,7 @@ optimizer.step()
    - Perform matrix multiply in tensor cores (if available)
    - Write result to HBM
 
-[^fn-hbm-frameworks]: HBM (introduced in @sec-dnn-architectures) provides 2-3 TB/s bandwidth on modern GPUs. For framework execution, HBM bandwidth determines whether operations are memory-bound or compute-bound. The 80GB capacity on an A100 sets practical limits on model size, as weights, activations, and gradients must all fit in HBM during execution.
+[^fn-hbm-frameworks]: HBM (introduced in @sec-dnn-architectures) provides 2-3 TB/s bandwidth on modern GPUs. For framework execution, HBM bandwidth determines whether operations are memory-bound or compute-bound. The `{python} a100_mem` GB capacity on an A100 sets practical limits on model size, as weights, activations, and gradients must all fit in HBM during execution.
 
 5. **Autograd Recording**: Simultaneously, PyTorch's autograd engine records a `MmBackward` node on the tape, storing references to `x` and `W1` for gradient computation.
 

@@ -33,6 +33,22 @@ In conventional software, programmers write logic that computers execute. In mac
 
 :::
 
+```{python}
+#| label: data-eng-setup
+#| echo: false
+
+from calc.constants import *
+from calc.formulas import fmt, sci
+
+# GPU specs
+a100_tflops_fp16 = f"{A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
+# FP16 with structured sparsity (2:4 pattern) = 2x dense FP16
+a100_tflops_fp16_sparse = f"{(A100_FLOPS_FP16_TENSOR * 2).to(TFLOPs/second).magnitude:.0f}"
+
+# Energy
+energy_dram = f"{ENERGY_DRAM_ACCESS_PJ.magnitude:.0f}"
+```
+
 ## Data Engineering as Dataset Compilation {#sec-data-engineering-ml-data-engineering-dataset-compilation-0496}
 
 The methodologies examined in @sec-ai-development-workflow establish the **when** and **why** of data preparation, showing that data work consumes 60 to 80 percent of ML project effort and represents the foundational "D" in the **AI Triad** introduced in @sec-introduction. However, executing those stages at scale requires dedicated infrastructure. If the workflow is the plan, data engineering is the factory floor. This chapter examines the infrastructure, processes, and engineering principles that turn raw observations into training-ready datasets.
@@ -80,13 +96,19 @@ The statistical ceiling establishes the theoretical bound on model performance. 
 **The Systems Lesson**: Data cleaning has compounding returns because cleaned data benefits every downstream experiment. This is why production teams prioritize data quality tooling over model complexity.
 :::
 
-The deduplication dividend illustrates a broader shift in how ML practitioners approach system development. Traditional ML development fixes the dataset early, then iterates on model architectures and hyperparameters. Research benchmarks reinforce this pattern by providing static datasets where progress is measured purely through algorithmic innovation. Production systems face a different reality: datasets continuously evolve, data quality varies across sources and time, and model improvements often plateau while data improvements continue yielding gains. This realization has catalyzed what Andrew Ng termed the shift from model-centric to **data-centric AI** [@ng2021datacentric].
+The deduplication dividend illustrates a broader shift in how ML practitioners approach system development. This shift begins by contrasting the traditional approach, which we formalize as Model-Centric AI, against the emerging Data-Centric paradigm.
+
+::: {.callout-definition title="Model-Centric AI"}
+***Model-Centric AI*** is the research paradigm where the **Dataset is Fixed** and engineering effort focuses on optimizing **Model Architecture** and hyperparameters. This approach enables fair algorithmic comparison (e.g., ImageNet benchmarks) but hits diminishing returns in production, where data quality—not architecture—is often the binding constraint.
+:::
+
+Research benchmarks reinforce this pattern by providing static datasets where progress is measured purely through algorithmic innovation. Production systems, however, face a different reality: datasets continuously evolve, data quality varies across sources and time, and model improvements often plateau while data improvements continue yielding gains. This realization has catalyzed what Andrew Ng termed the shift to **Data-Centric AI** [@ng2021datacentric].
 
 ::: {.callout-definition title="Data-Centric AI"}
 ***Data-Centric AI*** is the engineering paradigm of holding **Model Architecture** constant to iteratively optimize the **Training Dataset**. It addresses the diminishing returns of algorithmic complexity by treating data quality as the primary variable for improving system performance, effectively shifting the bottleneck from code optimization to **Signal-to-Noise Maximization**.
 :::
 
-@tbl-model-vs-data-centric contrasts these paradigms:
+While the definitions establish the conceptual goals, @tbl-model-vs-data-centric contrasts how these paradigms diverge across five key operational dimensions, from iteration targets to handling label noise.
 
 +----------------------------------+--------------------------------------+--------------------------------------------------+
 | **Aspect**                       | **Model-Centric Approach**           | **Data-Centric Approach**                        |
@@ -1443,9 +1465,12 @@ Quality monitoring extends beyond simple schema validation to statistical proper
 **Scenario**: Monitoring `session_duration` distribution stability between training ($P$) and serving ($Q$).
 
 **Methodology**
+
 1.  **Compute CDFs**: Calculate Cumulative Distribution Functions for both datasets.
+
 2.  **Calculate Statistic ($D_{KS}$)**: Find the maximum absolute difference between the CDFs.
     $$ D_{KS} = \max_x | F_P(x) - F_Q(x) | $$
+
 3.  **Determine Significance**: Compare $D_{KS}$ to critical value $D_{crit}$ based on sample size ($n$) and confidence level ($\alpha=0.05$).
     $$ D_{crit} \approx \frac{1.36}{\sqrt{n}} $$
 
@@ -2678,7 +2703,7 @@ Understanding these quantitative relationships enables informed architectural de
 
 **1. The Compute Term (Throughput Ceiling)**
 
-*   **Hardware Peak:** NVIDIA A100 = 312 TFLOPS (FP16 Tensor Core, dense operations).[^fn-a100-sparsity]
+*   **Hardware Peak:** NVIDIA A100 = `{python} a100_tflops_fp16` TFLOPS (FP16 Tensor Core, dense operations).[^fn-a100-sparsity]
 *   **Model Cost:** ResNet-50 = ~4 GFLOPs per image (forward + backward $\approx$ 12 GFLOPs).
 *   **Maximum Theoretical Throughput**:
     $$ \frac{312 \times 10^{12} \text{ FLOPs/sec}}{12 \times 10^9 \text{ FLOPs/img}} = \mathbf{26,000 \text{ images/sec}} $$
@@ -2698,7 +2723,7 @@ To saturate a *single* A100, your storage must deliver **3.9 GB/s**.
 **Iron Law Implication:** If you use SATA SSDs, your maximum throughput is capped at $500 \text{ MB/s} / 150 \text{ KB} \approx 3,300 \text{ img/s}$. Your \$15,000 GPU will run at **12% utilization** ($3,300/26,000$). Storage physics dictates training speed.
 :::
 
-[^fn-a100-sparsity]: **A100 Sparsity Support**: NVIDIA also advertises 624 TFLOPS with structured sparsity enabled (2:4 pattern), doubling effective throughput for models that can leverage sparse computation. The 312 TFLOPS dense figure used here represents the baseline for general workloads where sparsity cannot be assumed.
+[^fn-a100-sparsity]: **A100 Sparsity Support**: NVIDIA also advertises `{python} a100_tflops_fp16_sparse` TFLOPS with structured sparsity enabled (2:4 pattern), doubling effective throughput for models that can leverage sparse computation. The `{python} a100_tflops_fp16` TFLOPS dense figure used here represents the baseline for general workloads where sparsity cannot be assumed.
 
 This calculation illustrates the general principle governing data pipelines:
 
@@ -2752,9 +2777,10 @@ Model versioning becomes operationally critical during deployment. Storage syste
 
 Data versioning connects model versions to exact training data, enabling debugging and reproducibility. Without data versioning, teams cannot answer essential questions like "what exact data trained model v47?"
 
-**DVC Workflow** provides Git-like semantics for data versioning:
+@lst-dvc-workflow shows how DVC provides Git-like semantics for data versioning, while @lst-delta-time-travel demonstrates querying historical data states directly in SQL.
 
-```bash
+::: {#lst-dvc-workflow lst-cap="**DVC Workflow**: Git-like semantics for data versioning. DVC tracks large data files alongside code commits, enabling exact reproduction of any historical training dataset through paired `git checkout` and `dvc checkout` commands."}
+```{.bash}
 # Add data to version control
 dvc add data/training.csv
 git add data/training.csv.dvc
@@ -2765,16 +2791,17 @@ dvc push  # Upload to remote storage
 git checkout abc123
 dvc checkout  # Restores exact data from that commit
 ```
+:::
 
-**Delta Lake Time Travel** enables querying historical data states directly in SQL:
-
-```sql
+::: {#lst-delta-time-travel lst-cap="**Delta Lake Time Travel**: Querying historical data states directly in SQL. Delta Lake maintains a transaction log enabling point-in-time queries by date or version number, eliminating the need for separate snapshot management."}
+```{.sql}
 -- Query data as it existed on a specific date
 SELECT * FROM training_data VERSION AS OF '2024-01-15'
 
 -- Or by version number for programmatic access
 SELECT * FROM training_data VERSION AS OF 47
 ```
+:::
 
 **Feature Store Point-in-Time Retrieval** maintains historical feature values, enabling training with features "as they existed" at prediction time. This prevents label leakage where training inadvertently uses feature values computed after the prediction timestamp.
 

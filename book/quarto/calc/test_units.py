@@ -46,6 +46,7 @@ def test_units_are_registered():
         'GFLOPs': GFLOPs, 'TFLOPs': TFLOPs, 'ZFLOPs': ZFLOPs,
         'Mparam': Mparam,
         'Gbps': Gbps,
+        'MS': MS, 'US': US, 'NS': NS,
     }
     for name, unit in units_to_check.items():
         if not isinstance(unit, type(ureg.byte)):  # pint.Unit
@@ -209,7 +210,123 @@ def test_no_large_raw_magnitudes():
     return ok
 
 
-# ── 10. Formula Helper Functions ─────────────────────────────────────
+# ── 10. Time Unit Conversions ──────────────────────────────────────────
+
+def test_time_units():
+    """Verify registered time units convert correctly."""
+    ok = True
+    ok &= check("1 s -> MS", (1 * second).to(MS).magnitude, 1000.0)
+    ok &= check("1 s -> US", (1 * second).to(US).magnitude, 1e6)
+    ok &= check("1 s -> NS", (1 * second).to(NS).magnitude, 1e9)
+    ok &= check("1 MS -> MS", (1 * MS).to(MS).magnitude, 1.0)
+    ok &= check("1000 US -> MS", (1000 * US).to(MS).magnitude, 1.0)
+    ok &= check("1000 NS -> US", (1000 * NS).to(US).magnitude, 1.0)
+    return ok
+
+
+# ── 11. Extended GPU Specs ───────────────────────────────────────────
+
+def test_extended_gpu_specs():
+    """Verify all GPU spec constants convert correctly."""
+    ok = True
+
+    # A100 full spec sheet
+    ok &= check("A100 FP32", A100_FLOPS_FP32.to(TFLOPs / second).magnitude, 19.5)
+    ok &= check("A100 TF32", A100_FLOPS_TF32.to(TFLOPs / second).magnitude, 156.0)
+    ok &= check("A100 INT8", A100_FLOPS_INT8.to(TFLOPs / second).magnitude, 624.0)
+    ok &= check("A100 TDP", A100_TDP.to(watt).magnitude, 400.0)
+
+    # H100 full spec sheet
+    ok &= check("H100 TF32", H100_FLOPS_TF32.to(TFLOPs / second).magnitude, 756.0)
+    ok &= check("H100 INT8", H100_FLOPS_INT8.to(TFLOPs / second).magnitude, 3958.0)
+    ok &= check("H100 TDP", H100_TDP.to(watt).magnitude, 700.0)
+
+    # V100
+    ok &= check("V100 TDP", V100_TDP.to(watt).magnitude, 300.0)
+
+    # B200
+    ok &= check("B200 FP16", B200_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude, 4500.0)
+    ok &= check("B200 BW", B200_MEM_BW.to(TB / second).magnitude, 8.0)
+    ok &= check("B200 Mem", B200_MEM_CAPACITY.to(GiB).magnitude, 192.0)
+
+    # TPUv4
+    ok &= check("TPUv4 BF16", TPUV4_FLOPS_BF16.to(TFLOPs / second).magnitude, 275.0)
+    ok &= check("TPUv4 BW", TPUV4_MEM_BW.to(GB / second).magnitude, 1200.0)
+
+    # T4
+    ok &= check("T4 TDP", T4_TDP.to(watt).magnitude, 70.0)
+
+    return ok
+
+
+# ── 12. Interconnect Conversions ─────────────────────────────────────
+
+def test_interconnect_specs():
+    """Verify interconnect bandwidth conversions."""
+    ok = True
+    ok &= check("NVLink V100", NVLINK_V100_BW.to(GB / second).magnitude, 300.0)
+    ok &= check("NVLink A100", NVLINK_A100_BW.to(GB / second).magnitude, 600.0)
+    ok &= check("NVLink H100", NVLINK_H100_BW.to(GB / second).magnitude, 900.0)
+    ok &= check("PCIe Gen4", PCIE_GEN4_BW.to(GB / second).magnitude, 32.0)
+    ok &= check("PCIe Gen5", PCIE_GEN5_BW.to(GB / second).magnitude, 64.0)
+    ok &= check("IB HDR", INFINIBAND_HDR_BW.to(Gbps).magnitude, 200.0)
+    ok &= check("IB NDR", INFINIBAND_NDR_BW.to(Gbps).magnitude, 400.0)
+    ok &= check("100G net", NETWORK_100G_BW.to(Gbps).magnitude, 100.0)
+    ok &= check("100G -> GB/s", NETWORK_100G_BW.to(GB / second).magnitude, 12.5)
+    return ok
+
+
+# ── 13. Energy Conversions ───────────────────────────────────────────
+
+def test_energy_specs():
+    """Verify energy constants are consistent."""
+    ok = True
+    # FP32 > FP16 > INT8 (energy ordering)
+    fp32 = ENERGY_FLOP_FP32_PJ.magnitude
+    fp16 = ENERGY_FLOP_FP16_PJ.magnitude
+    int8 = ENERGY_FLOP_INT8_PJ.magnitude
+    if not (fp32 > fp16 > int8):
+        FAILURES.append(f"  ✗ Energy ordering: FP32={fp32} > FP16={fp16} > INT8={int8}")
+        ok = False
+    ok &= check("DRAM >> compute", ENERGY_DRAM_ACCESS_PJ.magnitude / ENERGY_FLOP_FP32_PJ.magnitude, 173.0, tol=0.05)
+    ok &= check("L2 > L1 > reg",
+                 ENERGY_SRAM_L2_PJ.magnitude / ENERGY_SRAM_L1_PJ.magnitude, 4.0)
+    return ok
+
+
+# ── 14. Model Spec Conversions ───────────────────────────────────────
+
+def test_model_specs():
+    """Verify model constants convert correctly."""
+    ok = True
+    ok &= check("GPT-2 1500 Mparam", GPT2_PARAMS.to(Mparam).magnitude, 1500.0)
+    ok &= check("BERT 110 Mparam", BERT_BASE_PARAMS.to(Mparam).magnitude, 110.0)
+    ok &= check("MobileNetV2 3.5 Mparam", MOBILENETV2_PARAMS.to(Mparam).magnitude, 3.5)
+    ok &= check("BERT 22 GFLOPs", BERT_BASE_FLOPs.to(GFLOPs).magnitude, 22.0)
+    ok &= check("MobileNetV2 0.3 GFLOPs", MOBILENETV2_FLOPs.to(GFLOPs).magnitude, 0.3)
+    return ok
+
+
+# ── 15. Ridge Point Derivations ──────────────────────────────────────
+
+def test_ridge_points():
+    """Verify ridge point (arithmetic intensity threshold) calculations.
+
+    Ridge point = peak FLOPs / peak bandwidth (FLOP/byte).
+    Below this intensity, a workload is memory-bound; above, compute-bound.
+    """
+    ok = True
+
+    def ridge(flops, bw):
+        return (flops / bw).to(flop / byte).magnitude
+
+    ok &= check("V100 ridge ~139", ridge(V100_FLOPS_FP16_TENSOR, V100_MEM_BW), 139.0, tol=0.02)
+    ok &= check("A100 ridge ~153", ridge(A100_FLOPS_FP16_TENSOR, A100_MEM_BW), 153.0, tol=0.02)
+    ok &= check("H100 ridge ~295", ridge(H100_FLOPS_FP16_TENSOR, H100_MEM_BW), 295.0, tol=0.02)
+    return ok
+
+
+# ── 16. Formula Helper Functions ─────────────────────────────────────
 
 def test_formula_helpers():
     """Verify fmt() and sci() produce correct formatted strings."""
@@ -241,6 +358,12 @@ if __name__ == "__main__":
         ("Memory capacity conversions", test_memory_capacity),
         ("Derived calculations (training, roofline)", test_derived_values),
         ("No raw base-unit magnitudes (sentinel)", test_no_large_raw_magnitudes),
+        ("Time unit conversions (MS, US, NS)", test_time_units),
+        ("Extended GPU specs (A100/H100/B200/TPU)", test_extended_gpu_specs),
+        ("Interconnect specs (NVLink, PCIe, IB)", test_interconnect_specs),
+        ("Energy specs (FP32 > FP16 > INT8)", test_energy_specs),
+        ("Model specs (GPT-2, BERT, MobileNet)", test_model_specs),
+        ("Ridge point derivations (V100/A100/H100)", test_ridge_points),
         ("Formula helpers (fmt, sci)", test_formula_helpers),
     ]
 

@@ -30,6 +30,28 @@ A single GPU fails perhaps once per year. A thousand GPUs experience failures da
 
 :::
 
+```{python}
+#| label: fault-tolerance-setup
+#| echo: false
+
+from calc.constants import *
+from calc.formulas import fmt, sci
+
+# GPT-3 model parameters
+gpt3_params_b = f"{GPT3_PARAMS.to(param).magnitude / 1e9:.0f}"
+
+# GPT-3 checkpoint size: weights (2 bytes FP16) + Adam m (4 bytes) + Adam v (4 bytes) = 12 bytes/param
+gpt3_ckpt_bytes = GPT3_PARAMS.magnitude * 12 * byte
+gpt3_ckpt_tb = f"{gpt3_ckpt_bytes.to(TB).magnitude:.1f}"
+
+# GPT-3 Adam optimizer state: m + v = 8 bytes/param
+gpt3_adam_bytes = GPT3_PARAMS.magnitude * 8 * byte
+gpt3_adam_tb = f"{gpt3_adam_bytes.to(TB).magnitude:.1f}"
+
+# Per-worker shard for 1000 workers
+gpt3_shard_gb = f"{gpt3_ckpt_bytes.to(GB).magnitude / 1000:.1f}"
+```
+
 ## Failure Analysis at Scale {#sec-fault-tolerance-reliability-reliability-failure-analysis-scale-6b4b}
 
 In the **Systems Sandwich** (@sec-vol2-introduction), Fault Tolerance acts as the **Immune System** of the Physical Layer. While the algorithmic layer assumes a perfect execution engine, the physical layer is built from chaotic, fallible matter. Thermodynamics ensures that hardware will fail; Fault Tolerance ensures the system survives.
@@ -711,9 +733,9 @@ The failure analysis in @sec-fault-tolerance-reliability-failure-analysis-scale-
 
 ### Checkpoint and Restart Fundamentals {#sec-fault-tolerance-reliability-reliability-checkpoint-restart-fundamentals-0ac2}
 
-Checkpointing captures sufficient state to resume training from a recorded point: model parameters, optimizer state, training progress indicators, random state for reproducibility, and learning rate schedule position. The checkpoint sizes established in @sec-storage, reaching 2.1 TB for 175B parameter models with Adam optimizer state,[^fn-adam-state] create both storage demands and recovery time constraints that fault tolerance mechanisms must address.
+Checkpointing captures sufficient state to resume training from a recorded point: model parameters, optimizer state, training progress indicators, random state for reproducibility, and learning rate schedule position. The checkpoint sizes established in @sec-storage, reaching `{python} gpt3_ckpt_tb` TB for `{python} gpt3_params_b`B parameter models with Adam optimizer state,[^fn-adam-state] create both storage demands and recovery time constraints that fault tolerance mechanisms must address.
 
-[^fn-adam-state]: **Adam Optimizer State**: Adam [@kingma2014adam] tracks first-moment ($m$, exponentially weighted gradient average) and second-moment ($v$, exponentially weighted squared gradient average) estimates for each parameter. This enables adaptive learning rates per parameter but triples memory requirements compared to vanilla SGD. For a 175B parameter model, this means 1.4 TB of optimizer state alone, which dominates checkpoint size and recovery time.
+[^fn-adam-state]: **Adam Optimizer State**: Adam [@kingma2014adam] tracks first-moment ($m$, exponentially weighted gradient average) and second-moment ($v$, exponentially weighted squared gradient average) estimates for each parameter. This enables adaptive learning rates per parameter but triples memory requirements compared to vanilla SGD. For a `{python} gpt3_params_b`B parameter model, this means `{python} gpt3_adam_tb` TB of optimizer state alone, which dominates checkpoint size and recovery time.
 
 #### Checkpoint Interval from Failure Analysis {#sec-fault-tolerance-reliability-reliability-checkpoint-interval-failure-analysis-c28d}
 
@@ -748,7 +770,7 @@ $$
 
 The U-shaped cost curve in @fig-young-daly-storage visualizes this trade-off: checkpoint overhead decreases as intervals lengthen, while rework cost from failures increases linearly. The optimal point minimizes their sum.
 
-For our 10,000 GPU cluster with calculated system MTBF of 3.69 hours (from @sec-fault-tolerance-reliability-worked-example-cluster-mtbf-calculation-9255) and checkpoint time of 21 seconds (from 2.1 TB checkpoint at 100 GB/s), @eq-young-daly-applied computes the optimal interval:
+For our 10,000 GPU cluster with calculated system MTBF of 3.69 hours (from @sec-fault-tolerance-reliability-worked-example-cluster-mtbf-calculation-9255) and checkpoint time of 21 seconds (from `{python} gpt3_ckpt_tb` TB checkpoint at 100 GB/s), @eq-young-daly-applied computes the optimal interval:
 
 $$ T_{opt} = \sqrt{2 \times 21s \times 3.69hr \times 3600s/hr} \approx 12.4 \text{ minutes} $$ {#eq-young-daly-applied}
 
@@ -927,9 +949,9 @@ Modern distributed training frameworks partition model state across workers usin
 
 **Sharded checkpointing**[^fn-sharded-ckpt] [@rajbhandari2020zero] leverages this distribution: each worker writes only its shard, dramatically reducing per-worker write volume. Recovery loads shards and redistributes state to workers based on the recovery configuration.
 
-[^fn-sharded-ckpt]: **Sharded Checkpointing**: A checkpoint strategy where each worker saves only its local partition of the model and optimizer state, rather than gathering everything to a single writer. For ZeRO-3 or FSDP with 1000 workers training a 175B model, each worker writes approximately 2.1 GB instead of one worker writing 2.1 TB. This parallelizes I/O across all workers, achieving aggregate write bandwidth of 100+ GB/s on modern distributed filesystems.
+[^fn-sharded-ckpt]: **Sharded Checkpointing**: A checkpoint strategy where each worker saves only its local partition of the model and optimizer state, rather than gathering everything to a single writer. For ZeRO-3 or FSDP with 1000 workers training a `{python} gpt3_params_b`B model, each worker writes approximately `{python} gpt3_shard_gb` GB instead of one worker writing `{python} gpt3_ckpt_tb` TB. This parallelizes I/O across all workers, achieving aggregate write bandwidth of 100+ GB/s on modern distributed filesystems.
 
-This approach enables efficient checkpointing even for massive models. A 175B parameter model with 2.1 TB checkpoint distributed across 1,000 workers requires each worker to write only 2.1 GB, achievable in seconds with local NVMe storage.
+This approach enables efficient checkpointing even for massive models. A `{python} gpt3_params_b`B parameter model with `{python} gpt3_ckpt_tb` TB checkpoint distributed across 1,000 workers requires each worker to write only `{python} gpt3_shard_gb` GB, achievable in seconds with local NVMe storage.
 
 When recovering with a different number of workers than the checkpoint, shard redistribution must remap state to the new worker configuration. This occurs due to elastic scaling or hardware changes. Modern frameworks support flexible resharding, enabling recovery even when worker count changes.
 

@@ -29,15 +29,45 @@ Everything changes when ML systems grow beyond what one machine can handle. Comm
 
 :::
 
+```{python}
+#| label: vol2-intro-setup
+#| echo: false
+
+from calc.constants import *
+from calc.formulas import fmt, sci
+
+# GPU specs
+a100_fp16_tflops = f"{A100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude:.0f}"
+a100_mem_bw_gbs = f"{A100_MEM_BW.to(GB / second).magnitude:,.0f}"
+a100_mem_bw_tbs = f"{A100_MEM_BW.to(TB / second).magnitude:.0f}"
+h100_fp8_tflops = f"{H100_FLOPS_FP8_TENSOR.to(TFLOPs / second).magnitude:,.0f}"
+v100_mem_bw_gbs = f"{V100_MEM_BW.to(GB / second).magnitude:.0f}"
+
+# TPU v4 specs
+tpuv4_bf16_tflops = f"{TPUV4_FLOPS_BF16.to(TFLOPs / second).magnitude:.0f}"
+
+# Interconnects
+nvlink_h100_gbs = f"{NVLINK_H100_BW.to(GB / second).magnitude:.0f}"
+ib_hdr_gbps = f"{INFINIBAND_HDR_BW.to(Gbps).magnitude:.0f}"
+ib_ndr_gbps = f"{INFINIBAND_NDR_BW.to(Gbps).magnitude:.0f}"
+ib_hdr_gbs = f"{INFINIBAND_HDR_BW.to(Gbps).magnitude / 8:.0f}"
+ib_ndr_gbs = f"{INFINIBAND_NDR_BW.to(Gbps).magnitude / 8:.0f}"
+
+# Model specs
+gpt3_params_b = f"{GPT3_PARAMS.to(param).magnitude / 1e9:.0f}"
+gpt3_training_ops_sci = sci(GPT3_TRAINING_OPS)
+gpt3_gradient_gb = f"{GPT3_PARAMS.to(param).magnitude * 4 / 1e9:.0f}"
+```
+
 ## The Scale Transformation {#sec-vol2-introduction-scale-transformation}
 
 The history of machine learning is defined by scale. Each major capability leap has come not from algorithmic breakthroughs alone, but from the ability to apply computation at previously impossible scales. Compute requirements have evolved over the past decade in ways that make systems engineering central to AI advancement. Three qualitative changes emerge at production scale: communication dominance, routine failure, and governance requirements that accompany societal impact.
 
 Compute requirements have grown exponentially. AlexNet (2012) trained on two GTX 580 GPUs for approximately 5-6 days [@krizhevsky2012imagenet]. BERT (2018) required 64 TPU[^fn-tpu] chips for 4 days, roughly 6,144 chip hours [@devlin2018bert].
 
-[^fn-tpu]: **Tensor Processing Unit (TPU)**: Google's custom-designed ASIC optimized specifically for neural network computation. Unlike general-purpose GPUs, TPUs implement a systolic array architecture that excels at the matrix multiplications dominating deep learning workloads. TPU v4 chips deliver approximately 275 TFLOPS of bfloat16 performance at 175 watts, roughly 2.5× the performance per watt of contemporary GPUs for transformer training. The latest TPU v5p chips are interconnected via Inter-Core Interconnect (ICI) providing 4,800 Gb/s of bandwidth per chip, enabling tight coupling for distributed training across TPU pods containing thousands of chips. While GPUs offer broader flexibility for varied workloads, TPUs demonstrate how hardware-software co-design enables significant efficiency gains for specific computational patterns.
+[^fn-tpu]: **Tensor Processing Unit (TPU)**: Google's custom-designed ASIC optimized specifically for neural network computation. Unlike general-purpose GPUs, TPUs implement a systolic array architecture that excels at the matrix multiplications dominating deep learning workloads. TPU v4 chips deliver approximately `{python} tpuv4_bf16_tflops` TFLOPS of bfloat16 performance at 175 watts, roughly 2.5× the performance per watt of contemporary GPUs for transformer training. The latest TPU v5p chips are interconnected via Inter-Core Interconnect (ICI) providing 4,800 Gb/s of bandwidth per chip, enabling tight coupling for distributed training across TPU pods containing thousands of chips. While GPUs offer broader flexibility for varied workloads, TPUs demonstrate how hardware-software co-design enables significant efficiency gains for specific computational patterns.
 
-GPT-3 (2020) consumed an estimated 3.14×10²³ FLOPS during training, requiring thousands of V100 GPUs running for weeks [@brown2020language]. PaLM (2022) trained on 6,144 TPU v4 chips for roughly 60 days, consuming approximately 10²⁴ FLOPS [@chowdhery2022palm]. GPT-4 (2023) reportedly trained on approximately 25,000 A100 GPUs over 90-100 days [@openai2023gpt4]. This progression represents approximately a 10-million-fold increase in training compute over a single decade, from roughly 10¹⁸ FLOPS for AlexNet to 10²⁵ FLOPS for GPT-4 [@sevilla2022compute; @amodei2018ai]. The following table summarizes this evolution:
+GPT-3 (2020) consumed an estimated $`{python} gpt3_training_ops_sci`$ FLOPS during training, requiring thousands of V100 GPUs running for weeks [@brown2020language]. PaLM (2022) trained on 6,144 TPU v4 chips for roughly 60 days, consuming approximately 10²⁴ FLOPS [@chowdhery2022palm]. GPT-4 (2023) reportedly trained on approximately 25,000 A100 GPUs over 90-100 days [@openai2023gpt4]. This progression represents approximately a 10-million-fold increase in training compute over a single decade, from roughly 10¹⁸ FLOPS for AlexNet to 10²⁵ FLOPS for GPT-4 [@sevilla2022compute; @amodei2018ai]. The following table summarizes this evolution:
 
 ::: {.callout-example title="Training Compute Evolution"}
 
@@ -88,11 +118,11 @@ On a single GPU, training proceeds deterministically: the same code, data, and r
 
 [^fn-failure-rates]: **Hardware Failure Rates at Scale**: Individual server components fail infrequently. Enterprise SSDs show annual failure rates of 0.5-2% [@pinheiro2007failure]; GPUs fail at roughly 1-2% annually under typical datacenter conditions, though rates can exceed 9% under intensive AI training workloads; memory DIMMs fail at 1-2% per year [@schroeder2009dram]. These rates seem manageable until multiplied by scale. A cluster of 10,000 GPUs with 2% annual failure rate experiences 200 GPU failures per year, or roughly one every two days. A training run lasting 100 days will statistically encounter 50 or more GPU failures. Production systems implement automatic detection, workload migration, and checkpoint-based recovery to handle failures as routine events rather than emergencies. Meta reported that during LLaMA 3 training on 16,384 H100 GPUs, they experienced hardware failures roughly every three hours, requiring automated recovery systems to maintain over 90% effective training time [@dubey2024llama3].
 
-These scale-induced challenges drive infrastructure investment by the largest AI organizations. Meta's Research SuperCluster (RSC) contains 16,000 NVIDIA A100 GPUs connected by 200 Gb/s InfiniBand[^fn-infiniband] networking [@meta2022rsc]. Google's TPU v4 pods contain 4,096 chips with 1.1 exaFLOPS[^fn-exaflops] of aggregate compute capacity. Microsoft's Azure AI infrastructure spans multiple datacenters with tens of thousands of GPUs dedicated to AI workloads. Frontier AI capabilities require frontier infrastructure.
+These scale-induced challenges drive infrastructure investment by the largest AI organizations. Meta's Research SuperCluster (RSC) contains 16,000 NVIDIA A100 GPUs connected by `{python} ib_hdr_gbps` Gb/s InfiniBand[^fn-infiniband] networking [@meta2022rsc]. Google's TPU v4 pods contain 4,096 chips with 1.1 exaFLOPS[^fn-exaflops] of aggregate compute capacity. Microsoft's Azure AI infrastructure spans multiple datacenters with tens of thousands of GPUs dedicated to AI workloads. Frontier AI capabilities require frontier infrastructure.
 
-[^fn-infiniband]: **InfiniBand**: A high-performance, low-latency networking technology purpose-built for data centers and supercomputing. While standard Ethernet reaches 100-400 Gb/s with 1-5 microsecond latencies, InfiniBand achieves 200-400 Gb/s with sub-microsecond latencies through features including Remote Direct Memory Access (RDMA), which bypasses the operating system to transfer data directly between application memory on different machines. For distributed ML training, InfiniBand's RDMA support enables NVIDIA Collective Communications Library (NCCL) to achieve near-optimal gradient synchronization bandwidth. The 200 Gb/s HDR InfiniBand links common in 2024 AI clusters deliver approximately 25 GB/s of usable bandwidth, while the newer 400 Gb/s NDR generation reaches 50 GB/s. These speeds determine whether training becomes communication-bound or compute-bound for large models.
+[^fn-infiniband]: **InfiniBand**: A high-performance, low-latency networking technology purpose-built for data centers and supercomputing. While standard Ethernet reaches 100-400 Gb/s with 1-5 microsecond latencies, InfiniBand achieves `{python} ib_hdr_gbps`-`{python} ib_ndr_gbps` Gb/s with sub-microsecond latencies through features including Remote Direct Memory Access (RDMA), which bypasses the operating system to transfer data directly between application memory on different machines. For distributed ML training, InfiniBand's RDMA support enables NVIDIA Collective Communications Library (NCCL) to achieve near-optimal gradient synchronization bandwidth. The `{python} ib_hdr_gbps` Gb/s HDR InfiniBand links common in 2024 AI clusters deliver approximately `{python} ib_hdr_gbs` GB/s of usable bandwidth, while the newer `{python} ib_ndr_gbps` Gb/s NDR generation reaches `{python} ib_ndr_gbs` GB/s. These speeds determine whether training becomes communication-bound or compute-bound for large models.
 
-[^fn-exaflops]: **ExaFLOPS**: One quintillion (10^18) floating-point operations per second. For context, a single NVIDIA H100 GPU delivers approximately 2,000 TFLOPS (teraFLOPS, or 10^12 FLOPS) of FP16 compute; achieving 1 exaFLOPS thus requires roughly 500 such GPUs operating in parallel with perfect efficiency. Google's TPU v4 pods reaching 1.1 exaFLOPS represent one of the first single-system installations to cross this threshold. The scale progression from megaFLOPS (10^6, 1980s workstations) through gigaFLOPS (10^9, 1990s servers), teraFLOPS (10^12, 2000s GPUs), petaFLOPS (10^15, 2010s supercomputers), to exaFLOPS (10^18, 2020s AI clusters) illustrates the exponential growth enabling modern ML capabilities.
+[^fn-exaflops]: **ExaFLOPS**: One quintillion (10^18) floating-point operations per second. For context, a single NVIDIA H100 GPU delivers approximately `{python} h100_fp8_tflops` TFLOPS (teraFLOPS, or 10^12 FLOPS) of FP8 compute; achieving 1 exaFLOPS thus requires roughly 500 such GPUs operating in parallel with perfect efficiency. Google's TPU v4 pods reaching 1.1 exaFLOPS represent one of the first single-system installations to cross this threshold. The scale progression from megaFLOPS (10^6, 1980s workstations) through gigaFLOPS (10^9, 1990s servers), teraFLOPS (10^12, 2000s GPUs), petaFLOPS (10^15, 2010s supercomputers), to exaFLOPS (10^18, 2020s AI clusters) illustrates the exponential growth enabling modern ML capabilities.
 
 ## AI Scaling Laws {#sec-vol2-intro-ai-scaling-laws-a043}
 
@@ -114,7 +144,7 @@ Understanding why efficiency becomes increasingly important as systems expand in
 
 ### Empirical Evidence for Scaling Laws {#sec-vol2-intro-empirical-evidence-scaling-laws-0105}
 
-The rapid evolution in AI capabilities over the past decade exemplifies this scaling trajectory. GPT-1 (2018) contained 117 million parameters and demonstrated basic sentence completion capabilities. GPT-2 (2019) scaled to 1.5 billion parameters and achieved coherent paragraph generation. GPT-3 (2020) expanded to 175 billion parameters and demonstrated sophisticated text generation across diverse domains. Each increase in model size brought dramatically improved capabilities, but at exponentially increasing costs.
+The rapid evolution in AI capabilities over the past decade exemplifies this scaling trajectory. GPT-1 (2018) contained 117 million parameters and demonstrated basic sentence completion capabilities. GPT-2 (2019) scaled to 1.5 billion parameters and achieved coherent paragraph generation. GPT-3 (2020) expanded to `{python} gpt3_params_b` billion parameters and demonstrated sophisticated text generation across diverse domains. Each increase in model size brought dramatically improved capabilities, but at exponentially increasing costs.
 
 This pattern extends beyond language models. In computer vision, doubling neural network size typically yields consistent accuracy gains when training data increases proportionally. AlexNet (2012) had 60 million parameters, VGG-16 (2014) scaled to 138 million, and large modern vision transformers can exceed 600 million parameters. Each generation achieved better image recognition accuracy but required proportionally more computational resources and training data.
 
@@ -145,7 +175,7 @@ Empirical studies of large language models (LLMs) reveal a key insight. For any 
 
 This principle emerges clearly in @fig-compute-optimal through three related views. The left panel shows 'IsoFLOP curves' where each curve corresponds to a constant number of floating-point operations (FLOPs[^fn-efficient-flops]) during transformer[^fn-transformer] training. The valleys in these curves identify the most efficient model size for each computational budget when training autoregressive[^fn-autoregressive] language models. The center and right panels reveal how the optimal number of parameters and tokens scales predictably as computational budgets increase, demonstrating the necessity for coordinated scaling to maximize resource utilization.
 
-[^fn-efficient-flops]: **FLOPs (Floating-Point Operations)**: Measure of computational work independent of hardware. GPT-3 required 3.14×10²³ FLOPs—equivalent to a gaming PC running 350 years. Chinchilla scaling laws suggest optimal FLOP allocation between model size and training tokens. FLOPs/second (FLOPS) measures hardware throughput; A100 delivers 312 TF32 TFLOPS.
+[^fn-efficient-flops]: **FLOPs (Floating-Point Operations)**: Measure of computational work independent of hardware. GPT-3 required $`{python} gpt3_training_ops_sci`$ FLOPs—equivalent to a gaming PC running 350 years. Chinchilla scaling laws suggest optimal FLOP allocation between model size and training tokens. FLOPs/second (FLOPS) measures hardware throughput; A100 delivers `{python} a100_fp16_tflops` FP16 Tensor TFLOPS.
 
 [^fn-transformer]: **Transformer**: Neural network architecture introduced by Vaswani et al. [@vaswani2017attention] that revolutionized NLP through self-attention mechanisms. Unlike sequential RNNs, transformers enable parallel processing during training, forming the foundation of modern large language models including GPT, BERT, T5, and their derivatives.
 
@@ -447,7 +477,7 @@ Data-driven and temporal scaling regimes inform system design by revealing multi
 
 Understanding scaling laws informs practical system design and resource planning. Consistent observation of power-law trends indicates that within well-defined operational regimes, model performance depends predominantly on scale rather than idiosyncratic architectural innovations. However, diminishing returns phenomena indicate that each additional improvement demands exponentially increased resources while delivering progressively smaller benefits.
 
-OpenAI's development of GPT-3 demonstrates this principle. Rather than conducting expensive architecture searches, the authors applied scaling laws derived from earlier experiments to determine optimal training dataset size and model parameter count [@brown2020language]. They scaled an established transformer architecture along the compute-optimal frontier to 175 billion parameters and approximately 300 billion tokens, enabling advance prediction of model performance and resource requirements.
+OpenAI's development of GPT-3 demonstrates this principle. Rather than conducting expensive architecture searches, the authors applied scaling laws derived from earlier experiments to determine optimal training dataset size and model parameter count [@brown2020language]. They scaled an established transformer architecture along the compute-optimal frontier to `{python} gpt3_params_b` billion parameters and approximately 300 billion tokens, enabling advance prediction of model performance and resource requirements.
 
 Scaling laws serve multiple practical functions in system design. They enable practitioners to estimate returns on investment for different resource allocations during resource budgeting. Under fixed computational budgets, designers can utilize empirical scaling curves to determine optimal performance improvement strategies across model size, dataset expansion, or training duration.
 
@@ -463,7 +493,7 @@ Scaling laws illuminate pathways to performance enhancement while revealing rapi
 
 Training large-scale models necessitates substantial processing power, typically requiring distributed infrastructures[^fn-distributed-infrastructure] comprising hundreds or thousands of accelerators. State-of-the-art language model training may require tens of thousands of GPU-days, consuming millions of kilowatt-hours of electricity. @sec-distributed-training examines how these distributed training systems introduce additional complexity around communication overhead, synchronization, and scaling efficiency.
 
-[^fn-distributed-infrastructure]: **Distributed Infrastructure**: Computing systems spreading ML workloads across machines connected by high-speed networks (InfiniBand 400Gb/s, NVLink 900GB/s). GPT-4 training reportedly used 10,000+ GPUs coordinated across clusters. Communication overhead (AllReduce synchronization) can consume 30-60% of training time, making network topology and parallelism strategy critical design decisions.
+[^fn-distributed-infrastructure]: **Distributed Infrastructure**: Computing systems spreading ML workloads across machines connected by high-speed networks (InfiniBand `{python} ib_ndr_gbps`Gb/s, NVLink `{python} nvlink_h100_gbs`GB/s). GPT-4 training reportedly used 10,000+ GPUs coordinated across clusters. Communication overhead (AllReduce synchronization) can consume 30-60% of training time, making network topology and parallelism strategy critical design decisions.
 
 Large models require extensive, high-quality, diverse datasets to achieve their full potential. Data collection, cleansing, and labeling processes consume considerable time and resources. As models approach saturation of available high-quality data, particularly in natural language processing, additional performance gains through data scaling become increasingly difficult to achieve. This reality underscores data efficiency as a necessary complement to brute-force scaling approaches.
 
@@ -926,7 +956,7 @@ This belief treats edge systems as resource-constrained cloud systems. Edge devi
 
 **Pitfall:** ***Focusing on algorithmic efficiency while ignoring system-level efficiency factors.***
 
-Engineers optimize FLOPs and parameter counts assuming these metrics predict deployment performance. Real efficiency depends on hardware characteristics that algorithmic complexity ignores. INT8 quantization provides 2–4$	imes$ speedup on NVIDIA Turing GPUs with tensor core support but negligible benefit on CPUs lacking integer SIMD instructions. Unstructured pruning achieves 80% sparsity but delivers no speedup on dense hardware, while structured pruning at 50% sparsity guarantees 2$	imes$ speedup. Memory-bound operations see throughput determined by bandwidth (A100: 2 TB/s HBM2e) rather than compute (312 TFLOPS). A model reduced from 10B to 3B parameters (70% FLOPs reduction) might achieve only 20% latency improvement because memory bandwidth bottlenecks dominate and the pruning pattern lacks hardware-friendly structure.
+Engineers optimize FLOPs and parameter counts assuming these metrics predict deployment performance. Real efficiency depends on hardware characteristics that algorithmic complexity ignores. INT8 quantization provides 2–4$	imes$ speedup on NVIDIA Turing GPUs with tensor core support but negligible benefit on CPUs lacking integer SIMD instructions. Unstructured pruning achieves 80% sparsity but delivers no speedup on dense hardware, while structured pruning at 50% sparsity guarantees 2$	imes$ speedup. Memory-bound operations see throughput determined by bandwidth (A100: `{python} a100_mem_bw_tbs` TB/s HBM2e) rather than compute (`{python} a100_fp16_tflops` TFLOPS). A model reduced from 10B to 3B parameters (70% FLOPs reduction) might achieve only 20% latency improvement because memory bandwidth bottlenecks dominate and the pruning pattern lacks hardware-friendly structure.
 
 ## Why Scale Changes Everything {#sec-vol2-introduction-why-scale-changes}
 
@@ -950,7 +980,7 @@ This unique profile creates different engineering constraints. While a web serve
 
 At small scale, computation dominates. Training a model on a single GPU spends most time performing matrix multiplications. Communication overhead (moving data between CPU and GPU memory) represents a small fraction of total time.
 
-At large scale, communication often dominates. Distributed training requires synchronizing gradients across workers after each batch. For a model with 175 billion parameters using 32-bit gradients, each synchronization must transfer 700GB of data (175 billion parameters × 4 bytes per parameter). Using the ring all-reduce algorithm[^fn-all-reduce] across 1,000 workers connected by 200 Gb/s InfiniBand (25 GB/s), theoretical completion time for the full synchronization approaches 56 seconds ($2 \times 700 \text{ GB} / 25 \text{ GB/s}$). Practical implementations achieve 60-80% of theoretical bandwidth, making communication consume a significant fraction of total training time even with optimized networks.
+At large scale, communication often dominates. Distributed training requires synchronizing gradients across workers after each batch. For a model with `{python} gpt3_params_b` billion parameters using 32-bit gradients, each synchronization must transfer `{python} gpt3_gradient_gb`GB of data (`{python} gpt3_params_b` billion parameters × 4 bytes per parameter). Using the ring all-reduce algorithm[^fn-all-reduce] across 1,000 workers connected by `{python} ib_hdr_gbps` Gb/s InfiniBand (`{python} ib_hdr_gbs` GB/s), theoretical completion time for the full synchronization approaches 56 seconds ($2 \times 700 \text{ GB} / 25 \text{ GB/s}$). Practical implementations achieve 60-80% of theoretical bandwidth, making communication consume a significant fraction of total training time even with optimized networks.
 
 [^fn-all-reduce]: **Ring All-Reduce**: An efficient collective communication algorithm for gradient synchronization that achieves near-optimal bandwidth utilization regardless of worker count. For large models, this synchronization can consume a significant fraction of training time. @sec-communication examines AllReduce algorithms and their trade-offs.
 
@@ -1135,7 +1165,7 @@ This layered progression structures the textbook's five Parts, each correspondin
 
 **The AI Triad** provides the organizing framework for understanding ML systems. Every machine learning system comprises three interdependent components: data that guides behavior, algorithms that learn patterns, and computational infrastructure that enables both training and inference. These components exist in dynamic tension. Larger models require more data and compute. Larger datasets enable more sophisticated models but demand storage and processing infrastructure.
 
-At production scale, these interdependencies intensify. The 10^25^ FLOPS required for GPT-4 training demanded infrastructure architecture that enabled efficient gradient synchronization across 25,000 GPUs. The terabytes of training data required distributed storage systems with access patterns optimized for ML workloads. The 175 billion parameters required partitioning strategies that balance computation against communication overhead. Understanding these interdependencies helps you predict when a change to one Triad component will cascade through the others.
+At production scale, these interdependencies intensify. The 10^25^ FLOPS required for GPT-4 training demanded infrastructure architecture that enabled efficient gradient synchronization across 25,000 GPUs. The terabytes of training data required distributed storage systems with access patterns optimized for ML workloads. The `{python} gpt3_params_b` billion parameters required partitioning strategies that balance computation against communication overhead. Understanding these interdependencies helps you predict when a change to one Triad component will cascade through the others.
 
 @fig-vol2-ai-triad visualizes these dependencies between data, algorithms, and infrastructure, revealing the optimization landscape that ML systems engineers must address.
 

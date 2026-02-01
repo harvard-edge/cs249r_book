@@ -210,31 +210,64 @@ The goal of data selection is to maximize the **Information-Compute Ratio (ICR)*
 
 To make the Information-Compute Ratio concrete, consider how coreset selection improves training efficiency on a real workload.
 
+```{python}
+#| label: data-selection-setup
+#| echo: false
+
+from calc.constants import RESNET50_FLOPs, GFLOPs
+from calc.formulas import fmt
+
+# ResNet-50 forward pass FLOPs from constants
+resnet50_fwd_gflops = fmt(RESNET50_FLOPs.to(GFLOPs), precision=1)
+resnet50_fwdbwd_gflops = fmt((RESNET50_FLOPs * 2).to(GFLOPs), precision=1)
+
+# ImageNet one-epoch compute (1.28M images x ~8 GFLOPs fwd+bwd)
+imagenet_size = 1.28e6
+resnet50_fwdbwd = (RESNET50_FLOPs * 2).to(GFLOPs).magnitude  # ~8.2 GFLOPs
+full_epoch_flops = imagenet_size * resnet50_fwdbwd * 1e9  # in raw FLOPs
+full_epoch_flops_str = f"{full_epoch_flops:.2e}"
+
+# Random selection ICR
+acc_gain_random = 5.0
+icr_random = acc_gain_random / full_epoch_flops
+icr_random_str = f"{icr_random:.1e}"
+
+# EL2N coreset (50% of data)
+coreset_size = int(imagenet_size * 0.5)
+coreset_size_str = f"{coreset_size:,.0f}".replace(",", "K").replace("000K", "K")
+coreset_flops = coreset_size * resnet50_fwdbwd * 1e9
+coreset_flops_str = f"{coreset_flops:.1e}"
+acc_gain_coreset = 4.5
+icr_coreset = acc_gain_coreset / coreset_flops
+icr_coreset_str = f"{icr_coreset:.1e}"
+icr_ratio = f"{icr_coreset / icr_random:.1f}"
+```
+
 ::: {.callout-example title="Computing ICR: Coresets"}
 **Scenario**: Training our **ResNet-50 Lighthouse model** (@sec-dnn-architectures) on ImageNet for one epoch. We compare random batch selection versus EL2N-based coreset selection. ResNet-50's compute-bound nature (high **arithmetic intensity**) makes it an ideal candidate for data selection optimization: reducing dataset size directly reduces training FLOPs with minimal I/O impact.
 
 **Setup**:
 
 - Dataset: ImageNet (1.28M images)
-- Model: ResNet-50 Lighthouse (~4 GFLOPs per forward pass, ~8 GFLOPs forward + backward)
-- One epoch: 1.28M × 8 GFLOPs = **1.02 × 10^16 FLOPs**
+- Model: ResNet-50 Lighthouse (~`{python} resnet50_fwd_gflops` GFLOPs per forward pass, ~`{python} resnet50_fwdbwd_gflops` GFLOPs forward + backward)
+- One epoch: 1.28M × `{python} resnet50_fwdbwd_gflops` GFLOPs = **`{python} full_epoch_flops_str` FLOPs**
 - Accuracy improvement per epoch (early training): ~5% points
 
 **Random Selection (baseline)**:
 
 - Process all 1.28M samples uniformly
 - Accuracy gain: 5.0 percentage points
-- ICR_random = 5.0 / (1.02 × 10^16) = **4.9 × 10^-16 per FLOP**
+- ICR_random = 5.0 / (`{python} full_epoch_flops_str`) = **`{python} icr_random_str` per FLOP**
 
 **EL2N Coreset (50% of data)**:
 
 - Process 640K high-uncertainty samples selected by EL2N scoring
 - Coreset focuses on decision boundary samples
 - Accuracy gain: 4.5 percentage points (90% of full data performance)
-- Compute: 640K × 8 GFLOPs = **5.1 × 10^15 FLOPs**
-- ICR_coreset = 4.5 / (5.1 × 10^15) = **8.8 × 10^-16 per FLOP**
+- Compute: 640K × `{python} resnet50_fwdbwd_gflops` GFLOPs = **`{python} coreset_flops_str` FLOPs**
+- ICR_coreset = 4.5 / (`{python} coreset_flops_str`) = **`{python} icr_coreset_str` per FLOP**
 
-**Result**: The coreset achieves **1.8$\times$ higher ICR**, nearly twice the learning per FLOP, by eliminating low-information "easy" samples that contribute little to the decision boundary. The 0.5 percentage point accuracy difference is often acceptable given the 50% compute savings.
+**Result**: The coreset achieves **`{python} icr_ratio`$\times$ higher ICR**, nearly twice the learning per FLOP, by eliminating low-information "easy" samples that contribute little to the decision boundary. The 0.5 percentage point accuracy difference is often acceptable given the 50% compute savings.
 :::
 
 ::: {#fig-data-selection-pipeline fig-cap="**The Data Selection Pipeline**: A structured approach to increasing data value. Raw data is first pruned to remove redundancy (Static Pruning), then dynamically selected during training (Active Learning), and finally augmented to increase diversity (Synthesis). Each stage increases the Information-Compute Ratio (ICR)." fig-alt="A flow diagram showing the progression of data: Raw Data -> Static Pruning -> Dynamic Selection -> Synthetic Generation -> High Value Model. Arrows indicate the flow."}

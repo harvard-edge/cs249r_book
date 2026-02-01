@@ -35,6 +35,33 @@ The mathematical operators—matrix multiplications, activation functions, gradi
 
 :::
 
+```{python}
+#| label: dnn-arch-setup
+#| echo: false
+
+from calc.constants import *
+from calc.formulas import fmt, sci
+
+# GPU specs
+a100_tflops_fp16 = f"{A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
+a100_tflops_fp32 = f"{A100_FLOPS_FP32.to(TFLOPs/second).magnitude:.1f}"
+a100_tflops_tf32 = f"{A100_FLOPS_TF32.to(TFLOPs/second).magnitude:.0f}"
+a100_tflops_int8 = f"{A100_FLOPS_INT8.to(TFLOPs/second).magnitude:.0f}"
+a100_mem = f"{A100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
+
+# Model specs
+resnet_params_m = f"{RESNET50_PARAMS.to(Mparam).magnitude:.1f}"
+resnet_gflops = f"{RESNET50_FLOPs.to(GFLOPs).magnitude:.1f}"
+resnet_fp32_mb = f"{(RESNET50_PARAMS.magnitude * 4 / 1e6):.0f}"
+gpt3_params_b = f"{GPT3_PARAMS.to(Mparam).magnitude/1000:.0f}"
+
+# Derived
+a100_8x_mem = f"{int(A100_MEM_CAPACITY.to(GiB).magnitude) * 8}"
+
+# Energy
+energy_dram = f"{ENERGY_DRAM_ACCESS_PJ.magnitude:.0f}"
+```
+
 ## Architectural Principles and Engineering Trade-offs {#sec-dnn-architectures-architectural-principles-engineering-tradeoffs-362e}
 
 Every neural network architecture answers one central question: *how should we structure computation to match the structure in our data?* Images have spatial locality, language has sequential dependencies, and tabular records have no inherent structure at all. The architecture encodes assumptions about these patterns directly into the computational graph, and those assumptions determine everything from parameter count to hardware utilization to deployment feasibility. Architecture selection is therefore a systems engineering problem, not merely a modeling decision.
@@ -89,7 +116,7 @@ plt.show()
 +------------------+-------------+------------+------------------+------------+----------------+------------------------------------------+
 | **Model**        | **Domain**  | **Params** | **FLOPs/Inf**    | **Memory** | **Bottleneck** | **Role in Textbook**                     |
 +:=================+:============+===========:+=================:+===========:+:===============+:=========================================+
-| **ResNet-50**    | Vision      | 25.6M      | 4.1 GFLOPs       | 102 MB     | Compute        | Parallelism, quantization, and batching  |
+| **ResNet-50**    | Vision      | `{python} resnet_params_m`M      | `{python} resnet_gflops` GFLOPs       | `{python} resnet_fp32_mb` MB     | Compute        | Parallelism, quantization, and batching  |
 +------------------+-------------+------------+------------------+------------+----------------+------------------------------------------+
 | **GPT-2 XL**     | Language    | 1.5B       | 3.0 GFLOPs/token | 6.0 GB     | Mem. Bandwidth | Autoregressive generation and KV caching |
 +------------------+-------------+------------+------------------+------------+----------------+------------------------------------------+
@@ -485,7 +512,7 @@ In the MNIST example, each output neuron requires 784 multiply-accumulate operat
 
 [^fn-dnn-blas]: **Basic Linear Algebra Subprograms (BLAS)**: Developed in the 1970s as a standard for basic vector and matrix operations, BLAS became the foundation for virtually all scientific computing. Modern implementations like Intel MKL and OpenBLAS can achieve 80-95% of theoretical peak performance on well-optimized workloads, making them necessary for neural network efficiency.
 
-[^fn-tensor-cores]: **Tensor Cores**: Specialized matrix units in NVIDIA GPUs (Volta+) accelerating mixed-precision GEMM operations. A100 Tensor Cores deliver 312 TFLOPS for FP16 (or 624 TFLOPS with structured sparsity) compared to 19.5 TFLOPS for FP32 on CUDA cores. Note that this comparison spans both precision (FP16 vs FP32) and execution unit (Tensor Core vs CUDA Core); TF32 mode on Tensor Cores achieves 156 TFLOPS. Tensor Cores require specific matrix dimensions (multiples of 8/16) and data layouts; frameworks like cuBLAS automatically tile operations to maximize utilization.
+[^fn-tensor-cores]: **Tensor Cores**: Specialized matrix units in NVIDIA GPUs (Volta+) accelerating mixed-precision GEMM operations. A100 Tensor Cores deliver `{python} a100_tflops_fp16` TFLOPS for FP16 (or `{python} a100_tflops_int8` TFLOPS with structured sparsity) compared to `{python} a100_tflops_fp32` TFLOPS for FP32 on CUDA cores. Note that this comparison spans both precision (FP16 vs FP32) and execution unit (Tensor Core vs CUDA Core); TF32 mode on Tensor Cores achieves `{python} a100_tflops_tf32` TFLOPS. Tensor Cores require specific matrix dimensions (multiples of 8/16) and data layouts; frameworks like cuBLAS automatically tile operations to maximize utilization.
 
 ### System Implications {#sec-dnn-architectures-system-implications-0550}
 
@@ -962,9 +989,9 @@ These architectural properties make CNNs highly amenable to systems-level analys
 +-----------------+---------------------------+------------------------------------------------------------------+
 | **Property**    | **Value**                 | **System Implication**                                           |
 +:================+:==========================+:=================================================================+
-| **Parameters**  | 25.6 million              | 102 MB model size at FP32; fits comfortably in GPU memory.       |
+| **Parameters**  | `{python} resnet_params_m` million              | `{python} resnet_fp32_mb` MB model size at FP32; fits comfortably in GPU memory.       |
 +-----------------+---------------------------+------------------------------------------------------------------+
-| **FLOPs/Image** | 4.1 GFLOPs (224×224)      | Dominated by 3×3 convolutions (~90% of compute).                 |
+| **FLOPs/Image** | `{python} resnet_gflops` GFLOPs (224×224)      | Dominated by 3×3 convolutions (~90% of compute).                 |
 +-----------------+---------------------------+------------------------------------------------------------------+
 | **Constraint**  | Compute Bound             | Limited by raw FLOPs, not memory bandwidth.                      |
 +-----------------+---------------------------+------------------------------------------------------------------+
@@ -2119,7 +2146,7 @@ This combination of dense and sparse computation makes *DLRM* the chapter's *rec
 :::
 
 **System Implications: The Memory Wall.**
-DLRM creates a unique systems challenge: **the model is too big to fit on a single GPU**. While a ResNet-50 (100 MB) or even GPT-3 (350 GB at FP16 precision, or approximately 700 GB at FP32) might fit on a single node, industrial recommendation models can reach terabytes or petabytes in size due to the embedding tables.
+DLRM creates a unique systems challenge: **the model is too big to fit on a single GPU**. While a ResNet-50 (`{python} resnet_fp32_mb` MB) or even GPT-3 (350 GB at FP16 precision, or approximately 700 GB at FP32) might fit on a single node, industrial recommendation models can reach terabytes or petabytes in size due to the embedding tables.
 
 This forces a specific parallelization strategy called **Model Parallelism** (specifically, **Embedding Sharding**):
 *   The embedding tables are split (sharded) across hundreds of GPUs.
@@ -2931,7 +2958,7 @@ Examine @tbl-sys-design-implications to see how architectural primitives drive h
 
 Energy consumption patterns vary dramatically across neural network architectures, with implications for both datacenter deployment and edge computing scenarios. Each architectural pattern exhibits distinct energy characteristics that inform deployment decisions and optimization strategies.
 
-Dense matrix operations in MLPs achieve excellent arithmetic intensity[^fn-arithmetic-intensity] (computation per data movement) but consume significant absolute energy. Each multiply-accumulate operation consumes approximately 4.6pJ, while data movement from DRAM costs 640pJ per 32-bit value [@Horowitz2014]. For typical MLP inference, 70-80% of energy goes to data movement rather than computation, making memory bandwidth optimization critical for energy efficiency.
+Dense matrix operations in MLPs achieve excellent arithmetic intensity[^fn-arithmetic-intensity] (computation per data movement) but consume significant absolute energy. Each multiply-accumulate operation consumes approximately 4.6pJ, while data movement from DRAM costs `{python} energy_dram`pJ per 32-bit value [@Horowitz2014]. For typical MLP inference, 70-80% of energy goes to data movement rather than computation, making memory bandwidth optimization critical for energy efficiency.
 
 [^fn-arithmetic-intensity]: **Arithmetic Intensity**: The ratio of floating-point operations to memory accesses, measured in FLOPS per byte. High arithmetic intensity (>10 FLOPS/byte) enables efficient hardware utilization, while low intensity (<1 FLOPS/byte) makes workloads memory-bound. Attention mechanisms typically have low arithmetic intensity, explaining their energy inefficiency.
 
@@ -3119,7 +3146,7 @@ With this theoretical foundation established, we can now demonstrate how to appl
 3.  **Precision**: FP32 (4 bytes per element).
 4.  **Table Size**: $100 \text{ Million} \times 128 \times 4 \text{ bytes} \approx \mathbf{51.2 \text{ GB}}$.
 
-**The Systems Conclusion**: A single embedding table for one feature (Items) already consumes **64%** of an 80GB A100 GPU. If you add a User table of the same size, the model **cannot fit** on a single machine. DLRM is **Capacity-Bound**, necessitating the "scale-out" distributed memory systems discussed in @sec-ai-training.
+**The Systems Conclusion**: A single embedding table for one feature (Items) already consumes **64%** of an `{python} a100_mem`GB A100 GPU. If you add a User table of the same size, the model **cannot fit** on a single machine. DLRM is **Capacity-Bound**, necessitating the "scale-out" distributed memory systems discussed in @sec-ai-training.
 :::
 
 While DLRM workloads are capacity-bound, vision workloads face a different constraint: sustained throughput for real-time processing.
@@ -3177,7 +3204,7 @@ The input is spatial data (images from camera traps, typically 1920×1080 resolu
 
 Compare candidates against our Lighthouse models:
 
-- **ResNet-50** (25.6M params, 4 GFLOPs): Too large. At ~100 MB FP32, leaves no room for OS and buffers. Power consumption would exceed budget.
+- **ResNet-50** (`{python} resnet_params_m`M params, `{python} resnet_gflops` GFLOPs): Too large. At ~`{python} resnet_fp32_mb` MB FP32, leaves no room for OS and buffers. Power consumption would exceed budget.
 - **MobileNetV1** (4.2M params, 569 MFLOPs): Promising. ~16 MB at FP32, ~4 MB quantized to INT8. Power-efficient depthwise separable convolutions.
 - **KWS DS-CNN** (250K params, 20 MFLOPs): Too small. Designed for 12-class audio, insufficient capacity for 50 visual species.
 
@@ -3243,7 +3270,7 @@ Engineers add attention mechanisms to CNNs or insert convolutional layers into t
 
 **Pitfall:** ***Optimizing architectural decisions for training hardware without considering deployment constraints.***
 
-Teams design architectures targeting high-end GPU clusters, then discover deployment failures on edge devices or cloud instances with different characteristics. An architecture exploiting 8x A100 GPUs with 80GB memory each (640GB total) cannot deploy to edge devices with 4GB memory; the 160x memory reduction requires fundamental architectural changes, not just quantization. As @sec-dnn-architectures-decision-framework-a889 emphasizes, effective architecture selection requires analyzing the full system stack: compute infrastructure, compiler optimization capabilities, target hardware characteristics, and operational constraints. A 500-layer ResNet trains efficiently on GPU clusters but compilation takes 45 minutes and generates 8GB of optimized kernels, making iterative development impractical. Edge deployment compounds these issues: models must fit in 10-100MB storage, execute in 50-200ms latency, and operate within 2-5W power budgets. Organizations that defer deployment considerations to "optimize later" encounter fundamental architectural mismatches requiring costly model redesigns.
+Teams design architectures targeting high-end GPU clusters, then discover deployment failures on edge devices or cloud instances with different characteristics. An architecture exploiting 8x A100 GPUs with `{python} a100_mem`GB memory each (`{python} a100_8x_mem`GB total) cannot deploy to edge devices with 4GB memory; the 160x memory reduction requires fundamental architectural changes, not just quantization. As @sec-dnn-architectures-decision-framework-a889 emphasizes, effective architecture selection requires analyzing the full system stack: compute infrastructure, compiler optimization capabilities, target hardware characteristics, and operational constraints. A 500-layer ResNet trains efficiently on GPU clusters but compilation takes 45 minutes and generates 8GB of optimized kernels, making iterative development impractical. Edge deployment compounds these issues: models must fit in 10-100MB storage, execute in 50-200ms latency, and operate within 2-5W power budgets. Organizations that defer deployment considerations to "optimize later" encounter fundamental architectural mismatches requiring costly model redesigns.
 
 With these cautionary notes in mind, we now synthesize the key concepts that practitioners should carry forward.
 

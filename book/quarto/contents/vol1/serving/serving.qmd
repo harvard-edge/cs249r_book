@@ -33,6 +33,22 @@ Benchmarks validated your optimizations under controlled conditions. Serving rev
 
 :::
 
+```{python}
+#| label: serving-setup
+#| echo: false
+
+from calc.constants import *
+from calc.formulas import fmt, sci
+
+# GPU specs
+v100_tflops_fp32 = f"{V100_FLOPS_FP32.to(TFLOPs/second).magnitude:.1f}"
+v100_bw = f"{V100_MEM_BW.to(GB/second).magnitude:.0f}"
+a100_bw_tbs = f"{A100_MEM_BW.to(TB/second).magnitude:.1f}"
+h100_bw_tbs = f"{H100_MEM_BW.to(TB/second).magnitude:.2f}"
+h100_mem = f"{H100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
+h100_tdp = f"{H100_TDP.to(watt).magnitude:.0f}"
+```
+
 ## The Serving Paradigm {#sec-model-serving-systems-serving-paradigm-9634}
 
 Serving marks the transition from model development to production deployment, where the **Iron Law of ML Systems** (@sec-ai-training-iron-law-training-performance-a53f) undergoes a fundamental shift. Training optimized for throughput, processing massive datasets over days where the goal was samples per hour and latency spikes were absorbed invisibly. Serving must deliver predictions within milliseconds under unpredictable load. The **Latency term** ($\text{Latency}_{\text{fixed}}$), the irreducible overhead of request scheduling, network round-trips, and system orchestration, becomes the dominant constraint rather than a rounding error. This inversion, from throughput to latency, from controlled conditions to unpredictable traffic, from offline to real time, defines the serving challenge. @sec-benchmarking-ai established techniques for measuring performance under controlled conditions; serving faces traffic patterns that no benchmark could anticipate. @sec-model-compression provided quantization methods that reduced model size; serving must validate that those optimizations preserve accuracy under real traffic distributions.
@@ -540,7 +556,7 @@ Doubling resolution from 224 to 448 theoretically yields 4x slowdown (measured: 
 | **640×640**    | 102.4MB             | 18 FLOPS/byte        | Memory BW      |
 +----------------+---------------------+----------------------+----------------+
 
-: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity decreases with resolution as activation sizes grow. For a V100 PCIe (14 TFLOPS FP32, 900 GB/s bandwidth), the ridge point is approximately 16 FLOPS/byte. At 224x224, compute dominates; by 512x512, memory bandwidth becomes the limiting factor. {#tbl-resolution-bottleneck}
+: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity decreases with resolution as activation sizes grow. For a V100 PCIe (`{python} v100_tflops_fp32` TFLOPS FP32, `{python} v100_bw` GB/s bandwidth), the ridge point is approximately 16 FLOPS/byte. At 224x224, compute dominates; by 512x512, memory bandwidth becomes the limiting factor. {#tbl-resolution-bottleneck}
 
 #### Resolution Strategies in Production {#sec-model-serving-systems-deploymentspecific-resolution-decisions-1d76}
 
@@ -1426,10 +1442,10 @@ The computational intensity of managing KV caches across concurrent requests rai
 ::: {.callout-notebook #notebook-carbon-chat title="The Carbon Cost of a Chat"}
 
 **Joules per Token: The Green Metric**:
-As LLMs scale, energy efficiency becomes a first-class operational metric alongside latency. For an H100 GPU (700W TDP), we can quantify the energy footprint of serving:
+As LLMs scale, energy efficiency becomes a first-class operational metric alongside latency. For an H100 GPU (`{python} h100_tdp`W TDP), we can quantify the energy footprint of serving:
 
 1.  **Throughput**: 114 concurrent requests × 7.5 tokens/sec/req $\approx$ **855 tokens/sec**.
-2.  **Power**: 700W (GPU) + 300W (Host/Overhead) = **1000W**.
+2.  **Power**: `{python} h100_tdp`W (GPU) + 300W (Host/Overhead) = **1000W**.
 3.  **Energy per Token**:
 
     $$\frac{1000 \text{ Joules/sec}}{855 \text{ tokens/sec}} \approx \mathbf{1.17 \text{ Joules/token}}$$
@@ -1677,7 +1693,7 @@ To apply the principles of latency budgeting, memory management, and hardware ef
 #### Workload Profile {#sec-model-serving-systems-workload-profile-a380}
 
 *   **Model**: Llama-3-8B (quantized to 4-bit AWQ).
-*   **Hardware**: 1$\times$ NVIDIA H100 SXM5 GPU (80 GB HBM3, 3.35 TB/s bandwidth).
+*   **Hardware**: 1$\times$ NVIDIA H100 SXM5 GPU (`{python} h100_mem` GB HBM3, `{python} h100_bw_tbs` TB/s bandwidth).
 *   **Request Characteristics**: 1,000-token input prompt (Prefill), 256-token generated response (Decode).
 *   **Target SLOs**: TTFT $<$ 200 ms, TPOT $<$ 20 ms.
 
@@ -1704,7 +1720,7 @@ Recall the **Energy-Movement Invariant** from @sec-data-engineering-ml: moving a
 $$ T_{\text{token}} \approx \frac{\text{Model Size (Bytes)}}{\text{Memory Bandwidth (Bytes/s)}} $$
 
 **The Engineering Implication**:
-Every time you generate a token, you are paying a massive "energy tax" to move the model's logic from HBM into compute registers. For Llama-3-8B (3.5 GB int4), an A100 80GB (2 TB/s HBM2e) generates tokens at $\approx 1.7$ ms/token. Adding more *compute cores* yields **zero** latency improvement; only faster memory (Physics) or smaller models (Algorithm) can speed up generation.
+Every time you generate a token, you are paying a massive "energy tax" to move the model's logic from HBM into compute registers. For Llama-3-8B (3.5 GB int4), an A100 80GB (`{python} a100_bw_tbs` TB/s HBM2e) generates tokens at $\approx 1.7$ ms/token. Adding more *compute cores* yields **zero** latency improvement; only faster memory (Physics) or smaller models (Algorithm) can speed up generation.
 :::
 
 *   $T_{\text{token}} \approx \frac{3.5 \text{ GB}}{3.35 \text{ TB/s}} \approx 1 \text{ ms}$ (theoretical limit).

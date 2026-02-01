@@ -34,6 +34,41 @@ Architectures define the computational patterns; frameworks translate those patt
 
 :::
 
+```{python}
+#| label: training-setup
+#| echo: false
+
+from calc.constants import *
+from calc.formulas import fmt, sci
+
+# GPU specs used in this chapter
+v100_tflops_fp16 = f"{V100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
+v100_tflops_fp32 = f"{V100_FLOPS_FP32.to(TFLOPs/second).magnitude:.1f}"
+v100_bw = f"{V100_MEM_BW.to(GB/second).magnitude:.0f}"
+v100_mem = f"{V100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
+
+a100_tflops_fp16 = f"{A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
+a100_tflops_fp32 = f"{A100_FLOPS_FP32.to(TFLOPs/second).magnitude:.1f}"
+a100_bw_gbs = f"{A100_MEM_BW.to(GB/second).magnitude:,.0f}"
+a100_bw_tbs = f"{A100_MEM_BW.to(TB/second).magnitude:.1f}"
+
+h100_tflops_fp16 = f"{H100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
+h100_tflops_tf32 = f"{H100_FLOPS_TF32.to(TFLOPs/second).magnitude:.0f}"
+h100_tflops_fp8 = f"{H100_FLOPS_FP8_TENSOR.to(TFLOPs/second).magnitude:,.0f}"
+h100_bw_tbs = f"{H100_MEM_BW.to(TB/second).magnitude:.2f}"
+
+# Ridge points
+a100_ridge = f"{(A100_FLOPS_FP16_TENSOR / A100_MEM_BW).to(flop/byte).magnitude:.0f}"
+h100_ridge = f"{(H100_FLOPS_FP16_TENSOR / H100_MEM_BW).to(flop/byte).magnitude:.0f}"
+
+# Interconnects
+nvlink_h100 = f"{NVLINK_H100_BW.to(GB/second).magnitude:.0f}"
+
+# Models
+gpt2_params_b = f"{GPT2_PARAMS.to(Mparam).magnitude/1000:.1f}"
+gpt3_params_b = f"{GPT3_PARAMS.to(Mparam).magnitude/1000:.0f}"
+```
+
 ## Training Systems Fundamentals {#sec-ai-training-training-systems-fundamentals-05d2}
 
 Running GPT-2 once costs a fraction of a cent. Training GPT-2 cost approximately $50,000 in 2019. Running GPT-4 once costs a few cents. Training GPT-4 cost an estimated $100 million. This million-to-one asymmetry between inference and training is not an engineering failure awaiting a clever solution—it is the fundamental economics of learning. Inference executes a fixed function; training discovers what that function should be by iterating through billions of examples, computing gradients for every parameter, and slowly refining weights until statistical patterns crystallize into useful behavior. The cost is not in the computation per se but in the sheer volume of computation required: millions of forward passes, each followed by a backward pass that costs twice as much, repeated across datasets measured in terabytes.
@@ -296,7 +331,7 @@ $$
 - With 48 layers in GPT-2: ~9.8 trillion FLOPS per training step
 - At 50K training steps: ~490 petaFLOPS total training computation
 
-**System Implication:** A V100 GPU (125 TFLOPS peak FP16 with Tensor Cores, 15.7 TFLOPS FP32 without) would require 79 seconds just for the attention computations per step at 100% utilization (theoretical peak; practical throughput would be lower). Actual training steps take 180 to 220ms, requiring 8 to 32 GPUs to achieve this throughput depending on utilization and interconnect efficiency.
+**System Implication:** A V100 GPU (`{python} v100_tflops_fp16` TFLOPS peak FP16 with Tensor Cores, `{python} v100_tflops_fp32` TFLOPS FP32 without) would require 79 seconds just for the attention computations per step at 100% utilization (theoretical peak; practical throughput would be lower). Actual training steps take 180 to 220ms, requiring 8 to 32 GPUs to achieve this throughput depending on utilization and interconnect efficiency.
 
 :::
 
@@ -970,7 +1005,7 @@ Consider @tbl-training-arithmetic-intensity: dense matrix multiplication achieve
 
 Consider the GPT-2 Attention Layer where Q, K, V projections with dimensions (B × S × H) multiplied by (H × H) produce BSH² FLOPs. Data movement requires reading Q, K, V (3 × BSH × 2 bytes) plus writing the output (BSH × 2 bytes). The arithmetic intensity equals BSH² divided by (8BSH), which simplifies to H/8. For GPT-2 with H=768, this yields 96 FLOP/byte—below the A100's ridge point, making standard attention memory-bound.
 
-GPUs have characteristic hardware ridge points where operations transition from memory-bound to compute-bound. The A100 with 312 TFLOPS FP16 Tensor Core and 2.0 TB/s bandwidth has a ridge point of 156 FLOP/byte. The H100 SXM with 989 TFLOPS TF32 Tensor Core and 3.35 TB/s bandwidth has a ridge point of approximately 295 FLOP/byte. Operations below the ridge point are memory-bound; above are compute-bound.
+GPUs have characteristic hardware ridge points where operations transition from memory-bound to compute-bound. The A100 with `{python} a100_tflops_fp16` TFLOPS FP16 Tensor Core and `{python} a100_bw_tbs` TB/s bandwidth has a ridge point of `{python} a100_ridge` FLOP/byte. The H100 SXM with `{python} h100_tflops_fp16` TFLOPS FP16 Tensor Core and `{python} h100_bw_tbs` TB/s bandwidth has a ridge point of approximately `{python} h100_ridge` FLOP/byte. Operations below the ridge point are memory-bound; above are compute-bound.
 
 ::: {.callout-perspective title="Peak FLOPS vs. Sustained Performance"}
 
@@ -1359,7 +1394,7 @@ While data pipeline throughput determines how fast training data reaches the GPU
 3. **Network Time**: At 100 Gbps (12.5 GB/s) NVLink: $28 / 12.5 = 2.2 \text{ s}$.
 4. **Compute Time**: If forward + backward takes $1 \text{ s}$, network is the bottleneck.
 
-**The Systems Insight**: The network becomes a wall when $t_{\text{communication}} > t_{\text{computation}}$. Solutions include gradient compression (reduce data volume), overlapping computation with communication (as implemented in Horovod [@sergeev2018horovod]), and using faster interconnects (NVLink at 900 GB/s vs Ethernet at 12.5 GB/s).
+**The Systems Insight**: The network becomes a wall when $t_{\text{communication}} > t_{\text{computation}}$. Solutions include gradient compression (reduce data volume), overlapping computation with communication (as implemented in Horovod [@sergeev2018horovod]), and using faster interconnects (NVLink at `{python} nvlink_h100` GB/s vs Ethernet at 12.5 GB/s).
 :::
 
 #### System Implications {#sec-ai-training-system-implications-2539}
@@ -2308,10 +2343,10 @@ where $A$ and $B$ are $4 \times 4$ FP16 matrices, $C$ is an FP32 accumulator, an
 
 The computational advantage of Tensor Cores becomes apparent when comparing theoretical peak performance across precisions. An NVIDIA A100 GPU specifications:
 
-- **FP32 throughput**: 19.5 TFLOPs (standard CUDA cores)
-- **FP16 Tensor Core throughput**: 312 TFLOPs (16× speedup)
-- **BF16 Tensor Core throughput**: 312 TFLOPs (same as FP16)
-- **FP8 Tensor Core throughput** (H100 SXM): 1,979 TFLOPs without sparsity (approximately 100× speedup over FP32)
+- **FP32 throughput**: `{python} a100_tflops_fp32` TFLOPs (standard CUDA cores)
+- **FP16 Tensor Core throughput**: `{python} a100_tflops_fp16` TFLOPs (16× speedup)
+- **BF16 Tensor Core throughput**: `{python} a100_tflops_fp16` TFLOPs (same as FP16)
+- **FP8 Tensor Core throughput** (H100 SXM): `{python} h100_tflops_fp8` TFLOPs without sparsity (approximately 100× speedup over FP32)
 
 This 16× theoretical speedup for FP16 materializes in practice because matrix multiplications, the dominant operation in neural network training, map naturally to Tensor Core operations. A transformer's attention mechanism computing $QK^T$ for a $(B, H, N, D)$ tensor requires $2 \times B \times H \times N^2 \times D$ FLOPs. On Tensor Cores, this executes 16× faster than on CUDA cores, directly translating to wall-clock speedups.
 
@@ -2344,8 +2379,8 @@ FP8 training doubles Tensor Core throughput again (3.9 PFLOPs on H100 versus 1.9
 
 Reduced precision not only accelerates computation but also alleviates memory bandwidth bottlenecks. Modern GPUs are increasingly compute-bound rather than bandwidth-bound for large matrix operations, but data movement still limits performance for smaller operations. A100's specifications illustrate this:
 
-- HBM2 bandwidth: 1,555 GB/s
-- FP32 throughput: 19.5 TFLOPs → requires $19.5 \times 10^{12} \times 4 \text{ bytes} = 78 \text{ TB/s}$ if every FLOP needs new data
+- HBM2e bandwidth: `{python} a100_bw_gbs` GB/s
+- FP32 throughput: `{python} a100_tflops_fp32` TFLOPs → requires $`{python} a100_tflops_fp32` \times 10^{12} \times 4 \text{ bytes} = 78 \text{ TB/s}$ if every FLOP needs new data
 - Actual requirement (with data reuse): Much lower, but bandwidth-limited for operations with low arithmetic intensity
 
 FP16 halves memory traffic for the same computation, effectively doubling available bandwidth. For operations like layer normalization (arithmetic intensity approximately 1 FLOP/byte), this bandwidth doubling directly translates to speedups even without Tensor Core involvement.
@@ -2400,7 +2435,7 @@ Optimal mixed-precision training requires matching the precision format to hardw
 |                   | FP16 for CNNs             | for legacy FP32 code                         |
 +-------------------+---------------------------+----------------------------------------------+
 | **H100 (Hopper)** | FP8 via TransformerEngine | Requires FP8-aware training recipes;         |
-|                   |                           | 1,979 TFLOPs peak throughput                 |
+|                   |                           | `{python} h100_tflops_fp8` TFLOPs peak throughput                 |
 +-------------------+---------------------------+----------------------------------------------+
 
 : **Precision Strategy by GPU Architecture.** Each generation introduces wider precision support, reducing the engineering burden of loss scaling while increasing throughput. {#tbl-hw-precision-strategy}
@@ -3328,7 +3363,7 @@ inner ysep=18, fill=BackColor,yshift=6, fit=(B4)(G4)](BB4){};
 ```
 :::
 
-Within a single node, GPUs communicate via high-bandwidth interconnects like NVLink[^fn-nvlink-training] (up to 900 GB/s on modern systems), making gradient synchronization and activation transfers fast. This intra-node parallelism forms the building block for larger distributed systems.
+Within a single node, GPUs communicate via high-bandwidth interconnects like NVLink[^fn-nvlink-training] (up to `{python} nvlink_h100` GB/s on modern systems), making gradient synchronization and activation transfers fast. This intra-node parallelism forms the building block for larger distributed systems.
 
 ::: {.callout-notebook title="Data vs. Model Parallelism"}
 
@@ -3356,11 +3391,11 @@ Within a single node, GPUs communicate via high-bandwidth interconnects like NVL
 *   Use **Model Parallel** when the model is too big to fit in a single GPU's memory.
 :::
 
-[^fn-nvlink-training]: **NVLink**: NVIDIA's high-bandwidth GPU interconnect, introduced in 2016 with Pascal architecture. NVLink provides 50-900 GB/s bidirectional bandwidth (depending on generation), compared to 16-64 GB/s for PCIe. For training, this 10-50x bandwidth advantage enables efficient gradient synchronization and model parallelism within a node. A DGX H100 system uses NVLink to achieve 900 GB/s between any pair of 8 GPUs, making intra-node communication nearly as fast as local memory access.
+[^fn-nvlink-training]: **NVLink**: NVIDIA's high-bandwidth GPU interconnect, introduced in 2016 with Pascal architecture. NVLink provides 50-`{python} nvlink_h100` GB/s bidirectional bandwidth (depending on generation), compared to 16-64 GB/s for PCIe. For training, this 10-50x bandwidth advantage enables efficient gradient synchronization and model parallelism within a node. A DGX H100 system uses NVLink to achieve `{python} nvlink_h100` GB/s between any pair of 8 GPUs, making intra-node communication nearly as fast as local memory access.
 
 ### Scaling Beyond a Single Node {#sec-ai-training-scaling-beyond-single-node-a671}
 
-When single-node multi-GPU training remains insufficient, distributed training extends across multiple machines. This introduces network communication bottlenecks (typically 10-100 Gbps between nodes vs. 900 GB/s within a node) and fault tolerance requirements absent from single-node setups. Understanding *the physics of synchronization* explains why this bandwidth gap is so consequential.
+When single-node multi-GPU training remains insufficient, distributed training extends across multiple machines. This introduces network communication bottlenecks (typically 10-100 Gbps between nodes vs. `{python} nvlink_h100` GB/s within a node) and fault tolerance requirements absent from single-node setups. Understanding *the physics of synchronization* explains why this bandwidth gap is so consequential.
 
 ::: {.callout-perspective title="The Physics of Synchronization"}
 

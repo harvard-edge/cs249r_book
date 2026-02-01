@@ -31,6 +31,25 @@ Distributed training appears simple: split the work across machines and combine 
 
 :::
 
+```{python}
+#| label: dist-train-setup
+#| echo: false
+
+from calc.constants import *
+from calc.formulas import fmt, sci
+
+# GPU specs
+a100_mem = f"{A100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
+h100_mem = f"{H100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
+
+# Interconnects
+nvlink_a100 = f"{NVLINK_A100_BW.to(GB/second).magnitude:.0f}"
+nvlink_h100 = f"{NVLINK_H100_BW.to(GB/second).magnitude:.0f}"
+
+# Models
+gpt3_params_b = f"{GPT3_PARAMS.to(Mparam).magnitude/1000:.0f}"
+```
+
 ## Multi-Machine Scaling Fundamentals {#sec-distributed-training-systems-systems-multimachine-scaling-fundamentals-ff96}
 
 In the **Systems Sandwich** framework (@sec-vol2-introduction), Distributed Training represents the **Operational Layer**—the logic that partitions the mathematical workload across the physical fleet. While Volume 1 optimized the execution on a single device, Volume 2 solves the constraint satisfaction problem of mapping a model larger than any single memory bank onto a cluster with finite bandwidth. This *connection to the Systems Sandwich* clarifies how the chapter's algorithms relate to the physical and service layers.
@@ -128,7 +147,7 @@ Choosing the right parallelism strategy is not a matter of preference; it is a c
 These bandwidth requirements impose a hard constraint on hardware placement, a principle we call the *Jeff Dean Test*.
 
 ::: {.callout-perspective title="The Jeff Dean Test"}
-If you attempt **Tensor Parallelism** across server racks connected by standard Ethernet, your training will stall. The communication volume ($\propto$ Batch $\times$ Layers) requires the 600-900 GB/s bandwidth of NVLink. For cross-rack scaling, you *must* switch to **Pipeline** or **Data** parallelism to respect the physics of the network.
+If you attempt **Tensor Parallelism** across server racks connected by standard Ethernet, your training will stall. The communication volume ($\propto$ Batch $\times$ Layers) requires the `{python} nvlink_a100`-`{python} nvlink_h100` GB/s bandwidth of NVLink. For cross-rack scaling, you *must* switch to **Pipeline** or **Data** parallelism to respect the physics of the network.
 :::
 
 ## Distributed Training Fundamentals {#sec-distributed-training-systems-systems-distributed-training-fundamentals-97da}
@@ -159,7 +178,7 @@ This coordination relies on consensus protocols and synchronization primitives t
 
 With these coordination mechanisms in place, practitioners follow a systematic progression from single-device to distributed training, with each stage building upon the previous level's challenges. Single GPU training requires only local memory management and straightforward forward/backward passes, establishing the baseline computational patterns. Scaling to multiple GPUs within a single node introduces high-bandwidth communication requirements, typically handled through NVLink[^nvlink] or PCIe connections with NCCL[^nccl] optimization while preserving the single-machine simplicity of fault tolerance and scheduling.
 
-[^nvlink]: NVLink provides 600 GB/s bidirectional bandwidth, enabling efficient gradient synchronization within nodes. @sec-compute provides detailed coverage of GPU interconnect architectures, including NVLink topology design and bandwidth optimization strategies.
+[^nvlink]: NVLink provides `{python} nvlink_a100` GB/s bidirectional bandwidth, enabling efficient gradient synchronization within nodes. @sec-compute provides detailed coverage of GPU interconnect architectures, including NVLink topology design and bandwidth optimization strategies.
 
 [^nccl]: **NCCL (NVIDIA Collective Communications Library)**: Optimized library implementing efficient collective operations (AllReduce, Broadcast, etc.) for multi-GPU and multi-node communication. Automatically selects optimal communication patterns based on hardware topology, critical for distributed training performance.
 
@@ -420,7 +439,7 @@ AllReduce complexity depends on two components: latency ($\alpha$) and bandwidth
 
 Interconnect selection proves critical for large-scale deployments, as these complexity characteristics determine when communication dominates computation.
 
-The bandwidth requirements for efficient distributed training are substantial, particularly for transformer models. Efficient systems require 100-400 GB/s aggregate bandwidth per node for transformer architectures. BERT-Base (110M parameters) requires approximately 440 MB of gradient synchronization per iteration in FP32, while BERT-Large (340M parameters) requires approximately 1.4 GB. Across 64 GPUs, these synchronization demands require 100-200 GB/s sustained bandwidth for sub-50ms synchronization latency. Language models with 175B parameters require 700 GB/s aggregate bandwidth to maintain 80% parallel efficiency, necessitating InfiniBand HDR or equivalent interconnects.
+The bandwidth requirements for efficient distributed training are substantial, particularly for transformer models. Efficient systems require 100-400 GB/s aggregate bandwidth per node for transformer architectures. BERT-Base (110M parameters) requires approximately 440 MB of gradient synchronization per iteration in FP32, while BERT-Large (340M parameters) requires approximately 1.4 GB. Across 64 GPUs, these synchronization demands require 100-200 GB/s sustained bandwidth for sub-50ms synchronization latency. Language models with `{python} gpt3_params_b`B parameters require 700 GB/s aggregate bandwidth to maintain 80% parallel efficiency, necessitating InfiniBand HDR or equivalent interconnects.
 
 Synchronization frequency presents a trade-off between communication efficiency and convergence behavior. Gradient accumulation reduces synchronization frequency but increases memory requirements and may impact convergence. Synchronizing every 4 steps reduces communication overhead by 60% while increasing memory usage by 3x for gradient storage. Asynchronous methods eliminate synchronization costs entirely but introduce staleness that degrades convergence by 15-30% for large learning rates.
 
@@ -470,7 +489,7 @@ At the scale of 10,000 GPUs, the "Energy Tax" of moving gradients becomes a mult
 
 Scaling efficiency follows predictable patterns across different GPU counts. In the linear scaling regime of 2-32 GPUs, systems typically achieve 85-95% parallel efficiency because communication overhead remains minimal. The communication bound regime emerges at 64-256 GPUs, where efficiency drops to 60-80% even with optimal interconnects. Beyond 512 GPUs, coordination overhead becomes dominant and limits efficiency to 40-60% due to collective operation latency.
 
-Hardware selection critically impacts these scaling characteristics. NVIDIA DGX systems with NVLink achieve 600 GB/s bisection bandwidth, enabling 90% parallel efficiency up to 8 GPUs per node. Multi-node scaling requires InfiniBand networks, where EDR at 100 Gbps supports efficient training up to 64 nodes, while HDR at 200 Gbps enables scaling to 256+ nodes with greater than 70% efficiency.
+Hardware selection critically impacts these scaling characteristics. NVIDIA DGX systems with NVLink achieve `{python} nvlink_a100` GB/s bisection bandwidth, enabling 90% parallel efficiency up to 8 GPUs per node. Multi-node scaling requires InfiniBand networks, where EDR at 100 Gbps supports efficient training up to 64 nodes, while HDR at 200 Gbps enables scaling to 256+ nodes with greater than 70% efficiency.
 
 These efficiency metrics directly influence the choice of parallelism strategy. Data parallelism works well in the linear scaling regime but becomes communication-bound at scale. Model parallelism addresses memory constraints but introduces sequential dependencies that limit efficiency. Pipeline parallelism reduces device idle time but introduces complexity in managing microbatches. Understanding these trade-offs enables architects to select appropriate strategies for their specific workloads.
 
@@ -947,7 +966,7 @@ The Systems Sandwich framework provides a systematic debugging methodology by ex
 **Physical Layer (Infrastructure)**:
 
 - **Topology**: 128 nodes, 8 GPUs per node
-- **Intra-node**: NVLink at 600 GB/s bidirectional between GPUs
+- **Intra-node**: NVLink at `{python} nvlink_a100` GB/s bidirectional between GPUs
 - **Inter-node**: InfiniBand HDR at 200 Gb/s (25 GB/s) per port
 - **Observation**: Your 3GB gradient tensor should take $3 \text{ GB} / 25 \text{ GB/s} = 120\text{ms}$ for a naive transfer, but ring AllReduce should achieve $2(N-1)/N \times 3 \text{ GB} / 25 \text{ GB/s} \approx 240\text{ms}$ across 128 nodes
 
@@ -1104,7 +1123,7 @@ Data parallelism is the default strategy for a reason: it scales **throughput** 
 
 **The Limitations**:
 
-*   **The Memory Wall**: Every GPU must hold a full copy of the model parameters, gradients, and optimizer states. For a 175B parameter model, this requires $>1$TB of memory per GPU, which is physically impossible on today's hardware without ZeRO sharding.
+*   **The Memory Wall**: Every GPU must hold a full copy of the model parameters, gradients, and optimizer states. For a `{python} gpt3_params_b`B parameter model, this requires $>1$TB of memory per GPU, which is physically impossible on today's hardware without ZeRO sharding.
 *   **The Bandwidth Wall**: As $N$ grows, the AllReduce cost $2(N-1)/N \times M/B$ eventually dominates. For large language models, gradient synchronization can consume 50%+ of the step time, collapsing efficiency.
 *   **The Batch Size Trap**: To scale to thousands of GPUs, you must increase the global batch size ($B_{global} = N \times B_{local}$). Eventually, you hit the **Critical Batch Size**, where adding more data per step yields diminishing returns in convergence.
 
@@ -1126,7 +1145,7 @@ This example demonstrates how data parallelism scales in practice, including eff
 Configuration:
 
 - Per-GPU batch: 16, global batch: 128
-- Gradient synchronization: 3GB @ 600 GB/s (NVLink) = 5ms
+- Gradient synchronization: 3GB @ `{python} nvlink_a100` GB/s (NVLink) = 5ms
 
 Performance results:
 
@@ -1198,7 +1217,7 @@ Per-Parameter Memory Cost:
 
 Total Memory for 7B Model:
 $$ M_{\text{total}} = 7 \times 10^9 \times 16 \text{ bytes} \approx \mathbf{112 \text{ GB}} $$
-*Result*: **OOM** on A100-80GB.
+*Result*: **OOM** on A100-`{python} a100_mem`GB.
 
 **Optimization: ZeRO-3 (Fully Sharded)**
 With $N=64$ GPUs, state is partitioned:
@@ -1290,7 +1309,7 @@ For a model with $L$ layers, FSDP performs $2L$ collective operations per traini
 Total FSDP communication volume: approximately $3M$ bytes (vs. $2M$ for DDP AllReduce), but spread across more operations with overlap opportunities.
 :::
 
-The choice between FSDP and DDP depends on model size and memory constraints. Use DDP when the model fits in GPU memory with room for activations, as it has lower overhead. Use FSDP ZeRO-2 when the model barely fits or requires activation checkpointing. Use FSDP ZeRO-3 when model parameters exceed single-GPU memory. For training 70B+ models on 80GB GPUs, combine FSDP with tensor parallelism.
+The choice between FSDP and DDP depends on model size and memory constraints. Use DDP when the model fits in GPU memory with room for activations, as it has lower overhead. Use FSDP ZeRO-2 when the model barely fits or requires activation checkpointing. Use FSDP ZeRO-3 when model parameters exceed single-GPU memory. For training 70B+ models on `{python} a100_mem`GB GPUs, combine FSDP with tensor parallelism.
 
 FSDP configuration requires careful tuning of sharding strategy (by layer, by transformer block, or flat) and mixed precision settings. The `auto_wrap_policy` determines sharding granularity, with finer sharding reducing memory but increasing communication frequency.
 
@@ -1298,27 +1317,27 @@ FSDP configuration requires careful tuning of sharding strategy (by layer, by tr
 
 The memory optimization techniques examined in the previous section extend data parallelism's reach by sharding optimizer states, gradients, and even parameters across workers. ZeRO and FSDP achieve substantial memory savings, reducing per-GPU requirements from hundreds of gigabytes to manageable fractions. Yet these techniques share a fundamental assumption: during computation, each device still processes complete layers, just with sharded state that is gathered on demand. When individual layers themselves exceed device memory, or when activation memory dominates the memory budget, a different approach becomes necessary.
 
-Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and parameters across workers, some architectures remain intractable. A 175B parameter model using FSDP across 64 GPUs still requires 700 GB / 64 = 11 GB of parameters per GPU before accounting for activations. For long-context transformers where activation memory dominates, a 2048-token sequence through 175B parameters generates 200+ GB of intermediate activations, and no amount of optimizer sharding addresses this constraint. Model parallelism addresses these limitations by splitting the model architecture itself across devices, rather than replicating it with sharded state.
+Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and parameters across workers, some architectures remain intractable. A `{python} gpt3_params_b`B parameter model using FSDP across 64 GPUs still requires 700 GB / 64 = 11 GB of parameters per GPU before accounting for activations. For long-context transformers where activation memory dominates, a 2048-token sequence through `{python} gpt3_params_b`B parameters generates 200+ GB of intermediate activations, and no amount of optimizer sharding addresses this constraint. Model parallelism addresses these limitations by splitting the model architecture itself across devices, rather than replicating it with sharded state.
 
 ::: {.callout-notebook title="The Memory Wall of Scale"}
-**Problem**: You want to train a **175 Billion parameter** model (like GPT-3) on NVIDIA A100s (80 GB). Can you use Data Parallelism with ZeRO-3?
+**Problem**: You want to train a **`{python} gpt3_params_b` Billion parameter** model (like GPT-3) on NVIDIA A100s (`{python} a100_mem` GB). Can you use Data Parallelism with ZeRO-3?
 
 **The Math**:
 
-1.  **Parameter Storage**: 175B params $\times$ 2 bytes (FP16) = **350 GB**.
-2.  **Optimizer State**: 175B params $\times$ 12 bytes (Adam FP32) = **2,100 GB**.
+1.  **Parameter Storage**: `{python} gpt3_params_b`B params $\times$ 2 bytes (FP16) = **350 GB**.
+2.  **Optimizer State**: `{python} gpt3_params_b`B params $\times$ 12 bytes (Adam FP32) = **2,100 GB**.
 3.  **Total Static Memory**: 2,450 GB.
 4.  **ZeRO-3 Sharding**: With 64 GPUs, per-GPU static memory = $2,450 / 64 \approx \mathbf{38 \text{ GB}}$.
 5.  **Activation Memory**: For sequence length 2048 and batch size 1, a 96-layer transformer generates $\approx \mathbf{50 \text{ GB}}$ of activations per GPU.
 
-**The Systems Conclusion**: $38 \text{ GB} (Static) + 50 \text{ GB} (Dynamic) = \mathbf{88 \text{ GB}}$. This exceeds the 80 GB capacity of the A100. Even with full ZeRO-3 sharding, **pure Data Parallelism fails**. You *must* use **Tensor Parallelism** to split the layers themselves.
+**The Systems Conclusion**: $38 \text{ GB} (Static) + 50 \text{ GB} (Dynamic) = \mathbf{88 \text{ GB}}$. This exceeds the `{python} a100_mem` GB capacity of the A100. Even with full ZeRO-3 sharding, **pure Data Parallelism fails**. You *must* use **Tensor Parallelism** to split the layers themselves.
 :::
 
 Model parallelism addresses this limitation...
 
 Several implementations of model parallelism exist. In layer-based splitting, devices process distinct groups of layers sequentially. The first device might compute layers 1-4 while the second handles layers 5-8. Channel-based splitting divides the channels within each layer across devices, where the first device processes 512 channels while the second manages the remaining ones. For transformer architectures, attention head splitting distributes different attention heads to separate devices.
 
-This distribution method enables training of large-scale models. GPT-3, with 175 billion parameters, relies on model parallelism for training. Vision transformers processing high-resolution 16k × 16k pixel images use model parallelism to manage memory constraints. Mixture-of-Experts architectures use this approach to distribute their conditional computation paths across hardware.
+This distribution method enables training of large-scale models. GPT-3, with `{python} gpt3_params_b` billion parameters, relies on model parallelism for training. Vision transformers processing high-resolution 16k × 16k pixel images use model parallelism to manage memory constraints. Mixture-of-Experts architectures use this approach to distribute their conditional computation paths across hardware.
 
 Device coordination follows a specific pattern during training. In the forward pass, data flows sequentially through model segments on different devices. The backward pass propagates gradients in reverse order through these segments. During parameter updates, each device modifies only its assigned portion of the model. This coordination ensures mathematical equivalence to training on a single device while enabling the handling of models that exceed individual device memory capacities.
 
@@ -1746,7 +1765,7 @@ Model parallelism breaks the memory wall but introduces sequential dependencies 
 
 **The Advantages**:
 
-*   **Memory Scaling**: Enables training of models that exceed single-device memory. With 8-way tensor parallelism, a 175B model fits comfortably on A100s.
+*   **Memory Scaling**: Enables training of models that exceed single-device memory. With 8-way tensor parallelism, a `{python} gpt3_params_b`B model fits comfortably on A100s.
 *   **Efficient Large Batch Training**: By splitting the model, each GPU processes a smaller slice, effectively allowing larger global batch sizes without OOM.
 *   **Architectural Flexibility**: Maps naturally to the physical structure of transformers (Attention heads split via Tensor Parallelism, Layers split via Pipeline Parallelism).
 
@@ -1758,9 +1777,9 @@ Model parallelism breaks the memory wall but introduces sequential dependencies 
 
 ## Hybrid Parallelism {#sec-distributed-training-systems-systems-hybrid-parallelism-12a0}
 
-The preceding sections revealed a fundamental tension: data parallelism scales throughput but requires each GPU to hold the complete model, while model parallelism enables larger models but reduces throughput through sequential dependencies. For GPT-3 scale training, with 175B parameters across 300B tokens, neither approach alone suffices [@narayanan_pipeline_parallelism_2021]. Data parallelism across 1024 GPUs would require each GPU to hold 700 GB of parameters. Pure model parallelism across 64 stages would create $(64-1)/32 \approx$ 98% pipeline bubble overhead with reasonable microbatch counts.
+The preceding sections revealed a fundamental tension: data parallelism scales throughput but requires each GPU to hold the complete model, while model parallelism enables larger models but reduces throughput through sequential dependencies. For GPT-3 scale training, with `{python} gpt3_params_b`B parameters across 300B tokens, neither approach alone suffices [@narayanan_pipeline_parallelism_2021]. Data parallelism across 1024 GPUs would require each GPU to hold 700 GB of parameters. Pure model parallelism across 64 stages would create $(64-1)/32 \approx$ 98% pipeline bubble overhead with reasonable microbatch counts.
 
-Hybrid parallelism resolves this tension by applying both strategies orthogonally: model parallelism splits the architecture to fit available memory, while data parallelism scales throughput across multiple model replicas. Training a 175 billion parameter language model on a dataset of 300 billion tokens demonstrates this approach in practice. The neural network layers distribute across multiple GPUs through model parallelism, while data parallelism enables different GPU groups to process separate batches. This dual strategy addresses both memory constraints from model size and computational demands from dataset scale simultaneously, and it is precisely this combination that defines *Archetype A* training at frontier scale.
+Hybrid parallelism resolves this tension by applying both strategies orthogonally: model parallelism splits the architecture to fit available memory, while data parallelism scales throughput across multiple model replicas. Training a `{python} gpt3_params_b` billion parameter language model on a dataset of 300 billion tokens demonstrates this approach in practice. The neural network layers distribute across multiple GPUs through model parallelism, while data parallelism enables different GPU groups to process separate batches. This dual strategy addresses both memory constraints from model size and computational demands from dataset scale simultaneously, and it is precisely this combination that defines *Archetype A* training at frontier scale.
 
 ::: {.callout-note title="Archetype A: Physics of 3D Parallelism"}
 **Archetype A (The Trillion-Parameter LLM)** is the primary driver for hybrid parallelism. Because the model parameters ($P$) exceed the memory of any single accelerator ($M_{device}$), and the training dataset ($D$) requires massive throughput, we must split the problem along three orthogonal axes:
@@ -2018,7 +2037,7 @@ The framework abstractions enable practitioners to focus on model architecture a
 
 While this chapter focuses on algorithmic strategies, the physical reality of hardware interconnects dictates which strategies are feasible. The bandwidth hierarchy of a cluster creates natural boundaries for different parallelism types.
 
-**Intra-Node Bandwidth**: Modern GPU nodes provide extremely high bandwidth (600-900 GB/s) between devices via NVLink. This supports **Tensor Parallelism**, which requires frequent, high-volume communication (2 AllReduce operations per layer).
+**Intra-Node Bandwidth**: Modern GPU nodes provide extremely high bandwidth (`{python} nvlink_a100`-`{python} nvlink_h100` GB/s) between devices via NVLink. This supports **Tensor Parallelism**, which requires frequent, high-volume communication (2 AllReduce operations per layer).
 
 **Inter-Node Bandwidth**: Connectivity between nodes (InfiniBand/Ethernet) typically offers 25-100 GB/s, an order of magnitude slower than intra-node links. This constrains cross-node strategies to **Data Parallelism** (synchronizing gradients once per step) or **Pipeline Parallelism** (sending small activation tensors at stage boundaries).
 
@@ -2048,11 +2067,11 @@ Engineers assume more GPUs always accelerate training. In production, statistica
 
 **Pitfall:** ***Choosing parallelism strategy based solely on memory constraints.***
 
-Engineers see that a 70B model exceeds 80GB GPU memory and immediately choose tensor parallelism or pipeline parallelism to split weights. In production, the optimal strategy depends on the interaction between memory pressure, computation patterns, and communication topology. As @sec-distributed-training-systems-parallelism-strategy-comparison explains, tensor parallelism splits each layer across devices with AllReduce synchronization per layer, achieving even memory distribution but placing communication on the critical path. Pipeline parallelism assigns complete layers to stages with point-to-point transfers between stages, reducing per-step communication but introducing pipeline bubble overhead that wastes 10-30% of cycles. For a 175B model on 64 A100 GPUs where tensor parallelism degree-8 enables training, pipeline parallelism with 8 stages achieves 23% higher throughput due to reduced all-to-all communication despite similar memory footprints. The decision requires profiling communication patterns and bubble overhead, not just checking if weights fit in memory.
+Engineers see that a 70B model exceeds `{python} a100_mem`GB GPU memory and immediately choose tensor parallelism or pipeline parallelism to split weights. In production, the optimal strategy depends on the interaction between memory pressure, computation patterns, and communication topology. As @sec-distributed-training-systems-parallelism-strategy-comparison explains, tensor parallelism splits each layer across devices with AllReduce synchronization per layer, achieving even memory distribution but placing communication on the critical path. Pipeline parallelism assigns complete layers to stages with point-to-point transfers between stages, reducing per-step communication but introducing pipeline bubble overhead that wastes 10-30% of cycles. For a `{python} gpt3_params_b`B model on 64 A100 GPUs where tensor parallelism degree-8 enables training, pipeline parallelism with 8 stages achieves 23% higher throughput due to reduced all-to-all communication despite similar memory footprints. The decision requires profiling communication patterns and bubble overhead, not just checking if weights fit in memory.
 
 **Fallacy:** ***FSDP and ZeRO always improve training efficiency.***
 
-Engineers adopt FSDP (Fully Sharded Data Parallel) universally after reading that it "reduces memory and enables larger models". In production, sharding introduces 10-25% communication overhead that only pays off when memory pressure justifies it. FSDP reduces memory footprint by sharding optimizer state, gradients, and optionally parameters across GPUs, but requires AllGather operations before each forward pass and ReduceScatter after backward pass. For a 7B model on A100-80GB GPUs with batch size 4, standard DDP achieves 145 samples/second while FSDP achieves only 118 samples/second (19% slower) because the model fits comfortably without sharding and the added communication overhead provides no benefit. FSDP provides value when model plus optimizer state exceeds single-GPU memory, when enabling larger per-GPU batch sizes justifies the overhead, or when ZeRO-Offload to CPU memory extends capacity. A 65B model that cannot fit on 80GB GPUs becomes trainable with FSDP ZeRO-3, accepting 15% throughput loss to enable training at all. Applying FSDP universally without measuring memory pressure wastes performance.
+Engineers adopt FSDP (Fully Sharded Data Parallel) universally after reading that it "reduces memory and enables larger models". In production, sharding introduces 10-25% communication overhead that only pays off when memory pressure justifies it. FSDP reduces memory footprint by sharding optimizer state, gradients, and optionally parameters across GPUs, but requires AllGather operations before each forward pass and ReduceScatter after backward pass. For a 7B model on A100-`{python} a100_mem`GB GPUs with batch size 4, standard DDP achieves 145 samples/second while FSDP achieves only 118 samples/second (19% slower) because the model fits comfortably without sharding and the added communication overhead provides no benefit. FSDP provides value when model plus optimizer state exceeds single-GPU memory, when enabling larger per-GPU batch sizes justifies the overhead, or when ZeRO-Offload to CPU memory extends capacity. A 65B model that cannot fit on `{python} a100_mem`GB GPUs becomes trainable with FSDP ZeRO-3, accepting 15% throughput loss to enable training at all. Applying FSDP universally without measuring memory pressure wastes performance.
 
 **Fallacy:** ***Parallelism overhead is roughly constant regardless of model size.***
 
@@ -2085,7 +2104,7 @@ Ultimately, the choice of parallelism is a **loop transformation** applied by th
 
 * **Communication-Computation Ratio is the ceiling**: Distributed training is governed by an extended Amdahl's Law. Speedup is limited by the sequential nature of synchronization (AllReduce) relative to the parallel work of computation.
 * **Data parallelism is the default, but hits the batch trap**: Scaling replicas improves throughput linearly until you hit the "Critical Batch Size," beyond which larger batches yield diminishing returns in convergence.
-* **Tensor parallelism is node-local**: Because it partitions matrix operations, it requires the 600-900 GB/s bandwidth of NVLink. Scaling it across racks on standard Ethernet will stall the fleet.
+* **Tensor parallelism is node-local**: Because it partitions matrix operations, it requires the `{python} nvlink_a100`-`{python} nvlink_h100` GB/s bandwidth of NVLink. Scaling it across racks on standard Ethernet will stall the fleet.
 * **Pipeline parallelism minimizes bandwidth, but adds "bubbles"**: Splitting depth across nodes allows for massive models, but efficiency depends on microbatching ($M \gg P$) to minimize idle time during fill and drain phases.
 * **Memory-efficient DP (ZeRO/FSDP) scales linear memory**: By sharding optimizer states, gradients, and parameters, ZeRO-3 allows 100B+ models to fit on commodity hardware that would otherwise require complex model parallelism.
 * **The Linear Scaling Rule requires Warmup**: Multiplying batch size by $k$ allows for multiplying learning rate by $k$, but only with a linear warmup period to maintain stability during the high-gradient-noise initial phase.

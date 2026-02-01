@@ -30,6 +30,28 @@ Accelerators can compute faster than storage can feed them. A modern GPU process
 
 :::
 
+```{python}
+#| label: storage-setup
+#| echo: false
+
+from calc.constants import *
+from calc.formulas import fmt, sci
+
+# GPU specs
+a100_mem = f"{A100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
+h100_mem = f"{H100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
+h100_bw_tbs = f"{H100_MEM_BW.to(TB/second).magnitude:.2f}"
+h100_fp8_tflops = f"{H100_FLOPS_FP8_TENSOR.to(TFLOPs/second).magnitude:,.0f}"
+h100_fp16_tflops = f"{H100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:,.0f}"
+
+# Model specs
+gpt3_params_b = f"{GPT3_PARAMS.to(Mparam).magnitude/1000:.0f}"
+resnet_params_m = f"{RESNET50_PARAMS.to(Mparam).magnitude:.1f}"
+
+# Storage
+nvme_bw = f"{NVME_SEQUENTIAL_BW.to(GB/second).magnitude:.1f}"
+```
+
 ## Storage Fundamentals for ML {#sec-storage-storage-fundamentals-ml-48a9}
 
 In the **Systems Sandwich** (@sec-vol2-introduction), Storage is the **Fuel Line** of the Machine Learning Fleet. While compute nodes (@sec-compute) provide the engine and networks (@sec-communication-collective-operations) provide the transmission, storage provides the fuel (data). If the **Iron Law** states that $L = (\text{Data} + \text{Compute}) / \text{Bandwidth}$, this chapter is about ensuring that the storage bandwidth term ($\text{Bandwidth}_{disk}$) never becomes the bottleneck.
@@ -67,7 +89,7 @@ ML systems extend this hierarchy with two critical additions: GPU High Bandwidth
 
 : **Extended Memory Hierarchy for ML Systems**: GPU HBM delivers 3.35 TB/s at ~10 ns latency but costs $15/GB, while object storage offers unlimited capacity at $0.02/GB with 50 ms latency. This 300,000x bandwidth gap between HBM and storage drives the need for sophisticated prefetching and caching strategies. {#tbl-storage-hierarchy}
 
-Looking at the bandwidth column, GPU HBM delivers 3.35 TB/s, roughly 17x faster than host DRAM and 130x faster than the fastest local NVMe drives. This disparity creates the central challenge of ML storage systems: keeping accelerators fed with data at rates that prevent them from idling.
+Looking at the bandwidth column, GPU HBM delivers `{python} h100_bw_tbs` TB/s, roughly 17x faster than host DRAM and 130x faster than the fastest local NVMe drives. This disparity creates the central challenge of ML storage systems: keeping accelerators fed with data at rates that prevent them from idling.
 
 ### High Bandwidth Flash (HBF): Blurring Storage and Memory {#sec-storage-high-bandwidth-flash-hbf-blurring-storage-memory-9bea}
 
@@ -123,13 +145,13 @@ This architecture treats Flash not as persistent storage, but as a "cold memory"
 ```
 :::
 
-These bandwidth specifications become concrete when we trace data flow through a single training iteration. Consider what happens when an H100 GPU processes a training batch. At 1,979 TFLOPS[^fn-tflops] of FP16 compute capability, the GPU can perform approximately 2 quadrillion floating-point operations per second. A typical transformer forward pass requires roughly 6 FLOPs per parameter per token. For a 7 billion parameter model processing 2048-token sequences with a batch size of 32, each forward pass involves:
+These bandwidth specifications become concrete when we trace data flow through a single training iteration. Consider what happens when an H100 GPU processes a training batch. At `{python} h100_fp8_tflops` TFLOPS[^fn-tflops] of FP16 compute capability, the GPU can perform approximately 2 quadrillion floating-point operations per second. A typical transformer forward pass requires roughly 6 FLOPs per parameter per token. For a 7 billion parameter model processing 2048-token sequences with a batch size of 32, each forward pass involves:
 
-[^fn-tflops]: **TFLOPS (Tera Floating-Point Operations Per Second)**: A measure of computational throughput representing one trillion ($10^{12}$) floating-point operations per second. The H100's 1,979 TFLOPS uses FP16 (16-bit floating-point) precision with sparsity optimization; dense FP16 achieves 990 TFLOPS, and FP32 (32-bit) achieves 67 TFLOPS. This 15x difference between FP16 and FP32 explains why ML training increasingly uses mixed-precision techniques, performing bulk computation in FP16 while maintaining FP32 precision for numerically sensitive operations like loss accumulation.
+[^fn-tflops]: **TFLOPS (Tera Floating-Point Operations Per Second)**: A measure of computational throughput representing one trillion ($10^{12}$) floating-point operations per second. The H100's `{python} h100_fp8_tflops` TFLOPS uses FP16 (16-bit floating-point) precision with sparsity optimization; dense FP16 achieves `{python} h100_fp16_tflops` TFLOPS, and FP32 (32-bit) achieves 67 TFLOPS. This 15x difference between FP16 and FP32 explains why ML training increasingly uses mixed-precision techniques, performing bulk computation in FP16 while maintaining FP32 precision for numerically sensitive operations like loss accumulation.
 
 $$\text{FLOPs per batch} = 6 \times 7 \times 10^9 \times 2048 \times 32 \approx 2.75 \times 10^{15}$$
 
-At 1,979 TFLOPS, this computation completes in approximately 1.4 seconds, during which the next batch must be ready in GPU memory. If data arrives even slightly slower than the GPU consumes it, expensive accelerator time is wasted waiting for storage.
+At `{python} h100_fp8_tflops` TFLOPS, this computation completes in approximately 1.4 seconds, during which the next batch must be ready in GPU memory. If data arrives even slightly slower than the GPU consumes it, expensive accelerator time is wasted waiting for storage.
 
 ### How ML Workloads Invert Traditional Assumptions {#sec-storage-ml-workloads-invert-traditional-assumptions-fef8}
 
@@ -141,7 +163,7 @@ Traditional storage system design optimizes for workloads with specific characte
 
 **Working sets exceed any cache level.** Traditional applications exhibit locality: a web server repeatedly accesses the same popular pages, a database repeatedly queries hot rows. Caching exploits this locality, keeping frequently accessed data in fast memory. ML training datasets are accessed uniformly: each sample is read once per epoch, with no sample more likely to be accessed than any other during training. A 10 TB image dataset cannot be cached in DRAM; each sample is effectively cold when accessed. This lack of locality renders traditional caching strategies ineffective for training data.
 
-**Write patterns are bursty rather than continuous.** Transactional systems generate continuous streams of small writes as users update records. ML systems generate occasional massive writes when saving checkpoints. A 175 billion parameter model checkpoint [@brown2020gpt3] occupies approximately 700 GB; saving it every 10 minutes generates 70 GB/minute average throughput but concentrated into bursts that saturate storage bandwidth for 1-2 minutes followed by idle periods. This bursty pattern requires storage systems that can absorb high-bandwidth writes without blocking ongoing reads.
+**Write patterns are bursty rather than continuous.** Transactional systems generate continuous streams of small writes as users update records. ML systems generate occasional massive writes when saving checkpoints. A `{python} gpt3_params_b` billion parameter model checkpoint [@brown2020gpt3] occupies approximately 700 GB; saving it every 10 minutes generates 70 GB/minute average throughput but concentrated into bursts that saturate storage bandwidth for 1-2 minutes followed by idle periods. This bursty pattern requires storage systems that can absorb high-bandwidth writes without blocking ongoing reads.
 
 **Read/write ratios vary dramatically by phase.** Training reads vastly exceed writes: a typical training run reads the dataset dozens of times (one per epoch) while writing only periodic checkpoints. The read-to-write ratio can exceed 100:1. Inference, conversely, is almost entirely read-only, loading model weights once and then serving requests without writes. Feature stores for recommendation systems present yet another pattern: continuous reads for serving interleaved with batch writes from offline feature computation. No single storage configuration optimizes all three patterns. @tbl-storage-assumptions captures these fundamental mismatches, revealing why enterprise storage systems designed for transactional workloads underperform for ML.
 
@@ -947,7 +969,7 @@ Consider training ResNet-50 [@he2016resnet] on ImageNet [@deng2009imagenet] with
 
 **Training configuration:**
 
-- Model: ResNet-50 (25.6M parameters)
+- Model: ResNet-50 (`{python} resnet_params_m`M parameters)
 - Dataset: ImageNet (1.28M training images, ~150 KB average JPEG size)
 - Batch size: 256 images
 - Target throughput: 1000 images/second (achievable A100 throughput)
@@ -1085,9 +1107,10 @@ Diagnosing I/O bottlenecks requires measurement at multiple levels. The followin
 
 **GPU utilization** below target (< 90%) indicates a bottleneck somewhere in the pipeline. However, low GPU utilization does not pinpoint whether the bottleneck is I/O, preprocessing, or data transfer.
 
-**Data loader wait time** measures how long the training loop blocks waiting for the next batch. PyTorch's DataLoader exposes this through profiling:
+**Data loader wait time** measures how long the training loop blocks waiting for the next batch. PyTorch's DataLoader exposes this through profiling, as shown in @lst-dataloader-profiling.
 
-```python
+::: {#lst-dataloader-profiling lst-cap="**DataLoader Wait Time Profiling**: Using PyTorch's built-in profiler to measure how long the training loop blocks waiting for the next batch, which reveals whether the data pipeline is the bottleneck."}
+```{.python}
 import torch.profiler
 
 with torch.profiler.profile(
@@ -1101,25 +1124,30 @@ with torch.profiler.profile(
 # Look for "DataLoader" entries showing wait time
 print(prof.key_averages().table(sort_by="cpu_time_total"))
 ```
+:::
 
-**Storage bandwidth utilization** indicates whether the storage system is saturated. On Linux, `iostat -x 1` shows per-device utilization:
+**Storage bandwidth utilization** indicates whether the storage system is saturated. On Linux, `iostat -x 1` shows per-device utilization as in @lst-iostat-utilization.
 
-```bash
+::: {#lst-iostat-utilization lst-cap="**Monitoring Storage Bandwidth**: The `iostat` command reveals per-device I/O utilization, helping identify whether storage is saturated or underutilized."}
+```{.bash}
 $ iostat -x 1
 Device    r/s    rMB/s   rrqm/s  %util
 nvme0n1   45000  6800    0       98%    # Near saturation
 nvme1n1   12000  1800    0       45%    # Underutilized
 ```
+:::
 
 If storage utilization is low but GPU utilization is also low, the bottleneck is CPU preprocessing. If storage utilization is high and GPU utilization is low, the storage system is undersized.
 
-**I/O wait percentage** in CPU statistics (`top`, `htop`) reveals when processes block on I/O:
+**I/O wait percentage** in CPU statistics (`top`, `htop`) reveals when processes block on I/O, as @lst-iowait-monitoring illustrates.
 
-```bash
+::: {#lst-iowait-monitoring lst-cap="**I/O Wait Detection**: The `top` command shows I/O wait as a percentage of CPU time, indicating when processes are blocked waiting for storage operations to complete."}
+```{.bash}
 $ top
 %Cpu(s):  15.2 us,  3.1 sy,  0.0 ni, 45.3 id, 35.4 wa, ...
                                            ^^^^^ I/O wait
 ```
+:::
 
 I/O wait above 20% indicates storage is constraining the pipeline.
 
@@ -1153,15 +1181,15 @@ Training large models requires days to months of continuous computation. During 
 
 ### Checkpoint Architecture Fundamentals {#sec-storage-checkpoint-architecture-fundamentals-135d}
 
-With the cost of lost computation established, we can examine precisely what state must be preserved to enable recovery. A checkpoint captures the complete state needed to resume training exactly where it left off. This includes model parameters (the current values of all trainable weights; for a 175 billion parameter model in FP16 [@brown2020gpt3], this is 350 GB of dense data), optimizer state (optimizers like Adam[^fn-adam-optimizer] [@kingma2015adam] maintain per-parameter statistics such as first and second moments, with Adam's state being 2x the size of model parameters, adding 700 GB for the 175B parameter case), learning rate scheduler state (the current position in the learning rate schedule including step count and warmup progress), random number generator state (to ensure reproducibility, the RNG state for each worker must be saved), and data loader state (which samples have been seen in the current epoch, enabling resumption without repeating or skipping samples).
+With the cost of lost computation established, we can examine precisely what state must be preserved to enable recovery. A checkpoint captures the complete state needed to resume training exactly where it left off. This includes model parameters (the current values of all trainable weights; for a `{python} gpt3_params_b` billion parameter model in FP16 [@brown2020gpt3], this is 350 GB of dense data), optimizer state (optimizers like Adam[^fn-adam-optimizer] [@kingma2015adam] maintain per-parameter statistics such as first and second moments, with Adam's state being 2x the size of model parameters, adding 700 GB for the `{python} gpt3_params_b`B parameter case), learning rate scheduler state (the current position in the learning rate schedule including step count and warmup progress), random number generator state (to ensure reproducibility, the RNG state for each worker must be saved), and data loader state (which samples have been seen in the current epoch, enabling resumption without repeating or skipping samples).
 
-[^fn-adam-optimizer]: **Adam (Adaptive Moment Estimation)**: The most widely used optimizer for deep learning, introduced in 2014. Adam maintains two exponential moving averages per parameter: the first moment (mean of gradients, for momentum) and second moment (mean of squared gradients, for adaptive learning rates). This 2x memory overhead becomes significant at scale: a 175B parameter model requires 350 GB for weights and 700 GB for Adam state, totaling over 1 TB per checkpoint. Memory-efficient optimizers like Adafactor reduce this overhead by factorizing the second moment matrix, trading some convergence speed for 4-8x memory savings.
+[^fn-adam-optimizer]: **Adam (Adaptive Moment Estimation)**: The most widely used optimizer for deep learning, introduced in 2014. Adam maintains two exponential moving averages per parameter: the first moment (mean of gradients, for momentum) and second moment (mean of squared gradients, for adaptive learning rates). This 2x memory overhead becomes significant at scale: a `{python} gpt3_params_b`B parameter model requires 350 GB for weights and 700 GB for Adam state, totaling over 1 TB per checkpoint. Memory-efficient optimizers like Adafactor reduce this overhead by factorizing the second moment matrix, trading some convergence speed for 4-8x memory savings.
 
 The total checkpoint size for a large model can reach several terabytes:
 
 $$S_{checkpoint} = S_{params} + S_{optimizer} + S_{auxiliary}$$
 
-For a 175B parameter model with Adam optimizer:
+For a `{python} gpt3_params_b`B parameter model with Adam optimizer:
 
 $$S_{checkpoint} = 350 \text{ GB} + 700 \text{ GB} + \text{~1 GB} \approx 1.05 \text{ TB}$$
 
@@ -1598,9 +1626,10 @@ Example: A fraud detection model trained with features including "user_reported_
 
 :::
 
-**Query patterns**: Offline queries retrieve features for millions of training examples in batch:
+**Query patterns**: Offline queries retrieve features for millions of training examples in batch, using point-in-time correct joins as shown in @lst-pit-feature-query.
 
-```sql
+::: {#lst-pit-feature-query lst-cap="**Point-in-Time Correct Feature Join**: The temporal join condition ensures that only features available before the training event are used, preventing data leakage from future information."}
+```{.sql}
 SELECT
     labels.user_id,
     labels.item_id,
@@ -1615,6 +1644,7 @@ LEFT JOIN features
     -- Limit to most recent feature version within window
     AND features.timestamp > labels.event_time - INTERVAL 1 DAY
 ```
+:::
 
 ::: {#fig-pit-correctness fig-env="figure" fig-pos="htb" fig-cap="**Point-in-Time Correctness**. To prevent data leakage, features for a training example must be joined based on the timestamp of the event. If an ad impression occurred at $T_{event}$, the model must be trained using features as they existed at $T < T_{event}$. Using features from $T > T_{event}$ (e.g., \"user clicked\") to predict the click introduces future information, rendering the model useless in production." fig-alt="Timeline showing feature versions V1, V2, V3 at timestamps 10:00, 10:05, 10:10. Training event at 10:08 marked in red. Green bracket shows correct join using V2. Red bracket marks V3 as data leakage since it occurs after the training event."}
 ```{.tikz}
@@ -1654,9 +1684,10 @@ The online store provides low-latency access to the most recent feature values f
 
 [^fn-redis]: **Redis (Remote Dictionary Server)**: An in-memory data structure store created by Salvatore Sanfilippo in 2009, now the most widely used in-memory database. Redis achieves sub-millisecond latency for key-value lookups by keeping all data in RAM, with optional persistence to disk. For feature stores, Redis serves as the online store providing 100,000+ lookups per second per instance with P99 latency under 1ms. The trade-off is cost: at approximately $10-15/GB/month for managed Redis versus $0.02/GB/month for object storage, organizations carefully select which features justify in-memory storage.
 
-**Data organization**: Features are stored by entity key with only the most recent value:
+**Data organization**: Features are stored by entity key with only the most recent value, following the schema in @lst-online-store-schema.
 
-```json
+::: {#lst-online-store-schema lst-cap="**Online Feature Store Key-Value Schema**: Each entity key maps to a flat dictionary of its most recent feature values, optimized for single-key point lookups at serving time."}
+```{.json}
 Key: user:12345
 Value: {
     "purchase_count_7d": 5,
@@ -1664,16 +1695,19 @@ Value: {
     "last_updated": "2024-01-16T14:30:00Z"
 }
 ```
+:::
 
-**Access patterns**: Online queries retrieve features for a single entity or small batch:
+**Access patterns**: Online queries retrieve features for a single entity or small batch, as demonstrated in @lst-online-feature-lookup.
 
-```python
+::: {#lst-online-feature-lookup lst-cap="**Low-Latency Online Feature Retrieval**: A point lookup retrieves the most recent feature values for a single entity, typically completing in under 5 milliseconds."}
+```{.python}
 features = online_store.get_features(
     entity_id="user:12345",
     feature_names=["purchase_count_7d", "avg_session_length"],
 )
 # Returns in < 5ms
 ```
+:::
 
 **Consistency with offline**: The online store must reflect the same feature values that the offline store would return for "now". Feature computation pipelines update both stores, with the offline store receiving the historical record and the online store receiving the current value.
 
@@ -1681,9 +1715,10 @@ features = online_store.get_features(
 
 Features are computed by pipelines that transform raw data into feature values. These pipelines can operate in batch or streaming mode.
 
-**Batch pipelines** compute features over historical data, typically running daily or hourly. They are simpler to implement and debug but produce features that are always somewhat stale.
+**Batch pipelines** compute features over historical data, typically running daily or hourly. They are simpler to implement and debug but produce features that are always somewhat stale, as @lst-batch-feature-pipeline illustrates.
 
-```python
+::: {#lst-batch-feature-pipeline lst-cap="**Batch Feature Computation**: A scheduled pipeline that computes aggregate features over historical data, trading freshness for simplicity and debuggability."}
+```{.python}
 # Batch feature: user's purchase count in last 7 days
 @feature(schedule="daily")
 def purchase_count_7d(user_id: str, date: datetime) -> int:
@@ -1695,10 +1730,12 @@ def purchase_count_7d(user_id: str, date: datetime) -> int:
     """
     )
 ```
+:::
 
-**Streaming pipelines** compute features from real-time event streams, providing fresh feature values within seconds of underlying events. They are more complex but essential for use cases where freshness matters (e.g., fraud detection, real-time recommendations).
+**Streaming pipelines** compute features from real-time event streams, providing fresh feature values within seconds of underlying events. They are more complex but essential for use cases where freshness matters (e.g., fraud detection, real-time recommendations), as shown in @lst-streaming-feature-pipeline.
 
-```python
+::: {#lst-streaming-feature-pipeline lst-cap="**Streaming Feature Computation**: A real-time pipeline that updates feature values within seconds of each event, maintaining session-level state for low-latency serving."}
+```{.python}
 # Streaming feature: user's purchases in current session
 @streaming_feature(source="purchase_events")
 def session_purchase_count(event: PurchaseEvent, state: State) -> int:
@@ -1711,6 +1748,7 @@ def session_purchase_count(event: PurchaseEvent, state: State) -> int:
         state.count
     )  # Updated within seconds of each purchase event
 ```
+:::
 
 **Lambda architecture**[^fn-lambda-architecture] combines both: batch pipelines provide accurate but stale features; streaming pipelines provide fresh but potentially approximate features. The serving layer merges results, preferring fresh streaming values when available.
 
@@ -1911,9 +1949,10 @@ Model versioning differs from code versioning in important ways:
 
 **Metadata is as important as artifacts.** Knowing what hyperparameters, training data, and code version produced a model is essential for debugging and reproducibility.
 
-A typical model version record includes:
+A typical model version record includes the metadata shown in @lst-model-registry-record.
 
-```yaml
+::: {#lst-model-registry-record lst-cap="**Model Version Provenance Metadata**: A registry record capturing the full provenance chain for a model version, including artifact locations, training configuration, evaluation metrics, and lineage links to parent models and experiments."}
+```{.yaml}
 model_name: "product_recommender"
 version: "v2.3.1"
 status: "production"
@@ -1947,6 +1986,7 @@ lineage:
   code_commit: "git:abc123"
   experiment_id: "exp-2024-01-15-hyperopt"
 ```
+:::
 
 ### Reproducibility and Lineage Tracking {#sec-storage-reproducibility-lineage-tracking-6178}
 
@@ -2257,7 +2297,7 @@ Training a recommendation model on features that include the label (using "user 
 
 The transition from HDDs to SSDs represents a transformative improvement in storage performance: 100x better random access latency, 10-30x higher IOPS, and 10-30x greater sequential bandwidth. This leads teams to assume that NVMe storage eliminates I/O as a bottleneck. As @sec-storage-io-optimization-ml-data-pipelines-b1ff quantifies, this assumption fails for three reasons.
 
-First, the GPU-storage bandwidth gap remains vast. An H100 GPU consumes data at 3.35 TB/s from HBM. Even four NVMe drives in RAID 0 deliver only 25 GB/s, a 130x deficit. SSDs close the gap relative to HDDs but remain fundamentally slower than GPU memory bandwidth.
+First, the GPU-storage bandwidth gap remains vast. An H100 GPU consumes data at `{python} h100_bw_tbs` TB/s from HBM. Even four NVMe drives in RAID 0 deliver only 25 GB/s, a 130x deficit. SSDs close the gap relative to HDDs but remain fundamentally slower than GPU memory bandwidth.
 
 Second, preprocessing often dominates over I/O. Vision model training requires JPEG decoding (2-5 ms per image), random augmentation (1-2 ms), and normalization. At 1000 images/second, single-threaded preprocessing takes 7 seconds per second of training. The bottleneck shifts from storage to CPU, requiring 7+ parallel preprocessing workers. SSDs with their abundant bandwidth sit idle while CPUs struggle to decode images.
 
