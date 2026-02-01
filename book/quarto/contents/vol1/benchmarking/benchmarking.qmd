@@ -33,6 +33,32 @@ Compression techniques, hardware acceleration, and data selection strategies all
 
 :::
 
+```{python}
+#| label: benchmarking-setup
+#| echo: false
+
+from calc.constants import *
+from calc.formulas import fmt, sci
+
+# GPU specs referenced in this chapter
+a100_tflops_fp16 = f"{A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
+a100_bw_gbs = f"{A100_MEM_BW.to(GB/second).magnitude:,.0f}"
+a100_bw_tbs = f"{A100_MEM_BW.to(TB/second).magnitude:.1f}"
+h100_tflops_fp16 = f"{H100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
+h100_tflops_fp8 = f"{H100_FLOPS_FP8_TENSOR.to(TFLOPs/second).magnitude:,.0f}"
+h100_bw_tbs = f"{H100_MEM_BW.to(TB/second).magnitude:.2f}"
+
+# Energy per operation (Horowitz 2014 @ 45nm)
+energy_fp32 = f"{ENERGY_FLOP_FP32_PJ.magnitude}"
+energy_fp16 = f"{ENERGY_FLOP_FP16_PJ.magnitude}"
+energy_int8 = f"{ENERGY_FLOP_INT8_PJ.magnitude}"
+energy_dram = f"{ENERGY_DRAM_ACCESS_PJ.magnitude:.0f}"
+
+# Models
+bert_params_m = f"{BERT_BASE_PARAMS.to(Mparam).magnitude:.0f}"
+mobilenet_params_m = f"{MOBILENETV2_PARAMS.to(Mparam).magnitude:.1f}"
+```
+
 ## Machine Learning Benchmarking Framework {#sec-benchmarking-ai-machine-learning-benchmarking-framework-70b8}
 
 The optimization techniques from preceding chapters all claim improvements. Data selection strategies (@sec-data-selection) promise more efficient training. Model compression (@sec-model-compression) promises smaller, faster models. Hardware acceleration (@sec-ai-acceleration) promises higher throughput. But how do we know these claims hold in production? A model quantized to INT8 may benchmark 2x faster on a synthetic workload but show no improvement under real traffic patterns with variable input sizes and concurrent requests. A pruned model may maintain accuracy on the test set but fail on edge cases the benchmark never covered. Benchmarking is the discipline of verifying that optimizations deliver their promised benefits under realistic conditions.
@@ -309,11 +335,11 @@ These system benchmarks perform two critical functions in the AI ecosystem. Firs
 
 :::
 
-Effective benchmark interpretation requires understanding the performance characteristics of target hardware. Understanding whether specific AI workloads are compute-bound or memory-bound provides essential insight for optimization decisions. Computational intensity, measured as FLOPS[^fn-flops-throughput] per byte of data movement, determines performance limits. Consider an NVIDIA A100 GPU with 312 TFLOPS of tensor performance (TF32/FP16 with Tensor Cores; FP32 is 19.5 TFLOPS) and 2.0 TB/s memory bandwidth (SXM variant), yielding an arithmetic intensity threshold of 156 FLOPS/byte. The architectural foundations for understanding these hardware characteristics, including the roofline model for analyzing compute-bound versus memory-bound workloads, are established in @sec-ai-acceleration, which provides context for interpreting system benchmark results.
+Effective benchmark interpretation requires understanding the performance characteristics of target hardware. Understanding whether specific AI workloads are compute-bound or memory-bound provides essential insight for optimization decisions. Computational intensity, measured as FLOPS[^fn-flops-throughput] per byte of data movement, determines performance limits. Consider an NVIDIA A100 GPU with `{python} a100_tflops_fp16` TFLOPS of tensor performance (TF32/FP16 with Tensor Cores; FP32 is 19.5 TFLOPS) and `{python} a100_bw_tbs` TB/s memory bandwidth (SXM variant), yielding an arithmetic intensity threshold of 156 FLOPS/byte. The architectural foundations for understanding these hardware characteristics, including the roofline model for analyzing compute-bound versus memory-bound workloads, are established in @sec-ai-acceleration, which provides context for interpreting system benchmark results.
 
-[^fn-flops-throughput]: **FLOPS**: Floating-Point Operations Per Second, a measure of computational performance indicating how many floating-point calculations a processor can execute in one second. Modern AI accelerators achieve high FLOPS ratings: NVIDIA A100 delivers 312 TFLOPS (trillion FLOPS) for FP16/BF16 Tensor Core operations (624 TFLOPS with structured sparsity), while high-end CPUs achieve 1-10 TFLOPS. FLOPS measurements help compare hardware capabilities and determine computational bottlenecks in ML workloads.
+[^fn-flops-throughput]: **FLOPS**: Floating-Point Operations Per Second, a measure of computational performance indicating how many floating-point calculations a processor can execute in one second. Modern AI accelerators achieve high FLOPS ratings: NVIDIA A100 delivers `{python} a100_tflops_fp16` TFLOPS (trillion FLOPS) for FP16/BF16 Tensor Core operations (624 TFLOPS with structured sparsity), while high-end CPUs achieve 1-10 TFLOPS. FLOPS measurements help compare hardware capabilities and determine computational bottlenecks in ML workloads.
 
-High-intensity operations like dense matrix multiplication in certain AI model operations (typically >150 FLOPS/byte) achieve near-peak computational throughput on the A100. For example, a ResNet-50 forward pass on large batch sizes (256+) achieves arithmetic intensity of ~300 FLOPS/byte, enabling 85-90% of peak tensor performance (approximately 280 TFLOPS achieved vs 312 TFLOPS theoretical) [@nvidia2020a100]. Conversely, low-intensity operations like activation functions and certain lightweight operations (<10 FLOPS/byte) become memory bandwidth limited, utilizing only a fraction of the GPU's computational capacity. A BERT inference with batch size 1 achieves only 8 FLOPS/byte arithmetic intensity, limiting performance to 16 TFLOPS (2.0 TB/s × 8 FLOPS/byte), representing just 5% of peak computational capability.
+High-intensity operations like dense matrix multiplication in certain AI model operations (typically >150 FLOPS/byte) achieve near-peak computational throughput on the A100. For example, a ResNet-50 forward pass on large batch sizes (256+) achieves arithmetic intensity of ~300 FLOPS/byte, enabling 85-90% of peak tensor performance (approximately 280 TFLOPS achieved vs `{python} a100_tflops_fp16` TFLOPS theoretical) [@nvidia2020a100]. Conversely, low-intensity operations like activation functions and certain lightweight operations (<10 FLOPS/byte) become memory bandwidth limited, utilizing only a fraction of the GPU's computational capacity. A BERT inference with batch size 1 achieves only 8 FLOPS/byte arithmetic intensity, limiting performance to 16 TFLOPS (2.0 TB/s × 8 FLOPS/byte), representing just 5% of peak computational capability.
 
 This quantitative analysis, formalized in roofline models[^fn-roofline-model], provides a systematic framework that guides both algorithm design and hardware selection by clearly identifying the dominant performance constraints for specific workloads. Understanding these quantitative relationships allows engineers to predict performance bottlenecks accurately and optimize both model architectures and deployment strategies accordingly. For instance, increasing batch size from 1 to 32 for transformer inference can shift operations from memory-bound (8 FLOPS/byte) to compute-bound (150 FLOPS/byte), improving GPU utilization from 4% to 65% [@pope2022efficiently].
 
@@ -1639,9 +1665,9 @@ Understanding WHY quantization reduces energy consumption requires decomposing e
 
 | Precision | Multiplier Energy | Relative Cost |
 |-----------|------------------|---------------|
-| FP32 | ~3.7 pJ | 1.0× |
-| FP16 | ~1.1 pJ | 0.3× |
-| INT8 | ~0.2 pJ | 0.05× |
+| FP32 | ~`{python} energy_fp32` pJ | 1.0× |
+| FP16 | ~`{python} energy_fp16` pJ | 0.3× |
+| INT8 | ~`{python} energy_int8` pJ | 0.05× |
 
 An 8-bit multiplier uses ~20× less energy than a 32-bit floating-point multiplier because transistor count scales roughly with bit-width squared, and switching energy scales with transistor count.
 
