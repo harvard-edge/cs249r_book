@@ -119,7 +119,23 @@ class ForbiddenFootnoteChecker:
                         f"Found '{footnote}' in markdown caption: {context}"
                     ))
 
-            # Check 4: Footnotes inside ANY div blocks
+            # Check 4a: Footnotes inside callout title attributes
+            # title="..." is passed as a tcolorbox argument in LaTeX,
+            # where footnotes are not allowed and cause "Missing $ inserted" errors
+            if re.match(r'^:{3,4}\s*\{.*title=', stripped):
+                title_match = re.search(r'title="([^"]*)"', line)
+                if title_match:
+                    title_text = title_match.group(1)
+                    title_footnotes = self.footnote_pattern.findall(title_text)
+                    for footnote in title_footnotes:
+                        context = line.strip()[:80]
+                        file_errors.append((
+                            line_num,
+                            "CALLOUT_TITLE",
+                            f"Found '{footnote}' in callout title (breaks LaTeX PDF builds): {context}"
+                        ))
+
+            # Check 4b: Footnotes inside ANY div blocks
             # Div blocks (:::) are used for figures, callouts, examples, etc.
             # Footnotes break Quarto rendering inside these blocks
             if in_div_block and div_start_line != line_num:
@@ -192,6 +208,7 @@ class ForbiddenFootnoteChecker:
         print("\nFootnotes CANNOT be placed in:")
         print("  • Table cells (breaks Quarto table rendering)")
         print("  • Figure/table captions (breaks cross-referencing)")
+        print("  • Callout title attributes (breaks LaTeX PDF builds)")
         print("  • Div blocks like callouts (breaks content rendering)")
         print("\nFootnote formatting violations:")
         print("  • Inline footnotes ^[...] (must use [^fn-name] reference format)")
@@ -225,7 +242,8 @@ class ForbiddenFootnoteChecker:
         print("   1. Move footnote to regular paragraph text before/after the table or caption")
         print("   2. Or convert the footnoted information into inline text")
         print("   3. For tables: Add explanation in text before the table instead")
-        print("   4. For inline footnotes ^[...]: Create a proper footnote definition [^fn-name]:")
+        print("   4. For callout titles: Move the footnote reference to the body paragraph")
+        print("   5. For inline footnotes ^[...]: Create a proper footnote definition [^fn-name]:")
         print("      and use [^fn-name] as a reference in the text")
         print()
 
