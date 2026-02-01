@@ -150,10 +150,7 @@ end
 local function Meta_findChapterNumber(meta)
   local processedfile = pandoc.path.split_extension(PANDOC_STATE.output_file)
   fbx.isbook = meta.book ~= nil
-  fbx.iswebsite = meta.website ~= nil
   fbx.ishtmlbook = meta.book ~= nil and not quarto.doc.is_format("pdf")
-  -- Treat website projects as multi-file HTML projects for xref sharing
-  fbx.ismultifile = fbx.isbook or fbx.iswebsite
   fbx.processedfile = processedfile
 
   fbx.output_file = PANDOC_STATE.output_file
@@ -184,12 +181,7 @@ local function Meta_findChapterNumber(meta)
         fbx.unnumbered = true
       end
     end
-  elseif fbx.iswebsite then
-    -- Website projects: use shared xref file for cross-page references
-    fbx.xreffile = "._htmlbook_xref.json"
-    fbx.chapno = ""
-    fbx.unnumbered = true
-  else -- not a book or website (standalone file)
+  else -- not a book.
     fbx.xreffile ="._"..processedfile.."_xref.json"
     fbx.chapno = ""
     fbx.unnumbered = true
