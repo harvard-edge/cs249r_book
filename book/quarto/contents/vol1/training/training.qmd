@@ -1499,6 +1499,38 @@ This relationship illustrates a key principle in training system design: the sys
 
 Applying this throughput analysis to our GPT-2 lighthouse model reveals where the *data pipeline bottleneck* lies for language model training.
 
+```{python}
+#| label: gpt2-data-pipeline-calc
+#| echo: false
+
+# GPT-2 data loading pipeline analysis
+batch_size_gpt2 = 32
+seq_len_gpt2 = 1024
+tokens_per_batch = batch_size_gpt2 * seq_len_gpt2  # 32K
+tokenization_rate = 500_000  # tokens/sec per CPU core
+tokenization_ms = tokens_per_batch / tokenization_rate * 1000  # ms
+
+# Batch tensor size: [batch, seq_len] int64 = 8 bytes per token
+batch_bytes = batch_size_gpt2 * seq_len_gpt2 * 8  # bytes
+batch_kb = batch_bytes / 1024  # KB
+
+# PCIe transfer
+pcie_gen3_gbps = 15.75  # GB/s theoretical
+transfer_ms = (batch_kb / 1024 / 1024) / pcie_gen3_gbps * 1000  # ms
+
+# Multi-worker optimization
+n_cpu_workers = 8
+parallel_tokenization_ms = tokenization_ms / n_cpu_workers
+
+# Format strings
+tokens_per_batch_str = f"{tokens_per_batch // 1000}K"
+tokenization_ms_str = f"{tokenization_ms:.0f}"
+batch_kb_str = f"{batch_kb:.0f}"
+transfer_ms_str = f"{transfer_ms:.3f}"
+n_cpu_workers_str = f"{n_cpu_workers}"
+parallel_tokenization_ms_str = f"{parallel_tokenization_ms:.0f}"
+```
+
 ::: {.callout-example title="GPT-2 Language Model Data Pipeline"}
 
 Training language models like GPT-2 requires a specialized data pipeline optimized for text processing.
@@ -1513,20 +1545,20 @@ Training language models like GPT-2 requires a specialized data pipeline optimiz
    - BPE (Byte-Pair Encoding) tokenizer (50,257 vocabulary) converts text to token IDs
    - BPE segments text into subword units (e.g., "unbreakable" → ["un", "break", "able"])
    - Processing rate: ~500K tokens/second per CPU core
-   - For batch_size=32, seq_len=1024: need 32K tokens/batch
-   - Single core: 32K tokens ÷ 500K tokens/s = 64ms per batch
+   - For batch_size=32, seq_len=1024: need `{python} tokens_per_batch_str` tokens/batch
+   - Single core: `{python} tokens_per_batch_str` tokens ÷ 500K tokens/s = `{python} tokenization_ms_str`ms per batch
    - Bottleneck: GPU forward pass only takes 80ms
 3. Batching & Padding (CPU)
    - Pad sequences to uniform length (1024 tokens)
-   - Pack into tensors: [32, 1024] int64 = 256KB per batch
+   - Pack into tensors: [32, 1024] int64 = `{python} batch_kb_str`KB per batch
    - Trivial time: <5ms
 4. GPU Transfer (PCIe)
    - PCIe Gen3 x16: 15.75 GB/s theoretical
-   - 256KB per batch ÷ 15.75 GB/s = 0.016ms (negligible)
+   - `{python} batch_kb_str`KB per batch ÷ 15.75 GB/s = `{python} transfer_ms_str`ms (negligible)
 
 #### Bottleneck Analysis
 
-- Tokenization: 64ms
+- Tokenization: `{python} tokenization_ms_str`ms
 - GPU compute: 80ms
 - Transfer: <1ms
 
@@ -1534,7 +1566,7 @@ System is balanced (tokenization ≈ GPU compute), but tokenization becomes bott
 
 #### Optimization Applied
 
-- Multi-worker dataloading: 8 CPU workers tokenize in parallel → 64ms ÷ 8 = 8ms
+- Multi-worker dataloading: `{python} n_cpu_workers_str` CPU workers tokenize in parallel → `{python} tokenization_ms_str`ms ÷ `{python} n_cpu_workers_str` = `{python} parallel_tokenization_ms_str`ms
 - Prefetching: Tokenize next batch while GPU processes current batch
 - Result: GPU utilization >95%, training throughput: 380 samples/second on 8×V100
 
@@ -1988,7 +2020,7 @@ Training bottlenecks fall into three categories, which map directly to the **DAM
 +-------------------+----------------+-----------------------------------------------+----------------------------------------+
 | **DAM Component** | **Bottleneck** | **Symptoms**                                  | **Primary Solutions**                  |
 +:==================+:===============+:==============================================+:=======================================+
-| **Algorithm**     | Compute-bound  | GPU utilization &gt;90%; low memory bandwidth | FlashAttention, mixed precision,       |
+| **Algorithm**     | Compute-bound  | GPU utilization >90%; low memory bandwidth | FlashAttention, mixed precision,       |
 |                   |                | usage; arithmetic units are the limiting      | faster hardware                        |
 |                   |                | factor                                        |                                        |
 +-------------------+----------------+-----------------------------------------------+----------------------------------------+
@@ -2722,17 +2754,17 @@ This selective precision maximizes hardware utilization while maintaining numeri
 
 Optimal mixed-precision training requires matching the precision format to hardware capabilities. @tbl-hw-precision-strategy summarizes the recommended precision strategy for each GPU generation, reflecting the evolution from FP16-only support on Volta to native FP8 on Hopper.
 
-+-------------------+---------------------------+----------------------------------------------+
-| **Architecture**  | **Recommended Precision** | **Key Considerations**                       |
-+:==================+==========================:+=============================================:+
-| **V100 (Volta)**  | FP16 with loss scaling    | No BF16 support; gradient clipping essential |
-+-------------------+---------------------------+----------------------------------------------+
-| **A100 (Ampere)** | BF16 for transformers;    | TF32 mode provides automatic 2-3× speedup    |
-|                   | FP16 for CNNs             | for legacy FP32 code                         |
-+-------------------+---------------------------+----------------------------------------------+
-| **H100 (Hopper)** | FP8 via TransformerEngine | Requires FP8-aware training recipes;         |
-|                   |                           | `{python} h100_tflops_fp8` TFLOPs peak throughput                 |
-+-------------------+---------------------------+----------------------------------------------+
++-------------------+---------------------------+---------------------------------------------------+
+| **Architecture**  | **Recommended Precision** | **Key Considerations**                            |
++:==================+==========================:+==================================================:+
+| **V100 (Volta)**  | FP16 with loss scaling    | No BF16 support; gradient clipping essential      |
++-------------------+---------------------------+---------------------------------------------------+
+| **A100 (Ampere)** | BF16 for transformers;    | TF32 mode provides automatic 2-3× speedup         |
+|                   | FP16 for CNNs             | for legacy FP32 code                              |
++-------------------+---------------------------+---------------------------------------------------+
+| **H100 (Hopper)** | FP8 via TransformerEngine | Requires FP8-aware training recipes;              |
+|                   |                           | `{python} h100_tflops_fp8` TFLOPs peak throughput |
++-------------------+---------------------------+---------------------------------------------------+
 
 : **Precision Strategy by GPU Architecture.** Each generation introduces wider precision support, reducing the engineering burden of loss scaling while increasing throughput. {#tbl-hw-precision-strategy}
 
@@ -2921,8 +2953,8 @@ Training a GPT-2 style transformer on NVIDIA A100 GPU (12 layers, 768 hidden dim
 +:====================+:=====================+==================:+:======================+===================:+======================:+===================:+
 | 512                 | 12 ms                | 8 ms              | 35 ms                 | 18 ms              | 4.2 GB                | 2.8 GB             |
 | 2048                | 45 ms                | 15 ms             | 120 ms                | 35 ms              | 18 GB                 | 6 GB               |
-| 4096                | OOM                  | 32 ms             | OOM                   | 85 ms              | &gt;40 GB             | 12 GB              |
-| 8192                | OOM                  | 68 ms             | OOM                   | 180 ms             | &gt;80 GB             | 24 GB              |
+| 4096                | OOM                  | 32 ms             | OOM                   | 85 ms              | >40 GB             | 12 GB              |
+| 8192                | OOM                  | 68 ms             | OOM                   | 180 ms             | >80 GB             | 24 GB              |
 +---------------------+----------------------+-------------------+-----------------------+--------------------+-----------------------+--------------------+
 
 ```{python}
@@ -3230,7 +3262,7 @@ The synergy between gradient accumulation and checkpointing enables training of 
 
 For a network with L layers, each storing A bytes of activations, @tbl-checkpoint-tradeoffs quantifies how the number and placement of checkpoints determines the memory-compute tradeoff. **Note that sub-linear checkpointing strategies can reduce memory consumption from $O(L)$ to $O(\sqrt{L})$ with only a fractional increase in total compute time, enabling the training of much deeper models on existing hardware.**
 
-+-------------------------------------+-----------------+-----------------------+
++----------------------------+-------------------+--------------------+
 | **Strategy**               | **Memory Cost**   | **Recompute Cost** |
 +:===========================+:==================+:===================+
 | **No checkpointing**       | L x A             | 0 forward ops      |
@@ -3916,13 +3948,13 @@ Before accepting the complexity of distributed training, practitioners should sy
 +------------------------------+------------------------+-------------------------------------------------+
 | **Scale**                    | **Typical Approach**   | **Rationale**                                   |
 +:=============================+:=======================+:================================================+
-| **&lt;1B params, &lt;100GB** | Single GPU             | All optimizations fit; fastest iteration        |
+| **<1B params, <100GB** | Single GPU             | All optimizations fit; fastest iteration        |
 +------------------------------+------------------------+-------------------------------------------------+
-| **1-10B params, &lt;1TB**    | Single node (1-8 GPUs) | Model parallelism within node avoids network    |
+| **1-10B params, <1TB**    | Single node (1-8 GPUs) | Model parallelism within node avoids network    |
 +------------------------------+------------------------+-------------------------------------------------+
 | **10B+ params**              | Multi-node cluster     | Memory requirements exceed single-node capacity |
 +------------------------------+------------------------+-------------------------------------------------+
-| **&gt;10TB dataset**         | Multi-node + streaming | I/O bandwidth requires distributed storage      |
+| **>10TB dataset**         | Multi-node + streaming | I/O bandwidth requires distributed storage      |
 +------------------------------+------------------------+-------------------------------------------------+
 
 : **Scaling Decision Guidelines.** Model size, dataset scale, and available hardware determine when distributed training complexity is justified. Single-machine optimization provides better cost-efficiency below these thresholds. {#tbl-scaling-decision}

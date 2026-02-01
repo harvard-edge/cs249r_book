@@ -38,9 +38,7 @@ Serving infrastructure answers requests in milliseconds—but deployment is not 
 
 The preceding chapters taught you to build, optimize, benchmark, and serve ML systems. Benchmarking (@sec-benchmarking-ai) told you how a model performs at a point in time; serving infrastructure (@sec-model-serving-systems) showed how to answer requests in milliseconds. You deploy to production, and week one looks excellent. But what happens next? Data distributions shift, user behavior changes, and the world moves on from the conditions under which the model was trained. This chapter addresses what happens *over time*: how to ensure that a model's measured performance is maintained as the environment evolves around it.
 
-The urgency of this problem is difficult to overstate. Organizations without systematic operational practices routinely see deployment cycles stretch from weeks to months, and a large fraction of ML models that succeed in development never reach sustained production use[^fn-mlops-business-impact]. The root cause is a fundamental mismatch between how traditional software fails and how ML systems degrade:
-
-[^fn-mlops-business-impact]: **MLOps Business Impact**: Companies implementing mature MLOps practices report significant improvements in deployment speed, reducing time from months to weeks, substantial reductions in model debugging time, and improved model reliability. Organizations with mature MLOps practices consistently achieve higher model success rates moving from pilot to production compared to those using ad hoc approaches.
+The urgency of this problem is difficult to overstate. Organizations without systematic operational practices routinely see deployment cycles stretch from weeks to months, and a large fraction of ML models that succeed in development never reach sustained production use[^fn-mlops-business-impact]. The root cause is what we call *the operational mismatch* between how traditional software fails and how ML systems degrade:
 
 ::: {.callout-perspective title="The Operational Mismatch"}
 Traditional monitoring answers: *Is* the server running? *Is* latency acceptable? *Are* requests succeeding? These questions suffice for deterministic software where correctness is binary.
@@ -189,21 +187,21 @@ How these principles manifest in practice depends on the workload. A recommendat
 
 The dominant failure modes and monitoring priorities differ fundamentally across workload archetypes. @tbl-monitoring-archetype-strategy details each archetype's drift pattern, monitoring metric, and retraining trigger:
 
-+-------------------+------------------------------------------+------------------------------------------+--------------------------------------------+
-| **Archetype**     | **Dominant Drift Pattern**               | **Primary Monitoring Metric**            | **Typical Retraining Trigger**             |
-+:==================+:=========================================+:=========================================+:===========================================+
-| **ResNet-50**     | Visual distribution shift                | **Accuracy on holdout set**              | Accuracy drops > 2% from baseline          |
-| (Compute Beast)   | (lighting, camera, new object classes)   | (ground truth available)                 | ($\sim$monthly for stable domains)         |
-+-------------------+------------------------------------------+------------------------------------------+--------------------------------------------+
-| **GPT-2**         | Vocabulary drift, topic shift,           | **Perplexity on live traffic**           | Perplexity increases > 10%; new vocabulary |
-| (Bandwidth Hog)   | emerging entities                        | (no ground truth needed)                 | detected ($\sim$weekly for news domains)   |
-+-------------------+------------------------------------------+------------------------------------------+--------------------------------------------+
-| **DLRM**          | User behavior shift, item catalog churn, | **CTR/CVR delta** vs. historical         | Engagement drops > 5%; catalog refresh     |
-| (Sparse Scatter)  | cold-start items                         | cohorts                                  | ($\sim$daily for e-commerce)               |
-+-------------------+------------------------------------------+------------------------------------------+--------------------------------------------+
-| **DS-CNN**        | Acoustic environment change              | **Duty cycle** (wakeups/hour) +          | False wake rate > 1%; battery drain        |
-| (Tiny Constraint) | (noise floor shift)                      | **false positive rate**                  | exceeds spec ($\sim$quarterly OTA update)  |
-+-------------------+------------------------------------------+------------------------------------------+--------------------------------------------+
++-----------------------+------------------------------------------+----------------------------------+-----------------------------------------------+
+| **Archetype**         | **Dominant Drift Pattern**               | **Primary Monitoring Metric**    | **Typical Retraining Trigger**                |
++:======================+:=========================================+:=================================+:==============================================+
+| **ResNet-50**         | Visual distribution shift                | **Accuracy on holdout set**      | Accuracy drops > 2% from baseline          |
+| **(Compute Beast)**   | (lighting, camera, new object classes)   | (ground truth available)         | ($\sim$monthly for stable domains)            |
++-----------------------+------------------------------------------+----------------------------------+-----------------------------------------------+
+| **GPT-2**             | Vocabulary drift, topic shift,           | **Perplexity on live traffic**   | Perplexity increases > 10%; new vocabulary |
+| **(Bandwidth Hog)**   | emerging entities                        | (no ground truth needed)         | detected ($\sim$weekly for news domains)      |
++-----------------------+------------------------------------------+----------------------------------+-----------------------------------------------+
+| **DLRM**              | User behavior shift, item catalog churn, | **CTR/CVR delta** vs. historical | Engagement drops > 5%; catalog refresh     |
+| **(Sparse Scatter)**  | cold-start items                         | cohorts                          | ($\sim$daily for e-commerce)                  |
++-----------------------+------------------------------------------+----------------------------------+-----------------------------------------------+
+| **DS-CNN**            | Acoustic environment change              | **Duty cycle** (wakeups/hour) +  | False wake rate > 1%; battery drain        |
+| **(Tiny Constraint)** | (noise floor shift)                      | **false positive rate**          | exceeds spec ($\sim$quarterly OTA update)     |
++-----------------------+------------------------------------------+----------------------------------+-----------------------------------------------+
 
 : **Monitoring Strategy by Workload Archetype.** Monitoring strategy varies by workload archetype's dominant failure mode, requiring tailored metrics and response thresholds for each deployment context. {#tbl-monitoring-archetype-strategy}
 
@@ -1828,13 +1826,13 @@ GPU utilization metrics can mislead operators. A GPU reporting 90% utilization m
 +-------------------+------------------+--------------------+------------------------------+
 | **Pattern**       | **GPU Util**     | **Memory BW Util** | **Optimization Strategy**    |
 +:==================+=================:+===================:+:=============================+
-| **Compute-bound** | &gt;85%          | &lt;70%            | Larger batch sizes, tensor   |
+| **Compute-bound** | >85%          | <70%            | Larger batch sizes, tensor   |
 |                   |                  |                    | parallelism within node      |
 +-------------------+------------------+--------------------+------------------------------+
-| **Memory-bound**  | 50-85%           | &gt;85%            | Reduce model size, quantize, |
+| **Memory-bound**  | 50-85%           | >85%            | Reduce model size, quantize, |
 |                   |                  |                    | optimize memory access       |
 +-------------------+------------------+--------------------+------------------------------+
-| **I/O-bound**     | &lt;50%          | &lt;50%            | Improve data pipeline,       |
+| **I/O-bound**     | <50%          | <50%            | Improve data pipeline,       |
 |                   |                  |                    | prefetch inputs, use SSDs    |
 +-------------------+------------------+--------------------+------------------------------+
 | **Batch-starved** | Variable (spiky) | Variable           | Dynamic batching, request    |
@@ -1857,19 +1855,19 @@ Production systems should establish utilization targets based on workload charac
 
 Model serving performance depends critically on memory hierarchy utilization, as @tbl-gpu-memory-hierarchy quantifies:
 
-+-------------------------------+---------------+-------------------+
-| Memory Level                  | Bandwidth     | Typical Contents  |
-+:==============================+==============:+:=================:+
-| L2 Cache (40 MB on A100)      | ~3 TB/s       | Hot weights       |
-+-------------------------------+---------------+-------------------+
-| HBM2e GPU Memory (80 GB)      | ~2 TB/s       | Model             |
-+-------------------------------+---------------+-------------------+
-| PCIe/NVLink to CPU            | ~64 GB/s      | Activations       |
-+-------------------------------+---------------+-------------------+
-| System RAM (512 GB)           | ~200 GB/s     | Batched inputs    |
-+-------------------------------+---------------+-------------------+
-| NVMe SSD                      | ~7 GB/s       | Model swap        |
-+-------------------------------+---------------+-------------------+
++------------------------------+---------------+----------------------+
+| **Memory Level**             | **Bandwidth** | **Typical Contents** |
++:=============================+==============:+:=====================+
+| **L2 Cache (40 MB on A100)** | ~3 TB/s       | Hot weights          |
++------------------------------+---------------+----------------------+
+| **HBM2e GPU Memory (80 GB)** | ~2 TB/s       | Model                |
++------------------------------+---------------+----------------------+
+| **PCIe/NVLink to CPU**       | ~64 GB/s      | Activations          |
++------------------------------+---------------+----------------------+
+| **System RAM (512 GB)**      | ~200 GB/s     | Batched inputs       |
++------------------------------+---------------+----------------------+
+| **NVMe SSD**                 | ~7 GB/s       | Model swap           |
++------------------------------+---------------+----------------------+
 
 : GPU Memory Hierarchy and Bandwidth Characteristics {#tbl-gpu-memory-hierarchy}
 
@@ -2028,9 +2026,9 @@ Track feature distributions against training baselines using statistical distanc
 +--------------------------------------+---------------------+----------------------------------+
 | **Metric**                           | **Alert Threshold** | **Use Case**                     |
 +:=====================================+====================:+:=================================+
-| **Population Stability Index (PSI)** | PSI &gt; 0.2        | Categorical and binned features  |
-| **Kolmogorov-Smirnov statistic**     | KS &gt; 0.1         | Continuous feature distributions |
-| **Jensen-Shannon divergence**        | JS &gt; 0.1         | Probability distributions        |
+| **Population Stability Index (PSI)** | PSI > 0.2        | Categorical and binned features  |
+| **Kolmogorov-Smirnov statistic**     | KS > 0.1         | Continuous feature distributions |
+| **Jensen-Shannon divergence**        | JS > 0.1         | Probability distributions        |
 +--------------------------------------+---------------------+----------------------------------+
 
 : **Feature Distribution Thresholds.** Starting points for drift detection; teams should calibrate based on feature sensitivity and business impact. PSI values above 0.2 indicate significant distribution shift, while KS statistics exceeding 0.1 suggest statistically significant divergence from training distributions. Higher thresholds reduce alert fatigue but risk missing gradual drift. {#tbl-feature-distribution-thresholds}
@@ -2263,8 +2261,8 @@ Severity classification provides the foundation for prioritizing incident respon
 | **Level** | **Criteria**                               | **Response Time** | **Example**                    |
 +:==========+:===========================================+==================:+:===============================+
 | **P0**    | Complete model failure, serving errors     | 15 minutes        | Model returns null predictions |
-| **P1**    | Significant accuracy degradation (&gt;10%) | 1 hour            | Recommendation CTR drops 15%   |
-| **P2**    | Moderate drift, localized impact           | 4 hours           | One feature shows PSI &gt; 0.3 |
+| **P1**    | Significant accuracy degradation (>10%) | 1 hour            | Recommendation CTR drops 15%   |
+| **P2**    | Moderate drift, localized impact           | 4 hours           | One feature shows PSI > 0.3 |
 | **P3**    | Minor anomalies, no user impact            | 24 hours          | Training pipeline delay        |
 +-----------+--------------------------------------------+-------------------+--------------------------------+
 
@@ -2928,7 +2926,7 @@ As you read these case studies, look for how each implements the five foundation
 | **4. Observable Degradation** | On-device anomaly detection, limited telemetry | Cohort-specific monitoring, outcome tracking |
 +-------------------------------+------------------------------------------------+----------------------------------------------+
 | **5. Cost-Aware Automation**  | Battery-aware retraining triggers, CI/CD for   | Automated model updates with human-in-loop   |
-|                               | edge balancing accuracy and resource cost      | gates balancing update cost and patient risk  |
+|                               | edge balancing accuracy and resource cost      | gates balancing update cost and patient risk |
 +-------------------------------+------------------------------------------------+----------------------------------------------+
 
 Each case study demonstrates that domain constraints (edge hardware, clinical regulation) reshape *how* principles are implemented without changing *which* principles matter.

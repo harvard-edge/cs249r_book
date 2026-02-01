@@ -553,19 +553,19 @@ Key insight: **Preprocessing consumes `{python} preprocess_pct_str`% of latency*
 
 **The Contrast**: While ResNet-50 serving is limited by **Math** (CNN ops), DLRM serving is strictly limited by **I/O** and **Memory Capacity**.
 
-+--------------------+----------------------------+------------+----------------+
-| **Phase**          | **Operation**              | **Time**   | **Bottleneck** |
-+:===================+:===========================+===========:+===============:+
-| **Input Parsing**  | Request parsing            | 0.5ms      | CPU            |
-+--------------------+----------------------------+------------+----------------+
-| **Embedding Look** | **Fetch 100+ dense vectors**| **6.0ms**  | **Memory BW**  |
-+--------------------+----------------------------+------------+----------------+
-| **Inference**      | MLP forward pass           | 1.5ms      | Compute        |
-+--------------------+----------------------------+------------+----------------+
-| **Postprocessing** | Ranking & Filtering        | 1.0ms      | CPU            |
-+--------------------+----------------------------+------------+----------------+
-| **Total**          |                            | **9.0ms**  |                |
-+--------------------+----------------------------+------------+----------------+
++--------------------+------------------------------+-----------+----------------+
+| **Phase**          | **Operation**                | **Time**  | **Bottleneck** |
++:===================+:=============================+==========:+:===============+
+| **Input Parsing**  | Request parsing              | 0.5ms     | CPU            |
++--------------------+------------------------------+-----------+----------------+
+| **Embedding Look** | **Fetch 100+ dense vectors** | **6.0ms** | **Memory BW**  |
++--------------------+------------------------------+-----------+----------------+
+| **Inference**      | MLP forward pass             | 1.5ms     | Compute        |
++--------------------+------------------------------+-----------+----------------+
+| **Postprocessing** | Ranking & Filtering          | 1.0ms     | CPU            |
++--------------------+------------------------------+-----------+----------------+
+| **Total**          |                              | **9.0ms** |                |
++--------------------+------------------------------+-----------+----------------+
 
 **Key Systems Insight**:
 In DLRM, the "Inference" (MLP) is only ~15% of the latency. The majority of time is spent in **Embedding Lookups**—retrieving massive 128-dim vectors from terabyte-scale tables. This is an **IO-bound** workload where adding more GPUs doesn't help unless you also add more **Memory Bandwidth** and **Capacity**.
@@ -614,19 +614,19 @@ Moving preprocessing to GPU can reduce total latency by 6x in some pipelines by 
 
 Beyond the model execution itself, every request pays a "tax" to the serving infrastructure. @tbl-serving-tax quantifies these overheads for a typical high-performance inference request (e.g., ResNet-50 classification).
 
-+---------------------+-------------------+------------------------+-------------------------------------+
-| **Tax Component**   | **Typical Cost**  | **Scaling Behavior**   | **Tax Evasion Strategy**            |
-+:====================+:==================+:=======================+:====================================+
-| **Network I/O**     | 1-5 ms            | Linear with payload    | Compression, Region Colocation      |
-+---------------------+-------------------+------------------------+-------------------------------------+
-| **Serialization**   | 50-500 $\mu$s     | Linear with payload    | gRPC/Protobuf (vs JSON)             |
-+---------------------+-------------------+------------------------+-------------------------------------+
-| **Queuing**         | 0.1-10 ms         | Exponential w/ load    | Dynamic Batching, Autoscaling       |
-+---------------------+-------------------+------------------------+-------------------------------------+
-| **Dispatch**        | 10-50 $\mu$s      | Constant per batch     | Kernel Fusion (reduce launches)     |
-+---------------------+-------------------+------------------------+-------------------------------------+
-| **Data Copy**       | 100-500 $\mu$s    | Linear with tensor     | Zero-Copy / Shared Memory           |
-+---------------------+-------------------+------------------------+-------------------------------------+
++-------------------+------------------+----------------------+---------------------------------+
+| **Tax Component** | **Typical Cost** | **Scaling Behavior** | **Tax Evasion Strategy**        |
++:==================+=================:+:=====================+:================================+
+| **Network I/O**   | 1-5 ms           | Linear with payload  | Compression, Region Colocation  |
++-------------------+------------------+----------------------+---------------------------------+
+| **Serialization** | 50-500 $\mu$s    | Linear with payload  | gRPC/Protobuf (vs JSON)         |
++-------------------+------------------+----------------------+---------------------------------+
+| **Queuing**       | 0.1-10 ms        | Exponential w/ load  | Dynamic Batching, Autoscaling   |
++-------------------+------------------+----------------------+---------------------------------+
+| **Dispatch**      | 10-50 $\mu$s     | Constant per batch   | Kernel Fusion (reduce launches) |
++-------------------+------------------+----------------------+---------------------------------+
+| **Data Copy**     | 100-500 $\mu$s   | Linear with tensor   | Zero-Copy / Shared Memory       |
++-------------------+------------------+----------------------+---------------------------------+
 
 : **The Serving Tax Bill**: A breakdown of non-inference latency sources. While individual components like serialization seem small ($<1$ ms), they compound. In a 5ms inference service, this "tax" can easily consume 50% of the latency budget. The primary engineering goal is to drive these costs to zero through architectural choices like gRPC and Zero-Copy data paths. {#tbl-serving-tax}
 
@@ -838,15 +838,15 @@ where $\mu$ is the service rate (requests per second the server can handle), and
 
 This equation reveals why serving systems exhibit nonlinear behavior. At 50% utilization, average **time in system** is $2\times$ the service time. At 80% utilization, it is $5\times$. At 90% utilization, it is $10\times$. Small increases in load near capacity cause disproportionate latency increases.
 
-+--------------------------+------------------------+---------------------------+
-| **Utilization ($\rho$)** | **Latency Multiple**   | **Example (5ms service)** |
-+:=========================+=======================:+==========================:+
-| 50%                      | 2.0×                   | 10ms                      |
-| 70%                      | 3.3×                   | 17ms                      |
-| 80%                      | 5.0×                   | 25ms                      |
-| 90%                      | 10.0×                  | 50ms                      |
-| 95%                      | 20.0×                  | 100ms                     |
-+--------------------------+------------------------+---------------------------+
++--------------------------+----------------------+---------------------------+
+| **Utilization ($\rho$)** | **Latency Multiple** | **Example (5ms service)** |
++:=========================+=====================:+==========================:+
+| 50%                      | 2.0×                 | 10ms                      |
+| 70%                      | 3.3×                 | 17ms                      |
+| 80%                      | 5.0×                 | 25ms                      |
+| 90%                      | 10.0×                | 50ms                      |
+| 95%                      | 20.0×                | 100ms                     |
++--------------------------+----------------------+---------------------------+
 
 : **Utilization-Latency Relationship**: Average **latency** as a multiple of service time for an M/M/1 queue. At 50% utilization, latency is 2x service time; at 90%, it reaches 10x. This nonlinear growth explains why systems that perform well at moderate load suddenly violate SLOs when traffic increases: moving from 80% to 90% utilization doubles latency. {#tbl-utilization-latency}
 
@@ -1923,19 +1923,19 @@ Optimization without measurement is guesswork. To truly master the ML node, you 
 
 To guide optimization efforts, @tbl-optimization-impact summarizes the key techniques available at the node level, their primary targets, and expected returns.
 
-+--------------------------+---------------------+-------------------+---------------------+-------------------------+
-| **Technique**            | **Target Metric**   | **Typical Gain**  | **Implement. Cost** | **Best For**            |
-+:=========================+:====================+:==================+:====================+:========================+
-| **Operator Fusion**      | Latency & Throughput| 2-5$\times$       | Medium (Compiler)   | Memory-bound layers     |
-+--------------------------+---------------------+-------------------+---------------------+-------------------------+
-| **INT8 Quantization**    | Throughput          | 3-4$\times$       | High (Calibration)  | Inference-heavy nodes   |
-+--------------------------+---------------------+-------------------+---------------------+-------------------------+
-| **Graph Compilation**    | Latency             | 1.5-3$\times$     | Low (One-line)      | Static graph models     |
-+--------------------------+---------------------+-------------------+---------------------+-------------------------+
-| **Zero-Copy Loading**    | Startup Time        | 10-50$\times$     | Low (File format)   | Autoscaling / Cold Start|
-+--------------------------+---------------------+-------------------+---------------------+-------------------------+
-| **CPU Pinning**          | Tail Latency (P99)  | 20-50% reduction  | Low (Config)        | Latency-critical apps   |
-+--------------------------+---------------------+-------------------+---------------------+-------------------------+
++-----------------------+----------------------+------------------+---------------------+--------------------------+
+| **Technique**         | **Target Metric**    | **Typical Gain** | **Implement. Cost** | **Best For**             |
++:======================+:=====================+=================:+:====================+:=========================+
+| **Operator Fusion**   | Latency & Throughput | 2-5$\times$      | Medium (Compiler)   | Memory-bound layers      |
++-----------------------+----------------------+------------------+---------------------+--------------------------+
+| **INT8 Quantization** | Throughput           | 3-4$\times$      | High (Calibration)  | Inference-heavy nodes    |
++-----------------------+----------------------+------------------+---------------------+--------------------------+
+| **Graph Compilation** | Latency              | 1.5-3$\times$    | Low (One-line)      | Static graph models      |
++-----------------------+----------------------+------------------+---------------------+--------------------------+
+| **Zero-Copy Loading** | Startup Time         | 10-50$\times$    | Low (File format)   | Autoscaling / Cold Start |
++-----------------------+----------------------+------------------+---------------------+--------------------------+
+| **CPU Pinning**       | Tail Latency (P99)   | 20-50% reduction | Low (Config)        | Latency-critical apps    |
++-----------------------+----------------------+------------------+---------------------+--------------------------+
 
 : **Node-Level Optimization Impact**: A decision matrix for selecting optimization techniques. High-impact techniques like quantization often carry higher implementation costs (calibration data requirements), while architectural changes like zero-copy loading offer dramatic gains for specific metrics (startup time) with low effort. {#tbl-optimization-impact}
 
@@ -1995,6 +1995,24 @@ The worked example in @sec-model-serving-systems-queuing-theory-tail-latency-29a
 ### Production Case Study: Serving Llama-3-8B {#sec-model-serving-systems-production-case-study-serving-llama38b-0499}
 
 To apply the principles of latency budgeting, memory management, and hardware efficiency, we analyze the production profile of a modern Large Language Model (LLM) serving workload. This case study demonstrates how physical constraints (memory bandwidth and PCIe capacity) translate directly into service-level metrics and unit economics.
+
+```{python}
+#| label: fig-kv-cache-growth
+#| echo: false
+#| fig-cap: "**The KV-Cache Explosion**: Memory usage vs. Context Length for a 70B parameter model. The linear growth of the Key-Value cache (storing attention history) quickly consumes available GPU memory (red dashed line). For batch size 32 (purple), the system hits the 'OOM Zone' at just 8k context length, forcing a trade-off between batch size (throughput) and context window (capability)."
+
+import sys
+import os
+sys.path.append(os.path.abspath("../../../calc"))
+import viz
+import matplotlib.pyplot as plt
+
+viz.set_book_style()
+viz.plot_kv_cache_growth()
+plt.show()
+```
+
+This memory pressure, visualized in @fig-kv-cache-growth, explains why long-context serving is memory-bound even on H100s. The linear growth of the KV cache with sequence length forces a hard trade-off: to support longer contexts (32k+), we must reduce batch size, which in turn kills throughput efficiency.
 
 #### Workload Profile {#sec-model-serving-systems-workload-profile-a380}
 
