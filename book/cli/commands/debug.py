@@ -97,11 +97,20 @@ def _find_chapter_qmd(book_dir: Path, chapter: str, volume: str) -> Path:
 
 
 def _get_output_path(book_dir: Path, format_type: str, volume: str) -> Optional[Path]:
-    """Get the expected output file path for a build."""
+    """Get the expected output file path for a build.
+
+    For PDF/EPUB, looks for any matching file in the output directory since
+    the filename depends on the book title configured in each volume's YAML.
+    """
+    _TITLES = {
+        "vol1": "Introduction-to-Machine-Learning-Systems",
+        "vol2": "Advanced-Machine-Learning-Systems",
+    }
+    title = _TITLES.get(volume, "Machine-Learning-Systems")
     if format_type == "pdf":
-        return book_dir / "_build" / f"pdf-{volume}" / "Machine-Learning-Systems.pdf"
+        return book_dir / "_build" / f"pdf-{volume}" / f"{title}.pdf"
     elif format_type == "epub":
-        return book_dir / "_build" / f"epub-{volume}" / "Machine-Learning-Systems.epub"
+        return book_dir / "_build" / f"epub-{volume}" / f"{title}.epub"
     elif format_type == "html":
         return book_dir / "_build" / f"html-{volume}" / "index.html"
     return None

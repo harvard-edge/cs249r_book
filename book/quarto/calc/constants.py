@@ -95,6 +95,12 @@ MOBILE_TDP_W = 3 * watt
 PHONE_BATTERY_WH = 15 * watt * hour
 OBJECT_DETECTOR_POWER_W = 2 * watt
 
+# --- Video ---
+VIDEO_1080P_WIDTH = 1920
+VIDEO_1080P_HEIGHT = 1080
+VIDEO_BYTES_PER_PIXEL_RGB = 3 * byte
+VIDEO_FPS_STANDARD = Q_(30, 'Hz')
+
 # --- Models & Workloads ---
 ureg.define('param = 1 * count')
 param = ureg.param
