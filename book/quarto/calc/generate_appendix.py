@@ -4,9 +4,12 @@
 
 import inspect
 import pandas as pd
-from . import constants
+try:
+    from . import constants
+except ImportError:
+    import constants
 
-OUTPUT_FILE = "book/quarto/contents/vol1/appendix/assumptions.qmd"
+OUTPUT_FILE = "../contents/vol1/backmatter/appendix_assumptions.qmd"
 
 def main():
     records = []
@@ -48,8 +51,8 @@ This appendix lists the physical constants, hardware specifications, and economi
     
     print(md)
     # In a real workflow, we would write this to OUTPUT_FILE
-    # with open(OUTPUT_FILE, "w") as f:
-    #     f.write(md)
+    with open(OUTPUT_FILE, "w") as f:
+        f.write(md)
 
 if __name__ == "__main__":
     main()

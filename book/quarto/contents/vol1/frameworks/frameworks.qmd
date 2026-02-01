@@ -59,7 +59,7 @@ The architectural foundations established in @sec-dnn-architectures defined *wha
 
 A framework is to machine learning what a compiler is to traditional programming. A C compiler translates human-readable code into optimized machine instructions, managing register allocation, instruction scheduling, and memory layout. An ML framework translates high-level model definitions into hardware-specific execution plans, managing operator fusion, memory reuse, and device placement. This analogy is more than metaphor: modern frameworks literally include compilers, as we will see throughout this chapter.
 
-Every ML framework, regardless of API or design philosophy, must solve three fundamental problems. First, the *execution problem*: when and how should computation happen? Should operations execute immediately as written (**eager execution**), or should the framework build a complete description first and optimize before executing (graph execution)? This choice shapes debugging capability, optimization potential, and deployment flexibility. Second, the *differentiation problem*: how should the framework compute gradients automatically? Training requires derivatives of a loss function with respect to millions or billions of parameters, and manual differentiation is error-prone at this scale. Frameworks must implement automatic differentiation systems that compute exact gradients for arbitrary compositions of operations while managing the memory overhead of storing intermediate values. Third, the *hardware abstraction problem*: how should the framework target diverse hardware from a single interface? The same model definition should run on CPUs, GPUs, TPUs, and mobile devices, each with different memory constraints and optimal execution patterns.
+Every ML framework, regardless of API or design philosophy, must solve three fundamental problems. First, the *execution problem*: when and how should computation happen? Should operations execute immediately as written (**eager execution**), or should the framework build a complete description first and optimize before executing (graph execution)? This choice shapes debugging capability, optimization potential, and deployment flexibility. Second, the *differentiation problem*: how should the framework compute gradients automatically? As established in @sec-deep-learning-systems-foundations, training requires derivatives of a loss function with respect to millions or billions of parameters, and manual differentiation is error-prone at this scale. Frameworks must implement **automatic differentiation** systems that compute exact gradients for arbitrary compositions of operations while managing the memory overhead of storing intermediate values. Third, the *hardware abstraction problem*: how should the framework target diverse hardware from a single interface? The same model definition should run on CPUs, GPUs, TPUs, and mobile devices, each with different memory constraints and optimal execution patterns.
 
 These three problems are deeply interconnected. The execution model determines when differentiation occurs and what optimizations are possible. The abstraction layer must support both execution styles across all hardware targets. Solving any one problem in isolation leads to frameworks that excel in narrow contexts but fail in broader deployment. This chapter examines how frameworks evolved to solve these problems and the trade-offs each solution entails, tracing the history from early libraries through modern frameworks before examining each problem in depth.
 
@@ -72,7 +72,7 @@ Your "Source Code" is the model architecture (the **$Ops$** term). The framework
 
 1.  Minimize **Data Movement ($D$)** through techniques like kernel fusion.
 2.  Maximize **Utilization ($\eta$)** by matching operations to specialized hardware units like Tensor Cores.
-3.  Minimize **Overhead ($L_{fixed}$)** through efficient asynchronous dispatch and graph capture.
+3.  Minimize **Overhead ($L_{lat}$)** through efficient asynchronous dispatch and graph capture.
 
 Choosing a framework means choosing the compiler that determines how efficiently your model utilizes hardware.
 :::
@@ -1020,16 +1020,16 @@ The optimal framework execution strategy depends on which Iron Law term dominate
 +-----------------------+--------------------------------------+------------------------------------+--------------------------------------------+
 | **Archetype**         | **Dominant Iron Law Term**           | **Optimal Framework Strategy**     | **Rationale**                              |
 +:======================+:=====================================+:===================================+:===========================================+
-| **ResNet-50**         | $\frac{Ops}{P \cdot \eta}$ (Compute) | **TensorRT** (inference)           | Kernel fusion maximizes MFU; compute-bound |
+| **ResNet-50**         | $\frac{O}{R_{peak} \cdot \eta}$ (Compute) | **TensorRT** (inference)           | Kernel fusion maximizes MFU; compute-bound |
 | **(Compute Beast)**   |                                      | **torch.compile** (training)       | workloads benefit most from optimization   |
 +-----------------------+--------------------------------------+------------------------------------+--------------------------------------------+
-| **GPT-2**             | $\frac{D}{B}$ (Memory Bandwidth)     | **torch.compile**                  | Kernel fusion reduces HBM round-trips;     |
+| **GPT-2**             | $\frac{D_{vol}}{BW}$ (Memory Bandwidth)     | **torch.compile**                  | Kernel fusion reduces HBM round-trips;     |
 | **(Bandwidth Hog)**   |                                      |                                    | keeps data in cache to mitigate bandwidth  |
 +-----------------------+--------------------------------------+------------------------------------+--------------------------------------------+
-| **DLRM**              | $\frac{D}{B}$ (Random Access) +      | **Eager** with specialized kernels | Embedding lookups are inherently irregular |
+| **DLRM**              | $\frac{D_{vol}}{BW}$ (Random Access) +      | **Eager** with specialized kernels | Embedding lookups are inherently irregular |
 | **(Sparse Scatter)**  | $T_{network}$                        | (FBGEMM)                           | and dynamic; compilation gains are small   |
 +-----------------------+--------------------------------------+------------------------------------+--------------------------------------------+
-| **DS-CNN**            | $L_{fixed}$ (Overhead)               | **AOT compilation** (TFLite, ONNX) | Sub-ms inference; every microsecond of     |
+| **DS-CNN**            | $L_{lat}$ (Overhead)               | **AOT compilation** (TFLite, ONNX) | Sub-ms inference; every microsecond of     |
 | **(Tiny Constraint)** |                                      |                                    | Python overhead is unacceptable            |
 +-----------------------+--------------------------------------+------------------------------------+--------------------------------------------+
 
@@ -1661,7 +1661,7 @@ z.backward()  # Computes wrong gradient!
 
 These three principles connect directly to the framework's role as a compiler for the Silicon Contract. The reverse-linked graph determines which operations the backward pass must execute (the $Ops$ term). The memory-compute trade-off governs how much data the framework must move through the memory hierarchy (the $D$ term). And the extensibility mechanisms allow engineers to tune both terms for their specific workload. The interaction between autograd memory management and numerical precision leads naturally to mixed-precision training, which further reduces the $D$ term.
 
-**Mixed-Precision Training Support.** Mixed precision exploits a hardware asymmetry to improve two Iron Law terms simultaneously: Tensor Cores execute FP16 matrix multiplications at 2x the throughput of FP32 (increasing effective $Ops/P$), while FP16 activations halve the memory footprint (reducing $D$). Improving both terms simultaneously is rare; most optimizations improve one at the expense of the other.
+**Mixed-Precision Training Support.** Mixed precision exploits a hardware asymmetry to improve two Iron Law terms simultaneously: Tensor Cores execute FP16 matrix multiplications at 2x the throughput of FP32 (increasing effective $O/R_{peak}$), while FP16 activations halve the memory footprint (reducing $D_{vol}$). Improving both terms simultaneously is rare; most optimizations improve one at the expense of the other.
 
 Frameworks exploit this through automatic mixed-precision APIs that select reduced precision for compute-intensive operations while maintaining FP32 where numerical stability demands it. Inside these APIs, frameworks automatically apply precision rules: matrix multiplications and convolutions use FP16 for bandwidth efficiency, while numerically sensitive operations like softmax and layer normalization remain in FP32. This selective precision maintains accuracy while achieving speedups on modern GPUs with specialized hardware units. Because FP16 has a narrower dynamic range than FP32, gradients can underflow to zero during backpropagation. Loss scaling addresses this by multiplying the loss by a large factor before the backward pass, then dividing gradients by the same factor afterward.
 
@@ -2107,7 +2107,7 @@ The cost of moving data between devices varies by orders of magnitude depending 
 
 : **Device Transfer Overhead.** Transfer time for a 4 MB tensor across different interconnects. PCIe bandwidth shown is unidirectional (typical for GPU transfers), with full-duplex operation providing 2x total bandwidth. NVLink bandwidth is bidirectional (300 GB/s per direction). Transfer times dominate for small operations, making device placement critical for performance. {#tbl-device-transfer-overhead}
 
-These numbers connect directly to the Iron Law of performance. Every cross-device transfer inflates the data movement term ($D/B$) at a fraction of the available on-device bandwidth. A PCIe 4.0 transfer at 32 GB/s means moving a 1 GB activation tensor adds approximately 31 ms to the data movement cost, equivalent to roughly 9.4 trillion operations on a GPU delivering 300 TFLOPS. For a model forward pass taking 0.5 ms on GPU, transferring inputs and outputs over PCIe 3.0 doubles the total latency. When batches are small or models are lightweight, transfer overhead can exceed computation time entirely.
+These numbers connect directly to the Iron Law of performance. Every cross-device transfer inflates the data movement term ($D_{vol}/BW$) at a fraction of the available on-device bandwidth. A PCIe 4.0 transfer at 32 GB/s means moving a 1 GB activation tensor adds approximately 31 ms to the data movement cost, equivalent to roughly 9.4 trillion operations on a GPU delivering 300 TFLOPS. For a model forward pass taking 0.5 ms on GPU, transferring inputs and outputs over PCIe 3.0 doubles the total latency. When batches are small or models are lightweight, transfer overhead can exceed computation time entirely.
 
 The systems implication is clear: every tensor should reside on the device where it will be consumed, and transfers should occur only when unavoidable. Frameworks track device placement for every tensor and raise errors when operations attempt to combine tensors from different devices, enforcing this discipline at the API level.
 
@@ -2115,7 +2115,7 @@ The systems implication is clear: every tensor should reside on the device where
 
 When transfers are unavoidable, the next optimization is to hide their latency by executing them concurrently with computation. Modern GPUs contain independent hardware units for computation (SM clusters) and data transfer (copy engines), enabling true simultaneous execution. The framework abstraction that exposes this hardware parallelism is the *CUDA stream*: an independent execution queue where operations execute sequentially within a stream but concurrently across streams.
 
-Without explicit concurrency control, the GPU serializes all operations on a single default stream, leaving execution units idle while data transfers complete. By placing data transfers on one stream and computation on another, the effective latency approaches the theoretical minimum of $\max(\text{compute\_time}, \text{transfer\_time})$ rather than their sum. Stream-based overlap effectively hides the $D/B$ penalty when computation is the longer operation (see @lst-overlap-compute-transfer):
+Without explicit concurrency control, the GPU serializes all operations on a single default stream, leaving execution units idle while data transfers complete. By placing data transfers on one stream and computation on another, the effective latency approaches the theoretical minimum of $\max(\text{compute\_time}, \text{transfer\_time})$ rather than their sum. Stream-based overlap effectively hides the $D_{vol}/BW$ penalty when computation is the longer operation (see @lst-overlap-compute-transfer):
 
 ::: {#lst-overlap-compute-transfer lst-cap="**Overlapping Computation and Transfer**: Use separate streams for data transfer and computation to hide transfer latency. Pinned memory enables truly asynchronous non-blocking transfers."}
 ```{.python}
@@ -3162,7 +3162,7 @@ JAX makes the most radical trade-off. The model is a pure function[^pure-functio
 
 [^fn-xla]: **XLA (Accelerated Linear Algebra)**: Google's domain-specific compiler released in March 2017, optimizing tensor operations across CPUs, GPUs, and TPUs. The name emphasizes that linear algebra operations (matrix multiplies, convolutions) dominate ML computation. Achieves 3-10x speedups through operation fusion and hardware-specific codegen. Now part of OpenXLA (2022), a cross-industry effort including Google, Meta, NVIDIA, and Apple.
 
-[^fn-onnx]: **ONNX (Open Neural Network Exchange)**: Launched September 2017 by Facebook and Microsoft to solve framework fragmentation. Originally named "Toffee" internally at Facebook, the name change emphasized its role as an exchange format. Became a Linux Foundation project in 2019. Enables training in PyTorch and deploying via TensorFlow Lite or TensorRT without manual conversion.
+[^fn-onnx]: **ONNX (Open Neural Network Exchange)** [@bai2019onnx]: Launched September 2017 by Facebook and Microsoft to solve framework fragmentation. Originally named "Toffee" internally at Facebook, the name change emphasized its role as an exchange format. Became a Linux Foundation project in 2019. Enables training in PyTorch and deploying via TensorFlow Lite or TensorRT without manual conversion.
 
 No framework optimizes all three problems simultaneously; each makes deliberate trade-offs that shape everything from API design to performance characteristics.
 
@@ -3407,8 +3407,8 @@ The bias addition and ReLU follow similar patterns, each adding a node to the au
 # MNIST training step roofline analysis on A100
 mnist_total_flops = 40e6          # ~40M FLOPs
 mnist_mem_traffic_bytes = 5e6     # ~5 MB
-a100_peak_tflops = 312e12         # 312 TFLOPS (FP16 tensor)
-a100_mem_bw_bytes = 2e12          # 2 TB/s
+a100_peak_tflops = A100_FLOPS_FP16_TENSOR.to(flop/second).magnitude
+a100_mem_bw_bytes = A100_MEM_BW.to(byte/second).magnitude
 
 mnist_t_compute_us = f"{mnist_total_flops / a100_peak_tflops * 1e6:.1f}"
 mnist_t_memory_us = f"{mnist_mem_traffic_bytes / a100_mem_bw_bytes * 1e6:.1f}"
@@ -3420,8 +3420,8 @@ mnist_t_overhead_us = f"{mnist_n_ops * mnist_us_per_op:.0f}"
 
 Total: ~40M FLOPs, ~5MB memory traffic. On an A100:
 
-- $T_{\text{compute}} \approx 40\text{M} / 312\text{T} \approx `{python} mnist_t_compute_us`\mu\text{s}$
-- $T_{\text{memory}} \approx 5\text{MB} / 2\text{TB/s} \approx `{python} mnist_t_memory_us`\mu\text{s}$
+- $T_{\text{compute}} \approx 40\text{M} / `{python} f"{a100_peak_tflops/1e12:.0f}"`\text{T} \approx `{python} mnist_t_compute_us`\mu\text{s}$
+- $T_{\text{memory}} \approx 5\text{MB} / `{python} f"{a100_mem_bw_bytes/1e12:.0f}"`\text{TB/s} \approx `{python} mnist_t_memory_us`\mu\text{s}$
 - $T_{\text{overhead}} \approx 6\text{ ops} \times 5\mu\text{s} \approx `{python} mnist_t_overhead_us`\mu\text{s}$
 
 **The training step is overhead-bound!** For small models, Python dispatch and kernel launch dominate. This explains why:

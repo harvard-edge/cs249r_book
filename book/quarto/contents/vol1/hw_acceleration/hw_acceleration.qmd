@@ -115,7 +115,7 @@ Hardware acceleration targets specific terms in the **Iron Law of ML Systems**. 
 
 ::: {.callout-notebook title="The Iron Law of Acceleration"}
 
-Hardware acceleration does not speed up the entire system; it *only speeds up the parallelizable fraction ($P$)*. This is governed by **Amdahl's Law for AI**:
+Hardware acceleration does not speed up the entire system; it *only speeds up the parallelizable fraction ($P$)*. This is governed by **Amdahl's Law for AI** [@amdahl1967validity]:
 
 $$ Speedup = \frac{1}{(1 - P) + \frac{P}{S}} $$
 
@@ -201,7 +201,7 @@ $$Speedup = \frac{1}{(1-0.80) + \frac{0.80}{500}} = \frac{1}{0.20 + 0.0016} \app
 The **Bandwidth Hog** archetype suffers more from serial bottlenecks. Even infinite accelerator speed yields only $1/(1-P) = `{python} amdahl_gpt2_ceil_str`\times$ maximum speedup. This is why LLM inference optimization focuses on reducing the serial fraction (batching, speculative decoding) rather than raw hardware speed.
 :::
 
-These examples reveal that the critical question for any hardware optimization is not "how fast is the chip?" but rather: *is this workload limited by how fast we can compute, or how fast we can move data?* The answer determines which accelerator to choose, which optimizations matter, and whether a 10x more powerful chip will actually help. The **Roofline Model** (@sec-ai-acceleration-roofline-model) provides the analytical framework for answering this question. It plots an operation's **arithmetic intensity** (operations per byte of memory traffic) against hardware capabilities, revealing whether performance is capped by compute or bandwidth. A dense matrix multiplication with high arithmetic intensity benefits from more TFLOPS; a LayerNorm with low arithmetic intensity benefits from more memory bandwidth. ResNet-50's convolutions are compute-bound while GPT-2's attention layers are memory-bound, and this distinction is precisely why these architectures require different optimization strategies.
+These examples reveal that the critical question for any hardware optimization is not "how fast is the chip?" but rather: *is this workload limited by how fast we can compute, or how fast we can move data?* The answer determines which accelerator to choose, which optimizations matter, and whether a 10x more powerful chip will actually help. The **Roofline Model** (formally defined in @sec-system-foundations-roofline-model-5f7c) provides the analytical framework for answering this question. It plots an operation's **arithmetic intensity** (operations per byte of memory traffic) against hardware capabilities, revealing whether performance is capped by compute or bandwidth. A dense matrix multiplication with high arithmetic intensity benefits from more TFLOPS; a LayerNorm with low arithmetic intensity benefits from more memory bandwidth. ResNet-50's convolutions are compute-bound while GPT-2's attention layers are memory-bound, and this distinction is precisely why these architectures require different optimization strategies.
 
 With this analytical lens in place, the chapter proceeds through four major topics. First, we trace the historical evolution of domain-specific architectures, from floating-point coprocessors through graphics processors to contemporary AI accelerators. Second, we examine the computational primitives that characterize ML workloads (matrix multiplication, vector operations, and nonlinear activation functions) and analyze how specialized hardware optimizes these operations through innovations such as systolic arrays and tensor cores. Third, we turn to memory hierarchy design, where data movement energy costs exceeding computation costs by more than 100x make on-chip buffer optimization and high-bandwidth memory interfaces critical. Fourth, the software stack: compiler optimization and runtime system support determine the extent to which theoretical hardware capabilities translate into measurable performance. Throughout, the focus remains on single-machine systems; multi-machine coordination is covered in Volume II.
 
@@ -315,7 +315,7 @@ These diverse domains share common characteristics: identification of domain-spe
 
 ### Emergence of Domain-Specific Architectures {#sec-ai-acceleration-emergence-domainspecific-architectures-e56e}
 
-These diverse acceleration patterns converged in a broader architectural shift. The emergence of domain-specific architectures (DSA)[^fn-dsa] marks a transition in computer system design, driven by two converging factors: the breakdown of traditional scaling laws and the increasing computational demands of specialized workloads. The slowdown of Moore's Law[^fn-moores-law-end], which previously ensured predictable enhancements in transistor density every 18 to 24 months, and the end of Dennard scaling[^fn-dennard-scaling], which permitted frequency increases without corresponding power increases, created a performance and efficiency bottleneck in general-purpose computing. As John Hennessy and David Patterson noted in their 2017 Turing Lecture [@HennessyPatterson2017Turing][^fn-hennessy-patterson], these limitations signaled the onset of a new era in computer architecture centered on domain-specific solutions that optimize hardware for specialized workloads.
+These diverse acceleration patterns converged in a broader architectural shift. The emergence of domain-specific architectures (DSA)[^fn-dsa] marks a transition in computer system design, driven by two converging factors: the breakdown of traditional scaling laws [@esmaeilzadeh2011dark] and the increasing computational demands of specialized workloads. The slowdown of Moore's Law[^fn-moores-law-end], which previously ensured predictable enhancements in transistor density every 18 to 24 months, and the end of Dennard scaling[^fn-dennard-scaling] [@dennard1974design], which permitted frequency increases without corresponding power increases, created a performance and efficiency bottleneck in general-purpose computing. As John Hennessy and David Patterson noted in their 2017 Turing Lecture [@HennessyPatterson2017Turing][^fn-hennessy-patterson], these limitations signaled the onset of a new era in computer architecture centered on domain-specific solutions that optimize hardware for specialized workloads.
 
 [^fn-dsa]: **Domain-Specific Architectures (DSA)**: Computing architectures optimized for specific application domains rather than general-purpose computation. Unlike CPUs designed for flexibility, DSAs sacrifice programmability for dramatic efficiency gains. Google's TPU achieves 15-30$\times$ better performance per watt than GPUs for neural networks, while video codecs provide 100-1000$\times$ improvements over software decoding. The 2018 Turing Award recognized this shift as the defining trend in modern computer architecture.
 
@@ -324,6 +324,28 @@ These diverse acceleration patterns converged in a broader architectural shift. 
 [^fn-dennard-scaling]: **Dennard Scaling**: Robert Dennard's 1974 principle that as transistors shrink, their power density remains constant, allowing higher frequencies without increased power consumption. This enabled CPUs to reach 3+ GHz by 2005. However, quantum effects and leakage current ended Dennard scaling around 2005, forcing architects to prioritize efficiency over raw speed and leading to the multi-core revolution.
 
 [^fn-hennessy-patterson]: **Hennessy & Patterson**: John Hennessy (former President of Stanford) and David Patterson (UC Berkeley Professor) are the "godfathers" of modern computer architecture. They pioneered Reduced Instruction Set Computing (RISC), transforming processor design from an art into a quantitative science. Their textbook *Computer Architecture: A Quantitative Approach* is the definitive reference in the field. They received the 2017 ACM A.M. Turing Award for these contributions. Patterson later joined Google Brain to help design the TPU, directly applying their principles to AI acceleration.
+
+### The Technology S-Curve: Why We Must Shift {#sec-ai-acceleration-technology-s-curve}
+
+To understand the gravity of this transition, we must view it through the lens of the **Technology S-Curve**. Every computing paradigm follows a distinct lifecycle characterized by three phases: **Ferment** (initial slow progress), **Take-off** (exponential growth), and **Saturation** (diminishing returns due to physical limits).
+
+:::
+
+```{python}
+#| label: fig-tech-s-curve
+#| fig-cap: "**The Twin S-Curves of Modern Computing**. General-purpose CPUs (gray) enjoyed decades of exponential growth driven by Moore's Law and Dennard Scaling. As physics constrained this curve around 2010 (Saturation), the industry was forced to jump to a new curve: Domain Specific Architectures (blue). We are currently in the **Take-off** phase of this new paradigm, where massive efficiency gains are unlocked by specializing hardware for linear algebra, albeit at the cost of general programmability."
+#| echo: false
+
+import matplotlib.pyplot as plt
+from calc import viz
+from calc.ch_hw_acceleration import plot_technology_s_curve
+
+viz.set_book_style()
+plot_technology_s_curve()
+plt.show()
+```
+
+As @fig-tech-s-curve illustrates, general-purpose computing has entered its saturation phase. The "easy" gains from shrinking transistors are gone. To sustain the exponential growth required by AI models (which are growing 4--10$\times$ faster than Moore's Law), we cannot simply wait for the next CPU generation. We must shift to a new curve—one defined not by clock speed, but by **Architecture**. To understand how we reached this inflection point, we must first examine the mechanics of the scaling laws that once fueled the general-purpose era.
 
 Historically, improvements in processor performance depended on semiconductor process scaling and increasing clock speeds. As power density limitations restricted further frequency scaling and transistor miniaturization encountered increasing physical and economic constraints, architects explored alternative approaches to sustain computational growth. The result was a shift toward domain-specific architectures, which dedicate silicon resources to optimize computation for specific application domains, trading flexibility for efficiency.
 
@@ -1753,18 +1775,72 @@ These dynamics help explain the rapid adoption of newer accelerators despite hig
 
 @tbl-accelerator-economics provides representative cost-performance data for common accelerators. Note that these figures are approximate and vary by vendor, region, and purchase volume; the key insight is the trend rather than the absolute numbers. **Observe how the cost per TFLOP has collapsed with each generation, even as the absolute power requirement (TDP) has climbed to nearly 1,000 Watts for flagship units, reflecting the industry's shift toward density over raw unit cost.**
 
+```{python}
+#| label: accelerator-economics-calc
+#| echo: false
+
+from calc.constants import (
+    V100_FLOPS_FP16_TENSOR, 
+    A100_FLOPS_FP16_TENSOR, 
+    H100_FLOPS_TF32, 
+    TPUV4_FLOPS_BF16, 
+    TFLOPs, second
+)
+
+# Prices (approximate)
+price_v100 = 9000
+price_a100 = 15000
+price_h100 = 25000  # Lower bound of range
+price_tpu = 8000
+price_gaudi = 12000
+
+# Specs (magnitude)
+# V100
+v100_tf = V100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
+v100_ratio = price_v100 / v100_tf
+
+# A100
+a100_tf = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
+a100_ratio = price_a100 / a100_tf
+
+# H100 (TF32)
+h100_tf = H100_FLOPS_TF32.to(TFLOPs/second).magnitude
+h100_ratio = price_h100 / h100_tf
+
+# TPUv4
+tpu_tf = TPUV4_FLOPS_BF16.to(TFLOPs/second).magnitude
+tpu_ratio = price_tpu / tpu_tf
+
+# Gaudi 2 (Static spec for now as not in constants)
+gaudi_tf = 200
+gaudi_ratio = price_gaudi / gaudi_tf
+
+# Format strings
+v100_price_str = f"~${price_v100:,}"
+a100_price_str = f"~${price_a100:,}"
+h100_price_str = f"~${price_h100:,}-30,000"
+tpu_price_str = f"~${price_tpu:,}*"
+gaudi_price_str = f"~${price_gaudi:,}"
+
+v100_pp_str = f"${v100_ratio:.0f}/TFLOP"
+a100_pp_str = f"${a100_ratio:.0f}/TFLOP"
+h100_pp_str = f"~${h100_ratio:.0f}/TFLOP"
+tpu_pp_str = f"~${tpu_ratio:.0f}/TFLOP"
+gaudi_pp_str = f"${gaudi_ratio:.0f}/TFLOP"
+```
+
 +-------------------+----------------------+-------------------------------------------+--------------------------+-----------------------+
 | **Accelerator**   | **List Price (USD)** | **Peak FLOPS (FP16)**                     | **Memory Bandwidth**     | **Price/Performance** |
 +:==================+=====================:+==========================================:+=========================:+======================:+
-| **NVIDIA V100**   | ~$9,000              | `{python} v100_tflops` TFLOPS             | `{python} v100_bw` GB/s  | $72/TFLOP             |
+| **NVIDIA V100**   | `{python} v100_price_str` | `{python} v100_tflops` TFLOPS             | `{python} v100_bw` GB/s  | `{python} v100_pp_str`             |
 +-------------------+----------------------+-------------------------------------------+--------------------------+-----------------------+
-| **NVIDIA A100**   | ~$15,000             | `{python} a100_tflops_fp16` TFLOPS        | `{python} a100_bw` GB/s  | $48/TFLOP             |
+| **NVIDIA A100**   | `{python} a100_price_str` | `{python} a100_tflops_fp16` TFLOPS        | `{python} a100_bw` GB/s  | `{python} a100_pp_str`             |
 +-------------------+----------------------+-------------------------------------------+--------------------------+-----------------------+
-| **NVIDIA H100**   | ~$25,000-30,000      | `{python} h100_tflops_tf32` TFLOPS (TF32) | `{python} h100_bw` GB/s  | ~$33/TFLOP            |
+| **NVIDIA H100**   | `{python} h100_price_str` | `{python} h100_tflops_tf32` TFLOPS (TF32) | `{python} h100_bw` GB/s  | `{python} h100_pp_str`            |
 +-------------------+----------------------+-------------------------------------------+--------------------------+-----------------------+
-| **Google TPUv4**  | ~$8,000*             | `{python} tpuv4_tflops` TFLOPS (BF16)     | `{python} tpuv4_bw` GB/s | ~$29/TFLOP            |
+| **Google TPUv4**  | `{python} tpu_price_str`  | `{python} tpuv4_tflops` TFLOPS (BF16)     | `{python} tpuv4_bw` GB/s | `{python} tpu_pp_str`            |
 +-------------------+----------------------+-------------------------------------------+--------------------------+-----------------------+
-| **Intel Gaudi 2** | ~$12,000             | 200 TFLOPS (INT8)                         | 800 GB/s                 | $60/TFLOP             |
+| **Intel Gaudi 2** | `{python} gaudi_price_str` | 200 TFLOPS (INT8)                         | 800 GB/s                 | `{python} gaudi_pp_str`             |
 +-------------------+----------------------+-------------------------------------------+--------------------------+-----------------------+
 
 : **Accelerator Cost-Performance Comparison.** Hardware costs evaluated against computational capabilities for optimal deployment strategy selection. Newer accelerators offer better price-performance ratios, though total cost of ownership includes power consumption, cooling requirements, and infrastructure costs. Prices are approximate list prices and vary by region and volume; TPU pricing estimated from cloud rates. {#tbl-accelerator-economics}
@@ -1949,13 +2025,13 @@ As models increase in size and complexity, improvements in memory capacity and b
 
 One way to quantify this challenge is by comparing the data transfer time with the time required for computations. Specifically, we define the memory transfer time as
 $$
-T_{\text{mem}} = \frac{M_{\text{total}}}{B_{\text{mem}}},
+T_{\text{mem}} = \frac{D_{\text{vol}}}{BW},
 $$
-where $M_{\text{total}}$ is the total data volume and $B_{\text{mem}}$ is the available memory bandwidth. In contrast, the compute time is given by
+where $D_{\text{vol}}$ is the total data volume and $BW$ is the available memory bandwidth. In contrast, the compute time is given by
 $$
-T_{\text{compute}} = \frac{\text{FLOPs}}{P_{\text{peak}}},
+T_{\text{compute}} = \frac{\text{FLOPs}}{R_{\text{peak}}},
 $$
-with the number of floating-point operations (FLOPs) divided by the peak hardware throughput, $P_{\text{peak}}$. When $T_{\text{mem}} > T_{\text{compute}}$, the system becomes memory-bound, meaning that the processing elements spend more time waiting for data than performing computations. This imbalance demonstrates the need for memory-optimized architectures and efficient data movement strategies to sustain high performance.
+with the number of floating-point operations (FLOPs) divided by the peak hardware throughput, $R_{\text{peak}}$. When $T_{\text{mem}} > T_{\text{compute}}$, the system becomes memory-bound, meaning that the processing elements spend more time waiting for data than performing computations. This imbalance demonstrates the need for memory-optimized architectures and efficient data movement strategies to sustain high performance.
 
 @fig-memory-wall quantifies this disparity for specific models and hardware generations, showing how model parameter counts have outpaced memory bandwidth improvements. The gap between these curves, from AlexNet to trillion-parameter models, represents the engineering challenge that drives accelerator memory system design.
 
@@ -2101,11 +2177,11 @@ At the highest level, large-capacity but slow storage devices provide long-term 
 +:=====================================+====================:+:==============+:=============+:=====================================================================+
 | **Registers**                        | ~1 cycle            | Highest       | Few values   | Storing operands for immediate computation                           |
 +--------------------------------------+---------------------+---------------+--------------+----------------------------------------------------------------------+
-| **L1/L2 Cache (SRAM)**               | ~1-10 ns            | High          | KBs-MBs      | Caching frequently accessed activations and small weight blocks      |
+| **L1/L2 Cache (SRAM)**               | ~1-10 ns            | High          | KiBs-MiBs      | Caching frequently accessed activations and small weight blocks      |
 +--------------------------------------+---------------------+---------------+--------------+----------------------------------------------------------------------+
-| **Scratchpad Memory**                | ~5-20 ns            | High          | MBs          | Software-managed storage for intermediate computations               |
+| **Scratchpad Memory**                | ~5-20 ns            | High          | MiBs          | Software-managed storage for intermediate computations               |
 +--------------------------------------+---------------------+---------------+--------------+----------------------------------------------------------------------+
-| **High-Bandwidth Memory (HBM)**      | ~100 ns             | Very High     | GBs          | Storing large model parameters and activations for high-speed access |
+| **High-Bandwidth Memory (HBM)**      | ~100 ns             | Very High     | GiBs          | Storing large model parameters and activations for high-speed access |
 +--------------------------------------+---------------------+---------------+--------------+----------------------------------------------------------------------+
 | **Off-Chip DRAM (DDR, GDDR, LPDDR)** | ~50-150 ns          | Moderate      | GBs-TBs      | Storing entire model weights that do not fit on-chip                 |
 +--------------------------------------+---------------------+---------------+--------------+----------------------------------------------------------------------+
@@ -2374,7 +2450,7 @@ The Roofline Model answers this question by plotting arithmetic intensity agains
 
 The roofline model[^fn-roofline-etymology] [@williams2009roofline] provides the standard framework for understanding whether workloads are compute-bound or memory-bound, directly connecting the memory wall discussion to practical performance analysis. This model enables quantitative reasoning about accelerator utilization and guides optimization decisions.
 
-[^fn-roofline-etymology]: **Roofline Model**: Named for its visual appearance when plotted: a flat horizontal line (the compute ceiling) meets a sloped line (the memory ceiling) forming a shape resembling a building roofline. Samuel Williams, Andrew Waterman, and David Patterson introduced this visualization at UC Berkeley in 2009. The metaphor captures how workloads hit different "ceilings" depending on their arithmetic intensity, making performance bounds intuitive at a glance.
+[^fn-roofline-etymology]: **Roofline Model** [@williams2009roofline]: Named for its visual appearance when plotted: a flat horizontal line (the compute ceiling) meets a sloped line (the memory ceiling) forming a shape resembling a building roofline. Samuel Williams, Andrew Waterman, and David Patterson introduced this visualization at UC Berkeley in 2009. The metaphor captures how workloads hit different "ceilings" depending on their arithmetic intensity, making performance bounds intuitive at a glance.
 
 **Model Definition**: Performance is bounded by two ceilings:
 $$\text{Attainable Performance} = \min(\text{Peak Compute}, \text{Peak Bandwidth} \times \text{Arithmetic Intensity})$$
@@ -2599,8 +2675,11 @@ dense_total_mb = (dense_input_kb * 1024 + dense_weights_mb * 1e6 + dense_output_
 dense_ai = dense_total_mflops / dense_total_mb  # FLOP/byte
 
 # Attainable performance (A100: 2039 GB/s bandwidth)
-dense_attainable_tflops = 2039 * dense_ai / 1e3  # ~63 TFLOPS (rounded from 2039 * 31.5 / 1000)
-dense_util_pct = dense_attainable_tflops / 312 * 100  # % of peak FP16
+a100_bw = A100_MEM_BW.to(GB/second).magnitude
+a100_peak = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
+
+dense_attainable_tflops = a100_bw * dense_ai / 1e3  # ~63 TFLOPS
+dense_util_pct = dense_attainable_tflops / a100_peak * 100  # % of peak FP16
 
 dense_total_mflops_str = f"{dense_total_mflops:.0f}"
 dense_input_kb_str = f"{dense_input_kb:.0f}"
@@ -2632,7 +2711,7 @@ ln_total_mb = ln_input_mb + ln_output_mb + ln_params_kb / 1024  # 50.4 MB
 ln_ai = ln_total_mflops / ln_total_mb  # FLOP/byte
 
 # Attainable performance
-ln_attainable_tflops = 2000 * ln_ai / 1e3  # 3 TFLOPS (using rounded 2000 GB/s)
+ln_attainable_tflops = a100_bw * ln_ai / 1e3  # 3 TFLOPS (using 2039 GB/s)
 
 ln_elements_m_str = f"{ln_elements_m:.1f}"
 ln_total_mflops_str = f"{ln_total_mflops:.1f}"
@@ -2841,7 +2920,7 @@ As this derivation demonstrates, the Roofline model provides the diagnostic fram
 
 The Roofline analysis taught us to diagnose whether specific operations are compute-bound or memory-bound on given hardware. We saw that ResNet-50's convolutions achieve high arithmetic intensity (50-200 FLOP/byte) and operate in the compute-bound regime, while GPT-2's attention layers achieve only 2-5 FLOP/byte and are severely memory-bound. But diagnosis is only half the challenge. Once we know that LayerNorm achieves just 1-2 FLOP/byte on an A100, the question becomes: how do we execute it efficiently despite this limitation? This is the domain of hardware mapping, the art of translating abstract computational graphs into concrete execution plans that exploit accelerator architectures while respecting their constraints.
 
-The memory system challenges examined in @sec-ai-acceleration-understanding-ai-memory-wall-3ea9 established *why* memory access dominates modern AI systems: DRAM access consumes 100-200x more energy than a multiply-accumulate operation. The Roofline model established *how to measure* whether a workload is compute-bound or memory-bound. This section addresses the critical follow-up: *how to map* computations to maximize data reuse and minimize the energy-intensive transfers that the Roofline analysis revealed as the primary bottleneck.
+The memory system challenges examined in @sec-ai-acceleration-understanding-ai-memory-wall-3ea9 established *why* memory access dominates modern AI systems: DRAM access consumes 100-200x more energy than a multiply-accumulate operation [@horowitz2014computing]. The Roofline model established *how to measure* whether a workload is compute-bound or memory-bound. This section addresses the critical follow-up: *how to map* computations to maximize data reuse and minimize the energy-intensive transfers that the Roofline analysis revealed as the primary bottleneck.
 
 Efficient execution of machine learning models on specialized AI acceleration hardware requires a structured approach to computation, ensuring that available resources are fully utilized while minimizing performance bottlenecks. These mapping considerations become particularly critical in distributed training scenarios, as explored in @sec-ai-training. Unlike general-purpose processors, which rely on dynamic task scheduling, AI accelerators operate under a structured execution model that maximizes throughput by carefully assigning computations to processing elements. This process, known as mapping, dictates how computations are distributed across hardware resources, influencing execution speed, memory access patterns, and overall efficiency.
 
@@ -3296,19 +3375,12 @@ Y = 2.0 * X2 + 1.0  # Final result
 
 Each operation produces an intermediate tensor that must be written to memory and retrieved for the next operation. On large tensors, this overhead of moving data can outweigh the computational cost of the operations [@shazeer2018mesh]. @tbl-memory-footprint illustrates the memory overhead in a naïve execution model. While only the final result $Y$ is needed, storing multiple intermediate tensors creates unnecessary memory traffic and inefficient memory usage.
 
-+------------------+---------------------------------------------+
-| **Tensor**       | **Size (MB) for 1024 $\times$ 1024 Tensor** |
-+:=================+============================================:+
-| **X**            | 4 MB                                        |
-+------------------+---------------------------------------------+
-| **X'**           | 4 MB                                        |
-+------------------+---------------------------------------------+
-| **X''**          | 4 MB                                        |
-+------------------+---------------------------------------------+
-| **Y**            | 4 MB                                        |
-+------------------+---------------------------------------------+
-| **Total Memory** | 16 MB                                       |
-+------------------+---------------------------------------------+
+| **Tensor**       | **Size (MiB) for 1024 $\times$ 1024 Tensor** |
+| **X**            | 4 MiB                                        |
+| **X'**           | 4 MiB                                        |
+| **X''**          | 4 MiB                                        |
+| **Y**            | 4 MiB                                        |
+| **Total Memory** | 16 MiB                                       |
 
 : **Intermediate Tensor Storage.** Naive execution models require substantial memory to store intermediate tensors generated by each operation. For a 1024x1024 tensor, storing intermediate results (even when only the final output is needed) quadruples the total memory footprint from `{python} tensor_mb_str` MB to `{python} total_mb_str` MB. Minimizing intermediate data storage is essential for improving memory efficiency. {#tbl-memory-footprint}
 
@@ -3335,14 +3407,14 @@ $$
 @tbl-fusion-benefits highlights the impact of operation fusion on memory efficiency. By keeping intermediate results in registers or local memory rather than writing them to main memory, fusion significantly reduces memory traffic. This optimization is especially beneficial on highly parallel architectures like GPUs and TPUs, where minimizing memory accesses translates directly into improved execution throughput. Compared to the naïve execution model, fused execution eliminates the need for storing intermediate tensors, dramatically lowering the total memory footprint and improving overall efficiency.
 
 +---------------------+---------------------------------+-----------------------------+
-| **Execution Model** | **Intermediate Tensors Stored** | **Total Memory Usage (MB)** |
+| **Execution Model** | **Intermediate Tensors Stored** | **Total Memory Usage (MiB)** |
 +:====================+:================================+============================:+
-| **Naïve Execution** | X', X''                         | 16 MB                       |
+| **Naïve Execution** | X', X''                         | 16 MiB                       |
 +---------------------+---------------------------------+-----------------------------+
-| **Fused Execution** | None                            | 4 MB                        |
+| **Fused Execution** | None                            | 4 MiB                        |
 +---------------------+---------------------------------+-----------------------------+
 
-: **Operation Fusion Benefits.** Fused execution reduces memory usage by eliminating the need to store intermediate tensors, directly improving efficiency on memory-bound hardware like GPUs and TPUs. Memory consumption drops from 16 MB in naive execution to 4 MB with fused operations. {#tbl-fusion-benefits}
+: **Operation Fusion Benefits.** Fused execution reduces memory usage by eliminating the need to store intermediate tensors, directly improving efficiency on memory-bound hardware like GPUs and TPUs. Memory consumption drops from 16 MiB in naive execution to 4 MiB with fused operations. {#tbl-fusion-benefits}
 
 ##### Performance Benefits and Constraints {#sec-ai-acceleration-performance-benefits-constraints-1b74}
 
@@ -3640,7 +3712,7 @@ Machine learning compilers automate the translation of dataflow strategies into 
 
 1. **Graph optimization** fuses the 49 Conv2D-BatchNorm-ReLU sequences into 49 single kernels, eliminating 98 intermediate memory writes that would otherwise consume bandwidth
 2. **Kernel selection** chooses Tensor Core implementations for the 3x3 convolutions, exploiting the high arithmetic intensity (50-200 FLOP/byte) we calculated in the Roofline analysis
-3. **Memory planning** determines that intermediate activations require approximately 2.1 GB at batch size 32, fitting comfortably in the A100's 40 GB HBM
+3. **Memory planning** determines that intermediate activations require approximately 2.1 GiB at batch size 32, fitting comfortably in the A100's 40 GiB HBM
 4. **Computation scheduling** overlaps memory transfers for layer N+1 with computation of layer N, hiding a substantial portion of transfer latency
 
 ```{python}

@@ -39,7 +39,7 @@ class ConfigManager:
             self.book_dir = self.root_dir
 
         # Configuration file paths (combined configs)
-        self.html_config = self.book_dir / "config" / "_quarto-html.yml"
+        self.html_config = self.book_dir / "config" / "_quarto-html-vol1.yml"
         self.pdf_config = self.book_dir / "config" / "_quarto-pdf.yml"
         self.epub_config = self.book_dir / "config" / "_quarto-epub.yml"
 

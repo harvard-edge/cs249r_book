@@ -84,7 +84,7 @@ A single forward pass through GPT-2 requires roughly $10^{10}$ floating-point op
 
 :::
 
-Three characteristics make training workloads fundamentally different from general-purpose computing, and concrete numbers illustrate why each matters. First, *computational intensity*: GPT-2's $10^{23}$ FLOPs spread over days of wall-clock time demands sustained petaFLOPS-scale throughput from hardware that rarely exceeds 30 to 70 percent utilization. Second, *memory pressure*: storing 1.5 billion weights requires 6 GB in FP32, but the Adam optimizer adds two additional state tensors per parameter (another 12 GB), and activation storage across 48 transformer layers can double or triple the total, easily exceeding a single GPU's memory capacity. Third, *data dependencies*: each gradient update depends on the result of the previous one, creating sequential bottlenecks that limit how much parallelism the system can exploit.
+Three characteristics make training workloads fundamentally different from general-purpose computing, and concrete numbers illustrate why each matters. First, *computational intensity*: GPT-2's $10^{23}$ FLOPs spread over days of wall-clock time demands sustained petaFLOPS-scale throughput from hardware that rarely exceeds 30 to 70 percent utilization. Second, *memory pressure*: storing 1.5 billion weights requires 6 GiB in FP32, but the Adam optimizer adds two additional state tensors per parameter (another 12 GiB), and activation storage across 48 transformer layers can double or triple the total, easily exceeding a single GPU's memory capacity. Third, *data dependencies*: each gradient update depends on the result of the previous one, creating sequential bottlenecks that limit how much parallelism the system can exploit.
 
 Each of these challenges opens a corresponding optimization pathway. Computational intensity can be addressed through hardware acceleration and precision reduction. Memory pressure responds to techniques like **gradient checkpointing**, which trades recomputation for reduced activation storage, and **mixed-precision training**, which halves the memory footprint of weights and activations. Data dependencies motivate pipeline designs that overlap computation with data movement so the GPU never sits idle waiting for the next batch. This chapter focuses on single-machine and single-node multi-GPU training; scaling to hundreds of machines across network boundaries introduces communication and fault tolerance challenges that are the subject of *Distributed Training Systems* in Volume II. We use the *Iron Law of Training Performance* as our organizing framework, examining how each optimization technique targets specific terms in the performance equation. Before formalizing that framework, consider how these constraints interact in practice when a single *gradient explosion* can erase days of expensive computation.
 
@@ -104,15 +104,15 @@ Each of these challenges opens a corresponding optimization pathway. Computation
 
 ### The Iron Law of Training Performance {#sec-ai-training-iron-law-training-performance-a53f}
 
-Frameworks provide abstractions for expressing training algorithms, but training systems engineering determines whether those algorithms can execute within physical resource limits. The Iron Law provides the organizing framework for understanding how every optimization technique improves training time.
+Frameworks provide abstractions for expressing training algorithms, but training systems engineering determines whether those algorithms can execute within physical resource limits. The Iron Law provides the organizing framework for understanding how every optimization technique improves training time. This is a specialized application of the general **Iron Law of ML Systems** introduced in @sec-silicon-contract, focused specifically on maximizing computational throughput.
 
 ::: {.callout-definition title="The Iron Law of Training Performance"}
 
 ***The Iron Law of Training Performance*** states that training time is purely a function of **Arithmetic Intensity** and **Hardware Efficiency**. It decomposes performance into three orthogonal terms: the **Algorithmic Work** (Total Operations), the **Hardware Capability** (Peak Throughput), and the **System Efficiency** (Utilization), dictating that speedups must come from reducing Ops, increasing Peak, or improving Utilization.
 
-$$\text{Training Time} = \frac{\text{Total Operations}}{\text{Peak Throughput} \times \text{Utilization}}$$
+$$ T_{train} = \frac{O}{R_{peak} \times \eta} $$
 
-where **Total Operations** is the FLOPs required for one epoch times the number of epochs, **Peak Throughput** is the hardware's theoretical FLOP/s capacity, and **Utilization** is the fraction of peak actually achieved (typically 30-70% for training workloads).
+where $O$ (**Total Operations**) is the FLOPs required for one epoch times the number of epochs, $R_{peak}$ (**Peak Throughput**) is the hardware's theoretical FLOP/s capacity, and $\eta$ (**Utilization**) is the fraction of peak actually achieved (typically 30-70% for training workloads).
 
 This equation reveals three levers for improvement: reduce total operations through algorithmic innovation, increase peak throughput through hardware utilization, or improve utilization through better pipeline orchestration. Each optimization technique in this chapter pulls one or more of these levers, as summarized in @tbl-iron-law-mapping.
 
@@ -177,7 +177,7 @@ The Iron Law provides a static framework for reasoning about training performanc
 
 The Iron Law framework shows how training systems co-evolved with hardware capabilities. Each generation faced different bottlenecks, and each generation's constraints drove the next generation's innovations:
 
-- **1986**: Backpropagation algorithm formalized [@rumelhart1986learning]. Training a 3-layer network on toy datasets required days on CPU workstations. The bottleneck was raw compute throughput (Peak Throughput in Iron Law terms).
+- **1986**: Backpropagation algorithm formalized [@rumelhart1986learning] (see @sec-system-foundations-backpropagation-algorithm-3175 for the derivation). Training a 3-layer network on toy datasets required days on CPU workstations. The bottleneck was raw compute throughput (Peak Throughput in Iron Law terms).
 - **2012**: AlexNet demonstrated GPU training [@krizhevsky2012imagenet]. Two GTX 580 GPUs reduced ImageNet training from weeks to days—a 10× improvement that launched the deep learning era. GPUs increased Peak Throughput dramatically.
 - **2017**: Transformers introduced attention mechanisms [@vaswani2017attention]. NVIDIA Volta GPUs with Tensor Cores enabled mixed-precision training, delivering 5× speedup over previous generation. Tensor Cores further increased Peak Throughput for specific operations.
 - **2020**: GPT-3 training used over 10,000 V100 GPUs on Microsoft's Azure supercomputer, consuming an estimated $4.6M in compute [@brown2020language].[^fn-gpt3-hardware] At this scale, Utilization became critical—idle GPUs wasted thousands of dollars per hour.
@@ -201,7 +201,7 @@ GPT-2 (1.5B) serves as our primary case study for **large-scale training** becau
 +------------------+-------------------------+-----------------------------------------------------------+
 | **Property**     | **Specification**       | **Systems Implication**                                   |
 +:=================+========================:+:==========================================================+
-| **Parameters**   | 1.5 Billion (XL)        | Requires ~3GB (FP16) or ~6GB (FP32) for weights alone.    |
+| **Parameters**   | 1.5 Billion (XL)        | Requires ~3 GiB (FP16) or ~6 GiB (FP32) for weights alone.    |
 +------------------+-------------------------+-----------------------------------------------------------+
 | **Architecture** | 48 Layers, 1600 Dim     | Deep pipeline creates heavy activation memory pressure.   |
 +------------------+-------------------------+-----------------------------------------------------------+
@@ -247,17 +247,16 @@ Throughout this chapter, we reference **FP32** (32-bit) and **FP16** (16-bit) fl
 *   **FP16**: Half precision, halves memory usage and accelerates math on modern hardware (like Tensor Cores).
 *   **Mixed-Precision**: Combines both to get the speed of FP16 with the stability of FP32 (detailed in @sec-ai-training-mixedprecision-training-9218).
 
+Having established our running examples—GPT-2 for dense compute-intensive workloads and DLRM for sparse, memory-bound systems—we now situate training systems within the broader ML development lifecycle.
+
 ### Training in the ML Development Lifecycle {#sec-ai-training-training-ml-development-lifecycle-6341}
 
 Training systems occupy a critical position in the machine learning pipeline: they consume prepared data from upstream engineering (@sec-data-engineering-ml) and produce trained models for downstream deployment (@sec-machine-learning-operations-mlops). This position creates bidirectional dependencies. Data quality directly impacts training stability, while training efficiency determines iteration velocity during model development.
 
 Modern training systems face three scaling challenges that define their architecture. First, **data scale**: processing petabyte datasets requires efficient I/O pipelines and distributed storage.
 
-::: {.callout-perspective title="The 10 GB to 10 TB Scale Factor"}
-
-Systems design changes qualitatively as the **Scale Factor** increases. This is the physical reality of the **Data ($D$)** term in our Iron Law:
-
--   **At 10 GB**: You can often fit the entire dataset in system RAM. Data loading is a one-time "startup cost," and the disk bandwidth ($B$) doesn't matter after the first few seconds.
+::: {.callout-perspective title="The 10 GiB to 10 TiB Scale Factor"}
+-   **At 10 GiB**: You can often fit the entire dataset in system RAM. Data loading is a one-time "startup cost," and the disk bandwidth ($B$) doesn't matter after the first few seconds.
 -   **At 10 TB**: Data becomes a continuous, high-pressure stream. You can no longer "load" the data; you must **orchestrate** its movement. The $D$ term shifts from a storage bottleneck to a **Networking and I/O bottleneck**, requiring zero-copy paths and multi-worker prefetching just to keep the GPU from starving.
 
 Scale is not just "more data"; it is a transformation of the system's physics.
@@ -274,7 +273,7 @@ Third, **infrastructure scale**: coordinating thousands of accelerators introduc
 
 ### System Design Principles {#sec-ai-training-system-design-principles-7058}
 
-Training is not merely a mathematical optimization problem; it is a system-driven process that requires careful orchestration of computing hardware, memory, and data movement.
+These lifecycle dependencies create specific system design requirements. Training is not merely a mathematical optimization problem; it is a system-driven process that requires careful orchestration of computing hardware, memory, and data movement.
 
 Training workflows consist of interdependent stages: data preprocessing, forward and backward passes, and parameter updates, extending the basic neural network concepts from @sec-deep-learning-systems-foundations. Each stage imposes specific demands on system resources. The data preprocessing stage relies on storage and I/O subsystems to provide computing hardware with continuous input. @sec-data-engineering-ml covers data validation, corruption detection, feature engineering, schema enforcement, and pipeline reliability strategies; this chapter examines the efficiency of data movement, transformation throughput, and delivery to computational resources during training.
 
@@ -512,7 +511,7 @@ Our GPT-2 lighthouse model makes a specific *activation function* choice that il
 
 ::: {.callout-notebook title="GPT-2 GELU Activation Function"}
 
-While @tbl-compare-activations covers classical activation functions, GPT-2 uses the Gaussian Error Linear Unit (GELU), defined as:
+While @tbl-compare-activations covers classical activation functions, GPT-2 uses the Gaussian Error Linear Unit (GELU) [@hendrycks2016gaussian], defined as:
 $$
 \text{GELU}(x) = x \cdot \Phi(x) = x \cdot \frac{1}{2}\left[1 + \text{erf}\left(\frac{x}{\sqrt{2}}\right)\right]
 $$
@@ -613,7 +612,7 @@ $$
 \end{aligned}
 $$
 
-For concrete understanding, consider ResNet-50 training with different batch sizes. At batch size 32, the model requires approximately 8 GB of activation memory, 4 GB for gradients, and 200 MB for parameters per GPU. Doubling to batch size 64 doubles these memory requirements to 16 GB activations and 8 GB gradients. This linear scaling quickly exhausts GPU memory, with high-end training GPUs typically providing 40--80 GB of HBM.
+For concrete understanding, consider ResNet-50 training with different batch sizes. At batch size 32, the model requires approximately 8 GiB of activation memory, 4 GiB for gradients, and 200 MiB for parameters per GPU. Doubling to batch size 64 doubles these memory requirements to 16 GiB activations and 8 GiB gradients. This linear scaling quickly exhausts GPU memory, with high-end training GPUs typically providing 40--80 GiB of HBM.
 
 Larger batches enable more efficient computation through improved parallelism and better memory access patterns. GPU utilization efficiency demonstrates this trade-off: batch sizes of 256 or higher typically achieve over 90% hardware utilization on modern training accelerators, while smaller batches of 16--32 may only achieve 60--70% utilization due to insufficient parallelism to saturate the hardware. Linear scaling rules for large-batch training help maintain convergence speed [@goyal2017accurate].
 
@@ -656,7 +655,7 @@ adam_overhead_str = f"{adam_overhead_mb}"
 
 The system implications of Adam are more substantial than previous methods. The optimizer must store two additional vectors ($m_t$ and $v_t$) for each parameter, tripling the memory required for optimization state. For a model with 100 million parameters using 32-bit floating-point numbers, the additional memory requirement is approximately `{python} adam_overhead_str` MB.
 
-[^fn-adam-optimizer-memory]: **Adam (Adaptive Moment Estimation)**: Introduced by Kingma and Ba in 2015, Adam became the default optimizer for deep learning due to its robust performance across diverse architectures. The algorithm maintains per-parameter learning rates using first and second moment estimates, requiring 3x the memory of SGD (parameters + two state vectors). For a 7B model in FP32, this means 84 GB for optimizer state alone, driving the adoption of memory-efficient variants like 8-bit Adam (2x compression) and GaLoRE (gradient low-rank projection).
+[^fn-adam-optimizer-memory]: **Adam (Adaptive Moment Estimation)**: Introduced by Kingma and Ba in 2015, Adam became the default optimizer for deep learning due to its robust performance across diverse architectures. The algorithm maintains per-parameter learning rates using first and second moment estimates, requiring 3x the memory of SGD (parameters + two state vectors). For a 7B model in FP32, this means 84 GiB for optimizer state alone, driving the adoption of memory-efficient variants like 8-bit Adam (2x compression) and GaLoRE (gradient low-rank projection).
 
 #### Optimization Algorithm System Implications {#sec-ai-training-optimization-algorithm-system-implications-f9f2}
 
@@ -685,34 +684,43 @@ from calc.constants import GPT2_PARAMS, Mparam
 
 gpt2_b = GPT2_PARAMS.to(Mparam).magnitude / 1000  # 1.5 B
 bytes_fp32 = 4
+bytes_fp16 = 2
 
-param_gb = gpt2_b * bytes_fp32
-grad_gb = gpt2_b * bytes_fp32
-adam_m_gb = gpt2_b * bytes_fp32
-adam_v_gb = gpt2_b * bytes_fp32
-total_opt_gb = param_gb + grad_gb + adam_m_gb + adam_v_gb
+# FP32 Baseline
+param_fp32_gb = gpt2_b * bytes_fp32
+grad_fp32_gb = gpt2_b * bytes_fp32
+adam_m_fp32_gb = gpt2_b * bytes_fp32
+adam_v_fp32_gb = gpt2_b * bytes_fp32
+total_static_fp32 = param_fp32_gb + grad_fp32_gb + adam_m_fp32_gb + adam_v_fp32_gb
 
-param_gb_str = f"{param_gb:.1f}"
-grad_gb_str = f"{grad_gb:.1f}"
-adam_m_str = f"{adam_m_gb:.1f}"
-adam_v_str = f"{adam_v_gb:.1f}"
-total_opt_str = f"{total_opt_gb:.0f}"
+# AMP (FP16)
+param_fp16_gb = gpt2_b * bytes_fp16
+grad_fp16_gb = gpt2_b * bytes_fp16
+master_fp32_gb = gpt2_b * bytes_fp32  # AMP overhead
+# Optimizer remains FP32 for stability
+total_static_amp = param_fp16_gb + grad_fp16_gb + master_fp32_gb + adam_m_fp32_gb + adam_v_fp32_gb
+
+# Strings
+param_fp32_str = f"{param_fp32_gb:.1f}"
+grad_fp32_str = f"{grad_fp32_gb:.1f}"
+adam_state_str = f"{adam_m_fp32_gb + adam_v_fp32_gb:.1f}"
+total_static_fp32_str = f"{total_static_fp32:.0f}"
+total_static_amp_str = f"{total_static_amp:.0f}"
 ```
 
 For GPT-2's 1.5B parameters in FP32 (4 bytes each):
 
-- Parameters: 1.5B × 4 bytes = `{python} param_gb_str` GB
-- Gradients: 1.5B × 4 bytes = `{python} grad_gb_str` GB
-- Adam first moment (m): 1.5B × 4 bytes = `{python} adam_m_str` GB
-- Adam second moment (v): 1.5B × 4 bytes = `{python} adam_v_str` GB
-- Total optimizer state: `{python} total_opt_str` GB
+- Parameters: 1.5B × 4 bytes = `{python} param_fp32_str` GiB
+- Gradients: 1.5B × 4 bytes = `{python} grad_fp32_str` GiB
+- Adam State (m, v): 1.5B × 8 bytes = `{python} adam_state_str` GiB
+- Total static memory: `{python} total_static_fp32_str` GiB
 
-This explains why GPT-2 training requires 32 GB+ V100 GPUs even before considering activation memory.
+This explains why GPT-2 training requires 32 GiB+ V100 GPUs even before considering activation memory.
 
 **System Decisions Driven by Optimizer**
 
-1. Mixed precision training (FP16 params, FP32 optimizer state) cuts this to ~15 GB
-2. Gradient accumulation (splitting effective batches into smaller micro-batches, accumulating gradients across multiple forward/backward passes before updating, detailed in @sec-ai-training-gradient-accumulation-checkpointing-0c47) allows effective batch_size=512 despite memory limits
+1. Mixed precision training (FP16) reduces operation precision but requires keeping FP32 master weights, maintaining the static memory footprint at ~`{python} total_static_amp_str` GiB.
+2. Gradient accumulation (splitting effective batches into smaller micro-batches) allows effective batch_size=512 despite memory limits.
 
 Adam's memory overhead is a necessary trade-off for convergence. GPT-2 converges in ~50K steps vs. ~150K+ steps with SGD+Momentum, saving weeks of training time despite higher per-step cost.
 
@@ -914,7 +922,7 @@ The optimization algorithms above specify how to update parameters given gradien
 
 The backpropagation algorithm[^fn-backpropagation] computes gradients by systematically moving backward through a neural network's computational graph. In @sec-deep-learning-systems-foundations-gradient-computation-backpropagation-dacf, we established the mathematical foundation: the chain rule breaks gradient computation into layer-by-layer operations, with each layer receiving adjustment signals proportional to its contribution to the final error. If terms like "computational graph" or "gradient flow" feel unfamiliar, the factory assembly line analogy in that section is worth revisiting.
 
-[^fn-backpropagation]: **Backpropagation Algorithm**: Independently rediscovered multiple times, backpropagation was popularized by Rumelhart, Hinton, and Williams in 1986 (though similar ideas appeared in Werbos 1974). This breakthrough enabled training of deep networks by efficiently computing gradients in O(n) time vs. naive O(n²) approaches. Modern implementations require careful memory management since storing all activations for a ResNet-50 consumes 1.2 GB per image.
+[^fn-backpropagation]: **Backpropagation Algorithm**: Independently rediscovered multiple times, backpropagation was popularized by Rumelhart, Hinton, and Williams in 1986 (though similar ideas appeared in Werbos 1974). This breakthrough enabled training of deep networks by efficiently computing gradients in O(n) time vs. naive O(n²) approaches. Modern implementations require careful memory management since storing all activations for a ResNet-50 consumes 1.2 GiB per image.
 
 Here, we shift focus from *what* backpropagation computes to *what it costs* to compute it at scale. The familiar equations from @sec-deep-learning-systems-foundations reappear because understanding their structure reveals exactly *what* must be stored and *when*. During the forward pass, each layer computes activations $a^{(l)} = f(W^{(l)}a^{(l-1)} + b^{(l)})$ that must be retained for the backward pass. Computing $\frac{\partial L}{\partial W^{(l)}}$ requires access to these stored activations, creating memory requirements that scale with network depth and batch size.
 
@@ -1010,13 +1018,13 @@ For GPT-2 with batch_size=32, seq_len=1024, hidden_dim=`{python} hidden_dim_str`
 
 #### Full Model Activation Memory
 
-- 48 layers × ~850 MB = **`{python} total_act_str` GB** just for activations
+- 48 layers × ~850 MiB = **`{python} total_act_str` GB** just for activations
 - Parameters (FP16): `{python} params_gb_str` GB
 - Gradients: `{python} grad_gb_str` GB
 - Optimizer state (Adam, FP32): `{python} opt_gb_str` GB
-- Peak memory during training: **~`{python} peak_gb_str` GB**
+- Peak memory during training: **~`{python} peak_gb_str` GiB**
 
-This exceeds a single V100's `{python} v100_mem_str` GB capacity.
+This exceeds a single V100's `{python} v100_mem_str` GiB capacity.
 
 #### System Solutions Applied
 
@@ -1709,19 +1717,19 @@ Memory management is particularly important during the forward pass, when interm
 
 ::: {.callout-notebook title="Estimating VRAM Requirements"}
 
-**Problem**: Will your 7B parameter model fit on a 24GB GPU for training?
+**Problem**: Will your 7B parameter model fit on a 24 GiB GPU for training?
 
-**Given**: 7B parameters, mixed-precision training (FP16 weights/gradients, FP32 optimizer), Adam optimizer, 24 GB GPU memory.
+**Given**: 7B parameters, mixed-precision training (FP16 weights/gradients, FP32 optimizer), Adam optimizer, 24 GiB GPU memory.
 
 **The Math**:
 
-1.  **Weights (FP16)**: $7\text{B} \times 2 \text{ bytes} = \mathbf{14 \text{ GB}}$.
-2.  **Gradients (FP16)**: Same size as weights = $\mathbf{14 \text{ GB}}$.
-3.  **Optimizer (Adam, FP32)**: Stores momentum & variance. $7\text{B} \times 8 \text{ bytes} = \mathbf{56 \text{ GB}}$.
-4.  **Subtotal (before activations)**: $14 + 14 + 56 = \mathbf{84 \text{ GB}}$. Already exceeds 24 GB.
-5.  **Activations**: Scale with batch size. Formula: $\text{Batch} \times \text{SeqLen} \times \text{Hidden} \times \text{Layers} \times \text{Bytes}$. Example: Batch=1, Seq=2048, Hidden=4096, 32 Layers $\approx$ **2 GB** additional.
+1.  **Weights (FP16)**: $7\text{B} \times 2 \text{ bytes} = \mathbf{14 \text{ GiB}}$.
+2.  **Gradients (FP16)**: Same size as weights = $\mathbf{14 \text{ GiB}}$.
+3.  **Optimizer (Adam, FP32)**: Stores momentum & variance. $7\text{B} \times 8 \text{ bytes} = \mathbf{56 \text{ GiB}}$.
+4.  **Subtotal (before activations)**: $14 + 14 + 56 = \mathbf{84 \text{ GiB}}$. Already exceeds 24 GiB.
+5.  **Activations**: Scale with batch size. Formula: $\text{Batch} \times \text{SeqLen} \times \text{Hidden} \times \text{Layers} \times \text{Bytes}$. Example: Batch=1, Seq=2048, Hidden=4096, 32 Layers $\approx$ **2 GiB** additional.
 
-**The Systems Conclusion**: The "administrative tax" (gradients + optimizer states) is $4\text{--}6\times$ larger than model weights. Training a 7B model on a single 24 GB GPU requires **quantization (4-bit)** or **parameter sharding (FSDP/ZeRO)**.
+**The Systems Conclusion**: The "administrative tax" (gradients + optimizer states) is $4\text{--}6\times$ larger than model weights. Training a 7B model on a single 24 GiB GPU requires **quantization (4-bit)** or **parameter sharding (FSDP/ZeRO)**.
 :::
 
 The total memory footprint grows with both network depth and batch size, following a basic relationship.
@@ -1767,7 +1775,7 @@ gpt3_fp32_str = f"{gpt3_fp32_gb}"
 gpt3_fp16_str = f"{gpt3_fp16_gb}"
 ```
 
-Consider a representative large model like ResNet-50 (a widely-used image classification architecture) processing images at $224\times224$ resolution with a batch size of 32. The initial convolutional layer produces activation maps of dimension $112\times112\times64$; for a batch of 32 at single-precision (4 bytes), this requires approximately 100 MB. As the network progresses through its 50 layers, the cumulative memory demands grow substantially: the complete forward pass activations total approximately 8GB, gradients require an additional 4GB, and model parameters consume 200MB. This `{python} total_gb_b32_str`GB total represents over `{python} pct_a100_str`% of a high-end A100 GPU's 40GB memory capacity for a single batch.
+Consider a representative large model like ResNet-50 (a widely-used image classification architecture) processing images at $224\times224$ resolution with a batch size of 32. The initial convolutional layer produces activation maps of dimension $112\times112\times64$; for a batch of 32 at single-precision (4 bytes), this requires approximately 100 MiB. As the network progresses through its 50 layers, the cumulative memory demands grow substantially: the complete forward pass activations total approximately 8 GiB, gradients require an additional 4 GiB, and model parameters consume 200 MiB. This `{python} total_gb_b32_str`GB total represents over `{python} pct_a100_str`% of a high-end A100 GPU's 40 GiB memory capacity for a single batch.
 
 The memory scaling patterns reveal critical hardware utilization trade-offs. Doubling the batch size to 64 increases activation memory to `{python} act_gb_b64_str`GB and gradient memory to `{python} grad_gb_b64_str`GB, totaling `{python} total_gb_b64_str`GB and approaching memory limits. Training larger models at the scale of GPT-3 (`{python} gpt3_params_b`B parameters, representing current large language models) requires approximately `{python} gpt3_fp32_str`GB just for parameters in FP32 (`{python} gpt3_fp16_str`GB in FP16), necessitating distributed memory strategies across multiple high-memory nodes.
 
@@ -1948,7 +1956,7 @@ Beyond batch size tuning, practitioners must also confront the economic reality 
 # Utility Bill: Llama-2-70B training cost analysis
 ub_params = 70e9           # 70B parameters
 ub_tokens = 2e12           # 2T tokens
-ub_scaling_factor = 6      # Chinchilla scaling constant
+ub_scaling_factor = 6      # Chinchilla scaling constant [@hoffmann2022training]
 ub_peak_tflops = 1000      # H100 peak FP16 TFLOPS
 ub_utilization = 0.50      # 50% utilization
 ub_effective_tflops = ub_peak_tflops * ub_utilization
@@ -3453,7 +3461,7 @@ These three techniques—prefetching, mixed precision, and gradient accumulation
 
 ### Putting It All Together: GPT-2 Optimization Walkthrough {#sec-ai-training-putting-together-gpt2-optimization-walkthrough-def7}
 
-To demonstrate how these techniques compose in practice, let us walk through optimizing GPT-2 (1.5B parameters) training on a single 32 GB V100 GPU. This example shows the iterative profiling-and-optimization process that transforms an infeasible training configuration into a practical one.
+To demonstrate how these techniques compose in practice, let us walk through optimizing GPT-2 (1.5B parameters) training on a single 32 GiB V100 GPU.
 
 ::: {.callout-example title="GPT-2 Optimization on V100"}
 
@@ -3468,12 +3476,12 @@ To demonstrate how these techniques compose in practice, let us walk through opt
 
 ```{.text}
 Memory breakdown:
-  Parameters (FP32):      6.0 GB
-  Gradients (FP32):       6.0 GB
-  Optimizer (Adam FP32): 24.0 GB
-  Activations:           65.0 GB
+  Parameters (FP32):      6.0 GiB
+  Gradients (FP32):       6.0 GiB
+  Optimizer (Adam):      12.0 GiB
+  Activations:           65.0 GiB
   ─────────────────────────────────
-  Total:                101.0 GB  ← OOM on 32 GB GPU
+  Total:                 89.0 GiB  ← OOM on 32 GiB GPU
 ```
 
 **Bottleneck identified**: Memory exhaustion. Cannot even begin training.
@@ -3484,15 +3492,15 @@ Enable AMP (Automatic Mixed Precision) with FP16 forward/backward, FP32 master w
 
 ```{.text}
 Memory breakdown:
-  Parameters (FP16):      3.0 GB
-  Gradients (FP16):       3.0 GB
-  Optimizer (Adam FP32): 12.0 GB  ← Still FP32 for stability
-  Activations (FP16):    32.5 GB
-  ─────────────────────────────────
-  Total:                 50.5 GB  ← Still OOM
+  Parameters (FP16):      3.0 GiB
+  Gradients (FP16):       3.0 GiB
+  Master Weights (FP32):  6.0 GiB
+  Optimizer (Adam):      12.0 GiB
+  Activations (FP16):    32.5 GiB
+  Total:                 56.5 GiB  ← Still OOM
 ```
 
-**Improvement**: 50% memory reduction, but still exceeds 32 GB.
+**Improvement**: 36% memory reduction, but still exceeds 32 GiB.
 
 #### Step 3: Apply Gradient Checkpointing {.unnumbered}
 
@@ -3500,12 +3508,9 @@ Checkpoint every 4 transformer layers, recompute activations during backward pas
 
 ```{.text}
 Memory breakdown:
-  Parameters (FP16):      3.0 GB
-  Gradients (FP16):       3.0 GB
-  Optimizer (Adam FP32): 12.0 GB
-  Activations (ckpt):     8.0 GB  ← 4× reduction
-  ─────────────────────────────────
-  Total:                 26.0 GB  ✓ Fits in 32 GB!
+  Static Memory (AMP):   24.0 GiB
+  Activations (ckpt):     8.0 GiB  ← 4× reduction
+  Total:                 32.0 GiB  ✓ Fits in 32 GiB!
 ```
 
 **Trade-off**: 33% more compute (recomputation), but now fits in memory.
@@ -3567,15 +3572,17 @@ The GPT-2 case study demonstrates how the optimization techniques examined in th
 +-----------------------------------+-------------------+---------------+-------------------------------------+
 | **Metric**                        | **FP32 Baseline** | **Optimized** | **Technique Applied**               |
 +:==================================+==================:+==============:+:====================================+
-| **Parameters**                    | 6.0 GB            | 3.0 GB        | Mixed precision (FP16)              |
+| **Parameters**                    | 6.0 GiB            | 3.0 GiB        | Mixed precision (FP16)              |
 +-----------------------------------+-------------------+---------------+-------------------------------------+
-| **Gradients**                     | 6.0 GB            | 3.0 GB        | Mixed precision (FP16)              |
+| **Gradients**                     | 6.0 GiB            | 3.0 GiB        | Mixed precision (FP16)              |
 +-----------------------------------+-------------------+---------------+-------------------------------------+
-| **Optimizer State (Adam)**        | 24.0 GB           | 12.0 GB       | FP32 required for stability         |
+| **Master Weights**                | 0.0 GiB            | 6.0 GiB        | AMP Overhead                        |
 +-----------------------------------+-------------------+---------------+-------------------------------------+
-| **Activations (batch=32)**        | 65.0 GB           | 8.0 GB        | Gradient checkpointing + FP16       |
+| **Optimizer State (Adam)**        | 12.0 GiB           | 12.0 GiB       | Unchanged (FP32 moments)            |
 +-----------------------------------+-------------------+---------------+-------------------------------------+
-| **Total Memory**                  | **101.0 GB**      | **26.0 GB**   | —                                   |
+| **Activations (batch=32)**        | 65.0 GiB           | 8.0 GiB        | Gradient checkpointing + FP16       |
++-----------------------------------+-------------------+---------------+-------------------------------------+
+| **Total Memory**                  | **89.0 GiB**       | **32.0 GiB**   | —                                   |
 +-----------------------------------+-------------------+---------------+-------------------------------------+
 | **Training Time (32 V100s)**      | 14 days           | 8.4 days      | 2.4× Tensor Core speedup            |
 +-----------------------------------+-------------------+---------------+-------------------------------------+
@@ -3586,7 +3593,7 @@ The GPT-2 case study demonstrates how the optimization techniques examined in th
 | **Carbon Footprint**              | ~125 tons CO₂     | ~52 tons CO₂  | Regional grid average (0.45 kg/kWh) |
 +-----------------------------------+-------------------+---------------+-------------------------------------+
 
-: **GPT-2 Training Optimization Summary.** Applying mixed-precision training and gradient checkpointing reduces memory from 101 GB to 26 GB, training time by 40%, energy consumption by 58%, and carbon footprint proportionally. {#tbl-gpt2-summary}
+: **GPT-2 Training Optimization Summary.** Applying mixed-precision training and gradient checkpointing reduces memory from 89 GiB to 32 GiB, training time by 40%, energy consumption by 58%, and carbon footprint proportionally. {#tbl-gpt2-summary}
 
 ```{python}
 #| label: optimization-summary-calc
@@ -3932,7 +3939,7 @@ Three additional strategies emerge:
 
 The implementation details—gradient synchronization algorithms (AllReduce[^fn-allreduce], ring-reduce), communication patterns (parameter server, peer-to-peer), fault tolerance mechanisms, and scaling efficiency analysis for training runs spanning thousands of GPUs—are covered in specialized documentation on distributed training systems.
 
-[^fn-allreduce]: **AllReduce**: A collective communication primitive that aggregates data across all participating devices and distributes the result back to each. For gradient synchronization, AllReduce sums gradients from all GPUs so each has the identical averaged gradient. Ring AllReduce, popularized by Baidu in 2017, achieves bandwidth-optimal performance by passing data in a ring topology, requiring only 2(N-1)/N of the data volume (approaching 2x for large N) regardless of participant count, making it the standard for data-parallel training.
+[^fn-allreduce]: **AllReduce**: A collective communication primitive that aggregates data across all participating devices and distributes the result back to each. For gradient synchronization, AllReduce sums gradients from all GPUs so each has the identical averaged gradient. Ring AllReduce [@patarasuk2009bandwidth], popularized by Baidu in 2017, achieves bandwidth-optimal performance by passing data in a ring topology, requiring only 2(N-1)/N of the data volume (approaching 2x for large N) regardless of participant count, making it the standard for data-parallel training.
 
 ### Decision Framework: Single-Machine vs. Distributed {#sec-ai-training-decision-framework-singlemachine-vs-distributed-2045}
 
@@ -4019,7 +4026,7 @@ The training optimizations explored throughout this chapter provide the foundati
 
 ::: {.callout-takeaways title="Key Takeaways"}
 
-* **The Iron Law governs training**: $\text{Training Time} = \frac{\text{Total Operations}}{\text{Peak Throughput} \times \text{Utilization}}$. Every optimization affects one of these terms—identifying which term is affected is essential for effective optimization.
+* **The Iron Law governs training**: $T_{train} = \frac{O}{R_{peak} \times \eta}$. Every optimization affects one of these terms—identifying which term is affected is essential for effective optimization.
 * **Profiling precedes optimization**: The iterative loop is: profile → identify bottleneck → apply targeted fix → re-profile. Optimization without profiling typically wastes effort on non-bottlenecks.
 * **Mixed precision provides substantial performance gains**: FP16 training with FP32 accumulation delivers approximately 2× throughput and 2× memory reduction with typically <1% accuracy impact on most workloads.
 * **Gradient checkpointing trades compute for memory**: Recomputing activations during the backward pass enables training larger models (e.g., GPT-3 scales from 1.3B to 3.7B parameters on V100s) or achieves 3–4× activation memory reduction. Essential when memory is the binding constraint.
@@ -4027,8 +4034,6 @@ The training optimizations explored throughout this chapter provide the foundati
 * **Energy and cost scale linearly with training time**: The same optimizations that accelerate training also reduce carbon emissions and cloud costs. Efficiency improvements directly translate to reduced resource consumption.
 
 :::
-
-The co-design principle established throughout this chapter—where algorithms, software frameworks, and hardware architectures evolve together—shapes how practitioners approach any training challenge. Matrix operation patterns drove GPU Tensor Core development, which frameworks exposed through mixed-precision APIs, enabling algorithmic techniques that further influenced hardware design. Understanding this feedback loop enables informed architectural decisions that leverage the full potential of training systems.
 
 ::: {.callout-chapter-connection title="From Build to Optimize"}
 

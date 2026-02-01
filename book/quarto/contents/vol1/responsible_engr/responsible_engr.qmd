@@ -885,6 +885,52 @@ Engineers can estimate three-year total cost of ownership using a structured app
 
 **Training Costs** include both initial development and ongoing retraining. @tbl-tco-training breaks down these costs, showing how quarterly retraining cycles accumulate over a three-year operational period.
 
+```{python}
+#| label: tco-calc
+#| echo: false
+
+# Rate assumptions
+gpu_rate = 4.0
+inf_gpu_rate = 2.50
+carbon_per_gpu_hr = 0.16 # kg
+
+# Training (1 cycle)
+t_data_prep = 100 * gpu_rate
+t_hparam = 50 * 40 # 50 experiments at $40
+t_final = 200 * gpu_rate
+t_subtotal = t_data_prep + t_hparam + t_final
+t_cycles = 12
+t_total = t_subtotal * t_cycles
+t_carbon = t_total / gpu_rate * carbon_per_gpu_hr
+
+# Inference (3 years)
+i_daily_q = 200e6
+i_latency = 0.01
+i_gpu_hr_day = (i_daily_q * i_latency) / 3600
+i_annual_cost = i_gpu_hr_day * 365 * inf_gpu_rate
+i_total = i_annual_cost * 3
+i_carbon = (i_gpu_hr_day * 365 * 3) * carbon_per_gpu_hr
+
+# Operations (3 years)
+o_monitor = 150000
+o_oncall = 300000
+o_incident = 60000
+o_total = o_monitor + o_oncall + o_incident
+
+# Summary
+total_tco = t_total + i_total + o_total
+p_train = t_total / total_tco * 100
+p_inf = i_total / total_tco * 100
+p_ops = o_total / total_tco * 100
+
+# Strings
+t_subtotal_str = f"${t_subtotal:,.0f}"
+t_total_str = f"${t_total:,.0f}"
+i_total_str = f"${i_total/1e6:.2f}M"
+o_total_str = f"${o_total/1e3:.0f}K"
+total_tco_str = f"${total_tco/1e6:.2f}M"
+```
+
 +---------------------------------+-------------------------------+------------------------+---------------------+
 | **Cost Component**              | **Calculation**               | **Financial Cost**     | **Carbon (kg CO2)** |
 +:================================+:==============================+=======================:+====================:+
@@ -894,11 +940,11 @@ Engineers can estimate three-year total cost of ownership using a structured app
 +---------------------------------+-------------------------------+------------------------+---------------------+
 | **Final training**              | hours × rate                  | 200 GPU-hr × $4 = $800 | 32 kg               |
 +---------------------------------+-------------------------------+------------------------+---------------------+
-| **Subtotal per training cycle** |                               | **$3,200**             | **128 kg**          |
+| **Subtotal per training cycle** |                               | **`{python} t_subtotal_str`** | **128 kg**          |
 +---------------------------------+-------------------------------+------------------------+---------------------+
 | **Retraining frequency**        | cycles/year × years           | 4/year × 3 years = 12  | 12                  |
 +---------------------------------+-------------------------------+------------------------+---------------------+
-| **Total training cost**         | subtotal x cycles             | **$38,400**            | **1,536 kg**        |
+| **Total training cost**         | subtotal x cycles             | **`{python} t_total_str`** | **1,536 kg**        |
 +---------------------------------+-------------------------------+------------------------+---------------------+
 
 : **Training Cost Calculation**: Training costs accumulate through initial development ($3,200 per cycle) and quarterly retraining over a three-year operational period. Data preparation, hyperparameter search, and final training each consume GPU hours at $4/hour, totaling $38,400 across 12 training cycles. Despite appearing substantial, training represents only 2% of total cost of ownership. {#tbl-tco-training}
@@ -916,7 +962,7 @@ Engineers can estimate three-year total cost of ownership using a structured app
 +---------------------------+----------------------+---------------------------+---------------------+
 | **Annual GPU cost**       | hours × 365 × rate   | 556 × 365 × $2.50 = $507K | 32,470 kg           |
 +---------------------------+----------------------+---------------------------+---------------------+
-| **3-year inference cost** | annual x 3           | **$1.52M**                | **97,410 kg**       |
+| **3-year inference cost** | annual x 3           | **`{python} i_total_str`** | **97,410 kg**       |
 +---------------------------+----------------------+---------------------------+---------------------+
 
 : **Inference Cost Calculation**: Inference costs scale with query volume: 200 million daily queries at 10 ms each require 556 GPU-hours daily, totaling $507K annually and $1.52M over three years. At 74% of total cost, inference dominates for high-traffic systems and justifies aggressive per-query optimization through quantization, pruning, and efficient serving. {#tbl-tco-inference}
@@ -932,7 +978,7 @@ Engineers can estimate three-year total cost of ownership using a structured app
 +-----------------------------------+---------------------+------------------+
 | **Incident response (estimated)** | $20K                | $60K             |
 +-----------------------------------+---------------------+------------------+
-| **Total operational**             |                     | **$510K**        |
+| **Total operational**             |                     | **`{python} o_total_str`** |
 +-----------------------------------+---------------------+------------------+
 
 : **Operational Cost Calculation**: Operational costs include monitoring infrastructure ($50K/year), on-call engineering at 0.5 FTE ($100K/year), and incident response reserves ($20K/year). The $510K three-year total represents 24% of TCO and often surprises teams focused primarily on compute costs. These expenses persist regardless of model performance and grow with system complexity. {#tbl-tco-operations}
@@ -941,16 +987,11 @@ Engineers can estimate three-year total cost of ownership using a structured app
 #| label: tco-summary-calc
 #| echo: false
 
-# TCO summary derived values (from tables above)
-training_3yr_k = 38
-inference_3yr_m = 1.52
-operations_3yr_k = 510
-total_tco_m = training_3yr_k / 1000 + inference_3yr_m + operations_3yr_k / 1000
-
-inf_train_ratio = (inference_3yr_m * 1000) / training_3yr_k
-carbon_inference_tons = 97.4
+# TCO summary derived values (from tco-calc above)
+inf_train_ratio = i_total / t_total
+carbon_inference_tons = i_carbon / 1000
 quant_reduction_pct = 0.20
-quant_savings_k = inference_3yr_m * 1000 * quant_reduction_pct
+quant_savings_k = i_total * quant_reduction_pct / 1000
 quant_carbon_tons = carbon_inference_tons * quant_reduction_pct
 
 inf_train_ratio_str = f"{inf_train_ratio:.0f}"
@@ -963,13 +1004,13 @@ The stark breakdown in @tbl-tco-summary answers where the money actually goes: i
 +----------------+-----------------+----------------+-------------------+
 | **Category**   | **3-Year Cost** | **Percentage** | **Carbon Impact** |
 +:===============+================:+===============:+==================:+
-| **Training**   | $38K            | 2%             | 1.5 tons          |
+| **Training**   | `{python} f"${t_total/1e3:.0f}K"` | `{python} f"{p_train:.0f}%"` | 1.5 tons          |
 +----------------+-----------------+----------------+-------------------+
-| **Inference**  | $1.52M          | 74%            | 97.4 tons         |
+| **Inference**  | `{python} i_total_str` | `{python} f"{p_inf:.0f}%"` | 97.4 tons         |
 +----------------+-----------------+----------------+-------------------+
-| **Operations** | $510K           | 24%            | -                 |
+| **Operations** | `{python} o_total_str` | `{python} f"{p_ops:.0f}%"` | -                 |
 +----------------+-----------------+----------------+-------------------+
-| **Total TCO**  | **$2.07M**      | 100%           | **~99 tons**      |
+| **Total TCO**  | **`{python} total_tco_str`** | 100%           | **~99 tons**      |
 +----------------+-----------------+----------------+-------------------+
 
 : **Total Cost of Ownership Summary**: Three-year TCO of $2.07M breaks down as: training $38K (2%), inference $1.52M (74%), and operations $510K (24%). The `{python} inf_train_ratio_str`:1 ratio between inference and training costs is typical for production systems serving 10 million daily users. A 20% reduction in inference latency through quantization would save $`{python} quant_savings_str`K and approximately `{python} quant_carbon_str` tons of CO2, easily justifying the optimization engineering investment. {#tbl-tco-summary}

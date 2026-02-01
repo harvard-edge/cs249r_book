@@ -66,7 +66,7 @@ mobilenetv2_mflops = f"{MOBILENETV2_FLOPs.to(GFLOPs).magnitude * 1000:.0f}"
 
 A 7-billion parameter language model requires 14 GB just to store its weights in FP16. Your deployment target is a smartphone with 6 GB of RAM shared across the operating system, applications, and your model. *The math does not work.* No amount of clever engineering changes this arithmetic: 14 GB cannot fit in 6 GB. Yet users expect the model to run: responsively, offline, without draining their battery in an hour. The gap between what training produces and what deployment permits is not a minor inconvenience but a five-orders-of-magnitude chasm that defines the field of model compression.
 
-Recall the **Silicon Contract**: every model architecture makes an implicit agreement with the hardware about which resource it will saturate: compute throughput, memory bandwidth, or memory capacity. During training, this contract is negotiated upward. Researchers select larger architectures, higher numerical precision, and deeper layers because the training environment, typically a GPU cluster with hundreds of gigabytes of memory, can afford those demands. Deployment reverses these priorities. The production environment is smaller, power-constrained, and latency-sensitive, yet the model was designed for an environment with none of those limitations. Model compression is the systematic process of renegotiating that contract for its new execution context: reducing memory footprint, computational cost, and energy consumption while preserving the model's ability to perform its task.
+Recall the **Silicon Contract**: every model architecture makes an implicit agreement with the hardware about which resource it will saturate: compute throughput, memory bandwidth, or memory capacity. During training, this contract is negotiated upward. Researchers select larger architectures, higher numerical precision, and deeper layers because the training environment, typically a GPU cluster with hundreds of gigabytes of memory, can afford those demands. In @sec-ai-training, we used Mixed Precision (FP16) to speed up these training cycles while maintaining the ability to learn. Here, we go further—to INT8 and beyond—for inference, where we trade the ability to update weights for massive gains in execution efficiency. Deployment reverses these priorities. The production environment is smaller, power-constrained, and latency-sensitive, yet the model was designed for an environment with none of those limitations. Model compression is the systematic process of renegotiating that contract for its new execution context: reducing memory footprint, computational cost, and energy consumption while preserving the model's ability to perform its task.
 
 The scale of this renegotiation makes model optimization an engineering discipline, not a collection of ad hoc tricks. A 175 billion parameter model consumes over 300 GB in FP16 representation alone, yet a smartphone provides 6 GB of RAM and a microcontroller offers 512 KB. Bridging six orders of magnitude between what training produces and what deployment permits requires systematic methods with predictable trade-offs, not trial and error. Every optimization technique removes something from the model, whether redundant parameters, numerical precision, or architectural complexity, and the engineer must understand exactly what is lost, what is preserved, and how these losses compose when techniques are combined.
 
@@ -113,9 +113,9 @@ Model optimization is not a single technique but a *framework* with three comple
 To understand *why* numerics matter so deeply, consider the *physics of quantization* at the silicon level.
 
 ::: {.callout-notebook title="The Physics of Quantization"}
-Why do we obsess over quantization? Because the **Energy-Movement Invariant** ($E_{move} \gg E_{compute}$) means that in the physics of silicon, **bits represent energy**.
+Why do we obsess over quantization? Because the **Energy-Movement Invariant** ($E_{move} \gg E_{compute}$) means that in the physics of silicon, **bits represent energy** (see @sec-system-foundations-numerical-representations-7b2f for a detailed comparison of FP32 vs. INT8 energy costs).
 
-According to the **Iron Law** ($L = \frac{D}{B} + \frac{Ops}{P \cdot \eta} + L_{fixed}$), reducing the bit-width of a weight has a quadratic effect on efficiency:
+According to the **Iron Law** ($T = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot \eta} + L_{lat}$), reducing the bit-width of a weight has a quadratic effect on efficiency:
 
 1.  **Memory Energy ($D$)**: Fetching a 32-bit float from DRAM costs $\approx$ **`{python} energy_dram` pJ**. Fetching an 8-bit integer costs $\approx$ **`{python} energy_dram_per_byte` pJ**.
 
@@ -230,6 +230,8 @@ We call this phenomenon *the quantization speedup*.
 
 These dimensions are interdependent. Pruning reduces complexity but may require architectural changes for hardware efficiency. Quantization reduces precision but impacts execution logic. The most effective strategies combine techniques across all three layers. For practitioners seeking immediate guidance on which techniques to apply, @sec-model-compression-decision-framework-1896 provides a decision framework that maps deployment constraints to specific technique recommendations. The intervening sections provide the technical foundation needed to apply that framework effectively.
 
+Before examining deployment scenarios, we must understand these three fundamental dimensions of model optimization: structural modifications that change the network topology, precision adjustments that alter numerical representation, and architectural innovations that redesign computation patterns. The following sections detail each dimension; here we preview how they combine in practice.
+
 ## Deployment Context {#sec-model-compression-deployment-context-0d88}
 
 Optimization requirements vary dramatically across deployment contexts. What matters for cloud inference differs fundamentally from mobile or embedded systems. @tbl-deployment-scenarios summarizes the key constraints across deployment environments.
@@ -269,22 +271,87 @@ Optimization requirements vary dramatically across deployment contexts. What mat
 
 @tbl-model-vs-device quantifies this gap using the Lighthouse models from @sec-ml-system-architecture. The mismatch between model requirements and device capabilities explains why compression is not optional for resource-constrained deployment: without it, the models simply cannot run.
 
-+------------------------+---------------+---------------+---------------+-------------+---------------+
-| **Model**              | **Memory**    | **Storage**   | **Cloud**     | **Mobile**  | **TinyML**    |
-|                        | **(Runtime)** | **(Weights)** | **(~100 GB)** | **(~8 GB)** | **(~512 KB)** |
-+:=======================+==============:+==============:+:==============+:============+==============:+
-| **DLRM**               | 100 GB        | 100 GB        | ✓             | ✗ (12×)     | ✗ (200k×)     |
-+------------------------+---------------+---------------+---------------+-------------+---------------+
-| **GPT-2 XL**           | 6 GB          | 6 GB          | ✓             | ✓           | ✗ (12k×)      |
-+------------------------+---------------+---------------+---------------+-------------+---------------+
-| **ResNet-50**          | 100 MB        | 98 MB         | ✓             | ✓           | ✗ (200×)      |
-+------------------------+---------------+---------------+---------------+-------------+---------------+
-| **MobileNetV2**        | 14 MB         | 14 MB         | ✓             | ✓           | ✗ (27×)       |
-+------------------------+---------------+---------------+---------------+-------------+---------------+
-| **MobileNetV2 (INT8)** | 3.5 MB        | 3.5 MB        | ✓             | ✓           | ✗ (7×)        |
-+------------------------+---------------+---------------+---------------+-------------+---------------+
-| **DS-CNN (KWS)**       | 500 KB        | 500 KB        | ✓             | ✓           | ✓             |
-+------------------------+---------------+---------------+---------------+-------------+---------------+
+```{python}
+#| label: model-device-comparison
+#| echo: false
+
+from calc.constants import GiB, MiB, KiB, MB, KB, byte
+
+# Device Capacities
+cloud_mem = 100 * GiB
+mobile_mem = 8 * GiB
+tiny_mem = 512 * KiB
+
+# Model Requirements (Runtime Memory)
+# DLRM: Sparse Embedding Tables ~100GB
+dlrm_mem = 100 * GiB
+
+# GPT-2 XL: 1.5B params * 2 bytes (FP16) + overhead ~6GB
+gpt2_mem = 6 * GiB
+
+# ResNet-50: ~25.6M params * 4 bytes (FP32) ≈ 100 MB
+resnet_mem = 100 * MiB
+
+# MobileNetV2: ~3.5M params * 4 bytes (FP32) ≈ 14 MB
+mobilenet_mem = 14 * MiB
+
+# MobileNetV2 INT8: ~3.5M params * 1 byte ≈ 3.5 MB
+mobilenet_int8_mem = 3.5 * MiB
+
+# DS-CNN: ~500 KB
+dscnn_mem = 500 * KiB
+
+# Calculate Ratios (rounded for display)
+def get_ratio(model_mem, device_mem):
+    ratio = model_mem / device_mem
+    if ratio < 1:
+        return "✓"
+    return f"✗ ({ratio:.0f}×)"
+
+# DLRM
+dlrm_mobile = get_ratio(dlrm_mem, mobile_mem)
+dlrm_tiny = get_ratio(dlrm_mem, tiny_mem) # ~200k
+
+# GPT-2
+gpt2_mobile = get_ratio(gpt2_mem, mobile_mem) # Fits (0.75x) -> Check mark
+gpt2_tiny = get_ratio(gpt2_mem, tiny_mem)
+
+# ResNet
+resnet_tiny = get_ratio(resnet_mem, tiny_mem)
+
+# MobileNet
+mobilenet_tiny = get_ratio(mobilenet_mem, tiny_mem)
+mobilenet_int8_tiny = get_ratio(mobilenet_int8_mem, tiny_mem)
+
+# Strings for table
+dlrm_str = f"{dlrm_mem.to(GiB).magnitude:.0f} GiB"
+gpt2_str = f"{gpt2_mem.to(GiB).magnitude:.0f} GiB"
+resnet_str = f"{resnet_mem.to(MiB).magnitude:.0f} MiB"
+mobilenet_str = f"{mobilenet_mem.to(MiB).magnitude:.0f} MiB"
+mobilenet_int8_str = f"{mobilenet_int8_mem.to(MiB).magnitude:.1f} MiB"
+dscnn_str = f"{dscnn_mem.to(KiB).magnitude:.0f} KiB"
+
+cloud_cap = f"~{cloud_mem.to(GiB).magnitude:.0f} GiB"
+mobile_cap = f"~{mobile_mem.to(GiB).magnitude:.0f} GiB"
+tiny_cap = f"~{tiny_mem.to(KiB).magnitude:.0f} KiB"
+```
+
++------------------------+-------------------------------+-------------------------------+-----------------------+------------------------+-------------------------+
+| **Model**              | **Memory**                    | **Storage**                   | **Cloud**             | **Mobile**             | **TinyML**              |
+|                        | **(Runtime)**                 | **(Weights)**                 | **(`{python} cloud_cap`)** | **(`{python} mobile_cap`)** | **(`{python} tiny_cap`)**    |
++:=======================+==============================:+==============================:+:======================+:=======================+:========================+
+| **DLRM**               | `{python} dlrm_str`           | `{python} dlrm_str`           | ✓                     | `{python} dlrm_mobile` | `{python} dlrm_tiny`    |
++------------------------+-------------------------------+-------------------------------+-----------------------+------------------------+-------------------------+
+| **GPT-2 XL**           | `{python} gpt2_str`           | `{python} gpt2_str`           | ✓                     | ✓                      | `{python} gpt2_tiny`    |
++------------------------+-------------------------------+-------------------------------+-----------------------+------------------------+-------------------------+
+| **ResNet-50**          | `{python} resnet_str`         | `{python} resnet_str`         | ✓                     | ✓                      | `{python} resnet_tiny`  |
++------------------------+-------------------------------+-------------------------------+-----------------------+------------------------+-------------------------+
+| **MobileNetV2**        | `{python} mobilenet_str`      | `{python} mobilenet_str`      | ✓                     | ✓                      | `{python} mobilenet_tiny`|
++------------------------+-------------------------------+-------------------------------+-----------------------+------------------------+-------------------------+
+| **MobileNetV2 (INT8)** | `{python} mobilenet_int8_str` | `{python} mobilenet_int8_str` | ✓                     | ✓                      | `{python} mobilenet_int8_tiny`|
++------------------------+-------------------------------+-------------------------------+-----------------------+------------------------+-------------------------+
+| **DS-CNN (KWS)**       | `{python} dscnn_str`          | `{python} dscnn_str`          | ✓                     | ✓                      | ✓                       |
++------------------------+-------------------------------+-------------------------------+-----------------------+------------------------+-------------------------+
 
 : **The Deployment Gap**: Model memory requirements compared against typical device capacities. Even MobileNetV2 quantized to INT8 exceeds TinyML constraints by 7×, while the purpose-built DS-CNN keyword spotter fits comfortably. Numbers in parentheses show how many times the model exceeds device memory. {#tbl-model-vs-device}
 
@@ -1984,9 +2051,9 @@ data_reduction_str = f"{data_reduction:.0f}"
 ```
 
 ::: {.callout-notebook title="The Bandwidth-Compute Trade-off"}
-**Reducing the Memory Pressure**: Low-rank factorization illustrates a classic systems trade-off: **trading computation for bandwidth reduction**. Storing a $4096 \times 4096$ matrix requires `{python} full_mb_str`MB (at FP32). Fetching this matrix for a single inference is a massive memory bandwidth hit, especially when limited by physical memory bandwidth constraints.
+**Reducing the Memory Pressure**: Low-rank factorization illustrates a classic systems trade-off: **trading computation for bandwidth reduction**. Storing a $4096 \times 4096$ matrix requires `{python} full_mb_str`MiB (at FP32). Fetching this matrix for a single inference is a massive memory bandwidth hit, especially when limited by physical memory bandwidth constraints.
 
-If we factorize it with rank $k=128$, we store two matrices ($4096 \times 128$ and $128 \times 4096$), totaling only `{python} factored_mb_str`MB, a **`{python} data_reduction_str`x reduction in data movement**. While the number of floating-point operations (FLOPs) actually *increases* slightly because we perform two smaller matrix multiplies instead of one large one, the system speedup is often dramatic. By reducing data movement by `{python} data_reduction_str`×, we allow the processor to spend more time computing and less time waiting for memory.
+If we factorize it with rank $k=128$, we store two matrices ($4096 \times 128$ and $128 \times 4096$), totaling only `{python} factored_mb_str`MiB, a **`{python} data_reduction_str`x reduction in data movement**. While the number of floating-point operations (FLOPs) actually *increases* slightly because we perform two smaller matrix multiplies instead of one large one, the system speedup is often dramatic. By reducing data movement by `{python} data_reduction_str`×, we allow the processor to spend more time computing and less time waiting for memory.
 :::
 
 This bandwidth-compute trade-off reflects the broader memory wall[^fn-memory-wall-preview] phenomenon where memory access becomes the dominant bottleneck.
@@ -2306,11 +2373,11 @@ The techniques explored so far (pruning, distillation, and factorization) all op
 
 ### Neural Architecture Search {#sec-model-compression-neural-architecture-search-f1e9}
 
-Pruning, knowledge distillation, and other techniques explored in previous sections rely on human expertise to determine optimal model configurations. While these manual approaches have led to significant advancements, selecting optimal architectures requires extensive experimentation, and even experienced practitioners may overlook more efficient designs [@elsken2019neural]. Neural Architecture Search (NAS) automates this process by systematically exploring large spaces of possible architectures to identify those that best balance accuracy, computational cost, memory efficiency, and inference latency.
+Pruning, knowledge distillation, and other techniques explored in previous sections rely on human expertise to determine optimal model configurations. While these manual approaches have led to significant advancements, selecting optimal architectures requires extensive experimentation, and even experienced practitioners may overlook more efficient designs [@elsken2019neural]. Neural Architecture Search (NAS) automates this process by systematically exploring large spaces of possible architectures to identify those that best balance accuracy, computational cost, memory efficiency, and inference latency [@zoph2017neural].
 
 @fig-nas-flow illustrates the NAS process. NAS[^fn-hardware-aware-nas] operates through three interconnected stages: defining the search space (architectural components and constraints), applying search strategies (reinforcement learning[@zoph2017neural], evolutionary algorithms, or gradient-based methods) to explore candidate architectures, and evaluating performance to ensure discovered designs satisfy accuracy and efficiency objectives. This automation enables the discovery of novel architectures that often match or surpass human-designed models while requiring substantially less expert effort.
 
-[^fn-hardware-aware-nas]: **Hardware-Aware NAS**: Architecture search directly optimizing for target hardware latency rather than proxy metrics like FLOPs. MnasNet (2019) uses actual measured latency in the search objective, finding architectures with 1.8× speedup over MobileNetV2 at higher accuracy. Platform-specific search discovers that optimal architectures differ significantly between mobile CPUs, GPUs, and TPUs.
+[^fn-hardware-aware-nas]: **Hardware-Aware NAS**: Architecture search [@tan2019mnasnet] directly optimizing for target hardware latency rather than proxy metrics like FLOPs. MnasNet (2019) uses actual measured latency in the search objective, finding architectures with 1.8× speedup over MobileNetV2 at higher accuracy. Platform-specific search discovers that optimal architectures differ significantly between mobile CPUs, GPUs, and TPUs.
 
 ::: {#fig-nas-flow fig-env="figure" fig-pos="htb" fig-cap="**Neural Architecture Search Flow**: Three components form a feedback loop: a Search Space defines candidate operations, a Search Strategy selects architectures, and a Performance Estimation Strategy evaluates each candidate. The strategy iterates by feeding performance estimates back into the search until convergence." fig-alt="Three-box flowchart showing NAS process. Search Space box feeds into Search Strategy box, which exchanges Architecture and Performance estimate with Performance Estimation Strategy box in a feedback loop."}
 ```{.tikz}
@@ -2528,7 +2595,7 @@ While DLRM operates at the terabyte scale, our Smart Doorbell Lighthouse faces t
 ::: {.callout-lighthouse title="The TinyML Quantization Imperative"}
 **The Energy and Storage Constraint**: Our **Smart Doorbell Lighthouse** operates at the opposite extreme of the Iron Law from DLRM. While DLRM optimizes for terabyte-scale capacity, the Smart Doorbell's Keyword Spotting (KWS) model must operate within a 100 KB budget to run on a microcontroller with 256 KB RAM.
 
-In FP32, even the compact DS-CNN architecture consumes 4$\times$ more memory bandwidth and energy per inference than in INT8. For an always-on device running on a coin cell battery, this 4$\times$ energy difference translates directly to battery life: a device that lasts 1 month on FP32 might last 4 months on INT8. Here, quantization is the primary lever for the **Energy Term** ($Ops/P \cdot \eta$) of the Iron Law.
+In FP32, even the compact DS-CNN architecture consumes 4$\times$ more memory bandwidth and energy per inference than in INT8. For an always-on device running on a coin cell battery, this 4$\times$ energy difference translates directly to battery life: a device that lasts 1 month on FP32 might last 4 months on INT8. Here, quantization is the primary lever for the **Energy Term** ($O / (R_{peak} \cdot \eta)$) of the Iron Law.
 :::
 
 ::: {#fig-quantized-energy fig-env="figure" fig-pos="htb" fig-cap="**Energy per Operation by Precision.** Bar chart comparing energy in picojoules for arithmetic operations (FP32 multiply: 3.7 pJ, INT8 add: 0.03 pJ) and SRAM memory accesses (5 to 50 pJ by cache size). Lower precision yields order-of-magnitude energy savings. Source: IEEE Spectrum." fig-alt="Bar chart comparing energy consumption in picojoules for arithmetic operations and memory accesses. FP32 multiply uses 3.7 pJ, INT8 add uses 0.03 pJ. SRAM reads range from 5 to 50 pJ depending on cache size."}
@@ -6492,6 +6559,8 @@ Model optimization bridges the gap between research advances and deployment real
 Combined with the data selection techniques from @sec-data-selection, these model-centric optimizations complete the efficiency toolkit: data selection maximizes learning from available examples, while model compression minimizes resources required for deployment. Systematic application of these techniques, matched to specific deployment constraints and hardware capabilities, turns research prototypes into production assets.
 
 The emergence of AutoML frameworks represents a paradigm shift toward automated discovery of optimization strategies. These systems enable practitioners to explore vast optimization spaces more systematically than manual approaches, often uncovering novel technique combinations that achieve superior efficiency-accuracy trade-offs. However, AutoML is not a universal solution: computational cost, search bias, and interpretability challenges limit its applicability. Whether optimizing manually or through automation, rigorous profiling and measurement remain essential for validating that optimizations achieve their intended goals on target hardware.
+
+These three dimensions of optimization are not independent choices but complementary tools. Production deployments typically combine pruning to reduce computation, quantization to accelerate execution, and architecture search to optimize the underlying structure. The deployment contexts introduced earlier illustrate how these techniques compose: mobile applications might prioritize quantization for power efficiency, while cloud deployments might favor structural pruning for throughput. Understanding these interactions enables practitioners to select and sequence techniques that match their specific deployment constraints.
 
 ::: {.callout-takeaways title="Key Takeaways"}
 

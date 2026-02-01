@@ -68,7 +68,7 @@ The quantitative evidence for this scaling asymmetry is stark. @tbl-scaling-asym
 **The Consequence**: Compute budgets now support training runs that far exceed what available high-quality data can fill. The field has become *compute-rich and data-poor*.
 :::
 
-This asymmetry inverts the optimization priority. When data was abundant and compute was scarce, the right strategy was algorithmic efficiency: squeeze more accuracy from limited GPU cycles. Now that compute is abundant and *quality data* is scarce, the winning strategy is **data selection**: squeeze more learning from each sample. Data selection operates upstream of all other optimizations. By pruning redundancy and selecting high-value samples, we reduce the workload before it ever enters the model or hits the hardware. In the Iron Law of Efficiency ($Time = \frac{Data}{BW} + \frac{Ops}{P \cdot \eta}$), this is the only technique that shrinks the *numerator* of the first term. Companies training frontier models are no longer bottlenecked by GPU access but by the quality and diversity of their training corpora.
+This asymmetry inverts the optimization priority. When data was abundant and compute was scarce, the right strategy was algorithmic efficiency: squeeze more accuracy from limited GPU cycles. Now that compute is abundant and *quality data* is scarce, the winning strategy is **data selection**: squeeze more learning from each sample. Data selection operates upstream of all other optimizations. By pruning redundancy and selecting high-value samples, we reduce the workload before it ever enters the model or hits the hardware. In the Iron Law of Efficiency ($T = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot \eta}$), this is the only technique that shrinks the *numerator* of the first term. Companies training frontier models are no longer bottlenecked by GPU access but by the quality and diversity of their training corpora.
 
 This chapter provides the engineering toolkit for intelligent data selection, organized around Part III's **DAM Taxonomy** (@sec-optimize-invariants), which establishes a deliberate optimization ordering: Data first, then Algorithm, then Machine. Data selection puts the "highest leverage first" principle into practice by addressing whether work is necessary before asking how to simplify or accelerate it. The chapter follows a three-stage optimization pipeline that structures the practical response to the Data Wall:
 
@@ -127,9 +127,9 @@ In this textbook, we adopt a **systems framing**: *how do I reduce the total cos
 The systems framing reveals optimization opportunities invisible to the ML framing. To see why, consider how data selection interacts with the Iron Law introduced in @sec-ml-system-architecture.
 
 ::: {.callout-perspective title="Data Selection and the Iron Law"}
-In the **Iron Law of ML Systems** ($L = \frac{D}{B} + \frac{Ops}{P \cdot \eta} + L_{fixed}$), data selection is the only technique that reduces the *Total Operations* term at its source. Model compression reduces operations per sample; hardware acceleration increases throughput per operation. But data selection reduces the number of samples processed entirely.
+In the **Iron Law of ML Systems** ($T = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot \eta} + L_{lat}$), data selection is the only technique that reduces the *Total Operations* term at its source. Model compression reduces operations per sample; hardware acceleration increases throughput per operation. But data selection reduces the number of samples processed entirely.
 
-- **Model compression**: Reduces $Ops$ per forward/backward pass
+- **Model compression**: Reduces $O$ per forward/backward pass
 - **Hardware acceleration**: Increases $P$ (peak throughput) and $\eta$ (utilization)
 - **Data selection**: Reduces the number of passes through the entire equation
 
@@ -203,7 +203,7 @@ $$
 \text{ICR} = \frac{\Delta \text{Model Performance}}{\Delta \text{FLOPs}}
 $$
 
-**The Iron Law Connection**: In the Iron Law of Training Performance ($T = \frac{Ops}{P \cdot \eta}$), the **Total Operations ($Ops$)** term is usually treated as a fixed constant determined by model architecture and dataset size. **Data Selection turns $Ops$ into a variable.** By maximizing ICR, we reduce the total FLOPs required to reach a target performance level, directly shrinking the numerator of the Iron Law equation. A 2x improvement in ICR is mathematically equivalent to a 2x improvement in hardware Peak Throughput ($P$), but often much cheaper to achieve.
+**The Iron Law Connection**: In the Iron Law of Training Performance ($T = \frac{O}{R_{peak} \cdot \eta}$), the **Total Operations ($O$)** term is usually treated as a fixed constant determined by model architecture and dataset size. **Data Selection turns $O$ into a variable.** By maximizing ICR, we reduce the total FLOPs required to reach a target performance level, directly shrinking the numerator of the Iron Law equation. A 2x improvement in ICR is mathematically equivalent to a 2x improvement in hardware Peak Throughput ($R_{peak}$), but often much cheaper to achieve.
 
 A random batch of raw data often has low ICR because it contains redundant examples, noisy samples, or "easy" examples the model has already mastered. Training on such a batch wastes GPU cycles on zero-information updates. High-efficiency data pipelines (@fig-data-selection-pipeline) filter, order, and synthesize data to maximize ICR, ensuring that every FLOP contributes to learning. To illustrate, consider *computing ICR* on a concrete coreset selection task. Later in this chapter, @sec-data-selection-measuring-data-selection-7957 provides the complete measurement framework for evaluating these efficiency gains, including the Data Roofline model that diagnoses whether a system is data-bound or compute-bound.
 
@@ -751,6 +751,8 @@ These gains are substantial, but semi-supervised learning is not universally app
 
 Despite these limitations, semi-supervised learning reduces label requirements by 5–10$\times$ while maintaining accuracy. Notice what we have not yet questioned: the assumption that we need *any* task-specific labels at all. What if the structure of data itself (the fact that cat images resemble other cat images, that coherent sentences follow grammatical patterns) could provide the supervision signal?
 
+The three-stage pipeline assumes labeled data, but a powerful alternative eliminates labeling requirements entirely. Self-supervised learning reframes the data selection problem: rather than selecting which examples to label, it defines learning objectives that derive supervision from the data itself. This approach transforms the pipeline's annotation stage from a bottleneck into an opportunity.
+
 ## Self-Supervised Learning: Eliminating the Label Bottleneck {#sec-data-selection-selfsupervised-learning-eliminating-label-bottleneck-1005}
 
 Active learning reduces labeling cost by 10$\times$. Semi-supervised learning reduces it by another 5–10$\times$. The most dramatic gain, however, comes from **self-supervised learning**[^fn-self-supervised], which removes the human annotation bottleneck entirely by learning from data structure rather than human labels. Self-supervised learning does not map neatly onto the three-stage pipeline (static pruning, dynamic selection, synthetic generation) introduced earlier. Rather than optimizing which labeled samples to use, SSL eliminates the label bottleneck by redefining what counts as supervision. It is best understood as a paradigm shift that makes the entire pipeline more effective: pre-trained representations improve the quality of coreset selection, active learning, and downstream fine-tuning alike.
@@ -1031,6 +1033,8 @@ This richer supervision signal enables student models to learn more efficiently 
 
 Together, augmentation, generative synthesis, and distillation complete the third stage of our data selection pipeline. Where static pruning removes redundancy and dynamic selection focuses compute on high-value samples, synthetic generation fills gaps by creating samples that never existed. These three stages form a complementary toolkit: pruning reduces what you have, selection focuses how you use it, and synthesis expands what you can access.
 
+Having examined selection techniques across all three pipeline stages, we now consolidate their characteristics to guide practical application.
+
 ## Technique Summary {#sec-data-selection-technique-summary-0ee8}
 
 @tbl-data-selection summarizes the three-stage optimization pipeline introduced at the beginning of this chapter.
@@ -1166,6 +1170,8 @@ A technique with high theoretical gains but high implementation cost may deliver
 **Step 4: Combine Techniques Strategically.** The techniques in this chapter are not mutually exclusive; in practice, the most effective pipelines combine multiple approaches. A typical production workflow begins by deduplicating the raw corpus for immediate gains at minimal cost. This cleaned dataset then undergoes coreset selection to identify the most informative samples. During training, curriculum learning orders these samples to optimize gradient quality, while data augmentation increases effective diversity at runtime. Finally, starting from a self-supervised foundation model rather than random initialization allows the pipeline to leverage knowledge learned from massive unlabeled corpora.
 
 Each stage compounds the efficiency gains of previous stages, turning individual percentage improvements into multiplicative savings.
+
+These techniques require infrastructure to operate at scale. The following sections examine the engineering systems that enable efficient data selection in production environments.
 
 The preceding sections answer the *what* of data selection: which samples to prune, when to select dynamically, and how to synthesize new data. Understanding these algorithmic choices is essential, but algorithms alone do not translate into faster training. A perfectly designed coreset algorithm that takes 10 hours to select samples for a 2-hour training run yields no practical benefit. The *how* of implementation matters as much as the *what* of algorithm choice.
 

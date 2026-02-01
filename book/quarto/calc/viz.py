@@ -16,12 +16,13 @@ COLORS = {
     "grid":       "#CCCCCC", # Light Gray
     
     # TikZ / Technical Palette (The "Golden" set)
-    "BlueLine":   "#006395", "BlueL":   "#D1E6F3",
-    "RedLine":    "#CB202D", "RedL":    "#F5D2D5",
-    "GreenLine":  "#008F45", "GreenL":  "#D4EFDF",
+    "BlueLine":   "#006395", "BlueL":   "#D1E6F3", "BlueFill": "#D6EAF8",
+    "RedLine":    "#CB202D", "RedL":    "#F5D2D5", "RedFill": "#F2D7D5",
+    "GreenLine":  "#008F45", "GreenL":  "#D4EFDF", "GreenFill": "#D5F5E3",
     "OrangeLine": "#E67817", "OrangeL": "#FCE4CC",
     "VioletLine": "#7E317B", "VioletL": "#E6D4E5",
-    "BrownLine":  "#78492A", "BrownL":  "#E3D3C8"
+    "BrownLine":  "#78492A", "BrownL":  "#E3D3C8",
+    "YellowFill": "#FEF9E0"
 }
 
 def set_book_style():
