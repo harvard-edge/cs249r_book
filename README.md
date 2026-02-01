@@ -462,6 +462,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
       <td align="center" valign="top" width="11.11%"><a href="https://github.com/keo-dara"><img src="https://avatars.githubusercontent.com/u/175544368?v=4?v=4?s=50" width="50px;" alt="keo-dara"/><br /><sub><b>keo-dara</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="11.11%"><a href="https://github.com/Kobra299"><img src="https://avatars.githubusercontent.com/u/4283156?v=4?v=4?s=50" width="50px;" alt="Wayne Norman"/><br /><sub><b>Wayne Norman</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="11.11%"><a href="https://github.com/lalalostcode"><img src="https://avatars.githubusercontent.com/u/149884766?v=4?v=4?s=50" width="50px;" alt="Ilham Rafiqin"/><br /><sub><b>Ilham Rafiqin</b></sub></a><br />🪲</td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/AndreaMattiaGaravagn"><img src="https://avatars.githubusercontent.com/AndreaMattiaGaravagn?v=4?s=50" width="50px;" alt="AndreaMattiaGaravagn"/><br /><sub><b>AndreaMattiaGaravagn</b></sub></a><br />✍️</td>
     </tr>
   </tbody>
 </table>
