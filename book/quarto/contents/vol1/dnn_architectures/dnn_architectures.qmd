@@ -70,7 +70,7 @@ Every neural network architecture answers one central question: *how should we s
 
 The structural assumptions that each architecture encodes are known as **inductive biases**, and they serve as the *unifying concept* for this entire chapter. A CNN's inductive bias is spatial locality: nearby pixels matter more than distant ones. A Transformer's inductive bias is that any element may attend to any other, enabling flexible long-range relationships at the cost of quadratic memory scaling. These biases are not incidental design choices; they are the mechanism through which architectures achieve efficiency by restricting the space of functions they can represent. We formalize this framework in @sec-dnn-architectures-unified-framework-inductive-biases-257d, after examining how each architecture's bias manifests in practice.
 
-Machine learning systems face a fundamental engineering trade-off: **representational power versus computational efficiency**. In the context of the **Iron Law of ML Systems** (@sec-ai-training-iron-law-training-performance-a53f), architectural choice is the primary determinant of the **Ops** term. A Transformer's attention mechanism enables global relationships but scales as $O(N^2)$ operations; a CNN exploits spatial locality to reduce operations to $O(N)$. Navigating this trade-off, choosing the right inductive biases for your data while setting a manageable "Ops budget," defines the practice of neural architecture selection.
+Machine learning systems face a fundamental engineering trade-off: **representational power versus computational efficiency**. In the context of the **Iron Law of ML Systems** (@sec-silicon-contract), architectural choice is the primary determinant of the **Ops** term. A Transformer's attention mechanism enables global relationships but scales as $O(N^2)$ operations; a CNN exploits spatial locality to reduce operations to $O(N)$. Navigating this trade-off, choosing the right inductive biases for your data while setting a manageable "Ops budget," defines the practice of neural architecture selection.
 
 Five architectural families define modern neural computation, each optimized for different data characteristics:
 
@@ -162,21 +162,24 @@ MobileNet [@howard2017mobilenets] challenged the trend of ever-larger models by 
 **Keyword Spotting (KWS) (Google/Arm, 2017)**
 Keyword Spotting models (like those detecting "Hey Siri" or "Ok Google") represent the extreme end of efficiency. Designed to run on "always-on" microcontrollers with kilobyte-scale memory and milliwatt power budgets, these models (often Depthwise Separable CNNs) exemplify the constraints of TinyML. They force engineers to count every byte and cycle, driving innovations in extreme quantization (int8/int4) and specialized hardware.
 
-#### Understanding Arithmetic Intensity {#sec-dnn-architectures-understanding-arithmetic-intensity-ade5}
+#### The Arithmetic Intensity Spectrum {#sec-dnn-architectures-understanding-arithmetic-intensity-ade5}
 
-The quantitative characteristics in @tbl-lighthouse-comparison reveal a critical systems concept: **arithmetic intensity**,[^fn-ai-analogy] the ratio of operations performed per byte of data moved. This metric determines whether a workload is compute-bound or memory-bound.
+The quantitative characteristics in @tbl-lighthouse-comparison expose a critical engineering constraint established in @sec-deep-learning-systems-foundations: **arithmetic intensity**. As we saw, this ratio of operations performed per byte of data moved determines whether a workload is compute-bound or memory-bound.
 
-[^fn-ai-analogy]: **Arithmetic Intensity Intuition**: Think of data as food and the processor as a mouth. High intensity (ResNet) is like chewing a tough steak: you spend a long time processing each "bite," so jaw speed (compute) is the bottleneck. Low intensity (GPT) is like drinking a smoothie: you swallow almost immediately, so the "straw" (bandwidth) is the bottleneck.
+Architecture selection is ultimately an engineering trade-off between **Math** ($Ops$) and **Memory Movement** ($D$). By comparing our Lighthouses, we can see how architectural choices shift a model's position on the intensity spectrum:
 
-::: {.callout-notebook title="The Arithmetic Intensity Spectrum"}
+-   **ResNet-50 (Compute-Bound)**: High intensity ($\approx 100$ $Ops/Byte$). Convolutional layers reuse each weight many times across the spatial dimensions of an image. Its performance is limited by how fast the hardware can do math.
+-   **GPT-2 (Bandwidth-Bound)**: Low intensity ($\approx 1$ $Ops/Byte$). Autoregressive transformers must load massive weights from memory just to perform a single token’s math. Its performance is limited by how fast memory can move bits.
+-   **MobileNet (Memory-Bound on GPUs)**: Low intensity ($\approx 10$ $Ops/Byte$). MobileNet reduces total $Ops$ through depthwise separable convolutions, but it moves more data relative to that work. It fits mobile hardware perfectly but often "starves" high-end GPUs optimized for dense math.
 
-Architecture selection is ultimately an engineering trade-off between **Math** ($Ops$) and **Memory Movement** ($D$). We quantify this using **Arithmetic Intensity**: the ratio of operations performed per byte of data moved.
+This spectrum determines whether you need a faster processor or faster memory to improve performance. The Roofline Model, which we examine in detail in @sec-ai-acceleration, provides the analytical framework for quantifying these limits on specific hardware.
 
--   **ResNet-50 (Compute-Bound)**: High intensity ($\approx 100$ $Ops/Byte$). ResNet reuses each weight many times across the image. Its performance is limited by how fast the hardware can do math.
--   **GPT-2 (Bandwidth-Bound)**: Low intensity ($\approx 1$ $Ops/Byte$). GPT-2 must load massive weights from memory just to perform a single token’s math. Its performance is limited by how fast memory can move bits.
--   **MobileNet (Memory-Bound on GPUs)**: Low intensity ($\approx 10$ $Ops/Byte$). MobileNet is optimized to reduce total $Ops$, but it moves more data relative to that work. It fits mobile hardware perfectly but often "starves" high-end GPUs.
+::: {.callout-checkpoint title="Arithmetic Intensity and Architecture" collapse="false"}
+Match the architectural choice to its systems implication:
 
-This spectrum determines whether you need a faster processor or faster memory to improve performance.
+- [ ] **Weight Reuse (CNNs)**: Increases arithmetic intensity by using the same weights across many inputs.
+- [ ] **Large Embedding Tables (DLRM)**: Decreases arithmetic intensity by requiring massive data movement for minimal computation.
+- [ ] **Sequential Attention (GPT)**: Decreases arithmetic intensity by loading weights per-token rather than per-batch.
 :::
 
 With these quantitative reference points established, we now examine each architectural family in detail, starting with the foundational Multi-Layer Perceptron, the architecture that established the computational patterns underlying all modern neural networks. From there, we progress through increasingly specialized designs: CNNs that exploit spatial structure, RNNs that capture temporal dependencies, Transformers that enable dynamic attention, and finally DLRM that handles massive categorical features. Each architecture represents a different answer to the same fundamental question: *how* should we structure computation to match the patterns in our data?
@@ -272,7 +275,7 @@ Both architectures can *represent* the digit classification function (UAT guaran
 
 **Why Specialized Architectures Exist**: The learnability gap motivates the core design principle: embed inductive biases that match data structure. CNNs embed locality for spatial data; RNNs embed sequential dependencies for temporal data; Transformers embed learned attention for relational data. Each sacrifices theoretical generality for practical learnability.
 
-**No Free Lunch**: The bias that helps one task may hurt another. CNN's translation invariance aids image classification but hurts tasks where absolute position matters. Architecture selection fundamentally matches inductive bias to data structure.
+**No Free Lunch** [@wolpert1996lack]: The bias that helps one task may hurt another. CNN's translation invariance aids image classification but hurts tasks where absolute position matters. Architecture selection fundamentally matches inductive bias to data structure.
 
 These theoretical insights translate directly into engineering decisions. Appropriate inductive biases reduce parameter counts (enabling edge deployment), accelerate convergence (reducing training costs), and produce structured computation patterns that map efficiently to specialized hardware (@sec-ai-acceleration). A `{python} mlp_params_str`-parameter MLP infeasible for edge deployment becomes a `{python} cnn_params_str`-parameter CNN that fits comfortably, a `{python} param_ratio_str`x reduction achieved by matching architecture to data structure.
 
@@ -534,7 +537,7 @@ In the MNIST example, each output neuron requires 784 multiply-accumulate operat
 
 [^fn-dnn-blas]: **Basic Linear Algebra Subprograms (BLAS)**: Developed in the 1970s as a standard for basic vector and matrix operations, BLAS became the foundation for virtually all scientific computing. Modern implementations like Intel MKL and OpenBLAS can achieve 80-95% of theoretical peak performance on well-optimized workloads, making them necessary for neural network efficiency.
 
-[^fn-tensor-cores]: **Tensor Cores**: Specialized matrix units in NVIDIA GPUs (Volta+) accelerating mixed-precision GEMM operations. A100 Tensor Cores deliver `{python} a100_tflops_fp16` TFLOPS for FP16 (or `{python} a100_tflops_int8` TFLOPS with structured sparsity) compared to `{python} a100_tflops_fp32` TFLOPS for FP32 on CUDA cores. Note that this comparison spans both precision (FP16 vs FP32) and execution unit (Tensor Core vs CUDA Core); TF32 mode on Tensor Cores achieves `{python} a100_tflops_tf32` TFLOPS. Tensor Cores require specific matrix dimensions (multiples of 8/16) and data layouts; frameworks like cuBLAS automatically tile operations to maximize utilization.
+[^fn-tensor-cores]: **Tensor Cores**: Specialized matrix units in NVIDIA GPUs (Volta+) accelerating mixed-precision GEMM operations. A100 Tensor Cores deliver `{python} a100_tflops_fp16` TFLOPS for FP16 (or `{python} a100_tflops_int8` TOPS for INT8) compared to `{python} a100_tflops_fp32` TFLOPS for FP32 on CUDA cores. Note that this comparison spans both precision (FP16 vs FP32) and execution unit (Tensor Core vs CUDA Core); TF32 mode on Tensor Cores achieves `{python} a100_tflops_tf32` TFLOPS. Tensor Cores require specific matrix dimensions (multiples of 8/16) and data layouts; frameworks like cuBLAS automatically tile operations to maximize utilization.
 
 ### System Implications {#sec-dnn-architectures-system-implications-0550}
 
@@ -1477,7 +1480,7 @@ While attention mechanisms were initially used as components within recurrent ar
 
 Dynamic pattern processing addresses scenarios where relationships between elements are not fixed by architecture but instead emerge from content. Language translation exemplifies this challenge: when translating "the bank by the river," understanding "bank" requires attending to "river," but in "the bank approved the loan," the important relationship is with "approved" and "loan." Unlike RNNs that process information sequentially or CNNs that use fixed spatial patterns, an architecture is required that can dynamically determine which relationships matter.
 
-Expanding beyond language, this requirement for dynamic processing appears across many domains. In protein structure prediction, interactions between amino acids depend on their chemical properties and spatial arrangements. In graph analysis, node relationships vary based on graph structure and node features. In document analysis, connections between different sections depend on semantic content rather than just proximity.
+Expanding beyond language, this requirement for dynamic processing appears across many domains. In protein structure prediction, interactions between amino acids depend on their chemical properties and spatial arrangements. In graph analysis, node relationships vary based on graph structure and node features, typically modeled by Graph Convolutional Networks (GCNs) [@kipf2016semi]. In document analysis, connections between different sections depend on semantic content rather than just proximity.
 
 Synthesizing these requirements, dynamic processing demands specific capabilities: the system must compute relationships between all pairs of elements, weigh these relationships based on content, and use the resulting weights to selectively combine information. Unlike previous architectures with fixed connectivity patterns, dynamic processing requires the flexibility to modify its computation graph based on the input itself. These capabilities lead to the attention mechanism, which serves as the foundation for the Transformer architecture examined in detail in the following sections. @fig-transformer-attention-visualized shows attention enabling this dynamic information flow.
 
@@ -1985,7 +1988,7 @@ Self-attention learns dynamic activation patterns across the input sequence. Unl
 
 The Transformer architecture leverages this self-attention mechanism within a broader structure that typically includes feed-forward layers, layer normalization, and residual connections. @fig-transformer illustrates this complete architecture, showing how these components combine to process input sequences in parallel while capturing complex dependencies without sequential computation. Transformers have demonstrated significant effectiveness across a wide range of tasks, from natural language processing to computer vision, transforming deep learning architectures across domains.
 
-::: {#fig-transformer fig-env="figure" fig-pos="htb" fig-cap="**Transformer Architecture (Encoder-Decoder)**: Complete architecture from Vaswani et al. The encoder (left, repeated $N$ times) consists of multi-head attention followed by feed-forward layers, each with residual connections (arrows bypassing blocks) and layer normalization. The decoder (right) adds masked attention to prevent attending to future tokens during autoregressive generation. Positional encodings (sine waves) inject sequence order information absent from the permutation-invariant attention operation. This design enables training parallelism across all positions while the decoder maintains autoregressive causality during inference. Source: Vaswani et al. [@vaswani2017attention]." fig-alt="Encoder-decoder architecture. Encoder: multi-head attention, add-norm, feed-forward, add-norm, repeated Nx. Decoder adds masked attention. Positional encoding sine waves at inputs. Skip connections bypass sublayers. Linear and softmax at top."}
+::: {#fig-transformer fig-env="figure" fig-pos="htb" fig-cap="**Transformer Architecture (Encoder-Decoder)**: Complete architecture from Vaswani et al. The encoder (left, repeated $N$ times) consists of multi-head attention followed by feed-forward layers, each with residual connections (arrows bypassing blocks) and layer normalization. The decoder (right) adds masked attention to prevent attending to future tokens during autoregressive generation. Positional encodings (sine waves) [@su2024roformer] inject sequence order information absent from the permutation-invariant attention operation. This design enables training parallelism across all positions while the decoder maintains autoregressive causality during inference. Source: Vaswani et al. [@vaswani2017attention]." fig-alt="Encoder-decoder architecture. Encoder: multi-head attention, add-norm, feed-forward, add-norm, repeated Nx. Decoder adds masked attention. Positional encoding sine waves at inputs. Skip connections bypass sublayers. Linear and softmax at top."}
 ```{.tikz}
 \scalebox{0.7}{
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -2160,13 +2163,13 @@ viz.plot_context_explosion()
 plt.show()
 ```
 
-This examination of four architectural families (MLPs, CNNs, RNNs, and Transformers) reveals both their individual characteristics and their collective evolution. Each addresses distinct data types: spatial, sequential, and relational patterns. However, one critical architecture class remains that differs fundamentally from all four: **sparse architectures** for recommendation systems, which dominate industrial AI workloads despite receiving less academic attention than their media-processing counterparts.
+This examination of four architectural families (MLPs, CNNs, RNNs, and Transformers) reveals both their individual characteristics and their collective evolution. Each addresses distinct data types: spatial, sequential, and relational patterns. While CNNs and Transformers dominate academic attention, industrial AI workloads are driven by a fundamentally different architecture class: recommendation systems. However, one critical architecture class remains that differs fundamentally from all four: **sparse architectures** for recommendation systems, which dominate industrial AI workloads despite receiving less academic attention than their media-processing counterparts.
 
 ### Sparse Architectures: Recommendation Systems {#sec-dnn-architectures-sparse-architectures-recommendation-systems-5d19}
 
 While CNNs and Transformers dominate media processing (vision, language, audio), a different class of architecture consumes the majority of AI cycles in industrial applications: recommendation systems (RecSys). These systems power content feeds, product suggestions, and ad ranking for billions of users. Unlike media models which are typically **compute-bound** (limited by FLOPs), recommendation models are uniquely **memory-capacity-bound** and **memory-bandwidth-bound** due to their reliance on massive embedding tables.
 
-The core challenge in RecSys is handling high-cardinality categorical features. A model might need to process User IDs (billions of unique users) and Item IDs (millions of videos or products). We cannot input these raw IDs directly into a neural network; instead, we map each ID to a dense vector called an **embedding**[^fn-embedding-etymology].
+The core challenge in RecSys is handling high-cardinality categorical features. A model might need to process User IDs (billions of unique users) and Item IDs (millions of videos or products). We cannot input these raw IDs directly into a neural network; instead, we map each ID to a dense vector called an **embedding**[^fn-embedding-etymology] [@mikolov2013efficient].
 
 [^fn-embedding-etymology]: **Embedding**: From the mathematical concept of embedding one space into another, the term entered ML via word2vec (2013) and related work. Just as a topological embedding maps a space into a higher-dimensional one while preserving structure, neural embeddings map discrete tokens (words, user IDs) into continuous vector spaces where semantic relationships become geometric ones: similar items cluster together, and relationships like "king - man + woman = queen" emerge as vector arithmetic.
 
@@ -2223,7 +2226,7 @@ This forces a specific parallelization strategy called **Model Parallelism** (sp
 
 The result is an **All-to-All** communication pattern: every GPU must exchange data with every other GPU to gather the necessary embedding vectors for its batch. Consequently, DLRM performance is often limited not by GPU compute speed (FLOPs) but by **network bandwidth** and **memory bandwidth**. Optimizing these systems requires high-speed interconnects (such as NVLink or InfiniBand) and specialized embedding caches, fundamentally different optimizations than those used for CNNs or Transformers.
 
-Having examined five architectural paradigms, each optimized for different data types and system constraints, a natural question emerges: beneath this diversity, what computational foundations do these architectures share? Understanding shared building blocks explains why certain optimizations transfer across architectures (matrix tiling benefits all dense operations) while others remain architecture-specific (FlashAttention targets transformer attention patterns). It also reveals evolutionary relationships, showing how each architecture innovated by recombining and refining existing primitives rather than starting from scratch.
+While we have examined each architecture family independently—MLPs establishing fundamental patterns, CNNs exploiting spatial locality, RNNs capturing temporal dependencies, Transformers enabling parallel sequence processing, and DLRMs handling sparse categorical data—understanding their historical relationships reveals how modern designs evolved through systematic refinement of computational primitives. Having examined five architectural paradigms, each optimized for different data types and system constraints, a natural question emerges: beneath this diversity, what computational foundations do these architectures share? Understanding shared building blocks explains why certain optimizations transfer across architectures (matrix tiling benefits all dense operations) while others remain architecture-specific (FlashAttention targets transformer attention patterns). It also reveals evolutionary relationships, showing how each architecture innovated by recombining and refining existing primitives rather than starting from scratch.
 
 ## Architectural Evolution {#sec-dnn-architectures-architectural-building-blocks-aa3a}
 
@@ -2570,7 +2573,7 @@ This synthesis of primitives in Transformers shows modern architectures innovati
 
 ## System-Level Building Blocks {#sec-dnn-architectures-systemlevel-building-blocks-41c5}
 
-The architectural evolution traced above reveals repeated patterns: matrix operations, memory access structures, and data movement requirements that appear across all designs. We now examine these computational primitives systematically. Understanding these system-level building blocks is essential for practitioners because they determine how architectures map to hardware, where performance bottlenecks arise, and which optimizations prove most effective.
+The architectural evolution reveals that despite their apparent diversity, all neural networks rely on a small set of fundamental computational primitives. These system-level building blocks—matrix operations, memory access patterns, and data movement structures—determine how architectures map to hardware. The architectural evolution traced above reveals repeated patterns: matrix operations, memory access structures, and data movement requirements that appear across all designs. We now examine these computational primitives systematically. Understanding these system-level building blocks is essential for practitioners because they determine how architectures map to hardware, where performance bottlenecks arise, and which optimizations prove most effective.
 
 Examining the deep learning architectures covered above reveals system requirements that distill into primitives underpinning both hardware and software implementations. These primitives represent operations that cannot be decomposed further while maintaining their essential characteristics.
 
@@ -3054,7 +3057,7 @@ The first step in systematic architecture selection involves understanding how d
 
 This alignment is not coincidental; it reflects fundamental computational trade-offs. Architectures that match data characteristics can leverage natural structure for efficiency, while mismatched architectures must work against their design assumptions, leading to poor performance or excessive resource consumption.
 
-In practice, MLPs excel for financial modeling, medical measurements, and structured prediction where feature relationships are unknown a priori. CNNs dominate image recognition, 2D sensor processing, and signal analysis where spatial locality matters. RNNs remain useful for time series forecasting and simple sequential tasks where memory across time is essential. Transformers have become the architecture of choice for language understanding, machine translation, and complex reasoning tasks requiring long-range dependencies.
+In practice, MLPs excel for financial modeling, medical measurements, and structured prediction where feature relationships are unknown a priori. CNNs dominate image recognition, 2D sensor processing, and signal analysis where spatial locality matters. RNNs remain useful for time series forecasting and simple sequential tasks where memory across time is essential. Transformers have become the architecture of choice for language understanding, machine translation, and complex reasoning tasks [@wei2022chain] requiring long-range dependencies.
 
 Beyond data type matching, computational constraints often determine final feasibility. Understanding the scaling behavior of each architecture allows realistic resource planning and prevents costly architectural mismatches during deployment.
 
@@ -3390,9 +3393,9 @@ Despite their apparent diversity, these architectures share fundamental computat
 
 ::: {.callout-takeaways title="Key Takeaways"}
 
-* **Match architecture to data structure**: MLPs for tabular, CNNs for spatial, RNNs for sequential, Transformers for relational, DLRM for high-cardinality categorical. Mismatched architectures incur 10--100x greater computational cost.
+* **Match architecture to data structure**: MLPs for tabular, CNNs for spatial, RNNs for sequential, Transformers for relational, DLRM for high-cardinality categorical. Mismatched architectures incur 10–100× greater computational cost.
 * **Characterize performance bottlenecks before optimization**: ResNet-50 is compute-bound (optimize FLOPS), GPT-2 is memory-bandwidth-bound (optimize data movement), DLRM is memory-capacity-bound (optimize distribution).
-* **Learnability outweighs representation**: Specialized architectures achieve superior performance not because MLPs lack representational power, but because inductive biases enable learning with 10--100x less data.
+* **Learnability outweighs representation**: Specialized architectures achieve superior performance not because MLPs lack representational power, but because inductive biases enable learning with 10–100× less data.
 * **Hardware constraints determine feasibility**: High accuracy becomes impractical if it exceeds memory budget, latency target, or power envelope. Validate hardware fit before optimizing accuracy.
 
 :::

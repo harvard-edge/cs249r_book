@@ -42,6 +42,7 @@ from calc.formulas import fmt, sci
 
 # GPU specs referenced in this chapter
 a100_tflops_fp16 = f"{A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
+a100_tflops_fp32 = f"{A100_FLOPS_FP32.to(TFLOPs/second).magnitude:.1f}"
 a100_bw_gbs = f"{A100_MEM_BW.to(GB/second).magnitude:,.0f}"
 a100_bw_tbs = f"{A100_MEM_BW.to(TB/second).magnitude:.1f}"
 h100_tflops_fp16 = f"{H100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
@@ -78,6 +79,8 @@ ML benchmarking operates across three independent dimensions that map directly t
 ***Machine Learning Benchmarking*** is the empirical measurement of system performance against **Representative Workloads**. It exists to decouple **Peak Performance** (marketing specs) from **Sustained Performance** (real-world capability), quantifying the gap caused by system overheads like memory bandwidth saturation and software dispatch latency.
 
 :::
+
+Unlike traditional systems where benchmarks represent fixed specifications, ML benchmarks capture only a snapshot of a shifting reality.
 
 ::: {.callout-perspective title="Benchmarks as Moving Targets"}
 **Why ML Benchmarking feels different from CPU Benchmarking:**
@@ -355,7 +358,7 @@ These system benchmarks perform two critical functions in the AI ecosystem. Firs
 
 :::
 
-Effective benchmark interpretation requires understanding the performance characteristics of target hardware. Understanding whether specific AI workloads are compute-bound or memory-bound provides essential insight for optimization decisions. Computational intensity, measured as FLOPS[^fn-flops-throughput] per byte of data movement, determines performance limits. Consider an NVIDIA A100 GPU with `{python} a100_tflops_fp16` TFLOPS of tensor performance (TF32/FP16 with Tensor Cores; FP32 is 19.5 TFLOPS) and `{python} a100_bw_tbs` TB/s memory bandwidth (SXM variant), yielding an arithmetic intensity threshold of `{python} a100_ridge` FLOPS/byte. The architectural foundations for understanding these hardware characteristics, including the **roofline model** for analyzing compute-bound versus memory-bound workloads, are established in @sec-ai-acceleration, which provides context for interpreting system benchmark results.
+Effective benchmark interpretation requires understanding the performance characteristics of target hardware. Understanding whether specific AI workloads are compute-bound or memory-bound provides essential insight for optimization decisions. Computational intensity, measured as FLOPS[^fn-flops-throughput] per byte of data movement, determines performance limits. Consider an NVIDIA A100 GPU with `{python} a100_tflops_fp16` TFLOPS of tensor performance (TF32/FP16 with Tensor Cores; FP32 is `{python} a100_tflops_fp32` TFLOPS) and `{python} a100_bw_tbs` TB/s memory bandwidth (SXM variant), yielding an arithmetic intensity threshold of `{python} a100_ridge` FLOPS/byte. The architectural foundations for understanding these hardware characteristics, including the **roofline model** for analyzing compute-bound versus memory-bound workloads, are established in @sec-ai-acceleration, which provides context for interpreting system benchmark results.
 
 [^fn-flops-throughput]: **FLOPS**: Floating-Point Operations Per Second, a measure of computational performance indicating how many floating-point calculations a processor can execute in one second. Modern AI accelerators achieve high FLOPS ratings: NVIDIA A100 delivers `{python} a100_tflops_fp16` TFLOPS (trillion FLOPS) for FP16/BF16 Tensor Core operations (624 TFLOPS with structured sparsity), while high-end CPUs achieve 1-10 TFLOPS. FLOPS measurements help compare hardware capabilities and determine computational bottlenecks in ML workloads.
 
@@ -385,7 +388,8 @@ bert_perf_b1_tflops = bert_perf_b1 / 1e3  # → 100 TFLOPS
 bert_perf_b1_str = f"{bert_perf_b1_tflops:.0f}"
 
 # GPU utilization at batch=1
-bert_util_b1 = bert_perf_b1_tflops / 312 * 100  # 32%
+a100_peak = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
+bert_util_b1 = bert_perf_b1_tflops / a100_peak * 100  # 32%
 bert_util_b1_str = f"{bert_util_b1:.0f}"
 
 # Batch=32 analysis
@@ -395,7 +399,7 @@ bert_batch32_flops_str = f"{bert_batch32_flops}"
 bert_ai_b32_str = f"{bert_ai_b32:.0f}"
 
 # Achievable perf at batch=32 (compute-bound, ~85% of peak)
-bert_perf_b32 = 0.85 * 312  # 265 TFLOPS
+bert_perf_b32 = 0.85 * a100_peak  # 265 TFLOPS
 bert_perf_b32_str = f"{bert_perf_b32:.0f}"
 
 ```
@@ -562,7 +566,7 @@ The most successful benchmarks strike a careful balance between academic rigor a
 
 Community consensus establishes enduring benchmark relevance, while fragmentation impedes scientific progress. Through collaborative development and transparent operation, benchmarks evolve into authoritative standards for measuring advancement. The most successful benchmarks in energy efficiency and domain-specific applications share this foundation of community development and governance, demonstrating how collective expertise and shared purpose create lasting impact in rapidly advancing fields.
 
-Community-driven standardization answers a crucial question: how do we ensure consistent measurement across diverse implementations? But standardization alone does not determine what to measure. A second fundamental design decision shapes benchmark utility: granularity.
+While community standards ensure reproducibility, they do not prescribe the level of detail at which measurements should be taken. The choice of granularity, from individual operations to complete systems, fundamentally shapes what insights benchmarks can provide.
 
 ## Benchmarking Granularity {#sec-benchmarking-ai-benchmarking-granularity-3855}
 
@@ -696,7 +700,7 @@ With these measurement principles established, we can now examine how to diagnos
 ::: {.callout-notebook title="Measuring the Iron Law Terms"}
 **From Theory to Trace**: How to map the Iron Law equation to a profiler timeline (like Nsight Systems or PyTorch Profiler).
 
-**1. Measuring the Data Term ($\frac{Data}{BW}$)**
+**1. Measuring the Data Term ($\frac{D_{vol}}{BW}$)**
 
 *   **Signal:** Look for the **"Memory Throughput"** or **"DRAM Bandwidth"** line.
 *   **Calculation:** $\text{Effective BW} = \frac{\text{Total Bytes Transferred}}{\text{Kernel Duration}}$.
@@ -824,6 +828,8 @@ Given the inherent specificity of end-to-end benchmarking, organizations typical
 :::
 
 Component interaction often produces unexpected behaviors that single-level benchmarks miss. While micro-benchmarks might show excellent performance for individual operations and macro-benchmarks might demonstrate strong model accuracy, end-to-end evaluation can reveal that data preprocessing creates unexpected bottlenecks during high-traffic periods. These system-level insights remain hidden when components undergo isolated testing, motivating systematic approaches that connect granularity choices to concrete implementation decisions.
+
+Having established that benchmarks operate at multiple granularities, we now examine the fundamental components that every benchmark, regardless of granularity, must specify. These components define what is measured, how measurements are taken, and how results are reported.
 
 ## Benchmark Components {#sec-benchmarking-ai-benchmark-components-97cc}
 
@@ -1369,6 +1375,8 @@ Energy costs follow different patterns. Training energy costs are amortized acro
 This comparative framework guides benchmark design by highlighting which metrics matter most for each phase and how evaluation methodologies should differ to capture phase-specific performance characteristics. Training benchmarks emphasize convergence time and scaling efficiency, while inference benchmarks prioritize latency consistency and resource efficiency across diverse deployment scenarios.
 
 ## Training Benchmarks {#sec-benchmarking-ai-training-benchmarks-96da}
+
+Training benchmarks divide into three categories: convergence metrics that measure learning progress, throughput metrics that measure computational efficiency, and scalability metrics that measure distributed performance. We examine each in turn.
 
 Training benchmarks validate whether hardware acceleration delivers promised training throughput. The GPU clusters, TPU pods, and distributed training strategies examined in @sec-ai-acceleration all claim dramatic speedups, and training benchmarks reveal which claims hold under realistic workloads. They evaluate how hardware configurations, data loading mechanisms, and distributed training strategies actually perform when training production-scale models.
 
@@ -2934,7 +2942,7 @@ anchor=south,fill=white,inner sep=1pt]at (axis description cs: 0.82,0.49) {Bench
 
 Analysis of these MLPerf Power trends reveals two significant patterns: first, a plateauing of energy efficiency improvements across all three scales for traditional ML workloads, and second, a dramatic increase in energy efficiency specifically for generative AI applications. This dichotomy suggests both the maturation of optimization techniques for conventional ML tasks and the rapid innovation occurring in the generative AI space. These trends underscore the dual challenges facing the field: developing novel approaches to break through efficiency plateaus while ensuring sustainable scaling practices for increasingly powerful generative AI models.
 
-These efficiency gains, whether plateauing or accelerating, represent real progress. Yet benchmark improvements do not automatically translate to deployment success. Understanding why requires examining what benchmarks inherently cannot capture.
+The measurement techniques examined above, from timing protocols to power instrumentation, provide the raw data for benchmarking. However, converting measurements into meaningful comparisons requires understanding systematic sources of error and bias.
 
 ## Benchmarking Limitations and Best Practices {#sec-benchmarking-ai-benchmarking-limitations-best-practices-9d65}
 
@@ -3773,7 +3781,7 @@ This interdependence means that benchmark results from one dimension can be inva
 
 This interdependence is precisely the AI Triad introduced in @sec-introduction (@fig-ai-triad): System corresponds to Machine, Model corresponds to Algorithm, and Data remains Data. Holistic evaluation requires not just passing benchmarks in each dimension, but verifying that assumptions made in one dimension hold across the others. The Part III optimization pipeline (data → model → hardware) creates implicit dependencies that benchmarking must validate explicitly.
 
-As AI continues to evolve, benchmarking methodologies must advance in tandem. Evaluating AI performance through the lens of systems, models, and data ensures that benchmarks drive improvements not just in accuracy, but also in efficiency, fairness, and robustness. This holistic perspective provides essential validation before deployment. The DAM Taxonomy provides a diagnostic framework for identifying which component limits performance. @tbl-dam-bottleneck formalizes this approach by crossing each AI Triad component with the three fundamental bottleneck types.
+As AI continues to evolve, benchmarking methodologies must advance in tandem. Evaluating AI performance through the lens of systems, models, and data ensures that benchmarks drive improvements not just in accuracy, but also in efficiency, fairness, and robustness. This holistic perspective provides essential validation before deployment. The DAM Taxonomy provides a diagnostic framework for identifying which component limits performance. @tbl-dam-bottleneck formalizes this approach by crossing each AI Triad component with the three fundamental bottleneck types (see @sec-appendix-dam for the full "Check the DAM" flowchart and troubleshooting guide).
 
 +---------------+------------------------------+----------------------------+--------------------------------+
 | **Component** | **Compute-Bound**            | **Memory-Bound**           | **I/O-Bound**                  |
