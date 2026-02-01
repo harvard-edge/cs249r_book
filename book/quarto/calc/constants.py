@@ -16,16 +16,29 @@ meter = ureg.meter
 hour = ureg.hour
 day = ureg.day
 
-KB = 1e3 * byte
-MB = 1e6 * byte
-GB = 1e9 * byte
-TB = 1e12 * byte
-PB = 1e15 * byte
+# Register data-scale aliases so .to(TB), .to(GB/second), etc. work
+ureg.define('KB = 1e3 * byte')
+ureg.define('MB = 1e6 * byte')
+ureg.define('GB = 1e9 * byte')
+ureg.define('TB = 1e12 * byte')
+ureg.define('PB = 1e15 * byte')
 
-KiB = 1024 * byte
-MiB = 1024**2 * byte
-GiB = 1024**3 * byte
-TiB = 1024**4 * byte
+KB = ureg.KB
+MB = ureg.MB
+GB = ureg.GB
+TB = ureg.TB
+PB = ureg.PB
+
+# Binary units (pint has kibibyte etc. built-in, register short aliases)
+ureg.define('KiB = 1024 * byte')
+ureg.define('MiB = 1048576 * byte')
+ureg.define('GiB = 1073741824 * byte')
+ureg.define('TiB = 1099511627776 * byte')
+
+KiB = ureg.KiB
+MiB = ureg.MiB
+GiB = ureg.GiB
+TiB = ureg.TiB
 
 # --- Time ---
 MS = 1e-3 * second
@@ -36,9 +49,14 @@ NS = 1e-9 * second
 
 # FLOPs are dimensionless "operations"
 ureg.define('flop = 1 * count')
+ureg.define('GFLOPs = 1e9 * flop')
+ureg.define('TFLOPs = 1e12 * flop')
+ureg.define('ZFLOPs = 1e21 * flop')
+
 flop = ureg.flop
-TFLOPs = 1e12 * flop
-ZFLOPs = 1e21 * flop
+GFLOPs = ureg.GFLOPs
+TFLOPs = ureg.TFLOPs
+ZFLOPs = ureg.ZFLOPs
 
 # NVIDIA V100 (Volta)
 V100_FLOPS_FP16_TENSOR = 125 * TFLOPs / second
@@ -71,7 +89,8 @@ MOBILE_NPU_TOPS_INT8 = 35 * TFLOPs / second
 MOBILE_NPU_MEM_BW = 100 * GB / second
 
 # --- Network ---
-Gbps = 1e9 * ureg.bit / second
+ureg.define('Gbps = 1e9 * bit / second')
+Gbps = ureg.Gbps
 NETWORK_10G_BW = 10 * Gbps
 NETWORK_5G_ENERGY_PER_MB_MJ = 100 * ureg.millijoule / MB
 
@@ -103,7 +122,10 @@ VIDEO_FPS_STANDARD = Q_(30, 'Hz')
 
 # --- Models & Workloads ---
 ureg.define('param = 1 * count')
+ureg.define('Mparam = 1e6 * param')
+
 param = ureg.param
+Mparam = ureg.Mparam
 
 # GPT-3 (175B)
 GPT3_PARAMS = 175e9 * param
