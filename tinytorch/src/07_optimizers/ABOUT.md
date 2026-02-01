@@ -43,7 +43,7 @@ Browse the source code on GitHub.
 
 ```{grid-item-card} 📊 Slide Deck
 
-Download the lecture PDF.
+Download the AI-generated PDF. 
 
 <a href="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-slides-v0.1.0/07_optimizers.pdf" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #0ea5e9; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Download PDF →</a>
 ```
