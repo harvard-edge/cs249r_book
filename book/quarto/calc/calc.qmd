@@ -1,0 +1,157 @@
+---
+title: "Inline Computation Test"
+subtitle: "Verifying that constants.py drives textbook numbers"
+engine: jupyter
+format:
+  html:
+    code-fold: true
+    toc: true
+---
+
+## Purpose
+
+This file tests Quarto's **inline code** feature with our `constants.py` physics engine.
+The goal: every derived number in the textbook should be *computed*, not hardcoded.
+
+```{python}
+#| echo: false
+#| label: setup
+
+# One import — every number for the chapter is pre-computed
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath("constants.py")))
+from ch_example import C
+```
+
+## 1. Basic Hardware Specs (Sanity Check)
+
+These numbers should match the NVIDIA datasheets. If they render correctly,
+our constants are importable and inline code is working.
+
+| GPU | FP16 Tensor (TFLOPS) | Memory BW | HBM Capacity (GiB) |
+|-----|-----:|-----:|-----:|
+| V100 | `{python} C.v100_tflops` | `{python} C.v100_bw_gbs` GB/s | `{python} C.v100_mem_gib` |
+| A100 | `{python} C.a100_tflops` | `{python} C.a100_bw_gbs` GB/s | `{python} C.a100_mem_gib` |
+| H100 | `{python} C.h100_tflops` | `{python} C.h100_bw_tbs` TB/s | `{python} C.h100_mem_gib` |
+
+## 2. Derived Ratios (The Real Test)
+
+These are the kinds of numbers we currently hardcode in prose.
+If we compute them from constants, they're always self-consistent.
+
+### Memory Bandwidth Generational Gains
+
+The A100 delivers `{python} C.bw_a100_vs_v100`× more memory bandwidth than the V100
+(`{python} C.a100_bw_gbs` GB/s vs `{python} C.v100_bw_gbs` GB/s).
+The H100 extends this to `{python} C.bw_h100_vs_v100`× over the V100.
+
+### Compute Scaling Outpaces Memory
+
+While bandwidth improved `{python} C.bw_h100_vs_v100`× from V100 to H100,
+compute improved `{python} C.compute_h100_vs_v100`×.
+This `{python} C.memory_wall_gap`× gap is the **memory wall** in action.
+
+### Ridge Points (Roofline Model)
+
+The ridge point is where a workload transitions from memory-bound to compute-bound:
+
+$$\text{Ridge Point} = \frac{\text{Peak FLOPS}}{\text{Peak Bandwidth}} \quad [\text{FLOP/Byte}]$$
+
+| GPU | Ridge Point (FLOP/Byte) | Interpretation |
+|-----|----:|------|
+| V100 | `{python} C.ridge_v100` | Need `{python} C.ridge_v100` ops/byte to saturate compute |
+| A100 | `{python} C.ridge_a100` | Need `{python} C.ridge_a100` ops/byte to saturate compute |
+| H100 | `{python} C.ridge_h100` | Need `{python} C.ridge_h100` ops/byte to saturate compute |
+
+Rising ridge points mean more workloads become **memory-bound** over time.
+
+## 3. Energy Analysis
+
+A single DRAM access (`{python} C.energy_dram_pj` pJ per 32-bit value) costs
+`{python} C.energy_ratio`× more energy than one floating-point operation
+(`{python} C.energy_flop_pj` pJ). This is why data movement dominates the
+energy budget in neural network inference.
+
+## 4. Model Complexity
+
+### ResNet-50 Inference Latency (Compute-Bound Estimate)
+
+A single ResNet-50 forward pass requires `{python} C.resnet_gflops` GFLOPs.
+On the V100 (FP32), this takes at minimum `{python} C.resnet_latency_v100_us` μs.
+On the A100 (TF32), this drops to `{python} C.resnet_latency_a100_us` μs — a
+`{python} C.resnet_speedup_a100_v100`× improvement.
+
+::: {.callout-note}
+These are *compute-bound lower bounds*. Real latency includes memory access,
+kernel launch overhead, and data transfer. But they establish the physics floor.
+:::
+
+### Llama-3-8B Memory Requirements
+
+| Precision | Model Size | Fits V100 (`{python} C.v100_mem_gib` GiB)? | Fits T4 (16 GiB)? |
+|-----------|-----:|:---:|:---:|
+| FP16 | `{python} C.llama_fp16_gib` GiB | `{python} C.llama_fits_v100_fp16` | `{python} C.llama_fits_t4_fp16` |
+| INT8 | `{python} C.llama_int8_gib` GiB | ✓ | `{python} C.llama_fits_t4_int8` |
+| INT4 | `{python} C.llama_int4_gib` GiB | ✓ | ✓ |
+
+Quantization from FP16 to INT4 reduces model size by
+`{python} C.llama_quant_reduction`×,
+making the `{python} C.llama_params_b`B parameter model deployable
+on edge hardware.
+
+## 5. Interconnect Analysis
+
+Transferring Llama-3-8B (FP16, `{python} C.llama_fp16_gib` GiB) over
+different interconnects:
+
+| Interconnect | Bandwidth | Transfer Time |
+|-------------|-----:|-----:|
+| PCIe Gen3 x16 | `{python} C.pcie3_bw_gbs` GB/s | `{python} C.llama_transfer_pcie3_ms` ms |
+| PCIe Gen5 x16 | `{python} C.pcie5_bw_gbs` GB/s | `{python} C.llama_transfer_pcie5_ms` ms |
+| NVLink (A100) | `{python} C.nvlink_bw_gbs` GB/s | `{python} C.llama_transfer_nvlink_ms` ms |
+| 100G Ethernet | `{python} C.net100g_bw_gbs` GB/s | `{python} C.llama_transfer_net100g_ms` ms |
+
+NVLink is `{python} C.nvlink_vs_pcie4`× faster than PCIe Gen4,
+which is why multi-GPU training within a single node uses NVLink
+while cross-node communication over network is the bottleneck.
+
+## How This Scales
+
+### The Architecture
+
+```
+book/calc/
+├── constants.py          # Raw hardware specs (single source of truth)
+├── ch_hw_acceleration.py # All derived numbers for Chapter 10
+├── ch_training.py        # All derived numbers for Chapter 8
+├── ch_serving.py         # All derived numbers for Chapter 12
+└── ...
+```
+
+### In Each Chapter `.qmd`
+
+**One hidden cell at the top:**
+
+````markdown
+```{{python}}
+#| echo: false
+import sys, os
+sys.path.insert(0, "/path/to/book/calc")
+from ch_hw_acceleration import C
+```
+````
+
+**Then anywhere in prose:**
+
+```markdown
+The A100 delivers `{{python}} C.bw_a100_vs_v100`× more bandwidth.
+```
+
+### Why This Works at Scale
+
+1. **One class per chapter** — Every computed number lives in `ch_<name>.py`
+2. **One import per `.qmd`** — No scattered compute cells cluttering the document
+3. **Pre-formatted strings** — `C.ridge_v100` is already `"139"`, not a float you need to format inline
+4. **Private intermediates** — `_ridge_v100` (float) for internal math, `ridge_v100` (string) for display
+5. **Auditable** — `grep` for any number and find exactly where it's computed
+6. **Testable** — Run `pytest` on the calc modules to verify all numbers
