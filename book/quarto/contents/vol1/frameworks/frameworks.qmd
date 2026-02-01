@@ -20,7 +20,7 @@ glossary: frameworks_glossary.json
 
 *Why does your choice of ML framework constrain your system's performance, deployment targets, and hardware compatibility far more than the model architecture itself?*
 
-Architectures define *what* computations neural networks must perform, but knowing what to compute differs fundamentally from knowing *how* to compute it efficiently across diverse hardware. Framework selection determines hardware compatibility, deployment targets, and available optimization strategies. Migrating between frameworks is rarely a simple refactor; it invalidates data pipelines, serving infrastructure, and team expertise, typically requiring three to six engineer-months for production systems. This lock-in explains why framework selection carries engineering weight disproportionate to its apparent simplicity. Organizations that treat frameworks as interchangeable tools discover too late that their inference pipeline requires a graph representation their eager-mode framework cannot provide, or that their target hardware lacks support in the ecosystem they chose.
+Architectures define *what* computations neural networks must perform, but knowing what to compute differs fundamentally from knowing *how* to compute it efficiently across diverse hardware. Framework selection determines hardware compatibility, deployment targets, and available optimization strategies. Migrating between frameworks is rarely a simple refactor; it invalidates data pipelines, serving infrastructure, and team expertise, typically requiring three to six engineer-months for production systems. This lock-in explains why framework selection carries engineering weight disproportionate to its apparent simplicity. Organizations that treat frameworks as interchangeable tools discover *too late* that their inference pipeline requires a graph representation their eager-mode framework cannot provide, or that their target hardware lacks support in the ecosystem they chose.
 
 ::: {.callout-tip title="Learning Objectives"}
 
@@ -55,39 +55,13 @@ gpt3_params_b = f"{GPT3_PARAMS.to(Mparam).magnitude/1000:.0f}"
 
 Two lines of code: `model = Transformer(...)` followed by `loss.backward()`. Between them, invisible to the programmer, the framework orchestrates billions of floating-point operations across memory hierarchies, computes exact gradients through millions of parameters using **automatic differentiation**, schedules thousands of GPU kernel launches, and manages gigabytes of intermediate state. The simplicity is an illusion. Those two lines trigger machinery as complex as a compiler, because that is exactly what a modern ML framework is.
 
-The architectural foundations established in @sec-dnn-architectures defined *what* computations neural networks perform. Knowing what to compute, however, is fundamentally different from knowing how to compute it efficiently. A Transformer's attention mechanism requires coordinating computation across memory hierarchies and accelerator cores in patterns that naive implementations would execute 100× slower than optimized ones. Implementing these operations from scratch for every model would make deep learning economically infeasible. ML frameworks exist to bridge this gap by translating high-level model definitions into hardware-specific execution plans that extract maximum performance from silicon.
+The architectural foundations established in @sec-dnn-architectures defined *what* computations neural networks perform. Knowing *what* to compute, however, is fundamentally different from knowing *how* to compute it efficiently. A Transformer's attention mechanism requires coordinating computation across memory hierarchies and accelerator cores in patterns that naive implementations would execute 100× slower than optimized ones. Implementing these operations from scratch for every model would make deep learning economically infeasible. ML frameworks exist to bridge this gap by translating high-level model definitions into hardware-specific execution plans that extract maximum performance from silicon.
 
 A framework is to machine learning what a compiler is to traditional programming. A C compiler translates human-readable code into optimized machine instructions, managing register allocation, instruction scheduling, and memory layout. An ML framework translates high-level model definitions into hardware-specific execution plans, managing operator fusion, memory reuse, and device placement. This analogy is more than metaphor: modern frameworks literally include compilers, as we will see throughout this chapter.
-
-::: {.callout-checkpoint title="The Systems Cost of Gradients" collapse="false"}
-Training is fundamentally more expensive than inference because of Automatic Differentiation.
-
-**Computational Reality**
-
-- [ ] **Reverse Mode AD**: Why is this the only viable method for neural networks? (Because we have 1 loss scalar and $10^9$ parameters. Forward mode would require $10^9$ passes).
-- [ ] **The Activation Tax**: Do you understand why training memory scales linearly with depth? (We must stash forward activations to compute backward gradients).
-
-**Optimization Mechanics**
-
-- [ ] **Gradient Checkpointing**: How does re-computing activations save memory? (We discard the stash and regenerate it on demand).
-:::
 
 Every ML framework, regardless of API or design philosophy, must solve three fundamental problems. First, the *execution problem*: when and how should computation happen? Should operations execute immediately as written (**eager execution**), or should the framework build a complete description first and optimize before executing (graph execution)? This choice shapes debugging capability, optimization potential, and deployment flexibility. Second, the *differentiation problem*: how should the framework compute gradients automatically? Training requires derivatives of a loss function with respect to millions or billions of parameters, and manual differentiation is error-prone at this scale. Frameworks must implement automatic differentiation systems that compute exact gradients for arbitrary compositions of operations while managing the memory overhead of storing intermediate values. Third, the *hardware abstraction problem*: how should the framework target diverse hardware from a single interface? The same model definition should run on CPUs, GPUs, TPUs, and mobile devices, each with different memory constraints and optimal execution patterns.
 
 These three problems are deeply interconnected. The execution model determines when differentiation occurs and what optimizations are possible. The abstraction layer must support both execution styles across all hardware targets. Solving any one problem in isolation leads to frameworks that excel in narrow contexts but fail in broader deployment. This chapter examines how frameworks evolved to solve these problems and the trade-offs each solution entails, tracing the history from early libraries through modern frameworks before examining each problem in depth.
-
-::: {.callout-checkpoint title="Execution Models" collapse="false"}
-The choice of execution mode determines both developer velocity and model performance.
-
-**Debuggability vs. Speed**
-
-- [ ] **Eager Mode (Python-First)**: Why does executing ops one-by-one make debugging easy but optimization hard? (Hint: The compiler cannot see the "future" ops to fuse them).
-- [ ] **Graph Mode (Compiler-First)**: Why does building a static graph enable **Kernel Fusion**? (Merging Conv+ReLU saves memory bandwidth).
-
-**The Modern Compromise**
-
-- [ ] **JIT Compilation**: How does `torch.compile` bridge the gap? (It captures the graph *just in time* to optimize, while falling back to Python for dynamic parts).
-:::
 
 This tension between debuggability and performance shapes how frameworks should be evaluated more broadly. The following perspective reframes what a framework actually does.
 
@@ -185,7 +159,7 @@ Each generation in this evolution addressed specific limitations of its predeces
 
 ## The Execution Problem {#sec-ai-frameworks-execution-problem-e1e1}
 
-The first fundamental problem every framework must solve is deciding **when and how computation should happen**. This seemingly simple question, "Should operations execute immediately as written, or be recorded for later execution?", creates a cascade of engineering trade-offs that shape every aspect of framework behavior.
+The first fundamental problem every framework must solve is deciding *when* and *how* computation should happen. This seemingly simple question, "Should operations execute immediately as written, or be recorded for later execution?", creates a cascade of engineering trade-offs that shape every aspect of framework behavior.
 
 ### Why Execution Strategy Matters: The Memory Wall {#sec-ai-frameworks-execution-strategy-matters-memory-wall-1ce8}
 
@@ -203,7 +177,7 @@ The key optimization for memory-bound operations is **kernel fusion**, combining
 
 ### The Computational Graph {#sec-ai-frameworks-computational-graph-00f7}
 
-At the heart of this problem is a representation called the **computational graph**, a directed acyclic graph (DAG) where nodes represent operations and edges represent data dependencies. This graph is the framework's internal model of your computation. @fig-comp-graph illustrates a simple example: computing $z = x \times y$ requires two input nodes ($x$ and $y$), one operation node (multiplication), and one output node ($z$). The execution problem asks: when is this graph constructed, and when is it executed?
+At the heart of this problem is a representation called the **computational graph**, a directed acyclic graph (DAG) where nodes represent operations and edges represent data dependencies. This graph is the framework's internal model of your computation. @fig-comp-graph illustrates a simple example: computing $z = x \times y$ requires two input nodes ($x$ and $y$), one operation node (multiplication), and one output node ($z$). The execution problem asks: *when* is this graph constructed, and *when* is it executed?
 
 ::: {#fig-comp-graph fig-env="figure" fig-pos="htb" fig-cap="**Simple Computational Graph.** A directed acyclic graph representing the computation $z = x \\times y$, where nodes define operations and edges specify the flow of data between them." fig-alt="Simple directed graph with nodes x and y flowing into function f(x,y) which outputs z."}
 ```{.tikz}
@@ -702,7 +676,31 @@ model(torch.randn(10, 10))
 ```
 :::
 
-The compilation overhead in these examples (milliseconds to compile, microseconds to reuse) illustrates a broader principle. Software dispatch costs that seem negligible for a single operation compound dramatically across the thousands of operations in a forward pass. The following analysis quantifies this effect.
+The compilation overhead in these examples (milliseconds to compile, microseconds to reuse) illustrates a broader principle. Software dispatch costs that seem negligible for a single operation compound dramatically across the thousands of operations in a forward pass. The following analysis quantifies *the physics of software overhead*.
+
+```{python}
+#| label: fusion-speedup-calc
+#| echo: false
+
+# Eager mode: 2 kernel launches (Add + ReLU)
+kernel_launch_us = 15  # Python dispatch + kernel launch per op
+eager_n_ops = 2
+eager_overhead_us = eager_n_ops * kernel_launch_us
+eager_mem_factor = 4  # 4N bytes (2 reads + 2 writes)
+
+# Compiled mode: 1 fused kernel launch
+compiled_n_ops = 1
+compiled_overhead_us = compiled_n_ops * kernel_launch_us
+compiled_mem_factor = 2  # 2N bytes (fused, intermediate stays in registers)
+
+overhead_speedup = eager_overhead_us // compiled_overhead_us
+bw_efficiency = eager_mem_factor // compiled_mem_factor
+
+eager_overhead_str = f"{eager_overhead_us}"
+compiled_overhead_str = f"{compiled_overhead_us}"
+overhead_speedup_str = f"{overhead_speedup}"
+bw_efficiency_str = f"{bw_efficiency}"
+```
 
 ::: {.callout-notebook title="The Physics of Software Overhead"}
 **The Iron Law Connection:**
@@ -719,21 +717,21 @@ Consider a simple activation block: `y = relu(x + bias)`.
 
 *   **Operations:** 2 (Add, ReLU).
 *   **Execution:**
-    1.  Launch `Add` Kernel: 15 $\mu$s overhead.
+    1.  Launch `Add` Kernel: `{python} kernel_launch_us` $\mu$s overhead.
     2.  Read/Write Memory: $2N$ bytes.
-    3.  Launch `ReLU` Kernel: 15 $\mu$s overhead.
+    3.  Launch `ReLU` Kernel: `{python} kernel_launch_us` $\mu$s overhead.
     4.  Read/Write Memory: $2N$ bytes.
-*   **Total Overhead:** 30 $\mu$s.
+*   **Total Overhead:** `{python} eager_overhead_str` $\mu$s.
 *   **Total Memory Traffic:** $4N$ bytes.
 
 **Scenario 2: Compiled Mode (Fusion)**
 The compiler fuses this into one kernel: `FusedAddRelu`.
 
 *   **Execution:**
-    1.  Launch `Fused` Kernel: 15 $\mu$s overhead.
+    1.  Launch `Fused` Kernel: `{python} compiled_overhead_str` $\mu$s overhead.
     2.  Read/Write Memory: $2N$ bytes (intermediate result stays in registers).
-*   **Total Overhead:** 15 $\mu$s (**2x speedup**).
-*   **Total Memory Traffic:** $2N$ bytes (**2x bandwidth efficiency**).
+*   **Total Overhead:** `{python} compiled_overhead_str` $\mu$s (**`{python} overhead_speedup_str`x speedup**).
+*   **Total Memory Traffic:** $2N$ bytes (**`{python} bw_efficiency_str`x bandwidth efficiency**).
 
 **The Conclusion:**
 Compilation is not magic; it is **overhead amortization**. For small, element-wise operations (like LayerNorm, GELU, Add), overhead often exceeds compute time by 10-100x. Fusing them is the only way to utilize the hardware.
@@ -980,7 +978,7 @@ $$
 \text{Eager} \xrightarrow{\text{tracing}} \text{JIT} \xrightarrow{\text{AOT}} \text{Static Graph} \xrightarrow{\text{synthesis}} \text{Custom Hardware}
 $$
 
-Each step rightward sacrifices flexibility for performance. The fundamental question is: **where on this continuum should your project operate?** The optimal compilation strategy depends on the ratio of **development iterations** to **production executions** (@eq-compilation-benefit):
+Each step rightward sacrifices flexibility for performance. The fundamental question is: *where* on this continuum should your project operate? The optimal compilation strategy depends on the ratio of **development iterations** to **production executions** (@eq-compilation-benefit):
 
 $$
 \text{Compilation Benefit} = \frac{N_{\text{prod}} \cdot (T_{\text{eager}} - T_{\text{compiled}})}{T_{\text{compile}} + N_{\text{dev}} \cdot T_{\text{compile}}}
@@ -1124,7 +1122,16 @@ dispatch_sw_time_str = f"{dispatch_sw_time:.0f}"
 gpt3_hw_time_us = 100_000
 gpt3_sw_time_us = 50
 dispatch_ratio_large = f"{gpt3_sw_time_us / gpt3_hw_time_us:.4f}"
+
+# Derived: overhead percentage and compilation speedup for Scenario 1
+dispatch_total_us = dispatch_sw_time + dispatch_hw_time_us
+dispatch_overhead_pct = dispatch_sw_time / dispatch_total_us * 100
+dispatch_overhead_pct_str = f"{dispatch_overhead_pct:.0f}"
+dispatch_compilation_speedup = dispatch_total_us / dispatch_hw_time_us
+dispatch_compilation_speedup_str = f"{dispatch_compilation_speedup:.0f}"
 ```
+
+This cumulative latency creates what is effectively *a dispatch tax* on execution.
 
 ::: {.callout-notebook title="The Dispatch Tax"}
 **Problem**: When does Python overhead kill performance?
@@ -1135,7 +1142,7 @@ dispatch_ratio_large = f"{gpt3_sw_time_us / gpt3_hw_time_us:.4f}"
 *   **Hardware Time**: $T_{hw} \approx 2.6 \mu s$ (mostly memory latency).
 *   **Software Overhead**: $T_{sw} \approx 6 \text{ ops} \times 5 \mu s/\text{op} = `{python} dispatch_sw_time_str` \mu s$.
 *   **Ratio**: $\frac{`{python} dispatch_sw_time_str`}{2.6} \approx \mathbf{`{python} dispatch_ratio_small`}$.
-*   **Conclusion**: You spend 92% of time waiting for Python. Compilation yields **10x speedup**.
+*   **Conclusion**: You spend `{python} dispatch_overhead_pct_str`% of time waiting for Python. Compilation yields **`{python} dispatch_compilation_speedup_str`x speedup**.
 
 **Scenario 2: GPT-3 Layer (Compute Bound)**
 
@@ -1171,6 +1178,21 @@ Micro-frameworks like **TensorFlow Lite Micro (TFLM)** and **PyTorch ExecuTorch*
 :::
 
 These micro-runtimes represent the "Pure AOT" endpoint of the continuum. By sacrificing all dynamic flexibility, they enable machine learning to run on devices consuming milliwatts of power, fulfilling the **Energy-Movement Invariant** by keeping all data movement local to the chip.
+
+This spectrum of execution strategies—from dynamic eager execution to static graph compilation and specialized micro-runtimes—requires developers to make deliberate trade-offs.
+
+::: {.callout-checkpoint title="Execution Models" collapse="false"}
+The choice of execution mode determines both developer velocity and model performance.
+
+**Debuggability vs. Speed**
+
+- [ ] **Eager Mode (Python-First)**: Why does executing ops one-by-one make debugging easy but optimization hard? (Hint: The compiler cannot see the "future" ops to fuse them).
+- [ ] **Graph Mode (Compiler-First)**: Why does building a static graph enable **Kernel Fusion**? (Merging Conv+ReLU saves memory bandwidth).
+
+**The Modern Compromise**
+
+- [ ] **JIT Compilation**: How does `torch.compile` bridge the gap? (It captures the graph *just in time* to optimize, while falling back to Python for dynamic parts).
+:::
 
 ## The Differentiation Problem {#sec-ai-frameworks-differentiation-problem-8b8a}
 
@@ -1827,6 +1849,19 @@ These implementation differences have direct practical consequences for framewor
 
 A recurring tension runs through every AD design decision: mathematical correctness demands storing computational history, but hardware imposes strict memory limits. Every framework resolves this tension differently, choosing which activations to checkpoint, which operations to fuse, and how aggressively to trade recomputation for memory. These choices determine which models can train on which hardware, making AD system design one of the most consequential engineering decisions in any framework.
 
+::: {.callout-checkpoint title="The Systems Cost of Gradients" collapse="false"}
+Training is *fundamentally more expensive* than inference because of Automatic Differentiation.
+
+**Computational Reality**
+
+- [ ] **Reverse Mode AD**: Why is this the only viable method for neural networks? (Because we have 1 loss scalar and $10^9$ parameters. Forward mode would require $10^9$ passes).
+- [ ] **The Activation Tax**: Do you understand why training memory scales linearly with depth? (We must stash forward activations to compute backward gradients).
+
+**Optimization Mechanics**
+
+- [ ] **Gradient Checkpointing**: How does re-computing activations save memory? (We discard the stash and regenerate it on demand).
+:::
+
 The execution and differentiation problems together enable the training loop. But both assume that the same code can run across diverse hardware: CPUs, GPUs, TPUs, mobile devices, and microcontrollers. This hardware diversity creates the third fundamental problem.
 
 ## The Abstraction Problem {#sec-ai-frameworks-abstraction-problem-37a5}
@@ -2473,7 +2508,9 @@ Parameter structures must also adapt to varying precision requirements. Training
 
 When training scales beyond a single machine, these same abstractions extend to manage process groups and communication primitives. Frameworks use constructs like `ProcessGroup` (PyTorch) or `Mesh` (JAX) to define how devices communicate, maintaining state for collective operations such as AllReduce that synchronize gradients across thousands of GPUs. This includes partitioning computational graphs, synchronizing gradients, and redistributing data as needed.
 
-We introduce these concepts here because they shape framework API design even for single-node code. The implementation details of distributed training, including gradient compression, communication topologies, and fault tolerance, are covered in Volume II (*Distributed Training Systems*). @fig-3d-parallelism provides an overview of how large-scale training distributes computation across multiple dimensions [@mcmahan2023communicationefficient].
+We introduce these concepts here because they shape framework API design even for single-node code. The implementation details of distributed training, including gradient compression, communication topologies, and fault tolerance, are covered in Volume II (*Distributed Training Systems*).
+
+@fig-3d-parallelism visualizes how large-scale training distributes computation. The grid layout illustrates three orthogonal scaling axes: **Data Parallelism** (replicating the model across columns), **Pipeline Parallelism** (splitting layers across rows), and **Model Parallelism** (sharding tensors within each cluster). This "3D" approach allows frameworks to scale beyond the memory limits of any single device [@mcmahan2023communicationefficient].
 
 ::: {#fig-3d-parallelism fig-env="figure" fig-pos="htb" fig-cap="**3D Parallelism.** A grid of eight accelerator clusters arranged in two rows and four columns, each containing stacked computational units. Distinct colors encode the three parallelism dimensions: data parallelism across columns, pipeline parallelism across rows, and model parallelism within each cluster." fig-alt="Grid of 8 GPU clusters in 2 rows and 4 columns. Each cluster contains 4 stacked cubes. Colors vary: blue, red, green, orange in bottom row; olive, yellow, brown, pink in top row."}
 ```{.tikz}
@@ -3432,31 +3469,31 @@ perf_gap_str = f"{perf_gap:.0f}"
 memory_ratio_str = f"{memory_ratio:.0f}"
 ```
 
-**Fallacy:** ***"All frameworks provide equivalent performance for the same model architecture."***
+##### Fallacy: *"All frameworks provide equivalent performance for the same model architecture."* {.unnumbered}
 
 Engineers assume that since ResNet-50 is mathematically identical across frameworks, performance must be equivalent. @tbl-framework-efficiency-matrix disproves this: PyTorch achieves 52ms inference at 32% hardware utilization, while TensorRT delivers 3ms at 88% utilization, a **`{python} perf_gap_str`x performance gap** on identical hardware. The difference arises from kernel fusion, graph optimization depth, and memory access patterns. Organizations assuming framework equivalence routinely miss production targets by 5-10×.
 
-**Pitfall:** ***Choosing frameworks based on popularity rather than project requirements.***
+##### Pitfall: *Choosing frameworks based on popularity rather than project requirements.* {.unnumbered}
 
 @tbl-framework-efficiency-matrix shows the deployment spectrum: PyTorch Mobile requires 220MB memory, TensorFlow Lite needs 180MB, and TensorFlow Lite Micro runs in 32KB, a **`{python} memory_ratio_str`x difference**. Teams building edge applications with PyTorch face either massive memory overhead or costly framework migration. Match framework capabilities to deployment constraints *before* development begins.
 
-**Fallacy:** ***"Framework abstractions eliminate the need for systems knowledge."***
+##### Fallacy: *"Framework abstractions eliminate the need for systems knowledge."* {.unnumbered}
 
 The Roofline Model disproves this fallacy. Element-wise operations like ReLU achieve arithmetic intensity of 0.125 FLOPS/byte, utilizing **under 0.1%** of an A100's peak compute regardless of framework. Understanding when operations are memory-bound vs. compute-bound and which sequences can be fused separates efficient implementations from those leaving 80-90% of hardware capacity unused. No framework can optimize away fundamental physics.
 
-**Pitfall:** ***Ignoring vendor lock-in from framework-specific formats.***
+##### Pitfall: *Ignoring vendor lock-in from framework-specific formats.* {.unnumbered}
 
 Converting TensorFlow SavedModel to PyTorch requires: rewriting custom operations, validating numerical equivalence across 10,000+ test cases, and retraining when operations lack exact equivalents, typically **3-6 engineer-months** for production systems. ONNX provides portability but supports only 80-85% of operations. Design for portability from the start by avoiding framework-specific features where standard alternatives exist.
 
-**Pitfall:** ***Selecting development frameworks without evaluating production infrastructure.***
+##### Pitfall: *Selecting development frameworks without evaluating production infrastructure.* {.unnumbered}
 
 Framework-infrastructure mismatches impose substantial operational overhead. TensorFlow Serving provides atomic model swaps with zero downtime; PyTorch deployments often require container restarts imposing 30-60 second outages. TensorFlow integrates natively with Prometheus/OpenTelemetry; PyTorch requires custom instrumentation adding 2-4 weeks of development. Evaluate the *complete deployment stack*, not just training APIs.
 
-**Fallacy:** ***"Increasing batch size is a free throughput optimization within framework memory limits."***
+##### Fallacy: *"Increasing batch size is a free throughput optimization within framework memory limits."* {.unnumbered}
 
 The Dispatch Overhead Equation (@eq-dispatch-overhead) reveals hidden costs that framework memory reporting obscures. A 7B parameter model in FP16 consumes 14GB, leaving 66GB on an A100-`{python} a100_mem`GB. Frameworks report sufficient free memory for batch size 32, but increasing from 8 to 32 quadruples activation memory for transformers (due to attention's $O(S^2)$ scaling), potentially triggering memory-saving recomputation strategies (trading extra computation to reduce memory usage) that **reduce throughput by 20-30%** despite the larger batch. Eager-mode frameworks compound this with per-operation allocation overhead that scales with batch size, while graph-mode frameworks may silently insert memory-management operations that add latency. The optimal batch size balances compute saturation (70-80% utilization), activation memory, and framework allocator overhead. Blindly maximizing batch size based on reported memory availability often achieves *lower* throughput than smaller batches that avoid triggering these framework-level memory management pathways.
 
-**Pitfall:** ***Treating compilation overhead as negligible.***
+##### Pitfall: *Treating compilation overhead as negligible.* {.unnumbered}
 
 ```{python}
 #| label: compilation-overhead-calc

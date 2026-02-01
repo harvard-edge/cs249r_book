@@ -36,7 +36,7 @@ The optimization journey begins upstream, before a single gradient is computed. 
 
 ## Data Selection Fundamentals {#sec-data-selection-fundamentals}
 
-Data selection asks a simple question with profound engineering consequences: given a clean, well-engineered dataset, which examples contribute the most learning per unit of compute cost? The preceding chapter on data engineering (@sec-data-engineering-ml) established the infrastructure for collecting, cleaning, and preparing data, producing pipelines that ingest raw signals and yield well-governed, versioned datasets ready for training. That chapter ensured data *quality* through correct labels, consistent schemas, and clean records. Data selection optimizes data *value* by extracting maximum learning from minimum samples. The distinction is fundamental: quality asks whether data is correct, while value asks whether correct data is worth the compute spent processing it.
+Data selection asks a simple question with profound engineering consequences: given a clean, well-engineered dataset, which examples contribute the most learning per unit of compute cost? The preceding chapter on data engineering (@sec-data-engineering-ml) established the infrastructure for collecting, cleaning, and preparing data, producing pipelines that ingest raw signals and yield well-governed, versioned datasets ready for training. That chapter ensured data *quality* through correct labels, consistent schemas, and clean records. Data selection optimizes data *value* by extracting maximum learning from minimum samples. The distinction is fundamental: quality asks *whether* data is correct, while value asks *whether* correct data is worth the compute spent processing it.
 
 For decades, the dominant strategy was straightforward: more data, better models. Scaling laws [@kaplan2020scaling; @hoffmann2022training] confirmed that model performance improves predictably with dataset size, and teams responded rationally by scraping more web pages, labeling more images, and generating more synthetic examples. A fundamental asymmetry has since emerged. Hardware acceleration has outpaced the growth of high-quality data. GPU compute capacity has increased faster than traditional Moore's Law projections, with AI-specific workloads seeing particularly rapid gains, while the supply of novel, high-quality human-generated text and images grows at roughly 2$\times$ per decade. The internet has already been scraped. Domain experts cannot label faster. This asymmetry, which researchers call the **Data Wall**[^fn-data-wall] [@villalobos2022will], has inverted the optimization priority from "get more data" to "get more from existing data."
 
@@ -68,7 +68,7 @@ The quantitative evidence for this scaling asymmetry is stark. @tbl-scaling-asym
 **The Consequence**: Compute budgets now support training runs that far exceed what available high-quality data can fill. The field has become *compute-rich and data-poor*.
 :::
 
-This asymmetry inverts the optimization priority. When data was abundant and compute was scarce, the right strategy was algorithmic efficiency: squeeze more accuracy from limited GPU cycles. Now that compute is abundant and *quality data* is scarce, the winning strategy is **data selection**: squeeze more learning from each sample. Data selection operates upstream of all other optimizations. By pruning redundancy and selecting high-value samples, we reduce the workload before it ever enters the model or hits the hardware. In the Iron Law of Efficiency ($Time = \frac{Data}{BW} + \frac{Ops}{P \cdot \eta}$), this is the only technique that shrinks the numerator of the first term. Companies training frontier models are no longer bottlenecked by GPU access but by the quality and diversity of their training corpora.
+This asymmetry inverts the optimization priority. When data was abundant and compute was scarce, the right strategy was algorithmic efficiency: squeeze more accuracy from limited GPU cycles. Now that compute is abundant and *quality data* is scarce, the winning strategy is **data selection**: squeeze more learning from each sample. Data selection operates upstream of all other optimizations. By pruning redundancy and selecting high-value samples, we reduce the workload before it ever enters the model or hits the hardware. In the Iron Law of Efficiency ($Time = \frac{Data}{BW} + \frac{Ops}{P \cdot \eta}$), this is the only technique that shrinks the *numerator* of the first term. Companies training frontier models are no longer bottlenecked by GPU access but by the quality and diversity of their training corpora.
 
 This chapter provides the engineering toolkit for intelligent data selection, organized around Part III's **DAM Taxonomy** (@sec-optimize-invariants), which establishes a deliberate optimization ordering: Data first, then Algorithm, then Machine. Data selection puts the "highest leverage first" principle into practice by addressing whether work is necessary before asking how to simplify or accelerate it. The chapter follows a three-stage optimization pipeline that structures the practical response to the Data Wall:
 
@@ -195,6 +195,8 @@ $$
 
 A random batch of raw data often has low ICR because it contains redundant examples, noisy samples, or "easy" examples the model has already mastered. Training on such a batch wastes GPU cycles on zero-information updates. High-efficiency data pipelines (@fig-data-selection-pipeline) filter, order, and synthesize data to maximize ICR, ensuring that every FLOP contributes to learning. To illustrate, consider *computing ICR* on a concrete coreset selection task. Later in this chapter, @sec-data-selection-measuring-data-selection-7957 provides the complete measurement framework for evaluating these efficiency gains, including the Data Roofline model that diagnoses whether a system is data-bound or compute-bound.
 
+Before diving into calculation examples, ensure you have a solid grasp of the core ICR concept.
+
 ::: {.callout-checkpoint title="Data Selection Efficiency" collapse="false"}
 The goal of data selection is to maximize the **Information-Compute Ratio (ICR)**.
 
@@ -320,7 +322,7 @@ The most counterintuitive finding in data selection is that training on *less* d
 - **CIFAR-10**: Because CIFAR-10 is smaller and more redundant, aggressive pruning works even better. Experiments report that 10–30% of samples (selected by forgetting scores [@toneva2019empirical] or margin-based methods) can match 90%+ of original accuracy, a 3–10$\times$ reduction.
 - **Large Language Model Corpora**: Web-scraped datasets like The Pile and C4 contain substantial exact and near-duplicate content. Deduplication studies [@lee2022deduplicating] report 10–30% redundancy ratios, with deduplicated training yielding *better* downstream performance (less memorization, more generalization).
 
-These numbers are benchmark-specific. Gains from pruning depend on the dataset's intrinsic redundancy, the selection algorithm, and the model architecture; always validate on your specific task before deploying aggressive pruning in production. The key insight remains: not all data points provide equal value for training. The following analysis quantifies how data quality affects learning efficiency.
+These numbers are benchmark-specific. Gains from pruning depend on the dataset's intrinsic redundancy, the selection algorithm, and the model architecture; always validate on your specific task before deploying aggressive pruning in production. The key insight remains: not all data points provide equal value for training. The following analysis quantifies what we call *the data quality multiplier*.
 
 ::: {.callout-notebook title="The Data Quality Multiplier"}
 **The Physics of Noise**: Why is one clean sample worth 100 noisy ones?
@@ -342,7 +344,7 @@ To reach a target error $\epsilon$:
 **The Systems Conclusion**: Cleaning your data (removing label noise) is a **100x compute accelerator**.
 :::
 
-The practical question then becomes: how do we identify which samples to keep?
+The practical question then becomes: *how* do we identify which samples to keep?
 
 ### Coreset Selection Algorithms {#sec-data-selection-coreset-selection-algorithms-a520}
 
@@ -557,7 +559,7 @@ Together, these three static pruning techniques (coreset selection, deduplicatio
 
 ## Dynamic Data Selection: Training-Time Optimization {#sec-data-selection-dynamic-data-selection-trainingtime-optimization-cd62}
 
-Static pruning commits to a fixed dataset before training begins, but what if the optimal training samples change as the model learns? Early in training, the model benefits from diverse coverage to build broad feature representations; later, it benefits from focusing on hard examples near the decision boundary to refine its predictions. Dynamic selection exploits this insight by optimizing which samples to use *during* training, adapting the data diet based on the model's evolving state.
+Static pruning commits to a fixed dataset before training begins, but *what if* the optimal training samples change as the model learns? Early in training, the model benefits from diverse coverage to build broad feature representations; later, it benefits from focusing on hard examples near the decision boundary to refine its predictions. Dynamic selection exploits this insight by optimizing which samples to use *during* training, adapting the data diet based on the model's evolving state.
 
 ### Curriculum Learning: Easy to Hard {#sec-data-selection-curriculum-learning-easy-hard-3428}
 
@@ -699,7 +701,7 @@ Random sampling will miss these rare failures. Instead, the Wake Vision team use
 
 ### Semi-Supervised Learning: Using Unlabeled Data {#sec-data-selection-semisupervised-learning-leveraging-unlabeled-data-53b7}
 
-Active learning optimizes which samples to label but still requires human annotation for every selected example. A more aggressive approach asks: can we extract learning signal from unlabeled data directly? **Semi-supervised learning** addresses this question. It uses a small set of labeled examples to guide learning on a much larger unlabeled pool, typically achieving 80–95% of fully supervised accuracy with only 10–20% of the labels.
+Active learning optimizes which samples to label but still requires human annotation for every selected example. A more aggressive approach asks: *can we* extract learning signal from unlabeled data directly? **Semi-supervised learning** addresses this question. It uses a small set of labeled examples to guide learning on a much larger unlabeled pool, typically achieving 80–95% of fully supervised accuracy with only 10–20% of the labels.
 
 The core insight behind semi-supervised learning is that unlabeled data, while it cannot directly teach the mapping from inputs to outputs, contains structural information about the input distribution $P(X)$ that constrains the hypothesis space. A decision boundary that cuts through dense regions of $P(X)$ is unlikely to generalize well because it would assign different labels to similar inputs. Semi-supervised methods use unlabeled data to push decision boundaries toward low-density regions, where class transitions are more likely to occur naturally.
 
@@ -1259,7 +1261,7 @@ trap_pct_str = f"{trap_overhead_pct:.0f}"
 **Rule of thumb**: Selection time should be <10% of subset training time for good ROI.
 :::
 
-The following analysis formalizes this heuristic, deriving the general condition under which data selection yields positive return on investment.
+The following analysis formalizes this heuristic, deriving what we call *the selection inequality*.
 
 ::: {.callout-notebook title="The Selection Inequality"}
 
@@ -1921,47 +1923,47 @@ The common thread: **data selection is not a single technique but a systems opti
 
 With metrics in hand, practitioners often rush to implement techniques without recognizing the conceptual traps and implementation errors that undermine their efforts. The following fallacies represent persistent misconceptions about data selection, while the pitfalls capture practical mistakes that sabotage otherwise sound strategies. Understanding both is essential for translating theory into production gains.
 
-**Fallacy:** ***Data is the new oil, so more is always better.***
+##### Fallacy: *Data is the new oil, so more is always better.* {.unnumbered}
 
 The "Data is Oil" metaphor fails to capture diminishing returns. A saturation point exists where adding terabytes of data yields negligible accuracy gains while exploding compute costs. Data is better understood as fuel with specific energy density: high-quality, curated data (high octane) powers models more efficiently than vast quantities of raw data (crude oil).
 
-**Fallacy:** ***Synthetic data can completely replace real data.***
+##### Fallacy: *Synthetic data can completely replace real data.* {.unnumbered}
 
 While synthetic data addresses scarcity, it is bounded by the generator's knowledge. A model trained purely on synthetic data from another model risks "Model Collapse," a degenerative feedback loop where errors are amplified. Synthetic data augments, but rarely replaces, the grounding provided by real-world distributions. It is best used to fill gaps in the data manifold, not to define it.
 
-**Fallacy:** ***Data selection is just data cleaning.***
+##### Fallacy: *Data selection is just data cleaning.* {.unnumbered}
 
 Cleaning (removing errors) is necessary but insufficient. True data selection involves *selection* (finding the decision boundary) and *synthesis* (creating hard negatives). You can have a perfectly clean dataset that is highly inefficient because it is filled with redundant, easy examples. Efficiency requires optimizing the information content, not just the hygiene.
 
-**Fallacy:** ***Data selection is only for resource-constrained settings.***
+##### Fallacy: *Data selection is only for resource-constrained settings.* {.unnumbered}
 
 Many practitioners view data selection as a corner-case optimization for TinyML or budget-limited startups, irrelevant when training foundation models with massive budgets. In reality, data selection is *most* valuable at scale. A 10% efficiency gain on a \$100M training run saves \$10M. The Data Wall affects frontier labs more acutely than anyone; they have the compute but lack the data. The techniques in this chapter are increasingly adopted by exactly those organizations with "unlimited" resources.
 
 These conceptual misunderstandings often lead to flawed strategies. Equally damaging are the implementation pitfalls that arise when correct strategies meet messy engineering realities.
 
-**Pitfall:** ***Optimizing selection without measuring selection overhead.***
+##### Pitfall: *Optimizing selection without measuring selection overhead.* {.unnumbered}
 
 A sophisticated coreset algorithm that takes 10 hours to select samples for a 2-hour training run has negative ROI. Always measure the Selection Inequality: $T_{selection} + T_{train}(subset) < T_{train}(full)$. Use lightweight proxy models or cached embeddings for selection, and profile selection time alongside training time.
 
-**Pitfall:** ***Pruning rare classes into oblivion.***
+##### Pitfall: *Pruning rare classes into oblivion.* {.unnumbered}
 
 Aggressive coreset selection often removes rare classes entirely because they contribute little to average loss. The model then fails catastrophically on these classes in production. Stratify selection by class and set minimum samples per class before applying any pruning algorithm.
 
-**Pitfall:** ***Training on deduplicated data while evaluating on duplicated test sets.***
+##### Pitfall: *Training on deduplicated data while evaluating on duplicated test sets.* {.unnumbered}
 
 If your test set contains duplicates of training samples (common in web-scraped data), deduplication appears to hurt performance when it actually improves generalization. Deduplicate train and test sets jointly, or use truly held-out evaluation data.
 
-**Pitfall:** ***Active learning without considering annotation latency.***
+##### Pitfall: *Active learning without considering annotation latency.* {.unnumbered}
 
 Active learning theory assumes instant oracle responses. In practice, getting expert labels takes days or weeks. By the time labels arrive, the model has moved on, and the selected samples may no longer be optimal. Select larger batches to amortize latency and use diversity sampling to hedge against model drift.
 
 A subtler class of errors emerges when practitioners assume that benchmark results transfer directly to their specific domains and deployment contexts.
 
-**Fallacy:** ***If a technique works on ImageNet, it will work on my dataset.***
+##### Fallacy: *If a technique works on ImageNet, it will work on my dataset.* {.unnumbered}
 
 Data selection results are highly dataset-dependent. CIFAR-10 is highly redundant, so 50% coresets work well. ImageNet has moderate redundancy. Domain-specific datasets (medical imaging, satellite imagery, scientific data) may have near-zero redundancy, where every sample captures unique information. A coreset that preserves 95% accuracy on ImageNet may fail catastrophically on a well-curated radiology dataset. Always pilot data selection techniques on your specific distribution. The "free lunch" ratios reported in benchmark papers (50% pruning, 10$\times$ label reduction) rarely transfer directly. Start with conservative pruning (20–30%) and validate on held-out data before aggressive reduction.
 
-**Pitfall:** ***Optimizing data selection metrics instead of deployment metrics.***
+##### Pitfall: *Optimizing data selection metrics instead of deployment metrics.* {.unnumbered}
 
 A team achieves excellent PPD (Performance-Per-Data) and DCR (Data Compression Ratio) during development, having created a beautifully efficient 10% coreset. At deployment, the model fails on edge cases: rare classes, unusual lighting conditions, demographic subgroups underrepresented in the coreset. The efficiency metrics looked great; the production metrics are catastrophic. Include deployment-relevant evaluation in data selection optimization. If the task requires 99.9% reliability on edge cases, ensure the coreset *oversamples* those cases, even if it reduces average PPD. Stratify evaluation by subgroup, not just overall accuracy. The goal is deployment success, not benchmark efficiency.
 

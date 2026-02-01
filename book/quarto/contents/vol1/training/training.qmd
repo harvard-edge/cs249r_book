@@ -20,7 +20,7 @@ glossary: training_glossary.json
 
 _Why does training a model cost millions while running it costs pennies?_
 
-Architectures define the computational patterns; frameworks translate those patterns into executable code. The process that gives models their capabilities—training—is extraordinarily expensive. A forward pass computes a prediction; training requires that forward pass plus a backward pass for gradients, plus optimizer state that often exceeds the model size itself, plus repetition across billions of examples until statistical patterns crystallize into learned behavior. This multiplicative cost structure—memory for weights, gradients, and optimizer states; compute for forward, backward, and update steps; repetition across epochs and hyperparameter searches—creates a million-to-one asymmetry between training and inference costs. We study training systems because this efficiency gap serves as the primary gatekeeper to AI innovation—determining not just *how fast* we can learn, but *who* can afford to learn at all.
+Architectures define the computational patterns; frameworks translate those patterns into executable code. The process that gives models their capabilities—training—is extraordinarily expensive. A forward pass computes a prediction; training requires that forward pass plus a backward pass for gradients, plus optimizer state that often exceeds the model size itself, plus repetition across billions of examples until statistical patterns crystallize into learned behavior. This multiplicative cost structure—memory for weights, gradients, and optimizer states; compute for forward, backward, and update steps; repetition across epochs and hyperparameter searches—creates a million-to-one asymmetry between training and inference costs. We study training systems because this efficiency gap serves as the *primary gatekeeper to AI innovation*—determining not just *how fast* we can learn, but *who* can afford to learn at all.
 
 ::: {.callout-tip title="Learning Objectives"}
 
@@ -74,7 +74,7 @@ gpt3_params_b = f"{GPT3_PARAMS.to(Mparam).magnitude/1000:.0f}"
 
 ## Training Systems Fundamentals {#sec-ai-training-training-systems-fundamentals-05d2}
 
-Running GPT-2 once costs a fraction of a cent. Training GPT-2 cost approximately $50,000 in 2019. Running GPT-4 once costs a few cents. Training GPT-4 cost an estimated $100 million. This million-to-one asymmetry between inference and training is not an engineering failure awaiting a clever solution—it is the fundamental economics of learning. Inference executes a fixed function; training discovers what that function should be by iterating through billions of examples, computing gradients for every parameter, and slowly refining weights until statistical patterns crystallize into useful behavior. The cost is not in the computation per se but in the sheer volume of computation required: millions of forward passes, each followed by a backward pass that costs twice as much, repeated across datasets measured in terabytes.
+Running GPT-2 once costs a fraction of a cent. Training GPT-2 cost approximately $50,000 in 2019. Running GPT-4 once costs a few cents. Training GPT-4 cost an estimated $100 million. This million-to-one asymmetry between inference and training is not an engineering failure awaiting a clever solution—it is the *fundamental economics of learning*. Inference executes a fixed function; training discovers what that function should be by iterating through billions of examples, computing gradients for every parameter, and slowly refining weights until statistical patterns crystallize into useful behavior. The cost is not in the computation per se but in the sheer volume of computation required: millions of forward passes, each followed by a backward pass that costs twice as much, repeated across datasets measured in terabytes.
 
 A single forward pass through GPT-2 requires roughly $10^{10}$ floating-point operations. Training requires millions of such passes, and each backward pass costs approximately twice as much as the forward pass, yielding a total computational budget on the order of $10^{23}$ operations [@brown2020language]. This asymmetry explains why training systems engineering is a distinct discipline—and why access to training infrastructure increasingly determines who can participate in AI development at all.
 
@@ -995,6 +995,8 @@ hidden_dim_str = f"{hidden_dim}"
 ffn_dim_str = f"{ffn_dim}"
 ```
 
+We can see this in detail by examining the *GPT-2 activation memory breakdown*.
+
 ::: {.callout-notebook title="GPT-2 Activation Memory Breakdown"}
 
 For GPT-2 with batch_size=32, seq_len=1024, hidden_dim=`{python} hidden_dim_str`, 48 layers:
@@ -1671,7 +1673,7 @@ These hardware utilization patterns reinforce the efficiency principles establis
 
 #### Memory Management {#sec-ai-training-memory-management-c1ec}
 
-Memory management is particularly important during the forward pass, when intermediate activations must be stored for subsequent backward propagation. Before examining how frameworks manage forward-pass memory, it is useful to estimate the total VRAM required for training. The following calculation reveals why *memory management* is so demanding.
+Memory management is particularly important during the forward pass, when intermediate activations must be stored for subsequent backward propagation. Before examining how frameworks manage forward-pass memory, it is useful to estimate the total VRAM required for training. The following calculation demonstrates the practical process of *estimating VRAM requirements*.
 
 ::: {.callout-notebook title="Estimating VRAM Requirements"}
 
@@ -2967,7 +2969,7 @@ Deep learning frameworks handle Flash Attention integration transparently. PyTor
 2. Use FP16 or BF16 for maximum speedup (Flash Attention optimized for mixed precision)
 3. Combine with gradient checkpointing for further memory savings (4-8× larger models trainable)
 
-The integration is typically a single-line change, as shown in @lst-flash-attention-migration.
+The integration is typically a single-line change, as shown in @lst-flash-attention-migration. **By swapping the manual attention call for the framework's optimized primitive, the developer delegates the complex tiling and SRAM management required to bypass the HBM bandwidth bottleneck to the underlying library.**
 
 ::: {#lst-flash-attention-migration lst-cap="**Flash Attention Migration**: Replacing manual attention with PyTorch's optimized scaled dot-product attention."}
 ```{.python}
@@ -3226,9 +3228,9 @@ The synergy between gradient accumulation and checkpointing enables training of 
 
 #### Optimal Checkpoint Placement Strategy {#sec-ai-training-optimal-checkpoint-placement-strategy-4a0d}
 
-For a network with L layers, each storing A bytes of activations, @tbl-checkpoint-tradeoffs quantifies how the number and placement of checkpoints determines the memory-compute tradeoff:
+For a network with L layers, each storing A bytes of activations, @tbl-checkpoint-tradeoffs quantifies how the number and placement of checkpoints determines the memory-compute tradeoff. **Note that sub-linear checkpointing strategies can reduce memory consumption from $O(L)$ to $O(\sqrt{L})$ with only a fractional increase in total compute time, enabling the training of much deeper models on existing hardware.**
 
-+----------------------------+-------------------+--------------------+
++-------------------------------------+-----------------+-----------------------+
 | **Strategy**               | **Memory Cost**   | **Recompute Cost** |
 +:===========================+:==================+:===================+
 | **No checkpointing**       | L x A             | 0 forward ops      |
@@ -3302,6 +3304,10 @@ savings_hourly_str = f"{savings_hourly}"
 savings_pct_str = f"{savings_pct:.0f}"
 accum_2wk_str = f"{accum_2wk:.1f}"
 naive_2wk_str = f"{naive_2wk:.1f}"
+
+# Communication reduction from gradient accumulation
+comm_reduction_pct = (1 - 1 / accum_steps) * 100
+comm_reduction_pct_str = f"{comm_reduction_pct:.0f}"
 ```
 
 **Memory Constraints**
@@ -3342,7 +3348,7 @@ With Accumulation (actual GPT-2 approach):
 
 - Compute overhead: 4$\times$ forward passes per update = ~8% slower (pipeline overlaps some cost)
 - Memory overhead: Gradient accumulation buffer = negligible (gradients already needed)
-- Communication benefit: Sync frequency reduced by 4× → communication time drops by 75%
+- Communication benefit: Sync frequency reduced by `{python} accum_steps`× → communication time drops by `{python} comm_reduction_pct_str`%
 - Cost benefit: Training 2 weeks on 8 GPUs = $`{python} accum_2wk_str`K vs. 32 GPUs = $`{python} naive_2wk_str`K
 
 **Convergence Quality**
@@ -3629,6 +3635,8 @@ cf_co2_str = f"{cf_co2_tons:.1f}"
 cf_gpu_tdp_str = f"{cf_gpu_tdp_w:.0f}"
 cf_household_months_str = f"{cf_household_months:.0f}"
 ```
+
+This scaling leads to a massive *carbon footprint of training*.
 
 ::: {.callout-notebook title="The Carbon Footprint of Training"}
 
@@ -3937,27 +3945,27 @@ Advanced systems engineering explores the distributed engineering required to co
 
 Training involves counterintuitive resource trade-offs and scaling behavior that defy intuitions from traditional software systems. The following fallacies and pitfalls capture errors that waste compute resources, delay research progress, and cause production training failures.
 
-**Fallacy:** ***Larger models always yield better performance.***
+##### Fallacy: *Larger models always yield better performance.* {.unnumbered}
 
 Engineers assume model scaling guarantees accuracy gains. In production, scaling without sufficient data causes severe overfitting. As established in @sec-ai-training-mathematical-foundations-d894, model capacity must match dataset size. A 20B parameter model requires approximately 120 GB memory (40 GB parameters FP16 + 80 GB optimizer states) but delivers worse accuracy than a 7B model when trained on datasets under 100M examples. Beyond critical thresholds, doubling model size while holding data constant typically degrades validation accuracy by 5 to 10 percent due to overfitting. Teams that pursue scale without data budgets waste months of compute on models that underperform smaller variants.
 
-**Pitfall:** ***Assuming distributed training automatically accelerates development.***
+##### Pitfall: *Assuming distributed training automatically accelerates development.* {.unnumbered}
 
 Many practitioners add devices expecting proportional speedup. Communication overhead destroys this assumption. Small models on 8 GPUs with data parallelism spend 30 to 50 percent of time synchronizing gradients, achieving only 4 to 6x speedup instead of 8x. As @sec-ai-training-scaling-training-systems-adfd demonstrates, single-device training with optimized pipelines often beats poorly configured distributed setups. A 7B model training on a single A100 for 24 hours can outperform an 8-GPU cluster completing in 6 hours when synchronization overhead consumes theoretical speedup. Organizations that reflexively distribute training burn budget on infrastructure complexity without profiling whether data loading, memory, or computation is the actual bottleneck.
 
-**Fallacy:** ***Hyperparameters scale linearly with model size and batch size.***
+##### Fallacy: *Hyperparameters scale linearly with model size and batch size.* {.unnumbered}
 
 This belief transfers learning rates from small experiments to large-scale training without adjustment. Large batch training requires the linear scaling rule: multiply learning rate by batch size ratio [@goyal2017accurate]. Training ResNet-50 with batch 512 uses learning rate 0.1; scaling to batch 4096 requires learning rate 0.8, not 0.1. Ignoring this relationship causes training instability or divergence. As discussed in @sec-ai-training-pipeline-optimizations-cd9d, large-scale training requires warmup schedules and adjusted momentum to maintain convergence. Teams that apply small-scale hyperparameters to large models experience training failures 3 to 5 days into multi-week runs, wasting substantial compute budgets.
 
-**Pitfall:** ***Treating mixed precision training as a simple toggle without validation.***
+##### Pitfall: *Treating mixed precision training as a simple toggle without validation.* {.unnumbered}
 
 Practitioners enable FP16 training expecting automatic 2x speedup and memory savings. Numerical stability failures emerge unpredictably. As shown in @sec-ai-training-pipeline-optimizations-cd9d, mixed precision achieves 2.4x speedup on V100 Tensor Cores but requires loss scaling to prevent gradient underflow. Models with large activation magnitudes or small gradient values experience divergence when loss scaling is misconfigured. A language model training for 48 hours can diverge at step 10,000 due to accumulated numerical errors, forcing restarts that waste days. Production training systems must validate mixed precision convergence on representative workloads before deploying at scale.
 
-**Pitfall:** ***Optimizing memory and computation independently.***
+##### Pitfall: *Optimizing memory and computation independently.* {.unnumbered}
 
 Engineers maximize batch size until GPU memory exhausts without considering computational efficiency. As @sec-ai-training-pipeline-optimizations-cd9d establishes, GPU utilization drops from 90 percent at batch 256 to 60-70 percent at batch 16 due to insufficient parallelism. Conversely, gradient accumulation simulates large batches within memory constraints by accumulating gradients over multiple passes before updating. Training ResNet-50 with gradient accumulation (effective batch 512, physical batch 64) achieves 85 percent utilization versus 90 percent for native batch 512, trading 5 percent efficiency for 8x memory reduction. Organizations that tune these parameters independently miss this trade-off, extending training time by 20 to 40 percent.
 
-**Pitfall:** ***Neglecting data pipeline optimization until GPU utilization profiling.***
+##### Pitfall: *Neglecting data pipeline optimization until GPU utilization profiling.* {.unnumbered}
 
 Teams optimize model architecture and hyperparameters while data loading creates 30 to 50 percent idle time. As illustrated in @sec-ai-training-pipeline-optimizations-cd9d, sequential data fetching leaves GPUs waiting for I/O. Profiling reveals 40 percent training time spent in data loading, yet computation receives optimization attention first. Prefetching with pipeline parallelism reduces wall-clock time by 40 percent (90 seconds to 55 seconds for two epochs) by overlapping data loading with computation. Organizations that defer data pipeline optimization waste weeks of researcher time on models bottlenecked by preventable I/O stalls.
 

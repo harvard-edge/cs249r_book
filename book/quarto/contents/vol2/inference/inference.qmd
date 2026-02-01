@@ -1391,29 +1391,81 @@ Consider a GPT-class model serving four concurrent requests with the following g
 | **R4**      | 90                | 150               | 240              |
 +-------------+-------------------+-------------------+------------------+
 
+```{python}
+#| label: batching-worked-example
+#| echo: false
+
+# Worked example: LLM serving with variable-length outputs
+output_lengths = [50, 200, 100, 150]  # R1, R2, R3, R4
+n_requests = len(output_lengths)
+decode_time_ms = 20  # ms per iteration for batch of 4
+
+mean_output = sum(output_lengths) / n_requests
+max_output = max(output_lengths)
+
+total_iterations = max_output
+total_batch_time_ms = total_iterations * decode_time_ms
+total_seq_iters = n_requests * max_output
+useful_seq_iters = sum(output_lengths)
+
+mean_output_str = f"{mean_output:.0f}"
+total_batch_time_str = f"{total_batch_time_ms:,}"
+total_seq_iters_str = f"{total_seq_iters:,}"
+useful_seq_iters_str = f"{useful_seq_iters:,}"
+
+# Continuous batching latencies (each request: output_length * decode_time)
+r1_latency_ms = output_lengths[0] * decode_time_ms
+r2_latency_ms = output_lengths[1] * decode_time_ms
+r3_latency_ms = output_lengths[2] * decode_time_ms
+r4_latency_ms = output_lengths[3] * decode_time_ms
+
+# Traditional: all requests wait for max
+trad_latency_ms = max_output * decode_time_ms
+
+# Continuous: average of individual latencies
+cont_avg_latency_ms = (r1_latency_ms + r3_latency_ms + r4_latency_ms + r2_latency_ms) / n_requests
+latency_reduction_pct = (1 - cont_avg_latency_ms / trad_latency_ms) * 100
+
+# Improvement factors
+r1_improvement = trad_latency_ms / r1_latency_ms
+r3_improvement = trad_latency_ms / r3_latency_ms
+r4_improvement = round(trad_latency_ms / r4_latency_ms, 2)
+
+r1_lat_str = f"{r1_latency_ms:,}"
+r2_lat_str = f"{r2_latency_ms:,}"
+r3_lat_str = f"{r3_latency_ms:,}"
+r4_lat_str = f"{r4_latency_ms:,}"
+trad_lat_str = f"{trad_latency_ms:,}"
+cont_avg_lat_str = f"{cont_avg_latency_ms:,}"
+latency_red_str = f"{latency_reduction_pct:.1f}"
+r1_imp_str = f"{r1_improvement:.0f}"
+r3_imp_str = f"{r3_improvement:.0f}"
+r4_imp_str = f"{r4_improvement:.2f}"
+```
+
 **System parameters**:
 
 - Decode time per iteration (batch of 4): 20 ms
 - Maximum output length in batch: 200 tokens (R2)
-- Mean output length: (50 + 200 + 100 + 150) / 4 = 125 tokens
+- Mean output length: (50 + 200 + 100 + 150) / 4 = `{python} mean_output_str` tokens
 
 **Traditional Batching Analysis**
 
 With traditional batching, all four requests must wait for R2 to complete its 200 tokens:
 
 - Total decode iterations: 200
-- Total batch time: 200 × 20 ms = 4,000 ms
+- Total batch time: 200 × 20 ms = `{python} total_batch_time_str` ms
 - Request completion times:
-  - R1 completes useful work at iteration 50, but waits until iteration 200 → latency = 4,000 ms
-  - R2 completes at iteration 200 → latency = 4,000 ms
-  - R3 completes useful work at iteration 100, but waits until iteration 200 → latency = 4,000 ms
-  - R4 completes useful work at iteration 150, but waits until iteration 200 → latency = 4,000 ms
+  - R1 completes useful work at iteration 50, but waits until iteration 200 → latency = `{python} trad_lat_str` ms
+  - R2 completes at iteration 200 → latency = `{python} trad_lat_str` ms
+  - R3 completes useful work at iteration 100, but waits until iteration 200 → latency = `{python} trad_lat_str` ms
+  - R4 completes useful work at iteration 150, but waits until iteration 200 → latency = `{python} trad_lat_str` ms
 
 Waste calculation using @eq-waste-ratio:
 
 $$W = 1 - \frac{125}{200} = 1 - 0.625 = 37.5\%$$
 
-The GPU performs 4 × 200 = 800 "sequence-iterations" but only 500 are useful.
+The GPU performs 4 × 200 = `{python} total_seq_iters_str` "sequence-iterations" but only `{python} useful_seq_iters_str` are useful.
 
 **Continuous Batching Analysis**
 
@@ -1426,17 +1478,17 @@ With continuous batching, sequences depart the batch upon completion, and new re
 
 Request latencies with continuous batching (assuming no queuing delay):
 
-- R1: 50 × 20 ms = 1,000 ms (4x improvement over traditional)
-- R3: 100 × 20 ms = 2,000 ms (2x improvement)
-- R4: 150 × 20 ms = 3,000 ms (1.33x improvement)
-- R2: 200 × 20 ms = 4,000 ms (no improvement for longest request)
+- R1: 50 × 20 ms = `{python} r1_lat_str` ms (`{python} r1_imp_str`x improvement over traditional)
+- R3: 100 × 20 ms = `{python} r3_lat_str` ms (`{python} r3_imp_str`x improvement)
+- R4: 150 × 20 ms = `{python} r4_lat_str` ms (`{python} r4_imp_str`x improvement)
+- R2: 200 × 20 ms = `{python} r2_lat_str` ms (no improvement for longest request)
 
 **Average latency comparison**:
 
-- Traditional: 4,000 ms (all requests)
-- Continuous: (1,000 + 2,000 + 3,000 + 4,000) / 4 = 2,500 ms
+- Traditional: `{python} trad_lat_str` ms (all requests)
+- Continuous: (`{python} r1_lat_str` + `{python} r3_lat_str` + `{python} r4_lat_str` + `{python} r2_lat_str`) / 4 = `{python} cont_avg_lat_str` ms
 
-This represents a **37.5% reduction in average latency**, exactly matching the waste ratio.
+This represents a **`{python} latency_red_str`% reduction in average latency**, exactly matching the waste ratio.
 
 ::: {.callout-note title="Traditional vs. Continuous Batching" collapse="false"}
 ```{.tikz}
@@ -3169,33 +3221,71 @@ where $w_i$ is the weight (capacity) of server $i$.
 
 A *heterogeneous GPU cluster* example demonstrates how weighted routing handles mixed hardware in practice.
 
+```{python}
+#| label: heterogeneous-gpu-cluster
+#| echo: false
+
+# Heterogeneous GPU cluster weighted routing example
+n_h100 = 10
+n_a100 = 20
+h100_cap_qps = 1000
+a100_cap_qps = 600
+target_qps = 15000
+
+total_cap = n_h100 * h100_cap_qps + n_a100 * a100_cap_qps
+total_servers = n_h100 + n_a100
+
+h100_weight = h100_cap_qps / total_cap
+a100_weight = a100_cap_qps / total_cap
+
+h100_load = target_qps * h100_weight
+a100_load = target_qps * a100_weight
+h100_util = h100_load / h100_cap_qps * 100
+a100_util = a100_load / a100_cap_qps * 100
+
+equal_load = target_qps / total_servers
+h100_util_equal = equal_load / h100_cap_qps * 100
+a100_util_equal = equal_load / a100_cap_qps * 100
+
+total_cap_str = f"{total_cap:,}"
+h100_weight_str = f"{h100_weight * 100:.1f}"
+a100_weight_str = f"{a100_weight * 100:.1f}"
+h100_load_str = f"{h100_load:.0f}"
+a100_load_str = f"{a100_load:.0f}"
+h100_util_str = f"{h100_util:.0f}"
+a100_util_str = f"{a100_util:.0f}"
+equal_load_str = f"{equal_load:.0f}"
+h100_util_equal_str = f"{h100_util_equal:.0f}"
+a100_util_equal_str = f"{a100_util_equal:.0f}"
+```
+
 ::: {.callout-example title="Heterogeneous GPU Cluster"}
 
 Consider a cluster with mixed GPU types:
 
 - 10 H100 GPUs (capacity: 1000 QPS each)
 - 20 A100 GPUs (capacity: 600 QPS each)
-- Total capacity: 10×1000 + 20×600 = 22,000 QPS
+- Total capacity: 10×1000 + 20×600 = `{python} total_cap_str` QPS
 
 **Target traffic**: 15,000 QPS
 
 **Weighted assignment**:
 
-- H100 weight: 1000 / 22000 = 4.5%
-- A100 weight: 600 / 22000 = 2.7%
+- H100 weight: 1000 / 22000 = `{python} h100_weight_str`%
+- A100 weight: 600 / 22000 = `{python} a100_weight_str`%
 
 **Expected load per server**:
 
-- H100: 15000 × 0.045 = 682 QPS (68% utilization)
-- A100: 15000 × 0.027 = 409 QPS (68% utilization)
+- H100: 15000 × 0.045 = `{python} h100_load_str` QPS (`{python} h100_util_str`% utilization)
+- A100: 15000 × 0.027 = `{python} a100_load_str` QPS (`{python} a100_util_str`% utilization)
 
 Both server types operate at equal utilization, maximizing overall capacity while maintaining latency consistency.
 
 **Without weighting** (equal distribution):
 
-- Per-server load: 15000 / 30 = 500 QPS
-- H100 utilization: 50% (underutilized)
-- A100 utilization: 83% (overloaded, latency spikes)
+- Per-server load: 15000 / 30 = `{python} equal_load_str` QPS
+- H100 utilization: `{python} h100_util_equal_str`% (underutilized)
+- A100 utilization: `{python} a100_util_equal_str`% (overloaded, latency spikes)
 
 :::
 
