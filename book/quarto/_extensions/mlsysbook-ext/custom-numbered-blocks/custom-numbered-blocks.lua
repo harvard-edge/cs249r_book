@@ -150,7 +150,10 @@ end
 local function Meta_findChapterNumber(meta)
   local processedfile = pandoc.path.split_extension(PANDOC_STATE.output_file)
   fbx.isbook = meta.book ~= nil
+  fbx.iswebsite = meta.website ~= nil
   fbx.ishtmlbook = meta.book ~= nil and not quarto.doc.is_format("pdf")
+  -- Treat website projects as multi-file HTML projects for xref sharing
+  fbx.ismultifile = fbx.isbook or fbx.iswebsite
   fbx.processedfile = processedfile
 
   fbx.output_file = PANDOC_STATE.output_file
@@ -181,7 +184,12 @@ local function Meta_findChapterNumber(meta)
         fbx.unnumbered = true
       end
     end
-  else -- not a book.
+  elseif fbx.iswebsite then
+    -- Website projects: use shared xref file for cross-page references
+    fbx.xreffile = "._htmlbook_xref.json"
+    fbx.chapno = ""
+    fbx.unnumbered = true
+  else -- not a book or website (standalone file)
     fbx.xreffile ="._"..processedfile.."_xref.json"
     fbx.chapno = ""
     fbx.unnumbered = true
@@ -475,7 +483,7 @@ local function Divs_getid(el)
    if id == nil or id =="" then
     -- try in next header
     el1 = el.content[1]
-    if el1.t=="Header" then
+    if el1 ~= nil and el1.t=="Header" then
     --    pout("--- looking at header with id "..el1.identifier)
     --    pout("--- still processing item with id ".. replaceifempty(id, "LEER"))
      -- pout("replacing id")
@@ -763,7 +771,7 @@ end -- function renderDiv
 -- TODO: make everything with walk. Looks so nice
 local function resolveref(data)
   return {
-   RawInline = function(el)
+    RawInline = function(el)
       local refid = el.text:match("\\ref{(.*)}")
       if refid then
         if data[refid] then
@@ -772,7 +780,25 @@ local function resolveref(data)
             href = data[refid].file .. '.html' .. href
           end
           return pandoc.Link(data[refid].refnum, href)
-      end  end
+        end
+      end
+    end,
+    -- Support for @id syntax (Quarto/Pandoc Cite elements)
+    Cite = function(el)
+      for _, citation in ipairs(el.citations) do
+        local refid = citation.id
+        if data[refid] then
+          local href = '#'..refid
+          if fbx.ishtmlbook then
+            href = data[refid].file .. '.html' .. href
+          end
+          -- Return link with reflabel + refnum (e.g., "Principle 1.1")
+          local linktext = data[refid].reflabel .. " " .. data[refid].refnum
+          return pandoc.Link(linktext, href)
+        end
+      end
+      -- Not our ref, return unchanged for bibliography processing
+      return nil
     end
   }
 end

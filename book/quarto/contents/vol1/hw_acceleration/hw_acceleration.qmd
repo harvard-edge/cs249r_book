@@ -77,6 +77,7 @@ Amdahl's Law is not merely theoretical: it explains why many GPU upgrades disapp
 #| label: fig-iron-law-heatmap
 #| echo: false
 #| fig-cap: "**The Iron Law Heatmap.** Total system speedup as a function of Accelerator Speed ($S$) and Parallel Fraction ($P$). Notice the 'Accelerator Wall' at the top: if your workload is even slightly serial ($P < 0.9$), increasing hardware speed ($S$) from 100x to 1000x yields almost no benefit. You must be in the yellow/green zone (High $P$) to justify High $S$."
+#| fig-alt: "Heatmap of Speedup vs Accelerator Speed and Parallel Fraction. High speedup (green/yellow) is only achieved in the bottom right corner where Parallel Fraction is near 1.0. The rest of the map is dominated by blue (low speedup), showing the serial bottleneck."
 
 import sys
 import matplotlib.pyplot as plt
@@ -1020,6 +1021,362 @@ While unstructured pruning reduces model size, it rarely translates to hardware 
 
 3.  **Result**: This effectively doubles the FLOPs/byte ratio, providing a theoretical $2\times$ speedup over dense matrix multiplication with minimal accuracy loss, provided the model is fine-tuned to respect the 2:4 constraint.
 
+To understand why "Structured" patterns are required for hardware speedup, consider how sparse matrices are actually stored in memory. As shown in @fig-sparse-formats, a sparse format (like CSR or Block Sparse) must store indices alongside values. If the sparsity is random, the index overhead and irregular access kill performance. Structured sparsity—whether at the **Large Block** scale or the **Fine-Grained N:M** scale—makes this indexing predictable and compact, allowing hardware to fetch data efficiently.
+
+::: {#fig-sparse-formats fig-env="figure" fig-pos="htb" fig-cap="**Sparse Storage Formats**: Hardware efficiency depends on how sparse matrices are stored. **Dense** storage (top left) is simple but wasteful for zeros. **Block Sparse** (top right) and **CSR** (bottom) compress the matrix by storing only non-zero values and their indices. Structured sparsity (like N:M or Blocks) makes this indexing predictable, allowing hardware to fetch data and skip zeros efficiently." fig-alt="Grid of 3x3 matrix blocks. Top left: Dense Matrix. Top right: Block Sparse Matrix showing dense sub-blocks. Bottom: Sparse Matrix (CSR) and Block Sparse (BSR) representations showing values and index arrays."}
+```{.tikz}
+\begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}]
+\tikzset{%
+helvetica/.style={align=flush center,font=\small\usefont{T1}{phv}{m}{n}},
+Line/.style={line width=1.0pt,black!50,text=black},
+}
+\definecolor{Blue1}{RGB}{23,68,150}
+\definecolor{Blue2}{RGB}{84,131,217}
+\definecolor{Blue3}{RGB}{145,177,237}
+\def\columns{3}
+\def\rows{3}
+\def\cellsize{5mm}
+\def\cellheight{5mm}
+
+\begin{scope}[local bounding box=BL1]
+\begin{scope}[local bounding box=matrica1]
+\def\rowone{Blue2,Blue3,Blue2}
+\def\rowtwo{Blue2,Blue1,Blue2}
+\def\rowthree{Blue2,Blue2,Blue2}
+\def\br{A}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+%%%%%%
+\begin{scope}[shift={(1.5,0)}]
+\def\rowone{Blue1,Blue2,Blue2}
+\def\rowtwo{Blue3,Blue2,Blue1}
+\def\rowthree{Blue2,Blue1,Blue2}
+\def\br{B}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+%%%%%%
+\begin{scope}[shift={(3.0,0)}]
+\def\br{C}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+\end{scope}
+
+\begin{scope}[local bounding box=BL2,shift={(5.0,0)}]
+\begin{scope}[local bounding box=matrica1]
+\def\rowone{Blue2,Blue3,Blue2}
+\def\rowtwo{Blue2,Blue1,Blue2}
+\def\rowthree{Blue2,Blue2,Blue2}
+\def\br{D}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+%%%%%%
+\begin{scope}[shift={(1.5,0)}]
+\def\br{E}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+%%%%%%
+\begin{scope}[shift={(3.0,0)}]
+\def\rowone{Blue1,Blue2,Blue2}
+\def\rowtwo{Blue3,Blue2,Blue1}
+\def\rowthree{Blue2,Blue1,Blue2}
+\def\br{F}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+\end{scope}
+
+\begin{scope}[local bounding box=BL3,shift={(0.0,-2.0)}]
+\begin{scope}[local bounding box=matrica1]
+\def\br{G}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+%%%%%%
+\begin{scope}[shift={(1.5,0)}]
+\def\br{H}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+%%%%%%
+\begin{scope}[shift={(3.0,0)}]
+\def\rowone{Blue1,Blue2,Blue2}
+\def\rowtwo{Blue3,Blue2,Blue1}
+\def\rowthree{Blue2,Blue1,Blue2}
+\def\br{I}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+\end{scope}
+
+\begin{scope}[local bounding box=BL4,shift={(5.0,-2.0)}]
+\begin{scope}[local bounding box=matrica1]
+\def\br{J}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+%%%%%%
+\begin{scope}[shift={(1.5,0)}]
+\def\rowone{Blue1,Blue2,Blue2}
+\def\rowtwo{Blue3,Blue2,Blue1}
+\def\rowthree{Blue2,Blue1,Blue2}
+\def\br{K}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+%%%%%%
+\begin{scope}[shift={(3.0,0)}]
+\def\br{L}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+\end{scope}
+\node[helvetica,anchor=south] at (BL1.north){Dense Matrix};
+\node[helvetica,anchor=south] at (BL2.north){Block Sparse Matrix};
+
+\node[helvetica,anchor=south] at (BL3.north){Sparse Matrix (CSR)};
+\node[helvetica,anchor=south] at (BL4.north){Block Sparse (BSR)};
+
+%array
+\node[draw=black, line width=1pt,fill=white, minimum width=5mm,
+            minimum height=5mm, line width=0.5pt] (arr-1) at (9.2,1.25) {1};
+\node[draw=black, line width=1pt,fill=white, minimum width=5mm,
+            minimum height=5mm, line width=0.5pt,anchor=west] (arr-2) at (arr-1.east) {2};
+\node[draw=black, line width=1pt,fill=white, minimum width=5mm,
+            minimum height=5mm, line width=0.5pt,anchor=west] (arr-3) at (arr-2.east) {4};
+\node[draw=black, line width=1pt,fill=white, minimum width=5mm,
+            minimum height=5mm, line width=0.5pt,anchor=west] (arr-4) at (arr-3.east) {5};
+\node[draw=black, line width=1pt,fill=white, minimum width=5mm,
+            minimum height=5mm, line width=0.5pt,anchor=west] (arr-5) at (arr-4.east) {7};
+\node[draw=black, line width=1pt,fill=white, minimum width=5mm,
+            minimum height=5mm, line width=0.5pt,anchor=west] (arr-6) at (arr-5.east) {9};
+\node[helvetica,anchor=south,text width=30mm] at (10.5,1.7){Non-zero Block Indices};
+
+\draw[-latex,Line] (arr-1.south) to [out=-90,in=90] (BL2.north west);
+\draw[-latex,Line] (arr-2.south) to [out=-90,in=90] ($(BL2.north west)+(1.5,0)$);
+\draw[-latex,Line] (arr-3.south) to [out=-90,in=90] ($(BL2.north west)+(4.5,0)$);
+\draw[-latex,Line] (arr-4.south) to [out=-90,in=90] ($(BL2.north west)+(1.5,-2)$);
+\draw[-latex,Line] (arr-5.south) to [out=-90,in=90] ($(BL2.north west)+(3.0,-2)$);
+\draw[-latex,Line] (arr-6.south) to [out=-90,in=90] ($(BL2.north west)+(4.5,-2)$);
+
+\end{tikzpicture}
+```
+:::
+
 Beyond structured sparsity optimizations, different hardware architectures implement matrix operations through distinct computational structures. Systolic arrays represent one such approach that has proven particularly effective for AI workloads.
 
 #### Systolic Arrays {#sec-ai-acceleration-systolic-arrays-6fa8}
@@ -1316,6 +1673,7 @@ The underlying cause of this wall is physical: moving data costs orders of magni
 #| label: fig-energy-hierarchy
 #| echo: false
 #| fig-cap: "**The Energy Hierarchy.** Energy cost per operation (Log Scale). Fetching data from off-chip DRAM costs ~128x more energy than an SRAM access and ~20,000x more than an INT8 addition. This energy disparity drives the design of every AI accelerator: data must be kept local (in SRAM/Registers) to be processed efficiently."
+#| fig-alt: "Horizontal bar chart of Energy (pJ) per operation on log scale. INT8 Add is tiny (0.03). DRAM Read is huge (640). An arrow highlights the massive gap between computation and memory access."
 
 import sys
 import matplotlib.pyplot as plt

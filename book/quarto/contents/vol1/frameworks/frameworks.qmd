@@ -727,6 +727,7 @@ The following visualization demonstrates this tax in action. Eager execution (to
 #| label: fig-python-tax
 #| echo: false
 #| fig-cap: "**The Python Tax.** Execution timeline for a sequence of small operations (e.g., LayerNorm). In Eager Mode (top), the GPU (blue) finishes quickly but must wait for the Python interpreter (red) to dispatch the next instruction. In Compiled Mode (bottom), the compiler fuses operations into a single kernel, eliminating dispatch overhead and keeping the GPU fully saturated."
+#| fig-alt: "Gantt chart of execution timeline. Eager mode shows alternating red (Python) and blue (GPU) blocks with gaps. Compiled mode shows one small red block followed by one long blue block."
 
 import sys
 import matplotlib.pyplot as plt
@@ -2859,23 +2860,11 @@ start_epoch = loaded_checkpoint["epoch"]
 
 Each major framework represents a distinct point in the design space defined by the three fundamental problems: TensorFlow prioritizes the **Abstraction Problem** through its comprehensive deployment ecosystem, PyTorch prioritizes the **Execution Problem** through its dynamic graph approach, and JAX reframes the **Differentiation Problem** through composable function transformations. These are not just API differences but fundamental capability trade-offs that determine what each framework can and cannot do well.
 
-### TensorFlow Ecosystem {#sec-ai-frameworks-tensorflow-ecosystem-063c}
+### TensorFlow: The Graph-First Production Machine {#sec-ai-frameworks-tensorflow-ecosystem-063c}
 
-TensorFlow was developed by the Google Brain team and was released as an open-source software library on November 9, 2015 [@abadi2016tensorflow]. It was designed for numerical computation using data flow graphs and has since become popular for a wide range of machine learning applications.
+TensorFlow's architecture reflects a comprehensive solution to the **Abstraction Problem**: how do you target diverse hardware—from cloud TPUs to microcontrollers—using a single interface? Its design philosophy is built on the **Static Graph** (or "Define-and-Run") principle. By requiring the model to be represented as a complete computational graph before execution, TensorFlow enables ahead-of-time (AOT) compilation and optimization.
 
-TensorFlow's architecture reflects a comprehensive solution to the **Abstraction Problem**: how do you target diverse hardware from a single interface? Rather than optimizing for a single deployment target, TensorFlow provides specialized runtimes for cloud servers (TensorFlow Serving), mobile devices (TensorFlow Lite), microcontrollers (TensorFlow Lite Micro), browsers (TensorFlow.js), and edge accelerators (Coral). This breadth of deployment targets comes from TensorFlow's commitment to static graph representation, which enables ahead-of-time compilation and optimization for each target platform.
-
-TensorFlow provides built-in functionality to handle everything from model creation and training to deployment, as shown in @fig-tensorflow-architecture. The ecosystem spans four variants that illustrate the deployment spectrum central to this chapter:
-
-- [TensorFlow Core](https://www.tensorflow.org/tutorials): the primary package for defining, training, and deploying models, with [tf.keras](https://www.tensorflow.org/guide/keras) as its high-level API.
-
-- [TensorFlow Lite](https://www.tensorflow.org/lite) (rebranded as LiteRT in 2024): deploys lightweight models on mobile, embedded, and edge devices by converting models to a compact format optimized for limited-resource hardware.
-
-- [TensorFlow Lite Micro](https://www.tensorflow.org/lite/microcontrollers): runs models on microcontrollers without operating system support, standard C/C++ libraries, or dynamic memory allocation, using only a few kilobytes of memory.
-
-- [TensorFlow Serving](https://www.tensorflow.org/tfx/guide/serving): serves models in production with versioning and dynamic model updates without service interruption.
-
-The broader ecosystem extends further to browser deployment, edge accelerators, federated learning, and end-to-end pipeline management. This breadth follows from TensorFlow's commitment to graph-based compilation, which enables ahead-of-time optimization for each deployment target.
+This approach prioritizes the **Deployment Spectrum**. Because the framework sees the entire graph, it can perform aggressive optimizations like constant folding, operator fusion, and memory layout optimization before the first byte of data is processed. This is why TensorFlow remains the standard for complex production ecosystems, as illustrated in @fig-tensorflow-architecture.
 
 ::: {#fig-tensorflow-architecture fig-env="figure" fig-pos="htb" fig-cap="**TensorFlow Training-to-Deployment Pipeline.** Two-column diagram showing the training path (left) from data preprocessing through tf.keras and distribution strategy across CPU, GPU, and TPU, and the deployment path (right) from SavedModel export to TensorFlow Serving, Lite, JS, and language bindings. Source: [TensorFlow.](https://blog.tensorflow.org/2019/01/whats-coming-in-tensorflow-2-0.html)." fig-alt="Two-column diagram. Training: data preprocessing, tf.keras, TensorFlow Hub, Premade Estimators, Distribution Strategy across CPU/GPU/TPU. Deployment via SavedModel to TensorFlow Serving, Lite, JS, and language bindings."}
 ```{.tikz}
@@ -2942,21 +2931,19 @@ The broader ecosystem extends further to browser deployment, edge accelerators, 
 ```
 :::
 
-**Production-Scale Deployment.** Real-world production systems demonstrate how framework selection directly impacts system performance under operational constraints. Framework optimization often achieves dramatic improvements: production systems commonly see 4--10$\times$ latency reductions and 2--5$\times$ cost savings through systematic optimization including quantization, operator fusion, and hardware-specific acceleration.
+While TensorFlow 2.0 introduced eager execution to bridge the gap between research and production, its core strength remains the robust, compiled path from research to global-scale deployment. These optimizations are addressed systematically in @sec-ai-training and @sec-model-serving-systems.
 
-These optimizations require significant engineering investment, typically 4 to 12 weeks of specialized effort for custom operator implementation, validation testing, and performance tuning. The detailed production deployment examples, optimization techniques, and quantitative trade-off analysis are covered in @sec-ai-training and @sec-model-serving-systems, where operational constraints and deployment strategies are systematically addressed.
+### PyTorch: The Eager Research Standard {#sec-ai-frameworks-pytorch-85cd}
 
-### PyTorch {#sec-ai-frameworks-pytorch-85cd}
+In contrast, PyTorch's architecture represents a fundamentally different answer to the **Execution Problem**. Its design philosophy is built on **Dynamic Graphs** (or "Define-by-Run"). Instead of building a blueprint before execution, PyTorch builds the computational graph on-the-fly as the code runs.
 
-In contrast to TensorFlow's production-first approach, PyTorch (developed by Facebook's AI Research lab) has gained significant traction among researchers and academics [@paszke2019pytorch]. Its design philosophy emphasizes ease of use, flexibility, and dynamic computation, aligning well with the iterative nature of research.
+This approach won the research community because it treats deep learning as standard Python programming. You can use Python loops, conditionals, and debuggers (like `pdb`) directly within your model's forward pass. This "Eager Execution" model enables rapid iteration and intuitive model design, which is essential for the trial-and-error nature of frontier AI research.
 
-PyTorch's architecture represents a fundamentally different answer to the **Execution Problem**. Where TensorFlow 1.x required defining a complete static graph before execution, PyTorch builds computational graphs on-the-fly during execution through its "define-by-run" approach. This dynamic graph system, which we examined in detail in @sec-ai-frameworks-eager-execution-dynamic-graphs-29c2, means that every forward pass constructs a new autograd tape, enabling intuitive model design, easier debugging, and standard Python control flow within models.
-
-The trade-off is explicit: PyTorch sacrifices some optimization opportunities (the framework cannot fuse operations it cannot see together) in exchange for development velocity and debugging capability. This design choice drove PyTorch's dominance in research settings, where the ability to inspect intermediate values and use standard Python debuggers outweighs the performance benefits of static compilation. PyTorch shares core abstractions with other frameworks, including tensors as the primary data structure, seamless CUDA[^fn-cuda-history] integration for GPU acceleration [@nickolls2008scalable], and autograd for automatic gradient tracking.
+The trade-off is a more fragmented deployment path. Because the graph is dynamic, the framework cannot easily perform global optimizations before execution. To bridge this "Research-to-Production gap," PyTorch introduced **TorchScript** and **PyTorch 2.0 (with `torch.compile`)**, which allow developers to "capture" a dynamic model and turn it into an optimized, static representation for deployment. This evolution shows PyTorch moving toward the "Production" end of the spectrum while preserving the "Eager" experience that made it famous.
 
 [^fn-cuda-history]: **CUDA (Compute Unified Device Architecture)**: Released by NVIDIA in 2007, CUDA was the pivotal technology that transformed GPUs from "graphics chips" into "general-purpose parallel processors" (GPGPU). Before CUDA, engineers had to hack algorithms into graphics shaders (rendering triangles to do math). CUDA allowed C++ code to run directly on the GPU cores, laying the infrastructure foundation for the deep learning explosion five years later.
 
-### Computational Graphs: The Blueprint of Intelligence {#sec-ai-frameworks-computational-graphs-blueprint-intelligence-e65a}
+### JAX: The Functional Transformation Engine {#sec-ai-frameworks-jax}
 
 Where PyTorch and TensorFlow evolved from imperative programming traditions, JAX represents a fundamentally different approach to ML frameworks, one built on functional programming principles and composable program transformations rather than computational graphs [@jax2018github]. Developed by Google Research, JAX has gained significant traction in research settings, particularly for work requiring custom differentiation, advanced optimization research, and large-scale distributed training.
 
