@@ -149,10 +149,16 @@ def plot_efficiency_frontier(ax=None):
                    c=color_map.get(family, COLORS['primary']), s=120, alpha=0.9, 
                    edgecolors='white', linewidth=1.2, zorder=3)
         
+    offsets = {
+        'MobileNet-v2': (5, -15),
+        'ResNet-50': (-45, 0),
+        'Swin-T': (-25, -10),
+        'ConvNeXt-T': (10, 10),
+        'EfficientNet-B0': (10, -10)
+    }
+    
     for _, row in df.iterrows():
-        xytext = (5, 5)
-        if row['Model'] == 'MobileNet-v2': xytext = (5, -10)
-        if row['Model'] == 'ResNet-50': xytext = (-40, 5)
+        xytext = offsets.get(row['Model'], (5, 5))
         ax.annotate(row['Model'], (row['GFLOPs'], row['Accuracy']), 
                     xytext=xytext, textcoords='offset points', fontsize=8)
 
@@ -238,9 +244,18 @@ def plot_systems_gap(ax=None):
         (2020, 10**(demand_slope*8), "GPT-3"),
         (2023, 10**(demand_slope*11), "GPT-4")
     ]
+    
+    model_offsets = {
+        "AlexNet": (0, 10),
+        "Transformer": (-15, 10),
+        "GPT-3": (-15, 8),
+        "GPT-4": (0, 8)
+    }
+
     for y, v, l in points:
         ax.scatter(y, v, color=COLORS['RedLine'], s=25, zorder=5, edgecolors='white')
-        ax.annotate(l, (y, v), xytext=(0, 8), textcoords='offset points', 
+        xytext = model_offsets.get(l, (0, 8))
+        ax.annotate(l, (y, v), xytext=xytext, textcoords='offset points', 
                     fontsize=8, ha='center', color=COLORS['RedLine'], fontweight='bold')
 
     hw_points = [
@@ -248,9 +263,17 @@ def plot_systems_gap(ax=None):
         (2016, 10**(gpu_slope*4), "P100"),
         (2022, 10**(gpu_slope*10), "H100")
     ]
+    
+    hw_offsets = {
+        "K20X": (0, -15),
+        "P100": (0, -15),
+        "H100": (0, -15)
+    }
+    
     for y, v, l in hw_points:
         ax.scatter(y, v, color=COLORS['BlueLine'], s=25, zorder=5, edgecolors='white')
-        ax.annotate(l, (y, v), xytext=(0, -12), textcoords='offset points',
+        xytext = hw_offsets.get(l, (0, -12))
+        ax.annotate(l, (y, v), xytext=xytext, textcoords='offset points',
                     fontsize=8, ha='center', color=COLORS['BlueLine'], fontweight='bold')
 
     ax.legend(loc='lower right', fontsize=8)
@@ -485,8 +508,11 @@ def plot_compute_growth(ax=None):
         
     for _, row in df.iterrows():
         if row['Model'] in ['AlexNet', 'AlphaGoZero', 'GPT-3', 'PaLM', 'GPT-4']:
+            xytext = (0, 5)
+            if row['Model'] == 'PaLM': xytext = (-5, 5)
+            if row['Model'] == 'GPT-4': xytext = (5, 5)
             ax.annotate(row['Model'], (row['Year'], row['FLOPs']), 
-                        xytext=(0, 5), textcoords='offset points', fontsize=8)
+                        xytext=xytext, textcoords='offset points', fontsize=8)
 
     ax.set_yscale('log')
     ax.set_xlabel('Year')
@@ -737,10 +763,10 @@ def plot_algo_efficiency(ax=None):
         'GoogLeNet': (0, 10),
         'ResNet-18': (0, -15),
         'DenseNet-121': (0, -15),
-        'MobileNet-v1': (-20, 5),
-        'ShuffleNet-v1': (0, 10),
-        'MobileNet-v2': (20, -5),
-        'ShuffleNet-v2': (0, 10),
+        'MobileNet-v1': (-25, 5),
+        'ShuffleNet-v1': (-20, 15),
+        'MobileNet-v2': (25, -15),
+        'ShuffleNet-v2': (10, 15),
         'EfficientNet-B0': (0, 10)
     }
     
@@ -893,32 +919,23 @@ def plot_context_explosion(ax=None):
     
     for y, c, l in zip(years, context, labels):
         # Adjusting label offsets to avoid step lines
-        off_x, off_y = -5, 10
-        ha = 'right'
+        off_x, off_y = 5, 5
+        ha = 'left'
         if l == "Gemini 1.5": 
-            off_x, off_y = -10, 0
+            off_x, off_y = -10, 10
             ha = 'right'
         elif l == "GPT-4":
-            off_x, off_y = -10, 0
+            off_x, off_y = -10, 10
             ha = 'right'
-        elif l == "BERT":
-            ha = 'center'
-            off_x, off_y = 0, 12
-        elif l == "GPT-2":
-            ha = 'center'
-            off_x, off_y = 0, 12
-        elif l == "GPT-3":
-            ha = 'center'
-            off_x, off_y = 0, 12
             
         c_label = f"{int(c/1000)}k" if c >= 1000 else f"{c/1000:.1f}k"
         ax.annotate(f"{l}\n({c_label})", (y, c), xytext=(off_x, off_y), textcoords='offset points', 
-                    fontsize=8, fontweight='bold', color=COLORS['VioletLine'], ha=ha)
+                    fontsize=8, fontweight='bold', color=COLORS['VioletLine'], rotation=45, ha=ha, va='bottom')
 
     ax.set_yscale('log')
     ax.set_xlabel('Year')
     ax.set_ylabel('Context Window (Tokens)')
-    ax.set_ylim(100, 3000000)
+    ax.set_ylim(100, 5000000)
     
     # Era Labels (Higher contrast)
     ax.axhline(2000, linestyle='--', color=COLORS['grid'], alpha=0.5)
@@ -937,36 +954,87 @@ def plot_intelligence_deflation(ax=None):
     data = [
         (2020.5, 20.0, "GPT-3 (Davinci)"),
         (2023.1, 2.0, "GPT-3.5 Turbo"),
-        (2023.5, 30.0, "GPT-4 (Frontier)"),
+        (2023.2, 30.0, "GPT-4 (Original)"),
+        (2024.2, 15.0, "Claude 3 Opus"),
+        (2024.2, 0.25, "Claude 3 Haiku"),
         (2024.3, 5.0, "GPT-4o"),
-        (2024.6, 0.15, "GPT-4o-mini")
+        (2024.4, 0.075, "Gemini 1.5 Flash"),
+        (2024.6, 0.15, "GPT-4o-mini"),
+        (2024.9, 0.27, "DeepSeek-V3")
     ]
     
-    years = [d[0] for d in data]
-    prices = [d[1] for d in data]
+    # Sort for fitting
+    data.sort(key=lambda x: x[0])
+    years = np.array([d[0] for d in data])
+    prices = np.array([d[1] for d in data])
     labels = [d[2] for d in data]
     
-    ax.plot(years, prices, 'o-', color=COLORS['GreenLine'], linewidth=2.5, markersize=8, zorder=3)
+    # 1. Trend Line (Log-Linear Fit)
+    # Filter for the "Frontier/Efficiency" frontier (exclude high-priced outliers like Opus/GPT-4 for the trend)
+    # We want to show the deflation of the "best price for reasonable intelligence"
+    trend_years = np.array([2020.5, 2023.1, 2024.2, 2024.4, 2024.9])
+    trend_prices = np.array([20.0, 2.0, 0.25, 0.075, 0.27]) # Approximate "Cheapest Competent Model"
     
+    # Fit: ln(y) = m*x + c
+    slope, intercept = np.polyfit(trend_years, np.log10(trend_prices), 1)
+    
+    line_years = np.linspace(2020, 2025.5, 100)
+    line_prices = 10**(slope * line_years + intercept)
+    
+    ax.plot(line_years, line_prices, '--', color=COLORS['grid'], linewidth=1.5, label='Deflation Trend (~10x / 18mo)', zorder=1)
+    
+    # 2. Plot Points
+    ax.scatter(years, prices, color=COLORS['GreenLine'], s=50, zorder=3, edgecolors='white', linewidth=1.5)
+    
+    # 3. Smart Label Placement
     for y, p, l in zip(years, prices, labels):
-        off_x, off_y = 8, 0
-        ha = 'left'
-        if l == "GPT-4 (Frontier)":
-            off_x, off_y = 8, 8
+        off_x, off_y = 5, 5
+        va, ha = 'bottom', 'left'
+        
+        if l == "GPT-3 (Davinci)":
+            off_y = 8
         elif l == "GPT-3.5 Turbo":
+            off_x, off_y = -8, -12
+            ha, va = 'right', 'top'
+        elif l == "GPT-4 (Original)":
+            off_y = 8
+        elif l == "Claude 3 Opus":
+            off_x, off_y = -8, 8
+            ha = 'right'
+        elif l == "Claude 3 Haiku":
+            off_x, off_y = -8, 8
+            ha, va = 'right', 'bottom'
+        elif l == "Gemini 1.5 Flash":
+            off_x, off_y = -8, -15 
+            ha, va = 'right', 'top'
+        elif l == "GPT-4o":
             off_x, off_y = 8, 8
-            
-        ax.annotate(l, (y, p), xytext=(off_x, off_y), textcoords='offset points', 
-                    fontsize=8, fontweight='bold', ha=ha, color=COLORS['primary'])
+        elif l == "GPT-4o-mini":
+            off_x, off_y = 8, -15
+            va = 'top'
+        elif l == "DeepSeek-V3":
+            off_x, off_y = 10, 8
+            ha = 'left'
 
+        ax.annotate(l, (y, p), xytext=(off_x, off_y), textcoords='offset points', 
+                    fontsize=8, fontweight='bold', ha=ha, va=va, color=COLORS['primary'],
+                    bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=1))
+
+    # 4. Styling & Limits
     ax.set_yscale('log')
-    ax.set_yticks([100, 10, 1, 0.1])
-    ax.set_yticklabels(['$100', '$10', '$1', '$0.10'])
+    ax.set_yticks([100, 10, 1, 0.1, 0.01])
+    ax.set_yticklabels(['$100', '$10', '$1', '$0.10', '$0.01'])
     
     ax.set_xlabel('Year')
     ax.set_ylabel('Price per 1M Tokens (USD)')
     ax.grid(True, which="major", ls="-", alpha=0.3)
-    ax.set_ylim(0.08, 300)
+    
+    # Ensure Gemini label (at bottom) fits
+    ax.set_ylim(0.01, 500) 
+    ax.set_xlim(2020, 2025.5)
+    
+    # Add Trend Legend
+    ax.text(2021, 0.05, "Trend: ~50% Cheaper\nEvery 8 Months", color=COLORS['grid'], fontsize=9, style='italic')
     
     return ax
 
@@ -1039,5 +1107,198 @@ def plot_communication_tax(ax=None):
     ax.set_ylabel('Effective Throughput (Speedup)')
     ax.legend(loc='upper left', fontsize=9)
     
+    return ax
+
+def plot_kv_cache_growth(ax=None):
+    """Visualizes 'The KV-Cache Explosion' (Memory vs Sequence Length)."""
+    if ax is None: fig, ax = plt.subplots()
+    
+    # Model: ~70B Params (e.g., Llama-2-70B scale)
+    # L=80 layers, d_model=8192
+    # Standard Attention (MHA): KV size = 2 * layers * d_model * seq_len * batch * 2_bytes(fp16)
+    
+    seq_len = np.linspace(0, 32000, 100)
+    layers = 80
+    d_model = 8192
+    bytes_per_param = 2 # FP16
+    
+    def get_kv_gb(batch, seq):
+        bytes_total = 2 * layers * d_model * seq * batch * bytes_per_param
+        return bytes_total / 1e9
+    
+    batches = [1, 4, 16, 32]
+    colors = [COLORS['BlueLine'], COLORS['GreenLine'], COLORS['OrangeLine'], COLORS['VioletLine']]
+    
+    for b, c in zip(batches, colors):
+        gb = get_kv_gb(b, seq_len)
+        ax.plot(seq_len, gb, label=f'Batch Size {b}', color=c, linewidth=2)
+
+    # Hardware Limit (A100/H100 80GB)
+    limit_gb = 80
+    ax.axhline(limit_gb, color=COLORS['RedLine'], linestyle='--', linewidth=2)
+    ax.text(1000, limit_gb + 2, "A100/H100 Capacity (80GB)", color=COLORS['RedLine'], fontweight='bold', fontsize=9)
+    
+    # OOM Zone
+    ax.axhspan(limit_gb, 140, color=COLORS['RedL'], alpha=0.2)
+    ax.text(16000, 100, "Out of Memory (OOM) Zone", color=COLORS['RedLine'], ha='center', fontsize=10, fontweight='bold')
+    
+    # Annotations
+    ax.annotate("Linear Growth", xy=(15000, get_kv_gb(4, 15000)), xytext=(20000, 30),
+                arrowprops=dict(facecolor=COLORS['primary'], arrowstyle='->'), fontsize=9)
+
+    ax.set_xlabel('Context Length (Tokens)')
+    ax.set_ylabel('KV Cache Size (GB) [FP16]')
+    ax.set_xlim(0, 32000)
+    ax.set_ylim(0, 120)
+    ax.set_xticks([0, 8000, 16000, 24000, 32000])
+    ax.set_xticklabels(['0', '8k', '16k', '24k', '32k'])
+    
+    ax.legend(loc='lower right', fontsize=8)
+    
+    return ax
+
+def plot_double_descent(ax=None):
+    """Visualizes 'The Double Descent' (Generalization vs Complexity)."""
+    if ax is None: fig, ax = plt.subplots()
+    
+    # X-axis: Complexity
+    x = np.linspace(0.1, 3.0, 200)
+    
+    # 1. Classical Regime (U-Curve)
+    # Error decreases then increases as we overfit
+    y_classical = 0.5 * (x - 0.5)**2 + 0.3
+    
+    # 2. Modern Regime (Descent)
+    # After interpolation (x=1.0), error drops again
+    y_modern = 0.3 * np.exp(-1.5 * (x - 1.0)) + 0.15
+    
+    # Combine with a peak at x=1
+    # We blend them: precise peak handling
+    y = np.zeros_like(x)
+    mask_under = x <= 1.0
+    mask_over = x > 1.0
+    
+    # Classical part with a spike at 1.0
+    y[mask_under] = 0.8 * (x[mask_under] - 0.4)**2 + 0.25 + 0.4 * np.exp(-100 * (x[mask_under]-1.0)**2)
+    
+    # Modern part descending from the peak
+    y[mask_over] = 0.3 * np.exp(-2.0 * (x[mask_over] - 1.0)) + 0.2
+    
+    # Smoothing the join
+    y = np.convolve(y, np.ones(5)/5, mode='same')
+
+    ax.plot(x, y, color=COLORS['BlueLine'], linewidth=2.5)
+    
+    # Zones
+    ax.axvspan(0, 1.0, color=COLORS['grid'], alpha=0.1)
+    ax.text(0.5, 0.8, "Classical Regime\n(Under-parameterized)", ha='center', fontsize=9, fontweight='bold', color=COLORS['primary'])
+    
+    ax.axvspan(1.0, 3.0, color=COLORS['GreenL'], alpha=0.1)
+    ax.text(2.0, 0.8, "Modern Regime\n(Over-parameterized)", ha='center', fontsize=9, fontweight='bold', color=COLORS['GreenLine'])
+    
+    # Threshold Line
+    ax.axvline(1.0, color=COLORS['RedLine'], linestyle='--', alpha=0.6)
+    ax.text(1.05, 0.6, "Interpolation Threshold\n(Zero Training Error)", color=COLORS['RedLine'], fontsize=8)
+
+    ax.set_xlabel('Model Complexity (Parameters / Data Size)')
+    ax.set_ylabel('Test Error')
+    ax.set_ylim(0.1, 0.9)
+    ax.set_xlim(0, 3.0)
+    ax.set_yticks([]) # Qualitative
+    
+    # Annotation
+    ax.annotate("Bigger is Better", xy=(2.5, 0.22), xytext=(2.5, 0.35),
+                arrowprops=dict(facecolor=COLORS['GreenLine'], arrowstyle='->'), 
+                color=COLORS['GreenLine'], ha='center', fontsize=9)
+    
+    return ax
+
+def plot_mlops_leverage(ax=None):
+    """Visualizes 'The MLOps Leverage' (Infrastructure ROI)."""
+    if ax is None: fig, ax = plt.subplots()
+    
+    team_size = np.linspace(1, 20, 100)
+    
+    # 1. Ad-hoc / Manual (Saturates due to coordination overhead)
+    # Velocity = N * (1 - alpha * N)
+    velocity_manual = 5 * team_size * np.exp(-0.05 * team_size)
+    
+    # 2. Platform / Automated (Scales linearly or super-linearly)
+    # Velocity = N * Leverage
+    velocity_platform = 5 * team_size ** 1.1  # Slight exponential network effect
+    
+    ax.plot(team_size, velocity_manual, '--', color=COLORS['RedLine'], label='Ad-hoc Scripts', linewidth=2)
+    ax.plot(team_size, velocity_platform, '-', color=COLORS['BlueLine'], label='MLOps Platform', linewidth=2.5)
+    
+    # Fill gap
+    ax.fill_between(team_size, velocity_manual, velocity_platform, color=COLORS['BlueL'], alpha=0.2)
+    
+    ax.text(18, 120, "The Flywheel\nEffect", ha='center', color=COLORS['BlueLine'], fontweight='bold', fontsize=9)
+    ax.annotate("", xy=(18, 110), xytext=(18, 40), arrowprops=dict(arrowstyle="->", color=COLORS['BlueLine']))
+    
+    ax.text(15, 25, "Coordination Tax", ha='center', color=COLORS['RedLine'], fontweight='bold', fontsize=9)
+    
+    ax.set_xlabel('Team Size (Engineers)')
+    ax.legend(loc='upper left', fontsize=9)
+    
+    return ax
+
+def plot_invariants_cycle(ax=None):
+    """Visualizes 'The Cycle of ML Systems' (The 12 Invariants)."""
+    if ax is None: fig, ax = plt.subplots(figsize=(10, 8))
+    
+    # Disable axes
+    ax.axis('off')
+    ax.set_xlim(-1.2, 1.2)
+    ax.set_ylim(-1.2, 1.2)
+    
+    from matplotlib.patches import FancyBboxPatch, ConnectionPatch, Circle
+    
+    # Nodes (Diamond Layout)
+    nodes = {
+        'Data':      {'x': -0.8, 'y': 0.0, 'label': 'Foundations\n(Data)', 'color': COLORS['GreenL'], 'ec': COLORS['GreenLine']},
+        'Model':     {'x': 0.0, 'y': 0.8, 'label': 'Build\n(Model)', 'color': COLORS['BlueL'], 'ec': COLORS['BlueLine']},
+        'Hardware':  {'x': 0.8, 'y': 0.0, 'label': 'Optimize\n(Hardware)', 'color': COLORS['OrangeL'], 'ec': COLORS['OrangeLine']},
+        'Ops':       {'x': 0.0, 'y': -0.8, 'label': 'Deploy\n(Operations)', 'color': COLORS['VioletL'], 'ec': COLORS['VioletLine']}
+    }
+    
+    # Draw Nodes
+    for k, n in nodes.items():
+        # Box
+        p = FancyBboxPatch((n['x']-0.2, n['y']-0.1), 0.4, 0.2, boxstyle="round,pad=0.05", 
+                           fc=n['color'], ec=n['ec'], linewidth=2, zorder=10)
+        ax.add_patch(p)
+        ax.text(n['x'], n['y'], n['label'], ha='center', va='center', fontsize=11, fontweight='bold', zorder=11)
+
+    # Center: Conservation of Complexity
+    ax.add_patch(Circle((0,0), 0.25, fc='white', ec=COLORS['grid'], linestyle='--', linewidth=1.5, zorder=5))
+    ax.text(0, 0, "Conservation\nof\nComplexity", ha='center', va='center', fontsize=10, fontweight='bold', color=COLORS['primary'], zorder=6)
+
+    # Transitions (Arrows & Invariants)
+    transitions = [
+        ('Data', 'Model', ['1. Data as Code', '2. Data Gravity'], (-0.5, 0.5)),
+        ('Model', 'Hardware', ['3. Iron Law', '4. Silicon Contract'], (0.5, 0.5)),
+        ('Hardware', 'Ops', ['5. Pareto Frontier', '6. Arith. Intensity', '8. Amdahl\'s Law'], (0.5, -0.5)),
+        ('Ops', 'Data', ['10. Stat. Drift', '11. Training-Serving Skew', '12. Latency Budget'], (-0.5, -0.5))
+    ]
+    
+    for start, end, invs, pos in transitions:
+        s_node = nodes[start]
+        e_node = nodes[end]
+        
+        # Arrow
+        con = ConnectionPatch(xyA=(s_node['x'], s_node['y']), xyB=(e_node['x'], e_node['y']), 
+                              coordsA="data", coordsB="data", 
+                              axesA=ax, axesB=ax, 
+                              arrowstyle="-|>,head_width=0.4,head_length=0.4", connectionstyle="arc3,rad=-0.2", 
+                              color=COLORS['primary'], lw=2.5, zorder=1)
+        ax.add_artist(con)
+        
+        # Labels (Invariants)
+        for i, inv in enumerate(invs):
+            offset = 0.12 * (i - (len(invs)-1)/2)
+            ax.text(pos[0], pos[1] - offset, inv, ha='center', va='center', 
+                    fontsize=9, fontweight='bold', bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', pad=1.5))
+
     return ax
 

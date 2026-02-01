@@ -307,6 +307,63 @@ The IEEE 754 standard and its AI-specific derivatives define different trade-off
 
 : **Numerical Format Comparison**: Each format trades off precision, dynamic range, memory footprint, and compute throughput. BF16 has emerged as the preferred training format because it matches FP32's range while using half the memory. {#tbl-numerical-formats}
 
+::: {#fig-float-formats fig-env="figure" fig-pos="htb" fig-cap="**Numerical Format Bit Layouts**: A visual comparison of bit allocations. Note how **BF16** (Brain Float 16) preserves the 8-bit exponent of **FP32**, ensuring the same dynamic range for training stability. **FP16** trades range for precision, often requiring loss scaling to prevent underflow." fig-alt="Stacked horizontal bars showing bit breakdown. FP32: 1 Sign, 8 Exp, 23 Mantissa. BF16: 1 Sign, 8 Exp, 7 Mantissa. FP16: 1 Sign, 5 Exp, 10 Mantissa. INT8: 8 Integer bits."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=1.0]
+  \tikzset{
+    BitBox/.style={draw=white, line width=0.8pt, minimum height=0.6cm, align=center, font=\scriptsize\bfseries\usefont{T1}{phv}{m}{n}, text=white},
+    Label/.style={text=TextBlack, font=\small\bfseries\usefont{T1}{phv}{m}{n}, anchor=east}
+  }
+
+  % Colors
+  \definecolor{SignColor}{HTML}{D9534F}      % Red
+  \definecolor{ExpColor}{HTML}{5BC0DE}       % Blue
+  \definecolor{MantColor}{HTML}{F0AD4E}      % Orange
+  \definecolor{IntColor}{HTML}{5CB85C}       % Green
+
+  % FP32
+  \node[Label] at (-0.2, 3) {FP32 (32-bit)};
+  \node[BitBox, fill=SignColor, minimum width=0.3cm] (fp32_s) at (0.15, 3) {S};
+  \node[BitBox, fill=ExpColor, minimum width=2.4cm, right=0pt of fp32_s] (fp32_e) {Exponent (8)};
+  \node[BitBox, fill=MantColor, minimum width=6.9cm, right=0pt of fp32_e] (fp32_m) {Mantissa (23)};
+  
+  % BF16
+  \node[Label] at (-0.2, 2) {BF16 (16-bit)};
+  \node[BitBox, fill=SignColor, minimum width=0.3cm] (bf16_s) at (0.15, 2) {S};
+  \node[BitBox, fill=ExpColor, minimum width=2.4cm, right=0pt of bf16_s] (bf16_e) {Exponent (8)};
+  \node[BitBox, fill=MantColor, minimum width=2.1cm, right=0pt of bf16_e] (bf16_m) {Mant (7)};
+  \node[right=0.2cm of bf16_m, font=\scriptsize\usefont{T1}{phv}{m}{n}, text=gray] {Matches FP32 Range};
+
+  % FP16
+  \node[Label] at (-0.2, 1) {FP16 (16-bit)};
+  \node[BitBox, fill=SignColor, minimum width=0.3cm] (fp16_s) at (0.15, 1) {S};
+  \node[BitBox, fill=ExpColor, minimum width=1.5cm, right=0pt of fp16_s] (fp16_e) {Exp (5)};
+  \node[BitBox, fill=MantColor, minimum width=3.0cm, right=0pt of fp16_e] (fp16_m) {Mantissa (10)};
+
+  % INT8
+  \node[Label] at (-0.2, 0) {INT8 (8-bit)};
+  \node[BitBox, fill=IntColor, minimum width=2.4cm] (int8) at (1.2, 0) {Integer (8)};
+
+  % Grid / Scale markers (approximate)
+  \draw[gray!30, dashed] (0, -0.5) -- (0, 3.5);
+  \draw[gray!30, dashed] (9.6, -0.5) -- (9.6, 3.5);
+  \node[below, font=\scriptsize\usefont{T1}{phv}{m}{n}, text=gray] at (0, -0.5) {Bit 31/15/7};
+  \node[below, font=\scriptsize\usefont{T1}{phv}{m}{n}, text=gray] at (9.6, -0.5) {Bit 0};
+
+\end{tikzpicture}
+```
+:::
+
+::: {.callout-note title="Systems Insight: The Dynamic Range Wall"}
+
+The choice of numerical format is a direct application of the **Iron Law of ML Systems**. Reducing precision from FP32 to BF16 or FP16 halves the **Data Movement** term in the denominator, potentially doubling throughput on memory-bound workloads. However, the *type* of 16-bit format determines the engineering complexity:
+
+*   **Dynamic Range (The Exponent)**: BF16 preserves the 8-bit exponent of FP32. This means it can represent the same range of extremely large and extremely small values (gradients). This is why BF16 is the "gold standard" for stable training—it rarely suffers from numerical overflow or underflow.
+*   **Precision (The Mantissa)**: FP16 has a larger 10-bit mantissa than BF16 (7 bits), offering higher precision for values within its range. But its 5-bit exponent is a major constraint; gradients often "vanish" to zero (underflow) because the exponent cannot represent them. To solve this, FP16 training requires **Loss Scaling**, an operational overhead where gradients are multiplied by a large constant to push them into the representable range.
+*   **Energy Efficiency**: INT8 operations are significantly more energy-efficient than floating-point equivalents because they utilize simpler integer ALUs and require less silicon area. Moving to INT8 for inference is the primary lever for deploying LLMs on battery-constrained edge devices.
+
+:::
+
 **Brain Float 16 (BF16)** deserves special attention [@wang_bfloat16_2019]. It matches FP32's 8-bit exponent (preserving dynamic range) while truncating the mantissa to 7 bits. This avoids the gradient underflow problems that plague FP16 training, eliminating the need for complex loss scaling. Most modern training uses BF16 for this reason.^[BF16 was originally introduced with the Google TPUv2 and has since been adopted by Intel, Arm, and NVIDIA (starting with Ampere architectures).]
 
 ### Integer Quantization {#sec-system-foundations-integer-quantization-9d02}

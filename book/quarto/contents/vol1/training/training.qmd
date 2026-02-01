@@ -1006,11 +1006,11 @@ For GPT-2 with batch_size=32, seq_len=1024, hidden_dim=`{python} hidden_dim_str`
 - Attention activations: `batch × seq × hidden × 4` (Q, K, V, output) = 32 × 1024 × `{python} hidden_dim_str` × 4 × 2 bytes (FP16) = `{python} attn_act_str` MB
 - FFN activations: `batch × seq × (hidden × 4)` (intermediate expansion) = 32 × 1024 × `{python} ffn_dim_str` × 2 bytes = `{python} ffn_act_str` MB
 - Layer norm states: Minimal (~10 MB per layer)
-- Total per layer: ~`{python} per_layer_str` MB
+- Total per layer: ~850 MB
 
 #### Full Model Activation Memory
 
-- 48 layers × `{python} per_layer_str` MB = **`{python} total_act_str` GB** just for activations
+- 48 layers × ~850 MB = **`{python} total_act_str` GB** just for activations
 - Parameters (FP16): `{python} params_gb_str` GB
 - Gradients: `{python} grad_gb_str` GB
 - Optimizer state (Adam, FP32): `{python} opt_gb_str` GB
@@ -1601,10 +1601,10 @@ network_time_str = f"{network_time_s:.1f}"
 
 1. **Gradient Size**: $7 \times 10^9 \times 2 \text{ bytes} = `{python} gradient_size_str` \text{ GB}$ per step.
 2. **AllReduce Cost**: Ring AllReduce sends $2 \times `{python} gradient_size_str` \text{ GB} = `{python} allreduce_str` \text{ GB}$ total.
-3. **Network Time**: At 100 Gbps (`{python} f"{network_bw_gbs:.1f}"` GB/s) NVLink: $`{python} allreduce_str` / `{python} f"{network_bw_gbs:.1f}"` = `{python} network_time_str` \text{ s}$.
+3. **Network Time**: At 100 Gbps (`{python} f"{network_bw_gbs:.1f}"` GB/s) InfiniBand: $`{python} allreduce_str` / `{python} f"{network_bw_gbs:.1f}"` = `{python} network_time_str` \text{ s}$.
 4. **Compute Time**: If forward + backward takes $1 \text{ s}$, network is the bottleneck.
 
-**The Systems Insight**: The network becomes a wall when $t_{\text{communication}} > t_{\text{computation}}$. Solutions include gradient compression (reduce data volume), overlapping computation with communication (as implemented in Horovod [@sergeev2018horovod]), and using faster interconnects (NVLink at `{python} nvlink_h100` GB/s vs Ethernet at 12.5 GB/s).
+**The Systems Insight**: The network becomes a wall when $t_{\text{communication}} > t_{\text{computation}}$. Solutions include gradient compression (reduce data volume), overlapping computation with communication (as implemented in Horovod [@sergeev2018horovod]), and using faster interconnects (NVLink at `{python} nvlink_h100` GB/s vs InfiniBand at 12.5 GB/s).
 :::
 
 #### System Implications {#sec-ai-training-system-implications-2539}
@@ -1767,7 +1767,7 @@ gpt3_fp32_str = f"{gpt3_fp32_gb}"
 gpt3_fp16_str = f"{gpt3_fp16_gb}"
 ```
 
-Consider a representative large model like ResNet-50 (a widely-used image classification architecture) processing images at $224\times224$ resolution with a batch size of 32. The initial convolutional layer produces activation maps of dimension $112\times112\times64$. Using single-precision floating-point format (4 bytes per value), this single layer's activation storage requires approximately 98 MB. As the network progresses through its 50 layers, the cumulative memory demands grow substantially: the complete forward pass activations total approximately 8GB, gradients require an additional 4GB, and model parameters consume 200MB. This `{python} total_gb_b32_str`GB total represents over `{python} pct_a100_str`% of a high-end A100 GPU's 40GB memory capacity for a single batch.
+Consider a representative large model like ResNet-50 (a widely-used image classification architecture) processing images at $224\times224$ resolution with a batch size of 32. The initial convolutional layer produces activation maps of dimension $112\times112\times64$; for a batch of 32 at single-precision (4 bytes), this requires approximately 100 MB. As the network progresses through its 50 layers, the cumulative memory demands grow substantially: the complete forward pass activations total approximately 8GB, gradients require an additional 4GB, and model parameters consume 200MB. This `{python} total_gb_b32_str`GB total represents over `{python} pct_a100_str`% of a high-end A100 GPU's 40GB memory capacity for a single batch.
 
 The memory scaling patterns reveal critical hardware utilization trade-offs. Doubling the batch size to 64 increases activation memory to `{python} act_gb_b64_str`GB and gradient memory to `{python} grad_gb_b64_str`GB, totaling `{python} total_gb_b64_str`GB and approaching memory limits. Training larger models at the scale of GPT-3 (`{python} gpt3_params_b`B parameters, representing current large language models) requires approximately `{python} gpt3_fp32_str`GB just for parameters in FP32 (`{python} gpt3_fp16_str`GB in FP16), necessitating distributed memory strategies across multiple high-memory nodes.
 

@@ -68,7 +68,7 @@ A 7-billion parameter language model requires 14 GB just to store its weights in
 
 Recall the **Silicon Contract**: every model architecture makes an implicit agreement with the hardware about which resource it will saturate: compute throughput, memory bandwidth, or memory capacity. During training, this contract is negotiated upward. Researchers select larger architectures, higher numerical precision, and deeper layers because the training environment, typically a GPU cluster with hundreds of gigabytes of memory, can afford those demands. Deployment reverses these priorities. The production environment is smaller, power-constrained, and latency-sensitive, yet the model was designed for an environment with none of those limitations. Model compression is the systematic process of renegotiating that contract for its new execution context: reducing memory footprint, computational cost, and energy consumption while preserving the model's ability to perform its task.
 
-The scale of this renegotiation makes model optimization an engineering discipline, not a collection of ad hoc tricks. A 175 billion parameter model consumes over 300 GB in FP16 representation alone, yet a smartphone provides 6 GB of RAM and a microcontroller offers 512 KB. Bridging five orders of magnitude between what training produces and what deployment permits requires systematic methods with predictable trade-offs, not trial and error. Every optimization technique removes something from the model, whether redundant parameters, numerical precision, or architectural complexity, and the engineer must understand exactly what is lost, what is preserved, and how these losses compose when techniques are combined.
+The scale of this renegotiation makes model optimization an engineering discipline, not a collection of ad hoc tricks. A 175 billion parameter model consumes over 300 GB in FP16 representation alone, yet a smartphone provides 6 GB of RAM and a microcontroller offers 512 KB. Bridging six orders of magnitude between what training produces and what deployment permits requires systematic methods with predictable trade-offs, not trial and error. Every optimization technique removes something from the model, whether redundant parameters, numerical precision, or architectural complexity, and the engineer must understand exactly what is lost, what is preserved, and how these losses compose when techniques are combined.
 
 This chapter organizes these techniques along three complementary dimensions. *Structural optimization* removes redundancy from the model itself: pruning eliminates parameters that contribute little to output quality, knowledge distillation transfers a large model's learned behavior into a smaller architecture, and neural architecture search discovers designs that are inherently efficient. *Precision optimization* reduces the numerical bit-width of weights and activations, for example converting 32-bit floating point values to 8-bit integers, which shrinks memory footprint and accelerates arithmetic on hardware that supports lower-precision operations. *Hardware-level optimization* ensures that the resulting model executes efficiently on the target processor by fusing operations to reduce memory traffic and exploiting sparsity patterns that the hardware can accelerate. These dimensions are not alternatives but layers in an optimization stack. A practitioner deploying ResNet-50 to a mobile device might prune 50% of its filters, quantize the remaining weights to INT8, and fuse batch normalization into convolution, with each technique compounding the gains of the others.
 
@@ -118,19 +118,34 @@ Why do we obsess over quantization? Because the **Energy-Movement Invariant** ($
 According to the **Iron Law** ($L = \frac{D}{B} + \frac{Ops}{P \cdot \eta} + L_{fixed}$), reducing the bit-width of a weight has a quadratic effect on efficiency:
 
 1.  **Memory Energy ($D$)**: Fetching a 32-bit float from DRAM costs $\approx$ **`{python} energy_dram` pJ**. Fetching an 8-bit integer costs $\approx$ **`{python} energy_dram_per_byte` pJ**.
+
 2.  **Compute Energy ($Ops$)**: A 32-bit FLOP costs $\approx$ **`{python} energy_flop_fp32` pJ**. An 8-bit integer OP costs $\approx$ **`{python} energy_flop_int8` pJ**.
 
-+-------------------+---------------+---------------------+
-| **Operation**     | **Bit-Width** | **Relative Energy** |
-+:==================+==============:+====================:+
-| **Integer Add**   | 8-bit         | 1x                  |
-+-------------------+---------------+---------------------+
-| **Float Add**     | 32-bit        | 30x                 |
-+-------------------+---------------+---------------------+
-| **Memory Access** | 64-bit        | **2000x**           |
+
+
 +-------------------+---------------+---------------------+
 
-**For Inference**: Moving from FP32 to INT8 doesn't just save 4× memory; it can reduce the **energy per inference** by nearly **20×** if the hardware supports it. This is the difference between a battery lasting 1 hour or 20 hours.
+| **Operation**     | **Bit-Width** | **Relative Energy** |
+
++:==================+==============:+====================:+
+
+| **Integer Add**   | 8-bit         | 1x                  |
+
++-------------------+---------------+---------------------+
+
+| **Float Add**     | 32-bit        | 30x                 |
+
++-------------------+---------------+---------------------+
+
+| **Memory Access** | 64-bit        | **40,000x**         |
+
++-------------------+---------------+---------------------+
+
+
+
+**For Inference**: Moving from FP32 to INT8 doesn't just save 4× memory; it can reduce the **energy per inference** by nearly **20×** if the hardware supports it.
+
+ This is the difference between a battery lasting 1 hour or 20 hours.
 
 These same physics apply at datacenter scale: distributed training systems use reduced precision to cut gradient communication overhead, a topic covered in @sec-ai-training.
 :::

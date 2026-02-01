@@ -179,7 +179,7 @@ GPT3_TRAINING_OPS = 3.14e23 * flop
 GPT3_TRAINING_DAYS_REF = 25 # Days on 1024 A100s
 
 # GPT-4 (Reference)
-GPT4_TRAINING_GPU_DAYS = 25000 # A100 days
+GPT4_TRAINING_GPU_DAYS = 2.5e6 # A100 days
 
 # BERT-Base
 BERT_BASE_PARAMS = 110e6 * param
@@ -187,6 +187,7 @@ BERT_BASE_FLOPs = 22e9 * flop              # Per inference (seq_len=512)
 
 # Google Search (Reference)
 GOOGLE_SEARCHES_PER_DAY = 8.5e9
+GMAIL_EMAILS_PER_DAY = 121e9
 
 # ResNet-50
 RESNET50_PARAMS = 25.6e6 * param
