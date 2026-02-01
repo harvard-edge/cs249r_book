@@ -85,8 +85,45 @@ def scan_chapter(filepath: Path) -> dict[str, FloatElement]:
     float_block_label = None
     brace_depth = 0
 
+    # Track code blocks for code-cell figure detection
+    in_code_block = False
+    code_block_start = 0
+    cell_options: dict[str, str] = {}
+
     for line_num, line in enumerate(lines, start=1):
-        # Check for definition starts
+        stripped = line.rstrip()
+
+        # --- Code-cell figure detection ---
+        # Detect code block start: ```{python}, ```{r}, etc.
+        if not in_code_block and re.match(r'^```\{(?:python|r|julia|ojs)', stripped):
+            in_code_block = True
+            code_block_start = line_num
+            cell_options = {}
+            continue
+
+        # Detect code block end
+        if in_code_block and stripped == '```':
+            label = cell_options.get('label', '')
+            if label.startswith('fig-') or label.startswith('tbl-'):
+                kind = "figure" if label.startswith("fig-") else "table"
+                if label not in elements:
+                    elements[label] = FloatElement(label=label, kind=kind)
+                if elements[label].definition_line is None:
+                    elements[label].definition_line = code_block_start
+            in_code_block = False
+            cell_options = {}
+            continue
+
+        # Inside a code block — collect cell options (skip prose ref detection)
+        if in_code_block:
+            opt_match = re.match(r'^#\|\s*([\w-]+):\s*(.+)$', stripped)
+            if opt_match:
+                key = opt_match.group(1)
+                value = opt_match.group(2).strip().strip('"').strip("'")
+                cell_options[key] = value
+            continue
+
+        # --- Attribute-based definition detection ---
         for pattern in [div_def_pattern, img_def_pattern, tbl_caption_pattern]:
             match = pattern.search(line)
             if match:
@@ -104,8 +141,8 @@ def scan_chapter(filepath: Path) -> dict[str, FloatElement]:
         # Track block boundaries for fenced divs
         if in_float_block:
             # Count ::: openings and closings
-            stripped = line.strip()
-            if stripped.startswith(":::") and not stripped.startswith("::: {"):
+            line_stripped = line.strip()
+            if line_stripped.startswith(":::") and not line_stripped.startswith("::: {"):
                 # This is a closing :::
                 in_float_block = False
                 float_block_label = None

@@ -6,6 +6,11 @@ This script reads the chapter configuration from the YAML file, extracts
 all figures from each chapter, and outputs a Markdown file listing each
 chapter with its figures numbered sequentially (Figure 1, Figure 2, etc.).
 
+Supports all three Quarto figure syntaxes:
+  1. Div-based:    ::: {#fig-id fig-cap="..." fig-alt="..."}
+  2. Markdown img: ![...](path){#fig-id fig-cap="..." fig-alt="..."}
+  3. Code-cell:    #| label: fig-id / #| fig-cap: "..." / #| fig-alt: "..."
+
 Usage:
     python extract_figures.py --vol 1                    # All types for vol1
     python extract_figures.py --vol 2 --label            # Labels only for vol2
@@ -17,7 +22,7 @@ Options:
     --label     Extract just the figure title (bold text from fig-cap)
     --alt-text  Extract fig-alt (visual descriptions for accessibility)
     --caption   Extract full fig-cap (explanatory caption text)
-    
+
     If no output type is specified, generates all three grouped by figure.
 
 Output:
@@ -37,120 +42,197 @@ def read_all_chapters_from_yaml(yaml_content: str, vol: str) -> list[str]:
     This captures the full intended chapter order.
     """
     chapters = []
-    
+
     # Pattern to match chapter entries (both commented and uncommented)
     # Matches lines like:
     #   - contents/vol1/introduction/introduction.qmd
     #   # - contents/vol1/introduction/introduction.qmd
     pattern = re.compile(
-        rf'^\s*#?\s*-\s*(contents/vol{vol}/[^\s#]+\.qmd)\s*$', 
+        rf'^\s*#?\s*-\s*(contents/vol{vol}/[^\s#]+\.qmd)\s*$',
         re.MULTILINE
     )
-    
+
     for match in pattern.finditer(yaml_content):
         path = match.group(1)
         # Skip part files and backmatter
         if '/parts/' not in path and '/backmatter/' not in path and '/frontmatter/' not in path:
             chapters.append(path)
-    
+
     return chapters
 
 
 def extract_chapter_title(qmd_path: Path) -> str:
     """
     Extract the chapter title from a .qmd file.
-    
+
     Looks for the first line starting with '# ' that is the chapter heading.
     """
     with open(qmd_path, 'r', encoding='utf-8') as f:
         content = f.read()
-    
+
     # Skip YAML frontmatter
     if content.startswith('---'):
         end_yaml = content.find('---', 3)
         if end_yaml != -1:
             content = content[end_yaml + 3:]
-    
+
     # Find first heading
     match = re.search(r'^#\s+([^{#\n]+)', content, re.MULTILINE)
     if match:
         return match.group(1).strip()
-    
+
     return qmd_path.stem.replace('_', ' ').title()
+
+
+def _extract_label_from_caption(caption_raw: str) -> str:
+    """Extract the bold title from a caption string."""
+    if not caption_raw:
+        return ''
+    label_match = re.match(r'\*\*([^*]+)\*\*', caption_raw)
+    if label_match:
+        return label_match.group(1).rstrip(':')
+    # If no bold markers, take text up to first colon or period
+    colon_pos = caption_raw.find(':')
+    period_pos = caption_raw.find('.')
+    if colon_pos > 0 and (period_pos < 0 or colon_pos < period_pos):
+        return caption_raw[:colon_pos]
+    if period_pos > 0:
+        return caption_raw[:period_pos]
+    return caption_raw[:50] + '...' if len(caption_raw) > 50 else caption_raw
+
+
+def _clean_yaml_string(value: str) -> str:
+    """Strip surrounding quotes from a YAML-style cell option value."""
+    value = value.strip()
+    if (value.startswith('"') and value.endswith('"')) or \
+       (value.startswith("'") and value.endswith("'")):
+        value = value[1:-1]
+    value = value.replace('\\"', '"').replace("\\'", "'")
+    return ' '.join(value.split())
+
+
+def _extract_code_cell_figures(lines: list[str]) -> list[dict]:
+    """
+    Extract figures defined in code cells using #| cell options.
+
+    Scans for fenced code blocks (```{python}, ```{r}, etc.) and collects
+    #| label: fig-..., #| fig-cap: ..., and #| fig-alt: ... options.
+    """
+    figures = []
+    in_code_block = False
+    cell_options: dict = {}
+
+    for line in lines:
+        stripped = line.rstrip()
+
+        # Detect code block start: ```{python}, ```{r}, ```{julia}, etc.
+        if not in_code_block and re.match(r'^```\{(?:python|r|julia|ojs)', stripped):
+            in_code_block = True
+            cell_options = {}
+            continue
+
+        # Detect code block end
+        if in_code_block and stripped == '```':
+            # Finished a code block — check if it had a figure label
+            fig_id = cell_options.get('label', '')
+            if fig_id.startswith('fig-'):
+                caption_raw = cell_options.get('fig-cap', '')
+                alt_text = cell_options.get('fig-alt', '')
+                label = _extract_label_from_caption(caption_raw)
+                caption = re.sub(r'\*\*([^*]+)\*\*', r'\1', caption_raw)
+                figures.append({
+                    'id': fig_id,
+                    'label': label,
+                    'caption': caption,
+                    'alt_text': alt_text,
+                    'source': 'code-cell',
+                })
+            in_code_block = False
+            cell_options = {}
+            continue
+
+        # Inside a code block — collect cell options
+        if in_code_block:
+            opt_match = re.match(r'^#\|\s*([\w-]+):\s*(.+)$', stripped)
+            if opt_match:
+                key = opt_match.group(1)
+                value = _clean_yaml_string(opt_match.group(2))
+                cell_options[key] = value
+
+    return figures
 
 
 def extract_figures_all(qmd_path: Path) -> list[dict]:
     """
     Extract all figures from a .qmd file with all three attributes.
-    
+
+    Supports:
+      - Div/markdown attribute figures: {#fig-ID fig-cap="..." fig-alt="..."}
+      - Code-cell figures: #| label: fig-ID / #| fig-cap: ... / #| fig-alt: ...
+
     Args:
         qmd_path: Path to the .qmd file
-    
+
     Returns a list of dicts with 'id', 'label', 'caption', and 'alt_text' keys.
     """
     with open(qmd_path, 'r', encoding='utf-8') as f:
         content = f.read()
-    
+
     figures = []
-    
-    # First, find all figure IDs with their full attribute blocks
-    # Pattern matches the entire {#fig-ID ...} block
+    seen_ids = set()
+
+    # --- Pass 1: Attribute-based figures ({#fig-ID ...}) ---
     fig_block_pattern = re.compile(
         r'\{#(fig-[a-zA-Z0-9_-]+)([^}]*)\}',
         re.DOTALL
     )
-    
+
     for match in fig_block_pattern.finditer(content):
         fig_id = match.group(1)
         attrs = match.group(2)
-        
+
         # Extract fig-cap
         cap_match = re.search(r'fig-cap="((?:[^"\\]|\\.)*)"', attrs)
         caption_raw = cap_match.group(1) if cap_match else ''
-        
+
         # Extract fig-alt
         alt_match = re.search(r'fig-alt="((?:[^"\\]|\\.)*)"', attrs)
         alt_text = alt_match.group(1) if alt_match else ''
-        
+
         # Skip if neither caption nor alt-text
         if not caption_raw and not alt_text:
             continue
-        
+
         # Clean up caption
         caption_raw = caption_raw.replace('\\"', '"').replace("\\'", "'")
         caption_raw = ' '.join(caption_raw.split())
-        
-        # Extract label from caption (bold title)
-        label = ''
-        if caption_raw:
-            label_match = re.match(r'\*\*([^*]+)\*\*', caption_raw)
-            if label_match:
-                label = label_match.group(1).rstrip(':')
-            else:
-                # If no bold markers, take text up to first colon or period
-                colon_pos = caption_raw.find(':')
-                period_pos = caption_raw.find('.')
-                if colon_pos > 0 and (period_pos < 0 or colon_pos < period_pos):
-                    label = caption_raw[:colon_pos]
-                elif period_pos > 0:
-                    label = caption_raw[:period_pos]
-                else:
-                    label = caption_raw[:50] + '...' if len(caption_raw) > 50 else caption_raw
-        
+
+        label = _extract_label_from_caption(caption_raw)
+
         # Clean caption (remove bold markers)
         caption = re.sub(r'\*\*([^*]+)\*\*', r'\1', caption_raw)
-        
+
         # Clean alt text
         alt_text = alt_text.replace('\\"', '"').replace("\\'", "'")
         alt_text = ' '.join(alt_text.split())
-        
+
         figures.append({
             'id': fig_id,
             'label': label,
             'caption': caption,
-            'alt_text': alt_text
+            'alt_text': alt_text,
+            'source': 'attribute',
         })
-    
+        seen_ids.add(fig_id)
+
+    # --- Pass 2: Code-cell figures (#| label: fig-...) ---
+    lines = content.splitlines()
+    code_cell_figures = _extract_code_cell_figures(lines)
+    for fig in code_cell_figures:
+        if fig['id'] not in seen_ids:
+            figures.append(fig)
+            seen_ids.add(fig['id'])
+
     return figures
 
 
