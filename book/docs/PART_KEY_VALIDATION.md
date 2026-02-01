@@ -54,12 +54,12 @@ The following keys are defined in `quarto/contents/parts/summaries.yml`:
 | Key | Title | Type |
 |-----|-------|------|
 | `frontmatter` | Frontmatter | Division |
-| `volume_1` | Volume I: Introduction to ML Systems | Division |
+| `volume_1` | Volume I: Introduction to Machine Learning Systems | Division |
 | `vol1_foundations` | ML Foundations | Part |
 | `vol1_development` | System Development | Part |
 | `vol1_optimization` | Model Optimization | Part |
 | `vol1_operations` | System Operations | Part |
-| `volume_2` | Volume II: Advanced ML Systems | Division |
+| `volume_2` | Volume II: Advanced Machine Learning Systems | Division |
 | `vol2_scale` | Foundations of Scale | Part |
 | `vol2_distributed` | Distributed Systems | Part |
 | `vol2_production` | Production Challenges | Part |

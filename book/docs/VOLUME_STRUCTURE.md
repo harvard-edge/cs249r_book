@@ -28,7 +28,7 @@ A reader completes Volume I and can competently build, optimize, and deploy ML s
 - Practitioners transitioning into ML systems
 
 ### Course Mapping
-- Single semester "Introduction to ML Systems" course
+- Single semester "Introduction to Machine Learning Systems" course
 - Foundation for more advanced distributed systems or MLOps courses
 
 ### Structure (16 chapters)
@@ -40,16 +40,16 @@ Establish the conceptual framework for understanding ML as a systems discipline.
 |----|-------|---------|
 | 1 | Introduction | Why ML systems thinking matters |
 | 2 | ML Systems | Survey of the field, deployment paradigms |
-| 3 | Deep Learning Primer | Mathematical and conceptual foundations |
-| 4 | DNN Architectures | CNNs, RNNs, Transformers, architectural choices |
+| 3 | Workflow | End-to-end ML development process |
+| 4 | Data Engineering | Pipelines, preprocessing, data quality |
 
-#### Part II: Development
-Practical skills for constructing ML systems from data to trained model.
+#### Part II: Build
+The technical implementation of machine learning systems from math to trained models.
 
 | Ch | Title | Purpose |
 |----|-------|---------|
-| 5 | Workflow | End-to-end ML development process |
-| 6 | Data Engineering | Pipelines, preprocessing, data quality |
+| 5 | DL Primer | Mathematical and conceptual foundations |
+| 6 | DNN Architectures | CNNs, RNNs, Transformers, architectural choices |
 | 7 | Frameworks | PyTorch, TensorFlow, JAX ecosystem |
 | 8 | Training | Training loops, optimization, debugging |
 
@@ -58,8 +58,8 @@ Techniques for making ML systems efficient and fast.
 
 | Ch | Title | Purpose |
 |----|-------|---------|
-| 9 | Efficient AI | Why efficiency matters, scaling laws, metrics |
-| 10 | Optimizations | Quantization, pruning, distillation |
+| 9 | Data Selection | Optimizing information, active learning, pruning |
+| 10 | Model Compression | Quantization, pruning, distillation |
 | 11 | Hardware Acceleration | GPUs, TPUs, custom accelerators |
 | 12 | Benchmarking | Measuring performance, MLPerf |
 
