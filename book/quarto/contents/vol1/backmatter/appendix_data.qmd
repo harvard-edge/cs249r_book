@@ -9,9 +9,37 @@ This appendix covers the principles of data engineering and statistical monitori
 
 Understanding hardware constraints is only half the battle; we must also shape our data to fit them. **Data Engineering** applies the principles of the memory hierarchy to storage formats and pipeline design, ensuring that the GPU never starves.
 
-::: {.callout-perspective title="Why This Matters"}
-Your training job is stalling because the GPU is waiting for data. Is the bottleneck your disk speed, your file format, or your row-based parsing logic? Data engineering is the practice of shaping data so it flows efficiently through the physical constraints of your system.
-:::
+This process begins with recognizing that data is physical—it has volume, it takes time to move, and it requires energy to parse.
+
+### Napkin Math: The Physics of Data Gravity
+
+Data Gravity is not a metaphor; it is a calculation of transfer time. Unlike compute, which gets faster every year, the speed of light is fixed and network bandwidth is a finite resource. When we speak of "Data Gravity," we are describing the phenomenon where datasets become so large that they effectively become stationary.
+
+**Transfer Time Equation**: $T = \text{Data Volume} / \text{Bandwidth}$
+
++-----------------+---------------------------+----------------------------+-------------------------------+------------------------+
+| **Data Volume** | **1 Gbps (Standard WAN)** | **10 Gbps (High-End WAN)** | **100 Gbps (Direct Connect)** | **Snowmobile (Truck)** |
++:================+==========================:+===========================:+==============================:+:=======================+
+| **1 TB**        | 2.2 Hours                 | 13 Minutes                 | 1.3 Minutes                   | N/A                    |
+| **100 TB**      | 9 Days                    | 22 Hours                   | 2.2 Hours                     | N/A                    |
+| **1 PB**        | **3 Months**              | **9 Days**                 | 22 Hours                      | **2 Days**             |
++-----------------+---------------------------+----------------------------+-------------------------------+------------------------+
+
+: **The Cost of Inertia.** Why we "ship compute to data" rather than "ship data to compute." If you have 1 PB, the network is often not a viable option. {#tbl-data-gravity}
+
+### The Cost of Serialization
+
+Even after data arrives at the machine, we face one final hurdle: **The Serialization Tax**. Many engineers meticulously optimize their GPU kernels while ignoring the CPU overhead of decoding data. Parsing text-based formats like JSON or CSV is extremely CPU-intensive, often leaving the GPU idling while the CPU struggles to convert strings into floating-point numbers.
+
++---------------------+---------------------------+-------------------------+-------------------------+
+| **Format**          | **Decoding Speed (MB/s)** | **CPU Cycles per Byte** | **Suitability**         |
++:====================+==========================:+========================:+:========================+
+| **CSV / JSON**      | ~50 - 100 MB/s            | ~1000 cycles            | Debugging only          |
+| **Protobuf**        | ~300 MB/s                 | ~200 cycles             | RPC / Messages          |
+| **Parquet / Arrow** | **> 1,000 MB/s**          | **~10 cycles**          | **High-Scale Training** |
++---------------------+---------------------------+-------------------------+-------------------------+
+
+: **Serialization Overhead.** Zero-copy formats like Arrow are 10-100x faster than row-based text formats because they align directly with internal memory structures. {#tbl-serialization-cost}
 
 ### Row vs. Columnar Formats {#sec-system-foundations-row-vs-columnar-formats-1f97}
 
@@ -124,6 +152,14 @@ How do we know if serving data ($Q$) has drifted from training data ($P$)? We me
 $$ D_{KL}(P || Q) = \sum P(x) \log \frac{P(x)}{Q(x)} $$
 
 **Population Stability Index (PSI)** is a symmetric, industry-standard metric derived from KL divergence. A PSI > 0.2 typically triggers an alert for retraining.
+
+### Information Theory for Systems {#sec-system-foundations-information-theory-a8f2}
+
+In the "Information Roofline" model (@sec-appendix-dam), we treat data quality as a physical constraint similar to bandwidth. Information Theory provides the units for this constraint.
+
+*   **Entropy ($H$)**: The average information content (uncertainty) in a distribution. A uniform distribution has maximum entropy (maximum uncertainty).
+*   **Information Density**: The amount of useful signal per unit of storage. High-quality data has high information density; noisy data has low density.
+*   **Signal-to-Noise Ratio (SNR)**: The ratio of useful information to irrelevant variance. In ML, training on low-SNR data is like trying to learn a pattern from static—you hit the "Information Roofline" where adding more compute yields no improvement.
 
 ### Logits and Numerical Stability {#sec-system-foundations-logits-numerical-stability-9f55}
 

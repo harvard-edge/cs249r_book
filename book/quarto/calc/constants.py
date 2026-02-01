@@ -104,8 +104,23 @@ T4_TDP = 70 * watt
 TPUV4_FLOPS_BF16 = 275 * TFLOPs / second
 TPUV4_MEM_BW = 1200 * GB / second
 
+# Google TPU v5p — Source: Google Cloud Documentation (2024)
+TPUV5P_FLOPS_BF16 = 459 * TFLOPs / second
+TPUV5P_MEM_BW = 2.76 * TB / second
+TPUV5P_MEM_CAPACITY = 95 * GiB
+TPUV5P_ICI_BW = 1600 * GB / second        # Inter-Chip Interconnect
+
 # High-end Desktop CPU (Reference)
 CPU_FLOPS_FP32 = 1 * TFLOPs / second
+
+# --- Latency Hierarchy (2025 Reference) ---
+LATENCY_L1_REGISTER = 1 * NS
+LATENCY_L2_CACHE = 4 * NS
+LATENCY_HBM3 = 300 * NS
+LATENCY_NVLINK = 500 * NS
+LATENCY_PCIE_GEN5 = 1000 * NS
+LATENCY_INFINIBAND = 5000 * NS
+LATENCY_NVME_SSD = 100000 * NS
 
 # Mobile NPU
 MOBILE_NPU_TOPS_INT8 = 35 * TFLOPs / second
