@@ -352,8 +352,8 @@ def plot_active_learning_multiplier(ax=None):
     ax.set_xscale('log')
     ax.set_xlabel('Labeled Samples')
     ax.set_ylabel('Accuracy (%)')
-    ax.annotate("", xy=(2000, 90), xytext=(8000, 90), arrowprops=dict(arrowstyle="->", color='black'))
-    ax.text(4000, 91, "4x Data Efficiency", ha='center', fontsize=9)
+    ax.annotate("", xy=(2500, 90), xytext=(9000, 90), arrowprops=dict(arrowstyle="->", color='black'))
+    ax.text(5000, 91, "4x Data Efficiency", ha='center', fontsize=9)
     ax.legend(loc='lower right', fontsize=8)
     return ax
 
@@ -467,9 +467,10 @@ def plot_python_tax(ax=None):
     ax.set_yticks([0, 1])
     ax.set_yticklabels(['Compiled / Fused', 'Eager Execution'])
     ax.set_xlabel('Execution Time (microseconds)')
-    ax.legend(loc='upper right', fontsize=8)
+    ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.25), ncol=2, fontsize=8)
     
-    ax.text(25, 1.4, "Gap = The Python Tax", color=COLORS['RedLine'], ha='center', fontsize=9)
+    # Move text to middle to act as annotation, not title
+    ax.text(30, 0.5, "Gap = The Python Tax", color=COLORS['RedLine'], ha='center', va='center', fontsize=9, fontweight='bold')
     return ax
 
 def plot_compute_growth(ax=None):
@@ -837,3 +838,206 @@ def plot_tail_latency(ax=None):
     ax.set_xticklabels(['0%', '20%', '40%', '60%', '80%', '100%'])
     ax.legend(loc='upper left', fontsize=8)
     return ax
+
+def plot_rising_ridge(ax=None):
+    """Visualizes 'The Rising Ridge' (Hardware Arithmetic Intensity)."""
+    if ax is None: fig, ax = plt.subplots()
+    
+    # Data: Peak FLOPS / Memory Bandwidth (FLOPs/Byte)
+    years = [2017, 2020, 2022, 2024]
+    chips = ['V100', 'A100', 'H100', 'B200']
+    ridges = [139, 153, 295, 562]
+    
+    ax.plot(years, ridges, 'o-', color=COLORS['RedLine'], linewidth=2.5, markersize=8, label='Hardware Ridge Point')
+    
+    for y, r, c in zip(years, ridges, chips):
+        # Position chips above point, and numeric value below
+        ax.annotate(c, (y, r), xytext=(0, 12), textcoords='offset points', 
+                    ha='center', fontweight='bold', color=COLORS['RedLine'], fontsize=9)
+        ax.annotate(f"{r:.0f}", (y, r), xytext=(0, -18), textcoords='offset points', 
+                    ha='center', fontsize=8, color=COLORS['primary'])
+
+    # Shaded Zones
+    ax.axhspan(0, 100, color=COLORS['BlueL'], alpha=0.2)
+    ax.text(2019, 50, "Memory-Rich Zone\n(Legacy Ops Safe)", color=COLORS['BlueLine'], ha='center', va='center', fontsize=9, fontweight='bold')
+    
+    ax.axhspan(100, 600, color=COLORS['OrangeL'], alpha=0.1)
+    ax.text(2019, 350, "Compute-Dense Zone\n(Transformers Required)", color=COLORS['OrangeLine'], ha='center', va='center', fontsize=9, fontweight='bold')
+
+    ax.set_xlabel('Release Year')
+    ax.set_ylabel('Arithmetic Intensity (FLOPs/Byte)')
+    ax.set_ylim(0, 650)
+    ax.set_xticks(years)
+    
+    return ax
+
+def plot_context_explosion(ax=None):
+    """Visualizes 'The Context Explosion' (Context Window Growth)."""
+    if ax is None: fig, ax = plt.subplots()
+    
+    data = [
+        (2018, 512, "BERT"),
+        (2019, 1024, "GPT-2"),
+        (2020, 2048, "GPT-3"),
+        (2023.2, 32768, "GPT-4"),
+        (2023.5, 100000, "Claude 2"),
+        (2024.1, 1000000, "Gemini 1.5")
+    ]
+    
+    years = [d[0] for d in data]
+    context = [d[1] for d in data]
+    labels = [d[2] for d in data]
+    
+    ax.step(years, context, where='post', color=COLORS['VioletLine'], linewidth=2.5, zorder=2)
+    ax.scatter(years, context, color=COLORS['VioletLine'], s=60, zorder=3, edgecolors='white')
+    
+    for y, c, l in zip(years, context, labels):
+        # Adjusting label offsets to avoid step lines
+        off_x, off_y = -5, 10
+        ha = 'right'
+        if l == "Gemini 1.5": 
+            off_x, off_y = -10, 0
+            ha = 'right'
+        elif l == "GPT-4":
+            off_x, off_y = -10, 0
+            ha = 'right'
+        elif l == "BERT":
+            ha = 'center'
+            off_x, off_y = 0, 12
+        elif l == "GPT-2":
+            ha = 'center'
+            off_x, off_y = 0, 12
+        elif l == "GPT-3":
+            ha = 'center'
+            off_x, off_y = 0, 12
+            
+        c_label = f"{int(c/1000)}k" if c >= 1000 else f"{c/1000:.1f}k"
+        ax.annotate(f"{l}\n({c_label})", (y, c), xytext=(off_x, off_y), textcoords='offset points', 
+                    fontsize=8, fontweight='bold', color=COLORS['VioletLine'], ha=ha)
+
+    ax.set_yscale('log')
+    ax.set_xlabel('Year')
+    ax.set_ylabel('Context Window (Tokens)')
+    ax.set_ylim(100, 3000000)
+    
+    # Era Labels (Higher contrast)
+    ax.axhline(2000, linestyle='--', color=COLORS['grid'], alpha=0.5)
+    ax.text(2018.1, 2600, "Standard Era (2k)", color=COLORS['grid'], fontsize=8, fontweight='bold')
+    
+    ax.axhline(100000, linestyle='--', color=COLORS['grid'], alpha=0.5)
+    ax.text(2018.1, 130000, "RAG Era (100k)", color=COLORS['grid'], fontsize=8, fontweight='bold')
+    
+    return ax
+
+def plot_intelligence_deflation(ax=None):
+    """Visualizes 'Intelligence Deflation' (Token Pricing Trends)."""
+    if ax is None: fig, ax = plt.subplots()
+    
+    # Pricing: Approx USD per 1M Input Tokens
+    data = [
+        (2020.5, 20.0, "GPT-3 (Davinci)"),
+        (2023.1, 2.0, "GPT-3.5 Turbo"),
+        (2023.5, 30.0, "GPT-4 (Frontier)"),
+        (2024.3, 5.0, "GPT-4o"),
+        (2024.6, 0.15, "GPT-4o-mini")
+    ]
+    
+    years = [d[0] for d in data]
+    prices = [d[1] for d in data]
+    labels = [d[2] for d in data]
+    
+    ax.plot(years, prices, 'o-', color=COLORS['GreenLine'], linewidth=2.5, markersize=8, zorder=3)
+    
+    for y, p, l in zip(years, prices, labels):
+        off_x, off_y = 8, 0
+        ha = 'left'
+        if l == "GPT-4 (Frontier)":
+            off_x, off_y = 8, 8
+        elif l == "GPT-3.5 Turbo":
+            off_x, off_y = 8, 8
+            
+        ax.annotate(l, (y, p), xytext=(off_x, off_y), textcoords='offset points', 
+                    fontsize=8, fontweight='bold', ha=ha, color=COLORS['primary'])
+
+    ax.set_yscale('log')
+    ax.set_yticks([100, 10, 1, 0.1])
+    ax.set_yticklabels(['$100', '$10', '$1', '$0.10'])
+    
+    ax.set_xlabel('Year')
+    ax.set_ylabel('Price per 1M Tokens (USD)')
+    ax.grid(True, which="major", ls="-", alpha=0.3)
+    ax.set_ylim(0.08, 300)
+    
+    return ax
+
+def plot_data_quality_multiplier(ax=None):
+    """Visualizes 'The Data Quality Multiplier' (Clean vs. Noisy Scaling)."""
+    if ax is None: fig, ax = plt.subplots()
+    
+    # Power Law Scaling: Err = a * (Data)^-k
+    # Clean Data: k = 0.5 (Fast learning)
+    # Noisy Data: k = 0.25 (Slow learning) + Irreducible Error floor
+    
+    data_size = np.logspace(2, 5, 100) # 100 to 100k samples
+    
+    # Accuracy = 100 - Error
+    acc_clean = 95 - 40 * (data_size / 100)**(-0.3)
+    acc_noisy = 85 - 30 * (data_size / 100)**(-0.15)
+    
+    ax.plot(data_size, acc_clean, '-', color=COLORS['GreenLine'], linewidth=2.5, label='Clean Data (High Quality)')
+    ax.plot(data_size, acc_noisy, '--', color=COLORS['RedLine'], linewidth=2.5, label='Noisy Data (Low Quality)')
+    
+    # Shaded Gap
+    ax.fill_between(data_size, acc_noisy, acc_clean, color=COLORS['GreenL'], alpha=0.2)
+    
+    # Annotations
+    ax.text(3000, 90, "The Quality Gap", color=COLORS['GreenLine'], fontweight='bold', fontsize=9)
+    ax.annotate("Diminishing Returns", xy=(10000, 82), xytext=(10000, 75),
+                arrowprops=dict(facecolor=COLORS['primary'], arrowstyle='->'), fontsize=8)
+    
+    ax.set_xscale('log')
+    ax.set_xlabel('Training Set Size (Samples)')
+    ax.set_ylabel('Test Accuracy (%)')
+    ax.legend(loc='lower right', fontsize=9)
+    
+    return ax
+
+def plot_communication_tax(ax=None):
+    """Visualizes 'The Communication Tax' (Distributed Training Scaling)."""
+    if ax is None: fig, ax = plt.subplots()
+    
+    gpus = np.array([1, 2, 4, 8, 16, 32, 64, 128])
+    
+    # Scaling efficiency models
+    ideal = gpus
+    linear_scaling = gpus * 1.0
+    
+    # Compute bound (ResNet) - high scaling (95% efficient)
+    compute_bound = gpus / (1 + (gpus-1) * 0.05)
+    
+    # Bandwidth bound (LLM) - diminishing (70% efficient at scale)
+    comm_bound = gpus / (1 + (gpus-1) * 0.2)
+    
+    ax.plot(gpus, ideal, '--', color='gray', alpha=0.5, label='Ideal Linear Scaling')
+    ax.plot(gpus, compute_bound, 'o-', color=COLORS['BlueLine'], linewidth=2.5, label='Compute Bound (ResNet)')
+    ax.plot(gpus, comm_bound, 's-', color=COLORS['RedLine'], linewidth=2.5, label='Bandwidth Bound (LLM)')
+    
+    ax.set_xscale('log', base=2)
+    ax.set_yscale('log', base=2)
+    
+    ax.set_xticks(gpus)
+    ax.set_xticklabels(gpus)
+    ax.set_yticks(gpus)
+    ax.set_yticklabels(gpus)
+    
+    # Annotation for the gap
+    ax.annotate("The Communication Tax", xy=(64, 20), xytext=(8, 40),
+                arrowprops=dict(facecolor=COLORS['RedLine'], arrowstyle='->', lw=1.5), 
+                color=COLORS['RedLine'], fontsize=9, fontweight='bold')
+    
+    ax.set_xlabel('Number of GPUs')
+    ax.set_ylabel('Effective Throughput (Speedup)')
+    ax.legend(loc='upper left', fontsize=9)
+    
+    return ax
+

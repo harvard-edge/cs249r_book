@@ -5,7 +5,7 @@ glossary: dnn_architectures_glossary.json
 crossrefs: dnn_architectures_xrefs.json
 ---
 
-# DNN Architectures {#sec-dnn-architectures}
+# Network Architectures {#sec-dnn-architectures}
 
 ::: {layout-narrow}
 ::: {.column-margin}
@@ -113,19 +113,19 @@ viz.plot_efficiency_frontier()
 plt.show()
 ```
 
-+------------------+-------------+------------+------------------+------------+----------------+------------------------------------------+
-| **Model**        | **Domain**  | **Params** | **FLOPs/Inf**    | **Memory** | **Bottleneck** | **Role in Textbook**                     |
-+:=================+:============+===========:+=================:+===========:+:===============+:=========================================+
-| **ResNet-50**    | Vision      | `{python} resnet_params_m`M      | `{python} resnet_gflops` GFLOPs       | `{python} resnet_fp32_mb` MB     | Compute        | Parallelism, quantization, and batching  |
-+------------------+-------------+------------+------------------+------------+----------------+------------------------------------------+
-| **GPT-2 XL**     | Language    | 1.5B       | 3.0 GFLOPs/token | 6.0 GB     | Mem. Bandwidth | Autoregressive generation and KV caching |
-+------------------+-------------+------------+------------------+------------+----------------+------------------------------------------+
-| **MobileNetV2**  | Edge Vision | 3.5M       | 300 MFLOPs       | 14 MB      | Latency        | Depthwise convolutions and efficiency    |
-+------------------+-------------+------------+------------------+------------+----------------+------------------------------------------+
-| **DLRM**         | Recommender | 25B        | Low              | 100 GB     | Mem. Capacity  | Embedding tables and scale-out systems   |
-+------------------+-------------+------------+------------------+------------+----------------+------------------------------------------+
-| **KWS (DS-CNN)** | Audio       | 200K       | 20 MFLOPs        | 800 KB     | Power          | Extreme quantization and always-on ops   |
-+------------------+-------------+------------+------------------+------------+----------------+------------------------------------------+
++------------------+-------------+-----------------------------+---------------------------------+------------------------------+----------------+------------------------------------------+
+| **Model**        | **Domain**  | **Params**                  | **FLOPs/Inf**                   | **Memory**                   | **Bottleneck** | **Role in Textbook**                     |
++:=================+:============+============================:+:================================+=============================:+:===============+:=========================================+
+| **ResNet-50**    | Vision      | `{python} resnet_params_m`M | `{python} resnet_gflops` GFLOPs | `{python} resnet_fp32_mb` MB | Compute        | Parallelism, quantization, and batching  |
++------------------+-------------+-----------------------------+---------------------------------+------------------------------+----------------+------------------------------------------+
+| **GPT-2 XL**     | Language    | 1.5B                        | 3.0 GFLOPs/token                | 6.0 GB                       | Mem. Bandwidth | Autoregressive generation and KV caching |
++------------------+-------------+-----------------------------+---------------------------------+------------------------------+----------------+------------------------------------------+
+| **MobileNetV2**  | Edge Vision | 3.5M                        | 300 MFLOPs                      | 14 MB                        | Latency        | Depthwise convolutions and efficiency    |
++------------------+-------------+-----------------------------+---------------------------------+------------------------------+----------------+------------------------------------------+
+| **DLRM**         | Recommender | 25B                         | Low                             | 100 GB                       | Mem. Capacity  | Embedding tables and scale-out systems   |
++------------------+-------------+-----------------------------+---------------------------------+------------------------------+----------------+------------------------------------------+
+| **KWS (DS-CNN)** | Audio       | 200K                        | 20 MFLOPs                       | 800 KB                       | Power          | Extreme quantization and always-on ops   |
++------------------+-------------+-----------------------------+---------------------------------+------------------------------+----------------+------------------------------------------+
 
 : **Lighthouse Model Comparison**: Quantitative characteristics and pedagogical roles of the five canonical workloads. Parameters and memory represent model weights at FP32 precision. FLOPs measured per single inference. The bottleneck column indicates the primary system constraint each model reveals: compute-bound models like ResNet stress arithmetic throughput, while bandwidth-bound models like GPT-2 stress memory transfer rates. {#tbl-lighthouse-comparison}
 
@@ -164,7 +164,9 @@ Keyword Spotting models (like those detecting "Hey Siri" or "Ok Google") represe
 
 #### Understanding Arithmetic Intensity {#sec-dnn-architectures-understanding-arithmetic-intensity-ade5}
 
-The quantitative characteristics in @tbl-lighthouse-comparison reveal a critical systems concept: **arithmetic intensity**, the ratio of operations performed per byte of data moved. This metric determines whether a workload is compute-bound or memory-bound.
+The quantitative characteristics in @tbl-lighthouse-comparison reveal a critical systems concept: **arithmetic intensity**,[^fn-ai-analogy] the ratio of operations performed per byte of data moved. This metric determines whether a workload is compute-bound or memory-bound.
+
+[^fn-ai-analogy]: **Arithmetic Intensity Intuition**: Think of data as food and the processor as a mouth. High intensity (ResNet) is like chewing a tough steak: you spend a long time processing each "bite," so jaw speed (compute) is the bottleneck. Low intensity (GPT) is like drinking a smoothie: you swallow almost immediately, so the "straw" (bandwidth) is the bottleneck.
 
 ::: {.callout-notebook title="The Arithmetic Intensity Spectrum"}
 
@@ -219,6 +221,25 @@ Three factors create the learnability gap:
 
 The classic *MNIST* handwritten digit benchmark illustrates this gap between *representation and learnability* concretely.
 
+```{python}
+#| label: mnist-param-counts
+#| echo: false
+
+# MLP: 784 → 4096 → 4096 → 10
+mlp_params = (784 * 4096) + (4096 * 4096) + (4096 * 10)
+mlp_params_str = f"{mlp_params / 1e6:.0f}M"
+
+# CNN: Conv(32, 3x3) → Conv(64, 3x3) → FC(128) → 10
+# Conv1 filters only (no bias for simplicity): 3*3*32 = 288
+# Conv2: 3*3*32*64 = 18432
+# FC1: 64*7*7*128 = 401408
+# FC2: 128*10 = 1280
+cnn_params = (3 * 3 * 32) + (3 * 3 * 32 * 64) + (64 * 7 * 7 * 128) + (128 * 10)
+cnn_params_str = f"{cnn_params / 1e3:.0f}K"
+
+param_ratio = mlp_params // cnn_params
+```
+
 ::: {.callout-example title="MNIST: Representation vs Learnability"}
 
 Consider classifying 28$\times$ 28 MNIST digits (784 input pixels, 10 output classes).
@@ -226,7 +247,7 @@ Consider classifying 28$\times$ 28 MNIST digits (784 input pixels, 10 output cla
 **MLP Approach**:
 
 - Architecture: 784 → 4096 → 4096 → 10
-- Parameters: $(784 \times 4096) + (4096 \times 4096) + (4096 \times 10) \approx 20\text{M parameters}$
+- Parameters: $(784 \times 4096) + (4096 \times 4096) + (4096 \times 10) \approx$ `{python} mlp_params_str` parameters
 - Training: 60,000 examples (standard MNIST training set)
 - Test Accuracy: ~97-98%
 - Rationale: Treats every pixel independently. Must learn all spatial correlations from data alone. No prior knowledge about spatial structure.
@@ -234,7 +255,7 @@ Consider classifying 28$\times$ 28 MNIST digits (784 input pixels, 10 output cla
 **CNN Approach**:
 
 - Architecture: Conv(32, 3×3) → Pool → Conv(64, 3×3) → Pool → FC(128) → 10
-- Parameters: $(3 \times 3 \times 32) + (3 \times 3 \times 32 \times 64) + (64 \times 7 \times 7 \times 128) + (128 \times 10) \approx 100\text{K parameters}$
+- Parameters: $(3 \times 3 \times 32) + (3 \times 3 \times 32 \times 64) + (64 \times 7 \times 7 \times 128) + (128 \times 10) \approx$ `{python} cnn_params_str` parameters
 - Training: 60,000 examples (same data)
 - Test Accuracy: ~99%+
 - Rationale: Embeds locality bias (nearby pixels are related) and translation invariance (digit patterns are meaningful regardless of position). These structural assumptions reduce parameter count and improve generalization.
@@ -539,7 +560,7 @@ This analysis shows that while dense connectivity provides universal approximati
 
 The MLP's assumption that all input features interact equally with all outputs proves particularly costly for spatially structured data like images. Building on the computational complexity considerations outlined in @sec-dnn-architectures-architectural-principles-engineering-tradeoffs-362e, this mismatch motivated architectural patterns that exploit inherent data structure.
 
-Convolutional[^fn-convolution-etymology] Neural Networks emerged as the solution to this challenge [@lecun1998gradient; @krizhevsky2012imagenet], embodying a specific inductive bias: they assume spatial locality and translation invariance, where nearby pixels are related and patterns can appear anywhere.
+**Convolutional**[^fn-convolution-etymology] **Neural Networks** emerged as the solution to this challenge [@lecun1998gradient; @krizhevsky2012imagenet], embodying a specific inductive bias: they assume spatial locality and translation invariance, where nearby pixels are related and patterns can appear anywhere.
 
 [^fn-convolution-etymology]: **Convolution**: From Latin *convolvere* meaning "to roll together," the mathematical operation appeared in 18th-century work by D'Alembert and Laplace on series expansions. The term "convolution" was first applied to this integral in 1934 by mathematician Aurel Wintner. In signal processing, convolution describes how a system's impulse response "rolls together" with an input signal, a metaphor that extends naturally to the sliding filter operations in neural networks.
 
@@ -986,19 +1007,19 @@ These architectural properties make CNNs highly amenable to systems-level analys
 ::: {.callout-lighthouse title="ResNet-50 (Vision Lighthouse)"}
 **Why it matters:** ResNet-50 is the gold standard benchmark for **compute-bound** vision workloads. Its architecture consists almost entirely of dense convolutional layers, making it highly regular and efficient on GPUs. Unlike MobileNet (latency-bound) or Transformers (memory-bound), ResNet-50's performance is typically limited by raw floating-point throughput (FLOPs), making it the ideal lighthouse for explaining data parallelism, quantization, and batching strategies.
 
-+-----------------+---------------------------+------------------------------------------------------------------+
-| **Property**    | **Value**                 | **System Implication**                                           |
-+:================+:==========================+:=================================================================+
-| **Parameters**  | `{python} resnet_params_m` million              | `{python} resnet_fp32_mb` MB model size at FP32; fits comfortably in GPU memory.       |
-+-----------------+---------------------------+------------------------------------------------------------------+
-| **FLOPs/Image** | `{python} resnet_gflops` GFLOPs (224×224)      | Dominated by 3×3 convolutions (~90% of compute).                 |
-+-----------------+---------------------------+------------------------------------------------------------------+
-| **Constraint**  | Compute Bound             | Limited by raw FLOPs, not memory bandwidth.                      |
-+-----------------+---------------------------+------------------------------------------------------------------+
-| **Bottleneck**  | FP Throughput             | Benefits maximally from specialized Matrix Units (Tensor Cores). |
-+-----------------+---------------------------+------------------------------------------------------------------+
-| **Profile**     | High Arithmetic Intensity | High ratio of math-to-memory operations (~100 ops/byte).         |
-+-----------------+---------------------------+------------------------------------------------------------------+
++-----------------+-------------------------------------------+----------------------------------------------------------------------------------+
+| **Property**    | **Value**                                 | **System Implication**                                                           |
++:================+:==========================================+:=================================================================================+
+| **Parameters**  | `{python} resnet_params_m` million        | `{python} resnet_fp32_mb` MB model size at FP32; fits comfortably in GPU memory. |
++-----------------+-------------------------------------------+----------------------------------------------------------------------------------+
+| **FLOPs/Image** | `{python} resnet_gflops` GFLOPs (224×224) | Dominated by 3×3 convolutions (~90% of compute).                                 |
++-----------------+-------------------------------------------+----------------------------------------------------------------------------------+
+| **Constraint**  | Compute Bound                             | Limited by raw FLOPs, not memory bandwidth.                                      |
++-----------------+-------------------------------------------+----------------------------------------------------------------------------------+
+| **Bottleneck**  | FP Throughput                             | Benefits maximally from specialized Matrix Units (Tensor Cores).                 |
++-----------------+-------------------------------------------+----------------------------------------------------------------------------------+
+| **Profile**     | High Arithmetic Intensity                 | High ratio of math-to-memory operations (~100 ops/byte).                         |
++-----------------+-------------------------------------------+----------------------------------------------------------------------------------+
 :::
 
 At the opposite end of the compute-efficiency spectrum, MobileNet demonstrates how architectural choices can dramatically reduce computational requirements.
@@ -1230,7 +1251,7 @@ CNNs demonstrate how architectural constraints can transform computational chall
 
 Sequential data presents a challenge distinct from spatial processing: patterns can span arbitrary temporal distances, rendering fixed-size kernels ineffective. While spatial convolution leverages the principle that nearby pixels are typically related, temporal relationships operate differently. Important connections may span hundreds or thousands of time steps with no correlation to proximity. Traditional feedforward architectures, including CNNs, process each input independently and cannot maintain the temporal context necessary for these long-range dependencies.
 
-Recurrent[^fn-recurrent-etymology] Neural Networks address this architectural limitation [@elman1990finding; @hochreiter1997long] by embodying a temporal inductive bias: they assume sequential dependence, where the order of information matters and the past influences the present.
+**Recurrent**[^fn-recurrent-etymology] **Neural Networks** address this architectural limitation [@elman1990finding; @hochreiter1997long] by embodying a temporal inductive bias: they assume sequential dependence, where the order of information matters and the past influences the present.
 
 [^fn-recurrent-etymology]: **Recurrent**: From Latin *recurrere* meaning "to run back" or "return," combining *re-* (back) and *currere* (to run). The term captures the architecture's defining feature: information "runs back" through time via connections that loop output back to input. This circular flow creates the memory mechanism that distinguishes RNNs from feedforward networks, though the same looping structure creates the sequential dependencies that limit parallelization.
 
@@ -1433,7 +1454,7 @@ While RNNs established concepts for sequential processing, their architectural c
 
 These RNN bottlenecks become concrete with a simple example. Consider the sentence "The cat, which was sitting by the window overlooking the garden, was sleeping." Here, "cat" and "sleeping" are separated by multiple intervening words, yet they form the core subject-predicate relationship. An RNN would process all intervening elements sequentially, potentially losing this connection in its fixed-capacity hidden state. What if, instead of processing tokens in order, the architecture could directly compute the relevance between any two positions regardless of distance?
 
-Attention mechanisms emerged as the answer to this question [@bahdanau2014neural] by introducing dynamic connectivity patterns that adapt based on input content. Rather than processing elements in predetermined order with fixed relationships, attention mechanisms compute the relevance between all pairs of elements and weight their interactions accordingly, replacing structural constraints with learned, data-dependent processing patterns.
+**Attention mechanisms** emerged as the answer to this question [@bahdanau2014neural] by introducing dynamic connectivity patterns that adapt based on input content. Rather than processing elements in predetermined order with fixed relationships, attention mechanisms compute the relevance between all pairs of elements and weight their interactions accordingly, replacing structural constraints with learned, data-dependent processing patterns.
 
 ::: {.callout-definition title="Attention Mechanisms"}
 
@@ -1441,7 +1462,7 @@ Attention mechanisms emerged as the answer to this question [@bahdanau2014neural
 
 :::
 
-While attention mechanisms were initially used as components within recurrent architectures, the *Transformer*[^fn-transformer-name] architecture [@vaswani2017attention] demonstrated that attention alone could entirely replace sequential processing, creating a new architectural paradigm. This paradigm deserves a formal definition.
+While attention mechanisms were initially used as components within recurrent architectures, the **Transformer**[^fn-transformer-name] architecture [@vaswani2017attention] demonstrated that attention alone could entirely replace sequential processing, creating a new architectural paradigm. This paradigm deserves a formal definition.
 
 [^fn-transformer-name]: **Transformer**: Named by co-author Jakob Uszkoreit, who simply "liked the sound of the word." The paper's title "Attention Is All You Need" references the Beatles song "All You Need Is Love." Despite the casual naming, the architecture proved transformative: cited over 173,000 times as of early 2025, it became the foundation for GPT, BERT, and virtually all modern large language models.
 
@@ -1859,17 +1880,34 @@ Attention mechanisms exhibit distinctive system-level patterns that differ from 
 **Memory Requirements.**
 Attention mechanisms require storage for attention weights, key-query-value projections, and intermediate feature representations. For a sequence length $N$ and dimension d, each attention layer must store an $N\times N$ attention weight matrix for each sequence in the batch, three sets of projection matrices for queries, keys, and values (each sized $d\times d$), and input and output feature maps of size $N\times d$. The dynamic generation of attention weights for every input creates a memory access pattern where intermediate attention weights become a significant factor in memory usage, producing a *quadratic bottleneck* that defines modern Transformer scaling limits. The following calculation illustrates how quickly this bottleneck manifests at scale.
 
+```{python}
+#| label: attention-quadratic-bottleneck
+#| echo: false
+
+seq_len = 100_000
+elements = seq_len * seq_len
+bytes_per_element = 2  # FP16
+single_layer_bytes = elements * bytes_per_element
+single_layer_gb = single_layer_bytes / 1e9
+num_layers = 32
+total_gb = single_layer_gb * num_layers
+
+elements_str = f"{elements:.0e}".replace("+", "")  # "1e10"
+single_layer_gb_str = f"{single_layer_gb:.0f}"
+total_gb_str = f"{total_gb:,.0f}"
+```
+
 ::: {.callout-notebook title="The Quadratic Bottleneck"}
 **Problem**: Calculate the memory required for the attention matrix of a single layer with sequence length $N=100,000$ (context window).
 
 **The Math**:
 
 1.  **Matrix Size**: The attention score matrix ($QK^T$) has dimensions $N \times N$.
-2.  **Elements**: $100,000 \times 100,000 = 10^{10}$ elements.
-3.  **Memory**: At FP16 (2 bytes/element): $10^{10} \times 2 \text{ bytes} = \mathbf{20 \text{ GB}}$.
+2.  **Elements**: $100{,}000 \times 100{,}000 = 10^{10}$ elements.
+3.  **Memory**: At FP16 (2 bytes/element): $10^{10} \times 2 \text{ bytes} =$ **`{python} single_layer_gb_str` GB**.
 
 **The Systems Conclusion**:
-A single layer's attention matrix consumes **20 GB** of HBM. A 32-layer model would require **640 GB** just for transient attention scores, far exceeding any single GPU's capacity.
+A single layer's attention matrix consumes **`{python} single_layer_gb_str` GB** of HBM. A 32-layer model would require **`{python} total_gb_str` GB** just for transient attention scores, far exceeding any single GPU's capacity.
 This **Memory Wall** collision forces the use of:
 
 *   **FlashAttention** (tiling to avoid materializing the full matrix).
@@ -2102,7 +2140,24 @@ Fourth, the core computations are dominated by large matrix multiplications invo
 
 Fifth, self-attention generates memory-intensive intermediate results. The attention weights matrix $(N\times N)$ and per-head intermediate results create large memory requirements, especially for long sequences, requiring careful memory management for deployment on constrained devices.
 
-The parallel nature of Transformers makes them well-suited for modern hardware, but quadratic complexity with sequence length constrains long-sequence processing. Much research has therefore focused on optimization techniques such as sparse attention patterns and low-rank approximations. Each technique presents its own trade-offs between computational efficiency and model expressiveness, a balance that must be considered in practical applications.
+The parallel nature of Transformers makes them well-suited for modern hardware, but quadratic complexity with sequence length constrains long-sequence processing. Much research has therefore focused on optimization techniques such as sparse attention patterns and low-rank approximations. Each technique presents its own trade-offs between computational efficiency and model expressiveness, a balance that must be considered in practical applications. As shown in @fig-context-explosion, this architectural capability has driven an exponential growth in context windows, enabling models to reason over entire books or codebases in a single pass.
+
+```{python}
+#| label: fig-context-explosion
+#| echo: false
+#| fig-cap: "**The Context Explosion.** Maximum supported context window (tokens) over time (Log Scale). The transition from 'Standard' windows (512–2k tokens) to 'Massive' windows (1M+ tokens) represents a fundamental shift in how ML systems handle long-range dependencies, increasingly favoring in-context reasoning over traditional retrieval-based approaches."
+#| fig-alt: "Step plot showing context windows growing from 512 (BERT) to 1M+ (Gemini 1.5). The log scale highlights the orders-of-magnitude leap in 2023-2024."
+
+import sys
+import matplotlib.pyplot as plt
+# Ensure calc directory is in path
+sys.path.append('../../../calc')
+import viz
+
+viz.set_book_style()
+viz.plot_context_explosion()
+plt.show()
+```
 
 This examination of four architectural families (MLPs, CNNs, RNNs, and Transformers) reveals both their individual characteristics and their collective evolution. Each addresses distinct data types: spatial, sequential, and relational patterns. However, one critical architecture class remains that differs fundamentally from all four: **sparse architectures** for recommendation systems, which dominate industrial AI workloads despite receiving less academic attention than their media-processing counterparts.
 
@@ -2119,7 +2174,19 @@ The **DLRM** architecture [@naumov2019deep] standardizes this pattern, combining
 
 1.  **Dense Features (Bottom MLP):** Continuous features (like user age, time of day) are processed by a standard Multi-Layer Perceptron (MLP). This component is compute-intensive but memory-light.
 
-2.  **Sparse Features (Embedding Tables):** Categorical features (User ID, Item ID) are looked up in massive embedding tables. A table for 1 billion users with 128-dimensional vectors requires $10^9 \times 128 \times 4$ bytes $\approx 512$ GB of memory. This component is memory-intensive but compute-light (just a memory copy).
+```{python}
+#| label: dlrm-embedding-size
+#| echo: false
+
+num_users = 1_000_000_000  # 1 billion
+embed_dim = 128
+bytes_per_param = 4  # FP32
+embed_table_bytes = num_users * embed_dim * bytes_per_param
+embed_table_gb = embed_table_bytes / 1e9
+embed_table_gb_str = f"{embed_table_gb:.0f}"
+```
+
+2.  **Sparse Features (Embedding Tables):** Categorical features (User ID, Item ID) are looked up in massive embedding tables. A table for 1 billion users with 128-dimensional vectors requires $10^9 \times 128 \times 4$ bytes $\approx$ `{python} embed_table_gb_str` GB of memory. This component is memory-intensive but compute-light (just a memory copy).
 
 3.  **Interaction Layer:** The dense vectors from the MLP and the sparse vectors from embeddings are combined (typically via dot products) to capture interactions between user and item features.
 
@@ -3018,7 +3085,18 @@ Dense matrix operations in MLPs map naturally to tensor processing units and GPU
 
 CNNs benefit from specialized convolution algorithms and data layout optimizations that differ significantly from dense matrix operations. Im2col transformations convert convolutions to matrix multiplication but double memory usage. Winograd algorithms[^fn-winograd] reduce arithmetic complexity by 2.25$\times$ for $3 \times 3$ convolutions at the cost of numerical stability. Direct convolution with custom kernels achieves optimal memory efficiency but requires architecture-specific tuning.
 
-[^fn-winograd]: **Winograd Algorithms**: Fast convolution algorithms based on Shmuel Winograd's 1980 work on minimal multiplication complexity. For 3x3 convolutions, Winograd reduces multiply operations from 9 to 4 per output (2.25x reduction) by trading multiplications for additions, which cost less in terms of both latency and energy. Modern deep learning frameworks like cuDNN automatically select Winograd for appropriate layer configurations, though numerical precision degradation at FP16 limits applicability for mixed-precision training.
+```{python}
+#| label: winograd-calc
+#| echo: false
+
+# Winograd algorithm reduction for 3x3 convolutions
+std_muls_3x3 = 9  # standard 3x3 multiply count
+winograd_muls = 4  # Winograd transform reduces to 4
+winograd_reduction = std_muls_3x3 / winograd_muls
+winograd_reduction_str = f"{winograd_reduction:.2f}"
+```
+
+[^fn-winograd]: **Winograd Algorithms**: Fast convolution algorithms based on Shmuel Winograd's 1980 work on minimal multiplication complexity. For 3x3 convolutions, Winograd reduces multiply operations from `{python} std_muls_3x3` to `{python} winograd_muls` per output (`{python} winograd_reduction_str`x reduction) by trading multiplications for additions, which cost less in terms of both latency and energy. Modern deep learning frameworks like cuDNN automatically select Winograd for appropriate layer configurations, though numerical precision degradation at FP16 limits applicability for mixed-precision training.
 
 RNNs require different optimization approaches due to their temporal dependencies. Loop unrolling reduces control overhead but increases memory usage. State vectorization allows SIMD operations across multiple sequences. Wavefront parallelization exploits independence across timesteps for bidirectional processing.
 
@@ -3205,12 +3283,41 @@ The input is spatial data (images from camera traps, typically 1920×1080 resolu
 Compare candidates against our Lighthouse models:
 
 - **ResNet-50** (`{python} resnet_params_m`M params, `{python} resnet_gflops` GFLOPs): Too large. At ~`{python} resnet_fp32_mb` MB FP32, leaves no room for OS and buffers. Power consumption would exceed budget.
-- **MobileNetV1** (4.2M params, 569 MFLOPs): Promising. ~16 MB at FP32, ~4 MB quantized to INT8. Power-efficient depthwise separable convolutions.
+```{python}
+#| label: wildlife-model-sizing
+#| echo: false
+
+# MobileNetV1
+mnv1_params_m = 4.2
+mnv1_fp32_mb = mnv1_params_m * 4  # 4 bytes per FP32 param
+mnv1_int8_mb = mnv1_params_m * 1  # 1 byte per INT8 param
+
+# MobileNetV2 with 0.75 width multiplier
+mnv2_params_m = 2.2
+mnv2_fp32_mb = mnv2_params_m * 4
+mnv2_int8_mb = mnv2_params_m  # × 1 byte
+
+# Inference power/energy
+inference_power_mw = 200
+inference_latency_ms = 75
+energy_per_inf_mj = inference_power_mw * inference_latency_ms / 1000
+inferences_per_day = 100
+energy_per_day_j = inferences_per_day * energy_per_inf_mj / 1000
+
+mnv1_fp32_str = f"{mnv1_fp32_mb:.0f}"
+mnv1_int8_str = f"{mnv1_int8_mb:.0f}"
+mnv2_fp32_str = f"{mnv2_fp32_mb:.0f}"
+mnv2_int8_str = f"{mnv2_int8_mb:.1f}"
+energy_mj_str = f"{energy_per_inf_mj:.0f}"
+energy_j_str = f"{energy_per_day_j:.1f}"
+```
+
+- **MobileNetV1** (4.2M params, 569 MFLOPs): Promising. ~`{python} mnv1_fp32_str` MB at FP32, ~`{python} mnv1_int8_str` MB quantized to INT8. Power-efficient depthwise separable convolutions.
 - **KWS DS-CNN** (250K params, 20 MFLOPs): Too small. Designed for 12-class audio, insufficient capacity for 50 visual species.
 
 **Architecture Selection:** MobileNetV2 variant with width multiplier 0.75
 
-- **Parameters:** ~2.2M (~9 MB FP32, ~2.5 MB INT8)
+- **Parameters:** ~2.2M (~`{python} mnv2_fp32_str` MB FP32, ~`{python} mnv2_int8_str` MB INT8)
 - **FLOPs:** ~150 MFLOPs at 224×224
 - **Rationale:** Sufficient capacity for 50-class problem; fits memory budget with margin; depthwise separable convolutions are power-efficient
 
@@ -3226,8 +3333,8 @@ $$
 $$\frac{150 \text{ MOPs}}{2 \text{ GOPS}} = 75 \text{ ms latency} \ll 500 \text{ ms target} \checkmark$$
 
 *Power Check:*
-Estimated inference power: ~200 mW for 75 ms = 15 mJ per inference
-At 100 inferences/day: 1.5 J/day → negligible vs. sleep power budget ✓
+Estimated inference power: ~200 mW for 75 ms = `{python} energy_mj_str` mJ per inference
+At 100 inferences/day: `{python} energy_j_str` J/day → negligible vs. sleep power budget ✓
 
 #### Step 5: Risk Assessment {.unnumbered}
 

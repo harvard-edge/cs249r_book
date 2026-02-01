@@ -4,7 +4,7 @@ concepts: dl_primer_concepts.yml
 glossary: dl_primer_glossary.json
 ---
 
-# Deep Learning Systems Foundations {#sec-deep-learning-systems-foundations}
+# Neural Computation {#sec-deep-learning-systems-foundations}
 
 ::: {layout-narrow}
 ::: {.column-margin}
@@ -25,8 +25,8 @@ Data flows through pipelines; predictions emerge from models. The transformation
 ::: {.callout-tip title="Learning Objectives"}
 
 - Explain how limitations of rule-based and classical ML systems necessitated deep learning approaches
-- Describe neural network components: neurons, layers, weights, biases, and activation functions
-- Compare activation functions and select appropriate loss functions for classification, regression, and other tasks
+- Describe neural network components: neurons, layers, weights, biases, and **activation functions**
+- Compare **activation functions** and select appropriate **loss functions** for classification, regression, and other tasks
 - Contrast training and inference phases in terms of computational demands and deployment considerations
 - Compute forward propagation through multi-layer networks using matrix operations
 - Execute backpropagation to calculate gradients for network weight updates
@@ -45,18 +45,39 @@ from calc.formulas import fmt, sci
 v100_tflops_fp16 = f"{V100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
 a100_tflops_fp16 = f"{A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
 
+# GPU specs for footnotes
+a100_mem_gb = f"{A100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
+a100_tdp_w = f"{A100_TDP.to(watt).magnitude:.0f}"
+h100_tdp_w = f"{H100_TDP.to(watt).magnitude:.0f}"
+
 # Model specs
 gpt3_params_b = f"{GPT3_PARAMS.to(Mparam).magnitude/1000:.0f}"
 gpt2_params_b = f"{GPT2_PARAMS.to(Mparam).magnitude/1000:.1f}"
 gpt2_params_count = f"{GPT2_PARAMS.to(param).magnitude:,.0f}"
 resnet_params_m = f"{RESNET50_PARAMS.to(Mparam).magnitude:.1f}"
+
+# Memory explosion callout
+mnist_params = 100_000
+mnist_mem_kb = mnist_params * 4 / 1024
+gpt2_mem_gb = GPT2_PARAMS.to(param).magnitude * 4 / 1e9
+mem_jump = GPT2_PARAMS.to(param).magnitude / mnist_params
+
+mnist_mem_str = f"{mnist_mem_kb:.0f}"
+gpt2_mem_str = f"{gpt2_mem_gb:.0f}"
+mem_jump_str = f"{mem_jump:,.0f}"
+
+# MNIST image dimensions → input neurons
+mnist_px_w = 28
+mnist_px_h = 28
+mnist_input_neurons = mnist_px_w * mnist_px_h
+mnist_input_str = f"{mnist_input_neurons}"
 ```
 
-## Deep Learning Systems Engineering Foundation {#sec-deep-learning-systems-foundations-deep-learning-systems-engineering-foundation-597f}
+## The Physics of Neural Computation {#sec-deep-learning-systems-foundations-deep-learning-systems-engineering-foundation-597f}
 
-The **Silicon Contract** established that every model architecture makes a computational bargain with the hardware it runs on. The architecture's mathematical operators set the terms of that bargain: they determine how much memory the model consumes, how long each computation takes, and how much energy the system expends. To honor the contract, a systems engineer must understand those operators. This chapter examines the mathematical foundations of deep learning not as abstract theory, but as a specification for computational workloads that dictate memory movement, execution time, and energy cost.
+The **Silicon Contract** established that every model architecture makes a computational bargain with the hardware it runs on. The architecture's mathematical operators set the terms of that bargain: they determine how much memory the model consumes, how long each computation takes, and how much energy the system expends. To honor the contract, a systems engineer must understand those operators. This chapter examines the mathematical foundations of neural networks not as abstract theory, but as a specification for computational workloads.
 
-The preceding chapters established the surrounding infrastructure. The ML workflow (@sec-ai-development-workflow) defined how projects progress from problem definition through deployment, and data engineering (@sec-data-engineering-ml) covered how to prepare the raw material that models consume. Now we turn inward, to what happens inside the model itself: the mathematical operations that transform data into predictions. Understanding these operations is not an academic exercise. It is how you predict memory consumption before provisioning hardware, diagnose why a training run diverges after hours of computation, and identify the bottleneck that leaves an expensive GPU idle.
+The preceding chapters established the surrounding infrastructure. The ML workflow (@sec-ai-development-workflow) defined how projects progress from problem definition through deployment, and data engineering (@sec-data-engineering-ml) covered how to prepare the raw material that models consume. Now we turn inward, to what happens inside the model itself. Neural computation represents a fundamental shift in how we process information: instead of executing a sequence of explicit logical instructions (if-then-else), we execute a massive sequence of continuous mathematical transformations (multiply-add-accumulate). This shift from **Logic** to **Arithmetic** changes everything for the systems engineer. It implies that the "bug" in your system is rarely a syntax error; it is a numerical instability, a vanishing gradient, or a saturated activation function.
 
 ::: {.callout-definition title="Deep Learning"}
 
@@ -76,13 +97,13 @@ This paradigm shift creates an engineering problem with no precedent in traditio
 
 This chapter builds the mathematical literacy needed to diagnose and solve such problems. We trace how learning paradigms evolved from explicit rules to handcrafted features to learned representations, then examine each component of a neural network as both a mathematical operation and a computational workload. The forward pass that produces predictions, the backpropagation algorithm that computes gradients, the loss functions that define optimization objectives, and the inference pipeline that serves trained models each connect directly to system engineering decisions: matrix multiplication illuminates memory bandwidth requirements, gradient computation explains numerical precision constraints, and optimization dynamics inform resource allocation.
 
-## Evolution of ML Paradigms {#sec-deep-learning-systems-foundations-evolution-ml-paradigms-ec9c}
+## Computing with Patterns {#sec-deep-learning-systems-foundations-evolution-ml-paradigms-ec9c}
 
-To understand why deep learning emerged as the dominant approach requiring specialized computational infrastructure, we examine how AI methods evolved over time. The current era represents the latest stage in a progression from rule-based programming through classical machine learning to modern neural networks. Each approach built upon and addressed the limitations of its predecessors.
+To understand the computational requirements of modern AI, we must trace the evolution of how machines solve problems. This is not just a history of algorithms, but a history of *representation*. How do we represent the complex patterns of the real world in a form a computer can process? The answer has evolved from explicit rules to learned features, and finally to the hierarchical patterns of neural computation.
 
-### Traditional Rule-Based Programming Limitations {#sec-deep-learning-systems-foundations-traditional-rulebased-programming-limitations-6e82}
+### From Explicit Logic to Learned Patterns {#sec-deep-learning-systems-foundations-traditional-rulebased-programming-limitations-6e82}
 
-Traditional programming requires developers to explicitly define rules that tell computers how to process inputs and produce outputs. Consider a simple game like Breakout[^fn-breakout-game]. The program needs explicit rules for every interaction: when the ball hits a brick, the code must specify that the brick should be removed and the ball's direction should be reversed (@fig-breakout). While this approach works effectively for games with clear physics and limited states, it demonstrates a limitation of rule-based systems.
+Traditional programming requires developers to explicitly define rules that tell computers how to process inputs and produce outputs. Consider a simple game like Breakout[^fn-breakout-game]. The program needs explicit rules for every interaction: when the ball hits a brick, the code must specify that the brick should be removed and the ball's direction should be reversed (@fig-breakout). While this approach works effectively for games with clear physics and limited states, it hits a wall when dealing with the messy, unstructured data of the real world.
 
 ::: {#fig-breakout fig-env="figure" fig-pos="htb" fig-cap="**Breakout Collision Rules**: The game program uses explicit if-then rules for collision detection, specifying ball direction reversal and brick removal upon contact. While effective for a game with clear physics and limited states, this approach illustrates how rule-based systems must anticipate every possible scenario." fig-alt="Breakout game grid with 3 rows of 5 colored bricks at top, brown paddle at bottom, and ball with trajectory arrow. Code snippet shows explicit if-then rules for collision detection: removeBrick, update ball velocity."}
 ```{.tikz}
@@ -485,11 +506,11 @@ These system requirements directly drive the architectural choices we make in bu
 
 ### Evolution of Neural Network Computing {#sec-deep-learning-systems-foundations-evolution-neural-network-computing-8754}
 
-Deep learning evolved to meet these challenges through concurrent advances in hardware and algorithms. The journey began with early artificial neural networks in the 1950s, marked by the introduction of the Perceptron [@rosenblatt1958perceptron][^fn-perceptron]. While groundbreaking in concept, these early systems were severely limited by the computational capabilities of their era: mainframe computers that lacked both the processing power and memory capacity needed for complex networks.
+Deep learning evolved to meet these challenges through concurrent advances in hardware and algorithms. The journey began with early artificial neural networks in the 1950s, marked by the introduction of the **Perceptron** [@rosenblatt1958perceptron][^fn-perceptron]. While groundbreaking in concept, these early systems were severely limited by the computational capabilities of their era: mainframe computers that lacked both the processing power and memory capacity needed for complex networks.
 
 [^fn-perceptron]: **Perceptron**: Invented by Frank Rosenblatt in 1957 at Cornell, the perceptron was the first artificial neural network capable of learning. The New York Times famously reported it would be "the embryo of an electronic computer that [the Navy] expects will be able to walk, talk, see, write, reproduce itself and be conscious of its existence." While overly optimistic, this breakthrough laid the foundation for all modern neural networks.
 
-The backpropagation algorithm, first applied to neural networks by Paul Werbos in his 1974 PhD thesis and building on Seppo Linnainmaa's 1970 work on automatic differentiation, was popularized by Rumelhart, Hinton, and Williams in 1986 [@rumelhart1986learning][^fn-dlprimer-backpropagation]. Their publication demonstrated the algorithm's practical effectiveness and brought it to widespread attention in the machine learning community, triggering renewed interest in neural networks. The systems-level implementation of this algorithm is detailed in @sec-ai-training. Despite this breakthrough, the computational demands far exceeded available hardware capabilities. Training even modest networks could take weeks, making experimentation and practical applications challenging. This mismatch between algorithmic requirements and hardware capabilities contributed to a period of reduced interest in neural networks.
+The **backpropagation** algorithm, first applied to neural networks by Paul Werbos in his 1974 PhD thesis and building on Seppo Linnainmaa's 1970 work on automatic differentiation, was popularized by Rumelhart, Hinton, and Williams in 1986 [@rumelhart1986learning][^fn-dlprimer-backpropagation]. Their publication demonstrated the algorithm's practical effectiveness and brought it to widespread attention in the machine learning community, triggering renewed interest in neural networks. The systems-level implementation of this algorithm is detailed in @sec-ai-training. Despite this breakthrough, the computational demands far exceeded available hardware capabilities. Training even modest networks could take weeks, making experimentation and practical applications challenging. This mismatch between algorithmic requirements and hardware capabilities contributed to a period of reduced interest in neural networks.
 
 This historical trajectory offers an important lesson in systems engineering: a groundbreaking algorithm is only as powerful as the hardware available to execute it. The decades-long gap between the mathematical formulation of backpropagation and its widespread adoption was not a failure of theory, but a latency in infrastructure. It teaches us that efficient ML systems engineering is not just about designing for the best math, but co-designing for the available silicon. The eventual deep learning revolution was sparked not by a new mathematical discovery alone, but by the convergence of data availability, algorithmic maturity, and the parallel processing power of GPUs.
 
@@ -1047,7 +1068,7 @@ $$ \hat{y} = \sigma(z) = \sigma\left(\sum (x_i \cdot w_{ij}) + b\right) $$
 
 @fig-nonlinear demonstrates this principle visually: the left panel shows a linear decision boundary that fails to separate the two classes, while the right panel shows how nonlinear activation functions enable the network to learn a curved boundary that correctly classifies the data.
 
-The universal approximation theorem[^fn-universal-approximation] establishes that neural networks with activation functions can approximate arbitrary functions. This theoretical foundation, combined with the computational and optimization characteristics of specific activation functions like ReLU and sigmoid, explains neural networks' practical effectiveness in complex tasks.
+The **universal approximation theorem**[^fn-universal-approximation] establishes that neural networks with activation functions can approximate arbitrary functions. This theoretical foundation, combined with the computational and optimization characteristics of specific activation functions like ReLU and sigmoid, explains neural networks' practical effectiveness in complex tasks.
 
 [^fn-universal-approximation]: **Universal Approximation Theorem**: Proven by George Cybenko [@cybenko1989approximation] and Kurt Hornik et al. [@hornik1989multilayer], this theorem states that neural networks with just one hidden layer containing enough neurons can approximate any continuous function to arbitrary accuracy. However, the theorem doesn't specify how many neurons are needed (could be exponentially many) or how to find the right weights. This explains why neural networks are theoretically powerful but doesn't guarantee practical learnability—a key distinction that drove the development of deep learning architectures and better training algorithms.
 
@@ -1326,7 +1347,7 @@ The XOR example established the fundamental three-layer architecture, but real-w
 
 Applying the three-layer architecture to MNIST reveals how data characteristics and task requirements constrain network design. @fig-mnist-topology-1 illustrates both perspectives on this architecture: panel (a) shows a $28\times 28$ pixel grayscale image of a handwritten digit connected to the hidden and output layers, while panel (b) demonstrates how the 2D image flattens into a 784-dimensional vector.
 
-The input layer's width is directly determined by our data format. For a $28\times 28$ pixel image, each pixel becomes an input feature, requiring 784 input neurons $(28\times 28 = 784)$. We can think of this either as a 2D grid of pixels or as a flattened vector of 784 values, where each value represents the intensity of one pixel.
+The input layer's width is directly determined by our data format. For a $28\times 28$ pixel image, each pixel becomes an input feature, requiring `{python} mnist_input_str` input neurons $(28\times 28 =$ `{python} mnist_input_str`$)$. We can think of this either as a 2D grid of pixels or as a flattened vector of 784 values, where each value represents the intensity of one pixel.
 
 The output layer's structure is determined by our task requirements. For digit classification, we use 10 output neurons, one for each possible digit (0-9). When presented with an image, the network produces a value for each output neuron, where higher values indicate greater confidence that the image represents that particular digit.
 
@@ -1533,11 +1554,134 @@ As networks grow deeper, the path from input to output becomes longer, potential
 
 These connection patterns have significant implications for both the theoretical capabilities and practical implementation of neural networks. Dense connections maximize learning flexibility at the cost of computational efficiency. Sparse connections can reduce computational requirements while potentially improving the network's ability to learn structured patterns. Skip connections help maintain effective information flow in deeper networks.
 
+```{python}
+#| label: mnist-memory-calc
+#| echo: false
+
+# MNIST network architecture: 784→128→64→10, batch=32, FP32 (4 bytes)
+layers = [(784, 128), (128, 64), (64, 10)]
+batch = 32
+bytes_per_param = 4
+
+# Parameter counts per layer
+layer_weights = [i * o for i, o in layers]
+layer_biases = [o for _, o in layers]
+layer_params = [w + b for w, b in zip(layer_weights, layer_biases)]
+total_weights = sum(layer_weights)
+total_biases = sum(layer_biases)
+total_params = sum(layer_params)
+
+# Parameter memory
+param_memory_kb = total_params * bytes_per_param / 1024
+
+# Activation counts per layer (batch × width)
+act_shapes = [(batch, 784), (batch, 128), (batch, 64), (batch, 10)]
+act_values = [b * w for b, w in act_shapes]
+act_memory_kb = [v * bytes_per_param / 1024 for v in act_values]
+total_act_values = sum(act_values)
+total_act_kb = sum(act_memory_kb)
+
+# Training-only memory
+grad_memory_kb = param_memory_kb  # same size as parameters
+optimizer_kb = param_memory_kb * 2  # Adam: momentum + velocity
+
+# Totals
+training_total_kb = param_memory_kb + total_act_kb + grad_memory_kb + optimizer_kb
+inference_total_kb = param_memory_kb + total_act_kb
+training_total_mb = training_total_kb / 1024
+training_ratio = training_total_kb / inference_total_kb
+
+# Format strings
+param_mem_str = f"{param_memory_kb:.1f}"
+grad_mem_str = f"{grad_memory_kb:.1f}"
+opt_mem_str = f"{optimizer_kb:.1f}"
+total_act_str = f"{total_act_kb:.1f}"
+training_mb_str = f"{training_total_mb:.1f}"
+inference_kb_str = f"{inference_total_kb:.0f}"
+training_ratio_str = f"{training_ratio:.1f}"
+
+# Per-layer FLOPs: 2 × M × K × N for matmul, plus bias+activation
+matmul_flops = [2 * batch * i * o for i, o in layers]
+bias_relu_flops = [2 * batch * o for _, o in layers]
+bias_relu_flops[-1] = batch * 10 * 2  # softmax simplified
+total_flops = sum(matmul_flops) + sum(bias_relu_flops)
+total_mops = total_flops / 1e6
+per_image_kops = total_flops / batch / 1e3
+layer1_pct = matmul_flops[0] / total_flops * 100
+arith_intensity = total_flops / (inference_total_kb * 1024)
+
+# Per-layer weight/bias/total strings for prose
+w1_str = f"{layer_weights[0]:,}"
+b1_str = f"{layer_biases[0]}"
+t1_str = f"{layer_params[0]:,}"
+w2_str = f"{layer_weights[1]:,}"
+b2_str = f"{layer_biases[1]}"
+t2_str = f"{layer_params[1]:,}"
+w3_str = f"{layer_weights[2]:,}"
+b3_str = f"{layer_biases[2]}"
+t3_str = f"{layer_params[2]}"
+total_params_str = f"{total_params:,}"
+total_weights_str = f"{total_weights:,}"
+total_biases_str = f"{total_biases}"
+
+# Inference-only activation values (no batch, single image)
+inference_act_values = [128, 64, 10]  # layer outputs
+total_inf_act = sum(inference_act_values)
+inf_act_kb = total_inf_act * bytes_per_param / 1024
+
+total_inf_act_str = f"{total_inf_act}"
+inf_act_kb_str = f"{inf_act_kb:.2f}"
+
+total_mops_str = f"{total_mops:.1f}"
+per_image_kops_str = f"{per_image_kops:.0f}"
+layer1_pct_str = f"{layer1_pct:.0f}"
+arith_intensity_str = f"{arith_intensity:.1f}"
+inference_kb_display = f"{inference_total_kb:.0f}"
+
+# Batch × layer activation sizes (for forward pass prose)
+batch_act = [(batch, o) for _, o in layers]  # (32,128), (32,64), (32,10)
+batch_act_vals = [b * o for b, o in batch_act]
+batch_h1_str = f"{batch_act_vals[0]:,}"   # "4,096"
+batch_h2_str = f"{batch_act_vals[1]:,}"   # "2,048"
+batch_out_str = f"{batch_act_vals[2]:,}"  # "320"
+batch_act_total = sum(batch_act_vals)
+batch_act_total_str = f"{batch_act_total:,}"  # "6,464"
+
+# Gradient sizes per layer (= weight counts, same as layer_weights)
+grad_l1_str = f"{layer_weights[0]:,}"  # "100,352"
+grad_l2_str = f"{layer_weights[1]:,}"  # "8,192"
+grad_l3_str = f"{layer_weights[2]:,}"  # "640"
+
+# Backward pass activation storage (different architecture: 784→512→256→10, batch=32)
+bp_layers = [(784, 512), (512, 256), (256, 10)]
+bp_batch = 32
+bp_act_vals = [bp_batch * o for _, o in [(0, 784)] + bp_layers]  # input + layer outputs
+bp_act_kb = [v * bytes_per_param / 1024 for v in bp_act_vals]
+bp_input_str = f"{bp_act_vals[0]:,}"       # "25,088"
+bp_input_kb_str = f"{bp_act_kb[0]:.0f}"   # "98" → ~100 KB
+bp_h1_str = f"{bp_act_vals[1]:,}"          # "16,384"
+bp_h1_kb_str = f"{bp_act_kb[1]:.0f}"      # "64"
+bp_h2_str = f"{bp_act_vals[2]:,}"          # "8,192"
+bp_h2_kb_str = f"{bp_act_kb[2]:.0f}"      # "32"
+bp_out_str = f"{bp_act_vals[3]:,}"         # "320"
+bp_out_kb_str = f"{bp_act_kb[3]:.1f}"     # "1.3"
+
+# Computational requirements for inference (multiply-adds per layer)
+inf_madd_l1 = layer_weights[0]   # 100,352
+inf_madd_l2 = layer_weights[1]   # 8,192
+inf_madd_l3 = layer_weights[2]   # 640
+inf_madd_total = inf_madd_l1 + inf_madd_l2 + inf_madd_l3
+inf_madd_l1_str = f"{inf_madd_l1:,}"
+inf_madd_l2_str = f"{inf_madd_l2:,}"
+inf_madd_l3_str = f"{inf_madd_l3:,}"
+inf_madd_total_str = f"{inf_madd_total:,}"
+```
+
 #### Model Size and Computational Complexity {#sec-deep-learning-systems-foundations-model-size-computational-complexity-1f0f}
 
 The arrangement of parameters (weights and biases) in a neural network determines both its learning capacity and computational requirements. While topology defines the network's structure, the initialization and organization of parameters play a crucial role in learning and performance.
 
-Parameter count grows with network width and depth. For our MNIST example, consider a network with a 784-dimensional input layer, hidden layers of 128 and 64 neurons, and a 10-neuron output layer (784→128→64→10). The first layer requires 100,352 weights and 128 biases, the second layer 8,192 weights and 64 biases, and the output layer 640 weights and 10 biases, totaling 109,386 parameters. Each must be stored in memory and updated during learning.
+Parameter count grows with network width and depth. For our MNIST example, consider a network with a 784-dimensional input layer, hidden layers of 128 and 64 neurons, and a 10-neuron output layer (784→128→64→10). The first layer requires `{python} w1_str` weights and `{python} b1_str` biases, the second layer `{python} w2_str` weights and `{python} b2_str` biases, and the output layer `{python} w3_str` weights and `{python} b3_str` biases, totaling `{python} total_params_str` parameters. Each must be stored in memory and updated during learning.
 
 ::: {.callout-example title="Memory: Training vs. Inference"}
 
@@ -1559,7 +1703,7 @@ Parameter count grows with network width and depth. For our MNIST example, consi
 | **Total**           | 109,184             | 202        | **109,386**          |
 +---------------------+---------------------+------------+----------------------+
 
-**Parameter memory**: 109,386 × 4 bytes = **437.5 KB**
+**Parameter memory**: 109,386 × 4 bytes = **`{python} param_mem_str` KB**
 
 #### Step 2: Activations {.unnumbered}
 
@@ -1579,8 +1723,8 @@ Parameter count grows with network width and depth. For our MNIST example, consi
 
 #### Step 3: Training-Only Memory {.unnumbered}
 
-- **Gradients** (same size as parameters): 437.5 KB
-- **Optimizer state** (Adam stores momentum + velocity, 2× parameters): 875.0 KB
+- **Gradients** (same size as parameters): `{python} grad_mem_str` KB
+- **Optimizer state** (Adam stores momentum + velocity, 2× parameters): `{python} opt_mem_str` KB
 
 **Summary**:
 
@@ -1598,7 +1742,7 @@ Parameter count grows with network width and depth. For our MNIST example, consi
 | **Total**           | **~1.9 MB**  | **~564 KB**   |
 +---------------------+--------------+---------------+
 
-**Key insight**: Training requires **3.4× more memory** than inference for the same batch size. For larger models, this ratio increases further because gradient and optimizer storage scale with parameter count, while activations scale with batch size × layer widths.
+**Key insight**: Training requires **`{python} training_ratio_str`× more memory** than inference for the same batch size. For larger models, this ratio increases further because gradient and optimizer storage scale with parameter count, while activations scale with batch size × layer widths.
 
 :::
 
@@ -1607,10 +1751,10 @@ The memory requirements above seem modest for our small MNIST classifier. But wh
 ::: {.callout-notebook title="The Memory Explosion"}
 How does the scale of our Lighthouse Archetypes affect the **Data ($D$)** term of the Iron Law? Compare our MNIST classifier to **GPT-2**.
 
--   **MNIST Archetype**: 100,000 parameters × 4 bytes (FP32) $\approx$ **400 KB**. This entire model fits inside the L2 cache of a modern processor.
--   **GPT-2 Archetype**: `{python} gpt2_params_count` parameters × 4 bytes (FP32) $\approx$ **6 GB**. This requires dedicated GPU VRAM and high-speed memory bandwidth.
+-   **MNIST Archetype**: 100,000 parameters × 4 bytes (FP32) $\approx$ **`{python} mnist_mem_str` KB**. This entire model fits inside the L2 cache of a modern processor.
+-   **GPT-2 Archetype**: `{python} gpt2_params_count` parameters × 4 bytes (FP32) $\approx$ **`{python} gpt2_mem_str` GB**. This requires dedicated GPU VRAM and high-speed memory bandwidth.
 
-**The Systems Conclusion**: Moving from 100K to `{python} gpt2_params_b`B parameters is a **15,000× jump**. It is not just "more parameters"; it is a phase change in engineering. MNIST is a logic problem; GPT-2 is a **Data Movement** problem.
+**The Systems Conclusion**: Moving from 100K to `{python} gpt2_params_b`B parameters is a **`{python} mem_jump_str`× jump**. It is not just "more parameters"; it is a phase change in engineering. MNIST is a logic problem; GPT-2 is a **Data Movement** problem.
 :::
 
 The memory calculations above are precise but slow. Experienced engineers develop shortcuts for quick feasibility assessments.
@@ -1645,9 +1789,25 @@ Detailed calculations are essential for design documents, but experienced engine
 | **"Is this compute-bound or memory-bound?"** | If batch × layer_width &lt; 1000, likely memory-bound |
 +----------------------------------------------+-------------------------------------------------------+
 
+```{python}
+#| label: mental-math-calc
+#| echo: false
+
+# "Can I train 100M params on 16GB?" mental math
+mm_params_m = 100
+mm_bytes = 4
+mm_overhead = 4  # params + grads + optimizer states
+mm_model_gb = mm_params_m * 1e6 * mm_bytes * mm_overhead / 1e9
+mm_gpu_gb = 16
+mm_remaining_gb = mm_gpu_gb - mm_model_gb
+
+mm_model_str = f"{mm_model_gb:.1f}"
+mm_remaining_str = f"{mm_remaining_gb:.0f}"
+```
+
 **Example**: *"Can I train a 100M parameter model on a 16GB GPU?"*
 
-Mental math: 100M × 4 bytes × 4 (training overhead) = 1.6 GB for model. Leaves ~14GB for activations and batch data. Answer: Yes, comfortably—batch size is the main constraint.
+Mental math: 100M × 4 bytes × 4 (training overhead) = `{python} mm_model_str` GB for model. Leaves ~`{python} mm_remaining_str`GB for activations and batch data. Answer: Yes, comfortably—batch size is the main constraint.
 
 :::
 
@@ -1793,7 +1953,7 @@ The forward pass is only half the story.
 
 When an image of a handwritten digit enters our network, it undergoes a series of transformations through the layers. Each transformation combines the weighted inputs with learned patterns to progressively extract relevant features. In our MNIST example, a $28\times 28$ pixel image is processed through multiple layers to ultimately produce probabilities for each possible digit (0-9).
 
-The process begins with the input layer, where each pixel's grayscale value becomes an input feature. For MNIST, this means 784 input values $(28\times 28 = 784)$, each normalized between 0 and 1. These values then propagate forward through the hidden layers, where each neuron combines its inputs according to its learned weights and applies a nonlinear activation function.
+The process begins with the input layer, where each pixel's grayscale value becomes an input feature. For MNIST, this means `{python} mnist_input_str` input values $(28\times 28 =$ `{python} mnist_input_str`$)$, each normalized between 0 and 1. These values then propagate forward through the hidden layers, where each neuron combines its inputs according to its learned weights and applies a nonlinear activation function.
 
 Each forward pass through our MNIST network (784-128-64-10) requires substantial matrix operations. The first layer alone performs nearly 100,000 multiply-accumulate operations per sample. When processing multiple samples in a batch, these operations multiply accordingly, requiring careful management of memory bandwidth and computational resources. Specialized hardware like GPUs executes these operations efficiently through parallel processing.
 
@@ -1904,12 +2064,12 @@ For each image in the batch, this produces a probability distribution over the p
 | **Total**   |                |                      | **~7.0 MOps**                  |
 +-------------+----------------+----------------------+--------------------------------+
 
-**Per-image cost**: 7.0 MOps ÷ 32 = **~219 KOps per image**
+**Per-image cost**: `{python} total_mops_str` MOps ÷ 32 = **~`{python} per_image_kops_str` KOps per image**
 
 **Key insights**:
 
-1. **Layer 1 dominates**: The first layer accounts for 92% of all $Ops$ because it processes the largest input (784 dimensions). This is why dimensionality reduction in early layers is so impactful.
-2. **Compute vs. Memory**: At 219 KOps per image and ~564 KB memory, this network has an arithmetic intensity of ~0.4 $Ops$/byte—firmly in the **memory-bound** regime for most hardware. A modern GPU achieving 10 TFLOPS would process each image in ~22 nanoseconds of pure compute, but memory latency typically dominates actual inference time.
+1. **Layer 1 dominates**: The first layer accounts for `{python} layer1_pct_str`% of all $Ops$ because it processes the largest input (784 dimensions). This is why dimensionality reduction in early layers is so impactful.
+2. **Compute vs. Memory**: At `{python} per_image_kops_str` KOps per image and ~`{python} inference_kb_display` KB memory, this network has an arithmetic intensity of ~`{python} arith_intensity_str` $Ops$/byte—firmly in the **memory-bound** regime for most hardware. A modern GPU achieving 10 TFLOPS would process each image in ~22 nanoseconds of pure compute, but memory latency typically dominates actual inference time.
 3. **Scaling intuition**: Doubling the hidden layer widths (784→256→128→10) would increase $Ops$ by ~4× to ~28 MOps, demonstrating quadratic scaling with layer width.
 
 :::
@@ -1920,11 +2080,11 @@ Implementing forward propagation requires attention to several practical aspects
 
 Memory management plays a central role during forward propagation. Each layer's activations must be stored for the backward pass during training. For our MNIST example (784-128-64-10) with a batch size of 32, the activation storage requirements are:
 
-* First hidden layer: $32\times 128 = 4,096$ values
-* Second hidden layer: $32\times 64 = 2,048$ values
-* Output layer: $32\times 10 = 320$ values
+* First hidden layer: $32\times 128 =$ `{python} batch_h1_str` values
+* Second hidden layer: $32\times 64 =$ `{python} batch_h2_str` values
+* Output layer: $32\times 10 =$ `{python} batch_out_str` values
 
-This produces a total of 6,464 values that must be maintained in memory for each batch during training, consistent with the worked example in @sec-deep-learning-systems-foundations-model-size-computational-complexity-1f0f. The memory requirements scale linearly with batch size and become substantial for larger networks.
+This produces a total of `{python} batch_act_total_str` values that must be maintained in memory for each batch during training, consistent with the worked example in @sec-deep-learning-systems-foundations-model-size-computational-complexity-1f0f. The memory requirements scale linearly with batch size and become substantial for larger networks.
 
 Batch processing introduces important trade-offs. Larger batches enable more efficient matrix operations and better hardware utilization but require more memory. For example, doubling the batch size to 64 would double the memory requirements for activations. This relationship between batch size, memory usage, and computational efficiency guides the choice of batch size in practice.
 
@@ -2155,10 +2315,10 @@ The practical implementation of backward propagation requires careful considerat
 
 Memory requirements during backward propagation stem from two main sources. First, we need to store the intermediate activations from the forward pass, as these are required for computing gradients. For our MNIST network with a batch size of 32, each layer's activations must be maintained:
 
-* Input layer: $32\times 784$ values (~100 KB using 32-bit numbers)
-* Hidden layer 1: $32\times 512$ values (~64 KB)
-* Hidden layer 2: $32\times 256$ values (~32 KB)
-* Output layer: $32\times 10$ values (~1.3 KB)
+* Input layer: $32\times 784$ values (~`{python} bp_input_kb_str` KB using 32-bit numbers)
+* Hidden layer 1: $32\times 512$ values (~`{python} bp_h1_kb_str` KB)
+* Hidden layer 2: $32\times 256$ values (~`{python} bp_h2_kb_str` KB)
+* Output layer: $32\times 10$ values (~`{python} bp_out_kb_str` KB)
 
 Second, we must store gradients for each parameter during backward propagation. For our example network with approximately 500,000 parameters, this requires several megabytes of memory for gradients. Advanced optimizers like Adam[^fn-adam-optimizer] require additional memory to store momentum terms, roughly doubling the gradient storage requirements.
 
@@ -2168,9 +2328,9 @@ The memory bandwidth requirements scale with model size and batch size. Each tra
 
 Second, we need storage for the gradients themselves. For each layer, we must maintain gradients of similar dimensions to the weights and biases. For our canonical network (784→128→64→10), this means storing:
 
-* First layer gradients: $784\times 128 = 100,352$ values
-* Second layer gradients: $128\times 64 = 8,192$ values
-* Output layer gradients: $64\times 10 = 640$ values
+* First layer gradients: $784\times 128 =$ `{python} grad_l1_str` values
+* Second layer gradients: $128\times 64 =$ `{python} grad_l2_str` values
+* Output layer gradients: $64\times 10 =$ `{python} grad_l3_str` values
 
 The computational pattern of backward propagation follows a specific sequence:
 
@@ -2191,7 +2351,7 @@ Training neural networks requires systematic adjustment of weights and biases to
 
 #### Parameter Update Algorithms {#sec-deep-learning-systems-foundations-parameter-update-algorithms-b592}
 
-The optimization process adjusts network weights through gradient descent[^fn-gradient-descent], a systematic method that implements the learning principles derived from our biological neural network analysis.
+The optimization process adjusts network weights through **gradient descent**[^fn-gradient-descent], a systematic method that implements the learning principles derived from our biological neural network analysis.
 
 ::: {.callout-definition title="Gradient Descent"}
 
@@ -2329,7 +2489,7 @@ Neural network operation divides into two distinct phases with markedly differen
 
 These computational differences manifest directly in hardware requirements and deployment strategies. Training clusters typically employ high-memory GPUs[^fn-training-gpu-specs] with substantial cooling infrastructure. Inference deployments prioritize latency and energy efficiency across diverse platforms: mobile devices utilize low-power neural processors (typically 2–4 W), edge servers deploy specialized inference accelerators[^fn-edge-accelerators], and cloud services employ inference-optimized instances with reduced numerical precision for increased throughput[^fn-inference-precision]. Production inference systems serving millions of requests daily require sophisticated infrastructure including load balancing, auto-scaling, and failover mechanisms typically unnecessary in training environments.
 
-[^fn-training-gpu-specs]: **Training GPU Requirements**: Modern training GPUs like the NVIDIA A100 or H100 provide 80 GB of high-bandwidth memory and consume 300--700 W during operation. This high memory capacity accommodates large models and training batches, while the power consumption reflects the intensive parallel computation required for gradient calculations across millions of parameters.
+[^fn-training-gpu-specs]: **Training GPU Requirements**: Modern training GPUs like the NVIDIA A100 or H100 provide `{python} a100_mem_gb` GB of high-bandwidth memory and consume `{python} a100_tdp_w`--`{python} h100_tdp_w` W during operation. This high memory capacity accommodates large models and training batches, while the power consumption reflects the intensive parallel computation required for gradient calculations across millions of parameters.
 
 [^fn-edge-accelerators]: **Edge AI Accelerators**: Specialized processors like Google's Edge TPU optimize for inference efficiency. As a representative snapshot, such accelerators can reach on the order of a few TOPS/W on INT8-style kernels, which can translate to order-of-magnitude energy-efficiency improvements over CPU execution for well-matched workloads. This efficiency enables deployment on battery-powered devices like smartphones and IoT sensors.
 
@@ -2552,10 +2712,10 @@ Neural networks consume computational resources differently during inference tha
 Memory requirements during inference can be precisely quantified:
 
 1. Static Memory (Model Parameters):
-   * Layer 1: $784 \times 128 = 100,352$ weights + 128 biases
-   * Layer 2: $128 \times 64 = 8,192$ weights + 64 biases
-   * Layer 3: $64 \times 10 = 640$ weights + 10 biases
-   * Total: 109,386 parameters ($\approx 437.5$ KB at 32-bit floating point precision[^fn-floating-point])
+   * Layer 1: $784 \times 128 =$ `{python} w1_str` weights + `{python} b1_str` biases
+   * Layer 2: $128 \times 64 =$ `{python} w2_str` weights + `{python} b2_str` biases
+   * Layer 3: $64 \times 10 =$ `{python} w3_str` weights + `{python} b3_str` biases
+   * Total: `{python} total_params_str` parameters ($\approx$ `{python} param_mem_str` KB at 32-bit floating point precision[^fn-floating-point])
 
 [^fn-floating-point]: **32-bit Floating Point Precision**: Also called "single precision" or FP32, this IEEE 754 standard uses 32 bits to represent real numbers: 1 bit for sign, 8 bits for exponent, and 23 bits for mantissa. While neural network training typically requires FP32 precision to maintain gradient stability, inference often works with FP16 (half precision) or even INT8 (8-bit integers), reducing memory usage by 2× to 4×. Modern AI chips like Google's TPU v4 support "bfloat16" (brain floating point), a custom 16-bit format that maintains FP32's range while halving memory requirements.
 
@@ -2563,14 +2723,14 @@ Memory requirements during inference can be precisely quantified:
    * Layer 1 output: 128 values
    * Layer 2 output: 64 values
    * Layer 3 output: 10 values
-   * Total: 202 values ($\approx 0.81$ KB at 32-bit floating point precision)
+   * Total: `{python} total_inf_act_str` values ($\approx$ `{python} inf_act_kb_str` KB at 32-bit floating point precision)
 
 Computational requirements follow a fixed pattern for each input:
 
-* First layer: 100,352 multiply-adds
-* Second layer: 8,192 multiply-adds
-* Output layer: 640 multiply-adds
-* Total: 109,184 multiply-add operations per inference
+* First layer: `{python} inf_madd_l1_str` multiply-adds
+* Second layer: `{python} inf_madd_l2_str` multiply-adds
+* Output layer: `{python} inf_madd_l3_str` multiply-adds
+* Total: `{python} inf_madd_total_str` multiply-add operations per inference
 
 This resource profile differs markedly from training requirements, where additional memory for gradients and computational overhead for backpropagation significantly increase resource demands (see the worked example in @sec-deep-learning-systems-foundations-model-size-computational-complexity-1f0f). The predictable, streamlined nature of inference computations enables various optimization opportunities and efficient hardware utilization.
 
@@ -2861,7 +3021,18 @@ Neural networks transform computational approaches by replacing rule-based progr
 
 Neural network architecture demonstrates hierarchical processing, where each layer extracts progressively more abstract patterns from raw data. Training adjusts connection weights through iterative optimization to minimize prediction errors, while inference applies learned knowledge to make predictions on new data. This separation between learning and application phases creates distinct system requirements for computational resources, memory usage, and processing latency that shape system design and deployment strategies.
 
-The mathematical and systems implications emerge through fully connected architectures. The multilayer perceptrons explored here demonstrate universal function approximation: with enough neurons and appropriate weights, such networks can theoretically learn any continuous function. This mathematical generality comes with computational costs. Consider our MNIST example: a 28x28 pixel image contains 784 input values, and a fully connected network treats each pixel independently, learning over 100,000 weights in the first layer alone (784 inputs x 128 neurons). Neighboring pixels are highly correlated while distant pixels rarely interact. Fully connected architectures expend computational resources learning irrelevant long-range relationships.
+```{python}
+#| label: mnist-weights-calc
+#| echo: false
+
+# MNIST fully connected first layer weights
+mnist_pixels = 784  # 28x28
+fc1_neurons = 128
+fc1_weights = mnist_pixels * fc1_neurons
+fc1_weights_str = f"{fc1_weights:,}"
+```
+
+The mathematical and systems implications emerge through fully connected architectures. The multilayer perceptrons explored here demonstrate universal function approximation: with enough neurons and appropriate weights, such networks can theoretically learn any continuous function. This mathematical generality comes with computational costs. Consider our MNIST example: a 28x28 pixel image contains `{python} mnist_pixels` input values, and a fully connected network treats each pixel independently, learning over `{python} fc1_weights_str` weights in the first layer alone (`{python} mnist_pixels` inputs x `{python} fc1_neurons` neurons). Neighboring pixels are highly correlated while distant pixels rarely interact. Fully connected architectures expend computational resources learning irrelevant long-range relationships.
 
 ::: {.callout-takeaways title="Key Takeaways"}
 

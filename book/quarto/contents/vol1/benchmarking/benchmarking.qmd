@@ -4,7 +4,7 @@ concepts: benchmarking_concepts.yml
 glossary: benchmarking_glossary.json
 ---
 
-# Benchmarking AI {#sec-benchmarking-ai}
+# Benchmarking {#sec-benchmarking-ai}
 ::: {layout-narrow}
 ::: {.column-margin}
 _DALL·E 3 Prompt: Photo of a podium set against a tech-themed backdrop. On each tier of the podium, there are AI chips with intricate designs. The top chip has a gold medal hanging from it, the second one has a silver medal, and the third has a bronze medal. Banners with 'AI Olympics' are displayed prominently in the background._
@@ -48,6 +48,14 @@ h100_tflops_fp16 = f"{H100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
 h100_tflops_fp8 = f"{H100_FLOPS_FP8_TENSOR.to(TFLOPs/second).magnitude:,.0f}"
 h100_bw_tbs = f"{H100_MEM_BW.to(TB/second).magnitude:.2f}"
 
+# Ridge points
+a100_ridge = f"{(A100_FLOPS_FP16_TENSOR / A100_MEM_BW).to(flop/byte).magnitude:.0f}"
+
+# Models
+gpt3_params_b = f"{GPT3_PARAMS.to(Mparam).magnitude/1000:.0f}"
+gpt3_params_billion = f"{gpt3_params_b} billion"
+h100_tdp = f"{H100_TDP.to(watt).magnitude:.0f}"
+
 # Energy per operation (Horowitz 2014 @ 45nm)
 energy_fp32 = f"{ENERGY_FLOP_FP32_PJ.magnitude}"
 energy_fp16 = f"{ENERGY_FLOP_FP16_PJ.magnitude}"
@@ -69,6 +77,18 @@ ML benchmarking operates across three independent dimensions that map directly t
 
 ***Machine Learning Benchmarking*** is the empirical measurement of system performance against **Representative Workloads**. It exists to decouple **Peak Performance** (marketing specs) from **Sustained Performance** (real-world capability), quantifying the gap caused by system overheads like memory bandwidth saturation and software dispatch latency.
 
+:::
+
+::: {.callout-perspective title="Benchmarks as Moving Targets"}
+**Why ML Benchmarking feels different from CPU Benchmarking:**
+
+In traditional systems (e.g., SPEC CPU), the benchmark is a **Rigid Specification**. A sorting algorithm is correct if it sorts the list. The "correctness" is absolute and unchanging.
+
+In ML systems, the benchmark is a **Soft Specification**.
+*   **The Test Set is the Spec**: Correctness is defined by a finite set of examples (ImageNet).
+*   **The World Moves**: A model that scores 99% on ImageNet (the benchmark) might fail completely on user photos from 2025.
+
+In H&P architecture, you design for the benchmark because the benchmark represents the workload. In AI Engineering, designing solely for the benchmark is **overfitting**. Robustness comes from acknowledging that the benchmark is only a proxy for a shifting reality.
 :::
 
 To make this three-dimensional framework concrete, we ground it in a running example that threads through the entire chapter. MobileNet deployment validation spans all three evaluation dimensions, illustrating how each reveals problems the others cannot.
@@ -117,7 +137,7 @@ The evolution from simple performance metrics to ML benchmarking reveals three m
 
 ### Performance Benchmarks {#sec-benchmarking-ai-performance-benchmarks-ea8a}
 
-The evolution from synthetic operations to representative workloads emerged when early benchmark gaming undermined evaluation validity. Mainframe benchmarks like Whetstone (1976) and LINPACK (1979) measured isolated operations, enabling vendors to optimize for narrow tests rather than practical performance. SPEC CPU (1989) pioneered using real application workloads to ensure evaluation reflects actual deployment scenarios. This lesson directly shapes ML benchmarking: optimization claims from @sec-model-compression require validation on representative tasks. MLPerf's inclusion of real models like ResNet-50 and BERT ensures benchmarks capture deployment complexity rather than idealized test cases.
+The evolution from synthetic operations to representative workloads emerged when early benchmark gaming undermined evaluation validity. Mainframe benchmarks like Whetstone (1976) and LINPACK (1979) measured isolated operations, enabling vendors to optimize for narrow tests rather than practical performance. SPEC CPU (1989) pioneered using real application workloads to ensure evaluation reflects actual deployment scenarios. This lesson directly shapes ML benchmarking: optimization claims from @sec-model-compression require validation on representative tasks. **MLPerf**'s inclusion of real models like ResNet-50 and BERT ensures benchmarks capture deployment complexity rather than idealized test cases.
 
 As deployment contexts diversified, benchmarks evolved from single-dimension to multi-objective evaluation. Graphics benchmarks measured quality alongside speed; mobile benchmarks evaluated battery life with performance. The multi-objective challenges from @sec-introduction, balancing accuracy, latency, and energy, manifest directly in modern ML evaluation where no single metric captures deployment viability.
 
@@ -335,7 +355,7 @@ These system benchmarks perform two critical functions in the AI ecosystem. Firs
 
 :::
 
-Effective benchmark interpretation requires understanding the performance characteristics of target hardware. Understanding whether specific AI workloads are compute-bound or memory-bound provides essential insight for optimization decisions. Computational intensity, measured as FLOPS[^fn-flops-throughput] per byte of data movement, determines performance limits. Consider an NVIDIA A100 GPU with `{python} a100_tflops_fp16` TFLOPS of tensor performance (TF32/FP16 with Tensor Cores; FP32 is 19.5 TFLOPS) and `{python} a100_bw_tbs` TB/s memory bandwidth (SXM variant), yielding an arithmetic intensity threshold of 156 FLOPS/byte. The architectural foundations for understanding these hardware characteristics, including the roofline model for analyzing compute-bound versus memory-bound workloads, are established in @sec-ai-acceleration, which provides context for interpreting system benchmark results.
+Effective benchmark interpretation requires understanding the performance characteristics of target hardware. Understanding whether specific AI workloads are compute-bound or memory-bound provides essential insight for optimization decisions. Computational intensity, measured as FLOPS[^fn-flops-throughput] per byte of data movement, determines performance limits. Consider an NVIDIA A100 GPU with `{python} a100_tflops_fp16` TFLOPS of tensor performance (TF32/FP16 with Tensor Cores; FP32 is 19.5 TFLOPS) and `{python} a100_bw_tbs` TB/s memory bandwidth (SXM variant), yielding an arithmetic intensity threshold of `{python} a100_ridge` FLOPS/byte. The architectural foundations for understanding these hardware characteristics, including the **roofline model** for analyzing compute-bound versus memory-bound workloads, are established in @sec-ai-acceleration, which provides context for interpreting system benchmark results.
 
 [^fn-flops-throughput]: **FLOPS**: Floating-Point Operations Per Second, a measure of computational performance indicating how many floating-point calculations a processor can execute in one second. Modern AI accelerators achieve high FLOPS ratings: NVIDIA A100 delivers `{python} a100_tflops_fp16` TFLOPS (trillion FLOPS) for FP16/BF16 Tensor Core operations (624 TFLOPS with structured sparsity), while high-end CPUs achieve 1-10 TFLOPS. FLOPS measurements help compare hardware capabilities and determine computational bottlenecks in ML workloads.
 
@@ -347,44 +367,77 @@ This quantitative analysis, formalized in roofline models[^fn-roofline-model], p
 
 The following worked example applies *roofline analysis for BERT inference* to demonstrate how these principles translate into concrete deployment predictions.
 
+```{python}
+#| label: bert-roofline-calc
+#| echo: false
+
+# BERT-Base roofline analysis on A100
+bert_flops_b = 22  # billion FLOPs per inference
+bert_weight_mb = 440  # MB (110M params × 4 bytes)
+
+# Batch=1 arithmetic intensity
+bert_ai_b1 = bert_flops_b * 1e9 / (bert_weight_mb * 1e6)  # 50 FLOP/byte
+bert_ai_b1_str = f"{bert_ai_b1:.0f}"
+
+# Achievable perf at batch=1 (memory-bound)
+bert_perf_b1 = bert_ai_b1 * 2.0 * 1e3  # FLOP/byte × TB/s → TFLOPS (2.0 TB/s)
+bert_perf_b1_tflops = bert_perf_b1 / 1e3  # → 100 TFLOPS
+bert_perf_b1_str = f"{bert_perf_b1_tflops:.0f}"
+
+# GPU utilization at batch=1
+bert_util_b1 = bert_perf_b1_tflops / 312 * 100  # 32%
+bert_util_b1_str = f"{bert_util_b1:.0f}"
+
+# Batch=32 analysis
+bert_batch32_flops = bert_flops_b * 32  # 704 billion
+bert_ai_b32 = bert_batch32_flops * 1e9 / (bert_weight_mb * 1e6)  # 1600 FLOP/byte
+bert_batch32_flops_str = f"{bert_batch32_flops}"
+bert_ai_b32_str = f"{bert_ai_b32:.0f}"
+
+# Achievable perf at batch=32 (compute-bound, ~85% of peak)
+bert_perf_b32 = 0.85 * 312  # 265 TFLOPS
+bert_perf_b32_str = f"{bert_perf_b32:.0f}"
+
+```
+
 ::: {.callout-notebook title="Roofline Analysis for BERT Inference"}
 
 **Problem**: You need to deploy BERT-Base for inference on an A100 GPU. Management expects high GPU utilization. What performance should you predict, and how can you improve it?
 
 #### Step 1: Hardware Limits {.unnumbered}
 
-- Peak compute: 312 TFLOPS (Tensor Core, TF32/FP16)
-- Memory bandwidth: 2.0 TB/s
-- Ridge point: $312 \div 2.0 = 156$ FLOPS/byte
+- Peak compute: `{python} a100_tflops_fp16` TFLOPS (Tensor Core, TF32/FP16)
+- Memory bandwidth: `{python} a100_bw_tbs` TB/s
+- Ridge point: `{python} a100_tflops_fp16` $\div$ `{python} a100_bw_tbs` = `{python} a100_ridge` FLOPS/byte
 
-Any workload with arithmetic intensity below 156 FLOPS/byte is memory-bound; above is compute-bound.
+Any workload with arithmetic intensity below `{python} a100_ridge` FLOPS/byte is memory-bound; above is compute-bound.
 
 #### Step 2: BERT-Base Characteristics {.unnumbered}
 
 - Parameters: 110M = 440 MB (FP32)
 - FLOPs per inference: ~22 billion (forward pass)
 - Data movement: ~440 MB (must load all weights from memory)
-- Arithmetic intensity: $22 \times 10^9 \div 440 \times 10^6 = 50$ FLOPS/byte
+- Arithmetic intensity: $22 \times 10^9 \div 440 \times 10^6 =$ `{python} bert_ai_b1_str` FLOPS/byte
 
 #### Step 3: Performance Prediction {.unnumbered}
 
-Since 50 < 156, BERT at batch=1 is **memory-bound**:
+Since 50 < `{python} a100_ridge`, BERT at batch=1 is **memory-bound**:
 
-$$\text{Achievable perf} = 50 \text{ FLOPS/byte} \times 2.0 \text{ TB/s} = 100 \text{ TFLOPS}$$
+$$\text{Achievable perf} = `{python} bert_ai_b1_str` \text{ FLOPS/byte} \times 2.0 \text{ TB/s} = `{python} bert_perf_b1_str` \text{ TFLOPS}$$
 
-$$\text{GPU utilization} = 100 \div 312 = 32\%$$
+$$\text{GPU utilization} = `{python} bert_perf_b1_str` \div `{python} a100_tflops_fp16` = `{python} bert_util_b1_str`\%$$
 
 #### Step 4: Optimization via Batching {.unnumbered}
 
 Increase batch size to 32:
 
 - Same 440 MB of weights, but 32× more compute
-- New FLOPs: $22 \times 10^9 \times 32 = 704 \times 10^9$
-- New intensity: $704 \times 10^9 \div 440 \times 10^6 = 1600$ FLOPS/byte
+- New FLOPs: $22 \times 10^9 \times 32 = `{python} bert_batch32_flops_str` \times 10^9$
+- New intensity: $`{python} bert_batch32_flops_str` \times 10^9 \div 440 \times 10^6 =$ `{python} bert_ai_b32_str` FLOPS/byte
 
-Since 1600 > 156, batch=32 is **compute-bound**:
+Since 1600 > `{python} a100_ridge`, batch=32 is **compute-bound**:
 
-$$\text{Achievable perf} \approx 0.85 \times 312 = 265 \text{ TFLOPS}$$
+$$\text{Achievable perf} \approx 0.85 \times `{python} a100_tflops_fp16` = `{python} bert_perf_b32_str` \text{ TFLOPS}$$
 
 $$\text{GPU utilization} \approx 85\%$$
 
@@ -633,7 +686,7 @@ To avoid measuring hardware artifacts instead of kernel performance, follow the 
 
 1.  **The Warm-up Rule**: Never measure the first 10-50 iterations. Modern hardware uses **DVFS (Dynamic Voltage and Frequency Scaling)** and **Turbo Boost**. A "cold" GPU may take 100ms to ramp from 300MHz to 1.5GHz. Your first batch will appear 5x slower than reality.
 2.  **The Variance Rule**: Report the **Coefficient of Variation (CV)** ($CV = \sigma / \mu$). If $CV > 0.05$ (5%), your measurement is noisy. This usually indicates background OS jitter, thermal throttling, or memory contention.
-3.  **The "Speed of Light" (SOL) Check**: Compare your achieved throughput against the **Roofline**. If your kernel achieves 10 TFLOPS on an H100 (peak ~990 TFLOPS for FP8 dense, or ~4,000 TFLOPS FP8 with sparsity), don't just optimize the code—ask *why* the utilization is so low. Is it a **Kernel Launch Latency** issue (too many small kernels)?
+3.  **The "Speed of Light" (SOL) Check**: Compare your achieved throughput against the **Roofline**. If your kernel achieves 10 TFLOPS on an H100 (peak ~`{python} h100_tflops_fp16` TFLOPS for FP8 dense, or ~4,000 TFLOPS FP8 with sparsity), don't just optimize the code—ask *why* the utilization is so low. Is it a **Kernel Launch Latency** issue (too many small kernels)?
 4.  **The Flush Rule**: When measuring memory bandwidth, ensure you flush the L2 cache between runs, or your "bandwidth" will reflect cache speed (~5-10 TB/s) rather than DRAM speed (~1-2 TB/s).
 
 :::
@@ -1047,7 +1100,7 @@ Understanding the landscape of ML benchmarking requires organizing metrics into 
 
 **Key distinctions**:
 
-- **Throughput vs. Latency**: Throughput measures aggregate capacity (ideal for batch processing), while latency measures individual request timing (critical for interactive applications). These metrics can conflict; maximizing throughput often increases latency through batching.
+- **Throughput vs. Latency**: **Throughput** measures aggregate capacity (ideal for batch processing), while **latency** measures individual request timing (critical for interactive applications). These metrics can conflict; maximizing throughput often increases latency through batching.
 
 - **Mean vs. Percentile Latency**: Mean latency can hide problematic tail behavior. A system with 10ms mean latency might have 500ms p99 latency, failing SLA requirements. In production, you should report percentiles (p50, p95, p99) in addition to means.
 
@@ -1181,7 +1234,7 @@ Applying these questions to a concrete vendor claim illustrates how incomplete s
 3. **What is included?** Pure inference, or including preprocessing?
 4. **What accuracy?** Matching the original 76.1% Top-1, or degraded?
 
-**A Complete Specification**: "10,000 images/second on ResNet-50 at batch size 32, INT8 precision, 76.0% Top-1 accuracy, including JPEG decoding, on NVIDIA H100 at 700W TDP."
+**A Complete Specification**: "10,000 images/second on ResNet-50 at batch size 32, INT8 precision, 76.0% Top-1 accuracy, including JPEG decoding, on NVIDIA H100 at `{python} h100_tdp`W TDP."
 
 **The Systems Insight**: Understanding whether a performance difference is meaningful requires both statistical rigor AND contextual validation. A benchmark number without these details is a marketing claim, not an engineering specification.
 :::
@@ -1321,9 +1374,9 @@ Training benchmarks validate whether hardware acceleration delivers promised tra
 
 These benchmarks are vital because training represents the largest capital expenditure in ML systems. A cluster that costs $10M should demonstrably outperform a $2M cluster on training time-to-accuracy, but only rigorous benchmarking reveals whether the 5x cost delivers proportional value or falls victim to scaling inefficiencies, memory bottlenecks, or communication overhead.
 
-For instance, large-scale models like OpenAI's GPT-3[^fn-bench-gpt3] [@brown2020language], which consists of 175 billion parameters trained on approximately 570GB of filtered CommonCrawl text (from a ~45TB raw dataset, combined with other sources to form 300 billion training tokens), highlight the immense computational demands of modern training. Standardized *ML training benchmarks* provide systematic evaluation of the underlying systems to ensure that hardware and software configurations can meet these unprecedented demands efficiently.
+For instance, large-scale models like OpenAI's GPT-3[^fn-bench-gpt3] [@brown2020language], which consists of `{python} gpt3_params_b` billion parameters trained on approximately 570GB of filtered CommonCrawl text (from a ~45TB raw dataset, combined with other sources to form 300 billion training tokens), highlight the immense computational demands of modern training. Standardized *ML training benchmarks* provide systematic evaluation of the underlying systems to ensure that hardware and software configurations can meet these unprecedented demands efficiently.
 
-[^fn-bench-gpt3]: **GPT-3**: OpenAI's 2020 language model with 175 billion parameters, trained on 300 billion tokens using 10,000 NVIDIA V100 GPUs for several months at an estimated cost of $4.6 million or more (Lambda Labs estimate; actual cost likely higher due to scaling inefficiencies). GPT-3 demonstrated emergent abilities like few-shot learning and in-context reasoning, establishing the paradigm of scaling laws where larger models consistently outperform smaller ones across diverse language tasks.
+[^fn-bench-gpt3]: **GPT-3**: OpenAI's 2020 language model with `{python} gpt3_params_b` billion parameters, trained on 300 billion tokens using 10,000 NVIDIA V100 GPUs for several months at an estimated cost of $4.6 million or more (Lambda Labs estimate; actual cost likely higher due to scaling inefficiencies). GPT-3 demonstrated emergent abilities like few-shot learning and in-context reasoning, establishing the paradigm of scaling laws where larger models consistently outperform smaller ones across diverse language tasks.
 
 ::: {.callout-definition title="ML Training Benchmarks"}
 
@@ -1535,7 +1588,7 @@ Y,Date
 **Importance of Training Benchmarks.**
 As machine learning models grow in complexity, training becomes increasingly demanding in terms of compute power, memory, and data storage. The ability to measure and compare training efficiency is critical to ensuring that systems can effectively handle large-scale workloads. Training benchmarks provide a structured methodology for assessing performance across different hardware platforms, software frameworks, and optimization techniques.
 
-A primary challenge in training machine learning models is efficient allocation of computational resources. Training a large-scale language model such as GPT-3, which consists of 175 billion parameters and requires processing terabytes of data, places enormous demands on modern computing infrastructure. Without standardized benchmarks, it is difficult to determine whether a system fully utilizes its resources or whether inefficiencies (slow data loading, underutilized accelerators, excessive memory overhead) limit performance.
+A primary challenge in training machine learning models is efficient allocation of computational resources. Training a large-scale language model such as GPT-3, which consists of `{python} gpt3_params_b` billion parameters and requires processing terabytes of data, places enormous demands on modern computing infrastructure. Without standardized benchmarks, it is difficult to determine whether a system fully utilizes its resources or whether inefficiencies (slow data loading, underutilized accelerators, excessive memory overhead) limit performance.
 
 Training benchmarks help uncover such inefficiencies by measuring key performance indicators, including system throughput, time-to-accuracy, and hardware utilization. Recall from @sec-ai-acceleration that GPUs achieve approximately 15,700 GFLOPS for mixed-precision operations while TPUs deliver 275,000 INT8 operations per second for specialized tensor workloads. Training benchmarks allow us to measure whether these theoretical hardware capabilities translate to actual training speedups under realistic conditions. These benchmarks allow practitioners to analyze whether accelerators are being leveraged effectively or whether specific bottlenecks, such as memory bandwidth constraints from hardware limitations (@sec-ai-acceleration), are reducing overall system performance. For example, a system using TF32 precision1 may achieve higher throughput than one using FP32, but if TF32 introduces numerical instability that increases the number of iterations required to reach the target accuracy, the overall training time may be longer. By providing insights into these factors, benchmarks support the design of more efficient training workflows that maximize hardware potential while minimizing unnecessary computation.
 
@@ -1609,6 +1662,26 @@ Parallelism in training is categorized into data parallelism[^fn-data-parallel],
 
 A key metric for evaluating parallelism is *scaling efficiency*, which quantifies how much of the added computational capacity translates into actual speedup.
 
+```{python}
+#| label: scaling-efficiency-calc
+#| echo: false
+
+# Scaling efficiency worked example: ResNet-50 on ImageNet
+t1_hours = 24       # single-GPU training time
+n_gpus = 8
+tn_hours = 4        # actual N-GPU training time
+
+ideal_hours = t1_hours / n_gpus
+efficiency_pct = t1_hours / (n_gpus * tn_hours) * 100
+loss_pct = 100 - efficiency_pct
+
+ideal_str = f"{ideal_hours:.0f}"
+eff_str = f"{efficiency_pct:.0f}"
+loss_str = f"{loss_pct:.0f}"
+eff_denom = n_gpus * tn_hours
+eff_denom_str = f"{eff_denom}"
+```
+
 ::: {.callout-notebook title="Scaling Efficiency Calculation"}
 
 **Problem**: Your team trains ResNet-50 on ImageNet. Single-GPU training takes 24 hours. With 8 GPUs, training takes 4 hours. Is this good scaling? Where did the efficiency go?
@@ -1623,11 +1696,11 @@ Where $T(1)$ is single-GPU time, $T(N)$ is N-GPU time, and $N$ is GPU count.
 
 #### Step 2: Calculate Efficiency {.unnumbered}
 
-$$\text{Efficiency}(8) = \frac{24 \text{ hours}}{8 \times 4 \text{ hours}} \times 100\% = \frac{24}{32} = 75\%$$
+$$\text{Efficiency}(8) = \frac{24 \text{ hours}}{8 \times 4 \text{ hours}} \times 100\% = \frac{24}{`{python} eff_denom_str`} = `{python} eff_str`\%$$
 
-With perfect scaling, 8 GPUs would complete in 3 hours (24/8). The actual 4 hours represents 75% efficiency.
+With perfect scaling, 8 GPUs would complete in `{python} ideal_str` hours (24/8). The actual 4 hours represents `{python} eff_str`% efficiency.
 
-#### Step 3: Account for the 25% Loss {.unnumbered}
+#### Step 3: Account for the `{python} loss_str`% Loss {.unnumbered}
 
 The "missing" 25% decomposes into measurable overhead:
 
@@ -1960,9 +2033,32 @@ These component-level contributions explain why optimizing any single stage yiel
 
 ::: {.callout-notebook title="Amdahl's Law: Optimization Ceiling"}
 
-The latency breakdown reveals why aggressive model optimization often yields disappointing end-to-end results. Consider a vision pipeline where preprocessing (JPEG decode, resize, normalize) consumes 8ms and inference consumes 10ms. Optimizing inference by 5x (from 10ms to 2ms) reduces total latency from 18ms to only 10ms, a 1.8x improvement rather than 5x.
+```{python}
+#| label: amdahl-benchmark-calc
+#| echo: false
 
-Amdahl's Law formalizes this ceiling: if preprocessing consumes fraction $f$ of total latency, then even infinitely fast inference yields at most $1/f$ speedup. With preprocessing at 45% of latency ($f = 0.45$), the maximum achievable speedup is $1/0.45 \approx 2.2\times$ regardless of model optimization.
+# Amdahl's Law: vision pipeline optimization
+bench_preprocess_ms = 8
+bench_inference_ms = 10
+bench_total_ms = bench_preprocess_ms + bench_inference_ms
+bench_inf_speedup = 5
+bench_opt_inference_ms = bench_inference_ms / bench_inf_speedup
+bench_opt_total_ms = bench_preprocess_ms + bench_opt_inference_ms
+bench_e2e_improvement = bench_total_ms / bench_opt_total_ms
+
+# Amdahl's ceiling with preprocessing fraction
+preprocess_fraction = 0.45
+amdahl_ceiling = 1 / preprocess_fraction
+
+bench_e2e_str = f"{bench_e2e_improvement:.1f}"
+bench_opt_total_str = f"{bench_opt_total_ms:.0f}"
+bench_opt_inf_str = f"{bench_opt_inference_ms:.0f}"
+amdahl_ceiling_str = f"{amdahl_ceiling:.1f}"
+```
+
+The latency breakdown reveals why aggressive model optimization often yields disappointing end-to-end results. Consider a vision pipeline where preprocessing (JPEG decode, resize, normalize) consumes `{python} bench_preprocess_ms`ms and inference consumes `{python} bench_inference_ms`ms. Optimizing inference by `{python} bench_inf_speedup`x (from `{python} bench_inference_ms`ms to `{python} bench_opt_inf_str`ms) reduces total latency from `{python} bench_total_ms`ms to only `{python} bench_opt_total_str`ms, a `{python} bench_e2e_str`x improvement rather than `{python} bench_inf_speedup`x.
+
+Amdahl's Law formalizes this ceiling: if preprocessing consumes fraction $f$ of total latency, then even infinitely fast inference yields at most $1/f$ speedup. With preprocessing at 45% of latency ($f = `{python} preprocess_fraction`$), the maximum achievable speedup is $1/`{python} preprocess_fraction` \approx `{python} amdahl_ceiling_str`\times$ regardless of model optimization.
 
 This principle has direct implications for benchmarking interpretation. A 3× inference speedup reported in isolation might translate to only 1.5× end-to-end improvement in production. Comprehensive benchmarks must either include preprocessing in measurements or clearly state that reported speedups apply only to the inference component.
 
@@ -3325,7 +3421,22 @@ The compression evaluation framework applies well to models with well-defined ac
 [^fn-perplexity]: **Perplexity**: From Latin "perplexus" (entangled, confused), entering English in the 15th century to describe mental bewilderment. In information theory, Claude Shannon adapted the concept in the 1940s as 2^H(p) where H is entropy, measuring how "confused" or uncertain a probability distribution is. For language models, perplexity quantifies how surprised the model is by test text. A perplexity of 1 means perfect prediction; 100 means the model is as confused as randomly choosing among 100 equally likely words.
 
 - **First-token latency** (time to first generated token) dominates user-perceived responsiveness for interactive applications. This metric is dominated by prompt processing, proportional to input length.
-- **Tokens per second** measures generation throughput. Modern LLMs achieve 20-100 tokens/second depending on model size and hardware. For a 500-word response (~750 tokens), 25 vs 100 tokens/second means 30 seconds vs 7.5 seconds.
+```{python}
+#| label: llm-throughput-calc
+#| echo: false
+
+response_tokens = 750  # ~500 words
+slow_toks = 25
+fast_toks = 100
+
+slow_sec = response_tokens / slow_toks
+fast_sec = response_tokens / fast_toks
+
+slow_str = f"{slow_sec:.0f}"
+fast_str = f"{fast_sec:.1f}"
+```
+
+- **Tokens per second** measures generation throughput. Modern LLMs achieve 20-100 tokens/second depending on model size and hardware. For a 500-word response (~750 tokens), 25 vs 100 tokens/second means `{python} slow_str` seconds vs `{python} fast_str` seconds.
 - **Time-to-first-token vs inter-token latency** capture different bottlenecks requiring different optimizations. Batching improves throughput but typically increases first-token latency, a trade-off invisible if only one metric is measured.
 
 **Benchmark contamination** is a unique LLM failure mode. Models trained on web-scale corpora may encounter benchmark questions during pretraining, inflating scores through memorization rather than capability [@xu2024benchmarking]. Studies estimate 4-15% contamination rates for popular benchmarks, with contaminated examples showing 10-20% higher accuracy. Mitigation strategies include temporal holdouts (benchmarks from content published after training cutoff), dynamic benchmarks (continuously generated evaluation instances), and contamination detection (testing whether models recall exact benchmark phrasing).

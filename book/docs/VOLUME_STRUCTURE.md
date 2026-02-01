@@ -40,7 +40,7 @@ Establish the conceptual framework for understanding ML as a systems discipline.
 |----|-------|---------|
 | 1 | Introduction | Why ML systems thinking matters |
 | 2 | ML Systems | Survey of the field, deployment paradigms |
-| 3 | Workflow | End-to-end ML development process |
+| 3 | ML Workflow | End-to-end ML development process |
 | 4 | Data Engineering | Pipelines, preprocessing, data quality |
 
 #### Part II: Build
@@ -48,10 +48,10 @@ The technical implementation of machine learning systems from math to trained mo
 
 | Ch | Title | Purpose |
 |----|-------|---------|
-| 5 | DL Primer | Mathematical and conceptual foundations |
-| 6 | DNN Architectures | CNNs, RNNs, Transformers, architectural choices |
-| 7 | Frameworks | PyTorch, TensorFlow, JAX ecosystem |
-| 8 | Training | Training loops, optimization, debugging |
+| 5 | Neural Computation | Mathematical and conceptual foundations |
+| 6 | Network Architectures | CNNs, RNNs, Transformers, architectural choices |
+| 7 | ML Frameworks | PyTorch, TensorFlow, JAX ecosystem |
+| 8 | Model Training | Training loops, optimization, debugging |
 
 #### Part III: Optimization
 Techniques for making ML systems efficient and fast.
@@ -68,7 +68,7 @@ Getting models into production responsibly.
 
 | Ch | Title | Purpose |
 |----|-------|---------|
-| 13 | Serving | Inference fundamentals, batching, latency optimization |
+| 13 | Model Serving | Inference fundamentals, batching, latency optimization |
 | 14 | ML Operations | Deployment, monitoring, CI/CD for ML |
 | 15 | Responsible Engineering | Ethics, safety, and professional practice |
 | 16 | Conclusion | Synthesis and bridge to Volume II |

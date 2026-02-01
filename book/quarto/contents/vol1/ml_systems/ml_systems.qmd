@@ -5,7 +5,7 @@ glossary: ml_systems_glossary.json
 engine: jupyter
 ---
 
-# ML System Architecture {#sec-ml-system-architecture}
+# ML Systems {#sec-ml-system-architecture}
 
 ::: {layout-narrow}
 ::: {.column-margin}
@@ -51,6 +51,25 @@ Before examining each paradigm, we must understand why deployment complexity dom
 
 **The Systems Lesson**: "Machine Learning" is easy; **"Machine Learning Systems"** are hard. The friction in deployment rarely comes from the matrix multiplication (the 5%); it comes from the interface between that math and the messy reality of the other 95%. If you optimize only the model, you are optimizing the smallest part of the problem.
 :::
+
+The following plot (@fig-systems-gap) visualizes this challenge as the **Systems Gap**: the divergence between what models demand and what hardware naturally provides.
+
+```{python}
+#| label: fig-systems-gap
+#| echo: false
+#| fig-cap: "**The Systems Gap.** Relative Compute Growth (Log Scale). The gray dotted line shows the **CPU Performance Trend** (~1.3x/year), which lags Moore's Law due to power constraints. The blue dashed line shows **GPU Peak (Huang's Law)** (accelerated scaling, ~1.7x/year), which bridged the gap from 2012-2018. The red solid line shows **Model Demand** (Scaling Laws, ~6x/year). The shaded purple region represents the **Systems Gap**: the massive deficit that cannot be closed by better chips alone, but must be filled by **Parallelism, Architecture, and Hardware-Software Co-design**."
+#| fig-alt: "Log-scale line chart from 2012 to 2024. Red line (Model Demand) rises steeply. Blue line (GPU Supply) rises moderately. Gray line (CPU Trend) rises slowly. A large purple shaded area between Red and Blue is labeled 'THE SYSTEMS GAP'."
+
+import sys
+import matplotlib.pyplot as plt
+# Ensure calc directory is in path
+sys.path.append('../../../calc')
+import viz
+
+viz.set_book_style()
+viz.plot_systems_gap()
+plt.show()
+```
 
 ### The Four Deployment Paradigms {#sec-ml-system-architecture-four-deployment-paradigms}
 
@@ -264,9 +283,20 @@ California to Virginia (~3,600 km straight-line) requires **~36 ms minimum** bef
 $$\text{Power} \propto C \times V^2 \times f \quad \text{where } V \propto f \implies \text{Power} \propto f^3$$
 Doubling clock frequency requires approximately 8× more power. This cubic relationship ended the era of "free" speedups via frequency scaling and forced the industry toward the parallelism (multi-core) and specialization (GPUs, TPUs) that defines modern ML. Mobile devices hit hard thermal limits at 3–5W; exceeding this causes "throttling," where the device reduces performance to prevent overheating. This constraint creates the need for **Mobile ML**: battery-powered devices cannot simply run cloud-scale models locally.
 
+```{python}
+#| label: memory-wall-calc
+#| echo: false
+
+# Memory wall: compute growth outpaces memory bandwidth growth
+compute_growth_per_yr = 1.6
+mem_bw_growth_per_yr = 1.2
+mem_wall_ratio = compute_growth_per_yr / mem_bw_growth_per_yr
+mem_wall_ratio_str = f"{mem_wall_ratio:.2f}"
+```
+
 **The Memory Wall** [@wulf1995memory] reflects the widening bandwidth[^fn-bandwidth] gap:
 
-$$\frac{\text{Compute Growth}}{\text{Memory BW Growth}} \approx \frac{1.6\times/\text{year}}{1.2\times/\text{year}} \approx 1.33\times/\text{year}$$
+$$\frac{\text{Compute Growth}}{\text{Memory BW Growth}} \approx \frac{1.6\times/\text{year}}{1.2\times/\text{year}} \approx `{python} mem_wall_ratio_str`\times/\text{year}$$
 
 Processors double in compute capacity every 18 months, but memory bandwidth improves only ~20% annually. This widening gap makes data movement the dominant bottleneck and energy cost for most ML workloads. This constraint affects all paradigms but is especially acute for **TinyML**, where devices have only kilobytes of memory to work with.
 
@@ -385,9 +415,21 @@ Throughout this book, we use five **Lighthouse Examples** introduced in @sec-int
 
 To orient readers who have not yet encountered these architectures, the following summaries describe each workload from a systems perspective.
 
-**ResNet-50** classifies images into 1,000 categories, processing each image through approximately 4 billion floating-point operations using 25.6 million parameters (102 MB at FP32). Its regular, compute-dense structure makes it the canonical benchmark for hardware accelerator performance.
+```{python}
+#| label: lighthouse-setup
+#| echo: false
+from calc.constants import *
+from calc.formulas import fmt
 
-**GPT-2 / Llama** generate text one token at a time, requiring the model to read its full parameter set (1.5 billion for GPT-2, 7 to 70 billion for Llama) from memory for each output token. This sequential memory access pattern creates the autoregressive bottleneck that dominates serving costs.
+resnet_gflops = f"{RESNET50_FLOPs.to(GFLOPs).magnitude:.1f}"
+resnet_params_m = f"{RESNET50_PARAMS.to(Mparam).magnitude:.1f}"
+resnet_fp32_mb = f"{(RESNET50_PARAMS.magnitude * 4 * byte).to(MB).magnitude:.0f}"
+gpt2_params_b = f"{GPT2_PARAMS.to(Mparam).magnitude/1000:.1f}"
+```
+
+**ResNet-50** classifies images into 1,000 categories, processing each image through approximately `{python} resnet_gflops` billion floating-point operations using `{python} resnet_params_m` million parameters (`{python} resnet_fp32_mb` MB at FP32). Its regular, compute-dense structure makes it the canonical benchmark for hardware accelerator performance.
+
+**GPT-2 / Llama** generate text one token at a time, requiring the model to read its full parameter set (`{python} gpt2_params_b` billion for GPT-2, 7 to 70 billion for Llama) from memory for each output token. This sequential memory access pattern creates the autoregressive bottleneck that dominates serving costs.
 
 **MobileNet** performs the same image classification task as ResNet but uses depthwise separable convolutions to reduce computation by 8 to 9x, enabling real-time inference on smartphones at 3 to 5 watts.
 
@@ -1253,7 +1295,20 @@ The battery constraint limits total energy consumption over time. However, even 
 3. **Thermal Trip**: Within 60 seconds, the hardware reaches the **Thermal Trip Point** ($80^\circ\text{C}$), triggering OS throttling.
 4. **The Result**: Your 100 FPS model suddenly drops to **30 FPS** to avoid melting the hardware.
 
-**The Engineering Conclusion**: Quantization from FP32 to INT8 reduces power by approximately 4×, but if the baseline power is 12W, you are still at 3W—the absolute limit of the hardware. Physics sets a hard ceiling that no optimization can exceed.
+```{python}
+#| label: thermal-quant-calc
+#| echo: false
+
+baseline_power_w = 12
+quant_reduction = 4
+quant_power_w = baseline_power_w / quant_reduction
+
+baseline_str = f"{baseline_power_w:.0f}"
+quant_power_str = f"{quant_power_w:.0f}"
+quant_red_str = f"{quant_reduction:.0f}"
+```
+
+**The Engineering Conclusion**: Quantization from FP32 to INT8 reduces power by approximately `{python} quant_red_str`×, but if the baseline power is `{python} baseline_str`W, you are still at `{python} quant_power_str`W—the absolute limit of the hardware. Physics sets a hard ceiling that no optimization can exceed.
 :::
 
 []{#sec-ml-system-architecture-battery-thermal-constraints-ab51}
@@ -1976,7 +2031,7 @@ The remaining chapters in this volume explore each layer: @sec-data-engineering-
 
 ### From Deployment to Operations
 
-The preceding sections addressed *where* to deploy ML systems and *how* to combine paradigms effectively. But deployment is not the end of the engineering challenge; it is the beginning of a new one. Traditional software, once deployed correctly, remains correct indefinitely. ML systems face a fundamentally different reality: **statistical decay**.
+The preceding sections addressed *where* to deploy ML systems and *how* to combine paradigms effectively. But deployment is not the end of the engineering challenge; it is the beginning of a new one. Traditional software, once deployed correctly, remains correct indefinitely. ML systems face a fundamentally different reality: **System Entropy (statistical decay)**.
 
 Unlike a sorting algorithm that remains correct as long as the code is unchanged, an ML model's accuracy degrades as the world drifts away from its training distribution—precisely what the Introduction's Degradation Equation captured. Every deployed model is in a state of unobserved decay from the moment it ships. Reliability in ML systems is therefore not a property of the code but a property of the monitoring and retraining infrastructure built to detect and correct this drift. The operational aspects covered in @sec-machine-learning-operations-mlops address precisely this challenge.
 
@@ -1992,13 +2047,30 @@ Physical constraints create hard boundaries that no single paradigm can span. As
 
 A related misconception holds that moving computation closer to the user always reduces latency, ignoring the processing overhead introduced by less powerful edge hardware.
 
+```{python}
+#| label: latency-mirage-calc
+#| echo: false
+
+# Cloud vs Edge latency comparison
+cloud_network_ms = 50
+cloud_inference_ms = 10
+cloud_total_ms = cloud_network_ms + cloud_inference_ms
+
+edge_network_ms = 5
+edge_inference_ms = 80
+edge_total_ms = edge_network_ms + edge_inference_ms
+
+cloud_total_str = f"{cloud_total_ms:.0f}"
+edge_total_str = f"{edge_total_ms:.0f}"
+```
+
 ::: {.callout-example title="The Latency Mirage"}
 **Fallacy**: Edge deployment always reduces latency compared to cloud.
 
 **The Reality**: "Closer" does not always mean "faster." Edge systems introduce processing overheads that cloud systems optimize away.
 
-*   **Cloud Path**: 50 ms network + 10 ms inference (A100) = **60 ms total**.
-*   **Edge Path**: 5 ms network + 80 ms inference (Raspberry Pi) = **85 ms total**.
+*   **Cloud Path**: 50 ms network + 10 ms inference (A100) = **`{python} cloud_total_str` ms total**.
+*   **Edge Path**: 5 ms network + 80 ms inference (Raspberry Pi) = **`{python} edge_total_str` ms total**.
 
 **The Engineering Conclusion**: The break-even point occurs only when local processing time plus reduced network distance falls below total cloud round-trip time. Teams deploying edge infrastructure without quantitative latency budgets often discover their solution increases tail latency while adding operational complexity and hardware costs.
 :::

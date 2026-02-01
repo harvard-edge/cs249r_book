@@ -47,7 +47,7 @@ For each chapter:
 
 ---
 
-## Chapter 3: Deep Learning Primer
+## Chapter 3: Neural Computation
 
 | Paper | Authors | Year | Why Seminal |
 |-------|---------|------|-------------|
@@ -63,7 +63,7 @@ For each chapter:
 
 ---
 
-## Chapter 4: DNN Architectures
+## Chapter 4: Network Architectures
 
 | Paper | Authors | Year | Why Seminal |
 |-------|---------|------|-------------|
@@ -99,7 +99,7 @@ For each chapter:
 
 ---
 
-## Chapter 6: Training
+## Chapter 6: Model Training
 
 | Paper | Authors | Year | Why Seminal |
 |-------|---------|------|-------------|
@@ -164,7 +164,7 @@ For each chapter:
 
 ---
 
-## Chapter 10: Serving
+## Chapter 10: Model Serving
 
 | Paper | Authors | Year | Why Seminal |
 |-------|---------|------|-------------|
@@ -206,7 +206,7 @@ For each chapter:
 
 ---
 
-## Chapter 13: MLOps
+## Chapter 13: ML Operations
 
 | Paper | Authors | Year | Why Seminal |
 |-------|---------|------|-------------|
@@ -233,7 +233,7 @@ For each chapter:
 
 ---
 
-## Chapter 15: Workflow
+## Chapter 15: ML Workflow
 
 | Paper | Authors | Year | Why Seminal |
 |-------|---------|------|-------------|
@@ -249,19 +249,19 @@ For each chapter:
 |---------|----------------------|
 | Introduction | 10 |
 | ML Systems | 8 |
-| DL Primer | 9 |
-| DNN Architectures | 14 |
-| Frameworks | 8 |
-| Training | 8 |
-| HW Acceleration | 11 |
+| Neural Computation | 9 |
+| Network Architectures | 14 |
+| ML Frameworks | 8 |
+| Model Training | 8 |
+| Hardware Acceleration | 11 |
 | Model Compression | 10 |
 | Benchmarking | 8 |
-| Serving | 8 |
+| Model Serving | 8 |
 | Data Engineering | 5 |
 | Data Efficiency | 8 |
-| MLOps | 5 |
+| ML Operations | 5 |
 | Responsible Engr | 8 |
-| Workflow | 3 |
+| ML Workflow | 3 |
 | **TOTAL** | **~113 unique papers** |
 
 ---

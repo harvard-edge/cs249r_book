@@ -4,7 +4,7 @@ concepts: data_engineering_concepts.yml
 glossary: data_engineering_glossary.json
 ---
 
-# Data Engineering for ML {#sec-data-engineering-ml}
+# Data Engineering {#sec-data-engineering-ml}
 
 ::: {layout-narrow}
 ::: {.column-margin}
@@ -85,6 +85,25 @@ A fundamental law of data-centric engineering is the **Statistical Ceiling**: Th
 
 If your labels are only 90% accurate, your model’s ceiling is 90% accuracy, regardless of whether you use a simple linear regression or a trillion-parameter transformer. In the context of the **Iron Law**, data engineering is the dual process of lowering the **Data ($D$)** term (through filtering and deduplication) while simultaneously raising this **Performance Ceiling** (through cleaning and labeling consistency). No amount of compute ($Ops$) can overcome a low statistical ceiling.
 :::
+
+The implications of this ceiling are visualized in @fig-data-quality-multiplier, which contrasts the scaling laws of clean versus noisy data. While clean data allows accuracy to improve with a power law, noisy data causes performance to plateau, making data cleaning a higher-leverage activity than mere data accumulation.
+
+```{python}
+#| label: fig-data-quality-multiplier
+#| echo: false
+#| fig-cap: "**The Data Quality Multiplier.** Model Accuracy vs. Dataset Size (Log Scale) for Clean vs. Noisy Data. High-quality data (Green) follows a steeper power law, reaching higher accuracy with fewer samples. Low-quality data (Red) hits a 'Statistical Ceiling' earlier, where adding more data yields diminishing returns due to irreducible label noise. This gap illustrates why data cleaning is often a higher-leverage optimization than model scaling."
+#| fig-alt: "Line plot showing accuracy vs. dataset size. Green line (Clean Data) rises steeply. Red line (Noisy Data) flattens out. Shaded area represents the 'Quality Gap'."
+
+import sys
+import matplotlib.pyplot as plt
+# Ensure calc directory is in path
+sys.path.append('../../../calc')
+import viz
+
+viz.set_book_style()
+viz.plot_data_quality_multiplier()
+plt.show()
+```
 
 The statistical ceiling establishes the theoretical bound on model performance. But how do we quantify the practical returns from investing in data quality? The following analysis demonstrates the compounding economics of one common data quality improvement, a phenomenon we call the *deduplication dividend*.
 
@@ -169,15 +188,39 @@ Effective data engineering maximizes this ratio. "Data Cleaning" is not just hyg
 ::: {.callout-notebook title="The Physics of Data Gravity"}
 **Problem**: You have a **1 PB** training dataset in a US East data center. You want to train a model using a TPU pod in US West. Is it faster to move the data or the compute?
 
+```{python}
+#| label: data-gravity-calc
+#| echo: false
+
+# Data gravity physics
+dataset_pb = 1
+dataset_gb_gravity = dataset_pb * 1_000_000  # 1 PB in GB
+network_gbps = 100  # Gbps
+network_gbs = network_gbps / 8  # GB/s
+transfer_seconds = dataset_gb_gravity / network_gbs
+transfer_hours = transfer_seconds / 3600
+
+egress_cost_per_gb = 0.01  # $/GB
+transfer_cost = dataset_gb_gravity * egress_cost_per_gb
+
+tpuv4_cost_per_hour = 4.0  # approximate $/hour
+equivalent_tpu_hours = transfer_cost / tpuv4_cost_per_hour
+
+transfer_seconds_str = f"{transfer_seconds:,.0f}"
+transfer_hours_str = f"{transfer_hours:.0f}"
+transfer_cost_str = f"{transfer_cost:,.0f}"
+tpu_hours_str = f"{equivalent_tpu_hours:,.0f}"
+```
+
 **The Physics**:
 
-1.  **Network Bandwidth**: A dedicated 100 Gbps line = 12.5 GB/s.
-2.  **Transfer Time**: $1,000,000 \text{ GB} / 12.5 \text{ GB/s} = 80,000 \text{ seconds} \approx \mathbf{22 \text{ hours}}$.
-3.  **Cost**: At $0.01/GB egress, moving 1 PB costs **$10,000**.
+1.  **Network Bandwidth**: A dedicated `{python} network_gbps` Gbps line = `{python} f"{network_gbs:.1f}"` GB/s.
+2.  **Transfer Time**: $`{python} f"{dataset_gb_gravity:,}"` \text{{ GB}} / `{python} f"{network_gbs:.1f}"` \text{{ GB/s}} = `{python} transfer_seconds_str` \text{{ seconds}} \approx \mathbf{`{python} transfer_hours_str` \text{{ hours}}}$.
+3.  **Cost**: At \$`{python} egress_cost_per_gb`/GB egress, moving 1 PB costs **\$`{python} transfer_cost_str`**.
 
 **The Engineering Conclusion**:
-If training takes < 22 hours, you spend more time moving data than training.
-If training costs < $10,000 (approx. 2,500 TPUv4-hours), you spend more on bandwidth than compute.
+If training takes < `{python} transfer_hours_str` hours, you spend more time moving data than training.
+If training costs < \$`{python} transfer_cost_str` (approx. `{python} tpu_hours_str` TPUv4-hours), you spend more on bandwidth than compute.
 
 **Rule of Thumb**: For petabyte-scale data, **Code moves to Data**. For gigabyte-scale data, **Data moves to Code**.
 :::
@@ -196,7 +239,7 @@ These physical properties of data impose hard engineering constraints on every p
 
 ## Four Pillars Framework {#sec-data-engineering-ml-four-pillars-framework-4ef1}
 
-Data engineering decisions span an enormous design space, from schema validation rules to storage tier selection to privacy compliance mechanisms. Without a unifying structure, teams make these decisions ad hoc, often discovering costly interactions between choices only after deployment failures. This section introduces the Four Pillars Framework, which organizes data engineering concerns into four interdependent dimensions: Quality, Reliability, Scalability, and Governance. We begin by examining the cascading failure patterns that motivate such a framework, then derive the pillars from first principles and demonstrate how they interact across every stage of the data lifecycle.
+Data engineering decisions span an enormous design space, from schema validation rules to storage tier selection to privacy compliance mechanisms. Without a unifying structure, teams make these decisions ad hoc, often discovering costly interactions between choices only after deployment failures. This section introduces the **Four Pillars Framework**, which organizes data engineering concerns into four interdependent dimensions: **Quality**, **Reliability**, **Scalability**, and **Governance**. We begin by examining the cascading failure patterns that motivate such a framework, then derive the pillars from first principles and demonstrate how they interact across every stage of the data lifecycle.
 
 ### Data Cascades: Why Systematic Foundations Matter {#sec-data-engineering-ml-data-cascades-systematic-foundations-matter-2efe}
 
@@ -749,6 +792,23 @@ With this understanding established, we apply the problem definition approach to
 
 3. **Benchmarks for Success**: Establish clear metrics to measure the success of the KWS system. Key performance indicators include true positive rate (the percentage of correctly identified keywords relative to all spoken keywords) and false positive rate (the percentage of non-keywords including silence, background noise, and out-of-vocabulary words incorrectly identified as keywords). Detection/error tradeoff curves evaluate KWS on streaming audio representative of real-world deployment scenarios by comparing false accepts per hour (false positives over total evaluation audio duration) against false rejection rate (missed keywords relative to spoken keywords in evaluation audio), as demonstrated by @nayak2022improving.
 
+```{python}
+#| label: false-positive-calc
+#| echo: false
+
+# False positive target for always-on KWS
+seconds_per_minute = 60
+minutes_per_hour = 60
+hours_per_day = 24
+days_per_month = 30
+windows_per_month = seconds_per_minute * minutes_per_hour * hours_per_day * days_per_month
+windows_per_month_str = f"{windows_per_month:,}"
+fpr = 1 / windows_per_month
+fpr_str = f"{fpr:.1e}"
+rejection_pct = (1 - fpr) * 100
+rejection_pct_str = f"{rejection_pct:.5f}"
+```
+
 ::: {.callout-notebook title="False Positive Targets"}
 **Constraint**: User tolerance is max 1 false wake-up per month.
 
@@ -756,12 +816,12 @@ With this understanding established, we apply the problem definition approach to
 
 - **Duty Cycle**: Always-on (24 hours/day).
 - **Window Size**: 1 second classification windows.
-- **Windows per Month**: $60 \times 60 \times 24 \times 30 = 2,592,000$ windows.
+- **Windows per Month**: $60 \times 60 \times 24 \times 30 = `{python} windows_per_month_str`$ windows.
 
 **Required Accuracy**
 
-- **False Positive Rate (FPR)**: $\frac{1}{2,592,000} \approx 3.8 \times 10^{-7}$
-- **Precision Requirement**: 99.99996% rejection of non-keywords.
+- **False Positive Rate (FPR)**: $\frac{1}{`{python} windows_per_month_str`} \approx `{python} fpr_str`$
+- **Precision Requirement**: `{python} rejection_pct_str`% rejection of non-keywords.
 
 **Implication**: Standard accuracy metrics (e.g., "99% accuracy") are meaningless here. We must evaluate specifically on **False Accepts per Hour (FA/Hr)**.
 :::
@@ -815,15 +875,41 @@ From @tbl-kws-design-space, the 64KB memory limit eliminates:
 - 40 MFCC coefficients (3× memory) → Must use 13 MFCCs
 - Cloud inference (requires network stack) → Must use local inference
 
+```{python}
+#| label: budget-allocation-calc
+#| echo: false
+
+# KWS data budget allocation
+total_budget = 150_000
+labeling_pct = 0.60
+storage_pct = 0.25
+governance_pct = 0.15
+
+labeling_budget = total_budget * labeling_pct
+storage_budget = total_budget * storage_pct
+governance_budget = total_budget * governance_pct
+
+cost_per_label = 0.10
+review_overhead = 0.20
+effective_cost = cost_per_label * (1 + review_overhead)
+labeled_examples = labeling_budget / effective_cost
+
+labeling_k = f"{labeling_budget/1000:.0f}"
+storage_k = f"{storage_budget/1000:.1f}"
+governance_k = f"{governance_budget/1000:.1f}"
+effective_cost_str = f"{effective_cost:.2f}"
+labeled_k = f"{labeled_examples/1000:.0f}"
+```
+
 #### Step 2: Calculate Budget Allocation {.unnumbered}
 
 Using the TCDO model with $150K budget:
 
-- **Labeling** (~60%): $90K available
-- **Storage/Processing** (~25%): $37.5K
-- **Governance/Other** (~15%): $22.5K
+- **Labeling** (~60%): $`{python} labeling_k`K available
+- **Storage/Processing** (~25%): $`{python} storage_k`K
+- **Governance/Other** (~15%): $`{python} governance_k`K
 
-At $0.10/label with 20% review overhead: $90K ÷ $0.12 = **750K labeled examples**
+At $0.10/label with 20% review overhead: $90K ÷ $`{python} effective_cost_str` = **`{python} labeled_k`K labeled examples**
 
 This falls between 1M and 10M in our design space—closer to 1M, suggesting +5–6% accuracy contribution from data volume.
 
@@ -1461,6 +1547,19 @@ These monitoring dimensions become particularly important when considering end-t
 
 Quality monitoring extends beyond simple schema validation to statistical properties that capture whether serving data resembles training data. Rather than just checking that values fall within valid ranges, production systems track rolling statistics over 24-hour windows. For numerical features like transaction_amount or session_duration, the system computes means and standard deviations continuously, then applies statistical tests like the Kolmogorov-Smirnov test[^fn-ks-test] to compare serving distributions against training distributions.
 
+```{python}
+#| label: ks-test-calc
+#| echo: false
+
+import math
+
+# KS test critical value example
+ks_n = 1000
+ks_coefficient = 1.36
+ks_dcrit = ks_coefficient / math.sqrt(ks_n)
+ks_dcrit_str = f"{ks_dcrit:.3f}"
+```
+
 ::: {.callout-example title="Detecting Drift with K-S Test"}
 **Scenario**: Monitoring `session_duration` distribution stability between training ($P$) and serving ($Q$).
 
@@ -1477,10 +1576,10 @@ Quality monitoring extends beyond simple schema validation to statistical proper
 **Example Calculation**
 
 - Sample size $n=1000$.
-- Critical value $D_{crit} \approx 1.36 / \sqrt{1000} \approx 0.043$.
+- Critical value $D_{crit} \approx 1.36 / \sqrt{1000} \approx `{python} ks_dcrit_str`$.
 - If observed max difference $D_{KS} = 0.08$:
 
-- **Result**: $0.08 > 0.043$ $\rightarrow$ **Reject Null Hypothesis**. Significant drift detected. Trigger retraining or investigation.
+- **Result**: $0.08 > `{python} ks_dcrit_str`$ $\rightarrow$ **Reject Null Hypothesis**. Significant drift detected. Trigger retraining or investigation.
 :::
 
 [^fn-ks-test]: **Kolmogorov-Smirnov test**: Named after Soviet mathematicians Andrey Kolmogorov (1933) and Nikolai Smirnov (1939) who independently developed this non-parametric test quantifying whether two datasets come from the same distribution. The test measures maximum distance between cumulative distribution functions, requiring no assumptions about underlying distributions. In ML systems, K-S tests detect data drift by comparing serving data against training baselines; p-values below 0.05 indicate statistically significant distribution shifts requiring investigation.
@@ -1503,6 +1602,18 @@ Perhaps the most insidious validation challenge arises from training-serving ske
 ### Data Quality as Code {#sec-data-engineering-ml-data-quality-code-1cca}
 
 Just as unit tests protect software systems, data expectation tests protect ML pipelines. Using libraries like Great Expectations or Pandera, teams codify quality expectations as executable assertions (@lst-data-expectations) that run on every pipeline execution.
+
+::: {.callout-perspective title="Mechanical vs. Semantic Quality"}
+**Why Data Validation feels different from Unit Testing:**
+
+In traditional software, quality is **Mechanical**. A null pointer is always a bug. An integer overflow is always a crash. These are binary, deterministic failures.
+
+In ML systems, data quality has a second, softer dimension: **Semantic Quality**.
+*   **Mechanical Check**: "Is `age` an integer?" (Yes/No).
+*   **Semantic Check**: "Is the `age` distribution shifting?" (Probabilistic).
+
+A dataset can be mechanically perfect (no nulls, correct types) but semantically broken (e.g., all users are suddenly 25 years old due to a default value change). Robust ML systems must validate both the **Container** (Mechanical) and the **Content** (Semantic).
+:::
 
 ::: {#lst-data-expectations lst-cap="**Data Quality Assertions**: Executable data contracts catch schema violations, missing values, and invalid entries before training begins. Production systems using this pattern detect approximately 60% of data issues at pipeline execution time, preventing cascading failures that would otherwise propagate to model training."}
 ```{.python}
@@ -1713,18 +1824,47 @@ Recognizing the limitations of either approach alone, many production ML systems
 
 Production systems must balance cost versus latency trade-offs when selecting patterns: real-time processing is often materially more expensive than batch processing, commonly by an order of magnitude or more in total cost per byte processed. This cost differential arises from several factors: streaming systems require always-on infrastructure rather than schedulable resources that can spin up and down based on workload; maintain redundant processing for fault tolerance to ensure no events are lost; need low-latency networking and storage to meet millisecond-scale SLAs; and cannot benefit from economies of scale that batch processing achieves by amortizing startup costs across large data volumes. A batch job processing one terabyte might use 100 machines for 10 minutes, while a streaming system processing the same data over 24 hours needs dedicated resources continuously available. This difference in resource commitment per byte processed drives many architectural decisions about which data truly requires real-time processing versus what can tolerate batch delays. Quantifying *the cost of real-time* makes this trade-off precise.
 
+```{python}
+#| label: realtime-cost-calc
+#| echo: false
+
+# Real-time vs batch cost comparison
+events_per_sec = 1_000_000
+event_size_kb = 1
+throughput_gbs = events_per_sec * event_size_kb / 1e6  # GB/s
+
+# Stream: 100 cores × 24 hrs × $0.05/hr
+stream_cores = 100
+stream_hours = 24
+stream_cost_per_hr = 0.05
+stream_cost_day = stream_cores * stream_hours * stream_cost_per_hr
+
+# Batch: 3.6 TB/hour, process in 10 min
+hourly_data_tb = throughput_gbs * 3600 / 1000  # TB per hour
+batch_core_hours = 33  # 200 cores × 10min/hr = 33 core-hours/day
+batch_cost_day = batch_core_hours * stream_cost_per_hr
+
+cost_ratio = stream_cost_day / batch_cost_day
+
+throughput_str = f"{throughput_gbs:.0f}"
+hourly_tb_str = f"{hourly_data_tb:.1f}"
+stream_cost_str = f"{stream_cost_day:.0f}"
+batch_cost_str = f"{batch_cost_day:.2f}"
+cost_ratio_str = f"{cost_ratio:.0f}"
+```
+
 ::: {.callout-notebook title="The Cost of Real-Time"}
 **Problem**: Ingest 1 million events/second. Compare Batch (hourly) vs. Stream (sub-second) costs.
 
 **The Physics**:
 
-1.  **Throughput**: 1M events/sec $\times$ 1KB/event = **1 GB/s**.
+1.  **Throughput**: 1M events/sec $\times$ 1KB/event = **`{python} throughput_str` GB/s**.
 
-2.  **Stream Requirements**: To sustain 1 GB/s with <100ms latency, you need ~50 dedicated cores + redundant backups (always on). Cost: 100 cores $\times$ 24 hrs $\times$ $0.05/hr = **$120/day**.
+2.  **Stream Requirements**: To sustain `{python} throughput_str` GB/s with <100ms latency, you need ~50 dedicated cores + redundant backups (always on). Cost: 100 cores $\times$ 24 hrs $\times$ $0.05/hr = **$`{python} stream_cost_str`/day**.
 
-3.  **Batch Requirements**: Process 3.6TB (1 hour data) in 10 mins. High throughput (sequential I/O) is efficient. You need 200 cores for 10 mins/hour = 33 core-hours/day. Cost: 33 $\times$ $0.05 = **$1.65/day**.
+3.  **Batch Requirements**: Process `{python} hourly_tb_str`TB (1 hour data) in 10 mins. High throughput (sequential I/O) is efficient. You need 200 cores for 10 mins/hour = 33 core-hours/day. Cost: 33 $\times$ $0.05 = **$`{python} batch_cost_str`/day**.
 
-**The Engineering Conclusion**: Real-time is **~100× more expensive** for the same data volume. Only pay this tax if the value of <1s latency justifies it.
+**The Engineering Conclusion**: Real-time is **~`{python} cost_ratio_str`× more expensive** for the same data volume. Only pay this tax if the value of <1s latency justifies it.
 :::
 
 ### ETL and ELT Comparison {#sec-data-engineering-ml-etl-elt-comparison-2e2b}
@@ -1937,22 +2077,57 @@ The ELT pattern reverses this order, loading raw data first and applying transfo
 
 Production ML systems rarely use one pattern exclusively. Structured data with stable schemas often flows through ETL for efficiency and compliance, while unstructured data or rapidly evolving feature pipelines benefit from ELT's flexibility. Choosing between these patterns requires understanding the *cost of transformation placement*.
 
+```{python}
+#| label: etl-elt-cost-calc
+#| echo: false
+
+# ETL vs ELT cost comparison
+daily_raw_tb = 10
+s3_per_tb_mo = 23
+spark_per_tb = 5
+n_models = 3
+retention_days = 30
+query_cost_per = 5
+
+# ETL
+etl_spark_daily = daily_raw_tb * spark_per_tb
+etl_datasets = 3
+etl_tb_each = 2
+etl_storage_tb = etl_datasets * etl_tb_each
+etl_storage_mo = etl_storage_tb * s3_per_tb_mo
+
+# ELT
+elt_storage_tb = daily_raw_tb * retention_days
+elt_storage_mo = elt_storage_tb * s3_per_tb_mo
+elt_query_mo = n_models * query_cost_per * retention_days
+
+# Savings
+storage_savings_mo = elt_storage_mo - etl_storage_mo
+
+etl_spark_str = f"{etl_spark_daily}"
+etl_storage_str = f"{etl_storage_mo}"
+elt_storage_tb_str = f"{elt_storage_tb}"
+elt_storage_str = f"{elt_storage_mo:,}"
+elt_query_str = f"{elt_query_mo}"
+savings_str = f"{storage_savings_mo:,}"
+```
+
 ::: {.callout-notebook title="The Cost of Transformation Placement"}
 **Problem**: Your team processes 10 TB of raw clickstream data daily. You need to compute user session features for three ML models, each requiring different aggregation windows (1-hour, 24-hour, 7-day). Compare ETL vs. ELT costs.
 
 **The Math**:
 
 1.  **ETL Approach**: Transform before loading. Compute all three aggregation windows in a Spark cluster before loading into the warehouse.
-    *   Spark compute: 10 TB at $5/TB = $50/day
-    *   Storage: 3 transformed datasets, ~2 TB each = 6 TB at $23/TB/month = $138/month
+    *   Spark compute: 10 TB at $5/TB = $`{python} etl_spark_str`/day
+    *   Storage: 3 transformed datasets, ~2 TB each = 6 TB at $23/TB/month = $`{python} etl_storage_str`/month
     *   Schema change cost: Re-run full pipeline (~4 hours) per change
 
 2.  **ELT Approach**: Load raw data first, transform in warehouse.
-    *   Storage: 10 TB raw/day, 30-day retention = 300 TB at $23/TB/month = $6,900/month
-    *   Query compute: 3 models × $5/query × 30 days = $450/month
+    *   Storage: 10 TB raw/day, 30-day retention = `{python} elt_storage_tb_str` TB at $23/TB/month = $`{python} elt_storage_str`/month
+    *   Query compute: 3 models × $5/query × 30 days = $`{python} elt_query_str`/month
     *   Schema change cost: Rewrite SQL query (~30 minutes) per change
 
-**The Engineering Conclusion**: ETL saves $6,762/month in storage but costs 8× more engineering time per schema change. If your feature definitions change weekly, ELT's flexibility pays for itself. If schemas are stable, ETL's lower storage cost dominates. The break-even point: if you change schemas fewer than once per month, ETL wins on total cost.
+**The Engineering Conclusion**: ETL saves $`{python} savings_str`/month in storage but costs 8× more engineering time per schema change. If your feature definitions change weekly, ELT's flexibility pays for itself. If schemas are stable, ETL's lower storage cost dominates. The break-even point: if you change schemas fewer than once per month, ETL wins on total cost.
 :::
 
 When implementing streaming components within ETL/ELT architectures, distributed systems principles become critical. The CAP theorem[^fn-cap-theorem] fundamentally constrains streaming system design choices. Apache Kafka[^fn-apache-kafka] emphasizes consistency and partition tolerance, making it well-suited for reliable event ordering but potentially experiencing availability issues during network partitions. Apache Pulsar emphasizes availability and partition tolerance, providing better fault tolerance but with relaxed consistency guarantees. Amazon Kinesis balances all three properties through careful configuration but requires understanding these trade-offs for proper deployment.
@@ -2316,6 +2491,18 @@ $$\text{Total Cost} = N \times \text{Cost}_{\text{label}} \times (1 + R_{\text{r
 
 where $N$ represents the number of examples, $\text{Cost}_{\text{label}}$ is the base cost per label, $R_{\text{review}}$ is the fraction requiring expert review (typically 0.05-0.15), and $R_{\text{rework}}$ accounts for labels requiring correction (typically 0.10-0.30). This equation reveals how quality requirements compound costs: a dataset requiring 1 million labels at $0.10 per label with 10% expert review (costing 5x more, or $0.50) and 20% rework reaches $138,000, not the $100,000 that naive calculation suggests. For comparison, training a ResNet-50 model on this data might cost only $50 for compute—nearly 3,000x less than labeling, demonstrating why labeling economics dominate total system costs yet receive insufficient attention during planning phases. Amdahl's Law formalizes this serial bottleneck principle.
 
+```{python}
+#| label: amdahl-pipeline-calc
+#| echo: false
+
+# Amdahl's Law applied to data pipelines
+serial_fraction = 0.70
+parallel_fraction = 1 - serial_fraction
+amdahl_speedup = 1 / serial_fraction
+amdahl_speedup_str = f"{amdahl_speedup:.2f}"
+amdahl_improvement_pct = int(round((amdahl_speedup - 1) * 100))
+```
+
 ::: {.callout-notebook #notebook-amdahl-pipelines title="Amdahl's Law for Data Pipelines"}
 **The Serial Bottleneck Principle**: Amdahl's Law reveals why labeling dominates data engineering costs and why parallelization alone cannot solve the problem.
 
@@ -2328,9 +2515,9 @@ where $S$ is the serial (non-parallelizable) fraction, $P$ is the parallel fract
 **Applied to Data Pipelines**:
 Industry surveys show practitioners spend 60--80% of their time on data preparation. If human labeling and review constitute 70% of total data engineering effort (the serial component), then:
 
-$$ \text{Speedup}_{\max} = \frac{1}{0.70 + \frac{0.30}{\infty}} = \frac{1}{0.70} \approx 1.43\times $$
+$$ \text{Speedup}_{\max} = \frac{1}{0.70 + \frac{0.30}{\infty}} = \frac{1}{0.70} \approx `{python} amdahl_speedup_str`\times $$
 
-Even infinite parallelization of non-labeling work yields only **43% improvement**.
+Even infinite parallelization of non-labeling work yields only **`{python} amdahl_improvement_pct`% improvement**.
 
 **The Engineering Implication**: This explains why:
 1. **AI-assisted labeling matters**: It attacks the serial bottleneck, not just adds parallelism
@@ -2491,11 +2678,9 @@ Scale AI deploys pre-trained models to accelerate annotation in specific domains
 
 The emergence of Large Language Models (LLMs) like ChatGPT has further transformed labeling pipelines. Beyond simple classification, LLMs can generate rich text descriptions, create labeling guidelines from examples, and even explain their reasoning for label assignments. For instance, content moderation systems use LLMs to perform initial content classification and generate explanations for policy violations that human reviewers can validate. However, integrating LLMs introduces new system challenges around inference costs (API calls can cost $0.01-$1 per example depending on complexity), rate limiting (cloud APIs typically limit to 100-10,000 requests per minute), and output validation (LLMs occasionally produce confident but incorrect labels requiring systematic validation). Many organizations adopt a tiered approach, using smaller specialized models for routine cases while reserving larger LLMs for complex scenarios requiring nuanced judgment or rare domain expertise.
 
-Methods such as active learning[^fn-active-learning] complement these approaches by intelligently prioritizing which examples need human attention [@coleman2022similarity].
-
 [^fn-active-learning]: **Active Learning**: The term contrasts with "passive" learning where models receive randomly selected training data. Formalized by David Cohn, Les Atlas, and Richard Ladner (1994), active learning inverts the traditional paradigm: instead of the data determining what the model learns, the model queries for specific examples it needs most. Selection strategies target uncertain examples (uncertainty sampling) or those maximizing expected information gain. Active learning achieves target accuracy with 50-90% fewer labels than random sampling, addressing the labeling bottleneck in data engineering.
 
-These systems continuously analyze model uncertainty to identify valuable labeling candidates. Rather than labeling a random sample of unlabeled data, active learning selects examples where the current model is most uncertain or where labels would most improve model performance. The infrastructure must efficiently compute uncertainty metrics (often prediction entropy or disagreement between ensemble models), maintain task queues ordered by informativeness, and adapt prioritization strategies based on incoming labels. Consider a medical imaging system: active learning might identify unusual pathologies for expert review while handling routine cases through pre-annotation that experts merely verify. This approach can reduce required annotations by 50-90% compared to random sampling, though it requires careful engineering to prevent feedback loops where the model's uncertainty biases which data gets labeled. The following analysis quantifies this *active learning multiplier* in concrete budget terms.
+Methods such as active learning[^fn-active-learning] complement these approaches by intelligently prioritizing which examples need human attention [@coleman2022similarity]. These systems continuously analyze model uncertainty to identify valuable labeling candidates. Rather than labeling a random sample of unlabeled data, active learning selects examples where the current model is most uncertain or where labels would most improve model performance. The infrastructure must efficiently compute uncertainty metrics (often prediction entropy or disagreement between ensemble models), maintain task queues ordered by informativeness, and adapt prioritization strategies based on incoming labels. Consider a medical imaging system: active learning might identify unusual pathologies for expert review while handling routine cases through pre-annotation that experts merely verify. This approach can reduce required annotations by 50-90% compared to random sampling, though it requires careful engineering to prevent feedback loops where the model's uncertainty biases which data gets labeled. The following analysis quantifies this *active learning multiplier* in concrete budget terms.
 
 ::: {.callout-notebook title="The Active Learning Multiplier"}
 **Problem**: You have a 10M image dataset and a $50K labeling budget. Random sampling achieves 85% accuracy with 100K images. You need 95% accuracy.
@@ -2658,7 +2843,25 @@ Beyond the functional differences between storage systems, cost and performance 
 
 [^fn-nvme]: **Non-Volatile Memory Express (NVMe)**: A storage protocol designed specifically for flash memory, bypassing the legacy AHCI interface that SATA SSDs use. NVMe connects directly to the PCIe bus, enabling 64K command queues versus SATA's single queue, reducing latency from milliseconds to microseconds. For ML training workloads, NVMe's 5-7 GB/s sequential throughput prevents storage from bottlenecking GPU utilization, while SATA SSD's 500 MB/s limit would leave expensive accelerators idle waiting for data.
 
-The performance difference directly impacts iteration velocity. Training that loads data at 5 GB/s completes dataset loading in 150 seconds, compared to 7,360 seconds at typical object storage speeds. This 50$\times$ difference determines whether teams can iterate multiple times daily or must wait hours between experiments.
+```{python}
+#| label: storage-loading-calc
+#| echo: false
+
+# Dataset loading time comparison: NVMe vs object storage
+kws_dataset_gb = 736
+nvme_bw_gbs = 5       # effective NVMe throughput
+obj_bw_gbs = 0.1      # typical object storage throughput
+
+nvme_load_s = kws_dataset_gb / nvme_bw_gbs
+obj_load_s = kws_dataset_gb / obj_bw_gbs
+load_speedup = obj_load_s / nvme_load_s
+
+nvme_load_str = f"{nvme_load_s:.0f}"
+obj_load_str = f"{obj_load_s:,.0f}"
+load_speedup_str = f"{load_speedup:.0f}"
+```
+
+The performance difference directly impacts iteration velocity. Training that loads data at 5 GB/s completes dataset loading in `{python} nvme_load_str` seconds, compared to `{python} obj_load_str` seconds at typical object storage speeds. This `{python} load_speedup_str`$\times$ difference determines whether teams can iterate multiple times daily or must wait hours between experiments.
 
 To build engineering judgment, practitioners must internalize the orders of magnitude separating these tiers. @tbl-ml-latencies translates these disparities into human-scale analogies: if a CPU cycle were one second, fetching from local SSD would take two days, while a cross-country network request would span six years. These are the "numbers every ML systems engineer should know."
 
@@ -2698,6 +2901,31 @@ The bandwidth hierarchy fundamentally constrains ML system design, creating bott
 
 Understanding these quantitative relationships enables informed architectural decisions about storage system selection and data pipeline optimization, which become even more critical during distributed training as examined in @sec-ai-training. The training throughput equation reveals the critical dependencies:
 
+```{python}
+#| label: storage-bandwidth-calc
+#| echo: false
+
+# Storage bandwidth budget for A100 + ResNet-50
+a100_flops_val = 312e12          # FP16 tensor core FLOPs/sec
+resnet_flops_per_img = 12e9      # forward + backward FLOPs per image
+max_img_per_sec = int(a100_flops_val / resnet_flops_per_img)
+max_img_per_sec_str = f"{max_img_per_sec:,}"
+
+image_size_kb = 150
+required_bw_gbs = max_img_per_sec * image_size_kb * 1e3 / 1e9
+required_bw_gbs_str = f"{required_bw_gbs:.1f}"
+
+# SATA SSD bottleneck
+sata_bw_mbs = 500
+sata_max_img_sec = int(sata_bw_mbs * 1e6 / (image_size_kb * 1e3))
+sata_max_img_sec_str = f"{sata_max_img_sec:,}"
+sata_utilization_pct = int(round(sata_max_img_sec / max_img_per_sec * 100))
+
+# S3 worker threads
+s3_bw_mbs = 100
+s3_workers = int(round(required_bw_gbs * 1e3 / s3_bw_mbs))
+```
+
 ::: {.callout-notebook title="Storage Bandwidth Budget"}
 **The Problem:** Design a storage system that ensures an NVIDIA A100 is never starved for data while training ResNet-50.
 
@@ -2706,21 +2934,21 @@ Understanding these quantitative relationships enables informed architectural de
 *   **Hardware Peak:** NVIDIA A100 = `{python} a100_tflops_fp16` TFLOPS (FP16 Tensor Core, dense operations).[^fn-a100-sparsity]
 *   **Model Cost:** ResNet-50 = ~4 GFLOPs per image (forward + backward $\approx$ 12 GFLOPs).
 *   **Maximum Theoretical Throughput**:
-    $$ \frac{312 \times 10^{12} \text{ FLOPs/sec}}{12 \times 10^9 \text{ FLOPs/img}} = \mathbf{26,000 \text{ images/sec}} $$
+    $$ \frac{312 \times 10^{12} \text{ FLOPs/sec}}{12 \times 10^9 \text{ FLOPs/img}} = \mathbf{`{python} max_img_per_sec_str` \text{ images/sec}} $$
 
 **2. The Data Term (Bandwidth Requirement)**
 
 *   **Image Size:** 150 KB (JPEG compressed).
 *   **Required Bandwidth**:
-    $$ 26,000 \text{ img/sec} \times 150 \text{ KB/img} \approx \mathbf{3.9 \text{ GB/s}} $$
+    $$ `{python} max_img_per_sec_str` \text{ img/sec} \times 150 \text{ KB/img} \approx \mathbf{`{python} required_bw_gbs_str` \text{ GB/s}} $$
 
 **The Systems Conclusion:**
-To saturate a *single* A100, your storage must deliver **3.9 GB/s**.
-*   **S3 Standard**: ~100 MB/s per thread. You need **40 concurrent worker threads**.
+To saturate a *single* A100, your storage must deliver **`{python} required_bw_gbs_str` GB/s**.
+*   **S3 Standard**: ~100 MB/s per thread. You need **`{python} s3_workers` concurrent worker threads**.
 *   **SATA SSD**: ~500 MB/s. Totally insufficient (bottleneck).
 *   **NVMe SSD**: ~3-7 GB/s. **Required.**
 
-**Iron Law Implication:** If you use SATA SSDs, your maximum throughput is capped at $500 \text{ MB/s} / 150 \text{ KB} \approx 3,300 \text{ img/s}$. Your \$15,000 GPU will run at **12% utilization** ($3,300/26,000$). Storage physics dictates training speed.
+**Iron Law Implication:** If you use SATA SSDs, your maximum throughput is capped at $500 \text{ MB/s} / 150 \text{ KB} \approx `{python} sata_max_img_sec_str` \text{ img/s}$. Your \$15,000 GPU will run at **`{python} sata_utilization_pct`% utilization** ($`{python} sata_max_img_sec_str`/`{python} max_img_per_sec_str`$). Storage physics dictates training speed.
 :::
 
 [^fn-a100-sparsity]: **A100 Sparsity Support**: NVIDIA also advertises `{python} a100_tflops_fp16_sparse` TFLOPS with structured sparsity enabled (2:4 pattern), doubling effective throughput for models that can leverage sparse computation. The `{python} a100_tflops_fp16` TFLOPS dense figure used here represents the baseline for general workloads where sparsity cannot be assumed.
@@ -2739,21 +2967,63 @@ File format selection dramatically impacts the **Data Term** ($\frac{D}{B}$) of 
 **The Concept**: Storage formats determine how much "waste" data you move to get the signal you need.
 $$ \text{Effective Bandwidth} = \text{Physical Bandwidth} \times \eta_{format} $$
 
-**Scenario**: Training a fraud model using 20 features from a 100-column table.
+```{python}
+#| label: format-efficiency-calc
+#| echo: false
 
-- **Row-Oriented (CSV)**: Must read all 100 columns to get the 20 needed.
-    - $\eta_{format} = \frac{20}{100} = 0.2$.
-    - **Result**: You waste 80% of your disk bandwidth.
-- **Column-Oriented (Parquet)**: Reads only the 20 columns needed.
-    - $\eta_{format} \approx 1.0$ (ignoring metadata overhead).
-    - **Result**: You get **5x higher effective throughput**.
+# Format efficiency: columnar vs row-oriented
+needed_cols = 20
+total_cols = 100
+eta_csv = needed_cols / total_cols
+waste_pct = (1 - eta_csv) * 100
+eta_parquet = 1.0
+throughput_ratio = eta_parquet / eta_csv
 
-**The Systems Conclusion**: Switching from CSV to Parquet is not just a file change; it is mathematically equivalent to buying a **5x faster hard drive**.
+eta_csv_str = f"{eta_csv:.1f}"
+waste_pct_str = f"{waste_pct:.0f}"
+throughput_ratio_str = f"{throughput_ratio:.0f}"
+```
+
+**Scenario**: Training a fraud model using `{python} needed_cols` features from a `{python} total_cols`-column table.
+
+- **Row-Oriented (CSV)**: Must read all `{python} total_cols` columns to get the `{python} needed_cols` needed.
+    - $\eta_{format} = \frac{`{python} needed_cols`}{`{python} total_cols`} = `{python} eta_csv_str`$.
+    - **Result**: You waste `{python} waste_pct_str`% of your disk bandwidth.
+- **Column-Oriented (Parquet)**: Reads only the `{python} needed_cols` columns needed.
+    - $\eta_{format} \approx `{python} f"{eta_parquet:.1f}"`$ (ignoring metadata overhead).
+    - **Result**: You get **`{python} throughput_ratio_str`x higher effective throughput**.
+
+**The Systems Conclusion**: Switching from CSV to Parquet is not just a file change; it is mathematically equivalent to buying a **`{python} throughput_ratio_str`x faster hard drive**.
 :::
 
 Columnar storage formats like Parquet or ORC deliver this five to 10 times I/O reduction compared to row-based formats like CSV or JSON for typical ML workloads. The reduction comes from two mechanisms: reading only required columns rather than entire records, and column-level compression exploiting value patterns within columns. Consider a fraud detection dataset with 100 columns where models typically use 20 features—columnar formats read only needed columns, achieving 80% I/O reduction before compression. Column compression proves particularly effective for categorical features with limited cardinality: a country code column with 200 unique values in 100 million records compresses 20 to 50 times through dictionary encoding, while run-length encoding compresses sorted columns by storing only value changes. The combination can achieve total I/O reduction of 20 to 100 times compared to uncompressed row formats, directly translating to faster training iterations and reduced infrastructure costs.
 
-Compression algorithm selection involves trade-offs between compression ratio and decompression speed. While gzip achieves higher compression ratios of six to eight times, Snappy achieves only two to three times compression but decompresses at 500 megabytes per second—roughly three to four times faster than gzip's 120 megabytes per second. For ML training where throughput matters more than storage costs, Snappy's speed advantage often outweighs gzip's space savings. Training on a 100 gigabyte dataset compressed with gzip requires 17 minutes of decompression time, while Snappy requires only five minutes. When training iterates over data for 50 epochs, this 12-minute difference per epoch compounds to 10 hours total—potentially the difference between running experiments overnight versus waiting multiple days for results. The choice cascades through the system: faster decompression enables higher batch sizes (fitting more examples in memory after decompression), reduced buffering requirements (less decompressed data needs staging), and better GPU utilization (less time idle waiting for data).
+```{python}
+#| label: compression-tradeoff-calc
+#| echo: false
+
+# Compression algorithm tradeoff
+snappy_decompress_mbs = 500  # MB/s
+gzip_decompress_mbs = 120    # MB/s
+decompress_speedup = snappy_decompress_mbs / gzip_decompress_mbs
+
+# Decompression time for 100 GB dataset
+dataset_gb = 100
+dataset_mb = dataset_gb * 1000
+gzip_decompress_min = dataset_mb / gzip_decompress_mbs / 60
+snappy_decompress_min = dataset_mb / snappy_decompress_mbs / 60
+time_diff_min = gzip_decompress_min - snappy_decompress_min
+n_epochs = 50
+total_diff_hours = time_diff_min * n_epochs / 60
+
+decompress_speedup_str = f"{decompress_speedup:.0f}"
+gzip_min_str = f"{gzip_decompress_min:.0f}"
+snappy_min_str = f"{snappy_decompress_min:.0f}"
+time_diff_str = f"{time_diff_min:.0f}"
+total_diff_hours_str = f"{total_diff_hours:.0f}"
+```
+
+Compression algorithm selection involves trade-offs between compression ratio and decompression speed. While gzip achieves higher compression ratios of six to eight times, Snappy achieves only two to three times compression but decompresses at `{python} snappy_decompress_mbs` megabytes per second—roughly `{python} decompress_speedup_str` times faster than gzip's `{python} gzip_decompress_mbs` megabytes per second. For ML training where throughput matters more than storage costs, Snappy's speed advantage often outweighs gzip's space savings. Training on a `{python} dataset_gb` gigabyte dataset compressed with gzip requires `{python} gzip_min_str` minutes of decompression time, while Snappy requires only `{python} snappy_min_str` minutes. When training iterates over data for `{python} n_epochs` epochs, this `{python} time_diff_str`-minute difference per epoch compounds to `{python} total_diff_hours_str` hours total—potentially the difference between running experiments overnight versus waiting multiple days for results. The choice cascades through the system: faster decompression enables higher batch sizes (fitting more examples in memory after decompression), reduced buffering requirements (less decompressed data needs staging), and better GPU utilization (less time idle waiting for data).
 
 Storage performance optimization extends beyond format and compression to data layout strategies. Data partitioning based on frequently used query parameters dramatically improves retrieval efficiency. A recommendation system processing user interactions might partition data by date and user demographic attributes, enabling training on recent data subsets or specific user segments without scanning the entire dataset. Partitioning strategies interact with distributed training patterns: range partitioning by user ID enables data parallel training where each worker processes a consistent user subset, while random partitioning ensures workers see diverse data distributions. The partitioning granularity matters—too few partitions limit parallelism, while too many partitions increase metadata overhead and reduce efficiency of sequential reads within partitions.
 
@@ -2853,7 +3123,7 @@ In production, edge storage requirements become critical as our system deploys t
 
 The storage architectures examined in this chapter—data lakes, warehouses, and feature stores—are not merely technical infrastructure; they are governance enforcement mechanisms. Decisions about how data is acquired, processed, and stored carry significant legal and ethical implications, from GDPR compliance to privacy-preserving processing.
 
-Because these concerns extend beyond data engineering into the broader lifecycle of model development and deployment, we address them in detail in **@sec-responsible-engineering-data-governance-compliance** in the Responsible Engineering chapter. There, we examine how technical controls like role-based access control (RBAC), data lineage, and audit trails transform abstract policy into enforceable engineering reality.
+Because these concerns extend beyond data engineering into the broader lifecycle of model development and deployment, we address them in detail in @sec-responsible-engineering-data-governance-compliance. There, we examine how technical controls like role-based access control (RBAC), data lineage, and audit trails transform abstract policy into enforceable engineering reality.
 
 Even with robust governance infrastructure in place, ML systems accumulate hidden liabilities over time—not just governance gaps, but shortcuts and compromises across every stage we have examined in this chapter. The undocumented datasets from hasty acquisition, the fragile schema workarounds in our pipelines, the uncorrected labeling errors we flagged but deferred, the models trained on data that has drifted from current distributions: each represents a form of debt that compounds silently. Governance infrastructure can prevent many issues, but organizations must also recognize and address the gradual accumulation of compromises that compound until remediation costs exceed system value.
 
@@ -3058,7 +3328,42 @@ Engineers from traditional request-response services design pipelines assuming d
 
 **Pitfall:** ***Choosing storage architecture based solely on capacity cost without considering access patterns and performance requirements.***
 
-Teams compare raw storage costs (S3 Standard at $23 per TB per month vs Glacier Deep Archive at $1 per TB per month) and select the cheapest option without analyzing access patterns. However, @sec-data-engineering-ml-ml-storage-systems-architecture-options-67fa establishes that total cost of ownership includes retrieval costs, access latency, and throughput limitations. Glacier Deep Archive charges $0.02 per GB for retrieval plus 12-hour access latency, meaning a single full retrieval of 100 TB costs $2,000, equivalent to 87 months of S3 Standard storage for that data. Training workloads requiring random access to 10% of a 100 TB dataset daily would spend $600 per day on Glacier retrievals versus $230 per month for S3 Standard storage with 3,500 MB/s sustained read throughput. Local NVMe storage at $0.10 per GB ($100 per TB) appears expensive but delivers 7,000 MB/s sequential reads and sub-millisecond random access latency, completing training epochs 15 to 30x faster than S3 for I/O-bound workloads. Organizations must match storage tiers to access patterns: cold archival data to Glacier, training datasets requiring sequential scans to S3, and active training data with random access patterns to local SSDs or high-performance networked storage.
+```{python}
+#| label: storage-cost-calc
+#| echo: false
+
+# Storage tier cost comparison
+s3_per_tb_mo = 23        # $/TB/month for S3 Standard
+glacier_per_tb_mo = 1    # $/TB/month for Glacier Deep Archive
+glacier_retrieval_per_gb = 0.02  # $/GB retrieval cost
+nvme_per_gb = 0.10       # $/GB purchase cost
+dataset_tb = 100
+
+# Full retrieval cost
+retrieval_cost = dataset_tb * 1000 * glacier_retrieval_per_gb
+equiv_months = retrieval_cost / s3_per_tb_mo
+# Note: equivalence is per-TB ($2000 / $23/mo ≈ 87 months of storing 1 TB,
+# but the data is 100 TB so S3 cost is $23×100 = $2300/mo)
+# The text says "equivalent to 87 months of S3 Standard storage for that data"
+# meaning $2000 / $23 = 87 (treating it as cost-per-TB equivalence)
+equiv_months_per_tb = retrieval_cost / s3_per_tb_mo
+
+# Daily random access: 10% of dataset
+daily_access_pct = 0.10
+daily_retrieval = dataset_tb * daily_access_pct * 1000 * glacier_retrieval_per_gb
+s3_monthly_cost = s3_per_tb_mo * dataset_tb
+
+# NVMe cost per TB
+nvme_per_tb = nvme_per_gb * 1000
+
+retrieval_str = f"{retrieval_cost:,.0f}"
+equiv_months_str = f"{equiv_months_per_tb:.0f}"
+daily_retrieval_str = f"{daily_retrieval:,.0f}"
+s3_monthly_str = f"{s3_monthly_cost:,.0f}"
+nvme_per_tb_str = f"{nvme_per_tb:.0f}"
+```
+
+Teams compare raw storage costs (S3 Standard at $23 per TB per month vs Glacier Deep Archive at $1 per TB per month) and select the cheapest option without analyzing access patterns. However, @sec-data-engineering-ml-ml-storage-systems-architecture-options-67fa establishes that total cost of ownership includes retrieval costs, access latency, and throughput limitations. Glacier Deep Archive charges $0.02 per GB for retrieval plus 12-hour access latency, meaning a single full retrieval of 100 TB costs $`{python} retrieval_str`, equivalent to `{python} equiv_months_str` months of S3 Standard storage for that data. Training workloads requiring random access to 10% of a 100 TB dataset daily would spend $`{python} daily_retrieval_str` per day on Glacier retrievals versus $`{python} s3_monthly_str` per month for S3 Standard storage with 3,500 MB/s sustained read throughput. Local NVMe storage at $0.10 per GB ($`{python} nvme_per_tb_str` per TB) appears expensive but delivers 7,000 MB/s sequential reads and sub-millisecond random access latency, completing training epochs 15 to 30x faster than S3 for I/O-bound workloads. Organizations must match storage tiers to access patterns: cold archival data to Glacier, training datasets requiring sequential scans to S3, and active training data with random access patterns to local SSDs or high-performance networked storage.
 
 These fallacies and pitfalls underscore a central theme: data engineering success requires abandoning intuitions from traditional software development. Statistical systems demand continuous monitoring, cost models must account for human labor, and storage decisions must optimize for access patterns rather than capacity alone.
 

@@ -79,7 +79,7 @@ ML systems extend this hierarchy with two critical additions: GPU High Bandwidth
 +--------------------------+----------------------+--------------------+------------------+-----------------+
 | **Storage Tier**         | **Typical Capacity** | **Bandwidth**      | **Latency**      | **Cost ($/GB)** |
 +:=========================+:=====================+===================:+=================:+================:+
-| **GPU HBM**              | 80 GB                | 3.35 TB/s          | ~10 ns           | ~15.00          |
+| **GPU HBM**              | 80 GB                | `{python} h100_bw_tbs` TB/s          | ~10 ns           | ~15.00          |
 | **Host DRAM**            | 512 GB - 2 TB        | 200 GB/s           | ~100 ns          | ~3.00           |
 | **Local NVMe SSD**       | 4-30 TB              | 7-25 GB/s          | ~10 μs           | ~0.10           |
 | **Parallel File System** | 100+ PB              | 1+ TB/s aggregate  | ~1 ms            | ~0.03           |
@@ -87,7 +87,7 @@ ML systems extend this hierarchy with two critical additions: GPU High Bandwidth
 | **Archive/Cold Storage** | Unlimited            | 1 GB/s             | Minutes to hours | ~0.004          |
 +--------------------------+----------------------+--------------------+------------------+-----------------+
 
-: **Extended Memory Hierarchy for ML Systems**: GPU HBM delivers 3.35 TB/s at ~10 ns latency but costs $15/GB, while object storage offers unlimited capacity at $0.02/GB with 50 ms latency. This 300,000x bandwidth gap between HBM and storage drives the need for sophisticated prefetching and caching strategies. {#tbl-storage-hierarchy}
+: **Extended Memory Hierarchy for ML Systems**: GPU HBM delivers `{python} h100_bw_tbs` TB/s at ~10 ns latency but costs $15/GB, while object storage offers unlimited capacity at $0.02/GB with 50 ms latency. This 300,000x bandwidth gap between HBM and storage drives the need for sophisticated prefetching and caching strategies. {#tbl-storage-hierarchy}
 
 Looking at the bandwidth column, GPU HBM delivers `{python} h100_bw_tbs` TB/s, roughly 17x faster than host DRAM and 130x faster than the fastest local NVMe drives. This disparity creates the central challenge of ML storage systems: keeping accelerators fed with data at rates that prevent them from idling.
 
@@ -1503,14 +1503,14 @@ Checkpoint strategies vary significantly by model architecture. LLMs demand high
 +------------------------------+---------------------+------------------------+-----------------------------------+
 | **Model Type**               | **Checkpoint Size** | **Typical Frequency**  | **Recommended Strategy**          |
 +:=============================+====================:+:=======================+:==================================+
-| **LLM (175B)**               | 700 GB - 1 TB       | Every 10-30 min        | Distributed async, tiered storage |
+| **LLM (`{python} gpt3_params_b`B)**               | 700 GB - 1 TB       | Every 10-30 min        | Distributed async, tiered storage |
 | **LLM (7B)**                 | 14-28 GB            | Every 5-15 min         | Single-node, parallel FS          |
 | **RecSys (10TB embeddings)** | 10+ TB              | Incremental every hour | Delta compression, streaming      |
 | **Vision (ResNet-50)**       | 200 MB              | Every epoch            | Simple sync, local + remote copy  |
 | **Vision (ViT-22B)**         | 88-175 GB           | Every 15-30 min        | Distributed, parallel FS          |
 +------------------------------+---------------------+------------------------+-----------------------------------+
 
-: **Checkpoint Strategies by Model Type**: 175B-parameter LLMs require distributed async checkpointing with tiered storage for 700 GB-1 TB checkpoints; RecSys with 10 TB embedding tables benefit from incremental delta compression; small vision models can use simple synchronous checkpointing. {#tbl-checkpoint-strategies}
+: **Checkpoint Strategies by Model Type**: `{python} gpt3_params_b`B-parameter LLMs require distributed async checkpointing with tiered storage for 700 GB-1 TB checkpoints; RecSys with 10 TB embedding tables benefit from incremental delta compression; small vision models can use simple synchronous checkpointing. {#tbl-checkpoint-strategies}
 
 @tbl-checkpoint-strategies demonstrates how checkpoint strategies should be tailored to model size and training dynamics. **Large Language Models** checkpoint infrequently (relative to iteration count) because checkpoint size dominates. A 1 TB checkpoint at 100 GB/s still takes 10 seconds, during which thousands of dollars of GPU time is consumed. Asynchronous checkpointing and high-bandwidth storage are essential.
 
@@ -2137,7 +2137,19 @@ Google trains models including PaLM [@chowdhery2022palm] (540 billion parameters
 
 **Distributed metadata.** Unlike GFS's single master, Colossus distributes file system metadata across multiple servers (Curators). This eliminates the metadata bottleneck that would otherwise limit operations to ~10,000/second, enabling the high-frequency checkpoint writes and metadata operations that large-scale training requires.
 
-**Erasure coding.** Colossus uses Reed-Solomon erasure coding [@reed1960polynomial] rather than simple replication. A typical configuration stores 9 data fragments plus 3 parity fragments, achieving durability equivalent to 3x replication while using only 1.33x storage. For petabyte-scale training data, this dramatically reduces storage costs.
+```{python}
+#| label: erasure-coding-calc
+#| echo: false
+
+# Reed-Solomon erasure coding overhead
+data_fragments = 9
+parity_fragments = 3
+total_fragments = data_fragments + parity_fragments
+storage_overhead = total_fragments / data_fragments
+storage_overhead_str = f"{storage_overhead:.2f}"
+```
+
+**Erasure coding.** Colossus uses Reed-Solomon erasure coding [@reed1960polynomial] rather than simple replication. A typical configuration stores `{python} data_fragments` data fragments plus `{python} parity_fragments` parity fragments, achieving durability equivalent to 3x replication while using only `{python} storage_overhead_str`x storage. For petabyte-scale training data, this dramatically reduces storage costs.
 
 **D (Disk) servers.** Colossus separates the storage layer into D servers that manage physical disks. This abstraction enables flexible placement of data across disk types (HDD for cold data, SSD for hot data) without changing the file system interface.
 

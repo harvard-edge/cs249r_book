@@ -4,7 +4,7 @@ concepts: serving_concepts.yml
 glossary: serving_glossary.json
 ---
 
-# Model Serving Systems {#sec-model-serving-systems}
+# Model Serving {#sec-model-serving-systems}
 
 ::: {layout-narrow}
 ::: {.column-margin}
@@ -79,7 +79,7 @@ The consequences of ignoring this inversion become visceral during a *traffic sp
 3.  **Degradation**: Serve cached/dumber recommendations to reduce compute cost per query.
 :::
 
-The following plot visualizes this **Tail Latency Explosion**. It demonstrates why production systems must run at relatively low utilization (40-60%) to guarantee stable tail latency (p99).
+As shown in @fig-tail-latency-explosion, this physics dictates why production systems must run at relatively low utilization (40-60%) to guarantee stable tail latency (p99).
 
 ```{python}
 #| label: fig-tail-latency-explosion
@@ -90,11 +90,30 @@ The following plot visualizes this **Tail Latency Explosion**. It demonstrates w
 import sys
 import matplotlib.pyplot as plt
 # Ensure calc directory is in path
-sys.path.append('../../calc')
+sys.path.append('../../../calc')
 import viz
 
 viz.set_book_style()
 viz.plot_tail_latency()
+plt.show()
+```
+
+Beyond the technical limits of latency, the economics of serving have undergone a radical transformation. As models become more efficient and hardware becomes more specialized, the cost of "intelligence" is collapsing. This trend is visualized in @fig-intelligence-deflation, which tracks the plummeting price of token generation across model generations.
+
+```{python}
+#| label: fig-intelligence-deflation
+#| echo: false
+#| fig-cap: "**Intelligence Deflation.** Cost per 1M tokens (USD) over time (Log Scale). The cost of token generation has collapsed by multiple orders of magnitude since the release of GPT-3. This trend—driven by algorithmic efficiency, hardware specialization, and intense competition—transforms the feasibility of deploying large-scale AI for automated workflows."
+#| fig-alt: "Line plot showing token pricing collapsing from $20/M tokens in 2020 to <$0.20/M tokens in 2024. Log scale highlights the deflationary trend."
+
+import sys
+import matplotlib.pyplot as plt
+# Ensure calc directory is in path
+sys.path.append('../../../calc')
+import viz
+
+viz.set_book_style()
+viz.plot_intelligence_deflation()
 plt.show()
 ```
 
@@ -164,27 +183,67 @@ The first architectural decision in any serving system is whether predictions ha
 
 **Dynamic inference** (also called online or real-time inference) computes predictions on demand when requests arrive. This handles any input, including rare edge cases and novel combinations, and immediately reflects model updates. The cost is strict latency requirements that may force simpler models and more intensive monitoring infrastructure.
 
-For our ResNet-50 image classifier, consider two deployment scenarios. A **static approach** suits a photo organization app that pre-classifies all images in a user's library overnight. With 10,000 photos and 5ms inference each, batch processing takes ~50 seconds total, and users see instant classification when browsing. A **dynamic approach** suits a content moderation API that must classify user-uploaded images in real-time, with each image requiring the full preprocessing→inference→postprocessing pipeline and a 100ms latency budget. Most production image classification systems use a **hybrid approach**: frequently requested images (popular products, known memes) are pre-classified and cached, while novel uploads trigger dynamic inference.
+```{python}
+#| label: static-batch-calc
+#| echo: false
+
+# Static batch inference timing
+n_photos = 10_000
+inference_ms = 5
+batch_total_s = n_photos * inference_ms / 1000
+batch_total_s_str = f"{batch_total_s:.0f}"
+```
+
+For our ResNet-50 image classifier, consider two deployment scenarios. A **static approach** suits a photo organization app that pre-classifies all images in a user's library overnight. With `{python} f"{n_photos:,}"` photos and `{python} inference_ms`ms inference each, batch processing takes ~`{python} batch_total_s_str` seconds total, and users see instant classification when browsing. A **dynamic approach** suits a content moderation API that must classify user-uploaded images in real-time, with each image requiring the full preprocessing→inference→postprocessing pipeline and a 100ms latency budget. Most production image classification systems use a **hybrid approach**: frequently requested images (popular products, known memes) are pre-classified and cached, while novel uploads trigger dynamic inference.
 
 The choice between static and dynamic serving has direct economic implications. Stricter latency requirements directly translate into higher infrastructure costs, creating a tradeoff that serving system architects must navigate carefully.
 
 ::: {.callout-notebook #notebook-cost-latency title="The Cost of Latency"}
 
-Latency constraints directly dictate infrastructure costs. Consider a GPU server renting for \$4/hour.
+```{python}
+#| label: cost-latency-calc
+#| echo: false
+
+# Cost of latency tradeoff
+gpu_cost_per_hour = 4.0  # $/hour
+
+# Scenario A: batch size 1
+latency_a_ms = 5
+throughput_a_rps = 200
+queries_per_hour_a = throughput_a_rps * 3600
+cost_per_million_a = gpu_cost_per_hour / (queries_per_hour_a / 1_000_000)
+
+# Scenario B: batch size 8
+latency_b_ms = 10
+throughput_b_rps = 800
+queries_per_hour_b = throughput_b_rps * 3600
+cost_per_million_b = gpu_cost_per_hour / (queries_per_hour_b / 1_000_000)
+
+# Cost increase
+cost_increase_pct = (cost_per_million_a / cost_per_million_b - 1) * 100
+cost_ratio = cost_per_million_a / cost_per_million_b
+
+cost_a_str = f"{cost_per_million_a:.2f}"
+cost_b_str = f"{cost_per_million_b:.2f}"
+cost_increase_str = f"{cost_increase_pct:.0f}"
+cost_ratio_str = f"{cost_ratio:.0f}"
+```
+
+Latency constraints directly dictate infrastructure costs. Consider a GPU server renting for \$`{python} f"{gpu_cost_per_hour:.0f}"`/hour.
 
 **Scenario A (Low Latency):** Batch size 1.
 
-*   Latency: 5ms.
-*   Throughput: 200 req/s.
-*   Cost per million queries: **\$5.55**.
+*   Latency: `{python} latency_a_ms`ms.
+*   Throughput: `{python} throughput_a_rps` req/s.
+*   Cost per million queries: **\$`{python} cost_a_str`**.
 
 **Scenario B (High Throughput):** Batch size 8.
 
-*   Latency: 10ms (doubled due to batching overhead).
-*   Throughput: 800 req/s (quadrupled due to parallel efficiency).
-*   Cost per million queries: **\$1.38**.
+*   Latency: `{python} latency_b_ms`ms (doubled due to batching overhead).
+*   Throughput: `{python} throughput_b_rps` req/s (quadrupled due to parallel efficiency).
+*   Cost per million queries: **\$`{python} cost_b_str`**.
 
-**The Trade-off:** Reducing latency from 10ms to 5ms increases the hardware bill by **400%**. Engineers must quantify whether that 5ms speedup generates enough business value to justify the 4x cost increase.
+**The Trade-off:** Reducing latency from `{python} latency_b_ms`ms to `{python} latency_a_ms`ms increases the hardware bill by **`{python} cost_increase_str`%**. Engineers must quantify whether that `{python} latency_a_ms`ms speedup generates enough business value to justify the `{python} cost_ratio_str`x cost increase.
 
 :::
 
@@ -458,7 +517,33 @@ A typical serving request for our ResNet-50 classifier shows the following laten
 | **Total**          |                            | **10.1ms** | **100%**       |
 +--------------------+----------------------------+------------+----------------+
 
-Key insight: **Preprocessing consumes 45% of latency** despite model inference being the computationally intensive phase. With TensorRT optimization reducing inference to 2ms, preprocessing would dominate at 75%.
+```{python}
+#| label: latency-budget-calc
+#| echo: false
+
+# ResNet-50 latency budget breakdown
+jpeg_decode_ms = 3.0
+resize_ms = 1.0
+normalize_ms = 0.5
+cpu_gpu_ms = 0.5
+resnet_inference_ms = 5.0
+postprocess_ms = 0.1
+
+preprocess_ms = jpeg_decode_ms + resize_ms + normalize_ms
+total_latency_ms = preprocess_ms + cpu_gpu_ms + resnet_inference_ms + postprocess_ms
+preprocess_pct = preprocess_ms / total_latency_ms * 100
+
+# TensorRT optimization scenario
+tensorrt_inference_ms = 2.0
+tensorrt_total_ms = preprocess_ms + cpu_gpu_ms + tensorrt_inference_ms + postprocess_ms
+tensorrt_preprocess_pct = preprocess_ms / tensorrt_total_ms * 100
+
+total_latency_str = f"{total_latency_ms:.1f}"
+preprocess_pct_str = f"{preprocess_pct:.0f}"
+tensorrt_preprocess_pct_str = f"{tensorrt_preprocess_pct:.0f}"
+```
+
+Key insight: **Preprocessing consumes `{python} preprocess_pct_str`% of latency** despite model inference being the computationally intensive phase. With TensorRT optimization reducing inference to `{python} f"{tensorrt_inference_ms:.0f}"`ms, preprocessing would dominate at `{python} tensorrt_preprocess_pct_str`%.
 
 :::
 
@@ -500,7 +585,23 @@ This breakdown reveals why straightforward optimization efforts often fail. Engi
 
 ::: {.callout-notebook title="The Quantitative Approach to Serving"}
 
-**Amdahl's Law at Work**: Preprocessing (4.5ms) and data transfer (0.5ms) consume 50% of total latency. Optimizing the model 10× faster (5ms → 0.5ms) yields only 1.8× end-to-end speedup (from 10.1ms to 5.6ms). This is why focusing exclusively on model optimization (quantization, pruning) often disappoints: the bottleneck is elsewhere.
+```{python}
+#| label: amdahl-serving-calc
+#| echo: false
+
+# Amdahl's Law: model optimization impact
+non_model_ms = preprocess_ms + cpu_gpu_ms  # preprocessing + transfer
+non_model_pct = non_model_ms / total_latency_ms * 100
+model_10x_ms = resnet_inference_ms / 10  # 10× faster model
+optimized_total_ms = non_model_ms + model_10x_ms + postprocess_ms
+amdahl_speedup = total_latency_ms / optimized_total_ms
+
+non_model_pct_str = f"{non_model_pct:.0f}"
+optimized_total_str = f"{optimized_total_ms:.1f}"
+amdahl_speedup_str = f"{amdahl_speedup:.1f}"
+```
+
+**Amdahl's Law at Work**: Preprocessing (`{python} f"{preprocess_ms:.1f}"`ms) and data transfer (`{python} f"{cpu_gpu_ms:.1f}"`ms) consume `{python} non_model_pct_str`% of total latency. Optimizing the model 10× faster (`{python} f"{resnet_inference_ms:.0f}"`ms → `{python} f"{model_10x_ms:.1f}"`ms) yields only `{python} amdahl_speedup_str`× end-to-end speedup (from `{python} total_latency_str`ms to `{python} optimized_total_str`ms). This is why focusing exclusively on model optimization (quantization, pruning) often disappoints: the bottleneck is elsewhere.
 
 **DSA Efficiency**: General-purpose CPUs achieve only 1-2% of peak performance at batch-1 because instruction overhead dominates. DSAs like TPUs and Tensor Cores replace complex logic with dense MAC arrays, achieving 10-100× higher arithmetic intensity. This makes hardware acceleration a requirement for economically viable serving.
 
@@ -545,7 +646,19 @@ For compute-bound models, @eq-resolution-throughput formalizes how throughput sc
 
 $$\frac{T(r_2)}{T(r_1)} = \left(\frac{r_1}{r_2}\right)^2$$ {#eq-resolution-throughput}
 
-Doubling resolution from 224 to 448 theoretically yields 4x slowdown (measured: 3.6x due to fixed overhead amortization). However, at high resolutions, models transition from compute-bound to memory-bound as activation tensors exceed cache capacity. @tbl-resolution-bottleneck quantifies this transition for ResNet-50, showing how arithmetic intensity decreases with resolution:
+```{python}
+#| label: resolution-scaling-calc
+#| echo: false
+
+# Resolution doubling theoretical slowdown
+r1 = 224
+r2 = 448
+theoretical_slowdown = (r2 / r1) ** 2
+measured_slowdown = 3.6  # Empirical measurement
+theoretical_str = f"{theoretical_slowdown:.0f}"
+```
+
+Doubling resolution from `{python} r1` to `{python} r2` theoretically yields `{python} theoretical_str`x slowdown (measured: `{python} measured_slowdown`x due to fixed overhead amortization). However, at high resolutions, models transition from compute-bound to memory-bound as activation tensors exceed cache capacity. @tbl-resolution-bottleneck quantifies this transition for ResNet-50, showing how arithmetic intensity decreases with resolution:
 
 +----------------+---------------------+----------------------+----------------+
 | **Resolution** | **Activation Size** | **Arith. Intensity** | **Bottleneck** |
@@ -672,13 +785,26 @@ Serving engineers routinely face a concrete question: given a latency SLO and an
 
 ### Little's Law {#sec-model-serving-systems-littles-law-9352}
 
-The most fundamental result in queuing theory is Little's Law,[^fn-littles-law] which @eq-littles-law expresses as a simple relationship between three quantities in any stable system:
+The most fundamental result in queuing theory is Little's Law,[^fn-littles-law] [^fn-littles-law-intuition] which @eq-littles-law expresses as a simple relationship between three quantities in any stable system:
 
 [^fn-littles-law]: **Little's Law**: Proven by John D.C. Little in 1961 [@little1961proof], this theorem establishes that $L = \lambda W$ holds for any stable queuing system regardless of arrival patterns, service distributions, or scheduling policies. The remarkable generality makes it one of the most useful results in operations research. For serving systems, it enables capacity planning from observable metrics: measuring queue depth and arrival rate directly yields average latency without instrumenting individual requests.
+
+[^fn-littles-law-intuition]: **Little's Law in the Coffee Shop**: Throughput ($\lambda$) is the rate of arriving customers; Latency ($W$) is the time to make one drink; Queue ($L$) is the number of people waiting. If the barista takes 1 minute per drink ($W=1$) and customers arrive every 30 seconds ($\lambda=2$), the queue ($L$) will grow indefinitely unless more baristas are added.
 
 $$L = \lambda \cdot W$$ {#eq-littles-law}
 
 where $L$ is the average number of requests in the system, $\lambda$ is the arrival rate (requests per second), and $W$ is the average time each request spends in the system. This relationship holds regardless of arrival distribution, service time distribution, or scheduling policy.
+
+```{python}
+#| label: littles-law-calc
+#| echo: false
+
+# Little's Law example: L = λ × W
+littles_lambda = 1000  # requests/sec
+littles_w = 0.05       # 50ms in seconds
+littles_l = littles_lambda * littles_w  # concurrent requests
+littles_l_str = f"{littles_l:.0f}"
+```
 
 ::: {.callout-notebook #notebook-littles-law title="Little's Law"}
 
@@ -692,7 +818,7 @@ where $L$ is the average number of requests in the system, $\lambda$ is the arri
 *   **Latency Target ($W$)**: 50 ms (0.05 s).
 
 **The Calculation**:
-$$ L = 1,000 \times 0.05 = \mathbf{50 \text{ concurrent requests}} $$
+$$ L = 1{,}000 \times 0.05 = \mathbf{`{python} littles_l_str` \text{ concurrent requests}} $$
 
 **The Constraint**: Your server *must* have enough RAM to hold 50 requests simultaneously (batch size + queue).
 
@@ -760,6 +886,49 @@ For single-machine serving, this principle has two implications. First, tail lat
 
 With the queuing model and tail latency analysis established, we can now apply these tools to a concrete capacity planning exercise.
 
+```{python}
+#| label: capacity-planning-calc
+#| echo: false
+
+import math
+
+# ResNet-50 capacity planning inputs
+cp_peak_qps = 5000
+cp_service_ms = 5
+cp_p99_target_ms = 50
+cp_rho_safe = 0.72  # from solving the M/M/1 p99 equation
+cp_v100_throughput = 1143  # images/sec at batch=16
+cp_headroom = 1.3  # 30% headroom
+
+# Step 2: Required service rate
+cp_mu_required = cp_peak_qps / cp_rho_safe
+cp_mu_required_str = f"{cp_mu_required:.0f}"
+
+# Step 3: GPU count
+cp_gpus_raw = cp_mu_required / cp_v100_throughput
+cp_gpus_ceil = math.ceil(cp_gpus_raw)
+cp_gpus_raw_str = f"{cp_gpus_raw:.1f}"
+cp_gpus_ceil_str = f"{cp_gpus_ceil}"
+
+# Step 4: With headroom
+cp_final_raw = cp_gpus_ceil * cp_headroom
+cp_final_ceil = math.ceil(cp_final_raw)
+cp_final_raw_str = f"{cp_final_raw:.1f}"
+cp_final_ceil_str = f"{cp_final_ceil}"
+
+# Step 5: Utilization after 1 failure
+cp_gpus_after_fail = cp_final_ceil - 1
+cp_gpus_after_fail_str = f"{cp_gpus_after_fail}"
+cp_util_after_fail = (cp_peak_qps / cp_v100_throughput) / cp_gpus_after_fail * 100
+cp_util_after_fail_str = f"{cp_util_after_fail:.1f}"
+
+# Precision throughput ratio
+cp_fp32_bits = 32
+cp_int8_bits = 8
+cp_precision_ratio = cp_fp32_bits // cp_int8_bits
+cp_precision_ratio_str = f"{cp_precision_ratio}"
+```
+
 ::: {.callout-notebook title="ResNet-50 Capacity Planning"}
 
 Consider designing a ResNet-50 serving system with these requirements:
@@ -778,29 +947,29 @@ This yields $\rho \leq 0.72$ (72% maximum utilization).
 
 #### Step 2: Calculate Required Service Rate {.unnumbered}
 
-$$\mu_{\text{required}} = \frac{\lambda}{\rho_{\text{safe}}} = \frac{5000}{0.72} = 6944 \text{ requests/second}$$
+$$\mu_{\text{required}} = \frac{\lambda}{\rho_{\text{safe}}} = \frac{5000}{0.72} = `{python} cp_mu_required_str` \text{ requests/second}$$
 
 #### Step 3: Determine GPU Count {.unnumbered}
 
 Single V100 throughput at batch=16: 1,143 images/second
 
-$$\text{GPUs needed} = \frac{6944}{1143} = 6.1 \rightarrow 7 \text{ GPUs}$$
+$$\text{GPUs needed} = \frac{`{python} cp_mu_required_str`}{1143} = `{python} cp_gpus_raw_str` \rightarrow `{python} cp_gpus_ceil_str` \text{ GPUs}$$
 
 #### Step 4: Add Headroom for Variance {.unnumbered}
 
 Production systems add 30% headroom for traffic spikes and variance:
 
-$$\text{Final count} = 7 \times 1.3 = 9.1 \rightarrow 10 \text{ GPUs}$$
+$$\text{Final count} = `{python} cp_gpus_ceil_str` \times 1.3 = `{python} cp_final_raw_str` \rightarrow `{python} cp_final_ceil_str` \text{ GPUs}$$
 
 #### Step 5: Verify Fault Tolerance {.unnumbered}
 
-The 30% headroom addresses traffic variance, but production systems also need fault tolerance. With 10 GPUs, losing one leaves 9 GPUs handling 5,000 QPS:
+The 30% headroom addresses traffic variance, but production systems also need fault tolerance. With `{python} cp_final_ceil_str` GPUs, losing one leaves `{python} cp_gpus_after_fail_str` GPUs handling 5,000 QPS:
 
-$$\text{Utilization after failure} = \frac{5000 / 1143}{9} = 48.6\%$$
+$$\text{Utilization after failure} = \frac{5000 / 1143}{`{python} cp_gpus_after_fail_str`} = `{python} cp_util_after_fail_str`\%$$
 
 This remains well below the 72% safe utilization threshold, confirming N+1 redundancy is satisfied. For stricter fault tolerance requirements, N+2 redundancy (tolerating two simultaneous failures) would require 11-12 GPUs.
 
-**Result**: Provision 10 V100 GPUs to serve 5,000 QPS at 50ms p99 latency with N+1 fault tolerance.
+**Result**: Provision `{python} cp_final_ceil_str` V100 GPUs to serve 5,000 QPS at 50ms p99 latency with N+1 fault tolerance.
 
 :::
 
@@ -840,7 +1009,7 @@ The queuing analysis from previous sections assumes two prerequisites: models ar
 
 ### Training-Serving Skew {#sec-model-serving-systems-trainingserving-skew-7b99}
 
-A model that performed well during validation may silently degrade when deployed. This phenomenon, known as *training-serving skew*, represents one of the most subtle failure modes in production ML because it is invisible to latency monitoring and exception tracking.
+A model that performed well during validation may silently degrade when deployed. This phenomenon, known as **training-serving skew**, represents one of the most subtle failure modes in production ML because it is invisible to latency monitoring and exception tracking.
 
 ::: {.callout-definition title="Training-Serving Skew"}
 
@@ -866,7 +1035,7 @@ For ResNet-50 serving, common sources of skew include:
 
 ### Cold Start and Initialization Dynamics {#sec-model-serving-systems-model-loading-initialization-cc5a}
 
-With preprocessing pipelines designed to avoid training-serving skew, the next challenge is getting models ready to serve. Before processing any request, models must load from storage into memory and prepare for inference [@romero2021infaas]. This initialization latency, known as *cold start*, affects system responsiveness during deployments, scaling events, and recovery from failures.
+With preprocessing pipelines designed to avoid training-serving skew, the next challenge is getting models ready to serve. Before processing any request, models must load from storage into memory and prepare for inference [@romero2021infaas]. This initialization latency, known as **cold start**, affects system responsiveness during deployments, scaling events, and recovery from failures.
 
 ::: {.callout-definition title="Cold Start"}
 
@@ -946,8 +1115,18 @@ The choice depends on whether consistent latency with MIG or maximum utilization
 
 When the aggregate size of all models exceeds GPU memory capacity, the serving system must swap models between host memory (DRAM) and device memory (VRAM) on demand. This introduces a new latency component determined by the PCIe bus bandwidth.
 
-For a 10 GB model on PCIe Gen4 x16 (32 GB/s theoretical bandwidth), loading takes at least:
-$$ T_{\text{load}} = \frac{10 \text{ GB}}{32 \text{ GB/s}} \approx 312 \text{ ms} $$
+```{python}
+#| label: model-swap-calc
+#| echo: false
+
+model_size_gb = 10
+pcie_bw_gbs = PCIE_GEN4_BW.to(GB / second).magnitude
+model_swap_ms = f"{model_size_gb / pcie_bw_gbs * 1000:.0f}"
+pcie_bw_gbs_str = f"{pcie_bw_gbs:.0f}"
+```
+
+For a `{python} model_size_gb` GB model on PCIe Gen4 x16 (`{python} pcie_bw_gbs_str` GB/s theoretical bandwidth), loading takes at least:
+$$ T_{\text{load}} = \frac{`{python} model_size_gb` \text{ GB}}{`{python} pcie_bw_gbs_str` \text{ GB/s}} \approx `{python} model_swap_ms` \text{ ms} $$
 
 To mitigate this, systems use **Pinned Memory** (page-locked host memory). By default, the operating system can move ("page") any memory region to disk when RAM is under pressure. This creates a problem for GPU transfers: if the GPU's DMA (Direct Memory Access) engine begins reading a memory region that gets paged out mid-transfer, the transfer fails or stalls. To avoid this, the CPU must first copy data to a temporary pinned buffer before the GPU can safely read it, adding both latency and CPU overhead.
 
@@ -957,7 +1136,7 @@ The lifecycle management strategies examined so far ensure models are ready to s
 
 ## Throughput Optimization {#sec-model-serving-systems-throughput-optimization-18d1}
 
-With models loaded, initialized, and ready to serve, the next optimization opportunity lies in how requests are grouped for processing. Batching[^fn-batch-etymology] differs fundamentally between training and serving [@crankshaw2017clipper]. Training batches maximize throughput, processing hundreds or thousands of samples together with no concern for individual sample latency. Serving batches must balance throughput against individual request latency, typically processing single digits of requests together while ensuring no request waits too long. This adaptive approach is called *dynamic batching* because the system adjusts batch composition in real time based on arriving requests.
+With models loaded, initialized, and ready to serve, the next optimization opportunity lies in how requests are grouped for processing. Batching[^fn-batch-etymology] differs fundamentally between training and serving [@crankshaw2017clipper]. Training batches maximize throughput, processing hundreds or thousands of samples together with no concern for individual sample latency. Serving batches must balance throughput against individual request latency, typically processing single digits of requests together while ensuring no request waits too long. This adaptive approach is called **dynamic batching** because the system adjusts batch composition in real time based on arriving requests.
 
 [^fn-batch-etymology]: **Batch**: From Old French "bache" (a quantity baked at one time), the term entered computing in the 1950s to describe jobs processed together without human interaction, as contrasted with interactive computing. IBM's batch processing systems of the 1960s would collect punch cards overnight and process them sequentially. The ML usage preserves this core meaning: group samples together for efficient processing, trading individual response time for aggregate throughput.
 
@@ -991,7 +1170,24 @@ The throughput-latency tradeoff for ResNet-50 on a V100 GPU illustrates the powe
 
 *Times shown are pure inference time, excluding queue wait. @sec-model-serving-systems-traffic-patterns-batching-strategy-2e6b analyzes how user-perceived latency includes batching window wait.
 
-**Key insight**: Batch size 32 achieves 6.4× higher throughput than batch size 1. However, user-perceived latency includes both queue wait and inference time. With a 10ms batching window and 25ms inference, total latency reaches 35ms versus 5ms at batch size 1.
+```{python}
+#| label: batch-throughput-calc
+#| echo: false
+
+# Batching throughput comparison (from table above)
+batch1_throughput = 200   # img/s at batch=1
+batch32_throughput = 1280  # img/s at batch=32
+throughput_ratio = batch32_throughput / batch1_throughput
+batch32_inference_ms = 25.0
+batch_window_ms = 10.0
+batch32_total_ms = batch_window_ms + batch32_inference_ms
+batch1_inference_total_ms = 5.0
+
+throughput_ratio_str = f"{throughput_ratio:.1f}"
+batch32_total_str = f"{batch32_total_ms:.0f}"
+```
+
+**Key insight**: Batch size 32 achieves `{python} throughput_ratio_str`× higher throughput than batch size 1. However, user-perceived latency includes both queue wait and inference time. With a `{python} f"{batch_window_ms:.0f}"`ms batching window and `{python} f"{batch32_inference_ms:.0f}"`ms inference, total latency reaches `{python} batch32_total_str`ms versus `{python} f"{batch1_inference_total_ms:.0f}"`ms at batch size 1.
 
 :::
 
@@ -1001,16 +1197,34 @@ The table reveals the throughput-latency tradeoff in stark terms: larger batches
 
 **Problem**: You are serving a ResNet-50 model. At batch=1, the GPU is mostly idle (15% utilization). You want to increase throughput to save money, but you have a **20 ms** latency budget.
 
+```{python}
+#| label: batching-sweetspot-calc
+#| echo: false
+
+# Batching sweet spot worked example
+batch1_ms = 5.0
+batch1_imgs = 200  # img/s
+batch8_wait_ms = 5.0
+batch8_inference_ms = 9.0
+batch8_user_latency_ms = batch8_wait_ms + batch8_inference_ms
+batch8_throughput = 8 / (batch8_user_latency_ms / 1000)
+latency_increase = batch8_user_latency_ms / batch1_ms
+
+batch8_user_latency_str = f"{batch8_user_latency_ms:.0f}"
+batch8_throughput_str = f"{batch8_throughput:.0f}"
+latency_increase_str = f"{latency_increase:.0f}"
+```
+
 **The Math**:
 
-1.  **Baseline (Batch 1)**: Inference = **5 ms**. Throughput = **200 img/s**.
+1.  **Baseline (Batch 1)**: Inference = **`{python} f"{batch1_ms:.0f}"` ms**. Throughput = **`{python} batch1_imgs` img/s**.
 2.  **Optimized (Batch 8)**:
-    - **Wait Time**: You set a **5 ms** batching window to collect requests.
-    - **Inference Time**: Batch 8 inference takes **9 ms**.
-    - **User Latency**: $5 \text{ ms (wait)} + 9 \text{ ms (compute)} = \mathbf{14 \text{ ms}}$.
-    - **Throughput**: $8 \text{ img} / 14 \text{ ms} \approx \mathbf{570 \text{ img/s}}$.
+    - **Wait Time**: You set a **`{python} f"{batch8_wait_ms:.0f}"` ms** batching window to collect requests.
+    - **Inference Time**: Batch 8 inference takes **`{python} f"{batch8_inference_ms:.0f}"` ms**.
+    - **User Latency**: $5 \text{ ms (wait)} + 9 \text{ ms (compute)} = \mathbf{`{python} batch8_user_latency_str` \text{ ms}}$.
+    - **Throughput**: $8 \text{ img} / `{python} batch8_user_latency_str` \text{ ms} \approx \mathbf{`{python} batch8_throughput_str` \text{ img/s}}$.
 
-**The Systems Conclusion**: By accepting a **3x increase in latency** (5ms $\rightarrow$ 14ms), you have achieved nearly **3x higher throughput** on the same hardware. As long as 14ms is under your 20ms budget, this is "free" capacity. This trade-off is the fundamental lever of serving economics.
+**The Systems Conclusion**: By accepting a **`{python} latency_increase_str`x increase in latency** (`{python} f"{batch1_ms:.0f}"`ms $\rightarrow$ `{python} batch8_user_latency_str`ms), you have achieved nearly **`{python} latency_increase_str`x higher throughput** on the same hardware. As long as `{python} batch8_user_latency_str`ms is under your 20ms budget, this is "free" capacity. This trade-off is the fundamental lever of serving economics.
 :::
 
 The following plot (@fig-throughput-latency-knee) visualizes this trade-off, showing the **"Knee"** of the curve. This is the optimal operating point where throughput is maximized before latency spikes due to queuing.
@@ -1063,7 +1277,22 @@ For Poisson arrivals with rate $\lambda$ and batching window $T$, requests arriv
 
 $$E[L_{\text{wait}}] = \frac{T}{2}$$ {#eq-avg-wait}
 
-This simple relationship has direct implications. A 20ms batching window adds 10ms average latency regardless of batch size achieved. If your latency SLO is 50ms and inference takes 5ms, the batching window consumes 20% of your latency budget before any computation begins.
+```{python}
+#| label: batching-budget-calc
+#| echo: false
+
+# Batching window latency budget analysis
+batch_window_ms = 20
+avg_wait_ms = batch_window_ms / 2
+slo_ms = 50
+inference_ms = 5
+budget_pct = avg_wait_ms / slo_ms * 100
+
+avg_wait_str = f"{avg_wait_ms:.0f}"
+budget_pct_str = f"{budget_pct:.0f}"
+```
+
+This simple relationship has direct implications. A 20ms batching window adds `{python} avg_wait_str`ms average latency regardless of batch size achieved. If your latency SLO is 50ms and inference takes 5ms, the batching window consumes `{python} budget_pct_str`% of your latency budget before any computation begins.
 
 **Batch Size Distribution.** The number of requests collected during window $T$ follows a Poisson distribution with mean $\lambda T$. @eq-batch-distribution formalizes this relationship:
 
@@ -1102,7 +1331,38 @@ For ResNet-50 on a V100 GPU, service time scales as $S(b) = 5\text{ms} + 0.6b$ (
 | 32             | 24.2ms           | 34.2ms            | 935 img/s      | Maximum        |
 +----------------+------------------+-------------------+----------------+----------------+
 
-: **Batching Throughput Analysis**: ResNet-50 throughput on V100 with 10ms batching window. Throughput increases 14.6x from batch size 1 to 32 (64 to 935 img/s), but total latency more than doubles (15.6ms to 34.2ms). The optimal configuration depends on whether the latency SLO or throughput target is the binding constraint. {#tbl-batching-throughput}
+```{python}
+#| label: batching-analysis-calc
+#| echo: false
+
+# Batching throughput analysis (from S(b) = 5ms + 0.6b, T = 10ms)
+T_window = 10.0  # batching window ms
+fixed_overhead_ms = 5.0
+per_image_ms = 0.6
+
+def service_time(b):
+    return fixed_overhead_ms + per_image_ms * b
+
+def total_latency(b):
+    return T_window + service_time(b)
+
+def throughput(b):
+    return b / (total_latency(b) / 1000)
+
+# Table values
+batch_sizes = [1, 4, 8, 16, 32]
+throughputs = {b: throughput(b) for b in batch_sizes}
+latencies = {b: total_latency(b) for b in batch_sizes}
+
+throughput_increase = throughputs[32] / throughputs[1]
+throughput_increase_str = f"{throughput_increase:.1f}"
+b1_throughput_str = f"{throughputs[1]:.0f}"
+b32_throughput_str = f"{throughputs[32]:.0f}"
+b1_latency_str = f"{latencies[1]:.1f}"
+b32_latency_str = f"{latencies[32]:.1f}"
+```
+
+: **Batching Throughput Analysis**: ResNet-50 throughput on V100 with `{python} f"{T_window:.0f}"`ms batching window. Throughput increases `{python} throughput_increase_str`x from batch size 1 to 32 (`{python} b1_throughput_str` to `{python} b32_throughput_str` img/s), but total latency more than doubles (`{python} b1_latency_str`ms to `{python} b32_latency_str`ms). The optimal configuration depends on whether the latency SLO or throughput target is the binding constraint. {#tbl-batching-throughput}
 
 The throughput gains in @tbl-batching-throughput trace directly back to the Iron Law framework established in @sec-ai-training-iron-law-training-performance-a53f, where batching amortizes the fixed overhead term.
 
@@ -1146,14 +1406,56 @@ The aggressive window achieves only 12% higher throughput but increases average 
 
 $$L_{p99} \approx T + S(b_{p99})$$ {#eq-p99-batch-latency}
 
-where $b_{p99}$ is the 99th percentile batch size. For $\lambda = 500$ QPS and $T = 10$ms:
+```{python}
+#| label: slo-violation-calc
+#| echo: false
 
-- Mean batch size: 5
-- p99 batch size: 11 (from Poisson distribution)
-- Mean latency: $5\text{ms} + 9.0\text{ms} = 14\text{ms}$
-- p99 latency: $10\text{ms} + 11.6\text{ms} = 21.6\text{ms}$
+import math
 
-The p99 latency is 1.54× the mean, reflecting both wait time variance and batch size variance. Systems that provision based on mean latency will experience SLO violations.
+# SLO violation analysis
+qps = 500
+T_slo = 10.0  # ms window
+mean_batch = qps * (T_slo / 1000)  # λ × T
+
+# Poisson p99: use inverse CDF approximation
+# For λT=5, p99 ≈ 11
+p99_batch = 11
+
+# Latency calculations using S(b) = 5ms + 0.6b
+mean_wait = T_slo / 2  # average wait = T/2
+mean_service = service_time(int(mean_batch))
+mean_latency = mean_wait + mean_service
+
+p99_service = service_time(p99_batch)
+p99_latency = T_slo + p99_service  # worst-case wait = T
+
+p99_to_mean = p99_latency / mean_latency
+
+mean_batch_str = f"{mean_batch:.0f}"
+mean_service_str = f"{mean_service:.1f}"
+mean_latency_str = f"{mean_latency:.0f}"
+p99_service_str = f"{p99_service:.1f}"
+p99_latency_str = f"{p99_latency:.1f}"
+p99_ratio_str = f"{p99_to_mean:.2f}"
+```
+
+where $b_{p99}$ is the 99th percentile batch size. For $\lambda = `{python} qps`$ QPS and $T = `{python} f"{T_slo:.0f}"`$ms:
+
+- Mean batch size: `{python} mean_batch_str`
+- p99 batch size: `{python} p99_batch` (from Poisson distribution)
+- Mean latency: $`{python} f"{mean_wait:.0f}"`\text{ms} + `{python} mean_service_str`\text{ms} = `{python} mean_latency_str`\text{ms}$
+- p99 latency: $`{python} f"{T_slo:.0f}"`\text{ms} + `{python} p99_service_str`\text{ms} = `{python} p99_latency_str`\text{ms}$
+
+The p99 latency is `{python} p99_ratio_str`× the mean, reflecting both wait time variance and batch size variance. Systems that provision based on mean latency will experience SLO violations.
+
+::: {.callout-perspective title="Practitioner's Perspective: The Latency-Throughput Trade-off" collapse="false"}
+In systems engineering interviews and architecture reviews, the most common pitfall is discussing "inference speed" without specifying **Batch Size**.
+
+*   **Batch-1 Regime**: Optimized for **Latency**. Relevant for real-time interaction (e.g., typing helpers, robotics). The bottleneck is usually Python overhead or memory bandwidth.
+*   **Batch-32 Regime**: Optimized for **Throughput**. Relevant for offline processing or high-traffic services. The bottleneck is usually Compute (FLOPS).
+
+**The Professional Response**: When asked "how fast is this model?", always clarify: "Are we optimizing for single-stream latency (Batch 1) or maximum throughput (Batch N)?" This distinction demonstrates systems maturity.
+:::
 
 #### Adaptive Batching Windows {#sec-model-serving-systems-adaptive-batching-windows-c404}
 
@@ -1510,7 +1812,7 @@ Numerical precision directly trades accuracy for throughput, connecting to the q
 
 **Precision-Throughput Relationship.** For memory-bandwidth-bound operations, reducing precision proportionally increases throughput by reducing data movement. @eq-precision-throughput quantifies the theoretical maximum speedup from precision reduction:
 
-$$\frac{\text{Throughput}_{\text{INT8}}}{\text{Throughput}_{\text{FP32}}} = \frac{32}{8} = 4\times \text{ (theoretical maximum)}$$ {#eq-precision-throughput}
+$$\frac{\text{Throughput}_{\text{INT8}}}{\text{Throughput}_{\text{FP32}}} = \frac{32}{8} = `{python} cp_precision_ratio_str`\times \text{ (theoretical maximum)}$$ {#eq-precision-throughput}
 
 In practice, GPU compute pipelines and Tensor Core alignment requirements limit achieved speedup to 2.5-3.5x for INT8 versus FP32. Tensor Cores require specific alignment: INT8 operations need tensor dimensions divisible by 16, while FP16 requires divisibility by 8. @sec-ai-acceleration provides the detailed Tensor Core architecture that explains these alignment constraints. The *precision tradeoffs* for a standard vision model illustrate how these theoretical limits manifest in practice.
 
@@ -1723,24 +2025,54 @@ $$ T_{\text{token}} \approx \frac{\text{Model Size (Bytes)}}{\text{Memory Bandwi
 Every time you generate a token, you are paying a massive "energy tax" to move the model's logic from HBM into compute registers. For Llama-3-8B (3.5 GB int4), an A100 80GB (`{python} a100_bw_tbs` TB/s HBM2e) generates tokens at $\approx 1.7$ ms/token. Adding more *compute cores* yields **zero** latency improvement; only faster memory (Physics) or smaller models (Algorithm) can speed up generation.
 :::
 
-*   $T_{\text{token}} \approx \frac{3.5 \text{ GB}}{3.35 \text{ TB/s}} \approx 1 \text{ ms}$ (theoretical limit).
-*   Accounting for kernel launch overhead and attention computation, realized $T_{\text{token}}$ is approximately 10 ms.
-*   Total decode time = $256 \text{ tokens} \times 10 \text{ ms/token} = 2.56 \text{ seconds}$.
-*   **TPOT is 10 ms**, well within the 20 ms "fluidity" SLO.
+```{python}
+#| label: llm-serving-calc
+#| echo: false
+
+# Token generation (decode phase)
+model_weight_gb = 3.5
+h100_bw_tb = H100_MEM_BW.to(TB / second).magnitude
+token_time_theoretical_ms = f"{model_weight_gb / (h100_bw_tb * 1000) * 1000:.0f}"  # GB / (TB/s) = ms
+realized_tpot_ms = 10
+decode_tokens = 256
+total_decode_s = f"{decode_tokens * realized_tpot_ms / 1000:.2f}"
+
+# KV cache and batch sizing
+kv_cache_gb = 72
+kv_per_token_mb = 0.5
+kv_capacity_tokens = int(kv_cache_gb * 1000 / kv_per_token_mb)
+kv_capacity_tokens_str = f"{kv_capacity_tokens:,}"
+tokens_per_req = 1256
+concurrent_batch = int(kv_capacity_tokens / tokens_per_req)
+
+# Unit economics
+ttft_s = 0.12
+req_time_s = ttft_s + decode_tokens * realized_tpot_ms / 1000
+req_time_s_str = f"{req_time_s:.2f}"
+hourly_cost = 3.00
+tokens_per_hour = concurrent_batch * (3600 / req_time_s) * tokens_per_req
+tokens_per_hour_m = f"{tokens_per_hour / 1e6:.0f}"
+cost_per_m_tokens = f"{hourly_cost / (tokens_per_hour / 1e6):.3f}"
+```
+
+*   $T_{\text{token}} \approx \frac{`{python} model_weight_gb` \text{ GB}}{`{python} h100_bw_tbs` \text{ TB/s}} \approx `{python} token_time_theoretical_ms` \text{ ms}$ (theoretical limit).
+*   Accounting for kernel launch overhead and attention computation, realized $T_{\text{token}}$ is approximately `{python} realized_tpot_ms` ms.
+*   Total decode time = $`{python} decode_tokens` \text{ tokens} \times `{python} realized_tpot_ms` \text{ ms/token} = `{python} total_decode_s` \text{ seconds}$.
+*   **TPOT is `{python} realized_tpot_ms` ms**, well within the 20 ms "fluidity" SLO.
 
 #### Memory & Throughput {#sec-model-serving-systems-memory-throughput-63dd}
 
-With 4-bit weights occupying 3.5 GB, the remaining ~76 GB of VRAM is available for the **KV Cache**. Using **PagedAttention**, we can allocate this memory with near-zero fragmentation.
+With 4-bit weights occupying `{python} model_weight_gb` GB, the remaining ~`{python} int(80 - model_weight_gb)` GB of VRAM is available for the **KV Cache**. Using **PagedAttention**, we can allocate this memory with near-zero fragmentation.
 
-*   Each token requires approximately 0.5 MB of KV cache (32 layers $\times$ 4096 dim $\times$ 2 vectors $\times$ 2-byte precision).
-*   Total cache capacity $\approx \frac{72 \text{ GB}}{0.5 \text{ MB/token}} \approx 144,000 \text{ tokens}$.
-*   At 1,256 tokens per request (input + output), the GPU can handle a **concurrent batch size of ~114 requests**.
+*   Each token requires approximately `{python} kv_per_token_mb` MB of KV cache (32 layers $\times$ 4096 dim $\times$ 2 vectors $\times$ 2-byte precision).
+*   Total cache capacity $\approx \frac{`{python} kv_cache_gb` \text{ GB}}{`{python} kv_per_token_mb` \text{ MB/token}} \approx `{python} kv_capacity_tokens_str` \text{ tokens}$.
+*   At `{python} f"{tokens_per_req:,}"` tokens per request (input + output), the GPU can handle a **concurrent batch size of ~`{python} concurrent_batch` requests**.
 
 #### Unit Economics {#sec-model-serving-systems-unit-economics-b685}
 
-For an H100 SXM5 instance at approximately \$3.00 per hour (specialized cloud providers; hyperscaler rates vary from \$2-13 per hour as of 2024):
-*   Total tokens per hour = $114 \text{ batch} \times \frac{3600 \text{ s/hr}}{2.68 \text{ s/req}} \times 1256 \text{ tokens/req} \approx 190 \text{ million tokens/hour}$.
-*   **Cost per million tokens**: $\frac{\$3.00}{190} \approx \mathbf{\$0.015}$.
+For an H100 SXM5 instance at approximately \$`{python} f"{hourly_cost:.2f}"` per hour (specialized cloud providers; hyperscaler rates vary from \$2-13 per hour as of 2024):
+*   Total tokens per hour = $`{python} concurrent_batch` \text{ batch} \times \frac{3600 \text{ s/hr}}{`{python} req_time_s_str` \text{ s/req}} \times `{python} f"{tokens_per_req:,}"` \text{ tokens/req} \approx `{python} tokens_per_hour_m` \text{ million tokens/hour}$.
+*   **Cost per million tokens**: $\frac{\$`{python} f"{hourly_cost:.2f}"`}{`{python} tokens_per_hour_m`} \approx \mathbf{\$`{python} cost_per_m_tokens`}$.
 
 This analysis highlights that for LLMs, **memory capacity** (the size of the KV cache) is the primary determinant of throughput and cost, while **memory bandwidth** is the primary determinant of latency.
 
@@ -1764,7 +2096,18 @@ Engineers assume identical model weights preserve validation set performance. In
 
 **Pitfall:** ***Using average latency to evaluate serving system performance.***
 
-Engineers monitor average latency because it trends smoothly and is simple to compute. In production, averages hide the slowest requests that determine user satisfaction. A system with 10ms average latency might have 200ms p99 latency, meaning 1 percent of users experience 20× worse performance. @sec-model-serving-systems-tail-latency-5376 explains how queuing variability causes this divergence: at 70 percent utilization with 5ms service time, average latency is 17ms but p99 reaches 75ms. Production SLOs specify percentile targets (p95, p99) precisely because averages mask tail behavior. Systems reporting only averages pass monitoring checks while violating user experience standards.
+```{python}
+#| label: tail-latency-calc
+#| echo: false
+
+avg_latency_ms = 10
+p99_latency_ms = 200
+tail_multiplier = p99_latency_ms / avg_latency_ms
+
+tail_mult_str = f"{tail_multiplier:.0f}"
+```
+
+Engineers monitor average latency because it trends smoothly and is simple to compute. In production, averages hide the slowest requests that determine user satisfaction. A system with 10ms average latency might have 200ms p99 latency, meaning 1 percent of users experience `{python} tail_mult_str`× worse performance. @sec-model-serving-systems-tail-latency-5376 explains how queuing variability causes this divergence: at 70 percent utilization with 5ms service time, average latency is 17ms but p99 reaches 75ms. Production SLOs specify percentile targets (p95, p99) precisely because averages mask tail behavior. Systems reporting only averages pass monitoring checks while violating user experience standards.
 
 **Fallacy:** ***Larger serving batches always improve throughput without affecting latency SLOs.***
 

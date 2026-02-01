@@ -346,7 +346,7 @@ The practical question then becomes: how do we identify which samples to keep?
 
 ### Coreset Selection Algorithms {#sec-data-selection-coreset-selection-algorithms-a520}
 
-Coreset selection[^fn-coreset] answers this question by identifying a small subset of data that preserves the statistical properties of the entire dataset.
+**Coreset selection**[^fn-coreset] answers this question by identifying a small subset of data that preserves the statistical properties of the entire dataset.
 
 [^fn-coreset]: **Coreset**: The term "coreset" combines "core" and "set," reflecting its purpose as a core representative subset. The concept emerged from computational geometry in the early 2000s, where researchers sought provably small subsets that approximate solutions to geometric optimization problems. For ML applications, coresets provide theoretical guarantees: a well-constructed coreset of size independent of the original dataset can approximate the full dataset's loss function within a factor of (1 + ε).
 
@@ -1171,32 +1171,90 @@ $$ T_{selection} + T_{train}(N_{subset}) < T_{train}(N_{total}) $$
 
 Here $T_{selection}$ is the time spent scoring the pool and $T_{train}$ is the compute time. If $f(x)$ requires a forward pass of a large model, the cost of selection can exceed the cost of training, producing negative ROI. A concrete scenario illustrates this trade-off.
 
+```{python}
+#| label: selection-inequality-calc
+#| echo: false
+
+# Selection inequality worked example
+n_images = 1_000_000
+n_coreset = 100_000
+n_epochs = 100
+
+# Option A: Full model selection
+resnet50_time_per_image = 0.01  # seconds
+score_a_sec = n_images * resnet50_time_per_image
+train_a_sec = n_coreset * n_epochs * resnet50_time_per_image
+total_a_sec = score_a_sec + train_a_sec
+total_a_hrs = total_a_sec / 3600
+
+# Option B: Proxy model selection
+resnet18_time_per_image = 0.002
+score_b_sec = n_images * resnet18_time_per_image
+train_b_sec = train_a_sec  # same training
+total_b_sec = score_b_sec + train_b_sec
+total_b_hrs = total_b_sec / 3600
+
+# Baseline: No selection
+baseline_sec = n_images * n_epochs * resnet50_time_per_image
+baseline_hrs = baseline_sec / 3600
+
+# Analysis
+savings_a_hrs = baseline_hrs - total_a_hrs
+savings_a_pct = savings_a_hrs / baseline_hrs * 100
+savings_b_hrs = baseline_hrs - total_b_hrs
+savings_b_pct = savings_b_hrs / baseline_hrs * 100
+b_beats_a_hrs = total_a_hrs - total_b_hrs
+
+# The Trap: 50 hours selection
+trap_sel_hrs = 50
+trap_total_hrs = trap_sel_hrs + train_a_sec / 3600
+trap_overhead_pct = trap_sel_hrs / (baseline_hrs - trap_total_hrs) * 100
+
+score_a_str = f"{score_a_sec:,.0f}"
+score_a_hrs_str = f"{score_a_sec/3600:.1f}"
+train_a_str = f"{train_a_sec:,.0f}"
+train_a_hrs_str = f"{train_a_sec/3600:.1f}"
+total_a_hrs_str = f"{total_a_hrs:.1f}"
+score_b_str = f"{score_b_sec:,.0f}"
+score_b_hrs_str = f"{score_b_sec/3600:.1f}"
+total_b_hrs_str = f"{total_b_hrs:.1f}"
+baseline_str = f"{baseline_sec:,.0f}"
+baseline_hrs_str = f"{baseline_hrs:.0f}"
+savings_a_str = f"{savings_a_hrs:.0f}"
+savings_a_pct_str = f"{savings_a_pct:.0f}"
+savings_b_str = f"{savings_b_hrs:.0f}"
+savings_b_pct_str = f"{savings_b_pct:.0f}"
+b_beats_a_str = f"{b_beats_a_hrs:.1f}"
+trap_total_str = f"{trap_total_hrs:.1f}"
+trap_pct_str = f"{trap_overhead_pct:.0f}"
+```
+
 ::: {.callout-example title="Selection Inequality in Practice"}
 **Scenario**: You have 1 million training images and want to select a 100k coreset (10%) using EL2N scoring.
 
 **Option A: Full Model Selection**
 
-- Score all 1M images with your target ResNet-50: 1M × 0.01 s = **10,000 seconds** (2.8 hours)
-- Train on 100k coreset for 100 epochs: 100k × 100 × 0.01 s = **100,000 seconds** (27.8 hours)
-- **Total: 30.6 hours**
+- Score all 1M images with your target ResNet-50: 1M × 0.01 s = **`{python} score_a_str` seconds** (`{python} score_a_hrs_str` hours)
+- Train on 100k coreset for 100 epochs: 100k × 100 × 0.01 s = **`{python} train_a_str` seconds** (`{python} train_a_hrs_str` hours)
+- **Total: `{python} total_a_hrs_str` hours**
 
 **Option B: Proxy Model Selection**
 
-- Score all 1M images with a small proxy (ResNet-18): 1M × 0.002 s = **2,000 seconds** (0.6 hours)
-- Train on 100k coreset for 100 epochs: **100,000 seconds** (27.8 hours)
-- **Total: 28.4 hours**
+- Score all 1M images with a small proxy (ResNet-18): 1M × 0.002 s = **`{python} score_b_str` seconds** (`{python} score_b_hrs_str` hours)
+- Train on 100k coreset for 100 epochs: **`{python} train_a_str` seconds** (`{python} train_a_hrs_str` hours)
+- **Total: `{python} total_b_hrs_str` hours**
 
 **Baseline: No Selection**
 
-- Train on full 1M dataset for 100 epochs: 1M × 100 × 0.01 s = **1,000,000 seconds** (278 hours)
+- Train on full 1M dataset for 100 epochs: 1M × 100 × 0.01 s = **`{python} baseline_str` seconds** (`{python} baseline_hrs_str` hours)
 
 **Analysis**:
 
-- Option A saves 247 hours vs. baseline (89% reduction) ✓
-- Option B saves 250 hours vs. baseline (90% reduction) ✓
-- Option B beats Option A by 2.2 hours. Proxy selection yields better ROI.
+- Option A saves `{python} savings_a_str` hours vs. baseline (`{python} savings_a_pct_str`% reduction) ✓
+- Option B saves `{python} savings_b_str` hours vs. baseline (`{python} savings_b_pct_str`% reduction) ✓
+- Option B beats Option A by `{python} b_beats_a_str` hours. Proxy selection yields better ROI.
 
-**The Trap**: If your selection required 50 hours (e.g., running a 7B parameter model), you would spend 77.8 hours total, still better than baseline, but the selection overhead consumes 64% of your savings.
+**The Trap**: If your selection required 50 hours (e.g., running a 7B parameter model), you would spend `{python} trap_total_str` hours total, still better than baseline, but the selection overhead consumes `{python} trap_pct_str`% of your savings.
 
 **Rule of thumb**: Selection time should be <10% of subset training time for good ROI.
 :::
@@ -1316,6 +1374,40 @@ $$
 
 If $R > 1$ (data pipeline is the bottleneck), set echo factor $e \leq R$ to fully utilize GPU capacity. If $R < 1$ (GPU is the bottleneck), data echoing provides no benefit. The following worked example calculates these trade-offs for a realistic scenario.
 
+```{python}
+#| label: data-echoing-calc
+#| echo: false
+
+# Data echoing ROI calculation
+pipeline_throughput = 300  # images/sec
+gpu_throughput = 800       # images/sec
+ratio_r = gpu_throughput / pipeline_throughput
+gpu_idle_pct = (1 - pipeline_throughput / gpu_throughput) * 100
+
+n_epochs_echo = 90
+imagenet_size = 1_280_000  # ~1.28M images
+
+# Without echoing
+no_echo_throughput = pipeline_throughput
+no_echo_sec = n_epochs_echo * imagenet_size / no_echo_throughput
+no_echo_hrs = no_echo_sec / 3600
+gpu_util_no_echo = pipeline_throughput / gpu_throughput * 100
+
+# With echo factor 2
+echo_factor = 2
+echo_throughput = pipeline_throughput * echo_factor
+echo_sec = n_epochs_echo * imagenet_size / echo_throughput
+echo_hrs = echo_sec / 3600
+
+ratio_str = f"{ratio_r:.2f}"
+idle_pct_str = f"{gpu_idle_pct:.0f}"
+no_echo_sec_str = f"{no_echo_sec:,.0f}"
+no_echo_hrs_str = f"{no_echo_hrs:.0f}"
+gpu_util_str = f"{gpu_util_no_echo:.0f}"
+echo_sec_str = f"{echo_sec:,.0f}"
+echo_hrs_str = f"{echo_hrs:.0f}"
+```
+
 ::: {.callout-example title="Worked Example: Data Echoing ROI"}
 **Scenario**: Training ResNet-50 on ImageNet with heavy augmentation (RandAugment + MixUp).
 
@@ -1323,20 +1415,20 @@ If $R > 1$ (data pipeline is the bottleneck), set echo factor $e \leq R$ to full
 
 - Data pipeline throughput: 300 images/second (reading, decoding, augmenting on CPU)
 - GPU training throughput: 800 images/second (forward + backward pass)
-- Ratio $R = 800/300 = 2.67$ (GPU waiting 63% of time)
+- Ratio $R = 800/300 = `{python} ratio_str`$ (GPU waiting `{python} idle_pct_str`% of time)
 
 **Without Echoing**:
 
 - Effective throughput: 300 images/second (limited by data pipeline)
-- Training time for 90 epochs: 90 × 1.28M / 300 = **384,000 seconds (106 hours)**
-- GPU utilization: ~38%
+- Training time for 90 epochs: 90 × 1.28M / 300 = **`{python} no_echo_sec_str` seconds (`{python} no_echo_hrs_str` hours)**
+- GPU utilization: ~`{python} gpu_util_str`%
 
 **With Echo Factor $e = 2$**:
 
 - Each batch is processed twice with different augmentations
 - Effective throughput: 600 images/second (still below GPU capacity)
 - Unique images per second: 300 (unchanged)
-- Training time: 90 × 1.28M / 600 = **192,000 seconds (53 hours)** if echoed data is equally valuable
+- Training time: 90 × 1.28M / 600 = **`{python} echo_sec_str` seconds (`{python} echo_hrs_str` hours)** if echoed data is equally valuable
 
 **But echoed data has diminishing returns**: Research shows echoed samples provide approximately 70–90% of the value of fresh samples, depending on augmentation diversity. Empirically, Choi et al. measured a **3.25$\times$ speedup** on ResNet-50 ImageNet training when reading data over a network, with minimal accuracy degradation.
 

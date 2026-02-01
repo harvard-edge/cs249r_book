@@ -1151,13 +1151,33 @@ Performance results:
 
 - Computation: 180ms per step
 - Communication: 5ms per step
-- Total: 185ms per step
-- Speedup: 1.8s ÷ 0.185s = 9.7× (not quite 8×)
-- Parallel efficiency: 9.7 ÷ 8 = 121%
+```{python}
+#| label: 8gpu-scaling-calc
+#| echo: false
+
+# 8-GPU scaling worked example
+single_gpu_step_s = 1.8   # single GPU step time
+compute_8gpu_ms = 180      # ms
+comm_8gpu_ms = 5           # NVLink overhead
+total_8gpu_ms = compute_8gpu_ms + comm_8gpu_ms
+speedup_8gpu = single_gpu_step_s / (total_8gpu_ms / 1000)
+efficiency_8gpu = speedup_8gpu / 8 * 100
+training_hours_1gpu = 25
+training_hours_8gpu = training_hours_1gpu / speedup_8gpu
+
+total_8gpu_str = f"{total_8gpu_ms}"
+speedup_8gpu_str = f"{speedup_8gpu:.1f}"
+efficiency_8gpu_str = f"{efficiency_8gpu:.0f}"
+training_8gpu_str = f"{training_hours_8gpu:.1f}"
+```
+
+- Total: `{python} total_8gpu_str`ms per step
+- Speedup: `{python} f"{single_gpu_step_s}"`s ÷ `{python} f"{total_8gpu_ms/1000}"`s = `{python} speedup_8gpu_str`× (not quite 8×)
+- Parallel efficiency: `{python} speedup_8gpu_str` ÷ 8 = `{python} efficiency_8gpu_str`%
 
 Why over 100% efficiency? Larger global batch (128 vs 16) improves GPU utilization from 72% to 89%. This "super-linear" speedup is common in ML at small scales when the baseline has poor utilization.
 
-Training time: 25 hours ÷ 9.7 = **2.6 hours**
+Training time: `{python} training_hours_1gpu` hours ÷ `{python} speedup_8gpu_str` = **`{python} training_8gpu_str` hours**
 
 **32 GPUs: 4 Nodes with InfiniBand**
 
@@ -1169,19 +1189,59 @@ Configuration:
 
 Performance results:
 
-- Computation: 180ms (42% of time)
-- Communication: 245ms (58% of time)
-- Total: 425ms per step
-- Speedup: 1.8s ÷ 0.425s = 4.2× faster → 5.9 hours
-- Parallel efficiency: 4.2 ÷ 32 = 13%
+```{python}
+#| label: 32gpu-scaling-calc
+#| echo: false
+
+# 32-GPU scaling worked example
+compute_32gpu_ms = 180
+inter_node_ms = 240
+intra_node_ms = 5
+comm_32gpu_ms = inter_node_ms + intra_node_ms
+total_32gpu_ms = compute_32gpu_ms + comm_32gpu_ms
+compute_pct = compute_32gpu_ms / total_32gpu_ms * 100
+comm_pct = comm_32gpu_ms / total_32gpu_ms * 100
+speedup_32gpu = single_gpu_step_s / (total_32gpu_ms / 1000)
+efficiency_32gpu = speedup_32gpu / 32 * 100
+training_32gpu_hours = training_hours_1gpu / speedup_32gpu
+
+compute_pct_str = f"{compute_pct:.0f}"
+comm_pct_str = f"{comm_pct:.0f}"
+total_32gpu_str = f"{total_32gpu_ms}"
+speedup_32gpu_str = f"{speedup_32gpu:.1f}"
+efficiency_32gpu_str = f"{efficiency_32gpu:.0f}"
+training_32gpu_str = f"{training_32gpu_hours:.1f}"
+```
+
+- Computation: `{python} compute_32gpu_ms`ms (`{python} compute_pct_str`% of time)
+- Communication: `{python} comm_32gpu_ms`ms (`{python} comm_pct_str`% of time)
+- Total: `{python} total_32gpu_str`ms per step
+- Speedup: `{python} f"{single_gpu_step_s}"`s ÷ `{python} f"{total_32gpu_ms/1000}"`s = `{python} speedup_32gpu_str`× faster → `{python} training_32gpu_str` hours
+- Parallel efficiency: `{python} speedup_32gpu_str` ÷ 32 = `{python} efficiency_32gpu_str`%
 
 Communication dominates and becomes the bottleneck.
 
 **Better Approach: 8 GPUs with Gradient Accumulation**
 
-- Configuration: 8 GPUs × batch 16 × 4 accumulation steps = 512 effective batch
-- Communication overhead: 5ms ÷ (4 × 180ms) = 0.7%
-- Training time: 3.8 hours
+```{python}
+#| label: grad-accum-calc
+#| echo: false
+
+# Gradient accumulation alternative
+n_gpus_ga = 8
+batch_per_gpu = 16
+accum_steps = 4
+effective_batch = n_gpus_ga * batch_per_gpu * accum_steps
+comm_overhead_pct = comm_8gpu_ms / (accum_steps * compute_8gpu_ms) * 100
+ga_training_hours = 3.8  # empirical
+
+effective_batch_str = f"{effective_batch}"
+comm_overhead_pct_str = f"{comm_overhead_pct:.1f}"
+```
+
+- Configuration: `{python} n_gpus_ga` GPUs × batch `{python} batch_per_gpu` × `{python} accum_steps` accumulation steps = `{python} effective_batch_str` effective batch
+- Communication overhead: `{python} comm_8gpu_ms`ms ÷ (`{python} accum_steps` × `{python} compute_8gpu_ms`ms) = `{python} comm_overhead_pct_str`%
+- Training time: `{python} ga_training_hours` hours
 - Cost: $128/hour × 3.8 hours = $486 vs. $3,021 for 32 GPUs
 - Savings: $2,535 (84% reduction) with only 1 hour longer training
 
@@ -1966,11 +2026,12 @@ While the theoretical foundations of distributed training establish the mathemat
 
 The data parallelism mechanisms we explored earlier—gradient averaging, AllReduce communication, and parameter synchronization—are abstracted through framework APIs that handle the complex coordination automatically. PyTorch provides two primary approaches that demonstrate different trade-offs between simplicity and performance.
 
-`torch.nn.DataParallel` represents the simpler approach, automatically replicating the model across available GPUs within a single node. This API abstracts the gradient collection and averaging process, requiring minimal code changes to existing single-GPU training scripts. However, this simplicity comes with performance limitations, as the implementation uses a parameter server approach[^fn-parameter-server] [@li2014parameter] that can create communication bottlenecks when scaling beyond 4-8 GPUs.
+`torch.nn.DataParallel` represents the simpler approach, automatically replicating the model across available GPUs within a single node. This API abstracts the gradient collection and averaging process, requiring minimal code changes to existing single-GPU training scripts, as shown in @lst-dataparallel-api. However, this simplicity comes with performance limitations, as the implementation uses a parameter server approach[^fn-parameter-server] [@li2014parameter] that can create communication bottlenecks when scaling beyond 4-8 GPUs.
 
 [^fn-parameter-server]: **Parameter Server**: A distributed architecture where dedicated server nodes store model parameters while worker nodes compute gradients on data. Workers pull parameters, compute gradients, and push updates to servers. While intuitive and flexible, this centralized design creates bandwidth bottlenecks at servers, leading modern systems to prefer decentralized AllReduce patterns where workers communicate directly without a central coordinator.
 
-```python
+::: {#lst-dataparallel-api lst-cap="**DataParallel API**: `torch.nn.DataParallel` abstracts gradient synchronization with minimal code changes, automatically splitting batches, replicating the model, and averaging gradients across GPUs."}
+```{.python}
 # Simple data parallelism - framework handles gradient synchronization
 model = torch.nn.DataParallel(model)
 # Training loop remains unchanged - framework automatically:
@@ -1979,10 +2040,12 @@ model = torch.nn.DataParallel(model)
 # 3. Gathers gradients and averages them
 # 4. Broadcasts updated parameters
 ```
+:::
 
-For production scale training, `torch.distributed` provides the high-performance alternative that implements the efficient AllReduce communication patterns discussed earlier. This API requires explicit initialization of process groups and distributed coordination but enables the linear scaling characteristics essential for large-scale training.
+For production scale training, `torch.distributed` provides the high-performance alternative that implements the efficient AllReduce communication patterns discussed earlier. As @lst-ddp-api illustrates, this API requires explicit initialization of process groups and distributed coordination but enables the linear scaling characteristics essential for large-scale training.
 
-```python
+::: {#lst-ddp-api lst-cap="**DistributedDataParallel API**: `torch.nn.parallel.DistributedDataParallel` uses optimized AllReduce via the NCCL backend for production-scale multi-GPU training."}
+```{.python}
 # Production distributed training
 # Explicit control over communication
 import torch.distributed as dist
@@ -1991,14 +2054,16 @@ dist.init_process_group(backend="nccl")  # NCCL for GPU communication
 model = torch.nn.parallel.DistributedDataParallel(model)
 # Framework now uses optimized AllReduce instead of parameter server
 ```
+:::
 
 `DistributedDataParallel` implements the efficient ring AllReduce algorithm automatically, transforming the O(n) communication complexity we discussed into practical code that achieves 90%+ parallel efficiency at scale. The framework handles device placement, gradient bucketing for efficient communication, and overlapping computation with communication.
 
 ### Model Parallel Framework Support {#sec-distributed-training-systems-systems-model-parallel-framework-support-7f7f}
 
-Model parallelism requires more explicit coordination since frameworks must manage cross-device tensor placement and data flow. PyTorch addresses this through manual device placement and the emerging `torch.distributed.pipeline` API for pipeline parallelism.
+Model parallelism requires more explicit coordination since frameworks must manage cross-device tensor placement and data flow. PyTorch addresses this through manual device placement, as demonstrated in @lst-model-parallel-manual, and the emerging `torch.distributed.pipeline` API for pipeline parallelism.
 
-```python
+::: {#lst-model-parallel-manual lst-cap="**Manual Model Parallelism**: Explicit cross-device tensor placement partitions model layers across GPUs, requiring the practitioner to manage data transfer between devices."}
+```{.python}
 # Manual model parallelism - explicit device placement
 class ModelParallelNet(nn.Module):
     def __init__(self):
@@ -2013,14 +2078,16 @@ class ModelParallelNet(nn.Module):
         )  # Cross-GPU data transfer
         return x
 ```
+:::
 
 This manual approach exposes the sequential dependencies and communication overhead inherent in model parallelism, requiring careful management of tensor movement between devices. The framework automatically handles the backward pass gradient flow across device boundaries, but practitioners must consider the performance implications of frequent device transfers.
 
 ### Communication Primitives {#sec-distributed-training-systems-systems-communication-primitives-7207}
 
-Modern frameworks expose the communication operations that enable distributed training through high-level APIs. These primitives abstract the low-level NCCL operations while maintaining performance:
+Modern frameworks expose the communication operations that enable distributed training through high-level APIs. As @lst-dist-comm-primitives shows, these primitives abstract the low-level NCCL operations while maintaining performance.
 
-```python
+::: {#lst-dist-comm-primitives lst-cap="**Collective Communication Primitives**: Framework-level APIs for AllReduce, broadcast, and AllGather operations that map directly to optimized NCCL collective operations."}
+```{.python}
 # Framework-provided collective operations
 dist.all_reduce(tensor)  # Gradient averaging across all devices
 dist.broadcast(tensor, src=0)  # Parameter broadcasting from master
@@ -2028,6 +2095,7 @@ dist.all_gather(
     tensor_list, tensor
 )  # Collecting tensors from all devices
 ```
+:::
 
 These APIs translate directly to the NCCL collective operations that implement the efficient communication patterns discussed earlier, demonstrating how frameworks provide accessible interfaces to complex distributed systems concepts while maintaining the performance characteristics essential for production training.
 

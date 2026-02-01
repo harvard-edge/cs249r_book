@@ -4,7 +4,7 @@ concepts: frameworks_concepts.yml
 glossary: frameworks_glossary.json
 ---
 
-# AI Frameworks {#sec-ai-frameworks}
+# ML Frameworks {#sec-ai-frameworks}
 
 ::: {layout-narrow}
 ::: {.column-margin}
@@ -43,6 +43,8 @@ from calc.formulas import fmt, sci
 # GPU specs
 a100_mem = f"{A100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
 a100_bw_tbs = f"{A100_MEM_BW.to(TB/second).magnitude:.1f}"
+a100_tflops_fp16 = f"{A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
+a100_tflops_sparse = f"{A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude * 2:.0f}"
 
 # Model specs
 resnet_params_m = f"{RESNET50_PARAMS.to(Mparam).magnitude:.1f}"
@@ -51,7 +53,7 @@ gpt3_params_b = f"{GPT3_PARAMS.to(Mparam).magnitude/1000:.0f}"
 
 ## The Three Problems Every Framework Must Solve {#sec-ai-frameworks-three-problems-every-framework-must-solve-317d}
 
-Two lines of code: `model = Transformer(...)` followed by `loss.backward()`. Between them, invisible to the programmer, the framework orchestrates billions of floating-point operations across memory hierarchies, computes exact gradients through millions of parameters using automatic differentiation, schedules thousands of GPU kernel launches, and manages gigabytes of intermediate state. The simplicity is an illusion. Those two lines trigger machinery as complex as a compiler, because that is exactly what a modern ML framework is.
+Two lines of code: `model = Transformer(...)` followed by `loss.backward()`. Between them, invisible to the programmer, the framework orchestrates billions of floating-point operations across memory hierarchies, computes exact gradients through millions of parameters using **automatic differentiation**, schedules thousands of GPU kernel launches, and manages gigabytes of intermediate state. The simplicity is an illusion. Those two lines trigger machinery as complex as a compiler, because that is exactly what a modern ML framework is.
 
 The architectural foundations established in @sec-dnn-architectures defined *what* computations neural networks perform. Knowing what to compute, however, is fundamentally different from knowing how to compute it efficiently. A Transformer's attention mechanism requires coordinating computation across memory hierarchies and accelerator cores in patterns that naive implementations would execute 100× slower than optimized ones. Implementing these operations from scratch for every model would make deep learning economically infeasible. ML frameworks exist to bridge this gap by translating high-level model definitions into hardware-specific execution plans that extract maximum performance from silicon.
 
@@ -70,7 +72,7 @@ Training is fundamentally more expensive than inference because of Automatic Dif
 - [ ] **Gradient Checkpointing**: How does re-computing activations save memory? (We discard the stash and regenerate it on demand).
 :::
 
-Every ML framework, regardless of API or design philosophy, must solve three fundamental problems. First, the *execution problem*: when and how should computation happen? Should operations execute immediately as written (eager execution), or should the framework build a complete description first and optimize before executing (graph execution)? This choice shapes debugging capability, optimization potential, and deployment flexibility. Second, the *differentiation problem*: how should the framework compute gradients automatically? Training requires derivatives of a loss function with respect to millions or billions of parameters, and manual differentiation is error-prone at this scale. Frameworks must implement automatic differentiation systems that compute exact gradients for arbitrary compositions of operations while managing the memory overhead of storing intermediate values. Third, the *hardware abstraction problem*: how should the framework target diverse hardware from a single interface? The same model definition should run on CPUs, GPUs, TPUs, and mobile devices, each with different memory constraints and optimal execution patterns.
+Every ML framework, regardless of API or design philosophy, must solve three fundamental problems. First, the *execution problem*: when and how should computation happen? Should operations execute immediately as written (**eager execution**), or should the framework build a complete description first and optimize before executing (graph execution)? This choice shapes debugging capability, optimization potential, and deployment flexibility. Second, the *differentiation problem*: how should the framework compute gradients automatically? Training requires derivatives of a loss function with respect to millions or billions of parameters, and manual differentiation is error-prone at this scale. Frameworks must implement automatic differentiation systems that compute exact gradients for arbitrary compositions of operations while managing the memory overhead of storing intermediate values. Third, the *hardware abstraction problem*: how should the framework target diverse hardware from a single interface? The same model definition should run on CPUs, GPUs, TPUs, and mobile devices, each with different memory constraints and optimal execution patterns.
 
 These three problems are deeply interconnected. The execution model determines when differentiation occurs and what optimizations are possible. The abstraction layer must support both execution styles across all hardware targets. Solving any one problem in isolation leads to frameworks that excel in narrow contexts but fail in broader deployment. This chapter examines how frameworks evolved to solve these problems and the trade-offs each solution entails, tracing the history from early libraries through modern frameworks before examining each problem in depth.
 
@@ -117,7 +119,7 @@ Understanding why modern frameworks are designed as they are requires tracing th
 
 1. **Hardware Primitives (1979–1992)**: The **Basic Linear Algebra Subprograms (BLAS)**[^fn-blas] established standardized, hardware-optimized implementations of operations like matrix multiplication (`GEMM`) [@lawson1979blas]. **LAPACK** extended this with higher-level solvers. These libraries remain the hidden foundation of every modern ML system; vendors like Intel (MKL) and NVIDIA (cuBLAS) provide highly tuned versions for their silicon.
 
-[^fn-blas]: **BLAS (Basic Linear Algebra Subprograms)**: A standardized specification (Level 1: vector operations; Level 2: matrix-vector; Level 3: matrix-matrix like GEMM) published in 1979 that defines portable APIs for dense linear algebra. Hardware vendors implement optimized BLAS libraries: Intel MKL achieves near-peak FLOPS on x86 CPUs through AVX-512 vectorization, while NVIDIA cuBLAS uses Tensor Cores for up to 312 TFLOPS (FP16/BF16/TF32) on A100 GPUs, or 624 TFLOPS with structured sparsity. This 45-year-old interface remains the performance foundation of modern ML frameworks.
+[^fn-blas]: **BLAS (Basic Linear Algebra Subprograms)**: A standardized specification (Level 1: vector operations; Level 2: matrix-vector; Level 3: matrix-matrix like GEMM) published in 1979 that defines portable APIs for dense linear algebra. Hardware vendors implement optimized BLAS libraries: Intel MKL achieves near-peak FLOPS on x86 CPUs through AVX-512 vectorization, while NVIDIA cuBLAS uses Tensor Cores for up to `{python} a100_tflops_fp16` TFLOPS (FP16/BF16/TF32) on A100 GPUs, or `{python} a100_tflops_sparse` TFLOPS with structured sparsity. This 45-year-old interface remains the performance foundation of modern ML frameworks.
 
 2. **Vectorized Productivity (2006)**: **NumPy**[^fn-numpy] made Python viable for numerical computing by delegating heavy computation to underlying C and Fortran BLAS libraries. This "vectorization" approach, writing code in high-level Python but executing it in low-level C, became the dominant pattern, drastically reducing the gap between research ideas and execution speed.
 
@@ -737,7 +739,7 @@ The compiler fuses this into one kernel: `FusedAddRelu`.
 Compilation is not magic; it is **overhead amortization**. For small, element-wise operations (like LayerNorm, GELU, Add), overhead often exceeds compute time by 10-100x. Fusing them is the only way to utilize the hardware.
 :::
 
-The following visualization demonstrates this tax in action. Eager execution (top) suffers from "gaps" where the GPU sits idle while Python dispatches the next kernel. Compilation (bottom) fuses these operations into a single kernel launch, eliminating the gaps.
+@fig-python-tax demonstrates this tax in action. Eager execution (top) suffers from "gaps" where the GPU sits idle while Python dispatches the next kernel. Compilation (bottom) fuses these operations into a single kernel launch, eliminating the gaps.
 
 ```{python}
 #| label: fig-python-tax
@@ -1106,6 +1108,24 @@ When Overhead Ratio $> 1$, the model is **overhead-bound**. Compilation provides
 
 From the case study in @sec-ai-frameworks-putting-together-anatomy-training-step-c7f1, we can quantify this effect.
 
+```{python}
+#| label: dispatch-tax-calc
+#| echo: false
+
+# Scenario 1: Small MLP (Overhead Bound)
+dispatch_n_ops = 6
+dispatch_us_per_op = 5
+dispatch_hw_time_us = 2.6
+dispatch_sw_time = dispatch_n_ops * dispatch_us_per_op
+dispatch_ratio_small = f"{dispatch_sw_time / dispatch_hw_time_us:.1f}"
+dispatch_sw_time_str = f"{dispatch_sw_time:.0f}"
+
+# Scenario 2: GPT-3 Layer (Compute Bound)
+gpt3_hw_time_us = 100_000
+gpt3_sw_time_us = 50
+dispatch_ratio_large = f"{gpt3_sw_time_us / gpt3_hw_time_us:.4f}"
+```
+
 ::: {.callout-notebook title="The Dispatch Tax"}
 **Problem**: When does Python overhead kill performance?
 
@@ -1113,8 +1133,8 @@ From the case study in @sec-ai-frameworks-putting-together-anatomy-training-step
 
 *   **Compute**: 6 small matrix/element-wise operations.
 *   **Hardware Time**: $T_{hw} \approx 2.6 \mu s$ (mostly memory latency).
-*   **Software Overhead**: $T_{sw} \approx 6 \text{ ops} \times 5 \mu s/\text{op} = 30 \mu s$.
-*   **Ratio**: $\frac{30}{2.6} \approx \mathbf{11.5}$.
+*   **Software Overhead**: $T_{sw} \approx 6 \text{ ops} \times 5 \mu s/\text{op} = `{python} dispatch_sw_time_str` \mu s$.
+*   **Ratio**: $\frac{`{python} dispatch_sw_time_str`}{2.6} \approx \mathbf{`{python} dispatch_ratio_small`}$.
 *   **Conclusion**: You spend 92% of time waiting for Python. Compilation yields **10x speedup**.
 
 **Scenario 2: GPT-3 Layer (Compute Bound)**
@@ -1122,7 +1142,7 @@ From the case study in @sec-ai-frameworks-putting-together-anatomy-training-step
 *   **Compute**: Huge matrix multiplications.
 *   **Hardware Time**: $T_{hw} \approx 100 \text{ ms} = 100,000 \mu s$.
 *   **Software Overhead**: $T_{sw} \approx 50 \mu s$.
-*   **Ratio**: $\frac{50}{100,000} \approx \mathbf{0.0005}$.
+*   **Ratio**: $\frac{50}{100,000} \approx \mathbf{`{python} dispatch_ratio_large`}$.
 *   **Conclusion**: Python overhead is negligible. Compilation helps only via kernel fusion (memory bandwidth), not dispatch elimination.
 :::
 
@@ -1835,7 +1855,7 @@ Framework data structures must therefore satisfy three concrete requirements: su
 
 #### Tensors {#sec-ai-frameworks-tensors-1cb7}
 
-At the foundation of every framework's data representation lies a single abstraction: the *tensor*.
+At the foundation of every framework's data representation lies a single abstraction: the **tensor**.
 
 ::: {.callout-definition title="Tensor"}
 
@@ -3341,11 +3361,29 @@ The bias addition and ReLU follow similar patterns, each adding a node to the au
 | **Backward (2× forward)** | ~26M                 | ~3.2 MB            | ~8.0                     |
 +---------------------------+----------------------+--------------------+--------------------------+
 
+```{python}
+#| label: mnist-training-step-calc
+#| echo: false
+
+# MNIST training step roofline analysis on A100
+mnist_total_flops = 40e6          # ~40M FLOPs
+mnist_mem_traffic_bytes = 5e6     # ~5 MB
+a100_peak_tflops = 312e12         # 312 TFLOPS (FP16 tensor)
+a100_mem_bw_bytes = 2e12          # 2 TB/s
+
+mnist_t_compute_us = f"{mnist_total_flops / a100_peak_tflops * 1e6:.1f}"
+mnist_t_memory_us = f"{mnist_mem_traffic_bytes / a100_mem_bw_bytes * 1e6:.1f}"
+
+mnist_n_ops = 6
+mnist_us_per_op = 5
+mnist_t_overhead_us = f"{mnist_n_ops * mnist_us_per_op:.0f}"
+```
+
 Total: ~40M FLOPs, ~5MB memory traffic. On an A100:
 
-- $T_{\text{compute}} \approx 40\text{M} / 312\text{T} \approx 0.1\mu\text{s}$
-- $T_{\text{memory}} \approx 5\text{MB} / 2\text{TB/s} \approx 2.5\mu\text{s}$
-- $T_{\text{overhead}} \approx 6\text{ ops} \times 5\mu\text{s} \approx 30\mu\text{s}$
+- $T_{\text{compute}} \approx 40\text{M} / 312\text{T} \approx `{python} mnist_t_compute_us`\mu\text{s}$
+- $T_{\text{memory}} \approx 5\text{MB} / 2\text{TB/s} \approx `{python} mnist_t_memory_us`\mu\text{s}$
+- $T_{\text{overhead}} \approx 6\text{ ops} \times 5\mu\text{s} \approx `{python} mnist_t_overhead_us`\mu\text{s}$
 
 **The training step is overhead-bound!** For small models, Python dispatch and kernel launch dominate. This explains why:
 
@@ -3376,13 +3414,31 @@ Understanding this flow enables informed optimization: fuse operations to reduce
 
 The training step analysis above demonstrates how abstract framework concepts translate to concrete system behavior. With this foundation, we can identify common reasoning errors, each accompanied by quantitative evidence from earlier sections.
 
+```{python}
+#| label: framework-gaps-calc
+#| echo: false
+
+# Framework performance gap (from @tbl-framework-efficiency-matrix)
+pytorch_ms = 52
+tensorrt_ms = 3
+perf_gap = pytorch_ms / tensorrt_ms
+
+# Deployment memory spectrum
+pytorch_mobile_mb = 220
+tflite_micro_kb = 32
+memory_ratio = pytorch_mobile_mb * 1024 / tflite_micro_kb
+
+perf_gap_str = f"{perf_gap:.0f}"
+memory_ratio_str = f"{memory_ratio:.0f}"
+```
+
 **Fallacy:** ***"All frameworks provide equivalent performance for the same model architecture."***
 
-Engineers assume that since ResNet-50 is mathematically identical across frameworks, performance must be equivalent. @tbl-framework-efficiency-matrix disproves this: PyTorch achieves 52ms inference at 32% hardware utilization, while TensorRT delivers 3ms at 88% utilization, a **17x performance gap** on identical hardware. The difference arises from kernel fusion, graph optimization depth, and memory access patterns. Organizations assuming framework equivalence routinely miss production targets by 5-10×.
+Engineers assume that since ResNet-50 is mathematically identical across frameworks, performance must be equivalent. @tbl-framework-efficiency-matrix disproves this: PyTorch achieves 52ms inference at 32% hardware utilization, while TensorRT delivers 3ms at 88% utilization, a **`{python} perf_gap_str`x performance gap** on identical hardware. The difference arises from kernel fusion, graph optimization depth, and memory access patterns. Organizations assuming framework equivalence routinely miss production targets by 5-10×.
 
 **Pitfall:** ***Choosing frameworks based on popularity rather than project requirements.***
 
-@tbl-framework-efficiency-matrix shows the deployment spectrum: PyTorch Mobile requires 220MB memory, TensorFlow Lite needs 180MB, and TensorFlow Lite Micro runs in 32KB, a **7000x difference**. Teams building edge applications with PyTorch face either massive memory overhead or costly framework migration. Match framework capabilities to deployment constraints *before* development begins.
+@tbl-framework-efficiency-matrix shows the deployment spectrum: PyTorch Mobile requires 220MB memory, TensorFlow Lite needs 180MB, and TensorFlow Lite Micro runs in 32KB, a **`{python} memory_ratio_str`x difference**. Teams building edge applications with PyTorch face either massive memory overhead or costly framework migration. Match framework capabilities to deployment constraints *before* development begins.
 
 **Fallacy:** ***"Framework abstractions eliminate the need for systems knowledge."***
 
@@ -3402,10 +3458,25 @@ The Dispatch Overhead Equation (@eq-dispatch-overhead) reveals hidden costs that
 
 **Pitfall:** ***Treating compilation overhead as negligible.***
 
+```{python}
+#| label: compilation-overhead-calc
+#| echo: false
+
+# Compilation overhead pitfall calculation
+n_images = 10_000
+eager_throughput = 1_450       # images/sec
+compiled_throughput = 2_150    # images/sec
+n_recompilations = 10
+compilation_time_s = 30        # seconds per recompilation
+
+eager_total = f"{n_images / eager_throughput:.1f}"
+compiled_total = f"{n_images / compiled_throughput + n_recompilations * compilation_time_s:.1f}"
+```
+
 @tbl-training-benchmark shows torch.compile achieves 48% higher ResNet-50 throughput than eager PyTorch, but incurs 15-60 seconds compilation overhead. For a 10,000-image experiment requiring 10 recompilations due to code changes:
 
-- Eager: $10{,}000 / 1{,}450 = 6.9$ seconds
-- Compiled: $10{,}000 / 2{,}150 + 10 \times 30 = 304.7$ seconds
+- Eager: $10{,}000 / 1{,}450 = `{python} eager_total`$ seconds
+- Compiled: $10{,}000 / 2{,}150 + 10 \times 30 = `{python} compiled_total`$ seconds
 
 Compilation pays off only when amortized over long training runs. For rapid prototyping with frequent changes, eager execution is often faster *end-to-end*.
 

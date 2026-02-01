@@ -28,7 +28,7 @@
 *   **Systems Thinking:**
     *   *Action:* Add a "Computational Intensity" table. Matrix Mul ($N^3$ ops, $N^2$ IO) vs Element-wise ($N$ ops, $N$ IO). Explain why GPUs are architecturally optimized for the former.
 
-### Chapter 6: DNN Architectures {#sec-volume-1-audit-comprehensive-review-notes-chapter-6-dnn-architectures-e78a}
+### Chapter 6: Network Architectures {#sec-volume-1-audit-comprehensive-review-notes-chapter-6-dnn-architectures-e78a}
 *   **Systems Thinking:**
     *   *Action:* Add "Dataflow Diagram" for a Transformer Layer. Visualize the Q, K, V projections and the Attention Score matrix size ($N^2$) to explain why sequence length scaling is the quadratic bottleneck of modern AI.
 
@@ -63,7 +63,7 @@
         *   DRAM Access: 640 pJ
     *   This justifies why quantization is a "Data Movement" optimization, not just a "Compute" optimization.
 
-### Chapter 12: AI Acceleration {#sec-volume-1-audit-comprehensive-review-notes-chapter-12-ai-acceleration-66a3}
+### Chapter 12: Hardware Acceleration {#sec-volume-1-audit-comprehensive-review-notes-chapter-12-ai-acceleration-66a3}
 *   **Systems Thinking:**
     *   *Action:* Add a "Dataflow Trade-off" table. Compare **Weight-Stationary** (best for CNNs) vs. **Output-Stationary** (best for Large MatMuls). Explain how this physical design choice dictates which models run efficiently on a specific chip.
 
@@ -76,13 +76,13 @@
 *   **Systems Thinking:**
     *   *Action:* Add a sidebar on **The Reliability Multiplier**. Quantify aggregate reliability: $R_{sys} = \prod R_i$. Show that a compound system with 5 dependent models each at 99% accuracy has an aggregate theoretical reliability of ~95%.
 
-### Chapter 14: Benchmarking AI {#sec-volume-1-audit-comprehensive-review-notes-chapter-14-benchmarking-ai-055e}
+### Chapter 14: Benchmarking {#sec-volume-1-audit-comprehensive-review-notes-chapter-14-benchmarking-ai-055e}
 *   **Quantitative Rigor:**
     *   *Action:* Add a "Thermal Throttling" sidebar. Show how a thermal limit can drop GPU performance from 300W peak to 200W sustained, causing a 30% reduction in TFLOPS.
 *   **Systems Thinking:**
     *   *Action:* Add a "Benchmark vs. Production Gap" analysis. Explain why synthetic peak FLOPS often overestimate production throughput by 2-10x by ignoring "Killer Microseconds" of system overhead.
 
-### Chapter 15: Model Serving Systems {#sec-volume-1-audit-comprehensive-review-notes-chapter-15-model-serving-systems-44a4}
+### Chapter 15: Model Serving {#sec-volume-1-audit-comprehensive-review-notes-chapter-15-model-serving-systems-44a4}
 *   **Quantitative Rigor:**
     *   *Action:* Quantify the **Memory Bandwidth Bottleneck** for LLM Decode phase. Formula: $T_{token} = \frac{\text{Model Size (GB)}}{\text{Memory Bandwidth (GB/s)}}$. Show that for a 7B model at FP16 (14GB), a 1TB/s bandwidth limits generation to 70 tokens/sec max.
 

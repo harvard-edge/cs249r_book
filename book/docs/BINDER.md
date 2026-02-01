@@ -104,7 +104,7 @@ Chapters can be referenced by their short names. Common examples:
 
 - `intro` → Introduction chapter
 - `ml_systems` → Machine Learning Systems chapter
-- `dl_primer` → Deep Learning Primer chapter
+- `dl_primer` → Neural Computation chapter
 - `training` → Training chapter
 - `ops` → MLOps chapter
 

@@ -52,6 +52,10 @@ energy_dram_per_byte = f"{ENERGY_DRAM_PJ_PER_BYTE.magnitude:.0f}"
 energy_flop_fp32 = f"{ENERGY_FLOP_FP32_PJ.magnitude}"
 energy_flop_int8 = f"{ENERGY_FLOP_INT8_PJ.magnitude}"
 
+# V100 specs
+v100_bw_gbs = f"{V100_MEM_BW.to(GB/second).magnitude:.0f}"
+v100_tflops_fp32 = f"{V100_FLOPS_FP32.to(TFLOPs/second).magnitude:.1f}"
+
 # Model specs
 resnet_params_m = f"{RESNET50_PARAMS.to(Mparam).magnitude:.1f}"
 resnet_gflops = f"{RESNET50_FLOPs.to(GFLOPs).magnitude:.1f}"
@@ -152,6 +156,40 @@ plt.show()
 
 These physics-level savings translate directly into deployment capabilities. A model that cannot fit on a device at full precision may run comfortably, and faster, when quantized. The following calculation demonstrates the *quantization speedup* for a concrete LLM deployment scenario.
 
+```{python}
+#| label: quant-speedup-calc
+#| echo: false
+
+# 7B LLM quantization speedup worked example
+params_b = 7  # billion parameters
+bytes_fp16 = 2
+bytes_int4 = 0.5
+device_ram_gb = 16
+mem_bw_gbs = 50  # GB/s device memory bandwidth
+kv_cache_gb = 1  # approximate KV cache for 4096-token context
+
+# FP16 scenario
+fp16_size_gb = params_b * bytes_fp16
+fp16_total_gb = fp16_size_gb + kv_cache_gb
+fp16_latency_ms = fp16_size_gb / mem_bw_gbs * 1000
+fp16_toks_per_sec = 1000 / fp16_latency_ms
+
+# INT4 scenario
+int4_size_gb = params_b * bytes_int4
+int4_latency_ms = int4_size_gb / mem_bw_gbs * 1000
+int4_toks_per_sec = 1000 / int4_latency_ms
+speedup = int4_toks_per_sec / fp16_toks_per_sec
+
+fp16_size_str = f"{fp16_size_gb:.0f}"
+fp16_total_str = f"{fp16_total_gb:.0f}"
+fp16_latency_str = f"{fp16_latency_ms:.0f}"
+fp16_toks_str = f"{fp16_toks_per_sec:.1f}"
+int4_size_str = f"{int4_size_gb:.1f}"
+int4_latency_str = f"{int4_latency_ms:.0f}"
+int4_toks_str = f"{int4_toks_per_sec:.0f}"
+speedup_str = f"{speedup:.0f}"
+```
+
 ::: {.callout-notebook title="The Quantization Speedup"}
 **Problem**: You want to deploy a 7B parameter LLM on a device with 16GB RAM. The weights are FP16 (2 bytes).
 
@@ -159,16 +197,16 @@ These physics-level savings translate directly into deployment capabilities. A m
 
 1.  **Model Size**: $7 \times 10^9 \text{ params} \times 2 \text{ bytes} = 14 \text{ GB}$.
 2.  **KV Cache**: Context window (4096 tokens) requires $\approx 1 \text{ GB}$.
-3.  **Total Memory**: $14 + 1 = 15 \text{ GB}$. This barely fits, leaving no room for OS or buffers.
-4.  **Bandwidth Cost**: Loading 14GB at 50 GB/s takes **280 ms** per token. That is 3.5 tokens/sec, too slow for chat.
+3.  **Total Memory**: $14 + 1 =$ `{python} fp16_total_str` GB. This barely fits, leaving no room for OS or buffers.
+4.  **Bandwidth Cost**: Loading `{python} fp16_size_str`GB at 50 GB/s takes **`{python} fp16_latency_str` ms** per token. That is `{python} fp16_toks_str` tokens/sec, too slow for chat.
 
 **The Fix (INT4)**:
 
 1.  **Quantization**: Convert weights to 4-bit integers (0.5 bytes).
-2.  **New Size**: $7 \times 10^9 \times 0.5 = 3.5 \text{ GB}$.
-3.  **New Speed**: Loading 3.5GB takes **70 ms**. Speed jumps to **14 tokens/sec**.
+2.  **New Size**: $7 \times 10^9 \times 0.5 =$ `{python} int4_size_str` GB.
+3.  **New Speed**: Loading `{python} int4_size_str`GB takes **`{python} int4_latency_str` ms**. Speed jumps to **`{python} int4_toks_str` tokens/sec**.
 
-**The Conclusion**: Quantization is not just about "fitting" the model; it is a **4x Linear Speedup** because LLM generation is bandwidth-bound.
+**The Conclusion**: Quantization is not just about "fitting" the model; it is a **`{python} speedup_str`x Linear Speedup** because LLM generation is bandwidth-bound.
 :::
 
 **3. Efficient Hardware Implementation:** Ensures operations run efficiently on target processors. Techniques like **operator fusion**, **sparsity exploitation**, and **hardware-aware scheduling** align computational patterns with hardware capabilities (memory hierarchy, vector units) to maximize utilization and throughput.
@@ -1663,7 +1701,7 @@ This leads to **knowledge distillation**, a fundamentally different approach. Ra
 
 ### Knowledge Distillation {#sec-model-compression-knowledge-distillation-e02e}
 
-Knowledge distillation[^fn-distillation-etymology] trains a smaller **student** model using guidance from a larger, pre-trained **teacher** model. The core insight is that a well-trained teacher provides a richer learning signal than simple ground-truth labels. While a hard label is binary (e.g., $[1, 0, 0]$ for cat), a teacher's probability distribution (e.g., $[0.85, 0.10, 0.05]$) reveals **inter-class similarity**, showing that a cat shares more features with a dog than a fox. @fig-kd-targets visualizes how this "dark knowledge" embedded in the teacher's learned representations guides the student to generalize better.
+**Knowledge distillation**[^fn-distillation-etymology] trains a smaller **student** model using guidance from a larger, pre-trained **teacher** model. The core insight is that a well-trained teacher provides a richer learning signal than simple ground-truth labels. While a hard label is binary (e.g., $[1, 0, 0]$ for cat), a teacher's probability distribution (e.g., $[0.85, 0.10, 0.05]$) reveals **inter-class similarity**, showing that a cat shares more features with a dog than a fox. @fig-kd-targets visualizes how this "dark knowledge" embedded in the teacher's learned representations guides the student to generalize better.
 
 [^fn-distillation-etymology]: **Distillation**: Borrowed from chemistry, where distillation separates mixtures by selective evaporation and condensation, extracting the essence while leaving impurities behind. Hinton et al. [@hinton2015distilling] chose this metaphor deliberately: the teacher's "dark knowledge" about class relationships is the essence being extracted, while the massive parameter count is the impurity left behind. The temperature parameter $T$ in the softmax even mirrors the literal temperature control in chemical distillation.
 
@@ -1902,10 +1940,32 @@ where $k \ll m, n$ is the approximation rank. This is typically computed via sin
 
 This factorization reveals a fundamental *bandwidth-compute trade-off* that recurs throughout systems design.
 
-::: {.callout-notebook title="The Bandwidth-Compute Trade-off"}
-**Reducing the Memory Pressure**: Low-rank factorization illustrates a classic systems trade-off: **trading computation for bandwidth reduction**. Storing a $4096 \times 4096$ matrix requires 64MB (at FP32). Fetching this matrix for a single inference is a massive memory bandwidth hit, especially when limited by physical memory bandwidth constraints.
+```{python}
+#| label: lowrank-bandwidth-calc
+#| echo: false
 
-If we factorize it with rank $k=128$, we store two matrices ($4096 \times 128$ and $128 \times 4096$), totaling only 4MB, a **16x reduction in data movement**. While the number of floating-point operations (FLOPs) actually *increases* slightly because we perform two smaller matrix multiplies instead of one large one, the system speedup is often dramatic. By reducing data movement by 16×, we allow the processor to spend more time computing and less time waiting for memory.
+# Low-rank factorization bandwidth trade-off
+mat_dim = 4096
+rank_k = 128
+bytes_fp32 = 4
+
+full_bytes = mat_dim * mat_dim * bytes_fp32
+full_mb = full_bytes / (1024**2)
+
+factored_bytes = (mat_dim * rank_k + rank_k * mat_dim) * bytes_fp32
+factored_mb = factored_bytes / (1024**2)
+
+data_reduction = full_mb / factored_mb
+
+full_mb_str = f"{full_mb:.0f}"
+factored_mb_str = f"{factored_mb:.0f}"
+data_reduction_str = f"{data_reduction:.0f}"
+```
+
+::: {.callout-notebook title="The Bandwidth-Compute Trade-off"}
+**Reducing the Memory Pressure**: Low-rank factorization illustrates a classic systems trade-off: **trading computation for bandwidth reduction**. Storing a $4096 \times 4096$ matrix requires `{python} full_mb_str`MB (at FP32). Fetching this matrix for a single inference is a massive memory bandwidth hit, especially when limited by physical memory bandwidth constraints.
+
+If we factorize it with rank $k=128$, we store two matrices ($4096 \times 128$ and $128 \times 4096$), totaling only `{python} factored_mb_str`MB, a **`{python} data_reduction_str`x reduction in data movement**. While the number of floating-point operations (FLOPs) actually *increases* slightly because we perform two smaller matrix multiplies instead of one large one, the system speedup is often dramatic. By reducing data movement by `{python} data_reduction_str`×, we allow the processor to spend more time computing and less time waiting for memory.
 :::
 
 This bandwidth-compute trade-off reflects the broader memory wall[^fn-memory-wall-preview] phenomenon where memory access becomes the dominant bottleneck.
@@ -2660,6 +2720,23 @@ To make these gains concrete, consider the *quantization savings* when deploying
 
 Beyond storage savings, quantization also accelerates computation through hardware parallelism. The following calculation illustrates why lower-precision formats execute faster.
 
+```{python}
+#| label: simd-throughput-calc
+#| echo: false
+
+# SIMD throughput calculation
+simd_register_bits = 512  # AVX-512
+simd_fp32_bits = 32
+simd_int8_bits = 8
+simd_fp32_ops = simd_register_bits // simd_fp32_bits  # 16
+simd_int8_ops = simd_register_bits // simd_int8_bits   # 64
+simd_gain = simd_int8_ops // simd_fp32_ops             # 4
+
+simd_fp32_str = f"{simd_fp32_ops}"
+simd_int8_str = f"{simd_int8_ops}"
+simd_gain_str = f"{simd_gain}"
+```
+
 ::: {.callout-notebook title="The SIMD Multiplier"}
 **The Throughput Physics**: Why is INT8 faster than FP32 on the same processor?
 
@@ -2668,11 +2745,11 @@ Beyond storage savings, quantization also accelerates computation through hardwa
 **The Math**:
 
 1.  **Register Width**: 512 bits.
-2.  **FP32 Capacity**: $512 / 32 = 16$ operations per cycle.
-3.  **INT8 Capacity**: $512 / 8 = 64$ operations per cycle.
+2.  **FP32 Capacity**: $512 / 32 =$ `{python} simd_fp32_str` operations per cycle.
+3.  **INT8 Capacity**: $512 / 8 =$ `{python} simd_int8_str` operations per cycle.
 
 **The Multiplier**: By switching to INT8, you pack **4x more elements** into the same register.
-$$ \text{Throughput Gain} = \frac{\text{INT8 Ops/Cycle}}{\text{FP32 Ops/Cycle}} = \frac{64}{16} = 4\times $$
+$$ \text{Throughput Gain} = \frac{\text{INT8 Ops/Cycle}}{\text{FP32 Ops/Cycle}} = \frac{`{python} simd_int8_str`}{`{python} simd_fp32_str`} = `{python} simd_gain_str`\times $$
 
 **The Systems Conclusion**: Quantization delivers a **4x speedup** on compute-bound layers solely due to vector packing, even before considering memory bandwidth savings.
 :::
@@ -4076,7 +4153,19 @@ def conv_bn_relu_fused(input, weight, gamma, beta, mean, var):
 ```
 :::
 
-The arithmetic operations remain identical, but memory traffic drops from 6 transfers to 2 transfers (3× reduction). For a ResNet-50 layer with 256 channels and spatial size $28 \times 28$, this eliminates $2 \times 256 \times 28 \times 28 \times 4 \text{ bytes} = 1.5\text{ MB}$ of intermediate memory traffic per layer.
+```{python}
+#| label: conv-fusion-calc
+#| echo: false
+
+# Conv-BN-ReLU fusion traffic reduction
+unfused_transfers = 6  # read/write for each of conv, BN, ReLU
+fused_transfers = 2    # read input, write output
+transfer_reduction = unfused_transfers // fused_transfers
+
+transfer_reduction_str = f"{transfer_reduction}"
+```
+
+The arithmetic operations remain identical, but memory traffic drops from 6 transfers to 2 transfers (`{python} transfer_reduction_str`× reduction). For a ResNet-50 layer with 256 channels and spatial size $28 \times 28$, this eliminates $2 \times 256 \times 28 \times 28 \times 4 \text{ bytes} = 1.5\text{ MB}$ of intermediate memory traffic per layer.
 
 **Element-wise Operation Fusion**: Element-wise operations (addition, multiplication, activation functions) have extremely low arithmetic intensity, making them severely memory-bound. @lst-elementwise-fusion demonstrates how combining these operations reduces memory traffic:
 
@@ -4093,7 +4182,23 @@ output = relu((x + y) * scale) + bias
 ```
 :::
 
-For tensors of size 1 MB, unfused execution performs 8 MB of memory traffic. Fused execution reduces this to 3 MB (2.67× reduction). On a GPU with 900 GB/s memory bandwidth, this saves approximately 6 microseconds per operation, accumulating to milliseconds of latency reduction over thousands of operations in a full model.
+```{python}
+#| label: elementwise-fusion-calc
+#| echo: false
+
+# Element-wise fusion traffic analysis
+tensor_mb = 1
+unfused_traffic_mb = 8  # 8 memory transfers × 1 MB
+fused_traffic_mb = 3    # 3 memory transfers × 1 MB
+ew_reduction = unfused_traffic_mb / fused_traffic_mb
+saved_traffic_mb = unfused_traffic_mb - fused_traffic_mb
+saved_us = saved_traffic_mb / (V100_MEM_BW.to(GB / second).magnitude * 1000) * 1e6
+
+ew_reduction_str = f"{ew_reduction:.2f}"
+saved_us_str = f"{saved_us:.0f}"
+```
+
+For tensors of size 1 MB, unfused execution performs 8 MB of memory traffic. Fused execution reduces this to 3 MB (`{python} ew_reduction_str`× reduction). On a GPU with `{python} v100_bw_gbs` GB/s memory bandwidth, this saves approximately `{python} saved_us_str` microseconds per operation, accumulating to milliseconds of latency reduction over thousands of operations in a full model.
 
 **Matrix Multiply-Add Fusion (GEMM Fusion)**: Linear layers followed by bias addition and activation appear throughout transformers and MLPs. @lst-gemm-fusion illustrates the fusion pattern:
 
@@ -4146,7 +4251,7 @@ Memory bandwidth analysis quantifies fusion benefits. Consider a Conv-BN-ReLU se
 - **Total memory traffic: 3.9 MB**
 - **Bandwidth reduction: 46%**
 
-On a V100 GPU with 900 GB/s HBM bandwidth and 14 TFLOPS FP32 compute, the unfused sequence takes approximately 8 microseconds (memory-bound), while the fused version takes 4.3 microseconds (1.86× speedup). The speedup comes entirely from reducing memory traffic, as the compute remains identical.
+On a V100 GPU with `{python} v100_bw_gbs` GB/s HBM bandwidth and `{python} v100_tflops_fp32` TFLOPS FP32 compute, the unfused sequence takes approximately 8 microseconds (memory-bound), while the fused version takes 4.3 microseconds (1.86× speedup). The speedup comes entirely from reducing memory traffic, as the compute remains identical.
 
 Operator fusion implementation occurs at multiple levels in the software stack:
 

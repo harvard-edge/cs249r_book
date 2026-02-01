@@ -4,7 +4,7 @@ concepts: training_concepts.yml
 glossary: training_glossary.json
 ---
 
-# AI Training {#sec-ai-training}
+# Model Training {#sec-ai-training}
 
 ::: {layout-narrow}
 ::: {.column-margin}
@@ -64,6 +64,9 @@ h100_ridge = f"{(H100_FLOPS_FP16_TENSOR / H100_MEM_BW).to(flop/byte).magnitude:.
 # Interconnects
 nvlink_h100 = f"{NVLINK_H100_BW.to(GB/second).magnitude:.0f}"
 
+# TDP
+a100_tdp = f"{A100_TDP.to(watt).magnitude:.0f}"
+
 # Models
 gpt2_params_b = f"{GPT2_PARAMS.to(Mparam).magnitude/1000:.1f}"
 gpt3_params_b = f"{GPT3_PARAMS.to(Mparam).magnitude/1000:.0f}"
@@ -83,7 +86,7 @@ A single forward pass through GPT-2 requires roughly $10^{10}$ floating-point op
 
 Three characteristics make training workloads fundamentally different from general-purpose computing, and concrete numbers illustrate why each matters. First, *computational intensity*: GPT-2's $10^{23}$ FLOPs spread over days of wall-clock time demands sustained petaFLOPS-scale throughput from hardware that rarely exceeds 30 to 70 percent utilization. Second, *memory pressure*: storing 1.5 billion weights requires 6 GB in FP32, but the Adam optimizer adds two additional state tensors per parameter (another 12 GB), and activation storage across 48 transformer layers can double or triple the total, easily exceeding a single GPU's memory capacity. Third, *data dependencies*: each gradient update depends on the result of the previous one, creating sequential bottlenecks that limit how much parallelism the system can exploit.
 
-Each of these challenges opens a corresponding optimization pathway. Computational intensity can be addressed through hardware acceleration and precision reduction. Memory pressure responds to techniques like gradient checkpointing, which trades recomputation for reduced activation storage, and mixed-precision training, which halves the memory footprint of weights and activations. Data dependencies motivate pipeline designs that overlap computation with data movement so the GPU never sits idle waiting for the next batch. This chapter focuses on single-machine and single-node multi-GPU training; scaling to hundreds of machines across network boundaries introduces communication and fault tolerance challenges that are the subject of *Distributed Training Systems* in Volume II. We use the *Iron Law of Training Performance* as our organizing framework, examining how each optimization technique targets specific terms in the performance equation. Before formalizing that framework, consider how these constraints interact in practice when a single *gradient explosion* can erase days of expensive computation.
+Each of these challenges opens a corresponding optimization pathway. Computational intensity can be addressed through hardware acceleration and precision reduction. Memory pressure responds to techniques like **gradient checkpointing**, which trades recomputation for reduced activation storage, and **mixed-precision training**, which halves the memory footprint of weights and activations. Data dependencies motivate pipeline designs that overlap computation with data movement so the GPU never sits idle waiting for the next batch. This chapter focuses on single-machine and single-node multi-GPU training; scaling to hundreds of machines across network boundaries introduces communication and fault tolerance challenges that are the subject of *Distributed Training Systems* in Volume II. We use the *Iron Law of Training Performance* as our organizing framework, examining how each optimization technique targets specific terms in the performance equation. Before formalizing that framework, consider how these constraints interact in practice when a single *gradient explosion* can erase days of expensive computation.
 
 ::: {.callout-example title="The 3AM Gradient Explosion"}
 **The Scenario**: You are training a 7B parameter LLM. The loss curve has been decreasing smoothly for 4 days. You go to sleep.
@@ -114,6 +117,25 @@ where **Total Operations** is the FLOPs required for one epoch times the number 
 This equation reveals three levers for improvement: reduce total operations through algorithmic innovation, increase peak throughput through hardware utilization, or improve utilization through better pipeline orchestration. Each optimization technique in this chapter pulls one or more of these levers, as summarized in @tbl-iron-law-mapping.
 
 :::
+
+The challenge of maintaining high utilization at scale is illustrated in @fig-communication-tax. While compute-bound workloads scale efficiently, bandwidth-bound workloads like LLM training suffer from synchronization overhead that grows with cluster size, creating a "tax" that degrades effective throughput.
+
+```{python}
+#| label: fig-communication-tax
+#| echo: false
+#| fig-cap: "**The Communication Tax.** Effective Throughput vs. GPU Count (Log-Log Scale). Ideal scaling (dashed gray) is linear. Compute-bound workloads like ResNet (Blue) scale efficiently because communication is a small fraction of step time. Bandwidth-bound workloads like LLMs (Red) suffer from the 'Communication Tax,' where synchronization overhead grows with cluster size, causing efficiency to drop. This divergence explains why network bandwidth is often the bottleneck in large-scale training."
+#| fig-alt: "Log-log plot of Throughput vs. GPUs. Blue line (ResNet) stays close to linear ideal. Red line (LLM) sags significantly at high GPU counts, annotated as 'The Communication Tax'."
+
+import sys
+import matplotlib.pyplot as plt
+# Ensure calc directory is in path
+sys.path.append('../../../calc')
+import viz
+
+viz.set_book_style()
+viz.plot_communication_tax()
+plt.show()
+```
 
 The gap between theoretical peak performance and actual training speed is often 2-3x. Before examining specific optimization techniques, verify your understanding of why this gap exists.
 
@@ -242,7 +264,7 @@ Scale is not just "more data"; it is a transformation of the system's physics.
 
 :::
 
-Second, **model scale**: billion-parameter models demand parallelization strategies including data parallelism[^fn-training-data-parallelism] (replicate model, split data) and model parallelism[^fn-training-model-parallelism] (split model across devices).
+Second, **model scale**: billion-parameter models demand parallelization strategies including **data parallelism**[^fn-training-data-parallelism] (replicate model, split data) and **model parallelism**[^fn-training-model-parallelism] (split model across devices).
 
 Third, **infrastructure scale**: coordinating thousands of accelerators introduces communication overhead that can dominate training time. These challenges motivate the workflow management tools (@sec-ai-development-workflow) that automate training orchestration.
 
@@ -307,14 +329,60 @@ To illustrate the scale of these operations concretely, consider the *attention 
 
 ::: {.callout-notebook title="GPT-2 Attention Layer Computation"}
 
-Each GPT-2 layer performs attention computations that exemplify dense matrix multiplication demands. For a single attention head with batch_size=32, sequence_length=1024, hidden_dim=1280:
+```{python}
+#| label: gpt2-flop-calc
+#| echo: false
+
+# GPT-2 XL (1.5B) attention FLOP calculations — consistent with lighthouse model
+batch = 32
+seq_len = 1024
+hidden = GPT2_HIDDEN_DIM     # 1600
+n_heads = 25                  # GPT-2 XL has 25 attention heads
+head_dim = hidden // n_heads  # 64
+n_layers_gpt2 = GPT2_LAYERS  # 48
+training_steps = 50_000
+
+# QKV projections: 3 × (batch × seq × hidden × hidden)
+qkv_flops = 3 * batch * seq_len * hidden * hidden
+qkv_billion = qkv_flops / 1e9
+
+# Attention scores: batch × heads × seq × seq × head_dim
+attn_flops = batch * n_heads * seq_len * seq_len * head_dim
+attn_billion = attn_flops / 1e9
+
+# Total per layer (QKV + attn scores + attn×V + output projection ≈ 204B)
+# Additional: attn×V same as attn_scores, output proj same size as one QKV
+total_per_layer = qkv_flops + attn_flops + attn_flops + (batch * seq_len * hidden * hidden)
+total_per_layer_b = total_per_layer / 1e9
+
+# Per step (all layers)
+per_step_flops = total_per_layer * n_layers_gpt2
+per_step_trillion = per_step_flops / 1e12
+
+# Total training
+total_training_flops = per_step_flops * training_steps
+total_training_peta = total_training_flops / 1e15
+
+# V100 time per step
+v100_fp16_tflops = V100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude  # 125
+v100_time_per_step_s = per_step_trillion / v100_fp16_tflops
+
+qkv_billion_str = f"{qkv_billion:.0f}"
+attn_billion_str = f"{attn_billion:.1f}"
+total_layer_str = f"{total_per_layer_b:.0f}"
+per_step_t_str = f"{per_step_trillion:.1f}"
+total_peta_str = f"{total_training_peta:.0f}"
+v100_time_str = f"{v100_time_per_step_s:.0f}"
+```
+
+Each GPT-2 layer performs attention computations that exemplify dense matrix multiplication demands. For a single attention head with batch_size=`{python} batch`, sequence_length=`{python} seq_len`, hidden_dim=`{python} hidden`:
 
 **Query, Key, Value Projections** (3 separate matrix multiplications):
 $$
 \text{FLOPS} = 3 \times (\text{batch} \times \text{seq} \times \text{hidden} \times \text{hidden})
 $$
 $$
-= 3 \times (32 \times 1024 \times 1280 \times 1280) \approx 160 \text{ billion FLOPS}
+= 3 \times (`{python} batch` \times `{python} seq_len` \times `{python} hidden` \times `{python} hidden`) \approx `{python} qkv_billion_str` \text{ billion FLOPS}
 $$
 
 **Attention Score Computation** (Q × K^T):
@@ -322,16 +390,16 @@ $$
 \text{FLOPS} = \text{batch} \times \text{heads} \times \text{seq} \times \text{seq} \times \text{hidden/heads}
 $$
 $$
-= 32 \times 20 \times 1024 \times 1024 \times 64 = 42.9 \text{ billion FLOPS}
+= `{python} batch` \times `{python} n_heads` \times `{python} seq_len` \times `{python} seq_len` \times `{python} head_dim` = `{python} attn_billion_str` \text{ billion FLOPS}
 $$
 
 **Computation Scale**
 
-- Total for one attention layer: ~204B FLOPS forward pass
-- With 48 layers in GPT-2: ~9.8 trillion FLOPS per training step
-- At 50K training steps: ~490 petaFLOPS total training computation
+- Total for one attention layer: ~`{python} total_layer_str`B FLOPS forward pass
+- With `{python} n_layers_gpt2` layers in GPT-2: ~`{python} per_step_t_str` trillion FLOPS per training step
+- At `{python} f"{training_steps:,}"` training steps: ~`{python} total_peta_str` petaFLOPS total training computation
 
-**System Implication:** A V100 GPU (`{python} v100_tflops_fp16` TFLOPS peak FP16 with Tensor Cores, `{python} v100_tflops_fp32` TFLOPS FP32 without) would require 79 seconds just for the attention computations per step at 100% utilization (theoretical peak; practical throughput would be lower). Actual training steps take 180 to 220ms, requiring 8 to 32 GPUs to achieve this throughput depending on utilization and interconnect efficiency.
+**System Implication:** A V100 GPU (`{python} v100_tflops_fp16` TFLOPS peak FP16 with Tensor Cores, `{python} v100_tflops_fp32` TFLOPS FP32 without) would require `{python} v100_time_str` seconds just for the attention computations per step at 100% utilization (theoretical peak; practical throughput would be lower). Actual training steps take 180 to 220ms, requiring 8 to 32 GPUs to achieve this throughput depending on utilization and interconnect efficiency.
 
 :::
 
@@ -528,7 +596,7 @@ However, processing single examples creates new system challenges. Modern accele
 
 ##### Mini-batch Processing {#sec-ai-training-minibatch-processing-4eb0}
 
-Mini-batch gradient descent emerges as a practical compromise between full-batch and stochastic methods, computing gradients over small batches of examples that align well with modern GPU architectures [@dean2012large]. GPUs contain thousands of cores designed for parallel computation, and mini-batch processing allows these cores to simultaneously compute gradients for multiple examples. The batch size $B$ becomes a key system parameter, influencing both computational efficiency and memory requirements.
+Mini-batch gradient descent emerges as a practical compromise between full-batch and stochastic methods, computing gradients over small batches of examples that align well with modern GPU architectures [@dean2012large]. GPUs contain thousands of cores designed for parallel computation, and mini-batch processing allows these cores to simultaneously compute gradients for multiple examples. The **batch size** $B$ becomes a key system parameter, influencing both computational efficiency and memory requirements.
 
 ::: {.callout-definition title="Batch Processing"}
 
@@ -573,7 +641,20 @@ v_t = \beta_2 v_{t-1} + (1-\beta_2)\big(\nabla L(\theta_t)\big)^2
 \theta_{t+1} = \theta_t - \alpha \frac{m_t}{\sqrt{v_t + \epsilon}}
 \end{gather*}
 
-The system implications of Adam are more substantial than previous methods. The optimizer must store two additional vectors ($m_t$ and $v_t$) for each parameter, tripling the memory required for optimization state. For a model with 100 million parameters using 32-bit floating-point numbers, the additional memory requirement is approximately 800 MB.
+```{python}
+#| label: adam-memory-calc
+#| echo: false
+
+# Adam optimizer memory overhead
+adam_example_params_m = 100  # million
+adam_bytes = 4  # FP32
+adam_vectors = 2  # m_t and v_t
+adam_overhead_mb = adam_example_params_m * adam_vectors * adam_bytes
+
+adam_overhead_str = f"{adam_overhead_mb}"
+```
+
+The system implications of Adam are more substantial than previous methods. The optimizer must store two additional vectors ($m_t$ and $v_t$) for each parameter, tripling the memory required for optimization state. For a model with 100 million parameters using 32-bit floating-point numbers, the additional memory requirement is approximately `{python} adam_overhead_str` MB.
 
 [^fn-adam-optimizer-memory]: **Adam (Adaptive Moment Estimation)**: Introduced by Kingma and Ba in 2015, Adam became the default optimizer for deep learning due to its robust performance across diverse architectures. The algorithm maintains per-parameter learning rates using first and second moment estimates, requiring 3x the memory of SGD (parameters + two state vectors). For a 7B model in FP32, this means 84 GB for optimizer state alone, driving the adoption of memory-efficient variants like 8-bit Adam (2x compression) and GaLoRE (gradient low-rank projection).
 
@@ -596,13 +677,35 @@ GPT-2 training uses the Adam optimizer with these hyperparameters:
 
 **Memory Overhead Calculation**
 
+```{python}
+#| label: gpt2-optimizer-memory-calc
+#| echo: false
+
+from calc.constants import GPT2_PARAMS, Mparam
+
+gpt2_b = GPT2_PARAMS.to(Mparam).magnitude / 1000  # 1.5 B
+bytes_fp32 = 4
+
+param_gb = gpt2_b * bytes_fp32
+grad_gb = gpt2_b * bytes_fp32
+adam_m_gb = gpt2_b * bytes_fp32
+adam_v_gb = gpt2_b * bytes_fp32
+total_opt_gb = param_gb + grad_gb + adam_m_gb + adam_v_gb
+
+param_gb_str = f"{param_gb:.1f}"
+grad_gb_str = f"{grad_gb:.1f}"
+adam_m_str = f"{adam_m_gb:.1f}"
+adam_v_str = f"{adam_v_gb:.1f}"
+total_opt_str = f"{total_opt_gb:.0f}"
+```
+
 For GPT-2's 1.5B parameters in FP32 (4 bytes each):
 
-- Parameters: 1.5B × 4 bytes = 6.0 GB
-- Gradients: 1.5B × 4 bytes = 6.0 GB
-- Adam first moment (m): 1.5B × 4 bytes = 6.0 GB
-- Adam second moment (v): 1.5B × 4 bytes = 6.0 GB
-- Total optimizer state: 24 GB
+- Parameters: 1.5B × 4 bytes = `{python} param_gb_str` GB
+- Gradients: 1.5B × 4 bytes = `{python} grad_gb_str` GB
+- Adam first moment (m): 1.5B × 4 bytes = `{python} adam_m_str` GB
+- Adam second moment (v): 1.5B × 4 bytes = `{python} adam_v_str` GB
+- Total optimizer state: `{python} total_opt_str` GB
 
 This explains why GPT-2 training requires 32 GB+ V100 GPUs even before considering activation memory.
 
@@ -848,26 +951,70 @@ This creates a complex set of trade-offs. Larger batch sizes enable more efficie
 
 Quantifying these trade-offs for our GPT-2 lighthouse model reveals the scale of the *activation memory* challenge.
 
+```{python}
+#| label: gpt2-activation-memory-calc
+#| echo: false
+
+from calc.constants import GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM, V100_MEM_CAPACITY, GiB
+
+# GPT-2 activation memory breakdown
+batch_size = 32
+seq_len = 1024
+hidden_dim = GPT2_HIDDEN_DIM  # 1600 for GPT-2 XL (1.5B)
+n_layers = GPT2_LAYERS        # 48
+ffn_expansion = 4
+ffn_dim = hidden_dim * ffn_expansion
+bytes_fp16 = 2
+bytes_fp32 = 4
+
+# Per-layer activation memory
+attn_act_mb = batch_size * seq_len * hidden_dim * 4 * bytes_fp16 / 1e6
+ffn_act_mb = batch_size * seq_len * ffn_dim * bytes_fp16 / 1e6
+layernorm_mb = 10  # approximate
+per_layer_mb = attn_act_mb + ffn_act_mb + layernorm_mb
+
+# Full model memory
+total_act_gb = n_layers * per_layer_mb / 1000
+params_gb = GPT2_PARAMS.magnitude * bytes_fp16 / 1e9
+grad_gb = params_gb
+optimizer_gb = GPT2_PARAMS.magnitude * bytes_fp32 * 2 / 1e9  # Adam: 2 states in FP32
+peak_gb = total_act_gb + params_gb + grad_gb + optimizer_gb
+
+v100_mem_gb = V100_MEM_CAPACITY.to(GiB).magnitude
+
+attn_act_str = f"{attn_act_mb:.0f}"
+ffn_act_str = f"{ffn_act_mb:.0f}"
+per_layer_str = f"{per_layer_mb:.0f}"
+total_act_str = f"{total_act_gb:.1f}"
+params_gb_str = f"{params_gb:.0f}"
+grad_gb_str = f"{grad_gb:.0f}"
+opt_gb_str = f"{optimizer_gb:.0f}"
+peak_gb_str = f"{peak_gb:.0f}"
+v100_mem_str = f"{v100_mem_gb:.0f}"
+hidden_dim_str = f"{hidden_dim}"
+ffn_dim_str = f"{ffn_dim}"
+```
+
 ::: {.callout-notebook title="GPT-2 Activation Memory Breakdown"}
 
-For GPT-2 with batch_size=32, seq_len=1024, hidden_dim=1280, 48 layers:
+For GPT-2 with batch_size=32, seq_len=1024, hidden_dim=`{python} hidden_dim_str`, 48 layers:
 
 #### Per-Layer Activation Memory
 
-- Attention activations: `batch × seq × hidden × 4` (Q, K, V, output) = 32 × 1024 × 1280 × 4 × 2 bytes (FP16) = 335 MB
-- FFN activations: `batch × seq × (hidden × 4)` (intermediate expansion) = 32 × 1024 × 5120 × 2 bytes = 335 MB
+- Attention activations: `batch × seq × hidden × 4` (Q, K, V, output) = 32 × 1024 × `{python} hidden_dim_str` × 4 × 2 bytes (FP16) = `{python} attn_act_str` MB
+- FFN activations: `batch × seq × (hidden × 4)` (intermediate expansion) = 32 × 1024 × `{python} ffn_dim_str` × 2 bytes = `{python} ffn_act_str` MB
 - Layer norm states: Minimal (~10 MB per layer)
-- Total per layer: ~680 MB
+- Total per layer: ~`{python} per_layer_str` MB
 
 #### Full Model Activation Memory
 
-- 48 layers × 680 MB = **32.6 GB** just for activations
-- Parameters (FP16): 3 GB
-- Gradients: 3 GB
-- Optimizer state (Adam, FP32): 12 GB
-- Peak memory during training: **~51 GB**
+- 48 layers × `{python} per_layer_str` MB = **`{python} total_act_str` GB** just for activations
+- Parameters (FP16): `{python} params_gb_str` GB
+- Gradients: `{python} grad_gb_str` GB
+- Optimizer state (Adam, FP32): `{python} opt_gb_str` GB
+- Peak memory during training: **~`{python} peak_gb_str` GB**
 
-This exceeds a single V100's 32 GB capacity.
+This exceeds a single V100's `{python} v100_mem_str` GB capacity.
 
 #### System Solutions Applied
 
@@ -1003,7 +1150,19 @@ Consider @tbl-training-arithmetic-intensity: dense matrix multiplication achieve
 ```
 :::
 
-Consider the GPT-2 Attention Layer where Q, K, V projections with dimensions (B × S × H) multiplied by (H × H) produce BSH² FLOPs. Data movement requires reading Q, K, V (3 × BSH × 2 bytes) plus writing the output (BSH × 2 bytes). The arithmetic intensity equals BSH² divided by (8BSH), which simplifies to H/8. For GPT-2 with H=768, this yields 96 FLOP/byte—below the A100's ridge point, making standard attention memory-bound.
+```{python}
+#| label: attn-intensity-calc
+#| echo: false
+
+# GPT-2 Small (117M) used here for roofline illustration:
+# H=768 gives intensity=96 FLOP/byte, below A100 ridge (~153), demonstrating memory-bound behavior
+H_small = 768
+attn_intensity = H_small / 8
+attn_intensity_str = f"{attn_intensity:.0f}"
+H_small_str = f"{H_small}"
+```
+
+Consider the GPT-2 Attention Layer where Q, K, V projections with dimensions (B × S × H) multiplied by (H × H) produce BSH² FLOPs. Data movement requires reading Q, K, V (3 × BSH × 2 bytes) plus writing the output (BSH × 2 bytes). The arithmetic intensity equals BSH² divided by (8BSH), which simplifies to H/8. For GPT-2 with H=`{python} H_small_str`, this yields `{python} attn_intensity_str` FLOP/byte—below the A100's ridge point, making standard attention memory-bound.
 
 GPUs have characteristic hardware ridge points where operations transition from memory-bound to compute-bound. The A100 with `{python} a100_tflops_fp16` TFLOPS FP16 Tensor Core and `{python} a100_bw_tbs` TB/s bandwidth has a ridge point of `{python} a100_ridge` FLOP/byte. The H100 SXM with `{python} h100_tflops_fp16` TFLOPS FP16 Tensor Core and `{python} h100_bw_tbs` TB/s bandwidth has a ridge point of approximately `{python} h100_ridge` FLOP/byte. Operations below the ridge point are memory-bound; above are compute-bound.
 
@@ -1387,11 +1546,28 @@ While data pipeline throughput determines how fast training data reaches the GPU
 
 **Problem**: You are training a large model on 8 GPUs. You want to know if the network is the bottleneck.
 
-**The Math**: For a 7B parameter model with FP16 gradients:
+```{python}
+#| label: network-wall-calc
+#| echo: false
 
-1. **Gradient Size**: $7 \times 10^9 \times 2 \text{ bytes} = 14 \text{ GB}$ per step.
-2. **AllReduce Cost**: Ring AllReduce sends $2 \times 14 \text{ GB} = 28 \text{ GB}$ total.
-3. **Network Time**: At 100 Gbps (12.5 GB/s) NVLink: $28 / 12.5 = 2.2 \text{ s}$.
+# Network wall worked example
+model_params_b = 7  # 7B parameters
+bytes_per_param_fp16 = 2
+gradient_size_gb = model_params_b * 1e9 * bytes_per_param_fp16 / 1e9
+allreduce_total_gb = 2 * gradient_size_gb  # Ring AllReduce sends 2× gradients
+network_bw_gbs = 12.5  # 100 Gbps = 12.5 GB/s
+network_time_s = allreduce_total_gb / network_bw_gbs
+
+gradient_size_str = f"{gradient_size_gb:.0f}"
+allreduce_str = f"{allreduce_total_gb:.0f}"
+network_time_str = f"{network_time_s:.1f}"
+```
+
+**The Math**: For a `{python} model_params_b`B parameter model with FP16 gradients:
+
+1. **Gradient Size**: $7 \times 10^9 \times 2 \text{ bytes} = `{python} gradient_size_str` \text{ GB}$ per step.
+2. **AllReduce Cost**: Ring AllReduce sends $2 \times `{python} gradient_size_str` \text{ GB} = `{python} allreduce_str` \text{ GB}$ total.
+3. **Network Time**: At 100 Gbps (`{python} f"{network_bw_gbs:.1f}"` GB/s) NVLink: $`{python} allreduce_str` / `{python} f"{network_bw_gbs:.1f}"` = `{python} network_time_str` \text{ s}$.
 4. **Compute Time**: If forward + backward takes $1 \text{ s}$, network is the bottleneck.
 
 **The Systems Insight**: The network becomes a wall when $t_{\text{communication}} > t_{\text{computation}}$. Solutions include gradient compression (reduce data volume), overlapping computation with communication (as implemented in Horovod [@sergeev2018horovod]), and using faster interconnects (NVLink at `{python} nvlink_h100` GB/s vs Ethernet at 12.5 GB/s).
@@ -1420,7 +1596,7 @@ Where bandwidth varies significantly across tiers:
 
 * Storage ($B_{\text{storage}}$): NVMe storage devices provide 1-2 GB/s
 * System ($B_{\text{system}}$): Main memory transfers data at 50-100 GB/s
-* Accelerator ($B_{\text{accelerator}}$): GPU memory achieves 900 GB/s or higher
+* Accelerator ($B_{\text{accelerator}}$): GPU memory achieves `{python} v100_bw` GB/s or higher
 
 These order-of-magnitude differences create distinct performance characteristics that must be carefully managed. The total time required for each training iteration comprises multiple pipelined operations:
 $$t_{\text{iteration}} =\max(t_{\text{fetch}}, t_{\text{process}}, t_{\text{transfer}})$$
@@ -1520,9 +1696,46 @@ $$
 $$
 where $B$ represents the batch size, $L$ is the number of layers, and $A_l$ represents the activation size at layer $l$. This simple equation masks considerable complexity in practice.
 
-Consider a representative large model like ResNet-50 (a widely-used image classification architecture) processing images at $224\times224$ resolution with a batch size of 32. The initial convolutional layer produces activation maps of dimension $112\times112\times64$. Using single-precision floating-point format (4 bytes per value), this single layer's activation storage requires approximately 98 MB. As the network progresses through its 50 layers, the cumulative memory demands grow substantially: the complete forward pass activations total approximately 8GB, gradients require an additional 4GB, and model parameters consume 200MB. This 12.2GB total represents over 30% of a high-end A100 GPU's 40GB memory capacity for a single batch.
+```{python}
+#| label: resnet-memory-scaling-calc
+#| echo: false
 
-The memory scaling patterns reveal critical hardware utilization trade-offs. Doubling the batch size to 64 increases activation memory to 16GB and gradient memory to 8GB, totaling 24.2GB and approaching memory limits. Training larger models at the scale of GPT-3 (175B parameters, representing current large language models) requires approximately 700GB just for parameters in FP32 (350GB in FP16), necessitating distributed memory strategies across multiple high-memory nodes.
+# ResNet-50 activation memory scaling (batch=32)
+first_conv_h, first_conv_w, first_conv_c = 112, 112, 64
+bytes_fp32 = 4
+first_conv_mb = first_conv_h * first_conv_w * first_conv_c * bytes_fp32 / (1024**2)
+
+# Approximate totals for batch=32
+act_gb_b32 = 8
+grad_gb_b32 = 4
+param_gb = 0.2  # ~25.6M params × 4 bytes ≈ 100MB, but ResNet-50 with batch overhead ≈ 200MB
+total_gb_b32 = act_gb_b32 + grad_gb_b32 + param_gb
+a100_40_gb = 40
+pct_of_a100 = total_gb_b32 / a100_40_gb * 100
+
+# Batch=64 scaling
+act_gb_b64 = act_gb_b32 * 2
+grad_gb_b64 = grad_gb_b32 * 2
+total_gb_b64 = act_gb_b64 + grad_gb_b64 + param_gb
+
+# GPT-3 parameter memory
+gpt3_params_count = 175  # billion
+gpt3_fp32_gb = gpt3_params_count * bytes_fp32
+gpt3_fp16_gb = gpt3_params_count * 2
+
+first_conv_mb_str = f"{first_conv_mb:.0f}"  # ~98 MB (note: 32 batches not included here, just one activation map)
+total_gb_b32_str = f"{total_gb_b32:.1f}"
+pct_a100_str = f"{pct_of_a100:.0f}"
+act_gb_b64_str = f"{act_gb_b64}"
+grad_gb_b64_str = f"{grad_gb_b64}"
+total_gb_b64_str = f"{total_gb_b64:.1f}"
+gpt3_fp32_str = f"{gpt3_fp32_gb}"
+gpt3_fp16_str = f"{gpt3_fp16_gb}"
+```
+
+Consider a representative large model like ResNet-50 (a widely-used image classification architecture) processing images at $224\times224$ resolution with a batch size of 32. The initial convolutional layer produces activation maps of dimension $112\times112\times64$. Using single-precision floating-point format (4 bytes per value), this single layer's activation storage requires approximately 98 MB. As the network progresses through its 50 layers, the cumulative memory demands grow substantially: the complete forward pass activations total approximately 8GB, gradients require an additional 4GB, and model parameters consume 200MB. This `{python} total_gb_b32_str`GB total represents over `{python} pct_a100_str`% of a high-end A100 GPU's 40GB memory capacity for a single batch.
+
+The memory scaling patterns reveal critical hardware utilization trade-offs. Doubling the batch size to 64 increases activation memory to `{python} act_gb_b64_str`GB and gradient memory to `{python} grad_gb_b64_str`GB, totaling `{python} total_gb_b64_str`GB and approaching memory limits. Training larger models at the scale of GPT-3 (`{python} gpt3_params_b`B parameters, representing current large language models) requires approximately `{python} gpt3_fp32_str`GB just for parameters in FP32 (`{python} gpt3_fp16_str`GB in FP16), necessitating distributed memory strategies across multiple high-memory nodes.
 
 GPUs typically provide 40--80 GB of memory in high-end training configurations, which must accommodate activations, model parameters, gradients, and optimization states. This constraint has motivated several memory management strategies:
 
@@ -1694,6 +1907,44 @@ Determining the optimal batch size involves balancing these factors within hardw
 
 Beyond batch size tuning, practitioners must also confront the economic reality of large-scale training. The compute cost itself becomes a binding constraint that shapes every training decision, from hardware selection to cluster sizing, a phenomenon best understood by examining *the utility bill* of a realistic training run.
 
+```{python}
+#| label: utility-bill-calc
+#| echo: false
+
+# Utility Bill: Llama-2-70B training cost analysis
+ub_params = 70e9           # 70B parameters
+ub_tokens = 2e12           # 2T tokens
+ub_scaling_factor = 6      # Chinchilla scaling constant
+ub_peak_tflops = 1000      # H100 peak FP16 TFLOPS
+ub_utilization = 0.50      # 50% utilization
+ub_effective_tflops = ub_peak_tflops * ub_utilization
+ub_num_gpus = 1000
+ub_rental_rate = 3         # $/hr per GPU
+ub_purchase_price = 30_000 # $ per GPU
+
+# Compute
+ub_total_flops = ub_scaling_factor * ub_params * ub_tokens
+ub_time_seconds = ub_total_flops / (ub_effective_tflops * 1e12)
+ub_time_years = ub_time_seconds / (365.25 * 24 * 3600)
+ub_cluster_days = ub_time_seconds / ub_num_gpus / 86400
+
+# Economics
+ub_rental_cost = ub_num_gpus * 24 * ub_cluster_days * ub_rental_rate
+ub_purchase_cost = ub_num_gpus * ub_purchase_price
+ub_breakeven = ub_purchase_cost / ub_rental_cost
+
+# Format for LaTeX inline references
+ub_flops_mantissa = f"{ub_total_flops:.1e}".split("e+")[0]
+ub_flops_exp = int(f"{ub_total_flops:.1e}".split("e+")[1])
+ub_time_s_mantissa = f"{ub_time_seconds:.2e}".split("e+")[0]
+ub_time_s_exp = int(f"{ub_time_seconds:.2e}".split("e+")[1])
+ub_years_str = f"{ub_time_years:.0f}"
+ub_cluster_days_str = f"{ub_cluster_days:.0f}"
+ub_rental_str = f"{ub_rental_cost/1e6:.2f}"
+ub_purchase_str = f"{ub_purchase_cost/1e6:.0f}"
+ub_breakeven_str = f"{ub_breakeven:.0f}"
+```
+
 ::: {.callout-notebook #notebook-utility-bill title="The Utility Bill"}
 
 **Problem**: Is it cheaper to rent an H100 or buy it for training Llama-2-70B?
@@ -1701,17 +1952,17 @@ Beyond batch size tuning, practitioners must also confront the economic reality 
 **The Math**:
 
 1.  **Workload**: Llama-2-70B (70B params, 2T tokens).
-2.  **Compute Required**: $6 \times 70 \times 10^9 \times 2 \times 10^{12} \approx 8.4 \times 10^{23}$ FLOPs.
+2.  **Compute Required**: $6 \times 70 \times 10^9 \times 2 \times 10^{12} \approx `{python} ub_flops_mantissa` \times 10^{`{python} ub_flops_exp`}$ FLOPs.
 3.  **Hardware**: NVIDIA H100 (Peak: 1,000 TFLOPS FP16). Assumed Utilization: 50% (500 TFLOPS).
-4.  **Time**: $8.4 \times 10^{23} / (500 \times 10^{12}) \approx 1.68 \times 10^9 \text{ seconds} \approx \mathbf{53 \text{ years}}$ (on 1 GPU).
-5.  **Cluster**: On 1,000 GPUs $\rightarrow$ 20 days.
+4.  **Time**: $`{python} ub_flops_mantissa` \times 10^{`{python} ub_flops_exp`} / (500 \times 10^{12}) \approx `{python} ub_time_s_mantissa` \times 10^{`{python} ub_time_s_exp`} \text{ seconds} \approx \mathbf{`{python} ub_years_str` \text{ years}}$ (on 1 GPU).
+5.  **Cluster**: On 1,000 GPUs $\rightarrow$ `{python} ub_cluster_days_str` days.
 
 **The Economics**:
 
-*   **Rental ($3/hr)**: $1,000 \text{ GPUs} \times 24 \text{ hrs} \times 20 \text{ days} \times \$3 \approx \mathbf{\$1.44 \text{ Million}}$.
-*   **Purchase ($30k/GPU)**: $1,000 \times \$30,000 = \mathbf{\$30 \text{ Million}}$.
+*   **Rental ($3/hr)**: $1,000 \text{ GPUs} \times 24 \text{ hrs} \times `{python} ub_cluster_days_str` \text{ days} \times \$3 \approx \mathbf{\$`{python} ub_rental_str` \text{ Million}}$.
+*   **Purchase ($30k/GPU)**: $1,000 \times \$30,000 = \mathbf{\$`{python} ub_purchase_str` \text{ Million}}$.
 
-**The Systems Conclusion**: You must train **20 models** before buying becomes cheaper than renting. Cloud economics favors bursty workloads like training; on-premise favors steady-state workloads like inference.
+**The Systems Conclusion**: You must train **`{python} ub_breakeven_str` models** before buying becomes cheaper than renting. Cloud economics favors bursty workloads like training; on-premise favors steady-state workloads like inference.
 :::
 
 The pipeline architecture established above, spanning data loading, forward pass, backward pass, and parameter updates, provides the *what* of training systems. The mathematical foundations quantified the FLOPs, memory, and bandwidth each stage demands. Together, these sections establish what operations execute and what resources they require.
@@ -2270,20 +2521,51 @@ GPT-2 training heavily relies on mixed-precision (FP16) to fit within GPU memory
 
 **Memory Savings**
 
+```{python}
+#| label: gpt2-mixed-precision-calc
+#| echo: false
+
+from calc.constants import GPT2_PARAMS, Mparam
+
+gpt2_b_mp = GPT2_PARAMS.to(Mparam).magnitude / 1000  # 1.5
+
+# FP32 baseline
+fp32_param_gb = gpt2_b_mp * 4
+fp32_act_gb = 65  # approximate, batch=32
+fp32_grad_gb = fp32_param_gb
+fp32_total_gb = fp32_param_gb + fp32_act_gb + fp32_grad_gb
+
+# FP16 mixed precision
+fp16_param_gb = gpt2_b_mp * 2
+fp16_act_gb = 32.6  # approximate, half of FP32
+fp16_grad_gb = fp16_param_gb
+# Adam m, v in FP32: 2 states × 1.5B × 4 bytes
+optimizer_fp32_gb = gpt2_b_mp * 4 * 2
+fp16_total_gb = fp16_param_gb + fp16_act_gb + fp16_grad_gb + optimizer_fp32_gb
+
+fp32_p_str = f"{fp32_param_gb:.1f}"
+fp32_g_str = f"{fp32_grad_gb:.1f}"
+fp32_t_str = f"{fp32_total_gb:.0f}"
+fp16_p_str = f"{fp16_param_gb:.1f}"
+fp16_g_str = f"{fp16_grad_gb:.1f}"
+opt_str = f"{optimizer_fp32_gb:.1f}"
+fp16_t_str = f"{fp16_total_gb:.0f}"
+```
+
 FP32 Baseline:
 
-- Parameters: 1.5B × 4 bytes = 6.0 GB
+- Parameters: 1.5B × 4 bytes = `{python} fp32_p_str` GB
 - Activations (batch=32): ~65 GB
-- Gradients: 6.0 GB
-- Total: ~77 GB (exceeds any single GPU)
+- Gradients: `{python} fp32_g_str` GB
+- Total: ~`{python} fp32_t_str` GB (exceeds any single GPU)
 
 FP16 Mixed Precision:
 
-- Parameters (FP16): 1.5B × 2 bytes = 3.0 GB
+- Parameters (FP16): 1.5B × 2 bytes = `{python} fp16_p_str` GB
 - Activations (FP16): ~32.6 GB
-- Gradients (FP16): 3.0 GB
-- Optimizer state (FP32 master weights): 12.0 GB (Adam m, v)
-- Total: ~51 GB (still tight, but manageable with optimizations)
+- Gradients (FP16): `{python} fp16_g_str` GB
+- Optimizer state (FP32 master weights): `{python} opt_str` GB (Adam m, v)
+- Total: ~`{python} fp16_t_str` GB (still tight, but manageable with optimizations)
 
 With Mixed Precision + Gradient Checkpointing:
 
@@ -2292,11 +2574,23 @@ With Mixed Precision + Gradient Checkpointing:
 
 **Computational Speedup**
 
+```{python}
+#| label: mixed-precision-speedup-calc
+#| echo: false
+
+# Mixed precision speedup on V100
+v100_fp32_samples = 90
+v100_fp16_samples = 220
+v100_mp_speedup = v100_fp16_samples / v100_fp32_samples
+
+v100_mp_speedup_str = f"{v100_mp_speedup:.1f}"
+```
+
 On NVIDIA V100 (Tensor Cores enabled):
 
-- FP32 throughput: ~90 samples/sec
-- FP16 throughput: ~220 samples/sec
-- Speedup: 2.4× faster training
+- FP32 throughput: ~`{python} v100_fp32_samples` samples/sec
+- FP16 throughput: ~`{python} v100_fp16_samples` samples/sec
+- Speedup: `{python} v100_mp_speedup_str`× faster training
 
 **Critical Implementation Details**
 
@@ -2440,7 +2734,26 @@ Optimal mixed-precision training requires matching the precision format to hardw
 
 : **Precision Strategy by GPU Architecture.** Each generation introduces wider precision support, reducing the engineering burden of loss scaling while increasing throughput. {#tbl-hw-precision-strategy}
 
-The performance impact across generations is substantial. Training our lighthouse GPT-2 model (1.5B parameters) on a single GPU illustrates how hardware and precision co-evolve: V100 achieves 18 samples/sec in FP32 and 45 samples/sec in FP16 (2.5× speedup), A100 reaches 165 samples/sec in BF16 (4.7× over V100 FP32), and H100 delivers 380 samples/sec in FP8 (21× over V100 FP32). These speedups compound with the memory savings discussed earlier, enabling both faster iteration and larger models. The hardware-software co-design principle emerges clearly: algorithmic techniques like mixed precision unlock specialized hardware capabilities, while hardware features like Tensor Cores make certain algorithms practical.
+```{python}
+#| label: cross-gen-precision-calc
+#| echo: false
+
+# Cross-generation performance comparison (GPT-2 1.5B, single GPU)
+v100_fp32_sps = 18
+v100_fp16_sps = 45
+a100_bf16_sps = 165
+h100_fp8_sps = 380
+
+v100_fp16_speedup = v100_fp16_sps / v100_fp32_sps
+a100_over_v100 = a100_bf16_sps / v100_fp32_sps
+h100_over_v100 = h100_fp8_sps / v100_fp32_sps
+
+v100_fp16_speedup_str = f"{v100_fp16_speedup:.1f}"
+a100_over_v100_str = f"{a100_over_v100:.1f}"
+h100_over_v100_str = f"{h100_over_v100:.0f}"
+```
+
+The performance impact across generations is substantial. Training our lighthouse GPT-2 model (`{python} gpt2_params_b`B parameters) on a single GPU illustrates how hardware and precision co-evolve: V100 achieves `{python} v100_fp32_sps` samples/sec in FP32 and `{python} v100_fp16_sps` samples/sec in FP16 (`{python} v100_fp16_speedup_str`× speedup), A100 reaches `{python} a100_bf16_sps` samples/sec in BF16 (`{python} a100_over_v100_str`× over V100 FP32), and H100 delivers `{python} h100_fp8_sps` samples/sec in FP8 (`{python} h100_over_v100_str`× over V100 FP32). These speedups compound with the memory savings discussed earlier, enabling both faster iteration and larger models. The hardware-software co-design principle emerges clearly: algorithmic techniques like mixed precision unlock specialized hardware capabilities, while hardware features like Tensor Cores make certain algorithms practical.
 
 ### Flash Attention: IO-Aware Attention Optimization {#sec-ai-training-flash-attention-ioaware-attention-optimization-3da0}
 
@@ -2452,7 +2765,26 @@ As detailed in @sec-dnn-architectures, standard self-attention computes relation
 
 $$ \text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V $$
 
-The memory bottleneck emerges from materializing the $n \times n$ intermediate matrices for scores and probabilities. For a sequence length of 4096 tokens with embedding dimension 64 (typical for a single attention head), the attention score matrix alone requires $4096^2 \times 4 \text{ bytes} = 64 \text{ MB}$ in FP32. With 16 attention heads, this grows to 1 GB just for intermediate attention matrices, not including the keys, queries, values, or output tensors.
+```{python}
+#| label: attention-memory-calc
+#| echo: false
+
+# Attention matrix memory calculation
+seq_len = 4096
+embed_dim = 64  # per head
+n_heads = 16
+bytes_fp32 = 4
+
+attn_matrix_bytes = seq_len ** 2 * bytes_fp32
+attn_matrix_mb = attn_matrix_bytes / (1024 ** 2)
+total_attn_mb = attn_matrix_mb * n_heads
+total_attn_gb = total_attn_mb / 1024
+
+attn_matrix_mb_str = f"{attn_matrix_mb:.0f}"
+total_attn_gb_str = f"{total_attn_gb:.0f}"
+```
+
+The memory bottleneck emerges from materializing the $n \times n$ intermediate matrices for scores and probabilities. For a sequence length of `{python} f"{seq_len:,}"` tokens with embedding dimension `{python} embed_dim` (typical for a single attention head), the attention score matrix alone requires $`{python} f"{seq_len:,}"`^2 \times `{python} bytes_fp32` \text{{ bytes}} = `{python} attn_matrix_mb_str` \text{{ MB}}$ in FP32. With `{python} n_heads` attention heads, this grows to `{python} total_attn_gb_str` GB just for intermediate attention matrices, not including the keys, queries, values, or output tensors.
 
 Modern GPU memory hierarchy exacerbates this bottleneck. HBM (High Bandwidth Memory) provides 40–80 GB capacity with 1–2 TB/s bandwidth, while SRAM (on-chip memory) provides only 20–40 MB capacity but delivers 20+ TB/s bandwidth (10× faster). Standard attention stores these large matrices in slow HBM and repeatedly loads them during the backward pass. For GPT-2 scale models processing 2048-token sequences, attention operations spend 70-80% of execution time waiting for memory transfers rather than computing, leaving expensive tensor cores underutilized.
 
@@ -2497,7 +2829,32 @@ Flash Attention achieves asymptotic improvements in both memory footprint and me
 - **Standard Attention**: $O(n^2)$ memory for storing $S$ and $P$ matrices across all sequence positions
 - **Flash Attention**: $O(n)$ memory, storing only input/output tensors $(Q, K, V, O)$ plus a small constant SRAM buffer
 
-For $n = 4096$, $d = 64$: Standard attention requires $4096^2 \times 4 \text{ bytes} = 64 \text{ MB}$ per head. Flash Attention requires only $(3 \times 4096 \times 64) \times 4 \text{ bytes} \approx 3 \text{ MB}$ per head, a **21× reduction**.
+```{python}
+#| label: flash-attention-calc
+#| echo: false
+
+# Flash Attention memory comparison
+fa_n = 4096          # sequence length
+fa_d = 64            # head dimension
+fa_bytes_per_elem = 4  # FP32
+
+# Standard attention: n^2 attention matrix
+fa_standard_bytes = fa_n**2 * fa_bytes_per_elem
+fa_standard_mb = fa_standard_bytes / 1e6
+
+# Flash Attention: 3 input tensors (Q, K, V) each n x d
+fa_flash_bytes = (3 * fa_n * fa_d) * fa_bytes_per_elem
+fa_flash_mb = fa_flash_bytes / 1e6
+
+# Reduction factor
+fa_reduction = fa_standard_mb / fa_flash_mb
+
+fa_standard_mb_str = f"{fa_standard_mb:.0f}"
+fa_flash_mb_str = f"{fa_flash_mb:.0f}"
+fa_reduction_str = f"{fa_reduction:.0f}"
+```
+
+For $n = 4096$, $d = 64$: Standard attention requires $4096^2 \times 4 \text{ bytes} = `{python} fa_standard_mb_str` \text{ MB}$ per head. Flash Attention requires only $(3 \times 4096 \times 64) \times 4 \text{ bytes} \approx `{python} fa_flash_mb_str` \text{ MB}$ per head, a **`{python} fa_reduction_str`x reduction**.
 
 **IO Complexity (Memory Reads/Writes).**
 Standard attention performs:
@@ -2566,7 +2923,24 @@ Training a GPT-2 style transformer on NVIDIA A100 GPU (12 layers, 768 hidden dim
 | 8192                | OOM                  | 68 ms             | OOM                   | 180 ms             | &gt;80 GB             | 24 GB              |
 +---------------------+----------------------+-------------------+-----------------------+--------------------+-----------------------+--------------------+
 
-Standard attention runs out of memory beyond 2048 tokens on a 40 GB A100, while Flash Attention trains sequences up to 8192 tokens. Even at 2048 tokens where both fit, Flash Attention achieves 3× forward pass speedup and 3.4× backward pass speedup.
+```{python}
+#| label: flash-attention-speedup-calc
+#| echo: false
+
+# Flash Attention speedups at 2048 tokens (from table above)
+std_fwd_2048 = 45   # ms
+flash_fwd_2048 = 15  # ms
+std_bwd_2048 = 120   # ms
+flash_bwd_2048 = 35  # ms
+
+flash_fwd_speedup = std_fwd_2048 / flash_fwd_2048
+flash_bwd_speedup = std_bwd_2048 / flash_bwd_2048
+
+flash_fwd_speedup_str = f"{flash_fwd_speedup:.0f}"
+flash_bwd_speedup_str = f"{flash_bwd_speedup:.1f}"
+```
+
+Standard attention runs out of memory beyond 2048 tokens on a 40 GB A100, while Flash Attention trains sequences up to 8192 tokens. Even at 2048 tokens where both fit, Flash Attention achieves `{python} flash_fwd_speedup_str`× forward pass speedup and `{python} flash_bwd_speedup_str`× backward pass speedup.
 
 Subsequent versions have continued improving performance: Flash Attention 2 (2023) achieved 1.5-2× additional speedup through better parallelism and register allocation, while Flash Attention 3 (2024) exploits FP8 tensor cores and asynchronous memory operations on Hopper GPUs to reach 740 TFLOPs on H100 (75% of theoretical peak).
 
@@ -2894,11 +3268,47 @@ Returning to our GPT-2 lighthouse model, *gradient accumulation* is essential fo
 
 GPT-2's training configuration demonstrates the essential role of gradient accumulation.
 
+```{python}
+#| label: grad-accum-calc
+#| echo: false
+
+micro_batch = 16
+effective_batch = 512
+gpus_naive = effective_batch // micro_batch
+
+# Gradient accumulation scenario
+gpus_accum = 8
+accum_steps = 4
+batch_per_gpu = micro_batch * accum_steps
+global_batch_accum = gpus_accum * batch_per_gpu
+
+# Cost comparison
+gpu_hourly_rate = 16  # $/hour per GPU
+naive_hourly = gpu_hourly_rate * gpus_naive
+accum_hourly = gpu_hourly_rate * gpus_accum
+savings_hourly = naive_hourly - accum_hourly
+savings_pct = savings_hourly / naive_hourly * 100
+
+# 2-week training cost
+training_hours = 14 * 24  # 2 weeks
+accum_2wk = gpus_accum * gpu_hourly_rate * training_hours / 1000  # $K
+naive_2wk = gpus_naive * gpu_hourly_rate * training_hours / 1000  # $K
+
+gpus_naive_str = f"{gpus_naive}"
+batch_per_gpu_str = f"{batch_per_gpu}"
+naive_hourly_str = f"{naive_hourly}"
+accum_hourly_str = f"{accum_hourly}"
+savings_hourly_str = f"{savings_hourly}"
+savings_pct_str = f"{savings_pct:.0f}"
+accum_2wk_str = f"{accum_2wk:.1f}"
+naive_2wk_str = f"{naive_2wk:.1f}"
+```
+
 **Memory Constraints**
 
 - V100 32GB GPU with gradient checkpointing: Can fit batch_size=16 (as shown in activation memory example)
 - Desired effective batch_size: 512 (optimal for transformer convergence)
-- Problem: 512 ÷ 16 = 32 GPUs needed just for batch size
+- Problem: 512 ÷ 16 = `{python} gpus_naive_str` GPUs needed just for batch size
 
 **Gradient Accumulation Solution**
 
@@ -2908,8 +3318,8 @@ Configuration:
 
 - Per-GPU micro-batch: 16
 - Accumulation steps: 4
-- Effective batch per GPU: 16 × 4 = 64
-- Global effective batch: 8 GPUs × 64 = **512** ✓
+- Effective batch per GPU: 16 × 4 = `{python} batch_per_gpu_str`
+- Global effective batch: 8 GPUs × `{python} batch_per_gpu_str` = **512** ✓
 
 @lst-gradient-accumulation-loop shows the training loop with gradient accumulation.
 
@@ -2919,21 +3329,21 @@ Without Accumulation (naive approach):
 
 - 32 GPUs × batch_size=16 = 512 effective batch
 - Gradient sync: 32 GPUs → high communication overhead
-- Cost: $16/hour × 32 GPUs = $512/hour
+- Cost: $16/hour × 32 GPUs = $`{python} naive_hourly_str`/hour
 
 With Accumulation (actual GPT-2 approach):
 
 - 8 GPUs × (16 × 4 accumulation) = 512 effective batch
 - Gradient sync: Only every 4 steps, only 8 GPUs
-- Cost: $16/hour × 8 GPUs = $128/hour
-- Savings: $384/hour = 75% cost reduction
+- Cost: $16/hour × 8 GPUs = $`{python} accum_hourly_str`/hour
+- Savings: $`{python} savings_hourly_str`/hour = `{python} savings_pct_str`% cost reduction
 
 **Tradeoff Analysis**
 
 - Compute overhead: 4$\times$ forward passes per update = ~8% slower (pipeline overlaps some cost)
 - Memory overhead: Gradient accumulation buffer = negligible (gradients already needed)
 - Communication benefit: Sync frequency reduced by 4× → communication time drops by 75%
-- Cost benefit: Training 2 weeks on 8 GPUs = $21.5K vs. 32 GPUs = $86K
+- Cost benefit: Training 2 weeks on 8 GPUs = $`{python} accum_2wk_str`K vs. 32 GPUs = $`{python} naive_2wk_str`K
 
 **Convergence Quality**
 
@@ -3140,7 +3550,29 @@ The GPT-2 case study demonstrates how the optimization techniques examined in th
 
 : **GPT-2 Training Optimization Summary.** Applying mixed-precision training and gradient checkpointing reduces memory from 101 GB to 26 GB, training time by 40%, energy consumption by 58%, and carbon footprint proportionally. {#tbl-gpt2-summary}
 
-This 4x memory reduction, combined with 2.4x computational speedup and 58% energy reduction, exemplifies how systematic optimization transforms hardware constraints into engineering design parameters. The same optimizations that improve throughput also reduce energy consumption and operational cost.
+```{python}
+#| label: optimization-summary-calc
+#| echo: false
+
+# GPT-2 optimization summary ratios
+naive_mem_gb = 101.0
+optimized_mem_gb = 26.0
+mem_reduction = naive_mem_gb / optimized_mem_gb
+
+naive_energy_kwh = 275_000
+optimized_energy_kwh = 115_000
+energy_reduction_pct = (1 - optimized_energy_kwh / naive_energy_kwh) * 100
+
+naive_days = 14
+optimized_days = 8.4
+time_speedup = naive_days / optimized_days
+
+mem_reduction_str = f"{mem_reduction:.1f}"
+energy_reduction_pct_str = f"{energy_reduction_pct:.0f}"
+time_speedup_str = f"{time_speedup:.1f}"
+```
+
+This `{python} mem_reduction_str`x memory reduction, combined with `{python} time_speedup_str`x computational speedup and `{python} energy_reduction_pct_str`% energy reduction, exemplifies how systematic optimization transforms hardware constraints into engineering design parameters. The same optimizations that improve throughput also reduce energy consumption and operational cost.
 
 We have now exhausted the single-machine optimization toolkit. Mixed precision extracts maximum throughput from Tensor Cores. Flash Attention reduces bandwidth consumption to near-theoretical minimums. Gradient checkpointing trades compute for memory at the most favorable ratios possible. Prefetching hides data loading latency. When all these techniques are applied and the training still takes too long or the model still does not fit, a different approach becomes necessary: spreading the computation across multiple devices.
 
@@ -3150,21 +3582,69 @@ The optimization techniques examined throughout this chapter extend single-devic
 
 Scaling to multiple devices also amplifies the energy consumption and environmental impact of training. The *carbon footprint of training* grows proportionally with cluster size, making efficiency optimization not just a performance concern but an environmental one.
 
+```{python}
+#| label: carbon-footprint-calc
+#| echo: false
+
+# Carbon Footprint of Training: 7B model on A100 cluster
+# Scenario: smaller training run representative of fine-tuning or
+# partial pre-training on a mid-size cluster
+cf_params = 7e9              # 7B parameters
+cf_tokens = 1e12             # 1T tokens
+cf_scaling_factor = 6        # Chinchilla scaling constant
+cf_sustained_tflops = 150    # sustained TFLOPS on A100
+cf_num_gpus = 1024           # realistic cluster for 1T-token run
+cf_gpu_tdp_w = A100_TDP.to(watt).magnitude  # 400W from constants
+cf_hosts = cf_num_gpus // 8  # 8 GPUs per host
+cf_cpu_tdp_per_host_w = 200  # CPU power per host
+
+# Compute
+cf_total_flops = cf_scaling_factor * cf_params * cf_tokens
+cf_time_seconds = cf_total_flops / (cf_sustained_tflops * 1e12 * cf_num_gpus)
+cf_time_hours = cf_time_seconds / 3600
+cf_time_days = cf_time_hours / 24
+
+# Energy
+cf_gpu_power_w = cf_num_gpus * cf_gpu_tdp_w
+cf_cpu_power_w = cf_hosts * cf_cpu_tdp_per_host_w
+cf_total_power_w = cf_gpu_power_w + cf_cpu_power_w
+cf_energy_kwh = cf_total_power_w * cf_time_hours / 1000
+
+# Optimization dividend: halving time saves half the energy
+cf_energy_saved_kwh = cf_energy_kwh / 2
+# CO2: US grid average ~0.4 kg CO2/kWh
+cf_co2_tons = cf_energy_saved_kwh * 0.4 / 1000
+
+# US household average ~900 kWh/month
+cf_household_months = cf_energy_kwh / 900
+
+# Format for inline references
+cf_flops_mantissa = f"{cf_total_flops:.1e}".split("e+")[0]
+cf_flops_exp = int(f"{cf_total_flops:.1e}".split("e+")[1])
+cf_time_days_str = f"{cf_time_days:.1f}"
+cf_time_hours_str = f"{cf_time_hours:.0f}"
+cf_energy_kwh_str = f"{cf_energy_kwh:,.0f}"
+cf_energy_saved_str = f"{cf_energy_saved_kwh:,.0f}"
+cf_co2_str = f"{cf_co2_tons:.1f}"
+cf_gpu_tdp_str = f"{cf_gpu_tdp_w:.0f}"
+cf_household_months_str = f"{cf_household_months:.0f}"
+```
+
 ::: {.callout-notebook title="The Carbon Footprint of Training"}
 
 **Scaling the Utility Bill**:
 Training large models is not just a compute challenge; it's a massive energy sink. We can quantify the environmental impact of scaling training using the **Energy Corollary** to the Iron Law:
 
 1.  **Workload**: Training a 7B parameter model for 1 trillion tokens.
-2.  **Compute**: $\approx 4.2 \times 10^{22}$ FLOPs.
-3.  **Efficiency**: 150 TFLOPS sustained on A100 (400W TDP).
-4.  **Time**: $\approx 3.2$ days on 64 GPUs.
-5.  **Energy**: $(64 \text{ GPUs} \times 400\text{W} + 64 \text{ CPUs/Host} \times 200\text{W}) \times 77 \text{ hours} \approx \mathbf{2,950 \text{ kWh}}$
+2.  **Compute**: $\approx `{python} cf_flops_mantissa` \times 10^{`{python} cf_flops_exp`}$ FLOPs.
+3.  **Efficiency**: 150 TFLOPS sustained on A100 (`{python} a100_tdp`W TDP).
+4.  **Time**: $\approx `{python} cf_time_days_str`$ days on `{python} f"{cf_num_gpus}"` GPUs.
+5.  **Energy**: $(`{python} f"{cf_num_gpus}"` \text{ GPUs} \times `{python} cf_gpu_tdp_str`\text{W} + `{python} f"{cf_hosts}"` \text{ hosts} \times `{python} f"{cf_cpu_tdp_per_host_w}"`\text{W}) \times `{python} cf_time_hours_str` \text{ hours} \approx \mathbf{`{python} cf_energy_kwh_str` \text{ kWh}}$
 
 **The Systems Conclusion**:
-This single training run consumes as much electricity as an average US household uses in **3 months**.
+This single training run consumes as much electricity as an average US household uses in **`{python} cf_household_months_str` months**.
 
-- **The Optimization Dividend**: Improving **Utilization** from 30% to 60% doesn't just halve the time; it saves ~1,500 kWh of energy and reduces the carbon footprint by over **0.6 tons of CO₂** (assuming average grid intensity).
+- **The Optimization Dividend**: Improving **Utilization** from 30% to 60% doesn't just halve the time; it saves ~`{python} cf_energy_saved_str` kWh of energy and reduces the carbon footprint by over **`{python} cf_co2_str` tons of CO2** (assuming average grid intensity).
 - **The True Cost**: Training systems engineering is the primary lever for sustainable AI. Every 1% gain in efficiency at scale is equivalent to taking dozens of cars off the road for a year.
 :::
 

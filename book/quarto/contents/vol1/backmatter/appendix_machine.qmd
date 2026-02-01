@@ -66,7 +66,7 @@ flop_pj = f"{ENERGY_FLOP_FP16_PJ.magnitude:.0f}"                       # "1" (1.
 
 #### A Concrete Example: The A100 Analysis {#sec-system-foundations-concrete-example-a100-analysis-0bb9}
 
-Consider an NVIDIA A100 GPU with FP16 Tensor Core performance of `{python} a100_fp16` TFLOP/s and HBM2e bandwidth of `{python} a100_bw_tb` TB/s. The ridge point is $312 / 2.0 = 156$ FLOP/byte.
+Consider an NVIDIA A100 GPU with FP16 Tensor Core performance of `{python} a100_fp16` TFLOP/s and HBM2e bandwidth of `{python} a100_bw_tb` TB/s. The ridge point is `{python} a100_fp16` / `{python} a100_bw_tb` = 156 FLOP/byte.
 
 Now compare two common operations:
 
@@ -92,9 +92,22 @@ As $n \to \infty$, the term $\frac{1-s}{n} \to 0$, and the speedup converges to 
 
 **Example**: If 5% of your training step is serial overhead (e.g., Python GIL, kernel launch latency) and 95% is parallelizable matrix math:
 
+```{python}
+#| label: amdahl-example
+#| echo: false
+
+# Amdahl's Law: Speedup(n) = 1 / (s + (1-s)/n)
+s = 0.05
+n_8 = 8
+amdahl_8 = 1 / (s + (1 - s) / n_8)
+amdahl_8_str = f"{amdahl_8:.1f}"          # "5.9"
+amdahl_inf = 1 / s
+amdahl_inf_str = f"{amdahl_inf:.0f}"      # "20"
+```
+
 *   With $n=1$, speedup is 1.
-*   With $n=8$, speedup is $\frac{1}{0.05 + 0.95/8} \approx 5.9\times$.
-*   With $n=\infty$, speedup is capped at $1/0.05 = 20\times$.
+*   With $n=8$, speedup is $\frac{1}{0.05 + 0.95/8} \approx `{python} amdahl_8_str`\times$.
+*   With $n=\infty$, speedup is capped at $1/0.05 = `{python} amdahl_inf_str`\times$.
 
 No matter how many GPUs you buy, you cannot make this fixed workload run faster than 20x.
 
@@ -112,9 +125,22 @@ Here, the parallel part of the workload grows linearly with $n$, while the seria
 
 **Example**: Using the same 5% serial overhead ($s=0.05$):
 
+```{python}
+#| label: gustafson-example
+#| echo: false
+
+# Gustafson's Law: Scaled Speedup(n) = n - s*(n-1)
+s_g = 0.05
+gustafson_8 = 8 - s_g * (8 - 1)
+gustafson_8_str = f"{gustafson_8:.2f}"             # "7.65"
+gustafson_8_serial = f"{s_g * 7:.2f}"              # "0.35"
+gustafson_1000 = 1000 - s_g * (1000 - 1)
+gustafson_1000_str = f"{gustafson_1000:.0f}"       # "950"
+```
+
 *   With $n=1$, speedup is 1.
-*   With $n=8$, Scaled Speedup is $8 - 0.05(7) = 8 - 0.35 = 7.65\times$.
-*   With $n=1000$, Scaled Speedup is $1000 - 0.05(999) \approx 950\times$.
+*   With $n=8$, Scaled Speedup is $8 - 0.05(7) = 8 - `{python} gustafson_8_serial` = `{python} gustafson_8_str`\times$.
+*   With $n=1000$, Scaled Speedup is $1000 - 0.05(999) \approx `{python} gustafson_1000_str`\times$.
 
 In weak scaling, efficiency remains high because the useful work (training the model) scales up to dwarf the fixed overheads.
 
@@ -132,10 +158,32 @@ Where:
 *   **$X$**: Peak FLOP/s of one accelerator.
 *   **$U$**: Model FLOPS Utilization (MFU), typically 30%–50%.
 
+```{python}
+#| label: training-time-example
+#| echo: false
+
+# Training time equation: T = 6*P*D / (N*X*U)
+P_params = 1e9           # 1B parameters
+D_tokens = 20e9          # 20B tokens
+N_gpus = 1
+X_flops = 312e12         # A100 FP16 peak FLOP/s
+U_mfu = 0.40             # 40% MFU
+
+total_flops = 6 * P_params * D_tokens
+throughput = N_gpus * X_flops * U_mfu
+T_seconds = total_flops / throughput
+T_minutes = T_seconds / 60
+
+total_flops_str = f"{total_flops:.1e}".replace("e+20", r" \times 10^{20}")   # "1.2 \times 10^{20}"
+throughput_str = f"{throughput:.2e}".replace("e+14", r" \times 10^{14}")      # "1.25 \times 10^{14}"
+T_seconds_str = f"{T_seconds:.0f}"                                            # "960"
+T_minutes_str = f"{T_minutes:.0f}"                                            # "16"
+```
+
 **Example**: Training a **1B parameter** model on **20B tokens** using **1 A100** (`{python} a100_fp16` TFLOPS) at **40% utilization**.
-$$ \text{Total FLOPs} = 6 \times 10^9 \times 20 \times 10^9 = 1.2 \times 10^{20} \text{ FLOPs} $$
-$$ \text{Throughput} = 1 \times (312 \times 10^{12}) \times 0.40 \approx 1.25 \times 10^{14} \text{ FLOP/s} $$
-$$ T = \frac{1.2 \times 10^{20}}{1.25 \times 10^{14}} \approx 960 \text{ seconds} \approx 16 \text{ minutes} $$
+$$ \text{Total FLOPs} = 6 \times 10^9 \times 20 \times 10^9 = `{python} total_flops_str` \text{ FLOPs} $$
+$$ \text{Throughput} = 1 \times (312 \times 10^{12}) \times 0.40 \approx `{python} throughput_str` \text{ FLOP/s} $$
+$$ T = \frac{`{python} total_flops_str`}{`{python} throughput_str`} \approx `{python} T_seconds_str` \text{ seconds} \approx `{python} T_minutes_str` \text{ minutes} $$
 
 ::::
 
@@ -145,7 +193,18 @@ For capacity planning in inference systems, **Little's Law** [@little1961proof] 
 
 $$ L = \lambda \times W $$
 
-**Example**: To sustain 1,000 queries per second (QPS) with 50ms average latency, your system must support $1000 \times 0.05 = 50$ concurrent requests.
+```{python}
+#| label: littles-law-example
+#| echo: false
+
+# Little's Law: L = lambda * W
+lambda_qps = 1000        # queries per second
+W_latency_s = 0.050      # 50 ms in seconds
+L_concurrent = lambda_qps * W_latency_s
+L_concurrent_str = f"{L_concurrent:.0f}"   # "50"
+```
+
+**Example**: To sustain 1,000 queries per second (QPS) with 50ms average latency, your system must support $1000 \times 0.05 = `{python} L_concurrent_str`$ concurrent requests.
 
 **Implication for Memory**: This tells you exactly how to size your inference worker pools. If serving one request requires 1 GB of temporary memory (KV cache, activations), handling 50 concurrent requests requires 50 GB of memory. If your GPU only has 24 GB, you are physically limited to 24 concurrent requests. Your maximum throughput is capped at $L/W = 24 / 0.05 = 480$ QPS, regardless of how many requests arrive.
 
@@ -193,9 +252,21 @@ For small transfers (e.g., single-token inference), latency dominates. For large
 
 **Example**: Sending data over a 10 Gbps link with 10ms ping (latency).
 
+```{python}
+#| label: bandwidth-latency-example
+#| echo: false
+
+# Transmission time = Data Size / Bandwidth
+data_kb = 1e3             # 1 KB in bytes
+bw_gbps = 10e9            # 10 Gbps in bits/s
+tx_time_s = (data_kb * 8) / bw_gbps   # convert bytes to bits
+tx_time_us = tx_time_s * 1e6
+tx_time_us_str = f"{tx_time_us:.1f}"   # "0.8"
+```
+
 *   **Latency-Bound (1KB Packet)**:
-    *   Transmission: $1\text{KB} / 10\text{Gbps} \approx 0.8 \mu s$.
-    *   Total Time $\approx 10\text{ms} + 0.8\mu s \approx 10\text{ms}$.
+    *   Transmission: $1\text{KB} / 10\text{Gbps} \approx `{python} tx_time_us_str` \mu s$.
+    *   Total Time $\approx 10\text{ms} + `{python} tx_time_us_str`\mu s \approx 10\text{ms}$.
     *   *Result*: The bandwidth is irrelevant; the speed of light (ping) is the bottleneck.
 
 *   **Bandwidth-Bound (1GB Checkpoint)**:
