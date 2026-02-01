@@ -23,6 +23,7 @@ try:
     from cli.commands.doctor import DoctorCommand
     from cli.commands.clean import CleanCommand
     from cli.commands.maintenance import MaintenanceCommand
+    from cli.commands.debug import DebugCommand
 except ImportError:
     # When run as local script
     from core.config import ConfigManager
@@ -32,6 +33,7 @@ except ImportError:
     from commands.doctor import DoctorCommand
     from commands.clean import CleanCommand
     from commands.maintenance import MaintenanceCommand
+    from commands.debug import DebugCommand
 
 console = Console()
 
@@ -58,6 +60,7 @@ class MLSysBookCLI:
         self.doctor_command = DoctorCommand(self.config_manager, self.chapter_discovery)
         self.clean_command = CleanCommand(self.config_manager, self.chapter_discovery)
         self.maintenance_command = MaintenanceCommand(self.config_manager, self.chapter_discovery)
+        self.debug_command = DebugCommand(self.config_manager, self.chapter_discovery, verbose=verbose)
 
     def show_banner(self):
         """Display the CLI banner."""
@@ -117,6 +120,8 @@ class MLSysBookCLI:
         mgmt_table.add_column("Description", style="white", width=30)
         mgmt_table.add_column("Example", style="dim", width=30)
 
+        mgmt_table.add_row("debug <fmt> --vol1|--vol2", "Find failing chapter + section", "./binder debug pdf --vol1")
+        mgmt_table.add_row("debug <fmt> --chapter <ch>", "Section-level debug (skip scan)", "./binder debug pdf --vol1 --chapter intro")
         mgmt_table.add_row("clean", "Clean build artifacts", "./binder clean")
         mgmt_table.add_row("switch <format>", "Switch active config", "./binder switch pdf")
         mgmt_table.add_row("list", "List available chapters", "./binder list")
@@ -382,6 +387,48 @@ class MLSysBookCLI:
         return self.maintenance_command.show_about()
 
 
+    def handle_debug_command(self, args):
+        """Handle debug command.
+
+        Usage:
+            ./binder debug pdf --vol1
+            ./binder debug html --vol2 --chapter training
+        """
+        # Parse args: first positional is format, then flags
+        format_type = None
+        volume = None
+        chapter = None
+
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg == "--vol1":
+                volume = "vol1"
+            elif arg == "--vol2":
+                volume = "vol2"
+            elif arg == "--chapter" and i + 1 < len(args):
+                i += 1
+                chapter = args[i]
+            elif arg in ("pdf", "html", "epub") and format_type is None:
+                format_type = arg
+            else:
+                # Try as format or chapter
+                if format_type is None and arg in ("pdf", "html", "epub"):
+                    format_type = arg
+                else:
+                    console.print(f"[red]Unknown argument: {arg}[/red]")
+                    return False
+            i += 1
+
+        if not format_type:
+            format_type = "pdf"  # Default to PDF
+        if not volume:
+            console.print("[red]Please specify --vol1 or --vol2[/red]")
+            console.print("[yellow]Usage: ./binder debug <pdf|html|epub> --vol1|--vol2 [--chapter <name>][/yellow]")
+            return False
+
+        return self.debug_command.debug_build(format_type, volume, chapter)
+
     def handle_list_command(self, args):
         """Handle list chapters command."""
         volume = None
@@ -426,6 +473,7 @@ class MLSysBookCLI:
             "pdf": self.handle_pdf_command,
             "epub": self.handle_epub_command,
             "clean": self.handle_clean_command,
+            "debug": self.handle_debug_command,
             "switch": self.handle_switch_command,
             "list": self.handle_list_command,
             "status": self.handle_status_command,

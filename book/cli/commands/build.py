@@ -965,6 +965,39 @@ class BuildCommand:
                         modified_lines.append(commented)
                     else:
                         modified_lines.append(line)
+            elif stripped == 'appendices:':
+                # Handle appendices section: look ahead to see if any appendix entries will be kept.
+                # If all entries are commented out, we must also comment out the 'appendices:' key
+                # itself, otherwise Quarto sees appendices: null and fails validation.
+                has_active_appendix = False
+                j = i + 1
+                while j < len(lines):
+                    next_line = lines[j]
+                    next_stripped = next_line.strip()
+                    # Stop at blank lines or non-indented lines (end of appendices block)
+                    if not next_stripped or (next_line and not next_line[0].isspace() and not next_line.startswith('\t')):
+                        break
+                    if '.qmd' in next_line:
+                        for chapter_name in keep_chapters:
+                            if (f'{chapter_name}/{chapter_name}.qmd' in next_line or
+                                f'{chapter_name}.qmd' in next_line or
+                                f'backmatter/{chapter_name}.qmd' in next_line or
+                                f'glossary/{chapter_name}.qmd' in next_line):
+                                has_active_appendix = True
+                                break
+                        for always_file in always_include:
+                            if always_file in next_line:
+                                has_active_appendix = True
+                                break
+                    if has_active_appendix:
+                        break
+                    j += 1
+
+                if has_active_appendix:
+                    modified_lines.append(line)
+                else:
+                    indent = len(line) - len(line.lstrip())
+                    modified_lines.append(' ' * indent + '# ' + line.lstrip())
             else:
                 # All other lines - copy as-is
                 modified_lines.append(line)
@@ -1168,6 +1201,38 @@ class BuildCommand:
                         modified_lines.append(commented)
                     else:
                         modified_lines.append(line)
+            elif stripped == 'appendices:':
+                # Handle appendices section: look ahead to see if any appendix entries will be kept.
+                # If all entries are commented out, we must also comment out the 'appendices:' key
+                # itself, otherwise Quarto sees appendices: null and fails validation.
+                has_active_appendix = False
+                j = i + 1
+                while j < len(lines):
+                    next_line = lines[j]
+                    next_stripped = next_line.strip()
+                    if not next_stripped or (next_line and not next_line[0].isspace() and not next_line.startswith('\t')):
+                        break
+                    if '.qmd' in next_line:
+                        for chapter_name in keep_chapters:
+                            if (f'{chapter_name}/{chapter_name}.qmd' in next_line or
+                                f'{chapter_name}.qmd' in next_line or
+                                f'backmatter/{chapter_name}.qmd' in next_line or
+                                f'glossary/{chapter_name}.qmd' in next_line):
+                                has_active_appendix = True
+                                break
+                        for always_file in always_include:
+                            if always_file in next_line:
+                                has_active_appendix = True
+                                break
+                    if has_active_appendix:
+                        break
+                    j += 1
+
+                if has_active_appendix:
+                    modified_lines.append(line)
+                else:
+                    indent = len(line) - len(line.lstrip())
+                    modified_lines.append(' ' * indent + '# ' + line.lstrip())
             else:
                 # All other lines - copy as-is
                 modified_lines.append(line)
@@ -1212,7 +1277,7 @@ class BuildCommand:
         for line in lines:
             stripped = line.strip()
 
-            # Check if this is a commented line with a .qmd file
+            # Check if this is a commented line with a .qmd file or a commented structural key
             if stripped.startswith('#') and '.qmd' in line:
                 # Uncomment the line while preserving indentation
                 # Handle both "# - " and "#- " patterns
@@ -1224,6 +1289,11 @@ class BuildCommand:
                     # Just remove the first # and space
                     uncommented = line.replace('# ', '', 1).replace('#', '', 1)
 
+                modified_lines.append(uncommented)
+                uncommented_count += 1
+            elif stripped == '# appendices:':
+                # Uncomment the appendices key (may have been commented out by fast build)
+                uncommented = line.replace('# appendices:', 'appendices:', 1)
                 modified_lines.append(uncommented)
                 uncommented_count += 1
             else:
