@@ -469,6 +469,51 @@ Each node performs a local AllGather to distribute the final result to all $G$ G
 
 The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node), effectively **multiplying the apparent inter-node bandwidth by $G$**. The following example quantifies this bandwidth multiplication effect:
 
+```{python}
+#| label: hierarchical-allreduce-calc
+#| echo: false
+
+# Hierarchical AllReduce analysis
+n_nodes_har = 8
+gpus_per_node = 8
+total_gpus_har = n_nodes_har * gpus_per_node
+gradient_gb = 1  # 1 GB gradient buffer
+
+# Flat Ring AllReduce
+ib_bw_gbs = 50  # InfiniBand GB/s
+flat_data_gb = 2 * gradient_gb  # bandwidth-optimal Ring sends ~2x
+flat_time_ms = flat_data_gb / ib_bw_gbs * 1000  # ms
+
+# Hierarchical AllReduce
+nvlink_bw_gbs = 900  # NVLink GB/s
+
+# Step 1: Intra-node ReduceScatter
+intra_data_mb = int(gradient_gb * 1000 * (gpus_per_node - 1) / gpus_per_node)  # ~875 MB
+intra_rs_ms = intra_data_mb / 1000 / nvlink_bw_gbs * 1000  # ~1 ms
+
+# Step 2: Inter-node AllReduce (only 1/G of data crosses IB)
+inter_data_mb = int(gradient_gb * 1000 / gpus_per_node)  # 125 MB
+inter_time_ms = inter_data_mb / 1000 / ib_bw_gbs * 1000  # ~2.5 ms, but with ring overhead ~5ms
+inter_time_ms = 5  # approximate with ring overhead for the example
+
+# Step 3: Intra-node AllGather
+intra_ag_ms = intra_rs_ms  # symmetric
+
+# Total
+hier_total_ms = intra_rs_ms + inter_time_ms + intra_ag_ms
+speedup = flat_time_ms / hier_total_ms
+
+# Format strings
+flat_time_ms_str = f"{flat_time_ms:.0f}"
+intra_data_mb_str = f"{intra_data_mb}"
+intra_rs_ms_str = f"{intra_rs_ms:.0f}"
+inter_data_mb_str = f"{inter_data_mb}"
+inter_time_ms_str = f"{inter_time_ms:.0f}"
+intra_ag_ms_str = f"{intra_ag_ms:.0f}"
+hier_total_ms_str = f"{hier_total_ms:.0f}"
+speedup_str = f"{speedup:.1f}"
+```
+
 ::: {.callout-notebook title="The Hierarchical Bandwidth Multiplier"}
 **Problem**: You have a cluster of 8 nodes, each with 8 GPUs (64 GPUs total). You need to AllReduce a 1 GB gradient buffer. Compare flat Ring AllReduce vs. Hierarchical AllReduce.
 
@@ -481,15 +526,15 @@ The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node)
 
 **Hierarchical AllReduce (3-step decomposition)**:
 
-1. **Intra-Node ReduceScatter**: Each GPU sends 875 MB at 900 GB/s → ~1 ms
-2. **Inter-Node AllReduce**: Each GPU sends $1\ \text{GB}/8 = 125\ \text{MB}$ at 50 GB/s → ~5 ms
+1. **Intra-Node ReduceScatter**: Each GPU sends `{python} intra_data_mb_str` MB at 900 GB/s → ~`{python} intra_rs_ms_str` ms
+2. **Inter-Node AllReduce**: Each GPU sends $1\ \text{GB}/8 = 125\ \text{MB}$ at 50 GB/s → ~`{python} inter_time_ms_str` ms
 
    *(Only 1/8 of the data crosses InfiniBand!)*
 
-3. **Intra-Node AllGather**: Each GPU receives 875 MB at 900 GB/s → ~1 ms
+3. **Intra-Node AllGather**: Each GPU receives `{python} intra_data_mb_str` MB at 900 GB/s → ~`{python} intra_ag_ms_str` ms
 - **Total Time**: $\approx 1 + 5 + 1 = 7\ \text{ms}$
 
-**The Systems Insight**: Hierarchical AllReduce achieves a **5.7× speedup** by reducing inter-node traffic from 1 GB to 125 MB per GPU. With 8 GPUs per node, we effectively get $8\times$ the apparent inter-node bandwidth. This is why NVIDIA's NCCL and similar libraries default to hierarchical algorithms on multi-node clusters.
+**The Systems Insight**: Hierarchical AllReduce achieves a **`{python} speedup_str`× speedup** by reducing inter-node traffic from 1 GB to `{python} inter_data_mb_str` MB per GPU. With 8 GPUs per node, we effectively get $8\times$ the apparent inter-node bandwidth. This is why NVIDIA's NCCL and similar libraries default to hierarchical algorithms on multi-node clusters.
 :::
 
 These three phases confine most traffic within each node before crossing the slower inter-node fabric.

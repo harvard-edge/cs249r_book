@@ -2225,23 +2225,62 @@ Request C page table: [0, 1, 2, 3, 4, 5, 15]  <- shares prefix blocks
 
 All three requests reference the same physical blocks for the system prompt. Only when generating unique tokens do they allocate new blocks. The savings from *prefix caching at scale* can be substantial when many concurrent requests share the same system prompt.
 
+```{python}
+#| label: prefix-caching-calc
+#| echo: false
+
+# Prefix caching KV cache analysis
+system_prompt_tokens = 2000
+concurrent_users = 1000
+avg_response_tokens = 500
+n_kv_pairs = 2  # key + value
+n_layers = 80  # large LLM (e.g., 70B-class)
+head_dim = 8192  # hidden dimension
+bytes_per_element = 2  # FP16
+
+# Without prefix caching
+tokens_per_user = system_prompt_tokens + avg_response_tokens  # 2500
+total_tokens_no_cache = tokens_per_user * concurrent_users
+kv_bytes_no_cache = total_tokens_no_cache * n_kv_pairs * n_layers * head_dim * bytes_per_element
+kv_tb_no_cache = kv_bytes_no_cache / 1e12
+
+# With prefix caching
+shared_tokens = system_prompt_tokens  # stored once
+unique_tokens = avg_response_tokens * concurrent_users
+total_tokens_cached = shared_tokens + unique_tokens
+kv_bytes_cached = total_tokens_cached * n_kv_pairs * n_layers * head_dim * bytes_per_element
+kv_tb_cached = kv_bytes_cached / 1e12
+
+# Savings
+memory_reduction_pct = (1 - kv_tb_cached / kv_tb_no_cache) * 100
+concurrent_multiplier = kv_tb_no_cache / kv_tb_cached
+
+# Format strings
+tokens_per_user_str = f"{tokens_per_user:,}"
+kv_tb_no_cache_str = f"{kv_tb_no_cache:.1f}"
+total_tokens_cached_str = f"{total_tokens_cached:,}"
+kv_tb_cached_str = f"{kv_tb_cached:.1f}"
+memory_reduction_pct_str = f"{memory_reduction_pct:.0f}"
+concurrent_multiplier_str = f"{concurrent_multiplier:.0f}"
+```
+
 ::: {.callout-note title="Prefix Caching at Scale"}
 
 Consider a chatbot service with a 2000-token system prompt and 1000 concurrent users:
 
 **Without prefix caching**:
 
-- KV cache per user: 2000 + 500 (avg response) = 2500 tokens
-- Total KV cache: 2500 × 1000 × 2 × 80 × 8192 × 2 = 6.5 TB
+- KV cache per user: 2000 + 500 (avg response) = `{python} tokens_per_user_str` tokens
+- Total KV cache: `{python} tokens_per_user_str` × 1000 × 2 × 80 × 8192 × 2 = `{python} kv_tb_no_cache_str` TB
 
 **With prefix caching**:
 
 - Shared prefix: 2000 tokens (once)
 - Unique per user: 500 tokens
-- Total: (2000 × 1) + (500 × 1000) = 502,000 tokens
-- Memory: 502,000 × 2 × 80 × 8192 × 2 = 1.3 TB
+- Total: (2000 × 1) + (500 × 1000) = `{python} total_tokens_cached_str` tokens
+- Memory: `{python} total_tokens_cached_str` × 2 × 80 × 8192 × 2 = `{python} kv_tb_cached_str` TB
 
-**Savings**: 80% reduction in KV cache memory, enabling 5x more concurrent users.
+**Savings**: `{python} memory_reduction_pct_str`% reduction in KV cache memory, enabling `{python} concurrent_multiplier_str`x more concurrent users.
 
 **Prefix hit rate** determines effectiveness:
 
