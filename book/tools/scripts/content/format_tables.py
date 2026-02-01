@@ -615,8 +615,6 @@ def format_table_lines(parser: GridTableParser, max_width: Optional[int] = None)
     for header_row in parser.header_rows:
         formatted_row = []
         for cell in header_row:
-            # First escape HTML entities
-            cell = escape_html_entities(cell)
             # Then apply bolding if needed
             if bold_headers and cell.strip() and not is_bolded(cell):
                 formatted_row.append(add_bold(cell))
@@ -629,8 +627,6 @@ def format_table_lines(parser: GridTableParser, max_width: Optional[int] = None)
     for row in wrapped_data:
         new_row = []
         for i, cell in enumerate(row):
-            # First escape HTML entities
-            cell = escape_html_entities(cell)
             # Bold first column only if it has content (preserve empty cells for multiline)
             if i == 0 and bold_first_col and cell.strip() and not is_bolded(cell):
                 new_row.append(add_bold(cell))
