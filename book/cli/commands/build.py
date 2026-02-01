@@ -4,6 +4,7 @@ Build command implementation for MLSysBook CLI.
 Handles building chapters and full books in different formats (HTML, PDF, EPUB).
 """
 
+import platform
 import subprocess
 import signal
 import sys
@@ -18,17 +19,61 @@ console = Console()
 class BuildCommand:
     """Handles build operations for the MLSysBook."""
 
-    def __init__(self, config_manager, chapter_discovery, verbose: bool = False):
+    def __init__(self, config_manager, chapter_discovery, verbose: bool = False, open_after: bool = False):
         """Initialize build command.
 
         Args:
             config_manager: ConfigManager instance
             chapter_discovery: ChapterDiscovery instance
             verbose: If True, stream build output in real-time
+            open_after: If True, open build output after successful build
         """
         self.config_manager = config_manager
         self.chapter_discovery = chapter_discovery
         self.verbose = verbose
+        self.open_after = open_after
+
+    def _open_output(self, output_dir: Path, format_type: str) -> None:
+        """Open the build output using the system's default application.
+
+        For PDF/EPUB: finds and opens the first matching file.
+        For HTML: opens index.html in the default browser.
+
+        Args:
+            output_dir: Path to the build output directory
+            format_type: Format type ('html', 'pdf', 'epub')
+        """
+        if not self.open_after:
+            return
+
+        target = None
+
+        if format_type == "pdf":
+            pdf_files = list(output_dir.glob("*.pdf"))
+            if pdf_files:
+                target = pdf_files[0]
+        elif format_type == "epub":
+            epub_files = list(output_dir.glob("*.epub"))
+            if epub_files:
+                target = epub_files[0]
+        elif format_type == "html":
+            index = output_dir / "index.html"
+            if index.exists():
+                target = index
+
+        if target is None:
+            console.print(f"[yellow]⚠️  No {format_type.upper()} output found to open in {output_dir}/[/yellow]")
+            return
+
+        console.print(f"[cyan]🔗 Opening {target.name}...[/cyan]")
+
+        system = platform.system()
+        if system == "Darwin":
+            subprocess.Popen(["open", str(target)])
+        elif system == "Linux":
+            subprocess.Popen(["xdg-open", str(target)])
+        elif system == "Windows":
+            subprocess.Popen(["start", "", str(target)], shell=True)
 
     def build_full(self, format_type: str = "html") -> bool:
         """Build full book in specified format.
@@ -103,6 +148,7 @@ class BuildCommand:
 
             if success:
                 console.print(f"[green]✅ {format_type.upper()} build completed: {output_dir}/[/green]")
+                self._open_output(output_dir, format_type)
             else:
                 console.print(f"[red]❌ {format_type.upper()} build failed[/red]")
 
@@ -190,6 +236,7 @@ class BuildCommand:
 
             if success:
                 console.print(f"[green]✅ Build complete: {output_dir}/[/green]")
+                self._open_output(output_dir, format_type)
             else:
                 console.print("[red]❌ Build failed[/red]")
 
@@ -302,6 +349,7 @@ class BuildCommand:
 
             if success:
                 console.print(f"[green]✅ Build complete: {output_dir}/[/green]")
+                self._open_output(output_dir, format_type)
             else:
                 console.print("[red]❌ Build failed[/red]")
 
@@ -391,6 +439,7 @@ class BuildCommand:
 
         if success:
             console.print(f"[green]✅ {volume_name} {format_type.upper()} build completed: {output_dir}/[/green]")
+            self._open_output(output_dir, format_type)
         else:
             console.print(f"[red]❌ {volume_name} {format_type.upper()} build failed[/red]")
 
@@ -553,6 +602,7 @@ class BuildCommand:
             if success:
                 output_dir = self.config_manager.get_output_dir("html")
                 console.print(f"[green]✅ HTML-only build completed: {output_dir}/[/green]")
+                self._open_output(output_dir, "html")
             else:
                 console.print("[red]❌ HTML-only build failed[/red]")
 
