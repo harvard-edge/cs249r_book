@@ -59,6 +59,29 @@ This equation transforms performance debugging from a qualitative guessing game 
 *   **Algorithm Lever**: Reducing total arithmetic operations ($O$) through pruning, quantization, or architectural refinement.
 *   **Machine Lever**: Increasing the denominator of the compute term by improving peak throughput ($R_{peak}$) or increasing the utilization factor ($\eta$) via kernel fusion.
 
+### DAM Coordination: From Sum to Max
+
+The additive Iron Law represents **sequential execution**—the worst case where Data, Algorithm, and Machine take turns. But skilled systems engineering transforms the sum into a **max**:
+
+$$ T_{sequential} = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot \eta} + L_{lat} \quad \xrightarrow{\text{overlap}} \quad T_{pipelined} = \max\left(\frac{D_{vol}}{BW}, \frac{O}{R_{peak} \cdot \eta}\right) + L_{lat} $$
+
+**The systems engineer's job is to make the components run in parallel, not in series.** This is DAM Coordination:
+
+| **Technique** | **DAM Components Overlapped** | **Implementation** |
+|:--------------|:------------------------------|:-------------------|
+| **Prefetching** | D overlaps M | DataLoader with `prefetch_factor`, `pin_memory=True` |
+| **CUDA Streams** | D overlaps M | Separate streams for H2D transfer and compute |
+| **Async Gradient Sync** | D (communication) overlaps A | Overlap AllReduce with next forward pass |
+| **Double Buffering** | D overlaps M | Fill buffer N+1 while computing on buffer N |
+
+: **DAM Overlap Techniques.** Each technique allows one DAM component to execute while another is in flight, converting additive latency into overlapped latency. {#tbl-dam-overlap}
+
+**When does overlap help?** Only when the DAM components are **balanced**. If one term dominates (e.g., severely memory-bound), overlapping the smaller term with the larger yields negligible gain—the max is still dominated by the same bottleneck. Overlap provides the greatest benefit when $D_{vol}/BW \approx O/(R_{peak} \cdot \eta)$.
+
+::: {.callout-warning title="The Overhead That Cannot Hide"}
+The latency term $L_{lat}$ (kernel launch, synchronization barriers, Python dispatch) typically cannot be overlapped—it represents serialization points where all components must wait. This is why **kernel fusion** is so powerful: it eliminates $L_{lat}$ by combining operations, not just by speeding up any single component.
+:::
+
 ## The Boundary: Arithmetic Intensity
 
 The boundary between **Data** (Memory-Bound) and **Machine** (Compute-Bound) is not arbitrary; it is defined mathematically by the **Arithmetic Intensity** ($I$) of the workload.
@@ -74,6 +97,18 @@ In the heat of a production outage, you rarely have time to solve the full Iron 
 *   **If Batch Size is 1**: You are likely **Latency Bound** (Algorithm overhead dominates).
 *   **If Arithmetic Intensity $<$ 100 Ops/Byte**: You are likely **Memory Bound** (Data/Machine boundary).
 *   **If System works in Dev but fails in Prod**: Suspect **Data Drift** (Data component).
+
+### The Bottleneck Diagnostic
+
+Once you identify the bottleneck, this table tells you what to do—and what NOT to do:
+
+| **If You're...** | **Dominant Term** | **Optimization That Works** | **Optimization That's Wasted** |
+|:-----------------|:------------------|:----------------------------|:-------------------------------|
+| **Memory-Bound** | $D_{vol}/BW$ | Quantization, pruning, batching, kernel fusion | Faster GPU (more FLOP/s won't help) |
+| **Compute-Bound** | $O/(R_{peak} \cdot \eta)$ | Better kernels, Tensor Cores, faster GPU, lower precision | More memory bandwidth (already saturated) |
+| **Latency-Bound** | $L_{lat}$ | Batching requests, kernel fusion, async dispatch | Neither compute nor bandwidth (overhead dominates) |
+
+: **What Works vs. What's Wasted.** Optimizing the wrong term yields exactly zero improvement. A memory-bound LLM will not speed up from a faster GPU; the GPU will simply idle faster while waiting for memory. {#tbl-bottleneck-actions}
 
 ## Anti-Patterns
 

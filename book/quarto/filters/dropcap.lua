@@ -13,8 +13,15 @@
 -- This keeps QMD files clean — no manual \lettrine calls needed.
 -- =============================================================================
 
--- Only apply to PDF/LaTeX output
-if not (quarto.doc.is_format("latex") or quarto.doc.is_format("pdf")) then
+-- Robust format check
+local function is_target_format()
+  return quarto.doc.is_format("latex") or 
+         quarto.doc.is_format("pdf") or 
+         quarto.doc.is_format("titlepage-pdf") or
+         quarto.doc.is_format("beamer")
+end
+
+if not is_target_format() then
   return {}
 end
 
@@ -30,8 +37,15 @@ function Header(el)
   end
 
   -- Look for first numbered section header (level 2) that is NOT unnumbered
-  if el.level == 2 and not applied_dropcap and not found_numbered_header then
+  if el.level == 2 then
+    -- If we already applied a dropcap in this chapter, stop looking
+    if applied_dropcap then
+      found_numbered_header = false
+      return nil
+    end
+
     -- Check if this header has the .unnumbered class
+    -- Use manual loop for maximum compatibility
     local is_unnumbered = false
     if el.classes then
       for _, cls in ipairs(el.classes) do
@@ -44,6 +58,9 @@ function Header(el)
 
     if not is_unnumbered then
       found_numbered_header = true
+    else
+      -- If we hit an unnumbered header (like Purpose), we are not ready yet
+      found_numbered_header = false
     end
   end
 
@@ -56,19 +73,34 @@ function Para(el)
     return nil
   end
 
-  -- Check that the paragraph starts with text content (not an image, div, etc.)
+  -- Check that the paragraph starts with text content
   if #el.content == 0 then
     return nil
   end
 
-  local first_inline = el.content[1]
+  local first_str_index = nil
+  local first_str_el = nil
 
-  -- Only apply to paragraphs that start with a Str (regular text)
-  if first_inline.t ~= "Str" then
+  -- Find the first Str element, skipping RawInline (like \index), Spans, Spaces, etc.
+  for i, inline in ipairs(el.content) do
+    if inline.t == "Str" then
+      first_str_index = i
+      first_str_el = inline
+      break
+    elseif inline.t == "RawInline" or inline.t == "Span" or inline.t == "Space" or inline.t == "SoftBreak" then
+      -- Skip these elements (indices, labels, spaces, line breaks)
+    else
+      -- If we encounter anything else (Image, Code, Strong, Emph, etc.) before the first Str,
+      -- we abort because dropcap logic gets complicated or invalid.
+      return nil
+    end
+  end
+
+  if not first_str_index then
     return nil
   end
 
-  local text = first_inline.text
+  local text = first_str_el.text
 
   -- Skip empty strings
   if #text == 0 then
@@ -84,10 +116,25 @@ function Para(el)
   local lettrine_open = pandoc.RawInline('latex',
     '\\lettrine{' .. first_char .. '}{' .. rest_of_first_word .. '}')
 
-  -- Replace the first Str with the lettrine command
-  -- Remove the original first inline and prepend the lettrine
-  local new_content = pandoc.List({lettrine_open})
-  for i = 2, #el.content do
+  -- Construct new content list
+  local new_content = pandoc.List()
+  
+  -- 1. Append all skipped elements (indices, etc.) BUT skip spaces/breaks to ensure flush left
+  for i = 1, first_str_index - 1 do
+    local inline = el.content[i]
+    -- We keep RawInline (indices) and Spans (labels)
+    -- We DROP Spaces and SoftBreaks that appear before the first letter
+    -- to prevent indentation issues with the drop cap
+    if inline.t ~= "Space" and inline.t ~= "SoftBreak" then
+      new_content:insert(inline)
+    end
+  end
+  
+  -- 2. Append the lettrine element
+  new_content:insert(lettrine_open)
+  
+  -- 3. Append the rest of the paragraph
+  for i = first_str_index + 1, #el.content do
     new_content:insert(el.content[i])
   end
 
@@ -95,7 +142,6 @@ function Para(el)
   return pandoc.Para(new_content)
 end
 
--- Return the filter — Header must run before Para to set the flag
 return {
   { Header = Header },
   { Para = Para }
