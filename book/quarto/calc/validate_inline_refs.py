@@ -44,6 +44,12 @@ LATEX_ADJACENT = re.compile(r'`\{python\}[^`]+`\s*\$\\(times|approx|ll|gg|mu)\$'
 # Pattern 3: Grid table row separator (indicates grid table format)
 GRID_TABLE_SEP = re.compile(r'^\+[-:=+]+\+$')
 
+# Pattern 4: Inline f-string formatting (should be pre-computed as _str)
+INLINE_FSTRING = re.compile(r'`\{python\}\s*f"[^`]+`')
+
+# Pattern 5: Inline function calls (should be pre-computed as _str)
+INLINE_FUNC_CALL = re.compile(r'`\{python\}\s*\w+\([^`]+\)`')
+
 
 def extract_compute_vars(lines):
     """Extract all variable names assigned in ```{python} compute cells."""
@@ -112,6 +118,20 @@ def check_rendering_patterns(qmd_path, verbose=False):
                 "Grid table with inline Python - convert to pipe table"))
             if verbose:
                 print(f"  ⚠ {qmd_path.name}:{i} — Python in grid table")
+        
+        # Check for inline f-string formatting (should be pre-computed)
+        if INLINE_FSTRING.search(line):
+            warnings.append((filepath, i, "INLINE_FSTRING",
+                "Inline f-string - pre-compute as _str variable in Python block"))
+            if verbose:
+                print(f"  ⚠ {qmd_path.name}:{i} — Inline f-string")
+        
+        # Check for inline function calls (should be pre-computed)
+        if INLINE_FUNC_CALL.search(line):
+            warnings.append((filepath, i, "INLINE_FUNC",
+                "Inline function call - pre-compute as _str variable in Python block"))
+            if verbose:
+                print(f"  ⚠ {qmd_path.name}:{i} — Inline function call")
     
     return warnings
 

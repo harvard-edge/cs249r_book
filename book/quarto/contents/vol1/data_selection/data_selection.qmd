@@ -202,6 +202,34 @@ $$
 
 A random batch of raw data often has low ICR because it contains redundant examples, noisy samples, or "easy" examples the model has already mastered. Training on such a batch wastes GPU cycles on zero-information updates. High-efficiency data pipelines (@fig-data-selection-pipeline) filter, order, and synthesize data to maximize ICR, ensuring that every FLOP contributes to learning. To illustrate, consider *computing ICR* on a concrete coreset selection task. Later in this chapter, @sec-data-selection-measuring-data-selection-7957 provides the complete measurement framework for evaluating these efficiency gains, including the Data Roofline model that diagnoses whether a system is data-bound or compute-bound.
 
+::: {#fig-data-selection-pipeline fig-cap="**The Data Selection Pipeline**: A structured approach to increasing data value. Raw data is first pruned to remove redundancy (Static Pruning), then dynamically selected during training (Active Learning), and finally augmented to increase diversity (Synthesis). Each stage increases the Information-Compute Ratio (ICR)." fig-alt="A flow diagram showing the progression of data: Raw Data -> Static Pruning -> Dynamic Selection -> Synthetic Generation -> High Value Model. Arrows indicate the flow."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=1.5cm, >={Stealth[length=3mm]}]
+  % Nodes
+  \node[draw, rectangle, fill=gray!10, minimum height=1cm, minimum width=2cm] (Raw) {Raw Data};
+
+  \node[draw, rectangle, fill=blue!10, minimum height=1cm, minimum width=2.5cm, right=1cm of Raw, align=center] (Prune) {1. Static\\Pruning};
+
+  \node[draw, rectangle, fill=green!10, minimum height=1cm, minimum width=2.5cm, right=1cm of Prune, align=center] (Select) {2. Dynamic\\Selection};
+
+  \node[draw, rectangle, fill=orange!10, minimum height=1cm, minimum width=2.5cm, right=1cm of Select, align=center] (Synth) {3. Synthetic\\Gen};
+
+  \node[draw, circle, fill=red!10, minimum size=1.2cm, right=1cm of Synth] (Model) {Model};
+
+  % Edges
+  \draw[->, thick] (Raw) -- (Prune);
+  \draw[->, thick] (Prune) -- (Select);
+  \draw[->, thick] (Select) -- (Synth);
+  \draw[->, thick] (Synth) -- node[above, font=\footnotesize\usefont{T1}{phv}{m}{n}] {High ICR} (Model);
+
+  % Annotations
+  \node[below=0.2cm of Prune, font=\footnotesize\usefont{T1}{phv}{m}{n}, color=gray] {Pre-training};
+  \node[below=0.2cm of Select, font=\footnotesize\usefont{T1}{phv}{m}{n}, color=gray] {During Training};
+  \node[below=0.2cm of Synth, font=\footnotesize\usefont{T1}{phv}{m}{n}, color=gray] {On-Demand};
+\end{tikzpicture}
+```
+:::
+
 Before diving into calculation examples, ensure you have a solid grasp of the core ICR concept.
 
 ::: {.callout-checkpoint title="Data Selection Efficiency" collapse="false"}
@@ -276,35 +304,7 @@ icr_ratio = f"{icr_coreset / icr_random:.1f}"
 - Compute: 640K × `{python} resnet50_fwdbwd_gflops` GFLOPs = **`{python} coreset_flops_str` FLOPs**
 - ICR_coreset = 4.5 / (`{python} coreset_flops_str`) = **`{python} icr_coreset_str` per FLOP**
 
-**Result**: The coreset achieves **`{python} icr_ratio`$\times$ higher ICR**, nearly twice the learning per FLOP, by eliminating low-information "easy" samples that contribute little to the decision boundary. The 0.5 percentage point accuracy difference is often acceptable given the 50% compute savings.
-:::
-
-::: {#fig-data-selection-pipeline fig-cap="**The Data Selection Pipeline**: A structured approach to increasing data value. Raw data is first pruned to remove redundancy (Static Pruning), then dynamically selected during training (Active Learning), and finally augmented to increase diversity (Synthesis). Each stage increases the Information-Compute Ratio (ICR)." fig-alt="A flow diagram showing the progression of data: Raw Data -> Static Pruning -> Dynamic Selection -> Synthetic Generation -> High Value Model. Arrows indicate the flow."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=1.5cm, >={Stealth[length=3mm]}]
-  % Nodes
-  \node[draw, rectangle, fill=gray!10, minimum height=1cm, minimum width=2cm] (Raw) {Raw Data};
-
-  \node[draw, rectangle, fill=blue!10, minimum height=1cm, minimum width=2.5cm, right=1cm of Raw, align=center] (Prune) {1. Static\\Pruning};
-
-  \node[draw, rectangle, fill=green!10, minimum height=1cm, minimum width=2.5cm, right=1cm of Prune, align=center] (Select) {2. Dynamic\\Selection};
-
-  \node[draw, rectangle, fill=orange!10, minimum height=1cm, minimum width=2.5cm, right=1cm of Select, align=center] (Synth) {3. Synthetic\\Gen};
-
-  \node[draw, circle, fill=red!10, minimum size=1.2cm, right=1cm of Synth] (Model) {Model};
-
-  % Edges
-  \draw[->, thick] (Raw) -- (Prune);
-  \draw[->, thick] (Prune) -- (Select);
-  \draw[->, thick] (Select) -- (Synth);
-  \draw[->, thick] (Synth) -- node[above, font=\footnotesize\usefont{T1}{phv}{m}{n}] {High ICR} (Model);
-
-  % Annotations
-  \node[below=0.2cm of Prune, font=\footnotesize\usefont{T1}{phv}{m}{n}, color=gray] {Pre-training};
-  \node[below=0.2cm of Select, font=\footnotesize\usefont{T1}{phv}{m}{n}, color=gray] {During Training};
-  \node[below=0.2cm of Synth, font=\footnotesize\usefont{T1}{phv}{m}{n}, color=gray] {On-Demand};
-\end{tikzpicture}
-```
+**Result**: The coreset achieves **`{python} icr_ratio`× higher ICR**, nearly twice the learning per FLOP, by eliminating low-information "easy" samples that contribute little to the decision boundary. The 0.5 percentage point accuracy difference is often acceptable given the 50% compute savings.
 :::
 
 This chapter explores three strategies to maximize this ratio:
@@ -508,14 +508,12 @@ def compute_el2n_scores(model, dataloader, num_epochs=5):
         scores.extend(el2n.tolist())
     return scores
 
-
 def select_coreset(scores, dataset, fraction=0.1):
     """Select top-k highest-scoring (most uncertain) samples."""
     k = int(len(dataset) * fraction)
     # Sort by score descending (highest uncertainty first)
     indices = argsort(scores, descending=True)[:k]
     return Subset(dataset, indices)
-
 
 # Usage: 10x data reduction with minimal accuracy loss
 scores = compute_el2n_scores(proxy_model, full_loader)
@@ -663,7 +661,7 @@ The economic implications are substantial. In production settings, labeling cost
 **The Systems Conclusion**: Data Selection is not just a "data trick"; it is a **20$\times$ compute accelerator** and a **$4.75 Million** cost-saving measure.
 :::
 
-The following plot (@fig-active-learning-multiplier) quantifies this advantage, showing how Active Learning shifts the learning curve to the left, achieving target accuracy with exponentially fewer samples than random selection.
+@fig-active-learning-multiplier quantifies this advantage, showing how Active Learning shifts the learning curve to the left, achieving target accuracy with exponentially fewer samples than random selection.
 
 ```{python}
 #| label: fig-active-learning-multiplier

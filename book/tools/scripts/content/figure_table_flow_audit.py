@@ -52,11 +52,14 @@ class FloatElement:
         if not self.first_reference_line:
             return "ORPHAN"  # defined but never referenced
         gap = self.gap
-        if gap < -5:
-            # Definition is well AFTER reference (reader sees @fig before figure)
-            return "LATE"
+        # gap = definition_line - first_reference_line
+        # gap > 0: definition comes AFTER reference (good if small)
+        # gap < 0: definition comes BEFORE reference (figure appears early)
         if gap > 30:
-            # Definition is way BEFORE reference (figure appears pages early)
+            # Definition is well AFTER reference (reader waits too long for figure)
+            return "LATE"
+        if gap < -5:
+            # Definition is way BEFORE reference (figure appears before it's mentioned)
             return "EARLY"
         return "OK"
 
@@ -209,9 +212,9 @@ def format_report(filepath: Path, elements: dict[str, FloatElement]) -> str:
 
             marker = ""
             if elem.status == "LATE":
-                marker = " ⚠️  Definition AFTER first reference"
+                marker = " ⚠️  Figure appears too far AFTER mention (move earlier)"
             elif elem.status == "EARLY":
-                marker = " ⚠️  Definition far BEFORE first reference"
+                marker = " ⚠️  Figure appears BEFORE it's mentioned (move later)"
             elif elem.status == "ORPHAN":
                 marker = " ⚠️  Defined but never referenced in prose"
 
@@ -243,10 +246,60 @@ def format_report(filepath: Path, elements: dict[str, FloatElement]) -> str:
     return "\n".join(lines)
 
 
+def format_report_compact(filepath: Path, elements: dict[str, FloatElement]) -> tuple[str, int]:
+    """Format a compact report for pre-commit (only issues, no OK items)."""
+    chapter_name = filepath.stem
+    parent_dir = filepath.parent.name
+
+    issues = [e for e in elements.values() if e.status in ("LATE", "EARLY", "ORPHAN")]
+
+    if not issues:
+        return "", 0
+
+    lines = []
+    lines.append(f"\n{parent_dir}/{chapter_name}.qmd - {len(issues)} issue(s):")
+
+    for elem in sorted(issues, key=lambda x: x.definition_line or 9999):
+        def_str = f"L{elem.definition_line}" if elem.definition_line else "—"
+        ref_str = f"L{elem.first_reference_line}" if elem.first_reference_line else "—"
+
+        if elem.status == "LATE":
+            lines.append(f"  {elem.label}: defined at {def_str}, first referenced at {ref_str} (figure appears too far AFTER mention)")
+        elif elem.status == "EARLY":
+            lines.append(f"  {elem.label}: defined at {def_str}, first referenced at {ref_str} (figure appears BEFORE it's mentioned)")
+        elif elem.status == "ORPHAN":
+            lines.append(f"  {elem.label}: defined at {def_str} but NEVER REFERENCED")
+
+    return "\n".join(lines), len(issues)
+
+
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Audit figure and table placement in QMD files"
+    )
+    parser.add_argument(
+        "files",
+        nargs="*",
+        help="QMD files to check. If none provided, scans all vol1/vol2 chapters."
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit with error code 1 if any issues found (for pre-commit)"
+    )
+    parser.add_argument(
+        "--quiet", "-q",
+        action="store_true",
+        help="Only show issues, not OK items (compact output for pre-commit)"
+    )
+
+    args = parser.parse_args()
+
     # Determine files to scan
-    if len(sys.argv) > 1:
-        files = [Path(f) for f in sys.argv[1:]]
+    if args.files:
+        files = [Path(f) for f in args.files]
     else:
         # Find all chapter .qmd files in vol1 and vol2
         base = Path(__file__).resolve().parents[3] / "quarto" / "contents"
@@ -268,30 +321,46 @@ def main():
         print("No .qmd files found.")
         sys.exit(1)
 
-    print(f"Figure & Table Flow Audit")
-    print(f"Scanning {len(files)} chapters...\n")
+    if not args.quiet:
+        print(f"Figure & Table Flow Audit")
+        print(f"Scanning {len(files)} chapters...\n")
 
     total_issues = 0
     total_elements = 0
 
     for filepath in files:
         if not filepath.exists():
-            print(f"  WARNING: {filepath} not found, skipping.")
+            if not args.quiet:
+                print(f"  WARNING: {filepath} not found, skipping.")
             continue
 
         elements = scan_chapter(filepath)
         if not elements:
             continue
 
-        report = format_report(filepath, elements)
-        print(report)
+        if args.quiet:
+            report, issue_count = format_report_compact(filepath, elements)
+            if report:
+                print(report)
+        else:
+            report = format_report(filepath, elements)
+            print(report)
+            issue_count = sum(1 for e in elements.values() if e.status in ("LATE", "EARLY", "ORPHAN"))
 
         total_elements += len(elements)
-        total_issues += sum(1 for e in elements.values() if e.status in ("LATE", "EARLY", "ORPHAN"))
+        total_issues += issue_count
 
-    print(f"\n{'='*80}")
-    print(f"  GRAND TOTAL: {total_elements} elements across {len(files)} chapters | {total_issues} issues")
-    print(f"{'='*80}")
+    if not args.quiet:
+        print(f"\n{'='*80}")
+        print(f"  GRAND TOTAL: {total_elements} elements across {len(files)} chapters | {total_issues} issues")
+        print(f"{'='*80}")
+    elif total_issues > 0:
+        print(f"\nTotal: {total_issues} figure/table placement issue(s)")
+        print("Figures should appear immediately after the paragraph that first references them.")
+
+    # Exit with error if strict mode and issues found
+    if args.strict and total_issues > 0:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

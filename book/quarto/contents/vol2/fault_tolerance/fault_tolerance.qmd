@@ -889,7 +889,7 @@ Moving to the middle layer, we examine the checkpoint coordination:
 - **Write pattern**: All 64 nodes writing simultaneously to shared NFS
 - **Observed behavior**: 10-minute writes instead of the `{python} min_write_min_str`-minute theoretical minimum
 
-The operational layer reveals contention: 64 nodes competing for 10 Gbps creates severe congestion. Each node effectively receives only `{python} per_node_mbs_str` MB/s (10 Gbps / 64 nodes), extending checkpoint time to `{python} total_ckpt_gb_str` GB / `{python} per_node_gbs` GB/s $\approx$ `{python} serialized_min_str` minutes per node if writes were serialized. The observed 10 minutes reflects partial parallelism with significant queuing delays.
+The operational layer reveals contention: 64 nodes competing for 10 Gbps creates severe congestion. Each node effectively receives only `{python} per_node_mbs_str` MB/s (10 Gbps / 64 nodes), extending checkpoint time to `{python} total_ckpt_gb_str` GB / `{python} per_node_gbs` GB/s ≈ `{python} serialized_min_str` minutes per node if writes were serialized. The observed 10 minutes reflects partial parallelism with significant queuing delays.
 
 **Societal Layer Analysis (Control Plane)**
 
@@ -1073,6 +1073,8 @@ The challenge is distinguishing stragglers from failures. Stragglers should trig
 
 ### Elastic Training {#sec-fault-tolerance-reliability-reliability-elastic-training-4f87}
 
+The checkpoint and restart mechanisms developed above share a common assumption: training operates with a fixed number of workers. When failures occur, we stop, recover state from checkpoint, and restart, ideally with replacement resources. But what if the system could adapt to failures dynamically, continuing training with fewer workers rather than stopping entirely? This alternative approach, **elastic training** (@fig-elastic-flow), enables dynamic scaling by adding or removing workers without stopping training.
+
 ::: {#fig-elastic-flow fig-env="figure" fig-pos="htb" fig-cap="**Elastic Training Recovery**. Unlike static training which aborts on failure, elastic training adapts. When a worker fails, the job pauses, redistributes the dataset and model shards across the remaining $N-1$ workers, and resumes training from the last consistent state. This capability transforms hard failures into temporary throughput degradations." fig-alt="Flowchart with 5 steps and decision diamond. Training on N GPUs flows to monitor alert diamond. On failure: pause training, rescale batch and learning rate to N-1 GPUs, resume training. Loop returns to monitoring. Annotation highlights key step."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=1.5cm]
@@ -1099,8 +1101,6 @@ The challenge is distinguishing stragglers from failures. Stragglers should trig
 \end{tikzpicture}
 ```
 :::
-
-The checkpoint and restart mechanisms developed above share a common assumption: training operates with a fixed number of workers. When failures occur, we stop, recover state from checkpoint, and restart, ideally with replacement resources. But what if the system could adapt to failures dynamically, continuing training with fewer workers rather than stopping entirely? This alternative approach, **elastic training** (@fig-elastic-flow), enables dynamic scaling by adding or removing workers without stopping training.
 
 Elastic training provides several advantages. For fault tolerance, failures reduce worker count rather than stopping training. For resource efficiency, training can use variable resource allocations. For preemption handling, systems gracefully handle preemption in shared clusters. For cost optimization, systems scale based on spot instance availability.
 
@@ -1270,6 +1270,28 @@ Fault tolerance for stateful serving requires multiple mechanisms. Session affin
 
 Redundancy is the foundation of serving fault tolerance. By maintaining multiple copies of serving capability, the system can continue operating when individual copies fail.
 
+#### Availability Calculations {#sec-fault-tolerance-reliability-reliability-availability-calculations-ef0a}
+
+For a single replica with availability $A_{single}$ (probability of being operational at any given time), @eq-availability-redundancy quantifies how multiple independent replicas achieve higher system availability:
+
+$$ A_{system} = 1 - (1 - A_{single})^R $$ {#eq-availability-redundancy}
+
+where $R$ is the number of replicas.
+
+**Worked Example**:
+
+Single replica availability: $A_{single} = 99\%$ (3.65 days of downtime per year)
+
+With two replicas: $A = 1 - (0.01)^2 = 99.99\%$ (52.6 minutes downtime per year)
+
+With three replicas: $A = 1 - (0.01)^3 = 99.9999\%$ (31.5 seconds downtime per year)
+
+This calculation assumes independent failures. Correlated failures reduce actual availability below these theoretical values. Shared power, shared network, and software bugs create correlation.
+
+#### Replication Strategies {#sec-fault-tolerance-reliability-reliability-replication-strategies-aaa2}
+
+**Active-active replication** (@fig-serving-redundancy, left): All replicas actively serve requests.
+
 ::: {#fig-serving-redundancy fig-env="figure" fig-pos="htb" fig-cap="**Serving Redundancy Strategies**. Comparison of Active-Active vs. Active-Passive replication. Active-Active (left) distributes load across all replicas, maximizing utilization but requiring capacity headroom to absorb failures. Active-Passive (right) keeps a standby replica idle and synchronized via heartbeat, simplifying failover logic at the cost of idle resource utilization." fig-alt="Two diagrams comparing replication strategies. Left: active-active with load balancer sending 50% to each of two green replicas. Right: active-passive with load balancer sending 100% to primary while dashed standby receives heartbeat sync."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -1299,29 +1321,7 @@ Redundancy is the foundation of serving fault tolerance. By maintaining multiple
   \end{scope}
 \end{tikzpicture}
 ```
-:::
-
-#### Availability Calculations {#sec-fault-tolerance-reliability-reliability-availability-calculations-ef0a}
-
-For a single replica with availability $A_{single}$ (probability of being operational at any given time), @eq-availability-redundancy quantifies how multiple independent replicas achieve higher system availability:
-
-$$ A_{system} = 1 - (1 - A_{single})^R $$ {#eq-availability-redundancy}
-
-where $R$ is the number of replicas.
-
-**Worked Example**:
-
-Single replica availability: $A_{single} = 99\%$ (3.65 days of downtime per year)
-
-With two replicas: $A = 1 - (0.01)^2 = 99.99\%$ (52.6 minutes downtime per year)
-
-With three replicas: $A = 1 - (0.01)^3 = 99.9999\%$ (31.5 seconds downtime per year)
-
-This calculation assumes independent failures. Correlated failures reduce actual availability below these theoretical values. Shared power, shared network, and software bugs create correlation.
-
-#### Replication Strategies {#sec-fault-tolerance-reliability-reliability-replication-strategies-aaa2}
-
-**Active-active replication** (@fig-serving-redundancy, left): All replicas actively serve requests. Load is distributed across replicas. Failure of one replica increases load on remaining replicas. This approach maximizes resource utilization but requires sufficient capacity in remaining replicas to handle increased load.
+::: Load is distributed across replicas. Failure of one replica increases load on remaining replicas. This approach maximizes resource utilization but requires sufficient capacity in remaining replicas to handle increased load.
 
 **Active-passive replication** (@fig-serving-redundancy, right): Primary replicas serve requests while standby replicas remain idle but ready. Failure of a primary triggers failover to standby. This approach provides simpler failover but wastes standby resources during normal operation.
 

@@ -17,7 +17,7 @@ return {
 
 defaultOptions={
   numbered = "true",
-  boxstyle = "foldbox.default",
+  boxstyle = "foldbox.simple",  -- Default to simple/compact style for all callouts
   collapse = "true",
   colors   = {"c0c0c0","808080"}
 },

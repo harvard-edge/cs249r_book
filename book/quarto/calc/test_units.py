@@ -338,8 +338,8 @@ def test_formula_helpers():
 
     # sci() - check format, not value
     result = sci(RESNET50_FLOPs)
-    if "\\times 10^{" not in result:
-        FAILURES.append(f"  ✗ sci() format: got '{result}', expected LaTeX scientific notation")
+    if "× 10" not in result or not any(c in result for c in '⁰¹²³⁴⁵⁶⁷⁸⁹'):
+        FAILURES.append(f"  ✗ sci() format: got '{result}', expected Unicode scientific notation (e.g., 4.10 × 10⁹)")
         ok = False
 
     return ok

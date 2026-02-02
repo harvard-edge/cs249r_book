@@ -588,7 +588,7 @@ $$
 \end{aligned}
 $$
 
-For concrete understanding, consider ResNet-50 training with different batch sizes. At batch size 32, the model requires approximately 8 GiB of activation memory, 4 GiB for gradients, and 200 MiB for parameters per GPU. Doubling to batch size 64 doubles these memory requirements to 16 GiB activations and 8 GiB gradients. This linear scaling quickly exhausts GPU memory, with high-end training GPUs typically providing 40--80 GiB of HBM.
+For concrete understanding, consider ResNet-50 training with different batch sizes. At batch size 32, the model requires approximately 8 GB of activation memory, 4 GB for gradients, and 200 MB for parameters per GPU. Doubling to batch size 64 doubles these memory requirements to 16 GB activations and 8 GB gradients. This linear scaling quickly exhausts GPU memory, with high-end training GPUs typically providing 40--80 GB of HBM.
 
 Larger batches enable more efficient computation through improved parallelism and better memory access patterns. GPU utilization efficiency demonstrates this trade-off: batch sizes of 256 or higher typically achieve over 90% hardware utilization on modern training accelerators, while smaller batches of 16--32 may only achieve 60--70% utilization due to insufficient parallelism to saturate the hardware. Linear scaling rules for large-batch training help maintain convergence speed [@goyal2017accurate].
 
@@ -639,6 +639,17 @@ The system implications of Adam are more substantial than previous methods. The 
 The choice of optimization algorithm creates specific patterns of computation and memory access that influence training efficiency. Memory requirements increase progressively from SGD ($1\times$ model size) through Momentum ($2\times$) to Adam ($3\times$), as quantified in @tbl-optimizer-properties. These memory costs must be balanced against convergence[^fn-convergence-etymology] benefits. While Adam often requires fewer iterations to reach convergence, its per-iteration memory and computation overhead may impact training speed on memory-constrained systems. The concrete scale of these *GPT-2 optimizer memory requirements* illustrates just how significant this overhead becomes for large models.
 
 [^fn-convergence-etymology]: **Convergence**: From Latin "convergere" (to incline together), combining "con-" (together) + "vergere" (to bend, turn). In optimization, convergence describes the process by which iterative algorithms approach a stable solution, where successive updates become smaller until parameters stabilize at a minimum. Training is said to converge when the loss stops decreasing meaningfully, typically requiring 10,000-100,000 iterations for large models.
+
+| **Property** | **SGD** | **Momentum** | **RMSprop** | **Adam** |
+|:---|:---|:---|:---|:---|
+| **Memory Overhead** | None | Velocity terms | Squared gradients | Both velocity and squared gradients |
+| **Memory Cost** | $1\times$ | $2\times$ | $2\times$ | $3\times$ |
+| **Access Pattern** | Sequential | Sequential | Random | Random |
+| **Operations/Parameter** | 2 | 3 | 4 | 5 |
+| **Hardware Efficiency** | Low | Medium | High | Highest |
+| **Convergence Speed** | Slowest | Medium | Fast | Fastest |
+
+: **Optimizer Memory Footprint.** Different optimization algorithms impose varying memory costs due to the storage of intermediate values like gradients, velocities, and squared gradients. Understanding these trade-offs is important for resource-constrained deployments and large-scale model training. {#tbl-optimizer-properties}
 
 ::: {.callout-notebook #notebook-gpt2-optimizer title="GPT-2 Optimizer Memory Requirements"}
 
@@ -726,17 +737,6 @@ These implementation factors determine the practical performance of optimization
 Optimization algorithms in neural network training sit at the intersection of algorithmic efficiency and system performance. While optimizers were developed to improve model convergence, their implementation significantly impacts memory usage, computational requirements, and hardware utilization.
 
 A deeper examination of popular optimization algorithms reveals their varying impacts on system resources. Examine @tbl-optimizer-properties to see how memory costs scale from 1x for SGD to 3x for Adam, with corresponding differences in hardware efficiency and convergence speed that directly influence training system design decisions. SGD maintains minimal memory overhead, requiring storage only for model parameters and current gradients. This lightweight memory footprint comes at the cost of slower convergence and potentially poor hardware utilization due to its sequential update nature.
-
-| **Property** | **SGD** | **Momentum** | **RMSprop** | **Adam** |
-|:---|:---|:---|:---|:---|
-| **Memory Overhead** | None | Velocity terms | Squared gradients | Both velocity and squared gradients |
-| **Memory Cost** | $1\times$ | $2\times$ | $2\times$ | $3\times$ |
-| **Access Pattern** | Sequential | Sequential | Random | Random |
-| **Operations/Parameter** | 2 | 3 | 4 | 5 |
-| **Hardware Efficiency** | Low | Medium | High | Highest |
-| **Convergence Speed** | Slowest | Medium | Fast | Fastest |
-
-: **Optimizer Memory Footprint.** Different optimization algorithms impose varying memory costs due to the storage of intermediate values like gradients, velocities, and squared gradients. Understanding these trade-offs is important for resource-constrained deployments and large-scale model training. {#tbl-optimizer-properties}
 
 Momentum methods introduce additional memory requirements by storing velocity terms for each parameter, doubling the memory footprint compared to SGD. This increased memory cost brings improved convergence through better gradient estimation, while maintaining relatively efficient memory access patterns. The sequential nature of momentum updates allows for effective hardware prefetching and cache utilization.
 
@@ -987,7 +987,7 @@ For GPT-2 with batch_size=32, seq_len=1024, hidden_dim=`{python} hidden_dim_str`
 
 #### Full Model Activation Memory
 
-- 48 layers × ~850 MiB = **`{python} total_act_str` GB** just for activations
+- 48 layers × ~850 MB = **`{python} total_act_str` GB** just for activations
 - Parameters (FP16): `{python} params_gb_str` GB
 - Gradients: `{python} grad_gb_str` GB
 - Optimizer state (Adam, FP32): `{python} opt_gb_str` GB
@@ -1364,6 +1364,8 @@ These three components are tightly integrated to ensure an efficient workflow. D
 
 The architectural overview identified the data pipeline as the first component in the training system. Its efficiency directly determines whether expensive GPU resources remain fully utilized or sit idle waiting for data. While this section focuses on the systems aspects of data movement and preprocessing, the upstream data engineering practices are covered in @sec-data-engineering-ml.
 
+The data pipeline running on the CPU bridges raw data storage and GPU computation. @fig-data-pipeline breaks down this architecture into three distinct zones:
+
 ::: {#fig-data-pipeline fig-env="figure" fig-pos="htb" fig-cap="**CPU-to-GPU Data Flow**: Three distinct zones compose the data pipeline: the storage zone houses raw data on disk, the CPU preprocessing zone handles format conversion, processing, and batching, and the GPU training zone distributes preprocessed batches across multiple GPU workers for parallel computation." fig-alt="Block diagram showing data flow through three zones: Storage Zone with raw data, CPU Preprocessing Zone with format, process, and batch stages, and GPU Training Zone with three GPU workers."}
 ```{.tikz}
 \begin{tikzpicture}[line width=0.75pt,font=\small\sffamily]
@@ -1424,7 +1426,7 @@ The architectural overview identified the data pipeline as the first component i
 ```
 :::
 
-The data pipeline running on the CPU bridges raw data storage and GPU computation. @fig-data-pipeline breaks down this architecture into three distinct zones: the storage zone houses raw data on disk, the CPU preprocessing zone handles format conversion, processing, and batching, and the GPU training zone distributes preprocessed batches across multiple accelerators for parallel computation.
+The storage zone houses raw data on disk, the CPU preprocessing zone handles format conversion, processing, and batching, and the GPU training zone distributes preprocessed batches across multiple accelerators for parallel computation.
 
 In the storage zone, raw data resides on disk, typically in formats like image files for computer vision tasks or text files for natural language processing. The CPU preprocessing zone handles the transformation of this raw data through multiple stages. For example, in an image recognition model, these stages include:
 
@@ -1524,11 +1526,11 @@ Training language models like GPT-2 requires a specialized data pipeline optimiz
    - Bottleneck: GPU forward pass only takes 80ms
 3. Batching & Padding (CPU)
    - Pad sequences to uniform length (1024 tokens)
-   - Pack into tensors: [32, 1024] int64 = `{python} batch_kb_str`KB per batch
+   - Pack into tensors: [32, 1024] int64 = `{python} batch_kb_str` KB per batch
    - Trivial time: <5ms
 4. GPU Transfer (PCIe)
    - PCIe Gen3 x16: 15.75 GB/s theoretical
-   - `{python} batch_kb_str`KB per batch ÷ 15.75 GB/s = `{python} transfer_ms_str`ms (negligible)
+   - `{python} batch_kb_str` KB per batch ÷ 15.75 GB/s = `{python} transfer_ms_str`ms (negligible)
 
 #### Bottleneck Analysis
 
@@ -1736,7 +1738,7 @@ gpt3_fp32_str = f"{gpt3_fp32_gb}"
 gpt3_fp16_str = f"{gpt3_fp16_gb}"
 ```
 
-Consider a representative large model like ResNet-50 (a widely-used image classification architecture) processing images at $224\times224$ resolution with a batch size of 32. The initial convolutional layer produces activation maps of dimension $112\times112\times64$; for a batch of 32 at single-precision (4 bytes), this requires approximately 100 MiB. As the network progresses through its 50 layers, the cumulative memory demands grow substantially: the complete forward pass activations total approximately 8 GiB, gradients require an additional 4 GiB, and model parameters consume 200 MiB. This `{python} total_gb_b32_str`GB total represents over `{python} pct_a100_str`% of a high-end A100 GPU's 40 GiB memory capacity for a single batch.
+Consider a representative large model like ResNet-50 (a widely-used image classification architecture) processing images at $224\times224$ resolution with a batch size of 32. The initial convolutional layer produces activation maps of dimension $112\times112\times64$; for a batch of 32 at single-precision (4 bytes), this requires approximately 100 MB. As the network progresses through its 50 layers, the cumulative memory demands grow substantially: the complete forward pass activations total approximately 8 GB, gradients require an additional 4 GB, and model parameters consume 200 MB. This `{python} total_gb_b32_str`GB total represents over `{python} pct_a100_str`% of a high-end A100 GPU's 40 GB memory capacity for a single batch.
 
 The memory scaling patterns reveal critical hardware utilization trade-offs. Doubling the batch size to 64 increases activation memory to `{python} act_gb_b64_str`GB and gradient memory to `{python} grad_gb_b64_str`GB, totaling `{python} total_gb_b64_str`GB and approaching memory limits. Training larger models at the scale of GPT-3 (`{python} gpt3_params_b`B parameters, representing current large language models) requires approximately `{python} gpt3_fp32_str`GB just for parameters in FP32 (`{python} gpt3_fp16_str`GB in FP16), necessitating distributed memory strategies across multiple high-memory nodes.
 
@@ -1872,7 +1874,7 @@ Batch size, a critical hyperparameter[^fn-hyperparameter-etymology] in machine l
 
 A larger batch size provides a more accurate estimate of the true gradient, allowing for larger learning steps. However, simply increasing the batch size without adjusting the learning rate leads to the **"Linear Scaling Failure"**.
 
-If you double the batch size, you perform half as many updates per epoch. If the learning rate remains constant, the model effectively travels "half the distance" in weight space, causing underfitting. The following plot (@fig-linear-scaling-failure) visualizes this **Generalization Gap** and how the **Linear Scaling Rule** ($\text{LR}_{new} = k \times \text{LR}_{base}$) corrects it.
+If you double the batch size, you perform half as many updates per epoch. If the learning rate remains constant, the model effectively travels "half the distance" in weight space, causing underfitting. @fig-linear-scaling-failure visualizes this **Generalization Gap** and how the **Linear Scaling Rule** ($\text{LR}_{new} = k \times \text{LR}_{base}$) corrects it.
 
 ```{python}
 #| label: fig-linear-scaling-failure
@@ -1958,7 +1960,7 @@ ub_breakeven_str = f"{ub_breakeven:.0f}"
 2.  **Compute Required**: $6 \times 70 \times 10^9 \times 2 \times 10^{12} \approx `{python} ub_flops_mantissa` \times 10^{`{python} ub_flops_exp`}$ FLOPs.
 3.  **Hardware**: NVIDIA H100 (Peak: 1,000 TFLOPS FP16). Assumed Utilization: 50% (500 TFLOPS).
 4.  **Time**: $`{python} ub_flops_mantissa` \times 10^{`{python} ub_flops_exp`} / (500 \times 10^{12}) \approx `{python} ub_time_s_mantissa` \times 10^{`{python} ub_time_s_exp`} \text{ seconds} \approx \mathbf{`{python} ub_years_str` \text{ years}}$ (on 1 GPU).
-5.  **Cluster**: On 1,000 GPUs $\rightarrow$ `{python} ub_cluster_days_str` days.
+5.  **Cluster**: On 1,000 GPUs → `{python} ub_cluster_days_str` days.
 
 **The Economics**:
 
@@ -2651,7 +2653,7 @@ FP8 training doubles Tensor Core throughput again (3.9 PFLOPs on H100 versus 1.9
 Reduced precision not only accelerates computation but also alleviates memory bandwidth bottlenecks. Modern GPUs are increasingly compute-bound rather than bandwidth-bound for large matrix operations, but data movement still limits performance for smaller operations. A100's specifications illustrate this:
 
 - HBM2e bandwidth: `{python} a100_bw_gbs` GB/s
-- FP32 throughput: `{python} a100_tflops_fp32` TFLOPs → requires $`{python} a100_tflops_fp32` \times 10^{12} \times 4 \text{ bytes} = 78 \text{ TB/s}$ if every FLOP needs new data
+- FP32 throughput: `{python} a100_tflops_fp32` TFLOPs → requires `{python} a100_tflops_fp32` × 10¹² × 4 bytes = 78 TB/s if every FLOP needs new data
 - Actual requirement (with data reuse): Much lower, but bandwidth-limited for operations with low arithmetic intensity
 
 FP16 halves memory traffic for the same computation, effectively doubling available bandwidth. For operations like layer normalization (arithmetic intensity approximately 1 FLOP/byte), this bandwidth doubling directly translates to speedups even without Tensor Core involvement.
@@ -2850,7 +2852,6 @@ Flash Attention's performance gains materialize through careful exploitation of 
 import torch
 import torch.nn.functional as F
 
-
 # Standard attention (materializes n×n matrix)
 def standard_attention(q, k, v):
     # q, k, v: [batch, heads, seq_len, head_dim]
@@ -2861,17 +2862,14 @@ def standard_attention(q, k, v):
     output = torch.matmul(attn, v)
     return output
 
-
 # Flash Attention (no n×n materialization)
 def flash_attention(q, k, v):
     # Automatically uses Flash Attention if available
     output = F.scaled_dot_product_attention(q, k, v)
     return output
 
-
 # Explicit Flash Attention 2 (flash-attn library)
 from flash_attn import flash_attn_func
-
 
 def flash_attn_2(q, k, v):
     # q, k, v: [batch, seq_len, heads, head_dim]
@@ -3476,6 +3474,21 @@ The systematic framework—profile, identify bottleneck, apply targeted techniqu
 
 The GPT-2 case study demonstrates how the optimization techniques examined in this section combine to transform infeasible training requirements into practical configurations. @tbl-gpt2-summary quantifies the cumulative impact across memory, time, energy, and cost dimensions:
 
+| **Metric** | **FP32 Baseline** | **Optimized** | **Technique Applied** |
+|:---|:---|:---|:---|
+| **Parameters** | `{python} b_param_str` | `{python} o_param_str` | Mixed precision (FP16) |
+| **Gradients** | `{python} b_grad_str` | `{python} o_grad_str` | Mixed precision (FP16) |
+| **Master Weights** | `{python} b_master_str` | `{python} o_master_str` | AMP Overhead |
+| **Optimizer State (Adam)** | `{python} b_opt_str` | `{python} o_opt_str` | Unchanged (FP32 moments) |
+| **Activations (batch=32)** | `{python} b_act_str` | `{python} o_act_str` | Gradient checkpointing + FP16 |
+| **Total Memory** | **`{python} b_total_mem_str`** | **`{python} o_total_mem_str`** | — |
+| **Training Time (32 V100s)** | `{python} b_time_str` | `{python} o_time_str` | 2.4× Tensor Core speedup |
+| **Energy Consumption** | `{python} b_energy_str` | `{python} o_energy_str` | Reduced time + improved efficiency |
+| **Electricity Cost (@$0.10/kWh)** | `{python} b_cost_str` | `{python} o_cost_str` | — |
+| **Carbon Footprint** | `{python} b_carbon_str` | `{python} o_carbon_str` | Regional grid average (0.45 kg/kWh) |
+
+: **GPT-2 Training Optimization Summary.** Applying mixed-precision training and gradient checkpointing reduces memory from 89 GiB to 32 GiB, training time by 40%, energy consumption by 58%, and carbon footprint proportionally. {#tbl-gpt2-summary}
+
 ```{python}
 #| label: gpt2-summary-calc
 #| echo: false
@@ -3528,21 +3541,6 @@ o_energy_str = f"{o_energy:,.0f} kWh"
 o_cost_str = f"${o_cost:,.0f}"
 o_carbon_str = f"~{o_carbon:.0f} tons CO₂"
 ```
-
-| **Metric** | **FP32 Baseline** | **Optimized** | **Technique Applied** |
-|:---|:---|:---|:---|
-| **Parameters** | `{python} b_param_str` | `{python} o_param_str` | Mixed precision (FP16) |
-| **Gradients** | `{python} b_grad_str` | `{python} o_grad_str` | Mixed precision (FP16) |
-| **Master Weights** | `{python} b_master_str` | `{python} o_master_str` | AMP Overhead |
-| **Optimizer State (Adam)** | `{python} b_opt_str` | `{python} o_opt_str` | Unchanged (FP32 moments) |
-| **Activations (batch=32)** | `{python} b_act_str` | `{python} o_act_str` | Gradient checkpointing + FP16 |
-| **Total Memory** | **`{python} b_total_mem_str`** | **`{python} o_total_mem_str`** | — |
-| **Training Time (32 V100s)** | `{python} b_time_str` | `{python} o_time_str` | 2.4× Tensor Core speedup |
-| **Energy Consumption** | `{python} b_energy_str` | `{python} o_energy_str` | Reduced time + improved efficiency |
-| **Electricity Cost (@$0.10/kWh)** | `{python} b_cost_str` | `{python} o_cost_str` | — |
-| **Carbon Footprint** | `{python} b_carbon_str` | `{python} o_carbon_str` | Regional grid average (0.45 kg/kWh) |
-
-: **GPT-2 Training Optimization Summary.** Applying mixed-precision training and gradient checkpointing reduces memory from 89 GiB to 32 GiB, training time by 40%, energy consumption by 58%, and carbon footprint proportionally. {#tbl-gpt2-summary}
 
 ```{python}
 #| label: optimization-summary-calc
@@ -3637,8 +3635,7 @@ Training large models is not just a compute challenge; it's a massive energy sin
 4.  **Time**: $\approx `{python} cf_time_days_str`$ days on `{python} f"{cf_num_gpus}"` GPUs.
 5.  **Energy**: $(`{python} f"{cf_num_gpus}"` \text{ GPUs} \times `{python} cf_gpu_tdp_str`\text{W} + `{python} f"{cf_hosts}"` \text{ hosts} \times `{python} f"{cf_cpu_tdp_per_host_w}"`\text{W}) \times `{python} cf_time_hours_str` \text{ hours} \approx \mathbf{`{python} cf_energy_kwh_str` \text{ kWh}}$
 
-**The Systems Conclusion**:
-This single training run consumes as much electricity as an average US household uses in **`{python} cf_household_months_str` months**.
+**The Systems Conclusion**: This single training run consumes as much electricity as an average US household uses in **`{python} cf_household_months_str` months**.
 
 - **The Optimization Dividend**: Improving **Utilization** from 30% to 60% doesn't just halve the time; it saves ~`{python} cf_energy_saved_str` kWh of energy and reduces the carbon footprint by over **`{python} cf_co2_str` tons of CO2** (assuming average grid intensity).
 - **The True Cost**: Training systems engineering is the primary lever for sustainable AI. Every 1% gain in efficiency at scale is equivalent to taking dozens of cars off the road for a year.
