@@ -81,7 +81,7 @@ Throughout this book, five Lighthouse Models have served as our systems detectiv
 - **GPT-2/Llama** exposed the memory bandwidth wall: why attention is memory-bound, how KV-caches dominate serving costs, and why model parallelism becomes necessary at scale.
 - **MobileNetV2** demonstrated efficiency under constraint: depthwise separable convolutions trading parameters for latency, quantization enabling deployment on mobile NPUs, and the Pareto frontier between accuracy and power.
 - **DLRM** revealed the embedding table challenge: memory capacity as the binding constraint, the unique demands of recommendation systems, and why sparse operations behave differently than dense matrix multiplication.
-- **Keyword Spotting (KWS)** brought us to the extreme edge: sub-megabyte models running on microcontrollers, always-on inference under microwatt power budgets, and the TinyML frontier where every byte matters.
+- **Keyword Spotting (KWS) / Wake Vision** brought us to the extreme edge: sub-megabyte models running on microcontrollers, always-on inference under microwatt power budgets, and the TinyML frontier where every byte matters.
 
 These five workloads span the full deployment spectrum from datacenter to microcontroller. Together, they have probed every bottleneck and tested every optimization strategy. The systems thinking you developed by following these Lighthouses across chapters, from architecture design through training, optimization, and deployment, is precisely the integrated perspective that distinguishes ML systems engineering from isolated algorithm development.
 
@@ -109,12 +109,12 @@ Throughout this book, each Part introduced quantitative principles that govern M
 |:----|:--------------------------|:-------------|:---------------------------------------------------------------------------|:-----------------------------------------------------------------------------|
 | 1     | Data as Code Invariant      | I: Foundations | System Behavior $\approx f(\text{Data})$                                     | Changing data changes the program                                              |
 | 2     | Data Gravity Invariant      | I: Foundations | $C_{move}(D) \gg C_{move}(\text{Compute})$                                   | Move compute to data, not data to compute                                      |
-| 3     | Iron Law of ML Systems      | II: Build      | $L = (D_{move} + \text{Compute}$ $+ \text{Overhead})/\eta$                   | Every optimization pulls one of three levers; reducing one may inflate another |
+| 3     | Iron Law of ML Systems      | II: Build      | $T = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot \eta} + L_{lat}$           | Every optimization pulls one of three levers; reducing one may inflate another |
 | 4     | Silicon Contract            | II: Build      | Every architecture bets on which hardware resource it saturates              | Mismatched hardware wastes money; matched hardware unlocks peak throughput     |
 | 5     | Pareto Frontier             | III: Optimize  | Multi-objective optimization; no free improvements                           | There is no universal optimum; every gain trades against another metric        |
-| 6     | Arithmetic Intensity Law    | III: Optimize  | $P = \min(P_{peak},\; I \times B_{mem})$                                     | Adding compute to a memory-bound model yields zero gain                        |
+| 6     | Arithmetic Intensity Law    | III: Optimize  | $P = \min(R_{peak},\; I \times BW)$                                          | Adding compute to a memory-bound model yields zero gain                        |
 | 7     | Energy-Movement Invariant   | III: Optimize  | $E_{move} \gg E_{compute}$ (100-500x)                                        | Data locality, not raw FLOPS, drives efficiency                                |
-| 8     | Amdahl's Law                | III: Optimize  | $\text{Speedup} = 1 / ((1-p) + p/s)$                                         | The serial fraction caps all parallelism gains                                 |
+| 8     | Amdahl's Law                | III: Optimize  | $\text{Speedup} = \frac{1}{(1-p) + \frac{p}{s}}$                             | The serial fraction caps all parallelism gains                                 |
 | 9     | Verification Gap            | IV: Deploy     | $P(f(X) \approx Y) > 1 - \epsilon$                                           | ML testing is statistical; you bound error, not prove correctness              |
 | 10    | Statistical Drift Invariant | IV: Deploy     | $\text{Acc}(t) \approx \text{Acc}_0 - \lambda \cdot D(P_t \Vert P_0)$        | Models decay without code changes; the world drifts away from training data    |
 | 11    | Training-Serving Skew Law   | IV: Deploy     | $\Delta\text{Acc} \geq \mathbb{E}[\lvert f_{serve}(x) - f_{train}(x)\rvert]$ | Even subtle preprocessing differences silently degrade accuracy                |
@@ -186,7 +186,28 @@ This cycle of mutual constraint is best understood visually. @fig-invariants-cyc
 ```
 :::
 
-As the figure illustrates, this is not a linear progression but a cycle: operational realities feed back into foundational decisions, requiring new data and triggering fresh passes through the entire stack. Notice how the Deploy-to-Foundations arrow carries Invariants 9–12—the deployment invariants that detect drift, skew, and verification failures. These are the signals that force the system to evolve, closing the loop and beginning a new iteration. The twelve invariants provide a theoretical foundation, but their value emerges through application. The following sections demonstrate how these principles guide decisions across different AI domains.
+As the figure illustrates, this is not a linear progression but a cycle: operational realities feed back into foundational decisions, requiring new data and triggering fresh passes through the entire stack. Notice how the Deploy-to-Foundations arrow carries Invariants 9–12—the deployment invariants that detect drift, skew, and verification failures. These are the signals that force the system to evolve, closing the loop and beginning a new iteration.
+
+::: {.callout-perspective title="Napkin Math: The Cost of a Token"}
+Let's apply the *Iron Law* (Invariant 3) and *Arithmetic Intensity* (Invariant 6) to a real-world problem: serving one token from a 70B parameter model (like Llama-2-70B) on an NVIDIA H100.
+
+**The Physics:**
+
+- **Model Size ($D_{vol}$):** 70B params $\times$ 2 bytes (FP16) = 140 GB.
+- **Compute ($O$):** $\approx 2 \times P$ per token = 140 GFLOPs.
+- **Hardware:** H100 ($BW = 3.35$ TB/s, $R_{peak} \approx 1000$ TFLOPs FP16).
+
+**The Calculation:**
+
+- **Time to Move Data:** $T_{mem} = \frac{140 \text{ GB}}{3,350 \text{ GB/s}} \approx 41.8 \text{ ms}$.
+- **Time to Compute:** $T_{comp} = \frac{140 \times 10^9}{1,000 \times 10^{12}} = 0.14 \text{ ms}$.
+
+**The Conclusion:**
+
+$T_{mem}$ is $300\times$ larger than $T_{comp}$. The system is heavily **Memory Bound** (Arithmetic Intensity $\approx 1$). To honor the *Silicon Contract*, we must either increase Arithmetic Intensity (via batching users to reuse $D_{vol}$) or reduce Data Volume (via quantization to INT4). A systems engineer who optimizes compute kernels ($T_{comp}$) without addressing memory ($T_{mem}$) wastes 100% of their effort.
+:::
+
+The twelve invariants provide a theoretical foundation, but their value emerges through application. The following sections demonstrate how these principles guide decisions across different AI domains.
 
 ## Principles in Practice {#sec-conclusion-applying-principles-across-three-critical-domains-821a}
 

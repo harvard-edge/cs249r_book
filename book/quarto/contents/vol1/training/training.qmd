@@ -253,8 +253,8 @@ Training systems occupy a critical position in the machine learning pipeline: th
 Modern training systems face three scaling challenges that define their architecture. First, **data scale**: processing petabyte datasets requires efficient I/O pipelines and distributed storage.
 
 ::: {.callout-perspective title="The 10 GB to 10 TB Scale Factor"}
--   **At 10 GB**: You can often fit the entire dataset in system RAM. Data loading is a one-time "startup cost," and the disk bandwidth ($B$) doesn't matter after the first few seconds.
--   **At 10 TB**: Data becomes a continuous, high-pressure stream. You can no longer "load" the data; you must **orchestrate** its movement. The $D$ term shifts from a storage bottleneck to a **Networking and I/O bottleneck**, requiring zero-copy paths and multi-worker prefetching just to keep the GPU from starving.
+-   **At 10 GB**: You can often fit the entire dataset in system RAM. Data loading is a one-time "startup cost," and the disk bandwidth ($BW$) doesn't matter after the first few seconds.
+-   **At 10 TB**: Data becomes a continuous, high-pressure stream. You can no longer "load" the data; you must **orchestrate** its movement. The $D_{vol}$ term shifts from a storage bottleneck to a **Networking and I/O bottleneck**, requiring zero-copy paths and multi-worker prefetching just to keep the GPU from starving.
 
 Scale is not just "more data"; it is a transformation of the system's physics.
 
@@ -437,7 +437,7 @@ The critical question for ML systems engineers is not *what* these functions do 
 
 Because activation functions execute millions of times per training step, even small per-operation differences compound into significant training time impact. The selection of an activation function directly influences training throughput and hardware efficiency. @fig-activation-perf quantifies these performance differences through CPU benchmarks on Apple M2 hardware, revealing that Tanh executes in 0.61 seconds compared to Sigmoid's 1.10 seconds, a 1.8$\times$ speedup.
 
-::: {#fig-activation-perf fig-env="figure" fig-pos="htb" fig-cap="**Activation Function Execution Time**: CPU benchmarks on Apple M2 hardware reveal significant variation: Tanh completes in 0.61 seconds, ReLU in 0.78 seconds, Softmax in 0.91 seconds, and Sigmoid in 1.10 seconds. These differences directly affect training throughput and real-time inference latency, making activation function selection a system-level design decision." fig-alt="Bar chart comparing CPU execution times: Sigmoid at 1.1 seconds, Tanh at 0.61 seconds, ReLU at 0.78 seconds, and Softmax at 0.91 seconds."}
+::: {#fig-activation-perf fig-env="figure" fig-pos="htb" fig-cap="**Activation Function Execution Time**: CPU benchmarks on Apple M2 hardware reveal significant variation: Tanh completes in 0.61 seconds, ReLU in 0.45 seconds, Softmax in 0.91 seconds, and Sigmoid in 1.10 seconds. These differences directly affect training throughput and real-time inference latency, making activation function selection a system-level design decision." fig-alt="Bar chart comparing CPU execution times: Sigmoid at 1.1 seconds, Tanh at 0.61 seconds, ReLU at 0.45 seconds, and Softmax at 0.91 seconds."}
 ```{.tikz}
 \scalebox{0.8}{%
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -449,10 +449,10 @@ Because activation functions execute millions of times per training step, even s
 
 \begin{axis}[
     ylabel={Execution Time (seconds)},
-    ymin=0.49,
+    ymin=0.40,
     axis lines=left,
     axis line style={thick,-latex},
-    ytick={0.5,0.6,...,1.1},
+    ytick={0.4,0.5,...,1.1},
     yticklabel style={font=\footnotesize\usefont{T1}{phv}{m}{n},
     /pgf/number format/.cd, fixed, fixed zerofill, precision=2},
     xticklabel style={font=\footnotesize\usefont{T1}{phv}{m}{n}},
@@ -472,7 +472,7 @@ Because activation functions execute millions of times per training step, even s
         }]
       \addplot[RedLine] coordinates {(1,1.1)};
       \addplot[BlueLine] coordinates {(2,0.61)};
-      \addplot[GreenLine] coordinates {(3,0.78)};
+      \addplot[GreenLine] coordinates {(3,0.45)};
       \addplot[OrangeLine] coordinates {(4,0.91)};
 \end{axis}
 \end{tikzpicture}}
@@ -1827,7 +1827,7 @@ The memory scaling analysis from @sec-ai-training-optimization-algorithm-system-
 
 At billion-parameter scale, optimizer state dominates the memory budget. As quantified in the GPT-2 worked example (@sec-ai-training-optimization-algorithm-system-implications-f9f2), a 1.5B parameter model requires 24 GB for optimizer state alone in FP32—before accounting for activations. This challenge has motivated memory-efficient optimizer variants. @fig-galore-llm-memory-breakdown demonstrates how GaLoRE addresses this constraint: by computing updates in a compressed space [@zhao2024galorememoryefficientllmtraining], the technique reduces the memory footprint dominated by optimizer states to a fraction of its original size, enabling training of larger models on fixed hardware.
 
-::: {#fig-galore-llm-memory-breakdown fig-env="figure" fig-pos="htb" fig-cap="**Memory Footprint Breakdown**: Memory usage of LLaMA-7B across four optimizer configurations, decomposed into weights, activations, optimizer state, weight gradients, and other components. The dashed red line marks the RTX 4090 24 GB memory limit, illustrating how standard Adam exceeds single-GPU capacity while GaLoRE compression reduces optimizer state enough to fit within this budget." fig-alt="Stacked horizontal bar chart comparing memory usage across four optimizers for LLaMA-7B. Shows components: others, weight gradient, optimization, activation, and weight. Dashed red line marks RTX 4090 memory limit at 30 GB."}
+::: {#fig-galore-llm-memory-breakdown fig-env="figure" fig-pos="htb" fig-cap="**Memory Footprint Breakdown**: Memory usage of LLaMA-7B across four optimizer configurations, decomposed into weights, activations, optimizer state, weight gradients, and other components. The dashed red line marks the RTX 4090 24 GB memory limit, illustrating how standard Adam exceeds single-GPU capacity while GaLoRE compression reduces optimizer state enough to fit within this budget." fig-alt="Stacked horizontal bar chart comparing memory usage across four optimizers for LLaMA-7B. Shows components: others, weight gradient, optimization, activation, and weight. Dashed red line marks RTX 4090 memory limit at 24 GB."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
 % Standard color definitions
@@ -3871,14 +3871,14 @@ Model parallelism's challenge is *idle time*. While Device 1 computes layers 1--
 **1. Data Parallelism (Split the Batch)**
 
 *   **Compute ($O$)**: Split by $N$ (Each GPU does $1/N$ of the batch).
-*   **Memory ($D$)**: **Replicated**. Every GPU must hold the full model weights $P$.
+*   **Memory ($D_{vol}$)**: **Replicated**. Every GPU must hold the full model weights $P$.
 *   **Communication**: **Gradients**. Size $\propto P$. Occurs at end of backward pass.
 *   **Bottleneck**: When Model Size $P >$ GPU Memory.
 
 **2. Model Parallelism (Split the Weights)**
 
 *   **Compute ($O$)**: Split by $N$ (Each GPU computes part of the layer).
-*   **Memory ($D$)**: **Split**. Each GPU holds $P/N$ weights.
+*   **Memory ($D_{vol}$)**: **Split**. Each GPU holds $P/N$ weights.
 *   **Communication**: **Activations**. Size $\propto B \times \text{Width}$. Occurs at every layer boundary.
 *   **Bottleneck**: When Activation Size is large (high communication frequency).
 
@@ -4008,7 +4008,7 @@ Training system mastery separates engineers who ship models from those who ship 
 
 ::: {.callout-chapter-connection title="From Build to Optimize"}
 
-We have built the power plant of modern AI: systems capable of training models at the scale of GPT-2 and beyond. But these massive models are often too heavy to fly in real-world environments like mobile phones or embedded sensors. We turn next to @sec-data-selection, where we begin the optimization journey by maximizing the learning value of every data sample before addressing the computational cost of the model artifact itself.
+We have built the power plant of modern AI: systems capable of training models at the scale of GPT-2 and beyond. But these massive models are often too heavy to fly in real-world environments like mobile phones or embedded sensors. We turn next to @sec-model-compression, where we begin the optimization journey by reducing the computational cost and memory footprint of the model artifact itself through quantization and pruning.
 
 :::
 
