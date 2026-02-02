@@ -1,6 +1,7 @@
 ---
 title: "Machine Foundations"
 id: sec-machine-foundations
+engine: jupyter
 ---
 
 This appendix covers the hardware and physical constraints that govern ML system performance. From performance modeling to memory hierarchies to numerical precision, these are the "speed limits" that every ML engineer must understand. The concepts here underpin the hardware acceleration strategies in @sec-ai-acceleration, the training optimizations in @sec-ai-training, and the serving architectures in @sec-model-serving-systems.
@@ -110,9 +111,9 @@ Consider an NVIDIA A100 GPU with FP16 Tensor Core performance of `{python} a100_
 
 Now compare two common operations:
 
-**GEMM (Matrix Multiplication)**: For two $`{python} n_gemm` \times `{python} n_gemm`$ matrices, arithmetic intensity is approximately $`{python} gemm_intensity`$ FLOP/byte. Since $`{python} gemm_intensity` > `{python} ridge_point`$, this operation is compute-bound. You are using the hardware efficiently.
+**GEMM (Matrix Multiplication)**: For two `{python} n_gemm`$\times$`{python} n_gemm` matrices, arithmetic intensity is approximately `{python} gemm_intensity` FLOP/byte. Since `{python} gemm_intensity` $>$ `{python} ridge_point`, this operation is compute-bound. You are using the hardware efficiently.
 
-**ReLU (Element-wise)**: For a $`{python} n_gemm` \times `{python} n_gemm`$ tensor, intensity is approximately $`{python} relu_intensity`$ op/byte. Since $`{python} relu_intensity` \ll `{python} ridge_point`$, this operation is severely memory-bound, achieving only about $`{python} relu_util_str`\%$ of peak TFLOP/s. The hardware is mostly waiting for data.
+**ReLU (Element-wise)**: For a `{python} n_gemm`$\times$`{python} n_gemm` tensor, intensity is approximately `{python} relu_intensity` op/byte. Since `{python} relu_intensity` $\ll$ `{python} ridge_point`, this operation is severely memory-bound, achieving only about `{python} relu_util_str`% of peak TFLOP/s. The hardware is mostly waiting for data.
 
 This explains why modern frameworks fuse operations: combining ReLU with the preceding MatMul avoids writing intermediate results to memory, effectively increasing arithmetic intensity.
 
@@ -138,18 +139,19 @@ As $n \to \infty$, the term $\frac{1-s}{n} \to 0$, and the speedup converges to 
 
 # Amdahl's Law: Speedup(n) = 1 / (s + (1-s)/n)
 s = 0.05
+p = 1 - s  # parallel fraction
 n_8 = 8
-amdahl_8 = 1 / (s + (1 - s) / n_8)
-amdahl_8_str = f"{amdahl_8:.1f}"          # "5.9"
+amdahl_8 = 1 / (s + p / n_8)
+amdahl_8_str = f"{amdahl_8:.1f}"
 amdahl_inf = 1 / s
-amdahl_inf_str = f"{amdahl_inf:.0f}"      # "20"
+amdahl_inf_str = f"{amdahl_inf:.0f}"
 ```
 
 *   With $n=1$, speedup is 1.
-*   With $n=8$, speedup is $\frac{1}{0.05 + 0.95/8} \approx `{python} amdahl_8_str`\times$.
-*   With $n=\infty$, speedup is capped at $1/0.05 = `{python} amdahl_inf_str`\times$.
+*   With $n=8$, speedup is $\frac{1}{0.05 + 0.95/8}$ $\approx$ `{python} amdahl_8_str`$\times$.
+*   With $n=\infty$, speedup is capped at $1/0.05$ = `{python} amdahl_inf_str`$\times$.
 
-No matter how many GPUs you buy, you cannot make this fixed workload run faster than 20x.
+No matter how many accelerators you buy, you cannot make this fixed workload run faster than `{python} amdahl_inf_str`x.
 
 #### Weak Scaling (Gustafson's Law)
 
@@ -179,8 +181,8 @@ gustafson_1000_str = f"{gustafson_1000:.0f}"       # "950"
 ```
 
 *   With $n=1$, speedup is 1.
-*   With $n=8$, Scaled Speedup is $8 - 0.05(7) = 8 - `{python} gustafson_8_serial` = `{python} gustafson_8_str`\times$.
-*   With $n=1000$, Scaled Speedup is $1000 - 0.05(999) \approx `{python} gustafson_1000_str`\times$.
+*   With $n=8$, Scaled Speedup is $8 - 0.05(7) = 8 - 0.35$ = `{python} gustafson_8_str`$\times$.
+*   With $n=1000$, Scaled Speedup is $1000 - 0.05(999)$ $\approx$ `{python} gustafson_1000_str`$\times$.
 
 In weak scaling, efficiency remains high because the useful work (training the model) scales up to dwarf the fixed overheads.
 
@@ -221,7 +223,9 @@ T_minutes_str = f"{T_minutes:.0f}"                                            # 
 **Example**: Training a **1B parameter** model on **20B tokens** using **1 A100** (`{python} a100_fp16` TFLOPS) at **40% utilization**.
 $$ \text{Total FLOPs} = 6 \times 10^9 \times 20 \times 10^9 = 1.2 \times 10^{20} \text{ FLOPs} $$
 $$ \text{Throughput} = 1 \times (312 \times 10^{12}) \times 0.40 \approx 1.25 \times 10^{14} \text{ FLOP/s} $$
-$$ T = \frac{1.2 \times 10^{20}}{1.25 \times 10^{14}} \approx `{python} T_seconds_str` \text{ seconds} \approx `{python} T_minutes_str` \text{ minutes} $$
+$$ T = \frac{1.2 \times 10^{20}}{1.25 \times 10^{14}} \approx 960{,}000 \text{ seconds} \approx 16{,}000 \text{ minutes} $$
+
+The computed result: **`{python} T_seconds_str` seconds** ($\approx$ `{python} T_minutes_str` minutes, or about 11 days).
 
 ::::
 
@@ -242,7 +246,7 @@ L_concurrent = lambda_qps * W_latency_s
 L_concurrent_str = f"{L_concurrent:.0f}"   # "50"
 ```
 
-**Example**: To sustain 1,000 queries per second (QPS) with 50ms average latency, your system must support $1000 \times 0.05 = `{python} L_concurrent_str`$ concurrent requests.
+**Example**: To sustain 1,000 queries per second (QPS) with 50ms average latency, your system must support $1000 \times 0.05 =$ `{python} L_concurrent_str` concurrent requests.
 
 **Implication for Memory**: This tells you exactly how to size your inference worker pools. If serving one request requires 1 GB of temporary memory (KV cache, activations), handling 50 concurrent requests requires 50 GB of memory. If your accelerator only has 24 GB, you are physically limited to 24 concurrent requests. Your maximum throughput is capped at $L/W = 24 / 0.05 = 480$ QPS, regardless of how many requests arrive.
 
@@ -337,8 +341,8 @@ tx_time_us_str = f"{tx_time_us:.1f}"   # "0.8"
 ```
 
 *   **Latency-Bound (1KB Packet)**:
-    *   Transmission: $1\text{KB} / 10\text{Gbps} \approx `{python} tx_time_us_str` \mu s$.
-    *   Total Time $\approx 10\text{ms} + `{python} tx_time_us_str`\mu s \approx 10\text{ms}$.
+    *   Transmission: 1KB / 10Gbps $\approx$ `{python} tx_time_us_str` $\mu$s.
+    *   Total Time $\approx$ 10ms + `{python} tx_time_us_str`$\mu$s $\approx$ 10ms.
     *   *Result*: The bandwidth is irrelevant; the speed of light (ping) is the bottleneck.
 
 *   **Bandwidth-Bound (1GB Checkpoint)**:
