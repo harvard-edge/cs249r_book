@@ -1601,6 +1601,29 @@ y.backward()
 
 **Detach vs. Data.** Use `.detach()` to safely break gradient flow. The deprecated `.data` attribute can silently corrupt gradient computation through in-place operations:
 
+::: {#lst-detach-vs-data lst-cap="**Safe Gradient Detachment**: Use `.detach()` to safely break gradient flow. The deprecated `.data` attribute can silently corrupt gradients through in-place operations."}
+```{.python}
+x = torch.tensor([1.0], requires_grad=True)
+y = x * 2
+
+# SAFE: .detach() creates a new tensor that shares storage
+# but is not part of the computation graph
+z_safe = y.detach()
+z_safe.mul_(100)  # In-place operation on detached tensor
+# y is unchanged, gradient computation is safe
+
+# DANGEROUS: .data bypasses autograd entirely
+# In-place modifications corrupt the computation graph
+z_unsafe = y.data
+z_unsafe.mul_(100)  # This modifies y's underlying storage!
+# y.backward() now computes wrong gradients
+
+# Best practice: always use .detach() for inference
+with torch.no_grad():
+    inference_output = model(x).detach()
+```
+:::
+
 These three principles connect directly to the framework's role as a compiler for the Silicon Contract. The reverse-linked graph determines which operations the backward pass must execute (the $Ops$ term). The memory-compute trade-off governs how much data the framework must move through the memory hierarchy (the $D$ term). And the extensibility mechanisms allow engineers to tune both terms for their specific workload. The interaction between autograd memory management and numerical precision leads naturally to mixed-precision training, which further reduces the $D$ term.
 
 **Mixed-Precision Training Support.** Mixed precision exploits a hardware asymmetry to improve two Iron Law terms simultaneously: Tensor Cores execute FP16 matrix multiplications at 2x the throughput of FP32 (increasing effective $O/R_{peak}$), while FP16 activations halve the memory footprint (reducing $D_{vol}$). Improving both terms simultaneously is rare; most optimizations improve one at the expense of the other.
@@ -2843,7 +2866,40 @@ handle_bwd.remove()
 ```
 :::
 
-**State Dictionary and Model Serialization.** The `state_dict()` mechanism provides checkpoint management, and `load_state_dict()` restores model state. Using `strict=False` enables partial loading for architecture modifications during fine-tuning. @lst-state_dict demonstrates the save/load cycle.
+**State Dictionary and Model Serialization.** The `state_dict()` mechanism provides checkpoint management, and `load_state_dict()` restores model state. Using `strict=False` enables partial loading for architecture modifications during fine-tuning.
+
+::: {#lst-state_dict lst-cap="**State Dictionary Serialization**: Save and load model state using `state_dict()` and `load_state_dict()`. The `strict=False` parameter enables partial loading for transfer learning."}
+```{.python}
+import torch
+import torch.nn as nn
+
+model = nn.Sequential(
+    nn.Linear(784, 256),
+    nn.ReLU(),
+    nn.Linear(256, 10)
+)
+
+# Save model state
+torch.save(model.state_dict(), "model.pt")
+
+# Load into same architecture
+model.load_state_dict(torch.load("model.pt"))
+
+# Load into modified architecture (e.g., added layers)
+# strict=False ignores missing/unexpected keys
+new_model = nn.Sequential(
+    nn.Linear(784, 256),
+    nn.ReLU(),
+    nn.Linear(256, 128),  # Modified
+    nn.ReLU(),
+    nn.Linear(128, 10)
+)
+new_model.load_state_dict(
+    torch.load("model.pt"),
+    strict=False  # Load matching layers only
+)
+```
+:::
 
 ## Major Framework Platform Analysis {#sec-ai-frameworks-major-framework-platform-analysis-fe96}
 
