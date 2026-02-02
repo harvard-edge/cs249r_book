@@ -84,7 +84,7 @@ A single forward pass through GPT-2 requires roughly $10^{10}$ floating-point op
 
 :::
 
-Three characteristics make training workloads fundamentally different from general-purpose computing, and concrete numbers illustrate why each matters. First, *computational intensity*: GPT-2's $10^{23}$ FLOPs spread over days of wall-clock time demands sustained petaFLOPS-scale throughput from hardware that rarely exceeds 30 to 70 percent utilization. Second, *memory pressure*: storing 1.5 billion weights requires 6 GiB in FP32, but the Adam optimizer adds two additional state tensors per parameter (another 12 GiB), and activation storage across 48 transformer layers can double or triple the total, easily exceeding a single GPU's memory capacity. Third, *data dependencies*: each gradient update depends on the result of the previous one, creating sequential bottlenecks that limit how much parallelism the system can exploit.
+Three characteristics make training workloads fundamentally different from general-purpose computing, and concrete numbers illustrate why each matters. First, *computational intensity*: GPT-2's $10^{23}$ FLOPs spread over days of wall-clock time demands sustained petaFLOPS-scale throughput from hardware that rarely exceeds 30 to 70 percent utilization. Second, *memory pressure*: storing 1.5 billion weights requires 6 GB in FP32, but the Adam optimizer adds two additional state tensors per parameter (another 12 GB), and activation storage across 48 transformer layers can double or triple the total, easily exceeding a single GPU's memory capacity. Third, *data dependencies*: each gradient update depends on the result of the previous one, creating sequential bottlenecks that limit how much parallelism the system can exploit.
 
 Each of these challenges opens a corresponding optimization pathway. Computational intensity can be addressed through hardware acceleration and precision reduction. Memory pressure responds to techniques like **gradient checkpointing**, which trades recomputation for reduced activation storage, and **mixed-precision training**, which halves the memory footprint of weights and activations. Data dependencies motivate pipeline designs that overlap computation with data movement so the GPU never sits idle waiting for the next batch. This chapter focuses on single-machine and single-node multi-GPU training; scaling to hundreds of machines across network boundaries introduces communication and fault tolerance challenges that are the subject of *Distributed Training Systems* in Volume II. We use the *Iron Law of Training Performance* as our organizing framework, examining how each optimization technique targets specific terms in the performance equation. Before formalizing that framework, consider how these constraints interact in practice when a single *gradient explosion* can erase days of expensive computation.
 
@@ -192,7 +192,7 @@ GPT-2 (1.5B) serves as our primary case study for **large-scale training** becau
 
 | **Property** | **Specification** | **Systems Implication** |
 |:---|---:|:---|
-| **Parameters** | 1.5 Billion (XL) | Requires ~3 GiB (FP16) or ~6 GiB (FP32) for weights alone. |
+| **Parameters** | 1.5 Billion (XL) | Requires ~3 GB (FP16) or ~6 GB (FP32) for weights alone. |
 | **Architecture** | 48 Layers, 1600 Dim | Deep pipeline creates heavy activation memory pressure. |
 | **Dataset** | OpenWebText (40GB) | I/O throughput must match high-speed accelerator compute. |
 | **Compute** | ~ $10^{23}$ FLOPs total | Training takes days/weeks; demands parallelization. |
@@ -236,8 +236,8 @@ Training systems occupy a critical position in the machine learning pipeline: th
 
 Modern training systems face three scaling challenges that define their architecture. First, **data scale**: processing petabyte datasets requires efficient I/O pipelines and distributed storage.
 
-::: {.callout-perspective title="The 10 GiB to 10 TiB Scale Factor"}
--   **At 10 GiB**: You can often fit the entire dataset in system RAM. Data loading is a one-time "startup cost," and the disk bandwidth ($B$) doesn't matter after the first few seconds.
+::: {.callout-perspective title="The 10 GB to 10 TB Scale Factor"}
+-   **At 10 GB**: You can often fit the entire dataset in system RAM. Data loading is a one-time "startup cost," and the disk bandwidth ($B$) doesn't matter after the first few seconds.
 -   **At 10 TB**: Data becomes a continuous, high-pressure stream. You can no longer "load" the data; you must **orchestrate** its movement. The $D$ term shifts from a storage bottleneck to a **Networking and I/O bottleneck**, requiring zero-copy paths and multi-worker prefetching just to keep the GPU from starving.
 
 Scale is not just "more data"; it is a transformation of the system's physics.
@@ -631,7 +631,7 @@ adam_overhead_str = f"{adam_overhead_mb}"
 
 The system implications of Adam are more substantial than previous methods. The optimizer must store two additional vectors ($m_t$ and $v_t$) for each parameter, tripling the memory required for optimization state. For a model with 100 million parameters using 32-bit floating-point numbers, the additional memory requirement is approximately `{python} adam_overhead_str` MB.
 
-[^fn-adam-optimizer-memory]: **Adam (Adaptive Moment Estimation)**: Introduced by Kingma and Ba in 2015, Adam became the default optimizer for deep learning due to its robust performance across diverse architectures. The algorithm maintains per-parameter learning rates using first and second moment estimates, requiring 3x the memory of SGD (parameters + two state vectors). For a 7B model in FP32, this means 84 GiB for optimizer state alone, driving the adoption of memory-efficient variants like 8-bit Adam (2x compression) and GaLoRE (gradient low-rank projection).
+[^fn-adam-optimizer-memory]: **Adam (Adaptive Moment Estimation)**: Introduced by Kingma and Ba in 2015, Adam became the default optimizer for deep learning due to its robust performance across diverse architectures. The algorithm maintains per-parameter learning rates using first and second moment estimates, requiring 3x the memory of SGD (parameters + two state vectors). For a 7B model in FP32, this means 84 GB for optimizer state alone, driving the adoption of memory-efficient variants like 8-bit Adam (2x compression) and GaLoRE (gradient low-rank projection).
 
 #### Optimization Algorithm System Implications {#sec-ai-training-optimization-algorithm-system-implications-f9f2}
 
@@ -697,16 +697,16 @@ total_static_amp_str = f"{total_static_amp:.0f}"
 
 For GPT-2's 1.5B parameters in FP32 (4 bytes each):
 
-- Parameters: 1.5B × 4 bytes = `{python} param_fp32_str` GiB
-- Gradients: 1.5B × 4 bytes = `{python} grad_fp32_str` GiB
-- Adam State (m, v): 1.5B × 8 bytes = `{python} adam_state_str` GiB
-- Total static memory: `{python} total_static_fp32_str` GiB
+- Parameters: 1.5B × 4 bytes = `{python} param_fp32_str` GB
+- Gradients: 1.5B × 4 bytes = `{python} grad_fp32_str` GB
+- Adam State (m, v): 1.5B × 8 bytes = `{python} adam_state_str` GB
+- Total static memory: `{python} total_static_fp32_str` GB
 
-This explains why GPT-2 training requires 32 GiB+ V100 GPUs even before considering activation memory.
+This explains why GPT-2 training requires 32 GB+ V100 GPUs even before considering activation memory.
 
 **System Decisions Driven by Optimizer**
 
-1. Mixed precision training (FP16) reduces operation precision but requires keeping FP32 master weights, maintaining the static memory footprint at ~`{python} total_static_amp_str` GiB.
+1. Mixed precision training (FP16) reduces operation precision but requires keeping FP32 master weights, maintaining the static memory footprint at ~`{python} total_static_amp_str` GB.
 2. Gradient accumulation (splitting effective batches into smaller micro-batches) allows effective batch_size=512 despite memory limits.
 
 Adam's memory overhead is a necessary trade-off for convergence. GPT-2 converges in ~50K steps vs. ~150K+ steps with SGD+Momentum, saving weeks of training time despite higher per-step cost.
@@ -891,7 +891,7 @@ The optimization algorithms above specify how to update parameters given gradien
 
 The backpropagation algorithm[^fn-backpropagation] computes gradients by systematically moving backward through a neural network's computational graph. In @sec-deep-learning-systems-foundations-gradient-computation-backpropagation-dacf, we established the mathematical foundation: the chain rule breaks gradient computation into layer-by-layer operations, with each layer receiving adjustment signals proportional to its contribution to the final error. If terms like "computational graph" or "gradient flow" feel unfamiliar, the factory assembly line analogy in that section is worth revisiting.
 
-[^fn-backpropagation]: **Backpropagation Algorithm**: Independently rediscovered multiple times, backpropagation was popularized by Rumelhart, Hinton, and Williams in 1986 (though similar ideas appeared in Werbos 1974). This breakthrough enabled training of deep networks by efficiently computing gradients in O(n) time vs. naive O(n²) approaches. Modern implementations require careful memory management since storing all activations for a ResNet-50 consumes 1.2 GiB per image.
+[^fn-backpropagation]: **Backpropagation Algorithm**: Independently rediscovered multiple times, backpropagation was popularized by Rumelhart, Hinton, and Williams in 1986 (though similar ideas appeared in Werbos 1974). This breakthrough enabled training of deep networks by efficiently computing gradients in O(n) time vs. naive O(n²) approaches. Modern implementations require careful memory management since storing all activations for a ResNet-50 consumes 1.2 GB per image.
 
 Here, we shift focus from *what* backpropagation computes to *what it costs* to compute it at scale. The familiar equations from @sec-deep-learning-systems-foundations reappear because understanding their structure reveals exactly *what* must be stored and *when*. During the forward pass, each layer computes activations $a^{(l)} = f(W^{(l)}a^{(l-1)} + b^{(l)})$ that must be retained for the backward pass. Computing $\frac{\partial L}{\partial W^{(l)}}$ requires access to these stored activations, creating memory requirements that scale with network depth and batch size.
 
@@ -991,13 +991,13 @@ For GPT-2 with batch_size=32, seq_len=1024, hidden_dim=`{python} hidden_dim_str`
 - Parameters (FP16): `{python} params_gb_str` GB
 - Gradients: `{python} grad_gb_str` GB
 - Optimizer state (Adam, FP32): `{python} opt_gb_str` GB
-- Peak memory during training: **~`{python} peak_gb_str` GiB**
+- Peak memory during training: **~`{python} peak_gb_str` GB**
 
-This exceeds a single V100's `{python} v100_mem_str` GiB capacity.
+This exceeds a single V100's `{python} v100_mem_str` GB capacity.
 
 #### System Solutions Applied
 
-1. Gradient checkpointing: Recompute activations during backward pass, reducing activation memory by 75% (to ~8 GiB) at cost of 33% more compute
+1. Gradient checkpointing: Recompute activations during backward pass, reducing activation memory by 75% (to ~8 GB) at cost of 33% more compute
 2. Activation CPU offloading: Store some activations in CPU RAM, transfer during backward pass
 3. Mixed precision: FP16 activations (already applied above) vs FP32 (would be 65 GB)
 4. Reduced batch size: Use batch_size=16 per GPU + gradient accumulation over 2 steps = effective batch_size=32
@@ -1680,19 +1680,19 @@ Memory management is particularly important during the forward pass, when interm
 
 ::: {.callout-notebook title="Estimating VRAM Requirements"}
 
-**Problem**: Will your 7B parameter model fit on a 24 GiB GPU for training?
+**Problem**: Will your 7B parameter model fit on a 24 GB GPU for training?
 
-**Given**: 7B parameters, mixed-precision training (FP16 weights/gradients, FP32 optimizer), Adam optimizer, 24 GiB GPU memory.
+**Given**: 7B parameters, mixed-precision training (FP16 weights/gradients, FP32 optimizer), Adam optimizer, 24 GB GPU memory.
 
 **The Math**:
 
-1.  **Weights (FP16)**: $7\text{B} \times 2 \text{ bytes} = \mathbf{14 \text{ GiB}}$.
-2.  **Gradients (FP16)**: Same size as weights = $\mathbf{14 \text{ GiB}}$.
-3.  **Optimizer (Adam, FP32)**: Stores momentum & variance. $7\text{B} \times 8 \text{ bytes} = \mathbf{56 \text{ GiB}}$.
-4.  **Subtotal (before activations)**: $14 + 14 + 56 = \mathbf{84 \text{ GiB}}$. Already exceeds 24 GiB.
-5.  **Activations**: Scale with batch size. Formula: $\text{Batch} \times \text{SeqLen} \times \text{Hidden} \times \text{Layers} \times \text{Bytes}$. Example: Batch=1, Seq=2048, Hidden=4096, 32 Layers $\approx$ **2 GiB** additional.
+1.  **Weights (FP16)**: $7\text{B} \times 2 \text{ bytes} = \mathbf{14 \text{ GB}}$.
+2.  **Gradients (FP16)**: Same size as weights = $\mathbf{14 \text{ GB}}$.
+3.  **Optimizer (Adam, FP32)**: Stores momentum & variance. $7\text{B} \times 8 \text{ bytes} = \mathbf{56 \text{ GB}}$.
+4.  **Subtotal (before activations)**: $14 + 14 + 56 = \mathbf{84 \text{ GB}}$. Already exceeds 24 GB.
+5.  **Activations**: Scale with batch size. Formula: $\text{Batch} \times \text{SeqLen} \times \text{Hidden} \times \text{Layers} \times \text{Bytes}$. Example: Batch=1, Seq=2048, Hidden=4096, 32 Layers $\approx$ **2 GB** additional.
 
-**The Systems Conclusion**: The "administrative tax" (gradients + optimizer states) is $4\text{--}6\times$ larger than model weights. Training a 7B model on a single 24 GiB GPU requires **quantization (4-bit)** or **parameter sharding (FSDP/ZeRO)**.
+**The Systems Conclusion**: The "administrative tax" (gradients + optimizer states) is $4\text{--}6\times$ larger than model weights. Training a 7B model on a single 24 GB GPU requires **quantization (4-bit)** or **parameter sharding (FSDP/ZeRO)**.
 :::
 
 The total memory footprint grows with both network depth and batch size, following a basic relationship.
@@ -3371,7 +3371,7 @@ These three techniques—prefetching, mixed precision, and gradient accumulation
 
 ### Putting It All Together: GPT-2 Optimization Walkthrough {#sec-ai-training-putting-together-gpt2-optimization-walkthrough-def7}
 
-To demonstrate how these techniques compose in practice, let us walk through optimizing GPT-2 (1.5B parameters) training on a single 32 GiB V100 GPU.
+To demonstrate how these techniques compose in practice, let us walk through optimizing GPT-2 (1.5B parameters) training on a single 32 GB V100 GPU.
 
 ::: {.callout-example title="GPT-2 Optimization on V100"}
 
@@ -3386,12 +3386,12 @@ To demonstrate how these techniques compose in practice, let us walk through opt
 
 ```{.text}
 Memory breakdown:
-  Parameters (FP32):      6.0 GiB
-  Gradients (FP32):       6.0 GiB
-  Optimizer (Adam):      12.0 GiB
-  Activations:           65.0 GiB
+  Parameters (FP32):      6.0 GB
+  Gradients (FP32):       6.0 GB
+  Optimizer (Adam):      12.0 GB
+  Activations:           65.0 GB
   ─────────────────────────────────
-  Total:                 89.0 GiB  ← OOM on 32 GiB GPU
+  Total:                 89.0 GB  ← OOM on 32 GB GPU
 ```
 
 **Bottleneck identified**: Memory exhaustion. Cannot even begin training.
@@ -3402,15 +3402,15 @@ Enable AMP (Automatic Mixed Precision) with FP16 forward/backward, FP32 master w
 
 ```{.text}
 Memory breakdown:
-  Parameters (FP16):      3.0 GiB
-  Gradients (FP16):       3.0 GiB
-  Master Weights (FP32):  6.0 GiB
-  Optimizer (Adam):      12.0 GiB
-  Activations (FP16):    32.5 GiB
-  Total:                 56.5 GiB  ← Still OOM
+  Parameters (FP16):      3.0 GB
+  Gradients (FP16):       3.0 GB
+  Master Weights (FP32):  6.0 GB
+  Optimizer (Adam):      12.0 GB
+  Activations (FP16):    32.5 GB
+  Total:                 56.5 GB  ← Still OOM
 ```
 
-**Improvement**: 36% memory reduction, but still exceeds 32 GiB.
+**Improvement**: 36% memory reduction, but still exceeds 32 GB.
 
 #### Step 3: Apply Gradient Checkpointing {.unnumbered}
 
@@ -3418,9 +3418,9 @@ Checkpoint every 4 transformer layers, recompute activations during backward pas
 
 ```{.text}
 Memory breakdown:
-  Static Memory (AMP):   24.0 GiB
-  Activations (ckpt):     8.0 GiB  ← 4× reduction
-  Total:                 32.0 GiB  ✓ Fits in 32 GiB!
+  Static Memory (AMP):   24.0 GB
+  Activations (ckpt):     8.0 GB  ← 4× reduction
+  Total:                 32.0 GB  ✓ Fits in 32 GB!
 ```
 
 **Trade-off**: 33% more compute (recomputation), but now fits in memory.
@@ -3487,7 +3487,7 @@ The GPT-2 case study demonstrates how the optimization techniques examined in th
 | **Electricity Cost (@$0.10/kWh)** | `{python} b_cost_str` | `{python} o_cost_str` | — |
 | **Carbon Footprint** | `{python} b_carbon_str` | `{python} o_carbon_str` | Regional grid average (0.45 kg/kWh) |
 
-: **GPT-2 Training Optimization Summary.** Applying mixed-precision training and gradient checkpointing reduces memory from 89 GiB to 32 GiB, training time by 40%, energy consumption by 58%, and carbon footprint proportionally. {#tbl-gpt2-summary}
+: **GPT-2 Training Optimization Summary.** Applying mixed-precision training and gradient checkpointing reduces memory from 89 GB to 32 GB, training time by 40%, energy consumption by 58%, and carbon footprint proportionally. {#tbl-gpt2-summary}
 
 ```{python}
 #| label: gpt2-summary-calc
@@ -3519,23 +3519,23 @@ o_cost = o_energy * 0.10
 o_carbon = 52.0
 
 # Strings
-b_param_str = f"{b_param:.1f} GiB"
-b_grad_str = f"{b_grad:.1f} GiB"
-b_master_str = f"{b_master:.1f} GiB"
-b_opt_str = f"{b_opt:.1f} GiB"
-b_act_str = f"{b_act:.1f} GiB"
-b_total_mem_str = f"{b_total_mem:.1f} GiB"
+b_param_str = f"{b_param:.1f} GB"
+b_grad_str = f"{b_grad:.1f} GB"
+b_master_str = f"{b_master:.1f} GB"
+b_opt_str = f"{b_opt:.1f} GB"
+b_act_str = f"{b_act:.1f} GB"
+b_total_mem_str = f"{b_total_mem:.1f} GB"
 b_time_str = f"{b_time:.0f} days"
 b_energy_str = f"{b_energy:,.0f} kWh"
 b_cost_str = f"${b_cost:,.0f}"
 b_carbon_str = f"~{b_carbon:.0f} tons CO₂"
 
-o_param_str = f"{o_param:.1f} GiB"
-o_grad_str = f"{o_grad:.1f} GiB"
-o_master_str = f"{o_master:.1f} GiB"
-o_opt_str = f"{o_opt:.1f} GiB"
-o_act_str = f"{o_act:.1f} GiB"
-o_total_mem_str = f"{o_total_mem:.1f} GiB"
+o_param_str = f"{o_param:.1f} GB"
+o_grad_str = f"{o_grad:.1f} GB"
+o_master_str = f"{o_master:.1f} GB"
+o_opt_str = f"{o_opt:.1f} GB"
+o_act_str = f"{o_act:.1f} GB"
+o_total_mem_str = f"{o_total_mem:.1f} GB"
 o_time_str = f"{o_time:.1f} days"
 o_energy_str = f"{o_energy:,.0f} kWh"
 o_cost_str = f"${o_cost:,.0f}"

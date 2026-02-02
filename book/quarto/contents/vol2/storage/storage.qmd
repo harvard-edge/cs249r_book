@@ -384,6 +384,8 @@ Object storage systems like S3 and GCS are suitable for training data. Since Dec
 
 **Feature store storage** requires consistency guarantees that vary by access pattern. Offline features can tolerate eventual consistency: batch computations produce new feature versions that propagate to serving over minutes to hours. Online features for serving require read-your-writes consistency at minimum: after a user action updates their features, subsequent requests must see those updated features. Strong consistency may be necessary for use cases like fraud detection where stale features could enable fraudulent transactions.
 
+@tbl-consistency-requirements maps each storage tier to its appropriate consistency model: training data tolerates eventual consistency because samples are immutable and shuffled anyway, while checkpoints demand linearizability because partial writes cause catastrophic recovery failures. These tier-specific consistency choices have direct *CAP theorem implications* for ML storage architecture.
+
 | **Storage Tier** | **Consistency Requirement** | **Rationale** | **Suitable Systems** |
 |:---|:---|:---|:---|
 | **Training data** | Strong consistency (now standard) | Immutable data, modern object stores provide strong consistency | S3, GCS, HDFS |
@@ -393,8 +395,6 @@ Object storage systems like S3 and GCS are suitable for training data. Since Dec
 | **Model weights** | Read-after-write | Model updates must be immediately visible | Consistent object storage |
 
 : **Consistency Requirements by Storage Tier**: Training data tolerates eventual consistency because samples are immutable and shuffled; checkpoints demand strong consistency because partial writes corrupt model state. This consistency spectrum enables cost-effective architecture by avoiding over-specification. {#tbl-consistency-requirements}
-
-@tbl-consistency-requirements maps each storage tier to its appropriate consistency model: training data tolerates eventual consistency because samples are immutable and shuffled anyway, while checkpoints demand linearizability because partial writes cause catastrophic recovery failures. These tier-specific consistency choices have direct *CAP theorem implications* for ML storage architecture.
 
 ::: {.callout-perspective title="CAP Theorem Implications"}
 
@@ -674,6 +674,8 @@ sample0002.cls
 
 #### Format Selection Guidelines {#sec-storage-format-selection-guidelines-78a8}
 
+@tbl-format-selection guides the matching of storage formats to model types, which requires considering access patterns and data characteristics. For LLMs processing tokenized sequences, TFRecord or custom binary formats minimize overhead; for vision models with images, WebDataset efficiently packages JPEG files; for structured features, Parquet's columnar layout enables selective reading.
+
 | **Model Type** | **Recommended Format** | **Rationale** |
 |:---|:---|:---|
 | **LLM** | TFRecord or custom binary | Token sequences are fixed-length arrays, columnar offers no benefit |
@@ -683,8 +685,6 @@ sample0002.cls
 | **Multimodal** | WebDataset | Different modalities (image, text, audio) naturally grouped |
 
 : **Data Format Selection by Model Type**: LLMs benefit from TFRecord's sequential streaming; RecSys exploits Parquet's column pruning for sparse features; vision models use WebDataset for efficient image packaging. Format selection impacts throughput by 2-10x. {#tbl-format-selection}
-
-@tbl-format-selection guides the matching of storage formats to model types, which requires considering access patterns and data characteristics. For LLMs processing tokenized sequences, TFRecord or custom binary formats minimize overhead; for vision models with images, WebDataset efficiently packages JPEG files; for structured features, Parquet's columnar layout enables selective reading.
 
 ### Data Loading Pipelines {#sec-storage-data-loading-pipelines-b193}
 
@@ -1146,6 +1146,8 @@ I/O wait above 20% indicates storage is constraining the pipeline.
 
 Training data requirements vary dramatically across model types, affecting storage architecture, data format selection, and pipeline design. LLMs demand massive text corpora with sophisticated deduplication; vision models require high-bandwidth image pipelines; recommendation systems process continuous streams of user logs that can reach petabyte scale.
 
+@tbl-training-data-diversity captures how training data characteristics diverge across model types, from LLMs requiring 10-100 TB of deduplicated text to RecSys processing 1+ PB of streaming user logs. **LLM training data** presents unique challenges at the preprocessing stage rather than during training. Raw web crawls contain duplicate content, low-quality text, and potentially harmful material. Deduplication alone can reduce dataset size by 30-50% [@wenzek2020ccnet]. The storage challenge is running these preprocessing pipelines at scale: processing Common Crawl (petabytes of raw HTML) requires distributed processing frameworks like Spark or Dataflow, with intermediate results stored in distributed file systems.
+
 | **Model Type** | **Data Format** | **Typical Volume** | **Key Storage Challenge** |
 |:---|:---|---:|:---|
 | **LLM** | Tokenized text | 10-100 TB | Deduplication at scale, quality filtering |
@@ -1155,8 +1157,6 @@ Training data requirements vary dramatically across model types, affecting stora
 | **Speech/Audio** | Waveforms, spectrograms | 10-100 TB | Variable length sequences |
 
 : **Training Data Diversity by Model Type**: LLMs require 10-100 TB of deduplicated text; RecSys processes 1+ PB of user interaction logs with real-time freshness requirements; vision models need high-throughput augmentation pipelines for 100 TB - 10 PB image datasets. {#tbl-training-data-diversity}
-
-@tbl-training-data-diversity captures how training data characteristics diverge across model types, from LLMs requiring 10-100 TB of deduplicated text to RecSys processing 1+ PB of streaming user logs. **LLM training data** presents unique challenges at the preprocessing stage rather than during training. Raw web crawls contain duplicate content, low-quality text, and potentially harmful material. Deduplication alone can reduce dataset size by 30-50% [@wenzek2020ccnet]. The storage challenge is running these preprocessing pipelines at scale: processing Common Crawl (petabytes of raw HTML) requires distributed processing frameworks like Spark or Dataflow, with intermediate results stored in distributed file systems.
 
 **Vision training data** is bandwidth-intensive during training due to real-time augmentation. Each image must be decoded, randomly augmented (crop, flip, color jitter), and normalized before being batched. The augmentation pipeline runs on CPU and can become the bottleneck for large vision models. Storing pre-augmented images is impractical (each image would need hundreds of augmented variants), so augmentation must happen during training.
 
@@ -1492,6 +1492,8 @@ For dense models where all parameters update every step, incremental checkpointi
 
 Practical compression ratios depend on model type and training dynamics. Sparse embedding updates in recommendation systems achieve 20-100x compression; dense LLM training typically sees 10-20x reduction.
 
+@tbl-delta-checkpoint quantifies delta checkpointing effectiveness across model types: sparse embedding updates in recommendation systems achieve 20-100x compression, while dense LLM training typically sees 10-20x reduction.
+
 | **Model Type** | **Full Checkpoint** | **Delta Size** | **Compression Ratio** |
 |:---|---:|---:|---:|
 | **LLM (dense updates)** | 1 TB | 50-100 GB | 10-20x |
@@ -1499,8 +1501,6 @@ Practical compression ratios depend on model type and training dynamics. Sparse 
 | **Vision (fine-tuning)** | 10 GB | 100 MB | 100x |
 
 : **Delta Checkpoint Compression by Model Type**: Sparse RecSys embedding updates achieve 20-100x compression; dense LLM updates achieve 10-20x; fine-tuning frozen models achieves 100x by saving only adapter weights. {#tbl-delta-checkpoint}
-
-@tbl-delta-checkpoint quantifies delta checkpointing effectiveness across model types: sparse embedding updates in recommendation systems achieve 20-100x compression, while dense LLM training typically sees 10-20x reduction.
 
 ### Checkpoint Storage Architecture {#sec-storage-checkpoint-storage-architecture-0a1d}
 
@@ -1518,6 +1518,8 @@ This architecture provides both performance (fast writes) and durability (object
 
 Checkpoint strategies vary significantly by model architecture. LLMs demand high-bandwidth distributed checkpointing for multi-hundred-GB models; vision models with smaller parameter counts can checkpoint to local storage; recommendation systems benefit from incremental updates that save only modified embeddings.
 
+@tbl-checkpoint-strategies demonstrates how checkpoint strategies should be tailored to model size and training dynamics. **Large Language Models** checkpoint infrequently (relative to iteration count) because checkpoint size dominates. A 1 TB checkpoint at 100 GB/s still takes 10 seconds, during which thousands of dollars of GPU time is consumed. Asynchronous checkpointing and high-bandwidth storage are essential.
+
 | **Model Type** | **Checkpoint Size** | **Typical Frequency** | **Recommended Strategy** |
 |:---|---:|:---|:---|
 | **LLM (`{python} gpt3_params_b`B)** | 700 GB - 1 TB | Every 10-30 min | Distributed async, tiered storage |
@@ -1527,8 +1529,6 @@ Checkpoint strategies vary significantly by model architecture. LLMs demand high
 | **Vision (ViT-22B)** | 88-175 GB | Every 15-30 min | Distributed, parallel FS |
 
 : **Checkpoint Strategies by Model Type**: `{python} gpt3_params_b`B-parameter LLMs require distributed async checkpointing with tiered storage for 700 GB-1 TB checkpoints; RecSys with 10 TB embedding tables benefit from incremental delta compression; small vision models can use simple synchronous checkpointing. {#tbl-checkpoint-strategies}
-
-@tbl-checkpoint-strategies demonstrates how checkpoint strategies should be tailored to model size and training dynamics. **Large Language Models** checkpoint infrequently (relative to iteration count) because checkpoint size dominates. A 1 TB checkpoint at 100 GB/s still takes 10 seconds, during which thousands of dollars of GPU time is consumed. Asynchronous checkpointing and high-bandwidth storage are essential.
 
 **Recommendation Systems** present unique challenges due to massive embedding tables. A DLRM-style model[^fn-dlrm] [@naumov2019dlrm] might have 10 TB of embedding parameters but only 1 GB of dense MLP parameters. Incremental checkpointing of modified embeddings (which may be a small fraction of the table) provides order-of-magnitude savings over full checkpoints.
 
@@ -1660,36 +1660,6 @@ LEFT JOIN features
 ```
 :::
 
-::: {#fig-pit-correctness fig-env="figure" fig-pos="htb" fig-cap="**Point-in-Time Correctness**. To prevent data leakage, features for a training example must be joined based on the timestamp of the event. If an ad impression occurred at $T_{event}$, the model must be trained using features as they existed at $T < T_{event}$. Using features from $T > T_{event}$ (e.g., \"user clicked\") to predict the click introduces future information, rendering the model useless in production." fig-alt="Timeline showing feature versions V1, V2, V3 at timestamps 10:00, 10:05, 10:10. Training event at 10:08 marked in red. Green bracket shows correct join using V2. Red bracket marks V3 as data leakage since it occurs after the training event."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
-  % Timeline
-  \draw[->, thick] (0, 0) -- (10, 0) node[right] {Time};
-
-  % Feature Updates
-  \foreach \x/\t/\v in {1/10:00/V1, 4/10:05/V2, 7/10:10/V3} {
-    \draw[blue, thick] (\x, 0.2) -- (\x, -0.2);
-    \node[blue, above] at (\x, 0.2) {Feature $\v$};
-    \node[gray, below, font=\scriptsize] at (\x, -0.2) {\t};
-  }
-
-  % Event (Label)
-  \draw[red, ultra thick] (6, 0.5) -- (6, -0.5);
-  \node[red, above, font=\bfseries] at (6, 0.5) {Training Event};
-  \node[red, below, font=\scriptsize] at (6, -0.5) {Click @ 10:08};
-
-  % Correct Join Interval
-  \draw[decorate, decoration={brace, amplitude=5pt}, green!60!black, thick] (4.1, -1) -- (6, -1);
-  \node[green!60!black, below=6pt, align=center, font=\footnotesize] at (5.05, -1) {\textbf{Correct Join}\\(Latest $T < T_{event}$)\\Value: V2};
-
-  % Leakage Interval
-  \draw[decorate, decoration={brace, amplitude=5pt, mirror}, red, thick] (6.1, -1) -- (7, -1);
-  \node[red, below=6pt, align=center, font=\footnotesize] at (8.5, -1) {\textbf{Data Leakage}\\(Future Info)\\Value: V3};
-
-\end{tikzpicture}
-```
-:::
-
 #### Online Store {#sec-storage-online-store-b9da}
 
 The online store provides low-latency access to the most recent feature values for serving. It trades historical depth for speed.
@@ -1812,6 +1782,8 @@ Recommendation systems present a unique storage challenge: embedding tables cont
 
 **Scale of embedding tables:**
 
+@tbl-embedding-sizes reveals the scale challenge: user embeddings for a billion users at 128 dimensions consume 512 GB, while sparse ID features for 100 billion entities can reach 25 TB. These embedding tables cannot fit in memory on a single machine, requiring distributed storage strategies that balance latency, cost, and capacity.
+
 | **Application** | **Entities** | **Embedding Dim** | **Total Size** |
 |:---|---:|---:|---:|
 | **User embeddings** | 1 billion | 128 | 512 GB |
@@ -1820,8 +1792,6 @@ Recommendation systems present a unique storage challenge: embedding tables cont
 | **Sparse ID embeddings** | 100 billion | 64 | 25 TB |
 
 : **Embedding Table Sizes at Production Scale**: User embeddings for 1 billion users at 128 dimensions consume 512 GB; sparse ID embeddings for 100 billion entities reach 25 TB. These scales exceed single-machine memory, requiring distributed sharding strategies. {#tbl-embedding-sizes}
-
-@tbl-embedding-sizes reveals the scale challenge: user embeddings for a billion users at 128 dimensions consume 512 GB, while sparse ID features for 100 billion entities can reach 25 TB. These embedding tables cannot fit in memory on a single machine, requiring distributed storage strategies that balance latency, cost, and capacity.
 
 **Storage strategies:**
 
@@ -1841,6 +1811,8 @@ Each shard stores 1/N of the embeddings. Lookup requires determining the correct
 
 Feature store importance varies dramatically by model type. Recommendation systems, fraud detection, and ad ranking require feature stores as critical infrastructure (millions of lookups per second with user, item, and contextual features). LLMs and vision models need them far less, primarily consuming prompts or images as direct inputs.
 
+@tbl-feature-store-criticality reveals why feature stores matter enormously for recommendation systems while playing minimal roles for LLMs. **Why feature stores are critical for RecSys but not LLMs:**
+
 | **Model Type** | **Feature Store Criticality** | **Rationale** |
 |:---|:---|:---|
 | **RecSys** | **Critical** | Millions of lookups/second, user/item features essential |
@@ -1852,8 +1824,6 @@ Feature store importance varies dramatically by model type. Recommendation syste
 | **Speech** | Low | Audio input, minimal runtime features |
 
 : **Feature Store Criticality by Application**: RecSys, fraud detection, and ad ranking require feature stores as critical infrastructure (millions of lookups/second); LLMs and vision models need them minimally since prompts and images serve as direct inputs. {#tbl-feature-store-criticality}
-
-@tbl-feature-store-criticality reveals why feature stores matter enormously for recommendation systems while playing minimal roles for LLMs. **Why feature stores are critical for RecSys but not LLMs:**
 
 Recommendation systems make predictions about user-item interactions, requiring features about both the user and items. At serving time, the system must retrieve:
 
@@ -1888,6 +1858,8 @@ Several platforms provide feature store functionality, each with different trade
 
 **Build vs buy considerations:**
 
+@tbl-feature-store-buildbuy weighs the costs and benefits of building versus adopting an existing platform. For most organizations, starting with an open-source solution (Feast) or cloud-managed service provides faster time-to-value than building custom infrastructure. Custom feature stores become worthwhile at massive scale (billions of features, millions of QPS) where platform limitations become constraints.
+
 | **Factor** | **Build In-House** | **Use Platform** |
 |:---|:---|:---|
 | **Customization** | Full control | Limited by platform |
@@ -1897,8 +1869,6 @@ Several platforms provide feature store functionality, each with different trade
 | **Integration** | Custom to stack | May require adaptation |
 
 : **Feature Store Build vs. Buy Tradeoffs**: Building in-house provides full customization at high development cost; platforms offer lower initial cost with managed operations but limited flexibility. Most organizations start with open-source (Feast) or cloud-managed services. {#tbl-feature-store-buildbuy}
-
-@tbl-feature-store-buildbuy weighs the costs and benefits of building versus adopting an existing platform. For most organizations, starting with an open-source solution (Feast) or cloud-managed service provides faster time-to-value than building custom infrastructure. Custom feature stores become worthwhile at massive scale (billions of features, millions of QPS) where platform limitations become constraints.
 
 The feature store provides a consistent view of *structured* data. However, modern AI systems, particularly Large Language Models, require efficient access to *unstructured* data represented as dense vectors. This requirement has given rise to a new storage primitive.
 
@@ -2070,6 +2040,8 @@ Model artifacts range from megabytes (small classifiers) to terabytes (large fou
 
 Storage cost optimization strategies for model artifacts balance size reduction against access complexity. Compression achieves 2-5x size reduction at the cost of CPU overhead during loading; tiered storage moves old versions to cold storage but increases retrieval latency:
 
+@tbl-artifact-storage summarizes these optimization strategies, from compression achieving 2-5x size reduction to tiered storage that moves old versions to cold storage at the cost of retrieval latency.
+
 | **Strategy** | **Benefit** | **Tradeoff** |
 |:---|:---|:---|
 | **Compression** | 2-5x size reduction | CPU overhead on load |
@@ -2078,8 +2050,6 @@ Storage cost optimization strategies for model artifacts balance size reduction 
 | **Differential storage** | Store only changed weights | Requires base model + diffs |
 
 : **Model Artifact Storage Optimization**: Compression achieves 2-5x size reduction at the cost of CPU load time; deduplication stores shared layers once across model variants; tiered storage moves old versions to cold storage while maintaining retrieval capability. {#tbl-artifact-storage}
-
-@tbl-artifact-storage summarizes these optimization strategies, from compression achieving 2-5x size reduction to tiered storage that moves old versions to cold storage at the cost of retrieval latency.
 
 ### Model Registry Platforms {#sec-storage-model-registry-platforms-8746}
 
@@ -2308,6 +2278,36 @@ Teams assume that feature lookup latency is negligible compared to model inferen
 **Pitfall:** ***Underestimating point-in-time correctness requirements.***
 
 Training a recommendation model on features that include the label (using "user clicked on item X" as a feature when predicting "will user click on item X?") creates models that work perfectly during training and fail catastrophically in production. Point-in-time correctness requires that features used during training reflect only information available before the prediction event. This constraint is easy to state and deceptively difficult to enforce in @sec-storage-feature-store-architecture-5328 implementations. Feature pipelines that aggregate over time windows, join multiple data sources, or depend on asynchronous updates can all violate point-in-time correctness in subtle ways. As @fig-pit-correctness demonstrates, joining training labels with features requires careful timestamp filtering to prevent future information from contaminating training data. The failure mode is insidious: models train well (95% offline accuracy), validate well (94% holdout accuracy), and then underperform in production (78% online CTR) without clear explanation. Engineering teams often chase phantom bugs for weeks before identifying temporal leakage as the root cause.
+
+::: {#fig-pit-correctness fig-env="figure" fig-pos="htb" fig-cap="**Point-in-Time Correctness**. To prevent data leakage, features for a training example must be joined based on the timestamp of the event. If an ad impression occurred at $T_{event}$, the model must be trained using features as they existed at $T < T_{event}$. Using features from $T > T_{event}$ (e.g., \"user clicked\") to predict the click introduces future information, rendering the model useless in production." fig-alt="Timeline showing feature versions V1, V2, V3 at timestamps 10:00, 10:05, 10:10. Training event at 10:08 marked in red. Green bracket shows correct join using V2. Red bracket marks V3 as data leakage since it occurs after the training event."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  % Timeline
+  \draw[->, thick] (0, 0) -- (10, 0) node[right] {Time};
+
+  % Feature Updates
+  \foreach \x/\t/\v in {1/10:00/V1, 4/10:05/V2, 7/10:10/V3} {
+    \draw[blue, thick] (\x, 0.2) -- (\x, -0.2);
+    \node[blue, above] at (\x, 0.2) {Feature $\v$};
+    \node[gray, below, font=\scriptsize] at (\x, -0.2) {\t};
+  }
+
+  % Event (Label)
+  \draw[red, ultra thick] (6, 0.5) -- (6, -0.5);
+  \node[red, above, font=\bfseries] at (6, 0.5) {Training Event};
+  \node[red, below, font=\scriptsize] at (6, -0.5) {Click @ 10:08};
+
+  % Correct Join Interval
+  \draw[decorate, decoration={brace, amplitude=5pt}, green!60!black, thick] (4.1, -1) -- (6, -1);
+  \node[green!60!black, below=6pt, align=center, font=\footnotesize] at (5.05, -1) {\textbf{Correct Join}\\(Latest $T < T_{event}$)\\Value: V2};
+
+  % Leakage Interval
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror}, red, thick] (6.1, -1) -- (7, -1);
+  \node[red, below=6pt, align=center, font=\footnotesize] at (8.5, -1) {\textbf{Data Leakage}\\(Future Info)\\Value: V3};
+
+\end{tikzpicture}
+```
+:::
 
 **Fallacy:** ***SSDs eliminate I/O bottlenecks for ML training.***
 

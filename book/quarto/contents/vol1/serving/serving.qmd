@@ -871,6 +871,10 @@ where $\mu$ is the service rate (requests per second the server can handle), and
 
 This equation reveals why serving systems exhibit nonlinear behavior. At 50% utilization, average **time in system** is $2\times$ the service time. At 80% utilization, it is $5\times$. At 90% utilization, it is $10\times$. Small increases in load near capacity cause disproportionate latency increases.
 
+The M/M/1 model assumes exponentially distributed service times, but ML inference typically has near-constant service time for fixed batch sizes, making the M/D/1 (deterministic service) model more accurate in practice. We use M/M/1 here because it yields closed-form solutions and produces conservative estimates. @tbl-utilization-latency reveals how average **latency** grows rapidly as utilization approaches 100%. For M/D/1 queues, average wait time is approximately half of M/M/1 at the same utilization, which matters for capacity planning: M/M/1 analysis will slightly over-provision, erring on the side of meeting SLOs rather than violating them.[^fn-queuing-models]
+
+[^fn-queuing-models]: **Kendall Notation**: The M/M/1 notation was introduced by British statistician David Kendall in 1953 and follows the pattern A/S/c (Arrivals/Service/servers). "M" stands for "Markovian" (memoryless, meaning exponential distributions), honoring Russian mathematician Andrey Markov (1856-1922). "D" means deterministic. So M/M/1 describes a single server with exponential arrivals and service times, while M/D/1 has deterministic service. ML inference is closer to M/D/1 since inference time is nearly constant, but M/M/1 yields conservative estimates suitable for capacity planning.
+
 | **Utilization ($\rho$)** | **Latency Multiple** | **Example (5ms service)** |
 |:---|---:|---:|
 | 50% | 2.0× | 10ms |
@@ -880,10 +884,6 @@ This equation reveals why serving systems exhibit nonlinear behavior. At 50% uti
 | 95% | 20.0× | 100ms |
 
 : **Utilization-Latency Relationship**: Average **latency** as a multiple of service time for an M/M/1 queue. At 50% utilization, latency is 2x service time; at 90%, it reaches 10x. This nonlinear growth explains why systems that perform well at moderate load suddenly violate SLOs when traffic increases: moving from 80% to 90% utilization doubles latency. {#tbl-utilization-latency}
-
-The M/M/1 model assumes exponentially distributed service times, but ML inference typically has near-constant service time for fixed batch sizes, making the M/D/1 (deterministic service) model more accurate in practice. We use M/M/1 here because it yields closed-form solutions and produces conservative estimates. @tbl-utilization-latency reveals how average **latency** grows rapidly as utilization approaches 100%. For M/D/1 queues, average wait time is approximately half of M/M/1 at the same utilization, which matters for capacity planning: M/M/1 analysis will slightly over-provision, erring on the side of meeting SLOs rather than violating them.[^fn-queuing-models]
-
-[^fn-queuing-models]: **Kendall Notation**: The M/M/1 notation was introduced by British statistician David Kendall in 1953 and follows the pattern A/S/c (Arrivals/Service/servers). "M" stands for "Markovian" (memoryless, meaning exponential distributions), honoring Russian mathematician Andrey Markov (1856-1922). "D" means deterministic. So M/M/1 describes a single server with exponential arrivals and service times, while M/D/1 has deterministic service. ML inference is closer to M/D/1 since inference time is nearly constant, but M/M/1 yields conservative estimates suitable for capacity planning.
 
 ### Multi-Server Considerations {#sec-model-serving-systems-multiserver-considerations-00fc}
 
@@ -1411,9 +1411,9 @@ b1_latency_str = f"{latencies[1]:.1f}"
 b32_latency_str = f"{latencies[32]:.1f}"
 ```
 
-: **Batching Throughput Analysis**: ResNet-50 throughput on V100 with `{python} f"{T_window:.0f}"`ms batching window. Throughput increases `{python} throughput_increase_str`x from batch size 1 to 32 (`{python} b1_throughput_str` to `{python} b32_throughput_str` img/s), but total latency more than doubles (`{python} b1_latency_str`ms to `{python} b32_latency_str`ms). The optimal configuration depends on whether the latency SLO or throughput target is the binding constraint. {#tbl-batching-throughput}
-
 The throughput gains in @tbl-batching-throughput trace directly back to the Iron Law framework established in @sec-ai-training-iron-law-training-performance-a53f, where batching amortizes the fixed overhead term.
+
+: **Batching Throughput Analysis**: ResNet-50 throughput on V100 with `{python} f"{T_window:.0f}"`ms batching window. Throughput increases `{python} throughput_increase_str`x from batch size 1 to 32 (`{python} b1_throughput_str` to `{python} b32_throughput_str` img/s), but total latency more than doubles (`{python} b1_latency_str`ms to `{python} b32_latency_str`ms). The optimal configuration depends on whether the latency SLO or throughput target is the binding constraint. {#tbl-batching-throughput}
 
 ::: {.callout-notebook title="The Iron Law of Batching Efficiency"}
 
@@ -2129,27 +2129,30 @@ hourly_cost = 3.00
 tokens_per_hour = concurrent_batch * (3600 / req_time_s) * tokens_per_req
 tokens_per_hour_m = f"{tokens_per_hour / 1e6:.0f}"
 cost_per_m_tokens = f"{hourly_cost / (tokens_per_hour / 1e6):.3f}"
+remaining_vram_gb_str = f"{int(80 - model_weight_gb)}"
+tokens_per_req_str = f"{tokens_per_req:,}"
+hourly_cost_str = f"{hourly_cost:.2f}"
 ```
 
 *   $T_{\text{token}}$ ≈ `{python} model_weight_gb` GB / `{python} h100_bw_tbs` TB/s ≈ `{python} token_time_theoretical_ms` ms (theoretical limit).
 *   Accounting for kernel launch overhead and attention computation, realized $T_{\text{token}}$ is approximately `{python} realized_tpot_ms` ms.
-*   Total decode time = $`{python} decode_tokens` \text{ tokens} \times `{python} realized_tpot_ms` \text{ ms/token} = `{python} total_decode_s` \text{ seconds}$.
+*   Total decode time: `{python} decode_tokens` tokens × `{python} realized_tpot_ms` ms/token = `{python} total_decode_s` seconds.
 *   **TPOT is `{python} realized_tpot_ms` ms**, well within the 20 ms "fluidity" SLO.
 
 #### Memory & Throughput {#sec-model-serving-systems-memory-throughput-63dd}
 
-With 4-bit weights occupying `{python} model_weight_gb` GB, the remaining ~`{python} int(80 - model_weight_gb)` GB of VRAM is available for the **KV Cache**. Using **PagedAttention**, we can allocate this memory with near-zero fragmentation.
+With 4-bit weights occupying `{python} model_weight_gb` GB, the remaining ~`{python} remaining_vram_gb_str` GB of VRAM is available for the **KV Cache**. Using **PagedAttention**, we can allocate this memory with near-zero fragmentation.
 
-*   Each token requires approximately `{python} kv_per_token_mb` MB of KV cache (32 layers $\times$ 4096 dim $\times$ 2 vectors $\times$ 2-byte precision).
-*   Total cache capacity $\approx \frac{`{python} kv_cache_gb` \text{ GB}}{`{python} kv_per_token_mb` \text{ MB/token}} \approx `{python} kv_capacity_tokens_str` \text{ tokens}$.
-*   At `{python} f"{tokens_per_req:,}"` tokens per request (input + output), the GPU can handle a **concurrent batch size of ~`{python} concurrent_batch` requests**.
+*   Each token requires approximately `{python} kv_per_token_mb` MB of KV cache (32 layers × 4096 dim × 2 vectors × 2-byte precision).
+*   Total cache capacity ≈ `{python} kv_cache_gb` GB / `{python} kv_per_token_mb` MB/token ≈ `{python} kv_capacity_tokens_str` tokens.
+*   At `{python} tokens_per_req_str` tokens per request (input + output), the GPU can handle a **concurrent batch size of ~`{python} concurrent_batch` requests**.
 
 #### Unit Economics {#sec-model-serving-systems-unit-economics-b685}
 
-For an H100 SXM5 instance at approximately \$`{python} f"{hourly_cost:.2f}"` per hour (specialized cloud providers; hyperscaler rates vary from \$2-13 per hour as of 2024):
+For an H100 SXM5 instance at approximately \$`{python} hourly_cost_str` per hour (specialized cloud providers; hyperscaler rates vary from \$2-13 per hour as of 2024):
 
-*   Total tokens per hour = $`{python} concurrent_batch` \text{ batch} \times \frac{3600 \text{ s/hr}}{`{python} req_time_s_str` \text{ s/req}} \times `{python} f"{tokens_per_req:,}"` \text{ tokens/req} \approx `{python} tokens_per_hour_m` \text{ million tokens/hour}$.
-*   **Cost per million tokens**: $\frac{\$`{python} f"{hourly_cost:.2f}"`}{`{python} tokens_per_hour_m`} \approx \mathbf{\$`{python} cost_per_m_tokens`}$.
+*   Total tokens per hour: `{python} concurrent_batch` batch × (3600 s/hr / `{python} req_time_s_str` s/req) × `{python} tokens_per_req_str` tokens/req ≈ `{python} tokens_per_hour_m` million tokens/hour.
+*   **Cost per million tokens**: \$`{python} hourly_cost_str` / `{python} tokens_per_hour_m` ≈ **\$`{python} cost_per_m_tokens`**.
 
 This analysis highlights that for LLMs, **memory capacity** (the size of the KV cache) is the primary determinant of throughput and cost, while **memory bandwidth** is the primary determinant of latency.
 
