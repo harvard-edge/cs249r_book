@@ -116,6 +116,17 @@ where $O$ (**Total Operations**) is the FLOPs required for one epoch times the n
 
 This equation reveals three levers for improvement: reduce total operations through algorithmic innovation, increase peak throughput through hardware utilization, or improve utilization through better pipeline orchestration. Each optimization technique in this chapter pulls one or more of these levers, as summarized in @tbl-iron-law-mapping.
 
+| **Technique** | **Term Affected** | **Mechanism** |
+|:---|:---|:---|
+| **Mixed Precision (FP16/BF16)** | Peak Throughput ↑ | Tensor Cores operate at up to 16× higher FLOP/s |
+| **Data Prefetching** | Utilization ↑ | Reduces GPU idle time waiting for data |
+| **Gradient Checkpointing** | Total Operations ↑ | Adds recomputation, but enables larger models |
+| **Gradient Accumulation** | Utilization ↑ | Maintains high batch parallelism efficiency |
+| **Operator Fusion** | Utilization ↑ | Reduces memory bandwidth bottlenecks |
+| **FlashAttention** | Total Operations ↓ Utilization ↑ | Algorithmic improvement reduces FLOP count Tiling improves memory access patterns |
+
+: **Iron Law Optimization Mapping.** Optimization techniques mapped to Iron Law terms. Understanding which term a technique affects guides optimization strategy selection. {#tbl-iron-law-mapping}
+
 :::
 
 The challenge of maintaining high utilization at scale is illustrated in @fig-communication-tax. While compute-bound workloads scale efficiently, bandwidth-bound workloads like LLM training suffer from synchronization overhead that grows with cluster size, creating a "tax" that degrades effective throughput.
@@ -152,17 +163,6 @@ Training speed is governed by the utilization of hardware peaks.
 - [ ] **Mixed Precision**: How does FP16/BF16 double throughput? (Tensor Cores run 2x faster, and memory bandwidth effectively doubles).
 :::
 
-| **Technique** | **Term Affected** | **Mechanism** |
-|:---|:---|:---|
-| **Mixed Precision (FP16/BF16)** | Peak Throughput ↑ | Tensor Cores operate at up to 16× higher FLOP/s |
-| **Data Prefetching** | Utilization ↑ | Reduces GPU idle time waiting for data |
-| **Gradient Checkpointing** | Total Operations ↑ | Adds recomputation, but enables larger models |
-| **Gradient Accumulation** | Utilization ↑ | Maintains high batch parallelism efficiency |
-| **Operator Fusion** | Utilization ↑ | Reduces memory bandwidth bottlenecks |
-| **FlashAttention** | Total Operations ↓ Utilization ↑ | Algorithmic improvement reduces FLOP count Tiling improves memory access patterns |
-
-: **Iron Law Optimization Mapping.** Optimization techniques mapped to Iron Law terms. Understanding which term a technique affects guides optimization strategy selection. {#tbl-iron-law-mapping}
-
 The Iron Law provides a static framework for reasoning about training performance. But the history of deep learning reveals how the *binding constraint* has shifted over time as hardware and algorithms co-evolved. Understanding this evolution helps explain why certain techniques emerged when they did.
 
 ::: {.callout-perspective title="Training Systems Evolution"}
@@ -183,7 +183,7 @@ Memory limits motivated gradient checkpointing; bandwidth limits motivated Flash
 
 ### Running Example: Training GPT-2 {#sec-ai-training-running-example-training-gpt2-19cd}
 
-To ground the abstract principles of training systems in concrete engineering decisions, we use GPT-2 as a recurring worked example throughout this chapter. This *lighthouse model* is large enough to expose real systems bottlenecks yet small enough to reason about without massive cluster infrastructure.
+To ground the abstract principles of training systems in concrete engineering decisions, we use GPT-2 as a recurring worked example throughout this chapter. This *Lighthouse Model* is large enough to expose real systems bottlenecks yet small enough to reason about without massive cluster infrastructure.
 
 ::: {.callout-lighthouse title="Lighthouse Example: Training GPT-2"}
 
@@ -305,7 +305,7 @@ Matrix multiplication dominance has driven both algorithmic and hardware innovat
 
 This computational dominance has driven system-level optimizations. Systems implement blocked matrix computations for parallel processing across multiple units. As neural architectures grew in scale, these multiplications demanded significant memory resources, since weight matrices and activation matrices must both remain accessible for the backward pass during training. Hardware designs adapted to optimize for these dense multiplication patterns while managing growing memory requirements.
 
-To illustrate the scale of these operations concretely, consider the *attention layer computations* in our GPT-2 lighthouse model.
+To illustrate the scale of these operations concretely, consider the *attention layer computations* in our GPT-2 Lighthouse Model.
 
 ::: {.callout-notebook title="GPT-2 Attention Layer Computation"}
 
@@ -313,7 +313,7 @@ To illustrate the scale of these operations concretely, consider the *attention 
 #| label: gpt2-flop-calc
 #| echo: false
 
-# GPT-2 XL (1.5B) attention FLOP calculations — consistent with lighthouse model
+# GPT-2 XL (1.5B) attention FLOP calculations — consistent with Lighthouse Model
 batch = 32
 seq_len = 1024
 hidden = GPT2_HIDDEN_DIM     # 1600
@@ -483,7 +483,7 @@ The memory footprint of activations is proportional to the batch size and networ
 
 The choice of activation function should balance computational considerations with their mathematical properties. This data underscores the value of evaluating both theoretical and practical performance when designing neural networks. For large-scale networks or real-time applications, ReLU is often the best choice due to its efficiency and scalability. However, for tasks requiring probabilistic outputs, such as classification, softmax remains indispensable despite its computational cost. Ultimately, the ideal activation function depends on the specific task, network architecture, and hardware environment.
 
-Our GPT-2 lighthouse model makes a specific *activation function* choice that illustrates these trade-offs in practice.
+Our GPT-2 Lighthouse Model makes a specific *activation function* choice that illustrates these trade-offs in practice.
 
 ::: {.callout-notebook title="GPT-2 GELU Activation Function"}
 
@@ -509,8 +509,6 @@ where $\Phi(x)$ is the cumulative distribution function of the standard normal d
 
 Frameworks implement fast approximation of GELU using optimized formulas (@lst-gelu-approx). This approximation reduces computational cost to approximately 1.5$\times$ ReLU while maintaining GELU's benefits, demonstrating *how* production systems balance mathematical properties with implementation efficiency.
 
-:::
-
 ::: {#lst-gelu-approx lst-cap="**GELU Approximation**: Fast approximation avoids expensive erf() computation while preserving activation properties."}
 ```{.python}
 # Fast GELU approximation used in production systems
@@ -520,6 +518,8 @@ gelu_approx = (
     0.5 * x * (1 + tanh(sqrt(2 / pi) * (x + 0.044715 * x**3)))
 )
 ```
+:::
+
 :::
 
 The GELU approximation highlights a broader pattern: compute cost is not always the dominant concern. For activation functions, the real bottleneck is often memory bandwidth rather than arithmetic operations. This distinction between compute-bound and memory-bound operations directly affects optimization priorities and recurs throughout our analysis of training bottlenecks.
@@ -926,7 +926,7 @@ The total memory needed scales with:
 
 This creates a complex set of trade-offs. Larger batch sizes enable more efficient computation and better gradient estimates for optimization, but require proportionally more memory for storing activations. More sophisticated optimizers like Adam can achieve faster convergence but require additional memory per parameter.
 
-Quantifying these trade-offs for our GPT-2 lighthouse model reveals the scale of the *activation memory* challenge.
+Quantifying these trade-offs for our GPT-2 Lighthouse Model reveals the scale of the *activation memory* challenge.
 
 ```{python}
 #| label: gpt2-activation-memory-calc
@@ -959,6 +959,13 @@ peak_gb = total_act_gb + params_gb + grad_gb + optimizer_gb
 
 v100_mem_gb = V100_MEM_CAPACITY.to(GiB).magnitude
 
+# Pre-formatted strings
+batch_size_str = str(batch_size)
+seq_len_str = str(seq_len)
+n_layers_str = str(n_layers)
+hidden_dim_str = f"{hidden_dim}"
+ffn_dim_str = f"{ffn_dim}"
+
 attn_act_str = f"{attn_act_mb:.0f}"
 ffn_act_str = f"{ffn_act_mb:.0f}"
 per_layer_str = f"{per_layer_mb:.0f}"
@@ -968,26 +975,24 @@ grad_gb_str = f"{grad_gb:.0f}"
 opt_gb_str = f"{optimizer_gb:.0f}"
 peak_gb_str = f"{peak_gb:.0f}"
 v100_mem_str = f"{v100_mem_gb:.0f}"
-hidden_dim_str = f"{hidden_dim}"
-ffn_dim_str = f"{ffn_dim}"
 ```
 
 We can see this in detail by examining the *GPT-2 activation memory breakdown*.
 
 ::: {.callout-notebook title="GPT-2 Activation Memory Breakdown"}
 
-For GPT-2 with batch_size=32, seq_len=1024, hidden_dim=`{python} hidden_dim_str`, 48 layers:
+For GPT-2 with batch_size=`{python} batch_size_str`, seq_len=`{python} seq_len_str`, hidden_dim=`{python} hidden_dim_str`, `{python} n_layers_str` layers:
 
 #### Per-Layer Activation Memory
 
-- Attention activations: `batch × seq × hidden × 4` (Q, K, V, output) = 32 × 1024 × `{python} hidden_dim_str` × 4 × 2 bytes (FP16) = `{python} attn_act_str` MB
-- FFN activations: `batch × seq × (hidden × 4)` (intermediate expansion) = 32 × 1024 × `{python} ffn_dim_str` × 2 bytes = `{python} ffn_act_str` MB
+- Attention activations: `batch × seq × hidden × 4` (Q, K, V, output) = `{python} batch_size_str` × `{python} seq_len_str` × `{python} hidden_dim_str` × 4 × 2 bytes (FP16) = `{python} attn_act_str` MB
+- FFN activations: `batch × seq × (hidden × 4)` (intermediate expansion) = `{python} batch_size_str` × `{python} seq_len_str` × `{python} ffn_dim_str` × 2 bytes = `{python} ffn_act_str` MB
 - Layer norm states: Minimal (~10 MB per layer)
-- Total per layer: ~850 MB
+- Total per layer: ~`{python} per_layer_str` MB
 
 #### Full Model Activation Memory
 
-- 48 layers × ~850 MB = **`{python} total_act_str` GB** just for activations
+- `{python} n_layers_str` layers × ~`{python} per_layer_str` MB = **`{python} total_act_str` GB** just for activations
 - Parameters (FP16): `{python} params_gb_str` GB
 - Gradients: `{python} grad_gb_str` GB
 - Optimizer state (Adam, FP32): `{python} opt_gb_str` GB
@@ -1473,7 +1478,7 @@ where:
 
 This relationship illustrates a key principle in training system design: the system's overall performance is limited by its slowest component. Whether preprocessing speed, data transfer rates, or computational capacity, the bottleneck stage determines the effective training throughput of the entire system. These relationships guide system architects toward balanced training pipelines where preprocessing capacity aligns with computational resources, ensuring optimal resource utilization.
 
-Applying this throughput analysis to our GPT-2 lighthouse model reveals where the *data pipeline bottleneck* lies for language model training.
+Applying this throughput analysis to our GPT-2 Lighthouse Model reveals where the *data pipeline bottleneck* lies for language model training.
 
 ```{python}
 #| label: gpt2-data-pipeline-calc
@@ -1568,19 +1573,21 @@ allreduce_total_gb = 2 * gradient_size_gb  # Ring AllReduce sends 2× gradients
 network_bw_gbs = 12.5  # 100 Gbps = 12.5 GB/s
 network_time_s = allreduce_total_gb / network_bw_gbs
 
+model_params_b_str = str(model_params_b)
 gradient_size_str = f"{gradient_size_gb:.0f}"
 allreduce_str = f"{allreduce_total_gb:.0f}"
 network_time_str = f"{network_time_s:.1f}"
+network_bw_str = f"{network_bw_gbs:.1f}"
 ```
 
-**The Math**: For a `{python} model_params_b`B parameter model with FP16 gradients:
+**The Math**: For a `{python} model_params_b_str`B parameter model with FP16 gradients:
 
-1. **Gradient Size**: $7 \times 10^9 \times 2 \text{ bytes} = `{python} gradient_size_str` \text{ GB}$ per step.
+1. **Gradient Size**: $`{python} model_params_b_str` \times 10^9 \times 2 \text{ bytes} = `{python} gradient_size_str` \text{ GB}$ per step.
 2. **AllReduce Cost**: Ring AllReduce sends $2 \times `{python} gradient_size_str` \text{ GB} = `{python} allreduce_str` \text{ GB}$ total.
-3. **Network Time**: At 100 Gbps (`{python} f"{network_bw_gbs:.1f}"` GB/s) InfiniBand: $`{python} allreduce_str` / `{python} f"{network_bw_gbs:.1f}"` = `{python} network_time_str` \text{ s}$.
+3. **Network Time**: At 100 Gbps (`{python} network_bw_str` GB/s) InfiniBand: $`{python} allreduce_str` / `{python} network_bw_str` = `{python} network_time_str` \text{ s}$.
 4. **Compute Time**: If forward + backward takes $1 \text{ s}$, network is the bottleneck.
 
-**The Systems Insight**: The network becomes a wall when $t_{\text{communication}} > t_{\text{computation}}$. Solutions include gradient compression (reduce data volume), overlapping computation with communication (as implemented in Horovod [@sergeev2018horovod]), and using faster interconnects (NVLink at `{python} nvlink_h100` GB/s vs InfiniBand at 12.5 GB/s).
+**The Systems Insight**: The network becomes a wall when $t_{\text{communication}} > t_{\text{computation}}$. Solutions include gradient compression (reduce data volume), overlapping computation with communication (as implemented in Horovod [@sergeev2018horovod]), and using faster interconnects (NVLink at `{python} nvlink_h100` GB/s vs InfiniBand at `{python} network_bw_str` GB/s).
 :::
 
 #### System Implications {#sec-ai-training-system-implications-2539}
@@ -2524,6 +2531,13 @@ fp16_grad_gb = fp16_param_gb
 optimizer_fp32_gb = gpt2_b_mp * 4 * 2
 fp16_total_gb = fp16_param_gb + fp16_act_gb + fp16_grad_gb + optimizer_fp32_gb
 
+# Pre-formatted strings
+gpt2_b_str = f"{gpt2_b_mp:.1f}"
+mp_batch_size = 32
+mp_batch_size_str = str(mp_batch_size)
+fp32_act_str = f"{fp32_act_gb:.0f}"
+fp16_act_str = f"{fp16_act_gb:.1f}"
+
 fp32_p_str = f"{fp32_param_gb:.1f}"
 fp32_g_str = f"{fp32_grad_gb:.1f}"
 fp32_t_str = f"{fp32_total_gb:.0f}"
@@ -2531,27 +2545,34 @@ fp16_p_str = f"{fp16_param_gb:.1f}"
 fp16_g_str = f"{fp16_grad_gb:.1f}"
 opt_str = f"{optimizer_fp32_gb:.1f}"
 fp16_t_str = f"{fp16_total_gb:.0f}"
+
+# Gradient checkpointing estimates
+ckpt_act_gb = 8
+ckpt_total_gb = fp16_param_gb + ckpt_act_gb + fp16_grad_gb + optimizer_fp32_gb
+ckpt_act_str = str(ckpt_act_gb)
+ckpt_total_str = f"{ckpt_total_gb:.0f}"
+v100_capacity_str = "32"
 ```
 
 FP32 Baseline:
 
-- Parameters: 1.5B × 4 bytes = `{python} fp32_p_str` GB
-- Activations (batch=32): ~65 GB
+- Parameters: `{python} gpt2_b_str`B × 4 bytes = `{python} fp32_p_str` GB
+- Activations (batch=`{python} mp_batch_size_str`): ~`{python} fp32_act_str` GB
 - Gradients: `{python} fp32_g_str` GB
 - Total: ~`{python} fp32_t_str` GB (exceeds any single GPU)
 
 FP16 Mixed Precision:
 
-- Parameters (FP16): 1.5B × 2 bytes = `{python} fp16_p_str` GB
-- Activations (FP16): ~32.6 GB
+- Parameters (FP16): `{python} gpt2_b_str`B × 2 bytes = `{python} fp16_p_str` GB
+- Activations (FP16): ~`{python} fp16_act_str` GB
 - Gradients (FP16): `{python} fp16_g_str` GB
 - Optimizer state (FP32 master weights): `{python} opt_str` GB (Adam m, v)
 - Total: ~`{python} fp16_t_str` GB (still tight, but manageable with optimizations)
 
 With Mixed Precision + Gradient Checkpointing:
 
-- Activations reduced to ~8 GB (recompute during backward)
-- Total: ~26 GB → fits comfortably in 32GB V100
+- Activations reduced to ~`{python} ckpt_act_str` GB (recompute during backward)
+- Total: ~`{python} ckpt_total_str` GB → fits comfortably in `{python} v100_capacity_str`GB V100
 
 **Computational Speedup**
 
@@ -3087,8 +3108,6 @@ Activation checkpointing reduces memory usage during the backward pass by discar
 
 With checkpointing, only a subset of the activations is retained during the forward pass. @fig-activation-checkpointing visualizes this memory-compute tradeoff: during the forward pass (top row), only checkpoint nodes (green, solid) are retained while intermediate nodes (white, dashed) are discarded. During the backward pass (bottom row), these discarded activations are recomputed on demand (brown nodes) from the nearest checkpoint, trading approximately 33% additional compute for memory savings that can exceed 70% in deep networks.
 
-The implementation involves three steps. First, split the model into segments. Second, retain activations only at the boundaries of these segments during the forward pass. Third, recompute activations for intermediate layers during the backward pass when needed.
-
 ::: {#fig-activation-checkpointing fig-env="figure" fig-pos="htb" fig-cap="**Activation Checkpointing**: Trading memory usage for recomputation during backpropagation enables training deeper neural networks. By storing only a subset of activations from the forward pass and recomputing others on demand, this technique reduces peak memory requirements at the cost of increased training time." fig-alt="Two-row diagram showing activation checkpointing. Top row: forward pass with checkpointed nodes (filled) and discarded nodes (dashed). Bottom row: backward pass recomputing discarded activations from checkpoints."}
 ```{.tikz}
 \begin{tikzpicture}[line cap=round,line join=round,font=\small\sffamily]
@@ -3187,6 +3206,8 @@ scale=1, every node/.append style={transform shape}]
 ```
 :::
 
+The implementation involves three steps. First, split the model into segments. Second, retain activations only at the boundaries of these segments during the forward pass. Third, recompute activations for intermediate layers during the backward pass when needed.
+
 Frameworks like PyTorch provide tools such as `torch.utils.checkpoint` to simplify this process. Checkpointing is particularly effective for very deep architectures, such as transformers or large convolutional networks, where the memory required for storing activations can exceed the GPU's capacity.
 
 The synergy between gradient accumulation and checkpointing enables training of larger, more complex models. Gradient accumulation manages memory constraints related to batch size, while checkpointing optimizes memory usage for intermediate activations. Together, these techniques expand the range of models that can be trained on available hardware.
@@ -3225,7 +3246,7 @@ Activation checkpointing[^fn-training-activation-checkpointing] significantly re
 
 Both techniques enhance scalability and cost efficiency by reducing hardware requirements, lowering development costs for organizations working within tight budgets.
 
-Returning to our GPT-2 lighthouse model, *gradient accumulation* is essential for achieving the target batch size within V100 memory constraints.
+Returning to our GPT-2 Lighthouse Model, *gradient accumulation* is essential for achieving the target batch size within V100 memory constraints.
 
 ::: {.callout-notebook title="GPT-2 Gradient Accumulation Strategy"}
 
@@ -3290,6 +3311,19 @@ Configuration:
 
 @lst-gradient-accumulation-loop shows the training loop with gradient accumulation.
 
+::: {#lst-gradient-accumulation-loop lst-cap="**Gradient Accumulation Training Loop**: Accumulates gradients over multiple micro-batches before synchronization, reducing communication overhead."}
+```{.python}
+optimizer.zero_grad()
+for step in range(4):  # Accumulation steps
+    micro_batch = next(dataloader)  # 16 samples
+    loss = model(micro_batch) / 4  # Scale loss
+    loss.backward()  # Accumulate gradients
+# Now gradients represent 64 samples
+all_reduce(gradients)  # Sync across 8 GPUs
+optimizer.step()  # Update with effective batch=512
+```
+:::
+
 **Performance Impact**
 
 Without Accumulation (naive approach):
@@ -3325,19 +3359,6 @@ $$
 
 **Key Insight:** For memory-bound models like GPT-2, gradient accumulation + moderate GPU count is more cost-effective than scaling to many GPUs with small batches.
 
-:::
-
-::: {#lst-gradient-accumulation-loop lst-cap="**Gradient Accumulation Training Loop**: Accumulates gradients over multiple micro-batches before synchronization, reducing communication overhead."}
-```{.python}
-optimizer.zero_grad()
-for step in range(4):  # Accumulation steps
-    micro_batch = next(dataloader)  # 16 samples
-    loss = model(micro_batch) / 4  # Scale loss
-    loss.backward()  # Accumulate gradients
-# Now gradients represent 64 samples
-all_reduce(gradients)  # Sync across 8 GPUs
-optimizer.step()  # Update with effective batch=512
-```
 :::
 
 #### Practical Considerations {#sec-ai-training-gradient-accumulation-practical-considerations-a5a4}
@@ -3570,7 +3591,7 @@ We have now exhausted the single-machine optimization toolkit. Mixed precision e
 
 ### Scaling Training Systems {#sec-ai-training-scaling-training-systems-adfd}
 
-The optimization techniques examined throughout this chapter extend single-device training capabilities substantially, but they cannot overcome fundamental hardware limits. A single GPU has finite memory capacity, finite compute throughput, and finite memory bandwidth. When model size exceeds device memory even after gradient checkpointing, or when training duration remains unacceptable even at peak utilization, multi-accelerator training becomes necessary. This section examines when and how to scale beyond single-device training, from multi-GPU configurations within a single machine (the ML node scope of this volume) to the threshold where distributed systems across multiple machines become essential. The distributed training techniques that operate across network boundaries are covered in detail in Volume II.
+The optimization techniques examined throughout this chapter extend single-device training capabilities substantially, but they cannot overcome fundamental hardware limits. A single GPU has finite memory capacity, finite compute throughput, and finite memory bandwidth. When model size exceeds device memory even after gradient checkpointing, or when training duration remains unacceptable even at peak utilization, multi-accelerator training becomes necessary. This section examines when and how to scale beyond single-device training, from multi-GPU configurations within a single machine (the ML node scope of this book) to the threshold where distributed systems across multiple machines become essential. The distributed training techniques that operate across network boundaries are covered in detail in Volume II.
 
 Scaling to multiple devices also amplifies the energy consumption and environmental impact of training. The *carbon footprint of training* grows proportionally with cluster size, making efficiency optimization not just a performance concern but an environmental one.
 
@@ -3711,7 +3732,7 @@ This architectural progression illuminates why traditional computing systems pro
 
 ### Single-Node Multi-GPU Training {#sec-ai-training-singlenode-multigpu-training-c87f}
 
-Multi-GPU training within a single node, the scope of this volume, predates large-scale distributed systems. AlexNet[^fn-training-alexnet] (2012) famously split its model across two GTX 580 GPUs—not because the model was too large, but because the 3GB memory per GPU couldn't hold both the model and the batch activations. This single-node, multi-GPU configuration remains common today and introduces the fundamental parallelism strategies without the complexity of network communication.
+Multi-GPU training within a single node, the scope of this book, predates large-scale distributed systems. AlexNet[^fn-training-alexnet] (2012) famously split its model across two GTX 580 GPUs—not because the model was too large, but because the 3GB memory per GPU couldn't hold both the model and the batch activations. This single-node, multi-GPU configuration remains common today and introduces the fundamental parallelism strategies without the complexity of network communication.
 
 [^fn-training-alexnet]: **AlexNet**: Developed by Alex Krizhevsky, Ilya Sutskever, and Geoffrey Hinton, AlexNet won ImageNet 2012 with 15.3% error rate (vs. 26.2% for second place), using two GTX 580 GPUs for 5-6 days of training. The model was split across GPUs with cross-GPU communication only at certain layers—an early form of model parallelism that launched the deep learning revolution.
 

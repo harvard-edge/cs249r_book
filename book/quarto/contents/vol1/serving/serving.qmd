@@ -836,6 +836,12 @@ where $L$ is the average number of requests in the system, $\lambda$ is the arri
 littles_lambda = 1000  # requests/sec
 littles_w = 0.05       # 50ms in seconds
 littles_l = littles_lambda * littles_w  # concurrent requests
+
+# Pre-formatted strings
+littles_lambda_str = f"{littles_lambda:,}"
+littles_w_ms = int(littles_w * 1000)
+littles_w_ms_str = str(littles_w_ms)
+littles_w_str = str(littles_w)
 littles_l_str = f"{littles_l:.0f}"
 ```
 
@@ -847,13 +853,13 @@ littles_l_str = f"{littles_l:.0f}"
 
 **Scenario**:
 
-*   **Throughput Target ($\lambda$)**: 1,000 requests/sec.
-*   **Latency Target ($W$)**: 50 ms (0.05 s).
+*   **Throughput Target ($\lambda$)**: `{python} littles_lambda_str` requests/sec.
+*   **Latency Target ($W$)**: `{python} littles_w_ms_str` ms (`{python} littles_w_str` s).
 
 **The Calculation**:
-$$ L = 1{,}000 \times 0.05 = \mathbf{`{python} littles_l_str` \text{ concurrent requests}} $$
+$$ L = `{python} littles_lambda_str` \times `{python} littles_w_str` = \mathbf{`{python} littles_l_str` \text{ concurrent requests}} $$
 
-**The Constraint**: Your server *must* have enough RAM to hold 50 requests simultaneously (batch size + queue).
+**The Constraint**: Your server *must* have enough RAM to hold `{python} littles_l_str` requests simultaneously (batch size + queue).
 
 *   If your GPU runs out of memory at Batch Size 32, you physically **cannot** hit 1,000 QPS at 50ms latency.
 *   You must either reduce latency ($W$) or buy more memory ($L$).
@@ -953,6 +959,11 @@ cp_gpus_after_fail_str = f"{cp_gpus_after_fail}"
 cp_util_after_fail = (cp_peak_qps / cp_v100_throughput) / cp_gpus_after_fail * 100
 cp_util_after_fail_str = f"{cp_util_after_fail:.1f}"
 
+# Pre-formatted strings for inputs
+cp_peak_qps_str = f"{cp_peak_qps:,}"
+cp_v100_throughput_str = f"{cp_v100_throughput:,}"
+cp_rho_safe_str = f"{cp_rho_safe:.2f}"
+
 # Precision throughput ratio
 cp_fp32_bits = 32
 cp_int8_bits = 8
@@ -967,7 +978,7 @@ We can formalize this through *ResNet-50 capacity planning*.
 Consider designing a ResNet-50 serving system with these requirements:
 
 - **Target p99 latency**: 50ms
-- **Peak expected traffic**: 5,000 requests per second
+- **Peak expected traffic**: `{python} cp_peak_qps_str` requests per second
 - **Service time** (TensorRT FP16): 5ms
 
 #### Step 1: Find Safe Utilization {.unnumbered}
@@ -976,17 +987,17 @@ Applying @eq-p99-latency to constrain $W_{p99} \leq 50$ms with 5ms service time 
 
 $$5\text{ms} \cdot \left(1 + \frac{\ln(100 \cdot \rho)}{1 - \rho}\right) \leq 50\text{ms}$$
 
-This yields $\rho \leq 0.72$ (72% maximum utilization).
+This yields $\rho \leq `{python} cp_rho_safe_str`$ (72% maximum utilization).
 
 #### Step 2: Calculate Required Service Rate {.unnumbered}
 
-$$\mu_{\text{required}} = \frac{\lambda}{\rho_{\text{safe}}} = \frac{5000}{0.72} = `{python} cp_mu_required_str` \text{ requests/second}$$
+$$\mu_{\text{required}} = \frac{\lambda}{\rho_{\text{safe}}} = \frac{`{python} cp_peak_qps_str`}{`{python} cp_rho_safe_str`} = `{python} cp_mu_required_str` \text{ requests/second}$$
 
 #### Step 3: Determine GPU Count {.unnumbered}
 
-Single V100 throughput at batch=16: 1,143 images/second
+Single V100 throughput at batch=16: `{python} cp_v100_throughput_str` images/second
 
-$$\text{GPUs needed} = \frac{`{python} cp_mu_required_str`}{1143} = `{python} cp_gpus_raw_str` \rightarrow `{python} cp_gpus_ceil_str` \text{ GPUs}$$
+$$\text{GPUs needed} = \frac{`{python} cp_mu_required_str`}{`{python} cp_v100_throughput_str`} = `{python} cp_gpus_raw_str` \rightarrow `{python} cp_gpus_ceil_str` \text{ GPUs}$$
 
 #### Step 4: Add Headroom for Variance {.unnumbered}
 
@@ -996,13 +1007,13 @@ $$\text{Final count} = `{python} cp_gpus_ceil_str` \times 1.3 = `{python} cp_fin
 
 #### Step 5: Verify Fault Tolerance {.unnumbered}
 
-The 30% headroom addresses traffic variance, but production systems also need fault tolerance. With `{python} cp_final_ceil_str` GPUs, losing one leaves `{python} cp_gpus_after_fail_str` GPUs handling 5,000 QPS:
+The 30% headroom addresses traffic variance, but production systems also need fault tolerance. With `{python} cp_final_ceil_str` GPUs, losing one leaves `{python} cp_gpus_after_fail_str` GPUs handling `{python} cp_peak_qps_str` QPS:
 
-$$\text{Utilization after failure} = \frac{5000 / 1143}{`{python} cp_gpus_after_fail_str`} = `{python} cp_util_after_fail_str`\%$$
+$$\text{Utilization after failure} = \frac{`{python} cp_peak_qps_str` / `{python} cp_v100_throughput_str`}{`{python} cp_gpus_after_fail_str`} = `{python} cp_util_after_fail_str`\%$$
 
 This remains well below the 72% safe utilization threshold, confirming N+1 redundancy is satisfied. For stricter fault tolerance requirements, N+2 redundancy (tolerating two simultaneous failures) would require 11-12 GPUs.
 
-**Result**: Provision `{python} cp_final_ceil_str` V100 GPUs to serve 5,000 QPS at 50ms p99 latency with N+1 fault tolerance.
+**Result**: Provision `{python} cp_final_ceil_str` V100 GPUs to serve `{python} cp_peak_qps_str` QPS at 50ms p99 latency with N+1 fault tolerance.
 
 :::
 
@@ -1263,6 +1274,10 @@ batch8_user_latency_ms = batch8_wait_ms + batch8_inference_ms
 batch8_throughput = 8 / (batch8_user_latency_ms / 1000)
 latency_increase = batch8_user_latency_ms / batch1_ms
 
+# Pre-formatted strings
+batch1_ms_str = f"{batch1_ms:.0f}"
+batch8_wait_ms_str = f"{batch8_wait_ms:.0f}"
+batch8_inference_ms_str = f"{batch8_inference_ms:.0f}"
 batch8_user_latency_str = f"{batch8_user_latency_ms:.0f}"
 batch8_throughput_str = f"{batch8_throughput:.0f}"
 latency_increase_str = f"{latency_increase:.0f}"
@@ -1270,14 +1285,14 @@ latency_increase_str = f"{latency_increase:.0f}"
 
 **The Math**:
 
-1.  **Baseline (Batch 1)**: Inference = **`{python} f"{batch1_ms:.0f}"` ms**. Throughput = **`{python} batch1_imgs` img/s**.
+1.  **Baseline (Batch 1)**: Inference = **`{python} batch1_ms_str` ms**. Throughput = **`{python} batch1_imgs` img/s**.
 2.  **Optimized (Batch 8)**:
-    - **Wait Time**: You set a **`{python} f"{batch8_wait_ms:.0f}"` ms** batching window to collect requests.
-    - **Inference Time**: Batch 8 inference takes **`{python} f"{batch8_inference_ms:.0f}"` ms**.
-    - **User Latency**: $5 \text{ ms (wait)} + 9 \text{ ms (compute)} = \mathbf{`{python} batch8_user_latency_str` \text{ ms}}$.
+    - **Wait Time**: You set a **`{python} batch8_wait_ms_str` ms** batching window to collect requests.
+    - **Inference Time**: Batch 8 inference takes **`{python} batch8_inference_ms_str` ms**.
+    - **User Latency**: $`{python} batch8_wait_ms_str` \text{ ms (wait)} + `{python} batch8_inference_ms_str` \text{ ms (compute)} = \mathbf{`{python} batch8_user_latency_str` \text{ ms}}$.
     - **Throughput**: $8 \text{ img} / `{python} batch8_user_latency_str` \text{ ms} \approx \mathbf{`{python} batch8_throughput_str` \text{ img/s}}$.
 
-**The Systems Conclusion**: By accepting a **`{python} latency_increase_str`× increase in latency** (`{python} f"{batch1_ms:.0f}"`ms → `{python} batch8_user_latency_str`ms), you have achieved nearly **`{python} latency_increase_str`× higher throughput** on the same hardware. As long as `{python} batch8_user_latency_str`ms is under your 20ms budget, this is "free" capacity. This trade-off is the fundamental lever of serving economics.
+**The Systems Conclusion**: By accepting a **`{python} latency_increase_str`× increase in latency** (`{python} batch1_ms_str`ms → `{python} batch8_user_latency_str`ms), you have achieved nearly **`{python} latency_increase_str`× higher throughput** on the same hardware. As long as `{python} batch8_user_latency_str`ms is under your 20ms budget, this is "free" capacity. This trade-off is the fundamental lever of serving economics.
 :::
 
 @fig-throughput-latency-knee visualizes this trade-off, showing the **"Knee"** of the curve. This is the optimal operating point where throughput is maximized before latency spikes due to queuing.

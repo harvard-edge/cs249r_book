@@ -176,6 +176,13 @@ serial_gpt2 = 1 - p_gpt2
 amdahl_gpt2 = 1 / (serial_gpt2 + p_gpt2 / hw_speedup)
 amdahl_gpt2_ceiling = 1 / (1 - p_gpt2)
 
+# Pre-formatted strings
+hw_speedup_str = str(hw_speedup)
+p_resnet_str = f"{p_resnet:.2f}"
+p_gpt2_str = f"{p_gpt2:.2f}"
+serial_resnet_str = f"{serial_resnet:.2f}"
+serial_gpt2_str = f"{serial_gpt2:.2f}"
+
 amdahl_resnet_str = f"{amdahl_resnet:.1f}"
 amdahl_gpt2_str = f"{amdahl_gpt2:.1f}"
 amdahl_gpt2_ceil_str = f"{amdahl_gpt2_ceiling:.0f}"
@@ -188,7 +195,7 @@ amdahl_gpt2_ceil_str = f"{amdahl_gpt2_ceiling:.0f}"
 - H100 delivers $S = `{python} hw_speedup`\times$ speedup over CPU for matrix multiply (`{python} h100_tflops_int8` TOPS INT8 vs. ~8 TOPS on baseline CPU without AMX extensions)
 - Typical inference has $P = `{python} p_resnet`$ (`{python} f"{p_resnet*100:.0f}"`% parallelizable, `{python} f"{serial_resnet*100:.0f}"`% serial: data loading, preprocessing, postprocessing)
 
-$$Speedup = \frac{1}{(1-0.95) + \frac{0.95}{500}} = \frac{1}{0.05 + 0.0019} = \frac{1}{0.0519} \approx `{python} amdahl_resnet_str`\times$$
+$$Speedup = \frac{1}{(1-`{python} p_resnet_str`) + \frac{`{python} p_resnet_str`}{`{python} hw_speedup_str`}} = \frac{1}{`{python} serial_resnet_str` + 0.0019} = \frac{1}{0.0519} \approx `{python} amdahl_resnet_str`\times$$
 
 Despite a `{python} hw_speedup`× hardware advantage, total system speedup is only **`{python} f"{amdahl_resnet:.0f}"`×**. The `{python} f"{serial_resnet*100:.0f}"`% serial fraction caps practical gains.
 
@@ -196,7 +203,7 @@ Despite a `{python} hw_speedup`× hardware advantage, total system speedup is on
 
 - Same H100, but GPT-2 token generation has $P = `{python} p_gpt2`$ (`{python} f"{(1-p_gpt2)*100:.0f}"`% serial: KV-cache updates, sampling, Python overhead)
 
-$$Speedup = \frac{1}{(1-0.80) + \frac{0.80}{500}} = \frac{1}{0.20 + 0.0016} \approx `{python} amdahl_gpt2_str`\times$$
+$$Speedup = \frac{1}{(1-`{python} p_gpt2_str`) + \frac{`{python} p_gpt2_str`}{`{python} hw_speedup_str`}} = \frac{1}{`{python} serial_gpt2_str` + 0.0016} \approx `{python} amdahl_gpt2_str`\times$$
 
 The **Bandwidth Hog** archetype suffers more from serial bottlenecks. Even infinite accelerator speed yields only $1/(1-P) = `{python} amdahl_gpt2_ceil_str`\times$ maximum speedup. This is *why* LLM inference optimization focuses on reducing the serial fraction (batching, speculative decoding) rather than raw hardware speed.
 :::
@@ -465,18 +472,6 @@ The primary engineering challenge is no longer "how fast can we calculate?" but 
 
 [^fn-hbm-architecture]: HBM (introduced in @sec-dnn-architectures) achieves 2-10x higher bandwidth than GDDR memory through 3D die stacking with thousands of TSVs. From a hardware architecture perspective, HBM's 2-3 TB/s bandwidth (vs. 500-700 GB/s for GDDR6X) transforms memory-bound ML workloads toward compute-bound performance. The trade-off is higher manufacturing cost, limiting HBM to data center accelerators where bandwidth justifies the premium.
 
-The evolution from the Intel 8087 to the Google TPU reveals a consistent pattern: hardware evolves to fit the algorithm's dominant bottleneck. Where the 8087 addressed floating-point operations that consumed 80% of scientific computing time, modern AI accelerators address matrix operations that constitute over 95% of neural network computation. This concentration of demand explains why specialized AI silicon achieves 100-1000$\times$ performance improvements over general-purpose processors.
-
-The constraints identified above (massive parallelism, predictable data flow, and tolerance for reduced precision) shape accelerator architecture. Before examining the computational primitives that exploit these characteristics, we examine the architectural organization that enables their efficient execution. Modern AI accelerators achieve their dramatic performance improvements through a carefully orchestrated hierarchy of specialized components operating in concert.
-
-The processing substrate consists of an array of processing elements, each containing dedicated computational units optimized for specific operations: tensor cores execute matrix multiplication, vector units perform element-wise operations, and special function units compute activation functions. These processing elements are organized in a grid topology that enables massive parallelism, with dozens to hundreds of units operating simultaneously on different portions of the computation, exploiting the data-level parallelism inherent in neural network workloads.
-
-The memory hierarchy forms an equally critical architectural component. High-bandwidth memory provides the aggregate throughput required to sustain these numerous processing elements, while a multi-level cache hierarchy from shared L2 caches down to per-element L1 caches and scratchpads minimizes the energy cost of data movement. This hierarchical organization embodies a core design principle: in AI accelerators, data movement typically consumes more energy than computation itself, necessitating architectural strategies that prioritize data reuse by maintaining frequently accessed values (including weights and partial results) in proximity to compute units.
-
-The host interface establishes connectivity between the specialized accelerator and the broader computing system, enabling coordination between general-purpose CPUs that manage program control flow and the accelerator that executes computationally intensive neural network operations.
-
-This architectural partitioning reflects specialization at the system level: CPUs address control flow, conditional logic, and system coordination, while accelerators focus on the regular, massively parallel arithmetic operations that dominate neural network execution. @fig-accelerator-anatomy shows how specialized compute units, hierarchical memory subsystems, and host connectivity integrate to form a system optimized for AI workloads.
-
 ::: {#fig-accelerator-anatomy fig-env="figure" fig-pos="htb" fig-cap="**Anatomy of a Modern AI Accelerator**: AI accelerators integrate specialized processing elements containing tensor cores, vector units, and special function units, supported by a hierarchical memory system from high-bandwidth memory down to local caches. This architecture maximizes data reuse and parallel execution while minimizing energy-intensive data movement, forming the foundation for 100-1000× performance improvements over general-purpose processors." fig-alt="Block diagram showing AI accelerator architecture: CPU connects to DRAM stacks and processing element grid containing tensor cores, vector units, and local caches in hierarchical arrangement."}
 ```{.tikz}
 \begin{tikzpicture}[line cap=round,line join=round,font=\usefont{T1}{phv}{m}{n}\small]
@@ -651,6 +646,18 @@ fit=(BB1)(DPE1)(DPE4)(B1),yshift=0mm](BB2){};
 \end{tikzpicture}
 ```
 :::
+
+The evolution from the Intel 8087 to the Google TPU reveals a consistent pattern: hardware evolves to fit the algorithm's dominant bottleneck. Where the 8087 addressed floating-point operations that consumed 80% of scientific computing time, modern AI accelerators address matrix operations that constitute over 95% of neural network computation. This concentration of demand explains why specialized AI silicon achieves 100-1000$\times$ performance improvements over general-purpose processors.
+
+The constraints identified above (massive parallelism, predictable data flow, and tolerance for reduced precision) shape accelerator architecture. Before examining the computational primitives that exploit these characteristics, we examine the architectural organization that enables their efficient execution. Modern AI accelerators achieve their dramatic performance improvements through a carefully orchestrated hierarchy of specialized components operating in concert.
+
+The processing substrate consists of an array of processing elements, each containing dedicated computational units optimized for specific operations: tensor cores execute matrix multiplication, vector units perform element-wise operations, and special function units compute activation functions. These processing elements are organized in a grid topology that enables massive parallelism, with dozens to hundreds of units operating simultaneously on different portions of the computation, exploiting the data-level parallelism inherent in neural network workloads.
+
+The memory hierarchy forms an equally critical architectural component. High-bandwidth memory provides the aggregate throughput required to sustain these numerous processing elements, while a multi-level cache hierarchy from shared L2 caches down to per-element L1 caches and scratchpads minimizes the energy cost of data movement. This hierarchical organization embodies a core design principle: in AI accelerators, data movement typically consumes more energy than computation itself, necessitating architectural strategies that prioritize data reuse by maintaining frequently accessed values (including weights and partial results) in proximity to compute units.
+
+The host interface establishes connectivity between the specialized accelerator and the broader computing system, enabling coordination between general-purpose CPUs that manage program control flow and the accelerator that executes computationally intensive neural network operations.
+
+This architectural partitioning reflects specialization at the system level: CPUs address control flow, conditional logic, and system coordination, while accelerators focus on the regular, massively parallel arithmetic operations that dominate neural network execution. @fig-accelerator-anatomy shows how specialized compute units, hierarchical memory subsystems, and host connectivity integrate to form a system optimized for AI workloads.
 
 ## AI Compute Primitives {#sec-ai-acceleration-ai-compute-primitives-2c99}
 
@@ -1497,6 +1504,11 @@ systolic_energy_pj = systolic_accesses_per_op * dram_access_pj + compute_energy_
 systolic_energy_str = f"{systolic_energy_pj:.0f}"
 systolic_access_str = f"{systolic_accesses_per_op:.3f}"
 
+# Pre-formatted strings for inputs
+dram_access_str = str(dram_access_pj)
+systolic_size_str = str(systolic_size)
+vector_accesses_str = str(vector_accesses)
+
 # Efficiency ratio
 energy_ratio = vector_energy_pj / systolic_energy_pj
 energy_ratio_str = f"{energy_ratio:.0f}"
@@ -1510,12 +1522,12 @@ This architecture provides *the energy advantage of pulsing data*.
 The "Systolic" (heartbeat) metaphor is not just about timing; it reflects a fundamental energy efficiency advantage. We can quantify the energy advantage of systolic dataflow over traditional vector units using the **Energy Corollary**:
 
 1.  **Vector Unit**: Loads $A$, loads $B$, computes $A \times B + C$, writes $C$.
-    - **Data Movement**: 3 loads + 1 write = 4 DRAM accesses (per operation).
-    - **Energy**: $\approx 4 \times 640\text{ pJ} = \mathbf{`{python} vector_energy_str` \text{ pJ/OP}}$.
+    - **Data Movement**: 3 loads + 1 write = `{python} vector_accesses_str` DRAM accesses (per operation).
+    - **Energy**: $\approx `{python} vector_accesses_str` \times `{python} dram_access_str`\text{ pJ} = \mathbf{`{python} vector_energy_str` \text{ pJ/OP}}$.
 
-2.  **Systolic Array ($128 \times 128$ size)**: Loads $A$ and $B$ once at the edges. Data "pulses" through 128 processing elements.
-    - **Data Movement**: 2 loads per 128 operations = `{python} systolic_access_str` DRAM accesses (per operation).
-    - **Energy**: $\approx `{python} systolic_access_str` \times 640\text{ pJ} + 1 \text{ pJ (compute)} \approx \mathbf{`{python} systolic_energy_str` \text{ pJ/OP}}$.
+2.  **Systolic Array ($`{python} systolic_size_str` \times `{python} systolic_size_str`$ size)**: Loads $A$ and $B$ once at the edges. Data "pulses" through `{python} systolic_size_str` processing elements.
+    - **Data Movement**: 2 loads per `{python} systolic_size_str` operations = `{python} systolic_access_str` DRAM accesses (per operation).
+    - **Energy**: $\approx `{python} systolic_access_str` \times `{python} dram_access_str`\text{ pJ} + 1 \text{ pJ (compute)} \approx \mathbf{`{python} systolic_energy_str` \text{ pJ/OP}}$.
 
 **The Systems Conclusion**: A systolic array is **`{python} energy_ratio_str`x more energy-efficient** than a naive vector unit for large matrix multiplications.
 - This efficiency is what allows a Google TPU to pack 100,000+ MAC units into a single chip without melting.
@@ -1527,32 +1539,6 @@ A systolic array arranges processing elements in a grid pattern, where data flow
 Kung and Leiserson[^fn-systolic-origin] [@kung1979systolic] first introduced systolic arrays, formalizing their use in parallel computing architectures for efficient matrix operations [@Kung1982]. Unlike general-purpose execution units, systolic arrays exploit spatial and temporal locality by reusing operands as they propagate through the grid. Google's TPU exemplifies this architectural approach: in the TPUv4, a $128\times128$ systolic array of multiply-accumulate units processes matrix operations by streaming data through the array in a pipelined manner [@jouppi2017datacenter]. @fig-systolic-array captures this dataflow architecture.
 
 [^fn-systolic-origin]: **Systolic Array**: Named from the Greek "systole" (contraction), referring to the rhythmic pumping of the heart. H.T. Kung and Charles Leiserson chose this term at CMU in 1979 because data pulses through the processing element grid in waves, like blood through cardiac chambers. Each element contracts (computes) and passes data to neighbors in a coordinated rhythm. Google's TPUs revived systolic designs for neural networks by pairing them with software stacks optimized for dense linear algebra, achieving high throughput when workloads map well to this rhythmic dataflow pattern.
-
-The systolic array architecture achieves computational efficiency through synchronized data movement across a structured grid of processing elements. Systolic arrays organize computation around four components:
-
-1. **Control Unit**: Coordinates timing and data distribution across the array, maintaining synchronized operation throughout the computational grid
-2. Data Streams: Input matrices propagate through coordinated pathways where matrix A elements traverse horizontally while matrix B elements flow vertically through the processing grid
-3. **Processing Element Grid**: Individual processing elements execute multiply-accumulate operations on streaming data, generating partial results that accumulate toward the final computation
-4. **Output Collection**: Results aggregate at designated output boundaries where accumulated partial sums form complete matrix elements
-
-Because systolic arrays physically fix how data flows through the grid, designers must decide which operand to keep stationary, a choice that permanently shapes the hardware's affinity for certain workloads.
-
-::: {.callout-perspective title="Matching Architecture to Workload"}
-
-**The Architects' Dilemma**: Systolic arrays must choose which data to keep stationary (in registers) to minimize movement. This choice hard-codes the hardware's preference for certain model types.
-
-| **Strategy** | **Stationary Item** | **Optimized For** | **Example Workload** |
-|:---|:---|:---|:---|
-| **Weight-Stationary** | Weights ($W$) | High Reuse of Weights | **CNNs (Conv2D)**: Filters are small and reused across the entire image. |
-| **Output-Stationary** | Partial Sums ($C$) | High Reuse of Accumulators | **Large Batch MatMul**: Accumulating results for many inputs against a large weight matrix. |
-| **Row-Stationary** | Input Rows ($A$) | Data Reuse | **General MatMul**: Balancing input and weight reuse. |
-
-There is no "perfect" accelerator. A chip optimized for Weight-Stationary flow (like early TPUs) excels at CNNs but might struggle with the massive, changing weights of LLMs, which push architectures toward different reuse patterns.
-:::
-
-The synchronized data flow ensures that matrix element A[i,k] encounters corresponding B[k,j] elements at precise temporal intervals, executing the multiply-accumulate operations required for matrix multiplication C[i,j] = Σ A[i,k] × B[k,j]. This systematic reuse of operands across multiple processing elements substantially reduces memory bandwidth requirements by eliminating redundant data fetches from external memory subsystems.
-
-Consider the multiplication of 2×2 matrices A and B within a systolic array. During the first computational cycle, element A[0,0]=2 propagates horizontally while B[0,0]=1 moves vertically, converging at processing element PE(0,0) to execute the multiplication 2×1=2. In the subsequent cycle, the same A[0,0]=2 advances to PE(0,1) where it encounters B[0,1]=3, computing 2×3=6. Concurrently, A[0,1]=4 enters PE(0,0) to engage with the next B matrix element. This coordinated data movement enables systematic operand reuse across multiple computational operations, eliminating redundant memory accesses and exemplifying the efficiency principle underlying systolic array architectures.
 
 ::: {#fig-systolic-array fig-env="figure" fig-pos="htb" fig-cap="**Systolic Array Dataflow**: A control unit feeds input data streams into a grid of processing elements, each performing multiply-accumulate operations. Data flows horizontally and vertically through the array in a pipelined manner, maximizing operand reuse and minimizing memory access, as exemplified by Google's TPUv4." fig-alt="Systolic array diagram with control unit feeding data streams into processing element grid. Elements perform multiply-accumulate operations with results flowing through accumulator chain."}
 ```{.tikz}
@@ -1649,6 +1635,32 @@ node[right]{Data};
 \end{tikzpicture}}
 ```
 :::
+
+The systolic array architecture achieves computational efficiency through synchronized data movement across a structured grid of processing elements. Systolic arrays organize computation around four components:
+
+1. **Control Unit**: Coordinates timing and data distribution across the array, maintaining synchronized operation throughout the computational grid
+2. Data Streams: Input matrices propagate through coordinated pathways where matrix A elements traverse horizontally while matrix B elements flow vertically through the processing grid
+3. **Processing Element Grid**: Individual processing elements execute multiply-accumulate operations on streaming data, generating partial results that accumulate toward the final computation
+4. **Output Collection**: Results aggregate at designated output boundaries where accumulated partial sums form complete matrix elements
+
+Because systolic arrays physically fix how data flows through the grid, designers must decide which operand to keep stationary, a choice that permanently shapes the hardware's affinity for certain workloads.
+
+::: {.callout-perspective title="Matching Architecture to Workload"}
+
+**The Architects' Dilemma**: Systolic arrays must choose which data to keep stationary (in registers) to minimize movement. This choice hard-codes the hardware's preference for certain model types.
+
+| **Strategy** | **Stationary Item** | **Optimized For** | **Example Workload** |
+|:---|:---|:---|:---|
+| **Weight-Stationary** | Weights ($W$) | High Reuse of Weights | **CNNs (Conv2D)**: Filters are small and reused across the entire image. |
+| **Output-Stationary** | Partial Sums ($C$) | High Reuse of Accumulators | **Large Batch MatMul**: Accumulating results for many inputs against a large weight matrix. |
+| **Row-Stationary** | Input Rows ($A$) | Data Reuse | **General MatMul**: Balancing input and weight reuse. |
+
+There is no "perfect" accelerator. A chip optimized for Weight-Stationary flow (like early TPUs) excels at CNNs but might struggle with the massive, changing weights of LLMs, which push architectures toward different reuse patterns.
+:::
+
+The synchronized data flow ensures that matrix element A[i,k] encounters corresponding B[k,j] elements at precise temporal intervals, executing the multiply-accumulate operations required for matrix multiplication C[i,j] = Σ A[i,k] × B[k,j]. This systematic reuse of operands across multiple processing elements substantially reduces memory bandwidth requirements by eliminating redundant data fetches from external memory subsystems.
+
+Consider the multiplication of 2×2 matrices A and B within a systolic array. During the first computational cycle, element A[0,0]=2 propagates horizontally while B[0,0]=1 moves vertically, converging at processing element PE(0,0) to execute the multiplication 2×1=2. In the subsequent cycle, the same A[0,0]=2 advances to PE(0,1) where it encounters B[0,1]=3, computing 2×3=6. Concurrently, A[0,1]=4 enters PE(0,0) to engage with the next B matrix element. This coordinated data movement enables systematic operand reuse across multiple computational operations, eliminating redundant memory accesses and exemplifying the efficiency principle underlying systolic array architectures.
 
 Each processing element in the array performs a multiply-accumulate operation in every cycle:
 
@@ -2096,8 +2108,6 @@ ggplot() +
 
 To better understand how ML workloads differ from traditional computing workloads, it is useful to compare their respective memory access patterns. Traditional workloads, such as scientific computing, general-purpose CPU applications, and database processing, typically exhibit well-defined memory access characteristics that benefit from standard caching and prefetching techniques. ML workloads, on the other hand, introduce highly dynamic access patterns (@tbl-traditional-vs-ml-mem) that challenge conventional memory optimization strategies.
 
-One key source of irregularity in ML workloads stems from batch size and execution order. The way input data is processed in batches directly affects memory reuse, creating a complex optimization challenge. Small batch sizes decrease the likelihood of reusing cached activations and weights, resulting in frequent memory fetches from slower, off-chip memory. Larger batch sizes can improve reuse and amortize memory access costs, but simultaneously place higher demands on available memory bandwidth, potentially creating congestion at different memory hierarchy levels. This delicate balance requires careful consideration of model architecture and available hardware resources.
-
 | **Feature** | **Traditional Computing Workloads** | **Machine Learning Workloads** |
 |:---|:---|:---|
 | **Memory Access Pattern** | Regular and predictable (e.g., sequential reads, structured patterns) | Irregular and dynamic (e.g., sparsity, attention mechanisms) |
@@ -2109,6 +2119,8 @@ One key source of irregularity in ML workloads stems from batch size and executi
 | **Impact on Energy Consumption** | Moderate, driven by FLOP-heavy execution | High, dominated by data movement costs |
 
 : **Memory Access Characteristics.** Traditional workloads exhibit predictable, sequential memory access benefiting from standard caching, while machine learning workloads introduce irregular and dynamic patterns due to sparsity and data dependencies. These differences inform the design of memory systems that efficiently support modern AI applications. {#tbl-traditional-vs-ml-mem}
+
+One key source of irregularity in ML workloads stems from batch size and execution order. The way input data is processed in batches directly affects memory reuse, creating a complex optimization challenge. Small batch sizes decrease the likelihood of reusing cached activations and weights, resulting in frequent memory fetches from slower, off-chip memory. Larger batch sizes can improve reuse and amortize memory access costs, but simultaneously place higher demands on available memory bandwidth, potentially creating congestion at different memory hierarchy levels. This delicate balance requires careful consideration of model architecture and available hardware resources.
 
 Different neural network layers interact with memory in distinct ways beyond batch size considerations. Convolutional layers benefit from spatial locality, as neighboring pixels in an image are processed together, enabling efficient caching of small weight kernels. Conversely, fully connected layers require frequent access to large weight matrices, often leading to more randomized memory access patterns that poorly align with standard caching policies. Transformers introduce additional complexity, as attention mechanisms demand accessing large key-value pairs stored across varied memory locations. The dynamic nature of sequence length and attention span renders traditional prefetching strategies ineffective, resulting in unpredictable memory latencies.
 
@@ -2343,7 +2355,7 @@ The transfer mechanisms examined thus far apply uniformly across all neural netw
 
 Machine learning models impose varying memory access patterns that significantly influence accelerator performance. The way data is transferred between the host and accelerator, how frequently memory is accessed, and the efficiency of caching mechanisms all determine overall execution efficiency. While multilayer perceptrons (MLPs), convolutional neural networks (CNNs), and transformer networks each require large parameter sets, their distinct memory demands necessitate tailored optimization strategies for accelerators. Understanding these differences provides insight into why different hardware architectures exhibit varying levels of efficiency across workloads.
 
-To ground this analysis, we return to the Lighthouse Archetypes introduced in @sec-introduction: **ResNet-50** represents CNN workloads with high spatial reuse, **GPT-2/Llama** exemplifies transformer memory pressure, **DLRM** illustrates sparse embedding lookups that stress memory systems differently than dense operations, and **MobileNet** demonstrates efficiency-optimized architectures with depthwise convolutions. These examples will recur throughout the remainder of this chapter as we analyze how memory characteristics translate to hardware utilization.
+To ground this analysis, we return to the Lighthouse Models introduced in @sec-introduction: **ResNet-50** represents CNN workloads with high spatial reuse, **GPT-2/Llama** exemplifies transformer memory pressure, **DLRM** illustrates sparse embedding lookups that stress memory systems differently than dense operations, and **MobileNet** demonstrates efficiency-optimized architectures with depthwise convolutions. These examples will recur throughout the remainder of this chapter as we analyze how memory characteristics translate to hardware utilization.
 
 #### Multilayer Perceptrons {#sec-ai-acceleration-multilayer-perceptrons-0bbc}
 
@@ -2477,7 +2489,7 @@ We can determine this balance by explicitly *calculating the ridge point* for ou
 | **LayerNorm** | 5-10 FLOP/byte | Memory-bound | **GPT-2 / Llama** |
 | **Embedding lookup** | <1 FLOP/byte | Memory-bound | **DLRM** |
 
-: **Operations on the Roofline.** Neural network layers span a wide range of arithmetic intensities. By mapping these operations to the **Lighthouse Archetypes**, ResNet-50 emerges as compute-bound (high AI) while MobileNet and DLRM are memory-bound (low AI). {#tbl-roofline-operations}
+: **Operations on the Roofline.** Neural network layers span a wide range of arithmetic intensities. By mapping these operations to the **Lighthouse Models**, ResNet-50 emerges as compute-bound (high AI) while MobileNet and DLRM are memory-bound (low AI). {#tbl-roofline-operations}
 
 To see how these intensity values translate into real performance predictions, we can work through a complete transformer layer and compute the arithmetic intensity of each sub-operation.
 
@@ -2488,6 +2500,12 @@ To see how these intensity values translate into real performance predictions, w
 # Transformer layer analysis: hidden_dim=768, batch=32, seq=512
 t_hidden = 768; t_batch = 32; t_seq = 512; t_heads = 12
 t_fp_bytes = 2  # FP16
+
+# Pre-formatted strings for inputs
+t_hidden_str = str(t_hidden)
+t_batch_str = str(t_batch)
+t_seq_str = str(t_seq)
+t_heads_str = str(t_heads)
 
 # === QKV Projection ===
 # FLOPs: 3 projections × batch × seq × hidden × hidden × 2 (multiply-add)
@@ -2527,18 +2545,18 @@ softmax_ai_str = f"{softmax_ai:.2f}"
 
 ::: {.callout-notebook #notebook-transformer-layers title="Transformer Layer Analysis"}
 
-For a transformer with hidden_dim=768, batch=32, seq=512:
+For a transformer with hidden_dim=`{python} t_hidden_str`, batch=`{python} t_batch_str`, seq=`{python} t_seq_str`:
 
 *Attention QKV Projection*:
 
-- FLOPs: $3 \times 32 \times 512 \times 768 \times 768$ = `{python} qkv_flops_b_str` billion FLOPs
-- Bytes: (input + weights + output) $= (32 \times 512 \times 768 + 3 \times 768 \times 768 + 32 \times 512 \times 768 \times 3) \times 2$ ≈ `{python} qkv_mb_str` MB
+- FLOPs: $3 \times `{python} t_batch_str` \times `{python} t_seq_str` \times `{python} t_hidden_str` \times `{python} t_hidden_str`$ = `{python} qkv_flops_b_str` billion FLOPs
+- Bytes: (input + weights + output) $= (`{python} t_batch_str` \times `{python} t_seq_str` \times `{python} t_hidden_str` + 3 \times `{python} t_hidden_str` \times `{python} t_hidden_str` + `{python} t_batch_str` \times `{python} t_seq_str` \times `{python} t_hidden_str` \times 3) \times 2$ ≈ `{python} qkv_mb_str` MB
 - AI = `{python} qkv_flops_b_str`B / `{python} qkv_mb_str`M = `{python} qkv_ai_str` FLOP/byte, which is **compute-bound on A100** (above `{python} a100_ridge` threshold)
 
 *Softmax*:
 
-- FLOPs: $32 \times 12 \times 512 \times 512 \times 3$ ≈ `{python} softmax_flops_m_str`M FLOPs (exp, sum, div)
-- Bytes: $32 \times 12 \times 512 \times 512 \times 2 \times 2$ = `{python} softmax_mb_str` MB
+- FLOPs: $`{python} t_batch_str` \times `{python} t_heads_str` \times `{python} t_seq_str` \times `{python} t_seq_str` \times 3$ ≈ `{python} softmax_flops_m_str`M FLOPs (exp, sum, div)
+- Bytes: $`{python} t_batch_str` \times `{python} t_heads_str` \times `{python} t_seq_str` \times `{python} t_seq_str` \times 2 \times 2$ = `{python} softmax_mb_str` MB
 - AI = `{python} softmax_flops_m_str`M / `{python} softmax_mb_str`M = `{python} softmax_ai_str` FLOP/byte, which is **memory-bound**
 
 This analysis explains why FlashAttention focuses on reducing memory traffic in attention rather than reducing FLOPs.
@@ -2921,8 +2939,6 @@ The severity of these penalties varies by workload. CNNs rely on structured, loc
 
 The efficient execution of machine learning models on AI accelerators requires careful consideration of placement and allocation. Placement involves spatial assignment of computations and data, while allocation covers temporal distribution of resources. These decisions are interdependent, and each introduces trade-offs that impact performance, energy efficiency, and scalability. @tbl-combinatorial-complexity enumerates the key trade-offs between computation placement and resource allocation that shape overall performance. Placement decisions influence parallelism, memory access patterns, and communication overhead, while allocation strategies determine how resources are distributed over time to balance execution efficiency. The interplay between these factors requires a careful balance to avoid bottlenecks such as excessive synchronization, memory congestion, or underutilized compute resources. Optimizing these trade-offs is necessary for ensuring that AI accelerators operate at peak efficiency.
 
-Each of these dimensions requires balancing trade-offs between placement and allocation. For instance, spatially distributing computations across multiple processing elements can increase throughput; however, if data allocation is not optimized, memory bandwidth limitations may introduce bottlenecks. Likewise, allocating resources for fine-grained computations may enhance flexibility but, without appropriate placement strategies, may lead to excessive synchronization overhead.
-
 | **Dimension** | **Placement Considerations** | **Allocation Considerations** |
 |:---|:---|:---|
 | **Computational Granularity** | Fine-grained placement enables greater parallelism but increases synchronization overhead. | Coarse-grained allocation reduces synchronization overhead but may limit flexibility. |
@@ -2932,6 +2948,8 @@ Each of these dimensions requires balancing trade-offs between placement and all
 | **Dataflow and Execution Ordering** | Static placement simplifies execution but limits adaptability to workload variations. | Dynamic allocation improves adaptability but adds scheduling complexity. |
 
 : **Placement-Allocation Trade-Offs.** AI accelerator performance depends on strategically mapping computations to hardware and allocating resources over time, balancing parallelism, memory access, and execution efficiency. Careful consideration of these interdependent factors is essential for maximizing throughput and minimizing energy consumption. {#tbl-combinatorial-complexity}
+
+Each of these dimensions requires balancing trade-offs between placement and allocation. For instance, spatially distributing computations across multiple processing elements can increase throughput; however, if data allocation is not optimized, memory bandwidth limitations may introduce bottlenecks. Likewise, allocating resources for fine-grained computations may enhance flexibility but, without appropriate placement strategies, may lead to excessive synchronization overhead.
 
 Because AI accelerator architectures impose constraints on both where computations execute and how resources are assigned over time, selecting an effective mapping strategy requires a coordinated approach to placement and allocation.
 
@@ -3285,6 +3303,15 @@ Y = 2.0 * X2 + 1.0  # Final result
 
 Each operation produces an intermediate tensor that must be written to memory and retrieved for the next operation. On large tensors, this overhead of moving data can outweigh the computational cost of the operations [@shazeer2018mesh]. @tbl-memory-footprint illustrates the memory overhead in a naïve execution model. While only the final result $Y$ is needed, storing multiple intermediate tensors creates unnecessary memory traffic and inefficient memory usage.
 
+| **Tensor**       | **Size (MB) for 1024 $\times$ 1024 Tensor** |
+| **X**            | `{python} tensor_mb_str` MB                 |
+| **X'**           | `{python} tensor_mb_str` MB                 |
+| **X''**          | `{python} tensor_mb_str` MB                 |
+| **Y**            | `{python} tensor_mb_str` MB                 |
+| **Total Memory** | **`{python} total_mb_str` MB**              |
+
+: **Intermediate Tensor Storage.** Naive execution models require substantial memory to store intermediate tensors generated by each operation. For a 1024x1024 tensor, storing intermediate results (even when only the final output is needed) quadruples the total memory footprint from `{python} tensor_mb_str` MB to `{python} total_mb_str` MB. Minimizing intermediate data storage is essential for improving memory efficiency. {#tbl-memory-footprint}
+
 ```{python}
 #| label: memory-footprint-table-calc
 #| echo: false
@@ -3300,15 +3327,6 @@ total_mb = tensor_mb * total_tensors
 tensor_mb_str = f"{tensor_mb:.0f}"
 total_mb_str = f"{total_mb:.0f}"
 ```
-
-| **Tensor**       | **Size (MB) for 1024 $\times$ 1024 Tensor** |
-| **X**            | `{python} tensor_mb_str` MB                 |
-| **X'**           | `{python} tensor_mb_str` MB                 |
-| **X''**          | `{python} tensor_mb_str` MB                 |
-| **Y**            | `{python} tensor_mb_str` MB                 |
-| **Total Memory** | **`{python} total_mb_str` MB**              |
-
-: **Intermediate Tensor Storage.** Naive execution models require substantial memory to store intermediate tensors generated by each operation. For a 1024x1024 tensor, storing intermediate results (even when only the final output is needed) quadruples the total memory footprint from `{python} tensor_mb_str` MB to `{python} total_mb_str` MB. Minimizing intermediate data storage is essential for improving memory efficiency. {#tbl-memory-footprint}
 
 The three intermediate tensors waste both memory capacity and bandwidth, limiting scalability on AI accelerators where data movement dominates execution cost.
 
@@ -3332,6 +3350,13 @@ $$
 
 @tbl-fusion-benefits highlights the impact of operation fusion on memory efficiency. By keeping intermediate results in registers or local memory rather than writing them to main memory, fusion significantly reduces memory traffic. This optimization is especially beneficial on highly parallel architectures like GPUs and TPUs, where minimizing memory accesses translates directly into improved execution throughput. Compared to the naïve execution model, fused execution eliminates the need for storing intermediate tensors, dramatically lowering the total memory footprint and improving overall efficiency.
 
+| **Execution Model** | **Intermediate Tensors Stored** | **Total Memory Usage (MB)** |
+|:---|:---|---:|
+| **Naïve Execution** | X', X'' | `{python} naive_mb_str` |
+| **Fused Execution** | None | `{python} fused_mb_str` |
+
+: **Operation Fusion Benefits.** Fused execution reduces memory usage by eliminating the need to store intermediate tensors, directly improving efficiency on memory-bound hardware like GPUs and TPUs. Memory consumption drops from `{python} naive_mb_str` in naive execution to `{python} fused_mb_str` with fused operations. {#tbl-fusion-benefits}
+
 ```{python}
 #| label: fusion-benefits-calc
 #| echo: false
@@ -3344,13 +3369,6 @@ fused_mb = tensor_mb # 4 MB (Just Y, or intermediates = 0?)
 naive_mb_str = f"{naive_mb:.0f} MB"
 fused_mb_str = f"{fused_mb:.0f} MB"
 ```
-
-| **Execution Model** | **Intermediate Tensors Stored** | **Total Memory Usage (MB)** |
-|:---|:---|---:|
-| **Naïve Execution** | X', X'' | `{python} naive_mb_str` |
-| **Fused Execution** | None | `{python} fused_mb_str` |
-
-: **Operation Fusion Benefits.** Fused execution reduces memory usage by eliminating the need to store intermediate tensors, directly improving efficiency on memory-bound hardware like GPUs and TPUs. Memory consumption drops from `{python} naive_mb_str` in naive execution to `{python} fused_mb_str` with fused operations. {#tbl-fusion-benefits}
 
 ##### Performance Benefits and Constraints {#sec-ai-acceleration-performance-benefits-constraints-1b74}
 
@@ -3659,8 +3677,6 @@ Machine learning workloads introduce challenges that traditional compilers were 
 
 @tbl-ml-vs-traditional-compilers outlines the key differences between traditional compilers and those designed for machine learning workloads. While traditional compilers optimize linear program execution through techniques like instruction scheduling and register allocation, ML compilers focus on optimizing computation graphs for efficient tensor operations. This distinction is critical, as ML compilers must incorporate domain-specific transformations such as kernel fusion, memory-aware scheduling, and hardware-accelerated execution plans to achieve high performance on specialized accelerators like GPUs and TPUs.
 
-This comparison highlights why machine learning models require a different compilation approach. Machine learning compilers must transform entire computation graphs, apply tensor-aware memory optimizations, and schedule operations across thousands of parallel processing elements, requirements that make traditional compiler techniques insufficient for modern deep learning workloads.
-
 | **Aspect** | **Traditional Compiler** | **Machine Learning Compiler** |
 |:---|:---|:---|
 | **Input Representation** | Linear program code (C, Python) | Computational graph (ML models) |
@@ -3671,6 +3687,8 @@ This comparison highlights why machine learning models require a different compi
 | **Compilation Output** | CPU-specific machine code | Hardware-specific execution plan (kernels, memory scheduling) |
 
 : **Compiler Optimization Priorities.** Traditional and machine learning compilers diverge in their optimization targets: traditional compilers prioritize efficient execution of sequential code, while ML compilers focus on optimizing tensor operations within computation graphs for specialized hardware. ML compilers incorporate domain-specific transformations such as kernel fusion and memory-aware scheduling, unlike the instruction scheduling and register allocation techniques used in conventional compilation. {#tbl-ml-vs-traditional-compilers}
+
+This comparison highlights why machine learning models require a different compilation approach. Machine learning compilers must transform entire computation graphs, apply tensor-aware memory optimizations, and schedule operations across thousands of parallel processing elements, requirements that make traditional compiler techniques insufficient for modern deep learning workloads.
 
 ::: {.callout-perspective title="The Hidden Optimization Layer"}
 

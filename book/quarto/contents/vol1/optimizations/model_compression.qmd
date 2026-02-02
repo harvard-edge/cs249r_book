@@ -166,6 +166,14 @@ device_ram_gb = 16
 mem_bw_gbs = 50  # GB/s device memory bandwidth
 kv_cache_gb = 1  # approximate KV cache for 4096-token context
 
+# Pre-formatted strings for inputs
+params_b_str = str(params_b)
+bytes_fp16_str = str(bytes_fp16)
+bytes_int4_str = str(bytes_int4)
+device_ram_gb_str = str(device_ram_gb)
+mem_bw_gbs_str = str(mem_bw_gbs)
+kv_cache_gb_str = str(kv_cache_gb)
+
 # FP16 scenario
 fp16_size_gb = params_b * bytes_fp16
 fp16_total_gb = fp16_size_gb + kv_cache_gb
@@ -191,19 +199,19 @@ speedup_str = f"{speedup:.0f}"
 We call this phenomenon *the quantization speedup*.
 
 ::: {.callout-notebook title="The Quantization Speedup"}
-**Problem**: You want to deploy a 7B parameter LLM on a device with 16GB RAM. The weights are FP16 (2 bytes).
+**Problem**: You want to deploy a `{python} params_b_str`B parameter LLM on a device with `{python} device_ram_gb_str`GB RAM. The weights are FP16 (`{python} bytes_fp16_str` bytes).
 
 **The Math**:
 
-1.  **Model Size**: $7 \times 10^9 \text{ params} \times 2 \text{ bytes} = 14 \text{ GB}$.
-2.  **KV Cache**: Context window (4096 tokens) requires $\approx 1 \text{ GB}$.
-3.  **Total Memory**: $14 + 1 =$ `{python} fp16_total_str` GB. This barely fits, leaving no room for OS or buffers.
-4.  **Bandwidth Cost**: Loading `{python} fp16_size_str`GB at 50 GB/s takes **`{python} fp16_latency_str` ms** per token. That is `{python} fp16_toks_str` tokens/sec, too slow for chat.
+1.  **Model Size**: $`{python} params_b_str` \times 10^9 \text{ params} \times `{python} bytes_fp16_str` \text{ bytes} = `{python} fp16_size_str` \text{ GB}$.
+2.  **KV Cache**: Context window (4096 tokens) requires $\approx `{python} kv_cache_gb_str` \text{ GB}$.
+3.  **Total Memory**: $`{python} fp16_size_str` + `{python} kv_cache_gb_str` =$ `{python} fp16_total_str` GB. This barely fits, leaving no room for OS or buffers.
+4.  **Bandwidth Cost**: Loading `{python} fp16_size_str`GB at `{python} mem_bw_gbs_str` GB/s takes **`{python} fp16_latency_str` ms** per token. That is `{python} fp16_toks_str` tokens/sec, too slow for chat.
 
 **The Fix (INT4)**:
 
-1.  **Quantization**: Convert weights to 4-bit integers (0.5 bytes).
-2.  **New Size**: $7 \times 10^9 \times 0.5 =$ `{python} int4_size_str` GB.
+1.  **Quantization**: Convert weights to 4-bit integers (`{python} bytes_int4_str` bytes).
+2.  **New Size**: $`{python} params_b_str` \times 10^9 \times `{python} bytes_int4_str` =$ `{python} int4_size_str` GB.
 3.  **New Speed**: Loading `{python} int4_size_str`GB takes **`{python} int4_latency_str` ms**. Speed jumps to **`{python} int4_toks_str` tokens/sec**.
 
 **The Conclusion**: Quantization is not just about "fitting" the model; it is a **`{python} speedup_str`x Linear Speedup** because LLM generation is bandwidth-bound.
@@ -875,8 +883,6 @@ Hardware-aware pruning strategies, such as N:M structured sparsity, enforce spec
 
 @fig-structured-unstructured illustrates the key differences between unstructured and structured pruning. On the left, unstructured pruning removes individual weights (depicted as dashed connections), creating a sparse weight matrix. This can disrupt the original network structure, as shown in the fully connected network where certain connections have been randomly pruned. While this reduces the number of active parameters, the resulting sparsity requires specialized execution kernels to fully utilize computational benefits.
 
-In contrast, structured pruning (depicted in the middle and right sections of @fig-structured-unstructured) removes entire neurons or filters while preserving the network's overall structure. In the middle section, a pruned fully connected network retains its fully connected nature but with fewer neurons. On the right, structured pruning is applied to a CNN by removing convolutional kernels or entire channels (dashed squares). This method maintains the CNN's core convolutional operations while reducing the computational load, making it more compatible with hardware accelerators.
-
 ::: {#fig-structured-unstructured fig-env="figure" fig-pos="htb" fig-cap="**Unstructured vs. Structured Pruning.** Unstructured pruning (left) achieves sparsity by removing individual weights, requiring specialized hardware, while structured pruning (middle, right) removes entire neurons or filters, preserving network structure for standard hardware acceleration. Source: [@qi2021efficient]." fig-alt="Three-panel diagram. Left shows unstructured pruning with dashed connections in a neural network. Middle and right show structured pruning: fully connected network with pruned neurons and CNN with pruned filters shown as dashed squares."}
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\small\usefont{T1}{phv}{m}{n}]
@@ -1005,6 +1011,8 @@ minimum height=57mm,
 \end{tikzpicture}
 ```
 :::
+
+In contrast, structured pruning (depicted in the middle and right sections of @fig-structured-unstructured) removes entire neurons or filters while preserving the network's overall structure. In the middle section, a pruned fully connected network retains its fully connected nature but with fewer neurons. On the right, structured pruning is applied to a CNN by removing convolutional kernels or entire channels (dashed squares). This method maintains the CNN's core convolutional operations while reducing the computational load, making it more compatible with hardware accelerators.
 
 A common approach to structured pruning is magnitude-based pruning, where entire neurons or filters are removed based on the magnitude of their associated weights. The intuition is that parameters with smaller magnitudes contribute less to the model's output, making them candidates for elimination. The importance of a neuron or filter is measured using a norm function, such as the $\ell_1$-norm or $\ell_2$-norm, applied to the weights associated with that unit. If the norm falls below a predefined threshold, the corresponding neuron or filter is pruned. This method is straightforward to implement and requires no additional computational overhead beyond computing norms across layers.
 
@@ -1814,11 +1822,6 @@ nodes near coords={\pgfmathprintnumber{\pgfplotspointmeta}\%},
 
 @fig-kd-overview illustrates the distillation workflow, which trains the student model to minimize a combination of two loss functions:
 
-1.  **Distillation Loss**: Typically the Kullback-Leibler (KL) divergence[^fn-kl-divergence] between the teacher's softened output distribution and the student's distribution.
-2.  **Student Loss**: Standard cross-entropy loss against the ground-truth hard labels.
-
-[^fn-kl-divergence]: **Kullback-Leibler Divergence**: Named after Solomon Kullback and Richard Leibler, who introduced it at the National Security Agency in 1951 for cryptanalysis. Measures how one probability distribution differs from a reference distribution. In information theory, KL(P||Q) quantifies the extra bits needed to encode samples from P using a code optimized for Q. Zero when distributions match; always non-negative.
-
 ::: {#fig-kd-overview fig-env="figure" fig-pos="htb" fig-cap="**Knowledge Distillation Workflow**: An input sample passes through both the teacher and the student network. The teacher produces soft labels via temperature-scaled softmax, while the student output is compared against both the soft labels (distillation loss) and the hard labels (student loss)." fig-alt="Block diagram showing knowledge distillation. Input flows to both teacher and student models. Teacher outputs soft labels via temperature-scaled softmax. Student outputs feed into distillation loss and student loss functions."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -1900,6 +1903,11 @@ anchor=north]{Teacher model};
 \end{tikzpicture}
 ```
 :::
+
+1.  **Distillation Loss**: Typically the Kullback-Leibler (KL) divergence[^fn-kl-divergence] between the teacher's softened output distribution and the student's distribution.
+2.  **Student Loss**: Standard cross-entropy loss against the ground-truth hard labels.
+
+[^fn-kl-divergence]: **Kullback-Leibler Divergence**: Named after Solomon Kullback and Richard Leibler, who introduced it at the National Security Agency in 1951 for cryptanalysis. Measures how one probability distribution differs from a reference distribution. In information theory, KL(P||Q) quantifies the extra bits needed to encode samples from P using a code optimized for Q. Zero when distributions match; always non-negative.
 
 **Distillation Mathematics.**
 To reveal the inter-class similarity information, we use a **temperature parameter**[^fn-temperature-softmax] $T$ to soften the probability distribution. The softmax output for class $i$ becomes:
@@ -2527,22 +2535,6 @@ Efficient numerical representations enable significant reductions in storage req
 
 Beyond computational and memory benefits, the energy costs associated with different numerical precisions reinforce the case for reduced precision. @fig-quantized-energy quantifies these energy differences: a 32-bit floating-point addition (FAdd) consumes approximately 0.9 pJ, whereas a 16-bit floating-point addition requires only 0.4 pJ. Similarly, a 32-bit integer addition costs 0.1 pJ, while an 8-bit integer addition is just 0.03 pJ. These savings compound across large-scale models operating over billions of operations, supporting both cost reduction and sustainability goals.
 
-These energy savings take on a different character for models where memory capacity, not compute, is the binding constraint. *DLRM embedding quantization* illustrates this distinction.
-
-::: {.callout-lighthouse title="DLRM and Embedding Quantization"}
-**The Memory Capacity Constraint**: Our **DLRM Lighthouse** (@sec-dnn-architectures) presents a unique compression challenge. Unlike ResNet or GPT, which are constrained by compute or bandwidth, DLRM is constrained by **Memory Capacity**. Its embedding tables can reach terabytes in size, far exceeding GPU memory.
-
-For DLRM, quantization is not about faster math; it's about **storage density**. Quantizing embedding tables from FP32 to INT8 (or INT4) reduces memory footprint by 4-8$\times$, allowing larger tables to fit on fewer GPUs. This is a pure **Information Density** optimization: we compress the lookup table so the **Machine** (Physics) can hold the **Algorithm** (Logic).
-:::
-
-While DLRM operates at the terabyte scale, our Smart Doorbell Lighthouse faces the opposite extreme, demonstrating a phenomenon we call the *TinyML quantization imperative*, where compression becomes an existential requirement.
-
-::: {.callout-lighthouse title="The TinyML Quantization Imperative"}
-**The Energy and Storage Constraint**: Our **Smart Doorbell Lighthouse** operates at the opposite extreme of the Iron Law from DLRM. While DLRM optimizes for terabyte-scale capacity, the Smart Doorbell's Keyword Spotting (KWS) model must operate within a 100 KB budget to run on a microcontroller with 256 KB RAM.
-
-In FP32, even the compact DS-CNN architecture consumes 4$\times$ more memory bandwidth and energy per inference than in INT8. For an always-on device running on a coin cell battery, this 4$\times$ energy difference translates directly to battery life: a device that lasts 1 month on FP32 might last 4 months on INT8. Here, quantization is the primary lever for the **Energy Term** ($O / (R_{peak} \cdot \eta)$) of the Iron Law.
-:::
-
 ::: {#fig-quantized-energy fig-env="figure" fig-pos="htb" fig-cap="**Energy per Operation by Precision.** Bar chart comparing energy in picojoules for arithmetic operations (FP32 multiply: 3.7 pJ, INT8 add: 0.03 pJ) and SRAM memory accesses (5 to 50 pJ by cache size). Lower precision yields order-of-magnitude energy savings. Source: IEEE Spectrum." fig-alt="Bar chart comparing energy consumption in picojoules for arithmetic operations and memory accesses. FP32 multiply uses 3.7 pJ, INT8 add uses 0.03 pJ. SRAM reads range from 5 to 50 pJ depending on cache size."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -2636,6 +2628,22 @@ In FP32, even the compact DS-CNN architecture consumes 4$\times$ more memory ban
 \end{tikzpicture}
 
 ```
+:::
+
+These energy savings take on a different character for models where memory capacity, not compute, is the binding constraint. *DLRM embedding quantization* illustrates this distinction.
+
+::: {.callout-lighthouse title="DLRM and Embedding Quantization"}
+**The Memory Capacity Constraint**: Our **DLRM Lighthouse** (@sec-dnn-architectures) presents a unique compression challenge. Unlike ResNet or GPT, which are constrained by compute or bandwidth, DLRM is constrained by **Memory Capacity**. Its embedding tables can reach terabytes in size, far exceeding GPU memory.
+
+For DLRM, quantization is not about faster math; it's about **storage density**. Quantizing embedding tables from FP32 to INT8 (or INT4) reduces memory footprint by 4-8$\times$, allowing larger tables to fit on fewer GPUs. This is a pure **Information Density** optimization: we compress the lookup table so the **Machine** (Physics) can hold the **Algorithm** (Logic).
+:::
+
+While DLRM operates at the terabyte scale, our Smart Doorbell Lighthouse faces the opposite extreme, demonstrating a phenomenon we call the *TinyML quantization imperative*, where compression becomes an existential requirement.
+
+::: {.callout-lighthouse title="The TinyML Quantization Imperative"}
+**The Energy and Storage Constraint**: Our **Smart Doorbell Lighthouse** operates at the opposite extreme of the Iron Law from DLRM. While DLRM optimizes for terabyte-scale capacity, the Smart Doorbell's Keyword Spotting (KWS) model must operate within a 100 KB budget to run on a microcontroller with 256 KB RAM.
+
+In FP32, even the compact DS-CNN architecture consumes 4$\times$ more memory bandwidth and energy per inference than in INT8. For an always-on device running on a coin cell battery, this 4$\times$ energy difference translates directly to battery life: a device that lasts 1 month on FP32 might last 4 months on INT8. Here, quantization is the primary lever for the **Energy Term** ($O / (R_{peak} \cdot \eta)$) of the Iron Law.
 :::
 
 Beyond direct compute savings, reducing numerical precision has a significant impact on memory energy consumption, which often dominates total system power. Lower-precision representations reduce data storage requirements and memory bandwidth usage, leading to fewer and more efficient memory accesses. Accessing memory, particularly off-chip DRAM, is far more energy-intensive than performing arithmetic operations: DRAM accesses require orders of magnitude more energy (1.3-2.6 nJ) compared to cache accesses (e.g., 10 pJ for an 8 KB L1 cache access). An instruction's total energy can therefore be dominated by memory access patterns rather than computation[^fn-energy-efficiency-metrics].
