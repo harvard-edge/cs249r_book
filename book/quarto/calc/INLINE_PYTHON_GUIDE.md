@@ -274,21 +274,26 @@ Document new issues and fixes as you encounter them.
 **Cause:** Same escaping issue at boundary
 **Fix:** Use Unicode: `` `{python} val`×``
 
-### Lesson 4: Bullet Lists Need Blank Lines (2026-02-01)
+### Lesson 4: Bullet Lists Need Blank Line Before Start (2026-02-01)
 **Issue:** Bullet points render inline in PDF (all on one line)
-**Cause:** PDF/LaTeX needs blank lines between list items
-**Fix:** Add blank line after each `*   item`
+**Cause:** PDF/LaTeX needs a blank line before the bullet list starts
+**Fix:** Add blank line between intro text and first bullet
 
 ```markdown
-<!-- WRONG - renders inline -->
+<!-- WRONG - no blank line before list -->
+Where:
 *   Item 1
 *   Item 2
 
-<!-- CORRECT - renders as list -->
-*   Item 1
+<!-- CORRECT - blank line before list -->
+Where:
 
+*   Item 1
 *   Item 2
+*   Item 3
 ```
+
+Note: Bullets can be consecutive - only need blank line BEFORE the list starts.
 
 ### Lesson 5: (Add new lessons here)
 **Issue:** 
