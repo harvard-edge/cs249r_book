@@ -63,6 +63,22 @@ from calc.formulas import fmt
 a100_fp16 = fmt(A100_FLOPS_FP16_TENSOR, "TFLOP/s", precision=0)       # "312"
 a100_bw_tb = fmt(A100_MEM_BW, "TB/s", precision=1)                     # "2.0"
 
+# Ridge point and arithmetic intensity calculations
+a100_fp16_raw = A100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude  # 312
+a100_bw_raw = A100_MEM_BW.to(TB / second).magnitude                    # 2.0
+ridge_point = int(a100_fp16_raw / a100_bw_raw)                         # 156 FLOP/byte
+
+# GEMM: For n×n matrices (FP16), Intensity = 2n³ FLOPs / (3n² × 2 bytes) = n/3
+# ReLU: For n×n tensor (FP16), Intensity = n² ops / (2n² × 2 bytes) = 0.25
+n_gemm = 4096
+gemm_intensity = int(n_gemm / 3)                                       # 1365 FLOP/byte
+relu_intensity = 0.25                                                  # FLOP/byte
+
+# ReLU achieved performance (memory-bound: perf = intensity × bandwidth)
+relu_achieved_tflops = relu_intensity * a100_bw_raw                    # 0.5 TFLOP/s
+relu_utilization = relu_achieved_tflops / a100_fp16_raw * 100          # 0.16%
+relu_util_str = f"{relu_utilization:.2f}"
+
 # Energy constants (Horowitz 2014)
 dram_pj = int(ENERGY_DRAM_ACCESS_PJ.magnitude)                         # 640
 flop_pj = f"{ENERGY_FLOP_FP16_PJ.magnitude:.0f}"                       # "1" (1.1 rounds)
@@ -90,13 +106,13 @@ tpuv5_ici = int(TPUV5P_ICI_BW.to(GB/second).magnitude)
 
 #### A Concrete Example: The A100 Analysis {#sec-system-foundations-concrete-example-a100-analysis-0bb9}
 
-Consider an NVIDIA A100 GPU with FP16 Tensor Core performance of `{python} a100_fp16` TFLOP/s and HBM2e bandwidth of `{python} a100_bw_tb` TB/s. The ridge point is `{python} a100_fp16` / `{python} a100_bw_tb` = 156 FLOP/byte.
+Consider an NVIDIA A100 GPU with FP16 Tensor Core performance of `{python} a100_fp16` TFLOP/s and HBM2e bandwidth of `{python} a100_bw_tb` TB/s. The ridge point is `{python} a100_fp16` / `{python} a100_bw_tb` = `{python} ridge_point` FLOP/byte.
 
 Now compare two common operations:
 
-**GEMM (Matrix Multiplication)**: For two $4096 \times 4096$ matrices, arithmetic intensity is approximately $1365$ FLOP/byte. Since $1365 > 156$, this operation is compute-bound. You are using the hardware efficiently.
+**GEMM (Matrix Multiplication)**: For two $`{python} n_gemm` \times `{python} n_gemm`$ matrices, arithmetic intensity is approximately $`{python} gemm_intensity`$ FLOP/byte. Since $`{python} gemm_intensity` > `{python} ridge_point`$, this operation is compute-bound. You are using the hardware efficiently.
 
-**ReLU (Element-wise)**: For a $4096 \times 4096$ tensor, intensity is approximately $0.25$ op/byte. Since $0.25 \ll 156$, this operation is severely memory-bound, achieving only about $0.16\%$ of peak TFLOP/s. The hardware is mostly waiting for data.
+**ReLU (Element-wise)**: For a $`{python} n_gemm` \times `{python} n_gemm`$ tensor, intensity is approximately $`{python} relu_intensity`$ op/byte. Since $`{python} relu_intensity` \ll `{python} ridge_point`$, this operation is severely memory-bound, achieving only about $`{python} relu_util_str`\%$ of peak TFLOP/s. The hardware is mostly waiting for data.
 
 This explains why modern frameworks fuse operations: combining ReLU with the preceding MatMul avoids writing intermediate results to memory, effectively increasing arithmetic intensity.
 
