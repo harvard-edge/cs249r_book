@@ -1685,21 +1685,58 @@ These hardware utilization patterns reinforce the efficiency principles establis
 
 Memory management is particularly important during the forward pass, when intermediate activations must be stored for subsequent backward propagation. Before examining how frameworks manage forward-pass memory, it is useful to estimate the total VRAM required for training. The following calculation demonstrates the practical process of *estimating VRAM requirements*.
 
+```{python}
+#| label: vram-requirements-calc
+#| echo: false
+
+# VRAM requirements estimation for LLM training
+vram_params_b = 7           # billion parameters
+vram_gpu_capacity_gb = 24   # GPU memory
+vram_fp16_bytes = 2
+vram_fp32_bytes = 4
+vram_adam_bytes = 8         # 2 FP32 states per parameter
+
+vram_weights_gb = vram_params_b * vram_fp16_bytes
+vram_gradients_gb = vram_params_b * vram_fp16_bytes
+vram_optimizer_gb = vram_params_b * vram_adam_bytes
+vram_subtotal_gb = vram_weights_gb + vram_gradients_gb + vram_optimizer_gb
+
+# Activation example
+vram_batch = 1
+vram_seq = 2048
+vram_hidden = 4096
+vram_layers = 32
+vram_activations_gb = 2  # approximate
+
+vram_params_b_str = str(vram_params_b)
+vram_gpu_capacity_str = str(vram_gpu_capacity_gb)
+vram_fp16_bytes_str = str(vram_fp16_bytes)
+vram_adam_bytes_str = str(vram_adam_bytes)
+vram_weights_gb_str = str(vram_weights_gb)
+vram_gradients_gb_str = str(vram_gradients_gb)
+vram_optimizer_gb_str = str(vram_optimizer_gb)
+vram_subtotal_gb_str = str(vram_subtotal_gb)
+vram_seq_str = f"{vram_seq:,}"
+vram_hidden_str = f"{vram_hidden:,}"
+vram_layers_str = str(vram_layers)
+vram_activations_gb_str = str(vram_activations_gb)
+```
+
 ::: {.callout-notebook title="Estimating VRAM Requirements"}
 
-**Problem**: Will your 7B parameter model fit on a 24 GB GPU for training?
+**Problem**: Will your `{python} vram_params_b_str`B parameter model fit on a `{python} vram_gpu_capacity_str` GB GPU for training?
 
-**Given**: 7B parameters, mixed-precision training (FP16 weights/gradients, FP32 optimizer), Adam optimizer, 24 GB GPU memory.
+**Given**: `{python} vram_params_b_str`B parameters, mixed-precision training (FP16 weights/gradients, FP32 optimizer), Adam optimizer, `{python} vram_gpu_capacity_str` GB GPU memory.
 
 **The Math**:
 
-1.  **Weights (FP16)**: $7\text{B} \times 2 \text{ bytes} = \mathbf{14 \text{ GB}}$.
-2.  **Gradients (FP16)**: Same size as weights = $\mathbf{14 \text{ GB}}$.
-3.  **Optimizer (Adam, FP32)**: Stores momentum & variance. $7\text{B} \times 8 \text{ bytes} = \mathbf{56 \text{ GB}}$.
-4.  **Subtotal (before activations)**: $14 + 14 + 56 = \mathbf{84 \text{ GB}}$. Already exceeds 24 GB.
-5.  **Activations**: Scale with batch size. Formula: $\text{Batch} \times \text{SeqLen} \times \text{Hidden} \times \text{Layers} \times \text{Bytes}$. Example: Batch=1, Seq=2048, Hidden=4096, 32 Layers $\approx$ **2 GB** additional.
+1.  **Weights (FP16)**: $`{python} vram_params_b_str`\text{B} \times `{python} vram_fp16_bytes_str` \text{ bytes} = \mathbf{`{python} vram_weights_gb_str` \text{ GB}}$.
+2.  **Gradients (FP16)**: Same size as weights = $\mathbf{`{python} vram_gradients_gb_str` \text{ GB}}$.
+3.  **Optimizer (Adam, FP32)**: Stores momentum & variance. $`{python} vram_params_b_str`\text{B} \times `{python} vram_adam_bytes_str` \text{ bytes} = \mathbf{`{python} vram_optimizer_gb_str` \text{ GB}}$.
+4.  **Subtotal (before activations)**: $`{python} vram_weights_gb_str` + `{python} vram_gradients_gb_str` + `{python} vram_optimizer_gb_str` = \mathbf{`{python} vram_subtotal_gb_str` \text{ GB}}$. Already exceeds `{python} vram_gpu_capacity_str` GB.
+5.  **Activations**: Scale with batch size. Formula: $\text{Batch} \times \text{SeqLen} \times \text{Hidden} \times \text{Layers} \times \text{Bytes}$. Example: Batch=1, Seq=`{python} vram_seq_str`, Hidden=`{python} vram_hidden_str`, `{python} vram_layers_str` Layers $\approx$ **`{python} vram_activations_gb_str` GB** additional.
 
-**The Systems Conclusion**: The "administrative tax" (gradients + optimizer states) is $4\text{--}6\times$ larger than model weights. Training a 7B model on a single 24 GB GPU requires **quantization (4-bit)** or **parameter sharding (FSDP/ZeRO)**.
+**The Systems Conclusion**: The "administrative tax" (gradients + optimizer states) is $4\text{--}6\times$ larger than model weights. Training a `{python} vram_params_b_str`B model on a single `{python} vram_gpu_capacity_str` GB GPU requires **quantization (4-bit)** or **parameter sharding (FSDP/ZeRO)**.
 :::
 
 The total memory footprint grows with both network depth and batch size, following a basic relationship.
@@ -1955,6 +1992,14 @@ ub_cluster_days_str = f"{ub_cluster_days:.0f}"
 ub_rental_str = f"{ub_rental_cost/1e6:.2f}"
 ub_purchase_str = f"{ub_purchase_cost/1e6:.0f}"
 ub_breakeven_str = f"{ub_breakeven:.0f}"
+ub_params_b_str = f"{ub_params/1e9:.0f}"
+ub_tokens_t_str = f"{ub_tokens/1e12:.0f}"
+ub_peak_tflops_str = f"{ub_peak_tflops:,}"
+ub_utilization_pct_str = f"{ub_utilization*100:.0f}"
+ub_effective_tflops_str = f"{ub_effective_tflops:.0f}"
+ub_num_gpus_str = f"{ub_num_gpus:,}"
+ub_rental_rate_str = str(ub_rental_rate)
+ub_purchase_k_str = f"{ub_purchase_price/1000:.0f}"
 ```
 
 ::: {.callout-notebook #notebook-utility-bill title="The Utility Bill"}
@@ -1963,16 +2008,16 @@ ub_breakeven_str = f"{ub_breakeven:.0f}"
 
 **The Math**:
 
-1.  **Workload**: Llama-2-70B (70B params, 2T tokens).
-2.  **Compute Required**: $6 \times 70 \times 10^9 \times 2 \times 10^{12} \approx `{python} ub_flops_mantissa` \times 10^{`{python} ub_flops_exp`}$ FLOPs.
-3.  **Hardware**: NVIDIA H100 (Peak: 1,000 TFLOPS FP16). Assumed Utilization: 50% (500 TFLOPS).
-4.  **Time**: $`{python} ub_flops_mantissa` \times 10^{`{python} ub_flops_exp`} / (500 \times 10^{12}) \approx `{python} ub_time_s_mantissa` \times 10^{`{python} ub_time_s_exp`} \text{ seconds} \approx \mathbf{`{python} ub_years_str` \text{ years}}$ (on 1 GPU).
-5.  **Cluster**: On 1,000 GPUs → `{python} ub_cluster_days_str` days.
+1.  **Workload**: Llama-2-70B (`{python} ub_params_b_str`B params, `{python} ub_tokens_t_str`T tokens).
+2.  **Compute Required**: $6 \times `{python} ub_params_b_str` \times 10^9 \times `{python} ub_tokens_t_str` \times 10^{12} \approx `{python} ub_flops_mantissa` \times 10^{`{python} ub_flops_exp`}$ FLOPs.
+3.  **Hardware**: NVIDIA H100 (Peak: `{python} ub_peak_tflops_str` TFLOPS FP16). Assumed Utilization: `{python} ub_utilization_pct_str`% (`{python} ub_effective_tflops_str` TFLOPS).
+4.  **Time**: $`{python} ub_flops_mantissa` \times 10^{`{python} ub_flops_exp`} / (`{python} ub_effective_tflops_str` \times 10^{12}) \approx `{python} ub_time_s_mantissa` \times 10^{`{python} ub_time_s_exp`} \text{ seconds} \approx \mathbf{`{python} ub_years_str` \text{ years}}$ (on 1 GPU).
+5.  **Cluster**: On `{python} ub_num_gpus_str` GPUs → `{python} ub_cluster_days_str` days.
 
 **The Economics**:
 
-*   **Rental ($3/hr)**: $1,000 \text{ GPUs} \times 24 \text{ hrs} \times `{python} ub_cluster_days_str` \text{ days} \times \$3 \approx \mathbf{\$`{python} ub_rental_str` \text{ Million}}$.
-*   **Purchase ($30k/GPU)**: $1,000 \times \$30,000 = \mathbf{\$`{python} ub_purchase_str` \text{ Million}}$.
+*   **Rental ($`{python} ub_rental_rate_str`/hr)**: $`{python} ub_num_gpus_str` \text{ GPUs} \times 24 \text{ hrs} \times `{python} ub_cluster_days_str` \text{ days} \times \$`{python} ub_rental_rate_str` \approx \mathbf{\$`{python} ub_rental_str` \text{ Million}}$.
+*   **Purchase ($`{python} ub_purchase_k_str`k/GPU)**: $`{python} ub_num_gpus_str` \times \$`{python} ub_purchase_k_str`,000 = \mathbf{\$`{python} ub_purchase_str` \text{ Million}}$.
 
 **The Systems Conclusion**: You must train **`{python} ub_breakeven_str` models** before buying becomes cheaper than renting. Cloud economics favors bursty workloads like training; on-premise favors steady-state workloads like inference.
 :::
