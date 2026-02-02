@@ -1582,3 +1582,62 @@ def plot_ai_datacenter_demand(ax=None):
     ax.set_ylim(0, 1100)
     
     return ax, ax2
+
+def plot_training_roofline(ax=None):
+    """Visualizes 'Training Roofline Model' (GPT-2 Operations)."""
+    if ax is None: fig, ax = plt.subplots()
+
+    # A100 Specs
+    peak_flops = 312
+    peak_bw = 2.0 # TB/s approx (actually 1.6-2.0 depending on version, using 2.0 from tikz)
+    ridge = peak_flops / peak_bw # 156
+
+    # Roofline
+    x = np.logspace(0, np.log10(500), 100)
+    y_mem = peak_bw * x
+    y_compute = np.full_like(x, peak_flops)
+    y = np.minimum(y_mem, y_compute)
+
+    ax.plot(x, y, color=COLORS['BlueLine'], linewidth=2.5, label='A100 Roofline')
+    
+    # Ridge Line
+    ax.vlines(ridge, 1, peak_flops, colors=COLORS['BlueLine'], linestyles='--', alpha=0.6)
+    ax.text(ridge * 0.9, 2, f"Ridge: {ridge:.0f}", rotation=90, color=COLORS['BlueLine'], fontsize=9, ha='right')
+    
+    # Moved A100 Peak label to the right to avoid overlap with FlashAttn
+    ax.text(450, 340, "A100 Peak (312 TF)", color=COLORS['BlueLine'], fontsize=9, fontweight='bold', ha='right')
+
+    # Points
+    ops = [
+        {'name': 'Softmax', 'x': 5, 'y': 10, 'color': COLORS['RedLine'], 'pos': 'top', 'offset': (0, 10)},
+        {'name': 'LayerNorm', 'x': 10, 'y': 20, 'color': COLORS['RedLine'], 'pos': 'top', 'offset': (0, 10)},
+        {'name': 'Std Attention', 'x': 50, 'y': 100, 'color': COLORS['OrangeLine'], 'pos': 'top', 'offset': (-20, 10)}, # Moved left
+        {'name': 'MatMul', 'x': 200, 'y': 312, 'color': COLORS['GreenLine'], 'pos': 'bottom', 'offset': (-15, -20)}, # Moved left/down
+        {'name': 'FlashAttn', 'x': 300, 'y': 312, 'color': COLORS['GreenLine'], 'pos': 'bottom', 'offset': (15, -20)} # Moved right/down
+    ]
+
+    for op in ops:
+        ax.scatter(op['x'], op['y'], color=op['color'], s=100, zorder=3, edgecolors='white')
+        
+        ax.annotate(op['name'], (op['x'], op['y']), xytext=op['offset'], textcoords='offset points',
+                    ha='center', fontsize=9, fontweight='bold', color=op['color'],
+                    bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=1))
+
+    # Arrow for FlashAttention
+    # Adjusted text position to be above the arrow to avoid overlap with line
+    ax.annotate("", xy=(300, 312), xytext=(50, 100),
+                arrowprops=dict(arrowstyle="->", color=COLORS['VioletLine'], lw=2.5))
+    ax.text(90, 180, "Flash Attention", color=COLORS['VioletLine'], rotation=32, fontsize=9, fontweight='bold', ha='right')
+
+    # Regions
+    ax.text(15, 200, "Memory-bound", color='gray', style='italic', fontsize=10)
+    ax.text(300, 180, "Compute-bound", color='gray', style='italic', fontsize=10)
+
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.set_xlim(1, 500)
+    ax.set_ylim(1, 400)
+    ax.set_xlabel('Arithmetic Intensity (FLOP/byte)')
+    ax.set_ylabel('Attainable TFLOP/s')
+    
+    return ax
