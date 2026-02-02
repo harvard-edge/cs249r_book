@@ -297,6 +297,7 @@ Neither approach dominates; each embodies different trade-offs between **flexibi
 
 \index{Eager Execution!define-by-run model}
 \index{Dynamic Graphs!eager execution}
+
 ::: {.callout-example title="Eager vs. Graph Execution Code Comparison"}
 **PyTorch (Eager Execution)**:
 ```{.python}
@@ -590,9 +591,6 @@ def forward(x):
 # Compiles Python source code to TorchScript IR
 # No example inputs needed
 # Preserves control flow structure
-```
-:::
-
 ```
 :::
 
@@ -906,7 +904,9 @@ Compilation adds overhead: 100--500 MB for FX graph construction, 500 MB--2 GB p
 
 Errors in compiled code produce stack traces pointing to generated code, not source Python code. Print statements inside compiled regions cause graph breaks (executed eagerly, not compiled). For debugging, remove `@torch.compile` to revert to eager execution, fix bugs, then re-enable compilation. Use `TORCH_COMPILE_DEBUG=1` for verbose compilation logs.
 
-**When to Use torch.compile.** Use torch.compile for:
+**When to Use torch.compile.** 
+
+Use torch.compile for:
 
 - **Training**: Long training runs (hundreds of iterations) amortize compilation overhead. Stable model architectures with fixed control flow minimize graph breaks.
 - **Inference**: Deployed models compile once at startup and serve thousands of requests. Use `mode='reduce-overhead'` to minimize per-request overhead.
@@ -1025,47 +1025,20 @@ For ImageNet (1.28M training images), compilation pays off within the first epoc
 
 @fig-compilation-continuum visualizes the decision space:
 
-::: {#fig-compilation-continuum fig-cap="**The Compilation Continuum**: Optimal execution strategy depends on development-to-production ratio. Left region (high dev iterations): eager mode dominates. Right region (high prod executions): compilation dominates. The crossover point depends on compilation cost and per-execution speedup." fig-alt="Graph with x-axis 'Production Executions' (log scale) and y-axis 'Total Time'. Three lines: Eager (steep slope), JIT (moderate slope with offset), Static (gentle slope with larger offset). Lines cross at different points showing when compilation becomes beneficial."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
-\begin{axis}[
-    width=110mm,
-    height=70mm,
-    xmode=log,
-    xlabel={Production Executions ($N_{\text{prod}}$)},
-    ylabel={Total Time (arbitrary units)},
-    xmin=100, xmax=10000000,
-    ymin=0, ymax=100,
-    legend pos=north west,
-    legend style={font=\footnotesize\usefont{T1}{phv}{m}{n}},
-    grid=both,
-    minor grid style={gray!15},
-    major grid style={gray!30},
-    label style={font=\small\usefont{T1}{phv}{m}{n}},
-    tick label style={font=\footnotesize\usefont{T1}{phv}{m}{n}},
-]
+```{python}
+#| label: fig-compilation-continuum
+#| fig-cap: "**The Compilation Continuum**: Optimal execution strategy depends on development-to-production ratio. Left region (high dev iterations): eager mode dominates. Right region (high prod executions): compilation dominates. The crossover point depends on compilation cost and per-execution speedup."
+#| fig-alt: "Graph with x-axis 'Production Executions' (log scale) and y-axis 'Total Time'. Three lines: Eager (steep slope), JIT (moderate slope with offset), Static (gentle slope with larger offset). Lines cross at different points showing when compilation becomes beneficial."
+#| echo: false
 
-% Eager: no compile cost, high per-execution cost
-\addplot[domain=100:10000000, thick, blue, samples=100] {0 + 0.00001*x};
-\addlegendentry{Eager ($T_{compile}=0$, $T_{exec}=10\mu s$)}
+from calc import viz
+import matplotlib.pyplot as plt
 
-% JIT: moderate compile cost, moderate per-execution
-\addplot[domain=100:10000000, thick, orange, samples=100] {10 + 0.000005*x};
-\addlegendentry{JIT ($T_{compile}=30s$, $T_{exec}=5\mu s$)}
-
-% Static/AOT: high compile cost, low per-execution
-\addplot[domain=100:10000000, thick, green!60!black, samples=100] {30 + 0.000002*x};
-\addlegendentry{AOT ($T_{compile}=2min$, $T_{exec}=2\mu s$)}
-
-% Region labels - positioned where each approach is optimal
-\node[anchor=north, font=\footnotesize\usefont{T1}{phv}{m}{n}, blue] at (axis cs:1000, 45) {Eager wins};
-\node[anchor=south, font=\footnotesize\usefont{T1}{phv}{m}{n}, orange] at (axis cs:4000000, 32) {JIT wins};
-\node[anchor=north, font=\footnotesize\usefont{T1}{phv}{m}{n}, green!60!black] at (axis cs:8000000, 48) {AOT wins};
-
-\end{axis}
-\end{tikzpicture}
+viz.set_book_style()
+fig, ax = plt.subplots(figsize=(8, 5))
+viz.plot_compilation_continuum(ax)
+plt.show()
 ```
-:::
 
 **The Dispatch Overhead Law.**\index{Dispatch Overhead!law} A second principle emerges from the Dispatch Overhead Equation (@eq-dispatch-overhead): when does framework overhead, rather than compute or memory, dominate execution time? Framework overhead dominates when operations are small relative to dispatch cost:
 
@@ -1257,7 +1230,6 @@ def f(x):
     b = sin(x)
     return a * b
 ```
-:::
 
 ```{.python}
 # Conceptually, each computation tracks (value, derivative)
@@ -1514,8 +1486,6 @@ Production training systems require fine-grained control over gradient flow that
 
 These control mechanisms share a common systems design: they are callback-based extensions that the autograd engine invokes at specific points during graph traversal, without modifying the core differentiation algorithm. This extensibility pattern allows the framework to maintain a single optimized backward pass while supporting arbitrarily complex gradient manipulation. The following examples demonstrate how to inspect and control PyTorch's autograd system: gradient accumulation (@lst-gradient-accumulation), custom autograd functions (@lst-custom-autograd-function), gradient hooks (@lst-gradient-hooks), and safe gradient detachment (@lst-detach-vs-data).
 
-:::
-
 **Retaining the Computation Graph.**\index{retain\_graph!multiple backward passes} By default, `backward()` frees the graph after use. To run multiple backward passes (for multi-loss optimization or higher-order derivatives), use `retain_graph=True` at the cost of doubled memory, as shown in @lst-retain-graph.
 
 ::: {#lst-retain-graph lst-cap="**Retaining Computation Graph**: Use retain_graph=True to run multiple backward passes on the same graph, useful for multi-loss optimization or higher-order derivatives."}
@@ -1597,8 +1567,6 @@ output.backward()
 print(
     x.grad, y.grad, z.grad
 )  # tensor([3.]), tensor([2.]), tensor([1.])
-```
-print(x.grad)  # tensor([8.])
 ```
 :::
 
@@ -2188,20 +2156,6 @@ with torch.cuda.stream(stream2):
 :::
 
 The performance difference between these approaches is not incremental but categorical. Full synchronization after every operation converts a concurrent pipeline into a sequential one, entirely negating the hardware parallelism that streams expose. Event-based synchronization preserves the concurrent execution model while enforcing only the dependencies that correctness requires. A common mistake in production code is inserting `torch.cuda.synchronize()` calls for debugging and forgetting to remove them, silently converting an overlapped pipeline into a serialized one. The following examples demonstrate PyTorch's device management API: device placement (@lst-tensor-device-placement), CUDA contexts (@lst-cuda-device-context), error handling (@lst-device-mismatch-error), and profiling (@lst-pytorch-profiler).
-
-torch.cuda.set_device(1)
-y = torch.randn(100, device="cuda")  # Uses cuda:1
-print(y.device)  # cuda:1
-
-# Context manager for scoped device changes
-print(torch.cuda.current_device())  # 0
-
-with torch.cuda.device(1):
-    x = torch.randn(100, device="cuda")
-    print(x.device)  # cuda:1
-    print(torch.cuda.current_device())  # 1
-
-print(torch.cuda.current_device())  # 0 (restored)
 
 ::: {#lst-pytorch-profiler lst-cap="**PyTorch Profiler**: Capture CPU-GPU transfers and operations as a Chrome trace for visualization and analysis of transfer bottlenecks."}
 ```{.python}
