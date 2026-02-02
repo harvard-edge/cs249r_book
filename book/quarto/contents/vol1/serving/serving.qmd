@@ -46,7 +46,37 @@ v100_bw = f"{V100_MEM_BW.to(GB/second).magnitude:.0f}"
 a100_bw_tbs = f"{A100_MEM_BW.to(TB/second).magnitude:.1f}"
 h100_bw_tbs = f"{H100_MEM_BW.to(TB/second).magnitude:.2f}"
 h100_mem = f"{H100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
-h100_tdp = f"{H100_TDP.to(watt).magnitude:.0f}"
+h100_tdp_val = H100_TDP.to(watt).magnitude
+h100_tdp = f"{h100_tdp_val:.0f}"
+
+# Carbon cost of chat calculations
+cc_concurrent_req = 114        # concurrent requests
+cc_tokens_per_sec_req = 7.5    # tokens/sec per request
+cc_total_tokens_sec = cc_concurrent_req * cc_tokens_per_sec_req
+cc_host_overhead_w = 300       # host/overhead watts
+cc_total_power_w = h100_tdp_val + cc_host_overhead_w
+cc_joules_per_token = cc_total_power_w / cc_total_tokens_sec
+cc_response_tokens = 500       # typical response length
+cc_response_joules = cc_joules_per_token * cc_response_tokens
+cc_smartphone_joules = 40000   # smartphone charge
+cc_boiling_water_joules = 100000  # boiling cup of water
+cc_low_util_pct = 10           # low utilization
+cc_idle_power_w = 300          # idle power
+cc_low_util_joules = 10        # joules/token at low utilization
+
+cc_concurrent_str = str(cc_concurrent_req)
+cc_tokens_req_str = str(cc_tokens_per_sec_req)
+cc_total_tokens_str = f"{cc_total_tokens_sec:.0f}"
+cc_host_overhead_str = str(cc_host_overhead_w)
+cc_total_power_str = f"{cc_total_power_w:.0f}"
+cc_joules_token_str = f"{cc_joules_per_token:.2f}"
+cc_response_tokens_str = str(cc_response_tokens)
+cc_response_joules_str = f"{cc_response_joules:.0f}"
+cc_smartphone_str = f"{cc_smartphone_joules:,}"
+cc_boiling_str = f"{cc_boiling_water_joules:,}"
+cc_low_util_str = str(cc_low_util_pct)
+cc_idle_power_str = str(cc_idle_power_w)
+cc_low_util_joules_str = str(cc_low_util_joules)
 ```
 
 ## The Serving Paradigm {#sec-model-serving-systems-serving-paradigm-9634}
@@ -437,14 +467,36 @@ Two dominant paradigms define modern serving interfaces, each with distinct syst
 
 The following example compares *JSON vs Protobuf serialization*.
 
+```{python}
+#| label: serialization-comparison-calc
+#| echo: false
+
+# JSON vs Protobuf serialization comparison
+serial_floats = 1000       # floating point numbers in payload
+json_size_kb = 9           # KB on wire
+json_parse_us = 50         # μs to parse
+protobuf_size_kb = 4       # KB on wire
+protobuf_parse_us = 5      # μs to parse
+requests_per_sec = 10000   # high-throughput system
+efficiency_gain = json_parse_us // protobuf_parse_us
+
+serial_floats_str = f"{serial_floats:,}"
+json_size_str = str(json_size_kb)
+json_parse_str = str(json_parse_us)
+protobuf_size_str = str(protobuf_size_kb)
+protobuf_parse_str = str(protobuf_parse_us)
+requests_per_sec_str = f"{requests_per_sec:,}"
+efficiency_gain_str = str(efficiency_gain)
+```
+
 ::: {.callout-notebook title="JSON vs Protobuf Serialization"}
 
-Consider a request payload containing 1,000 floating point numbers (e.g., an embedding vector).
+Consider a request payload containing `{python} serial_floats_str` floating point numbers (e.g., an embedding vector).
 
-*   **JSON**: Uses ~9 KB on the wire. Requires ~50$\mu$s to parse.
-*   **Protobuf**: Uses ~4 KB on the wire. Requires ~5$\mu$s to parse.
+*   **JSON**: Uses ~`{python} json_size_str` KB on the wire. Requires ~`{python} json_parse_str`$\mu$s to parse.
+*   **Protobuf**: Uses ~`{python} protobuf_size_str` KB on the wire. Requires ~`{python} protobuf_parse_str`$\mu$s to parse.
 
-For a system processing 10,000 requests per second, switching to Protobuf saves nearly half a core of CPU time just in serialization overhead. This 10$\times$ efficiency gain makes gRPC essential for high-throughput internal microservices.
+For a system processing `{python} requests_per_sec_str` requests per second, switching to Protobuf saves nearly half a core of CPU time just in serialization overhead. This `{python} efficiency_gain_str`$\times$ efficiency gain makes gRPC essential for high-throughput internal microservices.
 
 :::
 
@@ -1424,6 +1476,21 @@ b1_throughput_str = f"{throughputs[1]:.0f}"
 b32_throughput_str = f"{throughputs[32]:.0f}"
 b1_latency_str = f"{latencies[1]:.1f}"
 b32_latency_str = f"{latencies[32]:.1f}"
+
+# Iron Law of Batching - overhead and compute times
+il_overhead_ms = 5.0       # fixed overhead (kernel launch, etc.)
+il_compute_b1_ms = 0.6     # compute time at batch 1
+il_compute_b32_ms = 19.2   # compute time at batch 32
+il_eff_b1_pct = int(il_compute_b1_ms / (il_overhead_ms + il_compute_b1_ms) * 100)
+il_eff_b32_pct = int(il_compute_b32_ms / (il_overhead_ms + il_compute_b32_ms) * 100)
+il_threshold_pct = 10
+
+il_overhead_str = f"{il_overhead_ms:.0f}"
+il_compute_b1_str = f"{il_compute_b1_ms}"
+il_compute_b32_str = f"{il_compute_b32_ms}"
+il_eff_b1_str = f"{il_eff_b1_pct}"
+il_eff_b32_str = f"{il_eff_b32_pct}"
+il_threshold_str = str(il_threshold_pct)
 ```
 
 The throughput gains in @tbl-batching-throughput trace directly back to the Iron Law framework established in @sec-ai-training-iron-law-training-performance-a53f, where batching amortizes the fixed overhead term.
@@ -1438,10 +1505,10 @@ $$ T = \frac{O}{R_{peak} \cdot \eta} + L_{lat} $$
 
 **Deriving the Sweet Spot:**
 
-*   **Case 1 (Batch 1):** Overhead (5ms) $\approx$ Compute (0.6ms). Efficiency $\approx 10\%$. The GPU is mostly waiting.
-*   **Case 2 (Batch 32):** Overhead (5ms) $\ll$ Compute (19.2ms). Efficiency $\approx 80\%$. The GPU is crunching numbers.
+*   **Case 1 (Batch 1):** Overhead (`{python} il_overhead_str`ms) $\approx$ Compute (`{python} il_compute_b1_str`ms). Efficiency $\approx `{python} il_eff_b1_str`\%$. The GPU is mostly waiting.
+*   **Case 2 (Batch 32):** Overhead (`{python} il_overhead_str`ms) $\ll$ Compute (`{python} il_compute_b32_str`ms). Efficiency $\approx `{python} il_eff_b32_str`\%$. The GPU is crunching numbers.
 
-**The Golden Rule:** Increase batch size until the **Latency Term** becomes negligible (< 10% of total time). Beyond this point, you gain minimal throughput but pay a linear latency penalty.
+**The Golden Rule:** Increase batch size until the **Latency Term** becomes negligible (< `{python} il_threshold_str`% of total time). Beyond this point, you gain minimal throughput but pay a linear latency penalty.
 :::
 
 #### Latency-Constrained Optimization {#sec-model-serving-systems-latencyconstrained-optimization-8f66}
@@ -1827,18 +1894,18 @@ The computational intensity of managing KV caches across concurrent requests rai
 **Joules per Token: The Green Metric**:
 As LLMs scale, energy efficiency becomes a first-class operational metric alongside latency. For an H100 GPU (`{python} h100_tdp`W TDP), we can quantify the energy footprint of serving:
 
-1.  **Throughput**: 114 concurrent requests × 7.5 tokens/sec/req $\approx$ **855 tokens/sec**.
-2.  **Power**: `{python} h100_tdp`W (GPU) + 300W (Host/Overhead) = **1000W**.
+1.  **Throughput**: `{python} cc_concurrent_str` concurrent requests × `{python} cc_tokens_req_str` tokens/sec/req $\approx$ **`{python} cc_total_tokens_str` tokens/sec**.
+2.  **Power**: `{python} h100_tdp`W (GPU) + `{python} cc_host_overhead_str`W (Host/Overhead) = **`{python} cc_total_power_str`W**.
 3.  **Energy per Token**:
 
-    $$\frac{1000 \text{ Joules/sec}}{855 \text{ tokens/sec}} \approx \mathbf{1.17 \text{ Joules/token}}$$
+    $$\frac{`{python} cc_total_power_str` \text{ Joules/sec}}{`{python} cc_total_tokens_str` \text{ tokens/sec}} \approx \mathbf{`{python} cc_joules_token_str` \text{ Joules/token}}$$
 
-**The Systems Conclusion**: A typical 500-token response consumes $\approx \mathbf{585 \text{ Joules}}$.
+**The Systems Conclusion**: A typical `{python} cc_response_tokens_str`-token response consumes $\approx \mathbf{`{python} cc_response_joules_str` \text{ Joules}}$.
 
-- For comparison, charging a smartphone consumes $\approx 40,000$ Joules.
-- Boiling a cup of water consumes $\approx 100,000$ Joules.
+- For comparison, charging a smartphone consumes $\approx `{python} cc_smartphone_str`$ Joules.
+- Boiling a cup of water consumes $\approx `{python} cc_boiling_str`$ Joules.
 
-**The Engineering Lever**: The primary way to reduce Joules/Token is to **increase hardware utilization**. If the GPU sits at 10% utilization due to poor batching, the "Idle Power" is still ~300W, causing the energy-per-token to skyrocket to **>10 Joules**. MLOps is not just about speed; it is about sustainability through efficiency.
+**The Engineering Lever**: The primary way to reduce Joules/Token is to **increase hardware utilization**. If the GPU sits at `{python} cc_low_util_str`% utilization due to poor batching, the "Idle Power" is still ~`{python} cc_idle_power_str`W, causing the energy-per-token to skyrocket to **>`{python} cc_low_util_joules_str` Joules**. MLOps is not just about speed; it is about sustainability through efficiency.
 :::
 
 ## Inference Runtime Selection {#sec-model-serving-systems-inference-runtime-selection-5eef}
@@ -1863,20 +1930,55 @@ TorchScript and TensorFlow SavedModel formats enable ahead-of-time compilation a
 
 These optimizations typically achieve 2-5x speedup over framework-native serving but require explicit export and may not support all operations. A *runtime comparison* on a standard model quantifies these gains across the optimization spectrum.
 
+```{python}
+#| label: runtime-comparison-calc
+#| echo: false
+
+# Runtime comparison for ResNet-50 on V100 (batch size 1)
+rt_pytorch_ms = 8.5
+rt_torchscript_ms = 6.2
+rt_onnx_ms = 5.1
+rt_trt_fp32_ms = 2.8
+rt_trt_fp16_ms = 1.4
+rt_trt_int8_ms = 0.9
+
+# Speedups relative to PyTorch baseline
+rt_pytorch_speedup = 1.0
+rt_torchscript_speedup = rt_pytorch_ms / rt_torchscript_ms
+rt_onnx_speedup = rt_pytorch_ms / rt_onnx_ms
+rt_trt_fp32_speedup = rt_pytorch_ms / rt_trt_fp32_ms
+rt_trt_fp16_speedup = rt_pytorch_ms / rt_trt_fp16_ms
+rt_trt_int8_speedup = rt_pytorch_ms / rt_trt_int8_ms
+
+rt_pytorch_ms_str = f"{rt_pytorch_ms}"
+rt_torchscript_ms_str = f"{rt_torchscript_ms}"
+rt_onnx_ms_str = f"{rt_onnx_ms}"
+rt_trt_fp32_ms_str = f"{rt_trt_fp32_ms}"
+rt_trt_fp16_ms_str = f"{rt_trt_fp16_ms}"
+rt_trt_int8_ms_str = f"{rt_trt_int8_ms}"
+
+rt_pytorch_speedup_str = f"{rt_pytorch_speedup:.1f}"
+rt_torchscript_speedup_str = f"{rt_torchscript_speedup:.1f}"
+rt_onnx_speedup_str = f"{rt_onnx_speedup:.1f}"
+rt_trt_fp32_speedup_str = f"{rt_trt_fp32_speedup:.1f}"
+rt_trt_fp16_speedup_str = f"{rt_trt_fp16_speedup:.1f}"
+rt_trt_int8_speedup_str = f"{rt_trt_int8_speedup:.1f}"
+```
+
 ::: {.callout-notebook title="ResNet-50: Runtime Comparison"}
 
 Performance comparison for ResNet-50 inference on V100 GPU (batch size 1):
 
 | **Runtime** | **Latency** | **Speedup** | **Notes** |
 |:---|---:|---:|:---|
-| PyTorch (eager) | 8.5ms | 1.0× | Baseline, no optimization |
-| TorchScript | 6.2ms | 1.4× | JIT compilation |
-| ONNX Runtime | 5.1ms | 1.7× | Cross-platform |
-| TensorRT FP32 | 2.8ms | 3.0× | NVIDIA-specific |
-| TensorRT FP16 | 1.4ms | 6.1× | Tensor Core acceleration |
-| TensorRT INT8 | 0.9ms | 9.4× | Requires calibration |
+| PyTorch (eager) | `{python} rt_pytorch_ms_str`ms | `{python} rt_pytorch_speedup_str`× | Baseline, no optimization |
+| TorchScript | `{python} rt_torchscript_ms_str`ms | `{python} rt_torchscript_speedup_str`× | JIT compilation |
+| ONNX Runtime | `{python} rt_onnx_ms_str`ms | `{python} rt_onnx_speedup_str`× | Cross-platform |
+| TensorRT FP32 | `{python} rt_trt_fp32_ms_str`ms | `{python} rt_trt_fp32_speedup_str`× | NVIDIA-specific |
+| TensorRT FP16 | `{python} rt_trt_fp16_ms_str`ms | `{python} rt_trt_fp16_speedup_str`× | Tensor Core acceleration |
+| TensorRT INT8 | `{python} rt_trt_int8_ms_str`ms | `{python} rt_trt_int8_speedup_str`× | Requires calibration |
 
-**Key insight**: The 9.4× speedup from TensorRT INT8 comes at the cost of: (1) quantization calibration data, (2) potential accuracy loss (<1% for ResNet-50), and (3) NVIDIA-specific deployment.
+**Key insight**: The `{python} rt_trt_int8_speedup_str`× speedup from TensorRT INT8 comes at the cost of: (1) quantization calibration data, (2) potential accuracy loss (<1% for ResNet-50), and (3) NVIDIA-specific deployment.
 
 :::
 
