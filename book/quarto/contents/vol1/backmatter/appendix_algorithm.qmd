@@ -1,7 +1,42 @@
 ---
 title: "Algorithm Foundations"
 id: sec-algorithm-foundations
+engine: jupyter
 ---
+
+```{python}
+#| label: appendix-algorithm-setup
+#| echo: false
+
+from calc.constants import *
+from calc.formulas import fmt
+
+# Sparse matrix example: 100,000 × 10,000 embedding matrix
+vocab_size = 100_000
+embed_dim = 10_000
+total_elements = vocab_size * embed_dim  # 1 billion
+bytes_per_fp32 = 4
+dense_bytes = total_elements * bytes_per_fp32
+dense_gb = dense_bytes / 1e9  # 4 GB
+
+# Sparse at 1% density
+sparsity_pct = 1
+nonzeros = int(total_elements * sparsity_pct / 100)  # 10 million
+# CSR format: value (4 bytes) + column index (4 bytes) per nonzero
+sparse_bytes = nonzeros * (4 + 4)  # ~80 MB
+sparse_mb = sparse_bytes / 1e6
+reduction_factor = int(dense_bytes / sparse_bytes)  # 50x
+
+# 64x64 GEMM efficiency example
+# Arithmetic intensity = n/3 for n×n matrices
+n_small = 64
+small_intensity = n_small / 3  # ~21 FLOP/byte
+# Ridge point for A100: ~156 FLOP/byte (from appendix_machine)
+a100_ridge = int(A100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude / 
+                 A100_MEM_BW.to(TB / second).magnitude)
+# When memory-bound, efficiency ≈ intensity / ridge_point
+small_efficiency_pct = small_intensity / a100_ridge * 100  # ~14%
+```
 
 This appendix covers the mathematical and computational machinery that powers neural networks. From the linear algebra at the heart of every layer to the backpropagation algorithm that enables learning, these foundations explain *how* models compute and *why* certain implementation choices affect performance. The concepts here support the deep learning foundations in @sec-deep-learning-systems-foundations, the framework internals in @sec-ai-frameworks, and the training strategies in @sec-ai-training.
 
@@ -50,7 +85,7 @@ This explains several important phenomena:
 
 - **Larger batches improve efficiency**: Batching increases the effective matrix dimensions, pushing workloads toward the compute-bound region of the roofline.
 - **Power-of-two dimensions help**: Hardware tensor cores are optimized for specific tile sizes (typically 16x16 or 32x32). Dimensions that align with these sizes avoid padding overhead.
-- **Small matrices are inefficient**: A 64x64 GEMM may achieve only 10% of peak throughput because it cannot fully utilize the hardware.
+- **Small matrices are inefficient**: A $`{python} n_small` \times `{python} n_small`$ GEMM has intensity $`{python} n_small`/3 \approx `{python} int(small_intensity)$` FLOP/byte, well below the ridge point ($`{python} a100_ridge`$), achieving only ~$`{python} int(small_efficiency_pct)`\%$ of peak throughput.
 
 ### Sparse Matrix Formats {#sec-system-foundations-sparse-matrix-formats-7920}
 
@@ -64,10 +99,10 @@ The **Compressed Sparse Row (CSR)** format uses three arrays:
 
 CSR is essential for recommendation systems (sparse embedding tables) and pruned models. For a matrix with $N$ elements and $K$ non-zeros, CSR uses $O(K)$ storage instead of $O(N)$.
 
-**Example**: A vocabulary embedding matrix of size $100,000 \times 10,000$ (1 billion parameters).
-*   **Dense (FP32)**: $10^9 \times 4$ bytes = **4 GB**.
-*   **Sparse (1% density)**: Storing only non-zeros requires roughly $10^7 \times (4 \text{ bytes value} + 4 \text{ bytes index}) \approx$ **80 MB**.
-*   *Result*: A 50x reduction in memory footprint, fitting a model that would otherwise OOM (Out of Memory).
+**Example**: A vocabulary embedding matrix of size $`{python} f"{vocab_size:,}"` \times `{python} f"{embed_dim:,}"`$ (`{python} f"{total_elements/1e9:.0f}"` billion parameters).
+*   **Dense (FP32)**: $`{python} f"{total_elements/1e9:.0f}"` \times 10^9 \times 4$ bytes = **`{python} f"{dense_gb:.0f}"` GB**.
+*   **Sparse (`{python} sparsity_pct`% density)**: Storing only non-zeros requires roughly $`{python} f"{nonzeros/1e6:.0f}"` \times 10^6 \times (4 \text{ bytes value} + 4 \text{ bytes index}) \approx$ **`{python} f"{sparse_mb:.0f}"` MB**.
+*   *Result*: A `{python} reduction_factor`x reduction in memory footprint, fitting a model that would otherwise OOM (Out of Memory).
 
 ## Tensor Programming Primitives {#sec-system-foundations-tensor-programming-primitives-7baf}
 
