@@ -68,6 +68,9 @@ def parse_grid_table(table_lines: list[str]) -> tuple[list[str], list[list[str]]
     """
     Parse a grid table into headers, rows, and alignments.
     
+    Grid tables can have multi-line cells - content spans multiple | lines
+    until the next +---+ separator. This function accumulates content.
+    
     Returns: (headers, data_rows, alignments)
     """
     headers = []
@@ -75,34 +78,61 @@ def parse_grid_table(table_lines: list[str]) -> tuple[list[str], list[list[str]]
     alignments = []
     
     in_header = True
+    current_row = None  # Accumulator for multi-line cells
     
     for line in table_lines:
         line = line.rstrip()
         
-        # Header separator (with =) - extract alignment
+        # Header separator (with =) - extract alignment and finalize header
         if '=' in line and line.startswith('+'):
             alignments = parse_alignment(line)
+            if current_row is not None:
+                headers = current_row
+                current_row = None
             in_header = False
             continue
         
-        # Row separator (just -)
+        # Row separator (just -) - finalize current row
         if line.startswith('+') and '-' in line:
+            if current_row is not None and not in_header:
+                rows.append(current_row)
+                current_row = None
             continue
         
-        # Data line
+        # Data line - accumulate cell content
         if line.startswith('|'):
-            # Split by | and clean up cells
-            cells = [c.strip() for c in line.split('|')]
-            # Remove empty first/last from split
-            cells = [c for c in cells if c or cells.index(c) not in (0, len(cells)-1)]
-            # Actually just use a cleaner approach
             cells = line.strip('|').split('|')
             cells = [c.strip() for c in cells]
             
-            if in_header:
-                headers = cells
+            if current_row is None:
+                # Start new row
+                current_row = cells
             else:
-                rows.append(cells)
+                # Check if this is a continuation (first cell empty) or new row
+                if cells[0] == '':
+                    # Continuation - append to existing row (multi-line cell)
+                    for i, cell in enumerate(cells):
+                        if i < len(current_row) and cell:
+                            # Join with space if there's existing content
+                            if current_row[i]:
+                                current_row[i] += ' ' + cell
+                            else:
+                                current_row[i] = cell
+                else:
+                    # New row - save current and start fresh
+                    if not in_header:
+                        rows.append(current_row)
+                    else:
+                        headers = current_row
+                        in_header = False  # If we hit data before =, treat as simple table
+                    current_row = cells
+    
+    # Handle any remaining row
+    if current_row is not None:
+        if in_header:
+            headers = current_row
+        else:
+            rows.append(current_row)
     
     # Default alignments if none found
     if not alignments and headers:
