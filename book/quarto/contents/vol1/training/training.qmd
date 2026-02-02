@@ -52,10 +52,14 @@ a100_tflops_fp16 = f"{A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
 a100_tflops_fp32 = f"{A100_FLOPS_FP32.to(TFLOPs/second).magnitude:.1f}"
 a100_bw_gbs = f"{A100_MEM_BW.to(GB/second).magnitude:,.0f}"
 a100_bw_tbs = f"{A100_MEM_BW.to(TB/second).magnitude:.1f}"
+a100_mem = f"{A100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
+h100_mem = f"{H100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
 
 h100_tflops_fp16 = f"{H100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
 h100_tflops_tf32 = f"{H100_FLOPS_TF32.to(TFLOPs/second).magnitude:.0f}"
 h100_tflops_fp8 = f"{H100_FLOPS_FP8_TENSOR.to(TFLOPs/second).magnitude:,.0f}"
+h100_pflops_fp8 = f"{H100_FLOPS_FP8_TENSOR.to(TFLOPs/second).magnitude / 1000:.2f}"
+h100_pflops_fp16 = f"{H100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude / 1000:.2f}"
 h100_bw_tbs = f"{H100_MEM_BW.to(TB/second).magnitude:.2f}"
 
 # Ridge points
@@ -65,12 +69,22 @@ h100_ridge = f"{(H100_FLOPS_FP16_TENSOR / H100_MEM_BW).to(flop/byte).magnitude:.
 # Interconnects
 nvlink_h100 = f"{NVLINK_H100_BW.to(GB/second).magnitude:.0f}"
 
+# Storage bandwidth
+nvme_bw = f"{NVME_SEQUENTIAL_BW.to(GB/second).magnitude:.1f}"
+nvme_bw_sustained = f"{NVME_SEQUENTIAL_BW.to(GB/second).magnitude * 0.5:.2f}"
+system_mem_bw = f"{SYSTEM_MEMORY_BW.to(GB/second).magnitude:.0f}"
+
 # TDP
 a100_tdp = f"{A100_TDP.to(watt).magnitude:.0f}"
 
 # Models
 gpt2_params_b = f"{GPT2_PARAMS.to(Mparam).magnitude/1000:.1f}"
+gpt2_layers = f"{GPT2_LAYERS}"
+gpt2_params_gb_fp32 = f"{GPT2_PARAMS.magnitude * 4 / 1e9:.0f}"  # FP32 = 4 bytes
+gpt2_adam_gb = f"{GPT2_PARAMS.magnitude * 8 / 1e9:.0f}"  # Adam m + v = 8 bytes total
 gpt3_params_b = f"{GPT3_PARAMS.to(Mparam).magnitude/1000:.0f}"
+resnet50_params_m = f"{RESNET50_PARAMS.to(Mparam).magnitude:.1f}"
+resnet50_params_gb = f"{RESNET50_PARAMS.magnitude * 4 / 1e9:.1f}"  # FP32
 ```
 
 ## Training Systems Fundamentals {#sec-ai-training-training-systems-fundamentals-05d2}
@@ -85,9 +99,9 @@ A single forward pass through GPT-2 requires roughly $10^{10}$ floating-point op
 
 :::
 
-Three characteristics make training workloads fundamentally different from general-purpose computing, and concrete numbers illustrate why each matters. First, *computational intensity*: GPT-2's $10^{23}$ FLOPs spread over days of wall-clock time demands sustained petaFLOPS-scale throughput from hardware that rarely exceeds 30 to 70 percent utilization. Second, *memory pressure*: storing 1.5 billion weights requires 6 GB in FP32, but the Adam optimizer adds two additional state tensors per parameter (another 12 GB), and activation storage across 48 transformer layers can double or triple the total, easily exceeding a single GPU's memory capacity. Third, *data dependencies*: each gradient update depends on the result of the previous one, creating sequential bottlenecks that limit how much parallelism the system can exploit.
+Three characteristics make training workloads fundamentally different from general-purpose computing, and concrete numbers illustrate why each matters. First, *computational intensity*: GPT-2's $10^{23}$ FLOPs spread over days of wall-clock time demands sustained petaFLOPS-scale throughput from hardware that rarely exceeds 30 to 70 percent utilization. Second, *memory pressure*: storing `{python} gpt2_params_b` billion weights requires `{python} gpt2_params_gb_fp32` GB in FP32, but the Adam optimizer adds two additional state tensors per parameter (another `{python} gpt2_adam_gb` GB), and activation storage across `{python} gpt2_layers` transformer layers can double or triple the total, easily exceeding a single GPU's memory capacity. Third, *data dependencies*: each gradient update depends on the result of the previous one, creating sequential bottlenecks that limit how much parallelism the system can exploit.
 
-Each of these challenges opens a corresponding optimization pathway. Computational intensity can be addressed through hardware acceleration and precision reduction. Memory pressure responds to techniques like **gradient checkpointing**, which trades recomputation for reduced activation storage, and **mixed-precision training**, which halves the memory footprint of weights and activations. Data dependencies motivate pipeline designs that overlap computation with data movement so the GPU never sits idle waiting for the next batch. This chapter focuses on single-machine and single-node multi-GPU training; scaling to hundreds of machines across network boundaries introduces communication and fault tolerance challenges that are the subject of *Distributed Training Systems* in Volume II. We use the *Iron Law of Training Performance* as our organizing framework, examining how each optimization technique targets specific terms in the performance equation. Before formalizing that framework, consider how these constraints interact in practice when a single *gradient explosion* can erase days of expensive computation.
+Each of these challenges opens a corresponding optimization pathway. Computational intensity can be addressed through hardware acceleration and precision reduction. Memory pressure responds to techniques like **gradient checkpointing**, which trades recomputation for reduced activation storage, and **mixed-precision training**, which halves the memory footprint of weights and activations. Data dependencies motivate pipeline designs that overlap computation with data movement so the GPU never sits idle waiting for the next batch. This chapter focuses on single-machine and single-node multi-GPU training; scaling to hundreds of machines across network boundaries introduces communication and fault tolerance challenges that constitute an advanced topic beyond the scope of this chapter. We use the *Iron Law of Training Performance* as our organizing framework, examining how each optimization technique targets specific terms in the performance equation. Before formalizing that framework, consider how these constraints interact in practice when a single *gradient explosion* can erase days of expensive computation.
 
 ::: {.callout-example title="The 3AM Gradient Explosion"}
 **The Scenario**: You are training a 7B parameter LLM. The loss curve has been decreasing smoothly for 4 days. You go to sleep.
@@ -117,14 +131,14 @@ where $O$ (**Total Operations**) is the FLOPs required for one epoch times the n
 
 This equation reveals three levers for improvement: reduce total operations through algorithmic innovation, increase peak throughput through hardware utilization, or improve utilization through better pipeline orchestration. Each optimization technique in this chapter pulls one or more of these levers, as summarized in @tbl-iron-law-mapping.
 
-| **Technique** | **Term Affected** | **Mechanism** |
-|:---|:---|:---|
-| **Mixed Precision (FP16/BF16)** | Peak Throughput ↑ | Tensor Cores operate at up to 16× higher FLOP/s |
-| **Data Prefetching** | Utilization ↑ | Reduces GPU idle time waiting for data |
-| **Gradient Checkpointing** | Total Operations ↑ | Adds recomputation, but enables larger models |
-| **Gradient Accumulation** | Utilization ↑ | Maintains high batch parallelism efficiency |
-| **Operator Fusion** | Utilization ↑ | Reduces memory bandwidth bottlenecks |
-| **FlashAttention** | Total Operations ↓ Utilization ↑ | Algorithmic improvement reduces FLOP count Tiling improves memory access patterns |
+| **Technique**                   | **Term Affected**                | **Mechanism**                                                                     |
+|:------------------------------|:-------------------------------|:--------------------------------------------------------------------------------|
+| **Mixed Precision (FP16/BF16)** | Peak Throughput ↑                | Tensor Cores operate at up to 16× higher FLOP/s                                   |
+| **Data Prefetching**            | Utilization ↑                    | Reduces GPU idle time waiting for data                                            |
+| **Gradient Checkpointing**      | Total Operations ↑               | Adds recomputation, but enables larger models                                     |
+| **Gradient Accumulation**       | Utilization ↑                    | Maintains high batch parallelism efficiency                                       |
+| **Operator Fusion**             | Utilization ↑                    | Reduces memory bandwidth bottlenecks                                              |
+| **FlashAttention**              | Total Operations ↓ Utilization ↑ | Algorithmic improvement reduces FLOP count Tiling improves memory access patterns |
 
 : **Iron Law Optimization Mapping.** Optimization techniques mapped to Iron Law terms. Understanding which term a technique affects guides optimization strategy selection. {#tbl-iron-law-mapping}
 
@@ -135,8 +149,8 @@ The challenge of maintaining high utilization at scale is illustrated in @fig-co
 ```{python}
 #| label: fig-communication-tax
 #| echo: false
-#| fig-cap: "**The Communication Tax**: Effective Throughput vs. GPU Count (Log-Log Scale). Ideal scaling (dashed gray) is linear. Compute-bound workloads like ResNet (Blue) scale efficiently because communication is a small fraction of step time. Bandwidth-bound workloads like LLMs (Red) suffer from the 'Communication Tax,' where synchronization overhead grows with cluster size, causing efficiency to drop. This divergence explains why network bandwidth is often the bottleneck in large-scale training."
-#| fig-alt: "Log-log plot of Throughput vs. GPUs. Blue line (ResNet) stays close to linear ideal. Red line (LLM) sags significantly at high GPU counts, annotated as 'The Communication Tax'."
+#| fig-cap: "**The Communication Tax**: Effective Throughput vs. GPU Count (Log-Log Scale). Ideal scaling (dashed gray) represents the linear ceiling. Compute-bound workloads like ResNet (Blue) maintain high efficiency. Balanced workloads like LLMs with high-speed interconnects (Green) show slight degradation, while bandwidth-bound workloads (Red) suffer from the full 'Communication Tax' (shaded region). This divergence reveals why network topology and bandwidth become the dominant constraints when scaling to massive clusters."
+#| fig-alt: "Log-log plot of Throughput vs. GPUs (up to 256). Three lines show varying scaling efficiencies: Blue (95%), Green (85%), and Red (60%), with a shaded red region illustrating the cumulative communication tax."
 
 import sys
 import matplotlib.pyplot as plt
@@ -191,12 +205,12 @@ To ground the abstract principles of training systems in concrete engineering de
 **Why this model?**
 GPT-2 (1.5B) serves as our primary case study for **large-scale training** because it sits at the "sweet spot" of systems complexity. It is large enough to require distributed training and serious memory optimizations, yet small enough to comprehend without the massive infrastructure complexity of trillion-parameter clusters.
 
-| **Property** | **Specification** | **Systems Implication** |
-|:---|---:|:---|
-| **Parameters** | 1.5 Billion (XL) | Requires ~3 GB (FP16) or ~6 GB (FP32) for weights alone. |
-| **Architecture** | 48 Layers, 1600 Dim | Deep pipeline creates heavy activation memory pressure. |
-| **Dataset** | OpenWebText (40GB) | I/O throughput must match high-speed accelerator compute. |
-| **Compute** | ~ $10^{23}$ FLOPs total | Training takes days/weeks; demands parallelization. |
+| **Property**     |       **Specification** | **Systems Implication**                                   |
+|:---------------|----------------------:|:--------------------------------------------------------|
+| **Parameters**   |        1.5 Billion (XL) | Requires ~3 GB (FP16) or ~6 GB (FP32) for weights alone.  |
+| **Architecture** |     48 Layers, 1600 Dim | Deep pipeline creates heavy activation memory pressure.   |
+| **Dataset**      |      OpenWebText (40GB) | I/O throughput must match high-speed accelerator compute. |
+| **Compute**      | ~ $10^{23}$ FLOPs total | Training takes days/weeks; demands parallelization.       |
 
 **Key Systems Challenge:**
 Training GPT-2 is primarily **memory-bound** (due to activation storage) and **compute-intensive** (requiring massive matrix multiplications). It forces us to move beyond simple training loops to sophisticated pipelines that manage data movement as carefully as computation.
@@ -211,12 +225,12 @@ While GPT-2 illustrates dense, compute-intensive workloads, recommendation syste
 **Why this model?**
 DLRM represents the "Sparse" regime of the Iron Law. Unlike GPT-2, which is bound by FLOPs and Activation Memory, DLRM is bound by **Parameter Capacity** and **Network Bandwidth**. It powers the revenue engines of major internet companies (ads, search, feed ranking).
 
-| **Property** | **Specification** | **Systems Implication** |
-|:---|:---|:---|
-| **Parameters** | 100 Billion to 10 Trillion (mostly embeddings) | Embedding tables exceed single-node memory (requires TBs). |
-| **Architecture** | Embedding Tables + MLP | Low arithmetic intensity; highly memory-bandwidth bound. |
-| **Inputs** | Sparse Features (IDs) | Random memory access patterns defy caching. |
-| **Compute** | Low FLOPs per byte | GPUs often underutilized; typically trained on CPU clusters. |
+| **Property**     | **Specification**                              | **Systems Implication**                                      |
+|:---------------|:---------------------------------------------|:-----------------------------------------------------------|
+| **Parameters**   | 100 Billion to 10 Trillion (mostly embeddings) | Embedding tables exceed single-node memory (requires TBs).   |
+| **Architecture** | Embedding Tables + MLP                         | Low arithmetic intensity; highly memory-bandwidth bound.     |
+| **Inputs**       | Sparse Features (IDs)                          | Random memory access patterns defy caching.                  |
+| **Compute**      | Low FLOPs per byte                             | GPUs often underutilized; typically trained on CPU clusters. |
 
 **Key Systems Challenge:**
 Training DLRM requires **Model Parallelism** not for compute, but for capacity. The embedding tables are sharded across hundreds of devices. The bottleneck becomes the **All-to-All** communication pattern required to gather embeddings for the dense MLP top-stack.
@@ -354,16 +368,25 @@ total_layer_str = f"{total_per_layer_b:.0f}"
 per_step_t_str = f"{per_step_trillion:.1f}"
 total_peta_str = f"{total_training_peta:.0f}"
 v100_time_str = f"{v100_time_per_step_s:.0f}"
+
+# Pre-formatted strings for inline use
+batch_str = f"{batch}"
+seq_len_str = f"{seq_len}"
+hidden_str = f"{hidden}"
+n_heads_str = f"{n_heads}"
+head_dim_str = f"{head_dim}"
+n_layers_gpt2_str = f"{n_layers_gpt2}"
+training_steps_str = f"{training_steps:,}"
 ```
 
-Each GPT-2 layer performs attention computations that exemplify dense matrix multiplication demands. For a single attention head with batch_size=`{python} batch`, sequence_length=`{python} seq_len`, hidden_dim=`{python} hidden`:
+Each GPT-2 layer performs attention computations that exemplify dense matrix multiplication demands. For a single attention head with batch_size=`{python} batch_str`, sequence_length=`{python} seq_len_str`, hidden_dim=`{python} hidden_str`:
 
 **Query, Key, Value Projections** (3 separate matrix multiplications):
 $$
 \text{FLOPS} = 3 \times (\text{batch} \times \text{seq} \times \text{hidden} \times \text{hidden})
 $$
 $$
-= 3 \times (`{python} batch` \times `{python} seq_len` \times `{python} hidden` \times `{python} hidden`) \approx `{python} qkv_billion_str` \text{ billion FLOPS}
+= 3 \times (`{python} batch_str` \times `{python} seq_len_str` \times `{python} hidden_str` \times `{python} hidden_str`) \approx `{python} qkv_billion_str` \text{ billion FLOPS}
 $$
 
 **Attention Score Computation** (Q × K^T):
@@ -371,14 +394,14 @@ $$
 \text{FLOPS} = \text{batch} \times \text{heads} \times \text{seq} \times \text{seq} \times \text{hidden/heads}
 $$
 $$
-= `{python} batch` \times `{python} n_heads` \times `{python} seq_len` \times `{python} seq_len` \times `{python} head_dim` = `{python} attn_billion_str` \text{ billion FLOPS}
+= `{python} batch_str` \times `{python} n_heads_str` \times `{python} seq_len_str` \times `{python} seq_len_str` \times `{python} head_dim_str` = `{python} attn_billion_str` \text{ billion FLOPS}
 $$
 
 **Computation Scale**
 
 - Total for one attention layer: ~`{python} total_layer_str`B FLOPS forward pass
-- With `{python} n_layers_gpt2` layers in GPT-2: ~`{python} per_step_t_str` trillion FLOPS per training step
-- At `{python} f"{training_steps:,}"` training steps: ~`{python} total_peta_str` petaFLOPS total training computation
+- With `{python} n_layers_gpt2_str` layers in GPT-2: ~`{python} per_step_t_str` trillion FLOPS per training step
+- At `{python} training_steps_str` training steps: ~`{python} total_peta_str` petaFLOPS total training computation
 
 **System Implication:** A V100 GPU (`{python} v100_tflops_fp16` TFLOPS peak FP16 with Tensor Cores, `{python} v100_tflops_fp32` TFLOPS FP32 without) would require `{python} v100_time_str` seconds just for the attention computations per step at 100% utilization (theoretical peak; practical throughput would be lower). Actual training steps take 180 to 220ms, requiring 8 to 32 GPUs to achieve this throughput depending on utilization and interconnect efficiency.
 
@@ -416,27 +439,28 @@ The selection of an activation function directly influences training throughput 
 ::: {#fig-activation-perf fig-env="figure" fig-pos="htb" fig-cap="**Activation Function Execution Time**: CPU benchmarks on Apple M2 hardware reveal significant variation: Tanh completes in 0.61 seconds, ReLU in 0.78 seconds, Softmax in 0.91 seconds, and Sigmoid in 1.10 seconds. These differences directly affect training throughput and real-time inference latency, making activation function selection a system-level design decision." fig-alt="Bar chart comparing CPU execution times: Sigmoid at 1.1 seconds, Tanh at 0.61 seconds, ReLU at 0.78 seconds, and Softmax at 0.91 seconds."}
 ```{.tikz}
 \scalebox{0.8}{%
-\begin{tikzpicture}[font=\small\sffamily]
-\definecolor{Softmax}{HTML}{FDAE61}
-\definecolor{ReLU}{HTML}{ABDDA4}
-\definecolor{Tanh}{HTML}{2B83BA}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+% Standard color definitions
+\definecolor{BlueLine}{HTML}{006395}
+\definecolor{GreenLine}{HTML}{008F45}
+\definecolor{RedLine}{HTML}{CB202D}
+\definecolor{OrangeLine}{HTML}{CC5500}
+
 \begin{axis}[
     ylabel={Execution Time (seconds)},
     ymin=0.49,
     axis lines=left,
-   axis line style={thick,-latex},
-    ytick={0.5,0.55,...,1.1},
-    tick label style={/pgf/number format/assume math mode=true},
-    yticklabel style={font=\footnotesize\sffamily,
+    axis line style={thick,-latex},
+    ytick={0.5,0.6,...,1.1},
+    yticklabel style={font=\footnotesize\usefont{T1}{phv}{m}{n},
     /pgf/number format/.cd, fixed, fixed zerofill, precision=2},
-    xticklabel style={font=\footnotesize\sffamily},
-    ylabel style={font=\footnotesize\sffamily},
+    xticklabel style={font=\footnotesize\usefont{T1}{phv}{m}{n}},
+    ylabel style={font=\footnotesize\usefont{T1}{phv}{m}{n}},
     ymax=1.15,
     enlarge x limits=0.2,
-    tick style={draw=black,thin,},
+    tick style={draw=black,thin},
     tick align=outside,
     major tick length=1mm,
-    bar width=30pt,
     xtick={1,2,3,4},
     xticklabels={Sigmoid,Tanh,ReLU,Softmax},
     every axis plot/.append style={
@@ -445,10 +469,10 @@ The selection of an activation function directly influences training throughput 
           bar shift=0pt,
           fill
         }]
-      \addplot[red]coordinates {(1,1.1)};
-      \addplot[Tanh]coordinates{(2,0.61)};
-      \addplot[ReLU]coordinates{(3,0.78)};
-      \addplot[Softmax]coordinates{(4,0.91)};
+      \addplot[RedLine] coordinates {(1,1.1)};
+      \addplot[BlueLine] coordinates {(2,0.61)};
+      \addplot[GreenLine] coordinates {(3,0.78)};
+      \addplot[OrangeLine] coordinates {(4,0.91)};
 \end{axis}
 \end{tikzpicture}}
 ```
@@ -473,12 +497,12 @@ The memory footprint of activations is proportional to the batch size and networ
 
 @tbl-compare-activations synthesizes these system-level trade-offs, showing *how* mathematical behavior translates into operational constraints.
 
-| **Function** | **Key Advantages** | **Key Disadvantages** | **System Implications** |
-|:---|:---|:---|:---|
-| **Sigmoid** | Smooth gradients; bounded output in $(0, 1)$. | Vanishing gradients; non-zero-centered output. | Exponential computation adds overhead; LUT-based hardware implementation is required for efficiency. |
-| **Tanh** | Zero-centered output in $(-1, 1)$. | Vanishing gradients at extremes. | Better convergence than sigmoid; similar computational cost due to exponential terms. |
-| **ReLU** | Extremely efficient computation; avoids vanishing gradients for positive inputs. | Can suffer from "dying ReLU" (inactive neurons). | Single-instruction hardware implementation; enables sparsity-based optimizations. |
-| **Softmax** | Outputs probability distribution over classes. | High computational cost; non-local dependencies. | Requires global normalization; memory-intensive due to dependencies across the entire input vector. |
+| **Function** | **Key Advantages**                                                               | **Key Disadvantages**                            | **System Implications**                                                                              |
+|:-----------|:-------------------------------------------------------------------------------|:-----------------------------------------------|:---------------------------------------------------------------------------------------------------|
+| **Sigmoid**  | Smooth gradients; bounded output in $(0, 1)$.                                    | Vanishing gradients; non-zero-centered output.   | Exponential computation adds overhead; LUT-based hardware implementation is required for efficiency. |
+| **Tanh**     | Zero-centered output in $(-1, 1)$.                                               | Vanishing gradients at extremes.                 | Better convergence than sigmoid; similar computational cost due to exponential terms.                |
+| **ReLU**     | Extremely efficient computation; avoids vanishing gradients for positive inputs. | Can suffer from "dying ReLU" (inactive neurons). | Single-instruction hardware implementation; enables sparsity-based optimizations.                    |
+| **Softmax**  | Outputs probability distribution over classes.                                   | High computational cost; non-local dependencies. | Requires global normalization; memory-intensive due to dependencies across the entire input vector.  |
 
 : **Activation Function Systems Comparison.** While activation functions contribute only a fraction of total training time, their implementation characteristics (computational complexity, hardware utilization, and memory patterns) significantly impact the efficiency of modern learning pipelines. {#tbl-compare-activations}
 
@@ -505,7 +529,7 @@ where $\Phi(x)$ is the cumulative distribution function of the standard normal d
 
 - Computational cost: ~3 to 4$\times$ more expensive than ReLU (requires erf function evaluation)
 - Memory: Same as ReLU (element-wise operation)
-- Training time impact: For GPT-2's 48 layers, GELU adds ~5 to 8% to total forward pass time
+- Training time impact: For GPT-2's `{python} gpt2_layers` layers, GELU adds ~5 to 8% to total forward pass time
 - Worth it: The improved model quality (lower perplexity) offsets the computational overhead
 
 Frameworks implement fast approximation of GELU using optimized formulas (@lst-gelu-approx). This approximation reduces computational cost to approximately 1.5$\times$ ReLU while maintaining GELU's benefits, demonstrating *how* production systems balance mathematical properties with implementation efficiency.
@@ -641,14 +665,14 @@ The choice of optimization algorithm creates specific patterns of computation an
 
 [^fn-convergence-etymology]: **Convergence**: From Latin "convergere" (to incline together), combining "con-" (together) + "vergere" (to bend, turn). In optimization, convergence describes the process by which iterative algorithms approach a stable solution, where successive updates become smaller until parameters stabilize at a minimum. Training is said to converge when the loss stops decreasing meaningfully, typically requiring 10,000-100,000 iterations for large models.
 
-| **Property** | **SGD** | **Momentum** | **RMSprop** | **Adam** |
-|:---|:---|:---|:---|:---|
-| **Memory Overhead** | None | Velocity terms | Squared gradients | Both velocity and squared gradients |
-| **Memory Cost** | $1\times$ | $2\times$ | $2\times$ | $3\times$ |
-| **Access Pattern** | Sequential | Sequential | Random | Random |
-| **Operations/Parameter** | 2 | 3 | 4 | 5 |
-| **Hardware Efficiency** | Low | Medium | High | Highest |
-| **Convergence Speed** | Slowest | Medium | Fast | Fastest |
+| **Property**             | **SGD**    | **Momentum**   | **RMSprop**       | **Adam**                            |
+|:-----------------------|:---------|:-------------|:----------------|:----------------------------------|
+| **Memory Overhead**      | None       | Velocity terms | Squared gradients | Both velocity and squared gradients |
+| **Memory Cost**          | $1\times$  | $2\times$      | $2\times$         | $3\times$                           |
+| **Access Pattern**       | Sequential | Sequential     | Random            | Random                              |
+| **Operations/Parameter** | 2          | 3              | 4                 | 5                                   |
+| **Hardware Efficiency**  | Low        | Medium         | High              | Highest                             |
+| **Convergence Speed**    | Slowest    | Medium         | Fast              | Fastest                             |
 
 : **Optimizer Memory Footprint.** Different optimization algorithms impose varying memory costs due to the storage of intermediate values like gradients, velocities, and squared gradients. Understanding these trade-offs is important for resource-constrained deployments and large-scale model training. {#tbl-optimizer-properties}
 
@@ -668,11 +692,14 @@ GPT-2 training uses the Adam optimizer with these hyperparameters:
 #| label: gpt2-optimizer-memory-calc
 #| echo: false
 
-from calc.constants import GPT2_PARAMS, Mparam
+from calc.constants import GPT2_PARAMS, Mparam, V100_MEM_CAPACITY, GiB
 
 gpt2_b = GPT2_PARAMS.to(Mparam).magnitude / 1000  # 1.5 B
 bytes_fp32 = 4
 bytes_fp16 = 2
+
+# V100 memory capacity
+v100_mem_gib = V100_MEM_CAPACITY.to(GiB).magnitude  # 32 GiB
 
 # FP32 Baseline
 param_fp32_gb = gpt2_b * bytes_fp32
@@ -694,6 +721,7 @@ grad_fp32_str = f"{grad_fp32_gb:.1f}"
 adam_state_str = f"{adam_m_fp32_gb + adam_v_fp32_gb:.1f}"
 total_static_fp32_str = f"{total_static_fp32:.0f}"
 total_static_amp_str = f"{total_static_amp:.0f}"
+v100_mem_gib_str = f"{v100_mem_gib:.0f}"
 ```
 
 For GPT-2's 1.5B parameters in FP32 (4 bytes each):
@@ -703,7 +731,7 @@ For GPT-2's 1.5B parameters in FP32 (4 bytes each):
 - Adam State (m, v): 1.5B × 8 bytes = `{python} adam_state_str` GB
 - Total static memory: `{python} total_static_fp32_str` GB
 
-This explains why GPT-2 training requires 32 GB+ V100 GPUs even before considering activation memory.
+This explains why GPT-2 training requires `{python} v100_mem_gib_str` GB+ V100 GPUs even before considering activation memory.
 
 **System Decisions Driven by Optimizer**
 
@@ -960,6 +988,12 @@ peak_gb = total_act_gb + params_gb + grad_gb + optimizer_gb
 
 v100_mem_gb = V100_MEM_CAPACITY.to(GiB).magnitude
 
+# Gradient checkpointing estimates
+ckpt_reduction_pct = 75  # Typical reduction with checkpointing
+ckpt_act_gb = total_act_gb * (1 - ckpt_reduction_pct / 100)  # ~8 GB
+recompute_overhead_pct = 33  # Additional compute from recomputation
+act_fp32_gb = total_act_gb * 2  # FP32 would be 2× the FP16 size
+
 # Pre-formatted strings
 batch_size_str = str(batch_size)
 seq_len_str = str(seq_len)
@@ -976,6 +1010,10 @@ grad_gb_str = f"{grad_gb:.0f}"
 opt_gb_str = f"{optimizer_gb:.0f}"
 peak_gb_str = f"{peak_gb:.0f}"
 v100_mem_str = f"{v100_mem_gb:.0f}"
+ckpt_reduction_str = f"{ckpt_reduction_pct}"
+ckpt_act_gb_str = f"{ckpt_act_gb:.0f}"
+recompute_str = f"{recompute_overhead_pct}"
+act_fp32_gb_str = f"{act_fp32_gb:.0f}"
 ```
 
 We can see this in detail by examining the *GPT-2 activation memory breakdown*.
@@ -1003,12 +1041,12 @@ This exceeds a single V100's `{python} v100_mem_str` GB capacity.
 
 #### System Solutions Applied
 
-1. Gradient checkpointing: Recompute activations during backward pass, reducing activation memory by 75% (to ~8 GB) at cost of 33% more compute
+1. Gradient checkpointing: Recompute activations during backward pass, reducing activation memory by `{python} ckpt_reduction_str`% (to ~`{python} ckpt_act_gb_str` GB) at cost of `{python} recompute_str`% more compute
 2. Activation CPU offloading: Store some activations in CPU RAM, transfer during backward pass
-3. Mixed precision: FP16 activations (already applied above) vs FP32 (would be 65 GB)
+3. Mixed precision: FP16 activations (already applied above) vs FP32 (would be `{python} act_fp32_gb_str` GB)
 4. Reduced batch size: Use batch_size=16 per GPU + gradient accumulation over 2 steps = effective batch_size=32
 
-Most GPT-2 implementations use a training configuration of gradient checkpointing and batch_size=16 per GPU, fitting comfortably in 32 GB V100s while maintaining training efficiency.
+Most GPT-2 implementations use a training configuration of gradient checkpointing and batch_size=16 per GPU, fitting comfortably in `{python} v100_mem` GB V100s while maintaining training efficiency.
 
 :::
 
@@ -1060,12 +1098,12 @@ Operations with high arithmetic intensity are compute-bound: their performance i
 
 Consider @tbl-training-arithmetic-intensity: dense matrix multiplication achieves O(n) FLOP/byte (compute-bound), while activation functions operate at just 0.25 FLOP/byte (memory-bound), explaining why optimization strategies must differ fundamentally between these operation types.
 
-| **Operation** | **Arithmetic Intensity** | **Classification** |
-|:---|---:|:---|
-| **Dense MatMul (large)** | O(n) FLOP/byte | Compute-bound |
-| **Activation functions** | 0.25 FLOP/byte (FP16) | Memory-bound |
-| **LayerNorm/BatchNorm** | ~10 FLOP/byte | Memory-bound |
-| **Attention softmax** | ~5 FLOP/byte | Memory-bound |
+| **Operation**            | **Arithmetic Intensity** | **Classification** |
+|:-----------------------|-----------------------:|:-----------------|
+| **Dense MatMul (large)** |           O(n) FLOP/byte | Compute-bound      |
+| **Activation functions** |    0.25 FLOP/byte (FP16) | Memory-bound       |
+| **LayerNorm/BatchNorm**  |            ~10 FLOP/byte | Memory-bound       |
+| **Attention softmax**    |             ~5 FLOP/byte | Memory-bound       |
 
 : **Training Operation Classifications.** Different operations in the training pipeline have vastly different arithmetic intensities, determining whether they are limited by compute throughput or memory bandwidth. {#tbl-training-arithmetic-intensity}
 
@@ -1073,7 +1111,12 @@ Consider @tbl-training-arithmetic-intensity: dense matrix multiplication achieve
 
 ::: {#fig-training-roofline fig-env="figure" fig-pos="htb" fig-cap="**Training Roofline Model**: GPT-2 training operations mapped against arithmetic intensity on a log-log roofline diagram. Matrix multiplications operate in the compute-bound regime (right of the ridge point), while normalization and activation operations fall in the memory-bound region (left). FlashAttention shifts standard attention from below to above the ridge point, demonstrating how algorithmic redesign can move operations into a more efficient regime." fig-alt="Log-log plot showing roofline model with memory-bound slope and compute-bound ceiling. Points show different training operations: MatMul above ridge point, LayerNorm and Softmax below. Arrow shows FlashAttention improvement."}
 ```{.tikz}
-\begin{tikzpicture}[font=\small\sffamily]
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+% Standard color definitions
+\definecolor{BlueLine}{HTML}{006395}
+\definecolor{GreenLine}{HTML}{008F45}
+\definecolor{RedLine}{HTML}{CB202D}
+
 \begin{axis}[
     width=0.95\textwidth,
     height=7cm,
@@ -1084,48 +1127,46 @@ Consider @tbl-training-arithmetic-intensity: dense matrix multiplication achieve
     xmin=1, xmax=500,
     ymin=1, ymax=400,
     grid=both,
-    grid style={line width=.1pt, draw=gray!30},
-    major grid style={line width=.2pt, draw=gray!50},
+    grid style={line width=.1pt, draw=gray!20},
+    major grid style={line width=.2pt, draw=gray!40},
     legend pos=south east,
-    legend style={font=\footnotesize\sffamily},
-    tick label style={font=\footnotesize\sffamily},
-    label style={font=\small\sffamily},
+    legend style={font=\footnotesize\usefont{T1}{phv}{m}{n}},
+    tick label style={font=\footnotesize\usefont{T1}{phv}{m}{n}},
+    label style={font=\small\usefont{T1}{phv}{m}{n}},
 ]
 
 % A100 roofline
-\addplot[blue, very thick, domain=1:156] {2.0 * x};
-\addplot[blue, very thick, domain=156:500] {312};
-\node[blue, font=\footnotesize\sffamily, anchor=south] at (axis cs:350,312) {A100 Peak (312 TF)};
+\addplot[BlueLine, very thick, domain=1:156] {2.0 * x};
+\addplot[BlueLine, very thick, domain=156:500] {312};
+\node[BlueLine, font=\footnotesize\bfseries\usefont{T1}{phv}{m}{n}, anchor=south] at (axis cs:350,312) {A100 Peak (312 TF)};
 
 % Ridge point marker
-\draw[blue, dashed, thick] (axis cs:156,1) -- (axis cs:156,312);
-\node[blue, font=\scriptsize\sffamily, rotate=90, anchor=south] at (axis cs:140,8) {Ridge: 156};
+\draw[BlueLine, dashed, thick] (axis cs:156,1) -- (axis cs:156,312);
+\node[BlueLine, font=\scriptsize\usefont{T1}{phv}{m}{n}, rotate=90, anchor=south] at (axis cs:140,8) {Ridge: 156};
 
 % Operation points
-\addplot[only marks, mark=*, mark size=3pt, red] coordinates {(5,10)};
-\node[red, font=\scriptsize\sffamily, anchor=north west] at (axis cs:6,9) {Softmax};
+\addplot[only marks, mark=*, mark size=3pt, RedLine] coordinates {(5,10)};
+\node[RedLine, font=\scriptsize\bfseries\usefont{T1}{phv}{m}{n}, anchor=north west] at (axis cs:6,9) {Softmax};
 
-\addplot[only marks, mark=*, mark size=3pt, red] coordinates {(10,20)};
-\node[red, font=\scriptsize\sffamily, anchor=south west] at (axis cs:12,22) {LayerNorm};
+\addplot[only marks, mark=*, mark size=3pt, RedLine] coordinates {(10,20)};
+\node[RedLine, font=\scriptsize\bfseries\usefont{T1}{phv}{m}{n}, anchor=south west] at (axis cs:12,22) {LayerNorm};
 
 \addplot[only marks, mark=*, mark size=3pt, orange] coordinates {(50,100)};
-\node[orange, font=\scriptsize\sffamily, anchor=north east] at (axis cs:48,95) {Std Attention};
+\node[orange, font=\scriptsize\bfseries\usefont{T1}{phv}{m}{n}, anchor=north east] at (axis cs:48,95) {Std Attention};
 
 \addplot[only marks, mark=*, mark size=3pt, GreenLine] coordinates {(200,312)};
-
-\node[GreenLine, font=\scriptsize\sffamily, anchor=north west] at (axis cs:205,300) {MatMul};
+\node[GreenLine, font=\scriptsize\bfseries\usefont{T1}{phv}{m}{n}, anchor=north west] at (axis cs:205,300) {MatMul};
 
 \addplot[only marks, mark=*, mark size=3pt, GreenLine] coordinates {(300,312)};
-
-\node[GreenLine, font=\scriptsize\sffamily, anchor=north] at (axis cs:300,300) {FlashAttn};
+\node[GreenLine, font=\scriptsize\bfseries\usefont{T1}{phv}{m}{n}, anchor=north] at (axis cs:300,300) {FlashAttn};
 
 % Arrow showing FlashAttention improvement
-\draw[->, thick, purple] (axis cs:50,100) -- (axis cs:250,290);
-\node[purple, font=\scriptsize\sffamily, rotate=32, anchor=south] at (axis cs:120,175) {Flash Attention};
+\draw[->, ultra thick, purple!70] (axis cs:50,100) -- (axis cs:250,290);
+\node[purple!70, font=\scriptsize\bfseries\usefont{T1}{phv}{m}{n}, rotate=32, anchor=south] at (axis cs:120,175) {Flash Attention};
 
 % Memory-bound / Compute-bound labels
-\node[font=\scriptsize\sffamily, gray] at (axis cs:15,200) {Memory-bound};
-\node[font=\scriptsize\sffamily, gray] at (axis cs:380,180) {Compute-bound};
+\node[font=\footnotesize\itshape\usefont{T1}{phv}{m}{n}, gray] at (axis cs:15,200) {Memory-bound};
+\node[font=\footnotesize\itshape\usefont{T1}{phv}{m}{n}, gray] at (axis cs:380,180) {Compute-bound};
 
 \end{axis}
 \end{tikzpicture}
@@ -1169,38 +1210,38 @@ The mathematical operations examined above define what training systems must com
 
 ::: {#fig-training-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Training System Overview**: Machine learning systems organize training through interconnected data, training, and evaluation pipelines. Data flows sequentially through these components, with evaluation metrics providing feedback to guide iterative model refinement and ensure reproducible results." fig-alt="Block diagram with three connected boxes: Data Pipeline, Training Loop, and Evaluation Pipeline. Arrows show data flow with feedback from evaluation."}
 ```{.tikz}
-\begin{tikzpicture}[font=\sffamily\small]
-%
-\tikzset{ Line/.style={line width=1.0pt,black!50
-},
-  Box/.style={align=flush center,
-    inner xsep=2pt,
-    node distance=3.0,
-    draw=BlueLine,
-    line width=0.75pt,
-    fill=BlueL,
-    text width=30mm,
-    minimum width=30mm,
-    minimum height=20mm
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, line width=0.75pt, node distance=1.5cm]
+% Standard color definitions
+\definecolor{BlueLine}{HTML}{006395}
+\definecolor{BlueL}{HTML}{D1E6F3}
+\definecolor{TextColor}{HTML}{F8F9FA}
+
+\tikzset{
+  Box/.style={
+    rectangle, draw=BlueLine, fill=BlueL, line width=0.75pt,
+    rounded corners=2pt, text width=32mm, align=center,
+    minimum height=18mm
   },
-   Text/.style={%
-    inner sep=4pt,
-    draw=none,
-    line width=0.75pt,
-    fill=TextColor,
-    text=black,
-    font=\sffamily\footnotesize,
-    align=flush center,
-    minimum width=7mm, minimum height=5mm
+  Line/.style={
+    draw=black!50, line width=1.0pt, -latex
   },
+  Text/.style={
+    fill=TextColor, inner sep=3pt, font=\footnotesize\usefont{T1}{phv}{m}{n},
+    align=center, minimum width=15mm
+  }
 }
-\node[Box](B1){\textbf{Data Pipeline}\\ Ingestion, Preprocessing, Batching};
-\node[Box,right=of B1](B2){\textbf{Training Loop}\\ Forward Pass, Loss Calculation, Backward Pass};
-\node[Box,right=of B2](B3){\textbf{Evaluation Pipeline}\\ Validation and Metrics Computation};
-%
-\draw[-latex,Line](B1)--node[Text]{Processed\\ Batches}(B2);
-\draw[-latex,Line](B2.20)--node[Text]{Evaluation\\ Metrics}(B3.160);
-\draw[latex-,Line](B2.340)--node[Text]{Feedback}(B3.200);
+
+% Nodes
+\node[Box] (data) {\textbf{Data Pipeline}\\ Ingestion, Preprocessing, Batching};
+\node[Box, right=of data] (train) {\textbf{Training Loop}\\ Forward Pass, Loss, Backward Pass};
+\node[Box, right=of train] (eval) {\textbf{Evaluation Pipeline}\\ Validation and Metrics};
+
+% Connections
+\draw[Line] (data) -- node[Text] {Processed\\ Batches} (train);
+
+\draw[Line] (train.20) -- node[Text] {Evaluation\\ Metrics} (eval.160);
+\draw[Line, latex-] (train.340) -- node[Text] {Feedback} (eval.200);
+
 \end{tikzpicture}
 ```
 :::
@@ -1218,133 +1259,88 @@ The training loop is the computational core of the pipeline, where the model lea
 ::: {#fig-training-loop fig-env="figure" fig-pos="htb" fig-cap="**Single-GPU Training Loop**: The three sequential steps of one training iteration: the forward pass generates predictions, gradient computation propagates error signals backward, and the optimizer applies parameter updates. GPUs parallelize the underlying matrix operations, accelerating both the forward and backward passes." fig-alt="Neural network diagram showing data cylinders feeding into a network of connected nodes. A GPU box at bottom processes the forward and backward pass computations."}
 
 ```{.tikz}
-\begin{tikzpicture}[font=\sffamily\small]
-\tikzset{%
-  mycylinder/.style={cylinder, shape border rotate=90, aspect=1.3, draw, fill=white,
-  minimum width=20mm,minimum height=9mm,line width=1pt},
-  mycycle/.style={circle, draw=none, fill=red, minimum width=5mm},
-  myline/.style={line width=1.15pt,draw=cyan},
-%
- Box/.style={align=flush center,
-    inner xsep=2pt,
-    draw=RedLine,
-    line width=0.75pt,
-    fill=RedL!20,
-    text width=22mm,
-    minimum width=22mm, minimum height=8mm
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, line width=0.75pt, node distance=1cm]
+% Standard color definitions
+\definecolor{BlueLine}{HTML}{006395}
+\definecolor{BlueL}{HTML}{D1E6F3}
+\definecolor{GreenLine}{HTML}{008F45}
+\definecolor{GreenL}{HTML}{D4EFDF}
+\definecolor{RedLine}{HTML}{CB202D}
+\definecolor{RedL}{HTML}{F5D2D5}
+\definecolor{OrangeLine}{HTML}{CC5500}
+\definecolor{OrangeL}{HTML}{FFE5CC}
+\definecolor{TextColor}{HTML}{F8F9FA}
+
+\tikzset{
+  Block/.style={
+    rectangle, draw=BlueLine, fill=BlueL, line width=0.75pt,
+    rounded corners=2pt, text width=28mm, align=center,
+    minimum height=10mm
   },
-%
-Line/.style={line width=1.0pt,black!50}
-}
-
-\begin{scope}[node distance=-1.7,local bounding box = SC1]]
-\node[mycylinder,fill=red!30] (A) {};
-\scoped[on background layer]
-\node[mycylinder, above=of A,fill=red!50] (C) {};
-\node[mycylinder, below=of A,fill=red!10] (B) {};
-\end{scope}
-
-\begin{scope}[node distance=0.2,shift={(3.75,0.9))},local bounding box = SC2]
-\node[mycycle] (C1) {};
-\node[mycycle,below=of C1] (C2) {};
-\node[mycycle,below=of C2] (C3) {};
-\node[mycycle,below=of C3] (C4) {};
-\node[mycycle,fill=violet,left=0.6 of $(C1)!0.5!(C2)$] (CL1) {};
-\node[mycycle,fill=violet,left=0.6 of $(C2)!0.5!(C3)$] (CL2) {};
-\node[mycycle,fill=violet,left=0.6 of $(C3)!0.5!(C4)$] (CL3) {};
-%
-\node[mycycle,fill=green,right=0.6 of $(C1)!0.4!(C3)$] (CD1) {};
-\node[mycycle,fill=green,right=0.6 of $(C2)!0.6!(C4)$] (CD2) {};
-%
-\foreach \x in {1,2,3,4} {
-  \foreach \y in {CL1, CL2, CL3, CD1, CD2} {
-    \draw[myline] (\y) -- (C\x);
-  }
-}
-\node[Box,below=0.8 of C4](B1){GPU 1};
-\draw[myline,dashed](C4)--(B1);
-\end{scope}
-
-\begin{scope}[node distance=0.2,shift={(11.5,0.9))},local bounding box = SC3]
-\node[mycycle] (3C1) {};
-\node[mycycle,below=of 3C1] (3C2) {};
-\node[mycycle,below=of 3C2] (3C3) {};
-\node[mycycle,below=of 3C3] (3C4) {};
-\node[mycycle,fill=violet,right=0.6 of $(3C1)!0.5!(3C2)$] (3CL1) {};
-\node[mycycle,fill=violet,right=0.6 of $(3C2)!0.5!(3C3)$] (3CL2) {};
-\node[mycycle,fill=violet,right=0.6 of $(3C3)!0.5!(3C4)$] (3CL3) {};
-%
-\node[mycycle,fill=green,left=0.6 of $(3C1)!0.4!(3C3)$] (3CD1) {};
-\node[mycycle,fill=green,left=0.6 of $(3C2)!0.6!(3C4)$] (3CD2) {};
-%
-\foreach \x in {1,2,3,4} {
-  \foreach \y in {3CL1, 3CL2, 3CL3, 3CD1, 3CD2} {
-    \draw[myline] (\y) -- (3C\x);
+  DataBlock/.style={
+    rectangle, draw=GreenLine, fill=GreenL, line width=0.75pt,
+    rounded corners=2pt, text width=20mm, align=center,
+    minimum height=8mm
+  },
+  LossBlock/.style={
+    rectangle, draw=RedLine, fill=RedL, line width=0.75pt,
+    rounded corners=2pt, text width=28mm, align=center,
+    minimum height=10mm
+  },
+  OptBlock/.style={
+    rectangle, draw=OrangeLine, fill=OrangeL, line width=0.75pt,
+    rounded corners=2pt, text width=28mm, align=center,
+    minimum height=10mm
+  },
+  Line/.style={
+    draw=black!50, line width=1.0pt, -latex
+  },
+  StepLabel/.style={
+    fill=TextColor, inner sep=2pt, font=\footnotesize\bfseries\usefont{T1}{phv}{m}{n}
+  },
+  Annotation/.style={
+    font=\footnotesize\itshape\usefont{T1}{phv}{m}{n}, text=black!70
   }
 }
 
-\node[Box,below=0.8 of 3C4](3B1){GPU 1};
-\draw[myline,dashed](3C4)--(3B1);
-\end{scope}
+% Nodes
+\node[DataBlock] (data) {Training\\Batch};
+\node[Block, right=1.5 of data] (forward) {\textbf{Forward Pass}\\ (Model)};
+\node[DataBlock, right=1.2 of forward] (pred) {Predicted\\Labels};
+\node[LossBlock, below=1.2 of pred] (loss) {\textbf{Loss Function}\\ (Error Calculation)};
+\node[DataBlock, left=1.2 of loss] (grad) {Parameter\\Gradients};
+\node[Block, left=1.2 of grad] (backward) {\textbf{Backward Pass}\\ (Chain Rule)};
+\node[OptBlock, below=1.2 of backward] (optimizer) {\textbf{Optimizer}\\ (Adam / SGD)};
+\node[Block, right=1.5 of optimizer] (update) {\textbf{Update}\\ Parameters};
 
-\begin{scope}[node distance=0.2,shift={(17,0.9))},local bounding box = SC4]
-\node[mycycle] (4C1) {};
-\node[mycycle,below=of 4C1] (4C2) {};
-\node[mycycle,below=of 4C2] (4C3) {};
-\node[mycycle,below=of 4C3] (4C4) {};
-\node[mycycle,fill=violet,left=0.6 of $(4C1)!0.5!(4C2)$] (4CL1) {};
-\node[mycycle,fill=violet,left=0.6 of $(4C2)!0.5!(4C3)$] (4CL2) {};
-\node[mycycle,fill=violet,left=0.6 of $(4C3)!0.5!(4C4)$] (4CL3) {};
-%
-\node[mycycle,fill=green,right=0.6 of $(4C1)!0.4!(4C3)$] (4CD1) {};
-\node[mycycle,fill=green,right=0.6 of $(4C2)!0.6!(4C4)$] (4CD2) {};
-%
-%
-\foreach \x in {1,2,3,4} {
-  \foreach \y in {4CL1, 4CL2, 4CL3, 4CD1, 4CD2} {
-    \draw[myline] (\y) -- (4C\x);
-  }
-}
-\node[Box,below=0.8 of 4C4](4B1){GPU 1};
-\draw[myline,dashed](4C4)--(4B1);
-\end{scope}
-\coordinate(X)at($(CD1)!0.5!(CD2)$);
-\coordinate(Y)at($(3CD1)!0.5!(3CD2)$);
+% Feedback to data/start
+\coordinate (loopback) at ($(update.east) + (1.0, 0)$);
 
-\node[fill=white,minimum height=45](ER)at($(X)!0.3!(Y)$){Error};
-\node[fill=white,align=center,minimum height=45](CO)at($(X)!0.7!(Y)$){Compute\\ loss\\ function};
-\draw[myline,-latex,shorten <=3mm](X)--(ER.west);
-\draw[myline,-latex](ER.east)--(CO.west);
-\draw[myline,-latex,shorten >=3mm](CO.east)--(Y);
-\draw[myline,dashed](CO.south)--++(270:1)-|node[fill=white,align=center,
-pos=0.25](COM){Compare\\ predicted\\ label with\\ annotation}
-(ER.south);
+% Arrows and Step Labels
+\draw[Line] (data) -- (forward);
+\node[StepLabel, above=0.1 of $(data)!0.5!(forward)$] {Step 1: Predict};
 
-\node[fill=white,minimum height=45](OP)at($(3CL2)!0.5!(4CL2)$){Optimizer};
-\draw[myline,-latex,shorten <=1mm](3CL2)--(OP.west);
-\draw[myline,latex-,shorten <=1mm](4CL2)--(OP.east);
-%
-\draw[myline,latex-,shorten <=3mm,shorten >=3mm](CL2)--(SC1.east|-CL2);
-%
-\draw[myline,dashed](OP.north)--++(90:1.7)coordinate(OP1);
-\draw[myline,dashed]($(ER.north east)!0.5!(CO.north west)$)--++(90:1.7)coordinate(ER1);
-\coordinate (C) at ($(OP1) + (0,5mm)$);
-\coordinate (B) at ($(ER1) + (0,5mm)$);
-\path[red](C)-|coordinate(D1)(4CD1);
-\path[red](B)-|coordinate(A1)(SC1);
-\coordinate (D) at ($(D1) + (15mm,0)$);
-\coordinate (A) at ($(A1) + (-15mm,0)$);
-\draw[myline,dashed,shorten >=3mm,shorten <=3mm](B)--
-node[fill=white]{Step 2 -- Compute gradients}(C);
-\draw[myline,dashed,shorten >=3mm,pos=0.46](C)--
-node[fill=white]{Step 3 -- Update Parameters}(D);
-\draw[myline,dashed,shorten >=3mm,pos=0.46](B)--
-node[fill=white]{Step 1 -- Predict a label}(A);
+\draw[Line] (forward) -- (pred);
+\draw[Line] (pred) -- (loss);
 
-\node[above=0.3 of SC1]{Data set};
-\node[above=0.3 of SC2]{Forward pass};
-\node[above=0.3 of SC3]{Backward pass};
- \end{tikzpicture}
+% Annotation for loss
+\node[DataBlock, right=0.8 of loss, xshift=0.5cm] (labels) {Ground\\Truth};
+\draw[Line, dashed] (labels) -- (loss);
+\node[Annotation, above=0.1 of labels] {Labels};
+
+\draw[Line] (loss) -- (grad);
+\draw[Line] (grad) -- (backward);
+\node[StepLabel, above=0.1 of $(grad)!0.5!(backward)$] {Step 2: Gradients};
+
+\draw[Line] (backward) |- (optimizer);
+\draw[Line] (optimizer) -- (update);
+\node[StepLabel, above=0.1 of $(optimizer)!0.5!(update)$] {Step 3: Update};
+
+% Loop connection
+\draw[Line, dashed] (update.east) -- ++(0.5,0) |- ($(data.west) + (-0.5,0)$) -- (data.west);
+\node[Annotation, right=0.1 of update, xshift=0.2cm] {Next Iteration};
+
+\end{tikzpicture}
 ```
 :::
 
@@ -1374,60 +1370,79 @@ The data pipeline running on the CPU bridges raw data storage and GPU computatio
 
 ::: {#fig-data-pipeline fig-env="figure" fig-pos="htb" fig-cap="**CPU-to-GPU Data Flow**: Three distinct zones compose the data pipeline: the storage zone houses raw data on disk, the CPU preprocessing zone handles format conversion, processing, and batching, and the GPU training zone distributes preprocessed batches across multiple GPU workers for parallel computation." fig-alt="Block diagram showing data flow through three zones: Storage Zone with raw data, CPU Preprocessing Zone with format, process, and batch stages, and GPU Training Zone with three GPU workers."}
 ```{.tikz}
-\begin{tikzpicture}[line width=0.75pt,font=\small\sffamily]
-%
-\tikzset{ Line/.style={line width=1.0pt,black!50
-},
-  Box/.style={align=flush center,
-    inner xsep=2pt,
-    node distance=0.7,
-    draw=BlueLine,
-    line width=0.75pt,
-    fill=BlueL,
-    minimum width=22mm, minimum height=10mm
-  },
- Text/.style={%
-    inner sep=2pt,
-    draw=none,
-    line width=0.75pt,
-    fill=TextColor,
-    text=black,
-    font=\small\sffamily\footnotesize,
-    align=flush center,
-    minimum width=7mm, minimum height=5mm
-  },
-}
-%
-\node[Box,fill=RedL,draw=RedLine](B1){Raw Data};
-\node[Box,node distance=1.3,right=of B1](B2){Format};
-\node[Box,right=of B2](B3){Process};
-\node[Box,right=of B3](B4){Batch};
-\node[Box,node distance=2.2,right=of B4,fill=GreenL,draw=GreenLine](B6){GPU 2};
-\node[Box,above=of B6,fill=GreenL,draw=GreenLine](B5){GPU 1};
-\node[Box,below=of B6,fill=GreenL,draw=GreenLine](B7){GPU 3};
-%
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=11,inner ysep=43,yshift=0mm,
-           fill=BackColor,fit=(B1),line width=0.75pt](BB1){};
-\node[below=3pt of  BB1.north,anchor=north]{Storage Zone};
-%
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=11,inner ysep=43,yshift=0mm,
-           fill=BackColor,fit=(B2)(B3)(B4),line width=0.75pt](BB1){};
-\node[below=3pt of  BB1.north,anchor=north]{CPU Preprocessing Zone};
-%
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=11,inner ysep=20,yshift=2mm,
-           fill=BackColor,fit=(B5)(B6)(B7),line width=0.75pt](BB1){};
-\node[below=3pt of  BB1.north,anchor=north]{GPU Training Zone};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, line width=0.75pt, node distance=0.8cm]
+% Standard color definitions
+\definecolor{BlueLine}{HTML}{006395}
+\definecolor{BlueL}{HTML}{D1E6F3}
+\definecolor{GreenLine}{HTML}{008F45}
+\definecolor{GreenL}{HTML}{D4EFDF}
+\definecolor{RedLine}{HTML}{CB202D}
+\definecolor{RedL}{HTML}{F5D2D5}
+\definecolor{BackColor}{RGB}{255,255,229}
+\definecolor{BackLine}{RGB}{181,181,72}
+\definecolor{TextColor}{HTML}{F8F9FA}
 
-\foreach \x in{1,2,3}
-\pgfmathtruncatemacro{\newX}{\x + 1}
-\draw[-latex,Line](B\x)--(B\newX);
-%
-\draw[-latex,Line](B4)|-node[Text,pos=0.84]{Data}(B5);
-\draw[-latex,Line](B4)|-node[Text,pos=0.84]{Data}(B7);
-\draw[-latex,Line](B4)--node[Text,pos=0.5]{Data}(B6);
+\tikzset{
+  Box/.style={
+    rectangle, draw=BlueLine, fill=BlueL, line width=0.75pt,
+    rounded corners=2pt, text width=22mm, align=center,
+    minimum height=10mm
+  },
+  DataBox/.style={
+    Box, draw=RedLine, fill=RedL
+  },
+  GPUBox/.style={
+    Box, draw=GreenLine, fill=GreenL
+  },
+  ZoneBox/.style={
+    draw=BackLine, fill=BackColor, line width=0.75pt,
+    rounded corners=4pt
+  },
+  Line/.style={
+    draw=black!50, line width=1.0pt, -latex
+  },
+  Text/.style={
+    fill=TextColor, inner sep=2pt, font=\footnotesize\usefont{T1}{phv}{m}{n}
+  },
+  ZoneLabel/.style={
+    font=\footnotesize\bfseries\usefont{T1}{phv}{m}{n}, anchor=north, yshift=-2pt
+  }
+}
+
+% Nodes
+\node[DataBox] (raw) {Raw Data\\ (Disk/S3)};
+
+\node[Box, right=1.5 of raw] (format) {Format\\ Conversion};
+\node[Box, right=of format] (process) {Preprocessing\\ (Augment)};
+\node[Box, right=of process] (batch) {Batching};
+
+\node[GPUBox, right=2.2 of batch] (gpu2) {GPU 2};
+\node[GPUBox, above=0.5 of gpu2] (gpu1) {GPU 1};
+\node[GPUBox, below=0.5 of gpu2] (gpu3) {GPU 3};
+
+% Zone Backgrounds
+\scoped[on background layer]{
+  \node[ZoneBox, fit=(raw), inner xsep=10pt, inner ysep=20pt] (z1) {};
+  \node[ZoneBox, fit=(format)(process)(batch), inner xsep=10pt, inner ysep=20pt] (z2) {};
+  \node[ZoneBox, fit=(gpu1)(gpu2)(gpu3), inner xsep=10pt, inner ysep=15pt] (z3) {};
+}
+
+% Zone Labels
+\node[ZoneLabel] at (z1.north) {Storage Zone};
+\node[ZoneLabel] at (z2.north) {CPU Preprocessing Zone};
+\node[ZoneLabel] at (z3.north) {GPU Training Zone};
+
+% Connections
+\draw[Line] (raw) -- (format);
+\draw[Line] (format) -- (process);
+\draw[Line] (process) -- (batch);
+
+\draw[Line] (batch.east) -- ++(0.4,0) |- (gpu1.west);
+\draw[Line] (batch.east) -- (gpu2.west);
+\draw[Line] (batch.east) -- ++(0.4,0) |- (gpu3.west);
+
+\node[Text] at ($(batch.east)!0.5!(gpu2.west)$) {Data};
+
 \end{tikzpicture}
 ```
 :::
@@ -1485,6 +1500,8 @@ Applying this throughput analysis to our GPT-2 Lighthouse Model reveals where th
 #| label: gpt2-data-pipeline-calc
 #| echo: false
 
+from calc.constants import PCIE_GEN3_BW, GB, second
+
 # GPT-2 data loading pipeline analysis
 batch_size_gpt2 = 32
 seq_len_gpt2 = 1024
@@ -1496,8 +1513,8 @@ tokenization_ms = tokens_per_batch / tokenization_rate * 1000  # ms
 batch_bytes = batch_size_gpt2 * seq_len_gpt2 * 8  # bytes
 batch_kb = batch_bytes / 1024  # KB
 
-# PCIe transfer
-pcie_gen3_gbps = 15.75  # GB/s theoretical
+# PCIe transfer (from constants)
+pcie_gen3_gbps = PCIE_GEN3_BW.to(GB / second).magnitude  # 15.75 GB/s
 transfer_ms = (batch_kb / 1024 / 1024) / pcie_gen3_gbps * 1000  # ms
 
 # Multi-worker optimization
@@ -1508,6 +1525,7 @@ parallel_tokenization_ms = tokenization_ms / n_cpu_workers
 tokens_per_batch_str = f"{tokens_per_batch // 1000}K"
 tokenization_ms_str = f"{tokenization_ms:.0f}"
 batch_kb_str = f"{batch_kb:.0f}"
+pcie_gen3_str = f"{pcie_gen3_gbps}"
 transfer_ms_str = f"{transfer_ms:.3f}"
 n_cpu_workers_str = f"{n_cpu_workers}"
 parallel_tokenization_ms_str = f"{parallel_tokenization_ms:.0f}"
@@ -1517,11 +1535,11 @@ parallel_tokenization_ms_str = f"{parallel_tokenization_ms:.0f}"
 
 Training language models like GPT-2 requires a specialized data pipeline optimized for text processing.
 
-#### Pipeline Stages
+**Pipeline Stages**
 
 1. Raw Text Storage (Storage Zone)
    - OpenWebText dataset: ~40GB raw text files
-   - Stored on NVMe SSD: 3.5 GB/s sequential read bandwidth
+   - Stored on NVMe SSD: `{python} nvme_bw` GB/s sequential read bandwidth
    - Random access to different documents: ~0.35 GB/s effective (F_access ≈ 0.1)
 2. Tokenization (CPU Preprocessing Zone)
    - BPE (Byte-Pair Encoding) tokenizer (50,257 vocabulary) converts text to token IDs
@@ -1535,10 +1553,10 @@ Training language models like GPT-2 requires a specialized data pipeline optimiz
    - Pack into tensors: [32, 1024] int64 = `{python} batch_kb_str` KB per batch
    - Trivial time: <5ms
 4. GPU Transfer (PCIe)
-   - PCIe Gen3 x16: 15.75 GB/s theoretical
-   - `{python} batch_kb_str` KB per batch ÷ 15.75 GB/s = `{python} transfer_ms_str`ms (negligible)
+   - PCIe Gen3 x16: `{python} pcie_gen3_str` GB/s theoretical
+   - `{python} batch_kb_str` KB per batch ÷ `{python} pcie_gen3_str` GB/s = `{python} transfer_ms_str`ms (negligible)
 
-#### Bottleneck Analysis
+**Bottleneck Analysis**
 
 - Tokenization: `{python} tokenization_ms_str`ms
 - GPU compute: 80ms
@@ -1546,7 +1564,7 @@ Training language models like GPT-2 requires a specialized data pipeline optimiz
 
 System is balanced (tokenization ≈ GPU compute), but tokenization becomes bottleneck with faster GPUs (A100: 45ms compute means tokenization limits throughput).
 
-#### Optimization Applied
+**Optimization Applied**
 
 - Multi-worker dataloading: `{python} n_cpu_workers_str` CPU workers tokenize in parallel → `{python} tokenization_ms_str`ms ÷ `{python} n_cpu_workers_str` = `{python} parallel_tokenization_ms_str`ms
 - Prefetching: Tokenize next batch while GPU processes current batch
@@ -1610,7 +1628,7 @@ Machine learning systems manage complex data flows through multiple memory tiers
 $$T_{\text{memory}} =\min(B_{\text{storage}}, B_{\text{system}}, B_{\text{accelerator}})$$
 Where bandwidth varies significantly across tiers:
 
-[^fn-memory-hierarchy-ml]: **Memory Hierarchy in ML**: Unlike traditional CPU programs that focus on cache locality, ML training creates massive data flows between storage (TB datasets), system RAM (GB models), and GPU memory (GB activations). The 1000x bandwidth gap between storage (1-2 GB/s) and GPU memory (900+ GB/s) forces ML systems to use sophisticated prefetching and caching strategies. Traditional cache optimization (spatial/temporal locality) is less relevant than managing bulk data transfers efficiently.
+[^fn-memory-hierarchy-ml]: **Memory Hierarchy in ML**: Unlike traditional CPU programs that focus on cache locality, ML training creates massive data flows between storage (TB datasets), system RAM (GB models), and GPU memory (GB activations). The 1000× bandwidth gap between storage (1-2 GB/s) and GPU memory (`{python} v100_bw`+ GB/s) forces ML systems to use sophisticated prefetching and caching strategies. Traditional cache optimization (spatial/temporal locality) is less relevant than managing bulk data transfers efficiently.
 
 * Storage ($B_{\text{storage}}$): NVMe storage devices provide 1-2 GB/s
 * System ($B_{\text{system}}$): Main memory transfers data at 50-100 GB/s
@@ -1628,7 +1646,7 @@ Training architectures optimize performance by overlapping these operations: whe
 The ImageNet dataset provides a canonical example for understanding data pipeline requirements. Storage performance in practical systems follows a defined relationship between theoretical and practical throughput:
 $$T_{\text{practical}} = 0.5 \times B_{\text{theoretical}}$$
 
-To illustrate this relationship, consider an NVMe storage device with 3GB/s theoretical bandwidth. Such a device achieves approximately 1.5GB/s sustained read performance. However, the random access patterns required for training data shuffling further reduce this effective bandwidth by 90%. System designers must account for this reduction through careful memory buffer design.
+To illustrate this relationship, consider an NVMe storage device with `{python} nvme_bw` GB/s theoretical bandwidth. Such a device achieves approximately `{python} nvme_bw_sustained` GB/s sustained read performance. However, the random access patterns required for training data shuffling further reduce this effective bandwidth by 90%. System designers must account for this reduction through careful memory buffer design.
 
 The total memory requirements for the system scale with batch size according to the following relationship:
 $$M_{\text{required}} = (B_{\text{prefetch}} + B_{\text{processing}} + B_{\text{transfer}}) \times S_{\text{batch}}$$
@@ -1667,11 +1685,11 @@ A common mistake in ML systems is treating batch size as a continuous variable. 
 **Quantitative Example**:
 
 | **Batch Size** | **Warps Needed** | **Utilization** | **Relative Time** |
-|:---|---:|---:|---:|
-| 32 | 1 | 100% | 1.0× |
-| 33 | 2 | 52% | ~2.0× |
-| 64 | 2 | 100% | 1.0× |
-| 65 | 3 | 68% | ~1.5× |
+|:-------------|---------------:|--------------:|----------------:|
+| 32             |                1 |            100% |              1.0× |
+| 33             |                2 |             52% |             ~2.0× |
+| 64             |                2 |            100% |              1.0× |
+| 65             |                3 |             68% |             ~1.5× |
 
 **Engineering Rule**: Always choose batch sizes and hidden dimensions that are **powers of 2** or multiples of 8/32/64 to avoid this "quantization tax." A batch of 32 is often faster than 33, and a batch of 64 is often just as fast as 33.
 
@@ -1750,15 +1768,21 @@ where $B$ represents the batch size, $L$ is the number of layers, and $A_l$ repr
 #| label: resnet-memory-scaling-calc
 #| echo: false
 
+from calc.constants import RESNET50_PARAMS, Mparam
+
 # ResNet-50 activation memory scaling (batch=32)
 first_conv_h, first_conv_w, first_conv_c = 112, 112, 64
 bytes_fp32 = 4
 first_conv_mb = first_conv_h * first_conv_w * first_conv_c * bytes_fp32 / (1024**2)
 
-# Approximate totals for batch=32
+# ResNet-50 parameters: 25.6M params × 4 bytes ≈ 100MB
+resnet_params_m = RESNET50_PARAMS.to(Mparam).magnitude  # 25.6M
+resnet_param_gb = resnet_params_m * 1e6 * bytes_fp32 / 1e9  # ~0.1 GB
+
+# Approximate totals for batch=32 (activations dominate)
 act_gb_b32 = 8
 grad_gb_b32 = 4
-param_gb = 0.2  # ~25.6M params × 4 bytes ≈ 100MB, but ResNet-50 with batch overhead ≈ 200MB
+param_gb = 0.2  # With batch buffers, ~200MB effective
 total_gb_b32 = act_gb_b32 + grad_gb_b32 + param_gb
 a100_40_gb = 40
 pct_of_a100 = total_gb_b32 / a100_40_gb * 100
@@ -1849,58 +1873,57 @@ At billion-parameter scale, optimizer state dominates the memory budget. As quan
 
 ::: {#fig-galore-llm-memory-breakdown fig-env="figure" fig-pos="htb" fig-cap="**Memory Footprint Breakdown**: Memory usage of LLaMA-7B across four optimizer configurations, decomposed into weights, activations, optimizer state, weight gradients, and other components. The dashed red line marks the RTX 4090 24 GB memory limit, illustrating how standard Adam exceeds single-GPU capacity while GaLoRE compression reduces optimizer state enough to fit within this budget." fig-alt="Stacked horizontal bar chart comparing memory usage across four optimizers for LLaMA-7B. Shows components: others, weight gradient, optimization, activation, and weight. Dashed red line marks RTX 4090 memory limit at 30 GB."}
 ```{.tikz}
-\begin{tikzpicture}[font=\small\sffamily]
-\definecolor{other}{HTML}{D7191C}
-\definecolor{WeightGradient}{HTML}{FDAE61}
-\definecolor{Optimization}{HTML}{ABDDA4}
-\definecolor{Activation}{HTML}{2B83BA}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+% Standard color definitions
+\definecolor{BlueLine}{HTML}{006395}
+\definecolor{BlueL}{HTML}{D1E6F3}
+\definecolor{GreenLine}{HTML}{008F45}
+\definecolor{GreenL}{HTML}{D4EFDF}
+\definecolor{RedLine}{HTML}{CB202D}
+\definecolor{RedL}{HTML}{F5D2D5}
+\definecolor{OrangeLine}{HTML}{CC5500}
+\definecolor{OrangeL}{HTML}{FFE5CC}
+
 \begin{axis}[
     xbar stacked,
     legend style={
-    legend columns=1,
-       at={(axis cs:61.95,2.2)},
+        legend columns=1,
+        at={(axis cs:65,2.5)},
         anchor=north west,
         cells={anchor=west},
-        draw=none
+        draw=none,
+        font=\footnotesize\usefont{T1}{phv}{m}{n}
     },
     xmajorgrids=true,
     grid style=dashed,
     ytick=data,
     axis y line*=none,
     axis x line*=bottom,
-    tick label style={font=\footnotesize\sffamily},
-    legend style={font=\fontsize{7pt}{7}\selectfont\sffamily},
-    label style={font=\footnotesize\sffamily},
+    tick label style={font=\footnotesize\usefont{T1}{phv}{m}{n}},
+    label style={font=\footnotesize\usefont{T1}{phv}{m}{n}},
     xtick={0,20,40,60,80},
-    tick label style={/pgf/number format/assume math mode=true},
     width=1\textwidth,
     bar width=7mm,
     xlabel={Memory Cost (GB)},
     yticklabels={8-bit GaLore, 8-bit Adam, Adafactor, BF16},
     xmin=0,
-    xmax=82,
+    xmax=85,
     ymax=3,
     area legend,
     y=13mm,
     enlarge y limits={abs=0.5},
 ]
-\addplot[other,fill=other] coordinates
-{(1,0) (2,1) (3,2) (5,3)};
-\addplot[WeightGradient,fill=WeightGradient] coordinates
-{(4,0) (6,1) (8,2) (10,3)};
-\addplot[Optimization,fill=Optimization] coordinates
-{(6,0) (8,1) (10,2) (15,3)};
-\addplot[Activation,fill=Activation] coordinates
-{(12,0) (15,1) (20,2) (25,3)};
-\addplot[violet!70,fill=violet!70] coordinates
-{(8,0) (10,1) (15,2) (20,3)};
+\addplot[RedLine,fill=RedL] coordinates {(1,0) (2,1) (3,2) (5,3)};
+\addplot[OrangeLine,fill=OrangeL] coordinates {(4,0) (6,1) (8,2) (10,3)};
+\addplot[GreenLine,fill=GreenL] coordinates {(6,0) (8,1) (10,2) (15,3)};
+\addplot[BlueLine,fill=BlueL] coordinates {(12,0) (15,1) (20,2) (25,3)};
+\addplot[violet!70,fill=violet!30] coordinates {(8,0) (10,1) (15,2) (20,3)};
 
-\legend{Others, WeightGradient, Optimization, Activation, Weight}
-\coordinate (A) at (axis cs:30,-0.5) ;
-\coordinate (B) at  (axis cs:30,3.5);
+\legend{Others, Weight Gradient, Optimizer State, Activation, Weights}
+\coordinate (limit) at (axis cs:24,-0.5);
 \end{axis}
-\draw[dashed,red,thick](A)--node[right=7pt,
-font=\fontsize{8pt}{8}\selectfont\sffamily,red,pos=0.22]{RTX 4090 Memory Limit}(B);
+\draw[dashed,RedLine,ultra thick] (axis cs:24,-0.5) -- (axis cs:24,3.5)
+node[right=2pt, RedLine, font=\footnotesize\bfseries\usefont{T1}{phv}{m}{n}, pos=0.8] {24 GB Limit (RTX 4090)};
 \end{tikzpicture}
 ```
 :::
@@ -2041,11 +2064,11 @@ The first step in diagnosis is establishing a meaningful measure of training eff
 
 Training bottlenecks fall into three categories, which map directly to the **DAM Taxonomy** (@tbl-dam-taxonomy). @tbl-dam-training-bottlenecks connects each DAM component to the corresponding training bottleneck, its observable symptoms, and the optimization techniques that address it.
 
-| **DAM Component** | **Bottleneck** | **Symptoms** | **Primary Solutions** |
-|:---|:---|:---|:---|
-| **Algorithm** | Compute-bound | GPU utilization >90%; low memory bandwidth usage; arithmetic units are the limiting factor | FlashAttention, mixed precision, faster hardware |
-| **Machine** | Memory-bound | GPU utilization 50-80%; high memory bandwidth usage; arithmetic units idle waiting for data from memory | Operator fusion, memory-efficient attention, reduced precision formats |
-| **Data** | Data-bound | Periodic GPU utilization drops to near-zero; CPU fully utilized during gaps; pipeline cannot feed GPU fast enough | Prefetching, pipeline overlap, faster storage, DataLoader parallelism |
+| **DAM Component** | **Bottleneck** | **Symptoms**                                                                                                      | **Primary Solutions**                                                  |
+|:----------------|:-------------|:----------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------|
+| **Algorithm**     | Compute-bound  | GPU utilization >90%; low memory bandwidth usage; arithmetic units are the limiting factor                        | FlashAttention, mixed precision, faster hardware                       |
+| **Machine**       | Memory-bound   | GPU utilization 50-80%; high memory bandwidth usage; arithmetic units idle waiting for data from memory           | Operator fusion, memory-efficient attention, reduced precision formats |
+| **Data**          | Data-bound     | Periodic GPU utilization drops to near-zero; CPU fully utilized during gaps; pipeline cannot feed GPU fast enough | Prefetching, pipeline overlap, faster storage, DataLoader parallelism  |
 
 : **DAM Taxonomy Applied to Training Bottlenecks.** Each component of the DAM Taxonomy (Data, Algorithm, Machine) maps to a distinct training bottleneck with characteristic symptoms. Profiling reveals which component is the limiting factor, guiding practitioners to the appropriate optimization technique. {#tbl-dam-training-bottlenecks}
 
@@ -2072,11 +2095,11 @@ Once bottlenecks are identified, targeted optimizations can address them. Even w
 
 @tbl-optimization-roadmap extends the DAM-based bottleneck classification from @tbl-dam-training-bottlenecks by mapping each bottleneck to the specific optimization technique that addresses it:
 
-| **Bottleneck** | **Primary Solution(s)** |
-|:---|:---|
-| **Data Movement Latency** | Prefetching & Pipeline Overlapping |
-| **Compute Throughput** | Mixed-Precision Training |
-| **Memory Capacity** | Gradient Accumulation & Activation Checkpointing |
+| **Bottleneck**            | **Primary Solution(s)**                          |
+|:------------------------|:-----------------------------------------------|
+| **Data Movement Latency** | Prefetching & Pipeline Overlapping               |
+| **Compute Throughput**    | Mixed-Precision Training                         |
+| **Memory Capacity**       | Gradient Accumulation & Activation Checkpointing |
 
 : **Optimization Technique Roadmap.** Each primary bottleneck category has targeted solutions that address specific performance constraints, matching techniques to profiling results for systematic optimization. {#tbl-optimization-roadmap}
 
@@ -2100,70 +2123,81 @@ This systematic framework—profile, select, compose—applies three core optimi
 
 ::: {#fig-optimization-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Training Optimization Decision Flowchart**: Systematic approach to optimization selection based on profiling results. Begin by measuring GPU utilization, then follow the decision path to identify whether the bottleneck is data-bound, memory-bound, or compute-bound. Each path leads to specific techniques that address the identified constraint." fig-alt="Flowchart showing optimization decision tree starting from Profile Training Run, branching based on GPU utilization and memory pressure to different optimization techniques."}
 ```{.tikz}
-\begin{tikzpicture}[font=\small\sffamily]
-% Color definitions matching ML Systems chapter style
-\definecolor{StartL}{HTML}{E8E8E8}
-\definecolor{StartLine}{HTML}{888888}
-\definecolor{DecisionL}{HTML}{FFF3CD}
-\definecolor{DecisionLine}{HTML}{D4A017}
-\definecolor{ProcessL}{HTML}{D1ECF1}
-\definecolor{ProcessLine}{HTML}{0C7C9E}
-\definecolor{ActionL}{HTML}{D4EDDA}
-\definecolor{ActionLine}{HTML}{28A745}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, line width=0.75pt, node distance=1.2cm]
+% Standard color definitions
+\definecolor{BlueLine}{HTML}{006395}
+\definecolor{BlueL}{HTML}{D1E6F3}
+\definecolor{GreenLine}{HTML}{008F45}
+\definecolor{GreenL}{HTML}{D4EFDF}
+\definecolor{RedLine}{HTML}{CB202D}
+\definecolor{RedL}{HTML}{F5D2D5}
 \definecolor{TextColor}{HTML}{F8F9FA}
 
 \tikzset{
-  Line/.style={line width=1.0pt, black!60, text=black},
-  Box/.style={inner xsep=4pt, inner ysep=4pt, line width=0.75pt,
-    text width=22mm, align=flush center, minimum width=24mm, minimum height=10mm},
-  Decision/.style={diamond, aspect=2.5, fill=DecisionL, draw=DecisionLine,
-    line width=0.75pt, inner sep=3pt, align=center, font=\small\sffamily,
-    minimum width=28mm, minimum height=14mm},
-  Start/.style={Box, fill=StartL, draw=StartLine, rounded corners=2pt},
-  Process/.style={Box, fill=ProcessL, draw=ProcessLine, rounded corners=2pt},
-  Action/.style={Box, fill=ActionL, draw=ActionLine, rounded corners=2pt, text width=28mm, minimum width=30mm},
-  Text/.style={inner xsep=3pt, inner ysep=1pt, draw=none, fill=TextColor,
-    font=\footnotesize\sffamily, align=center, minimum height=5mm},
+  Start/.style={
+    draw=GreenLine, fill=magenta!20, line width=0.75pt,
+    rounded corners=10pt, text width=30mm, align=center,
+    minimum height=9mm
+  },
+  Decision/.style={
+    diamond, aspect=2, draw=BlueLine, fill=BlueL, line width=0.75pt,
+    text width=28mm, align=center, inner sep=0pt
+  },
+  Bottleneck/.style={
+    rectangle, draw=GreenLine, fill=GreenL, line width=0.75pt,
+    rounded corners=2pt, text width=30mm, align=center,
+    minimum height=9mm
+  },
+  Action/.style={
+    rectangle, draw=RedLine, fill=RedL, line width=0.75pt,
+    rounded corners=2pt, text width=35mm, align=center,
+    minimum height=10mm
+  },
+  Line/.style={
+    draw=black!50, line width=1.0pt, -latex
+  },
+  Text/.style={
+    fill=TextColor, inner sep=2pt, font=\footnotesize\usefont{T1}{phv}{m}{n}
+  }
 }
 
-% Start node
-\node[Start] (profile) at (0,0) {Profile Training Run};
+% Nodes
+\node[Start] (profile) {Profile Training Run};
 
-% First decision
-\node[Decision, below=1.6 of profile] (gpu) {GPU Util\\$<$ 70\%?};
+\node[Decision, below=of profile] (gpu) {GPU Util\\ $<$ 70\%?};
 
-% Data-bound path (left)
-\node[Process, below left=1.6 and 3.0 of gpu] (databound) {Data-Bound};
-\node[Action, below=1.0 of databound] (prefetch) {Prefetching \&\\Pipeline Overlap};
+% Data-bound path
+\node[Bottleneck, left=1.5 of gpu, yshift=-1cm] (databound) {\textbf{Data-Bound}};
+\node[Action, below=0.8 of databound] (prefetch) {Apply Prefetching \&\\ Pipeline Overlap};
 
-% Second decision (right)
-\node[Decision, below right=1.6 and 2.5 of gpu] (memory) {OOM Errors\\or Mem $>$90\%?};
+% Memory vs Compute path
+\node[Decision, below=1.5 of gpu] (memory) {OOM Errors or\\ Mem $>$ 90\%?};
 
-% Memory-bound path
-\node[Process, below=1.6 of memory] (membound) {Memory-Bound};
-\node[Action, below=1.0 of membound] (memtech) {Mixed Precision\\$\rightarrow$ Checkpointing\\$\rightarrow$ Accumulation};
+\node[Bottleneck, left=1.5 of memory, yshift=-1cm] (membound) {\textbf{Memory-Bound}};
+\node[Action, below=0.8 of membound] (memtech) {Mixed Precision $\rightarrow$\\ Checkpointing $\rightarrow$\\ Accumulation};
 
-% Compute-bound path
-\node[Process, right=2.8 of membound] (compbound) {Compute-Bound};
-\node[Action, below=1.0 of compbound] (comptech) {Increase Batch Size,\\Optimize Kernels};
+\node[Bottleneck, right=1.5 of memory, yshift=-1cm] (compbound) {\textbf{Compute-Bound}};
+\node[Action, below=0.8 of compbound] (comptech) {Increase Batch Size,\\ Optimize Kernels};
 
-% Re-profile node at bottom
-\node[Start, below=4.5 of gpu] (recheck) {Re-profile \&\\Iterate};
+\node[Start, below=5.5 of gpu] (recheck) {Re-profile \& Iterate};
 
-% Main flow arrows
-\draw[Line, -latex] (profile) -- (gpu);
-\draw[Line, -latex] (gpu.west) -- ++(-0.8,0) |- node[Text, pos=0.25] {Yes} (databound);
-\draw[Line, -latex] (gpu.east) -- ++(0.8,0) |- node[Text, pos=0.25] {No} (memory);
-\draw[Line, -latex] (databound) -- (prefetch);
-\draw[Line, -latex] (memory.south) -- ++(0,-0.4) -| node[Text, pos=0.15, anchor=south] {Yes} (membound);
-\draw[Line, -latex] (memory.east) -- ++(0.8,0) |- node[Text, pos=0.25] {No} (compbound);
-\draw[Line, -latex] (membound) -- (memtech);
-\draw[Line, -latex] (compbound) -- (comptech);
+% Connections
+\draw[Line] (profile) -- (gpu);
 
-% Feedback arrows to re-profile
-\draw[Line, -latex] (prefetch.south) |- (recheck.west);
-\draw[Line, -latex] (memtech.south) -- (recheck.north);
-\draw[Line, -latex] (comptech.south) |- (recheck.east);
+\draw[Line] (gpu.west) -| node[Text, pos=0.3] {Yes} (databound.north);
+\draw[Line] (gpu.south) -- node[Text, pos=0.5] {No} (memory.north);
+
+\draw[Line] (memory.west) -| node[Text, pos=0.3] {Yes} (membound.north);
+\draw[Line] (memory.east) -| node[Text, pos=0.3] {No} (compbound.north);
+
+\draw[Line] (databound) -- (prefetch);
+\draw[Line] (membound) -- (memtech);
+\draw[Line] (compbound) -- (comptech);
+
+% Feedback loops
+\draw[Line] (prefetch.south) |- (recheck.west);
+\draw[Line] (memtech.south) -- (recheck.north);
+\draw[Line] (comptech.south) |- (recheck.east);
 
 \end{tikzpicture}
 ```
@@ -2179,93 +2213,60 @@ Training machine learning models involves significant data movement between stor
 
 ::: {#fig-fetching-naive fig-env="figure" fig-pos="htb" fig-cap="**Sequential Data Fetching**: File open, read, and train operations execute serially across two epochs, with the GPU remaining idle during all file operations. The full sequential pipeline spans approximately 90 seconds, establishing the baseline that overlapped prefetching improves upon." fig-alt="Gantt chart showing sequential data pipeline over two epochs. Four rows: Open, Read, Train, and Epoch. Operations execute serially with gaps between phases, spanning from 00:00 to 01:30."}
 ```{.tikz}
-\begin{tikzpicture}[font=\small\sf,node distance=0pt]
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, line width=0.75pt]
+% Standard color definitions
+\definecolor{BlueLine}{HTML}{006395}
+\definecolor{BlueL}{HTML}{D1E6F3}
+\definecolor{GreenLine}{HTML}{008F45}
+\definecolor{GreenL}{HTML}{D4EFDF}
+\definecolor{OrangeLine}{HTML}{CC5500}
+\definecolor{OrangeL}{HTML}{FFE5CC}
+
 \tikzset{
-  Box/.style={inner xsep=2pt,
-    draw=black!80, line width=0.75pt,
-    fill=black!10,
-    anchor=south,
- rounded corners=2pt,
-    font=\sf\fontsize{7pt}{7pt}\selectfont,
-    %text width=27mm,
-    align=center,
-    minimum width=9.5mm,
-    minimum height=5mm
+  Bar/.style={
+    rectangle, draw=black!70, line width=0.5pt,
+    rounded corners=1pt, minimum height=6mm, anchor=west,
+    font=\footnotesize\usefont{T1}{phv}{m}{n}
   },
+  Grid/.style={
+    draw=black!10, line width=0.5pt
+  },
+  Label/.style={
+    anchor=east, xshift=-0.3cm, font=\small\bfseries\usefont{T1}{phv}{m}{n}
+  }
 }
 
-\definecolor{col1}{RGB}{240,240,255}
-\definecolor{col2}{RGB}{255, 255, 205}
+% X-axis Scale (1 unit = 10 seconds approx)
+\def\unit{1.8}
 
-\def\du{205mm}
-\def\vi{8mm}
+% Grid and Time Labels
+\foreach \t/\label in {0/00:00, 1.5/00:15, 3/00:30, 4.5/00:45, 6/01:00, 7.5/01:15, 9/01:30} {
+  \draw[Grid] (\t*\unit, -0.5) -- (\t*\unit, 4.5);
+  \node[below, font=\scriptsize] at (\t*\unit, -0.5) {\label};
+}
 
-\node[fill=GreenFill,draw=none,minimum width=\du,
-name path=G4,
-anchor=south west, minimum height=\vi](B1)at(-19.0mm,3mm){};
+% Rows
+\node[Label] at (0, 4) {Open};
+\node[Label] at (0, 3) {Read};
+\node[Label] at (0, 2) {Train};
+\node[Label] at (0, 1) {Epoch};
 
-\node[right=2mm of B1.west,anchor=west,align=left]{Epoch};
+% Epoch 1 data
+\node[Bar, fill=gray!20, minimum width=0.8*\unit cm] at (0, 4) {Open 1};
+\node[Bar, fill=BlueL, draw=BlueLine, minimum width=1.2*\unit cm] at (0.8*\unit, 3) {Read 1};
+\node[Bar, fill=BlueL, draw=BlueLine, minimum width=1.0*\unit cm] at (2.0*\unit, 3) {Read 2};
+\node[Bar, fill=GreenL, draw=GreenLine, minimum width=1.5*\unit cm] at (3.0*\unit, 2) {Train 1};
+\node[Bar, fill=GreenL, draw=GreenLine, minimum width=1.5*\unit cm] at (4.5*\unit, 2) {Train 2};
 
-\node[fill=col2,draw=none,minimum width=\du,
-name path=G3,
-anchor=south west, minimum height=\vi](Z)at(B1.north west){};
-\node[right=2mm of Z.west,anchor=west,align=left]{Train};
+\node[Bar, fill=OrangeL, draw=OrangeLine, minimum width=6.0*\unit cm] at (0, 1) {Epoch 1};
 
-\node[fill=RedFill,draw=none,minimum width=\du,
-name path=G2,
-anchor=south west, minimum height=\vi](B2)at (Z.north west){};
-\node[right=2mm of B2.west,anchor=west,align=left]{Read};
+% Epoch 2 data
+\node[Bar, fill=gray!20, minimum width=0.8*\unit cm] at (6.0*\unit, 4) {Open 2};
+\node[Bar, fill=BlueL, draw=BlueLine, minimum width=1.2*\unit cm] at (6.8*\unit, 3) {Read 3};
+\node[Bar, fill=GreenL, draw=GreenLine, minimum width=1.5*\unit cm] at (8.0*\unit, 2) {Train 3};
 
-\node[fill=col1,draw=none,minimum width=\du,
-name path=G1,
-anchor=south west, minimum height=\vi](V)at(B2.north west){};
-\node[right=2mm of V.west,anchor=west,align=left]{Open};
+\node[Bar, fill=OrangeL, draw=OrangeLine, minimum width=4.5*\unit cm] at (6.0*\unit, 1) {Epoch 2};
 
-\def\hi{3.95}
-
-\draw[thick,name path=V0](0,0)node[below]{00:00}--++(90:\hi);
-\draw[thick,name path=V1](3,0)node[below]{00:15}--++(90:\hi);
-\draw[thick,name path=V2](6,0)node[below]{00:30}--++(90:\hi);
-\draw[thick,name path=V3](9,0)node[below]{00:45}--++(90:\hi);
-\draw[thick,name path=V4](12,0)node[below]{01:00}--++(90:\hi);
-\draw[thick,name path=V5](15,0)node[below]{01:15}--++(90:\hi);
-\draw[thick,name path=V6](18,0)node[below]{01:30}--++(90:\hi);
-%%%%%%%%%%%
-\path [name intersections={of=V0 and G1,by={A1,B1}}];
-\node[Box, anchor=west]at($(B1)!0.5!(A1)$){Open 1};
-\path [name intersections={of=V0 and G2,by={A2,B2}}];
-\node[Box, anchor=west,fill=BlueFill]at([xshift=30]$(B2)!0.5!(A2)$){Read 1};
-\path [name intersections={of=V0 and G4,by={A3,B3}}];
-\node[Box, anchor=west,fill=OrangeFill, minimum width=80mm, ]at($(B3)!0.5!(A3)$){Epoch 1};
-
-%%
-\path [name intersections={of=V1 and G2,by={C1,D1}}];
-\node[Box, anchor=west,fill=BlueFill]at([xshift=0]$(C1)!0.5!(D1)$){Read 2};
-\path [name intersections={of=V1 and G3,by={C2,D2}}];
-\node[Box, anchor=east,fill=RedFill]at([xshift=0]$(C2)!0.5!(D2)$){Train 1};
-\node[Box, anchor=west,fill=RedFill]at([xshift=30]$(C2)!0.5!(D2)$){Train 2};
-%%
-\path [name intersections={of=V2 and G2,by={E1,F1}}];
-\node[Box, anchor=east,fill=BlueFill]at([xshift=0]$(E1)!0.5!(F1)$){Read 3};
-\path [name intersections={of=V2 and G3,by={C3,D3}}];
-\node[Box, anchor=west,fill=RedFill]at([xshift=0]$(C3)!0.5!(D3)$){Train 3};
-%
-\path [name intersections={of=V4 and G1,by={G1,H1}}];
-\node[Box, anchor=east]at([xshift=-30]$(G1)!0.5!(H1)$){Open 2};
-\path [name intersections={of=V4 and G2,by={G2,H2}}];
-\node[Box, anchor=east,fill=BlueFill]at([xshift=0]$(G2)!0.5!(H2)$){Read 4};
-\node[Box, anchor=east,fill=BlueFill]at([xshift=56]$(G2)!0.5!(H2)$){Read 5};
-\path [name intersections={of=V4 and G3,by={G3,H3}}];
-\node[Box, anchor=west,fill=RedFill]at([xshift=0]$(G3)!0.5!(H3)$){Train 4};
-\path [name intersections={of=V4 and G4,by={G4,H4}}];
-\node[Box, anchor=west,fill=OrangeFill, minimum width=80.5mm]
-at([xshift=-59]$(G4)!0.5!(H4)$){Epoch 2};
-%
-\path [name intersections={of=V5 and G2,by={I1,J1}}];
-\node[Box, anchor=west,fill=BlueFill]at([xshift=0]$(I1)!0.5!(J1)$){Read 6};
-\path [name intersections={of=V5 and G3,by={I2,J2}}];
-\node[Box, anchor=east,fill=RedFill]at([xshift=0]$(I2)!0.5!(J2)$){Train 5};
-\node[Box, anchor=east,fill=RedFill]at([xshift=59]$(I2)!0.5!(J2)$){Train 6};
 \end{tikzpicture}
 ```
 :::
@@ -2276,141 +2277,63 @@ Overlapping builds upon prefetching by coordinating multiple pipeline stages to 
 
 ::: {#fig-fetching-optimized fig-env="figure" fig-pos="htb" fig-cap="**Overlapped Data Prefetching**: Read and train operations execute concurrently, with each time slice overlapping data loading for the next batch with computation on the current batch. Two epochs complete in approximately 55 seconds compared to 90 seconds with sequential fetching, a 40% speedup." fig-alt="Gantt chart showing optimized pipeline with overlapping operations. Read and Train execute in parallel across time slices. Two epochs complete in approximately 55 seconds total."}
 ```{.tikz}
-\begin{tikzpicture}[font=\small\sf,node distance=0pt]
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, line width=0.75pt]
+% Standard color definitions
+\definecolor{BlueLine}{HTML}{006395}
+\definecolor{BlueL}{HTML}{D1E6F3}
+\definecolor{GreenLine}{HTML}{008F45}
+\definecolor{GreenL}{HTML}{D4EFDF}
+\definecolor{OrangeLine}{HTML}{CC5500}
+\definecolor{OrangeL}{HTML}{FFE5CC}
+
 \tikzset{
-  Box/.style={inner xsep=0pt,
-    draw=black!80, line width=0.75pt,
-    fill=black!10,
-    anchor=south,
- rounded corners=2pt,
-    font=\sf\fontsize{5pt}{5pt}\selectfont,
-    %text width=27mm,
-    align=center,
-    minimum width=20mm,
-    minimum height=4mm
+  Bar/.style={
+    rectangle, draw=black!70, line width=0.5pt,
+    rounded corners=1pt, minimum height=6mm, anchor=west,
+    font=\footnotesize\usefont{T1}{phv}{m}{n}
   },
+  Grid/.style={
+    draw=black!10, line width=0.5pt
+  },
+  Label/.style={
+    anchor=east, xshift=-0.3cm, font=\small\bfseries\usefont{T1}{phv}{m}{n}
+  }
 }
 
-\definecolor{col1}{RGB}{240,240,255}
-\definecolor{col2}{RGB}{255, 255, 205}
+% X-axis Scale (1 unit = 10 seconds approx)
+\def\unit{1.8}
 
-\def\du{205mm}
-\def\vi{7mm}
+% Grid and Time Labels
+\foreach \t/\label in {0/00:00, 1.5/00:15, 3/00:30, 4.5/00:45, 6/01:00} {
+  \draw[Grid] (\t*\unit, -0.5) -- (\t*\unit, 4.5);
+  \node[below, font=\scriptsize] at (\t*\unit, -0.5) {\label};
+}
 
-\node[fill=GreenFill,draw=none,minimum width=\du,
-name path=G4,
-anchor=south west, minimum height=\vi](B1)at(-19.0mm,3mm){};
+% Rows
+\node[Label] at (0, 4) {Open};
+\node[Label] at (0, 3) {Read};
+\node[Label] at (0, 2) {Train};
+\node[Label] at (0, 1) {Epoch};
 
-\node[right=2mm of B1.west,anchor=west,align=left]{Epoch};
+% Overlapped data
+\node[Bar, fill=gray!20, minimum width=0.8*\unit cm] at (0, 4) {Open 1};
 
-\node[fill=col2,draw=none,minimum width=\du,
-name path=G3,
-anchor=south west, minimum height=\vi](Z)at(B1.north west){};
-\node[right=2mm of Z.west,anchor=west,align=left]{Train};
+% Step 1
+\node[Bar, fill=BlueL, draw=BlueLine, minimum width=1.2*\unit cm] at (0.8*\unit, 3) {Read 1};
 
-\node[fill=RedFill,draw=none,minimum width=\du,
-name path=G2,
-anchor=south west, minimum height=\vi](B2)at (Z.north west){};
-\node[right=2mm of B2.west,anchor=west,align=left]{Read};
+% Step 2 (Overlap)
+\node[Bar, fill=BlueL, draw=BlueLine, minimum width=1.2*\unit cm] at (2.0*\unit, 3) {Read 2};
+\node[Bar, fill=GreenL, draw=GreenLine, minimum width=1.2*\unit cm] at (2.0*\unit, 2) {Train 1};
 
-\node[fill=col1,draw=none,minimum width=\du,
-name path=G1,
-anchor=south west, minimum height=\vi](V)at(B2.north west){};
-\node[right=2mm of V.west,anchor=west,align=left]{Open};
+% Step 3 (Overlap)
+\node[Bar, fill=BlueL, draw=BlueLine, minimum width=1.2*\unit cm] at (3.2*\unit, 3) {Read 3};
+\node[Bar, fill=GreenL, draw=GreenLine, minimum width=1.2*\unit cm] at (3.2*\unit, 2) {Train 2};
 
-\def\hi{3.45}
+% Final Train
+\node[Bar, fill=GreenL, draw=GreenLine, minimum width=1.2*\unit cm] at (4.4*\unit, 2) {Train 3};
 
-\draw[thick,name path=V0](0,0)node[below]{00:00}--++(90:\hi);
-\draw[thick,name path=V1](1,0)node[below]{00:05}--++(90:\hi);
-\draw[thick,name path=V2](2,0)node[below]{00:10}--++(90:\hi);
-%
-\draw[thick,name path=V3](3,0)node[below]{00:15}--++(90:\hi);
-\draw[thick,name path=V4](4,0)node[below]{00:20}--++(90:\hi);
-\draw[thick,name path=V5](5,0)node[below]{00:25}--++(90:\hi);
-%
-\draw[thick,name path=V6](6,0)node[below]{00:30}--++(90:\hi);
-\draw[thick,name path=V7](7,0)node[below]{00:35}--++(90:\hi);
-\draw[thick,name path=V8](8,0)node[below]{00:40}--++(90:\hi);
-\draw[thick,name path=V9](9,0)node[below]{00:45}--++(90:\hi);
-\draw[thick,name path=V10](10,0)node[below]{00:50}--++(90:\hi);
-\draw[thick,name path=V11](11,0)node[below]{00:55}--++(90:\hi);
-\draw[thick,name path=V12](12,0)node[below]{01:00}--++(90:\hi);
-\draw[thick,name path=V13](13,0)node[below]{01:05}--++(90:\hi);
-\draw[thick,name path=V14](14,0)node[below]{01:10}--++(90:\hi);
-\draw[thick,name path=V15](15,0)node[below]{01:15}--++(90:\hi);
-\draw[thick,name path=V16](16,0)node[below]{01:20}--++(90:\hi);
-\draw[thick,name path=V17](17,0)node[below]{01:25}--++(90:\hi);
-\draw[thick,name path=V18](18,0)node[below]{01:30}--++(90:\hi);
-%
-\path [name intersections={of=V0 and G1,by={A1,B1}}];
-\node[Box, anchor=west,
-    minimum width=11.2](O1)at($(B1)!0.5!(A1)$){};
- \draw[](O1)--++(60:0.5)node[above,inner sep=1pt,
- font=\sf\fontsize{6pt}{6pt}\selectfont]{Open 1};
- %
-\path [name intersections={of=V0 and G2,by={C1,D1}}];
-\node[Box, anchor=west, minimum width=16.8,
-fill=BlueFill](R1)at([xshift=11.2]$(C1)!0.5!(D1)$){Read 1};
-%
-\path [name intersections={of=V1 and G2,by={E1,F1}}];
-\node[Box, anchor=west, minimum width=11.2,
-fill=BlueFill]at([xshift=0]$(E1)!0.5!(F1)$)(R2){};
- \draw[](R2)--++(70:0.6)node[above,inner sep=1pt,
- font=\sf\fontsize{6pt}{6pt}\selectfont]{Read 2};
-\node[Box, anchor=west, minimum width=16.8,
-right=-0.5pt of R2,fill=BlueFill]{Read 3};
-%
-\path [name intersections={of=V1 and G3,by={G1,H1}}];
-\node[Box, anchor=west,fill=RedFill,
-minimum width=11.2]at([xshift=0]$(G1)!0.5!(H1)$)(T1){};
- \draw[](T1)--++(170:0.45)node[left,inner sep=1pt,
- font=\sf\fontsize{6pt}{6pt}\selectfont]{Train 1};
-%
-\node[Box, anchor=west,fill=RedFill,
-right=-0.5ptof T1,minimum width=16.8](T2){Train 2};
-\node[Box, anchor=west,fill=RedFill,
-right=-0.5ptof T2,minimum width=11.2](T3){};
- \draw[](T3)--++(40:0.45)node[above,inner sep=1pt,
- font=\sf\fontsize{6pt}{6pt}\selectfont]{Train 3};
- %
-  \path [name intersections={of=V0 and G4,by={A3,B3}}];
-\node[Box, anchor=west,fill=OrangeFill,
-minimum width=85](E1)at($(B3)!0.5!(A3)$){Epoch 1};
-%%%%%%
-\path [name intersections={of=V5 and G1,by={I1,J1}}];
-\node[Box, anchor=west,
-    minimum width=11.2](O2)at($(I1)!0.5!(J1)$){};
-\draw[](O2)--++(60:0.5)node[above,inner sep=1pt,
- font=\sf\fontsize{6pt}{6pt}\selectfont]{Open 2};
- %%%
- \path [name intersections={of=V5 and G2,by={K1,L1}}];
-\node[Box, anchor=west, minimum width=16.8,
-fill=BlueFill]at([xshift=11.2]$(K1)!0.5!(L1)$){Read 4};
-%
-\path [name intersections={of=V6 and G2,by={M1,N1}}];
-\node[Box, anchor=west, minimum width=11.2,
-fill=BlueFill]at([xshift=0]$(M1)!0.5!(N1)$)(R5){};
- \draw[](R5)--++(70:0.6)node[above,inner sep=1pt,
- font=\sf\fontsize{6pt}{6pt}\selectfont]{Read 5};
-\node[Box, anchor=west, minimum width=16.8,
-right=-0.5pt of R5,fill=BlueFill]{Read 6};
-%%%%
-\path [name intersections={of=V6 and G3,by={O1,P1}}];
-\node[Box, anchor=west,fill=RedFill,
-minimum width=11.2]at([xshift=0]$(O1)!0.5!(P1)$)(T4){};
- \draw[](T4)--++(170:0.45)node[left,inner sep=1pt,
- font=\sf\fontsize{6pt}{6pt}\selectfont]{Train 4};
+\node[Bar, fill=OrangeL, draw=OrangeLine, minimum width=5.6*\unit cm] at (0, 1) {Epochs (Overlapped)};
 
-\node[Box, anchor=west,fill=magenta!20,
-right=-0.5pt of T4,minimum width=16.8](T5){Train 5};
-\node[Box, anchor=west,fill=magenta!20,
-right=-0.5pt of T5,minimum width=11.2](T6){};
- \draw[](T6)--++(40:0.45)node[above,inner sep=1pt,
- font=\sf\fontsize{6pt}{6pt}\selectfont]{Train 6};
- %
- \path [name intersections={of=V5 and G4,by={R3,S3}}];
-\node[Box, anchor=west,fill=orange!30,
-minimum width=85]at($(R3)!0.5!(S3)$){Epoch 2};
 \end{tikzpicture}
 ```
 :::
@@ -2445,12 +2368,12 @@ These optimization techniques yield particular benefits in scenarios involving s
 
 @tbl-prefetching contrasts traditional sequential pipelines against optimized approaches across four critical dimensions: GPU utilization improves from frequent idle periods to near-constant activity, training time decreases through parallelism, resource usage shifts from suboptimal to maximized, and scalability transforms from bottleneck-limited to adaptable.
 
-| **Aspect** | **Traditional Pipeline** | **With Prefetching & Overlapping** |
-|:---|:---|:---|
-| **GPU Utilization** | Frequent idle periods | Near-constant utilization |
-| **Training Time** | Longer due to sequential operations | Reduced through parallelism |
-| **Resource Usage** | Often suboptimal | Maximized across available hardware |
-| **Scalability** | Limited by slowest component | Adaptable to various bottlenecks |
+| **Aspect**          | **Traditional Pipeline**            | **With Prefetching & Overlapping**  |
+|:------------------|:----------------------------------|:----------------------------------|
+| **GPU Utilization** | Frequent idle periods               | Near-constant utilization           |
+| **Training Time**   | Longer due to sequential operations | Reduced through parallelism         |
+| **Resource Usage**  | Often suboptimal                    | Maximized across available hardware |
+| **Scalability**     | Limited by slowest component        | Adaptable to various bottlenecks    |
 
 : **Pipeline Optimization.** Prefetching and overlapping maximize hardware utilization and reduce training time by enabling parallel data loading and computation, overcoming bottlenecks inherent in sequential pipelines. {#tbl-prefetching}
 
@@ -2474,12 +2397,12 @@ A neural network trained in FP32 requires 4 bytes per parameter, while both FP16
 
 The numerical precision differences between these formats shape their use cases. @tbl-precision-comparison reveals that BF16's 8-bit exponent matches FP32's dynamic range ($10^{-45}$ minimum representable), while FP16's 5-bit exponent limits its range to $6 \times 10^{-8}$, explaining why gradients below this threshold underflow to zero without loss scaling. FP32 represents numbers from approximately $\pm1.18 \times 10^{-38}$ to $\pm3.4 \times 10^{38}$ with 7 decimal digits of precision. FP16 ranges from $\pm6.10 \times 10^{-5}$ to $\pm65,504$ with 3-4 decimal digits of precision. Bfloat16, developed by Google Brain, maintains the same dynamic range as FP32 ($\pm1.18 \times 10^{-38}$ to $\pm3.4 \times 10^{38}$) but with reduced precision (3-4 decimal digits). This range preservation makes bfloat16 particularly suited for deep learning training, as it handles large and small gradients more effectively than FP16.
 
-| **Property** | **FP32** | **FP16** | **BF16** |
-|:---|---:|---:|---:|
-| **Exponent bits** | 8 | 5 | 8 |
-| **Mantissa bits** | 23 | 10 | 7 |
-| **Min normal value** | 10^-38 | 6.1 x 10^-5 | 10^-38 |
-| **Tensor Core speedup** | 1x | 16x | 16x |
+| **Property**            | **FP32** |    **FP16** | **BF16** |
+|:----------------------|-------:|----------:|-------:|
+| **Exponent bits**       |        8 |           5 |        8 |
+| **Mantissa bits**       |       23 |          10 |        7 |
+| **Min normal value**    |   10^-38 | 6.1 x 10^-5 |   10^-38 |
+| **Tensor Core speedup** |       1x |         16x |      16x |
 
 : **Precision Format Comparison.** The choice between FP16 and BF16 depends on whether dynamic range (BF16's strength) or precision (FP16's advantage) matters more for the specific workload. Minimum normal values shown are the practical thresholds for training, as subnormal values may flush to zero on many GPUs. {#tbl-precision-comparison}
 
@@ -2489,38 +2412,59 @@ The choice between formats depends on model characteristics. Models with gradien
 
 ::: {#fig-mixed-precision fig-env="figure" fig-pos="htb" fig-cap="**Mixed Precision Training**: The seven-step cycle: (1) FP32 master weights convert to FP16 for the forward pass, (2) loss is scaled to prevent gradient underflow, (3) backpropagation computes scaled FP16 gradients, (4) gradients copy to FP32, (5) loss scaling is removed, (6) FP32 gradients update master weights, and (7) the cycle repeats. This approach achieves Tensor Core speedups while preserving numerical stability." fig-alt="Flowchart showing 7-step mixed precision training cycle. FP32 master weights convert to FP16 for forward pass, loss scaling protects gradients during backpropagation, then gradients update FP32 weights."}
 ```{.tikz}
-\begin{tikzpicture}[line join=round,font=\small\sffamily]
-\tikzset{%
-LineD/.style={line width=1.0pt,black!50,text=black,align=center},
-Line/.style={red!30,line width=3pt,-{Triangle[width=1.8*6pt,length=0.8*6pt]},text=black,align=center},
-Box/.style={inner xsep=2pt,
-    node distance=2.7,
-    draw=GreenLine,
-    fill=GreenL,
-    line width=0.75pt,
-    align=flush center,
-    text width=22mm,
-    minimum width=22mm, minimum height=9.5mm
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, line width=0.75pt, node distance=1.2cm]
+% Standard color definitions
+\definecolor{BlueLine}{HTML}{006395}
+\definecolor{BlueL}{HTML}{D1E6F3}
+\definecolor{GreenLine}{HTML}{008F45}
+\definecolor{GreenL}{HTML}{D4EFDF}
+\definecolor{RedLine}{HTML}{CB202D}
+\definecolor{RedL}{HTML}{F5D2D5}
+\definecolor{OrangeLine}{HTML}{CC5500}
+\definecolor{OrangeL}{HTML}{FFE5CC}
+
+\tikzset{
+  Box/.style={
+    rectangle, draw=black!50, line width=0.75pt,
+    rounded corners=2pt, text width=25mm, align=center,
+    minimum height=10mm
   },
-Box2/.style={Box,fill=BlueL, draw=BlueLine},
-Box3/.style={Box,fill=BrownL, draw=BrownLine},
+  FP32Box/.style={
+    Box, draw=BlueLine, fill=BlueL
+  },
+  FP16Box/.style={
+    Box, draw=GreenLine, fill=GreenL
+  },
+  ScaledBox/.style={
+    Box, draw=RedLine, fill=RedL
+  },
+  Line/.style={
+    draw=black!40, line width=1.0pt, -latex
+  },
+  StepLabel/.style={
+    fill=white, inner sep=2pt, font=\footnotesize\bfseries\usefont{T1}{phv}{m}{n}
+  }
 }
 
-\node[Box](B1){FP 32 Master Weights};
-\node[Box,right=of B1](B2){FP 32 Gradients};
-\node[Box2,right=of B2](B3){Scaled FP 32 Gradients};
-\node[Box2,below right=0.5 and 1.1 of B3](B4){Scaled FP 16 Gradients};
-\node[Box3,below=2of B1](B11){FP 16\\ Weights};
-\node[Box3,below=2of B2](B22){FP 16 Loss};
-\node[Box2,below=2of B3](B33){Scaled FP 32 Loss};
-%
-\draw[Line,-latex](B4)|-node[above,pos=0.75]{4. Copy}(B3);
-\draw[Line,-latex](B3)--node[above]{5. Remove scale, \\(+clip, etc.)}(B2);
-\draw[Line,-latex](B2)--node[above]{6. Apply}(B1);
-\draw[Line,-latex](B1)--node[right]{7. Copy}(B11);
-\draw[Line,-latex](B11)--node[above]{1. Forward\\ Pass}(B22);
-\draw[Line,-latex](B22)--node[above]{2. Loss\\ Scaling}(B33);
-\draw[Line,-latex](B33)-|node[above,pos=0.25]{3. Backprop}(B4);
+% Nodes
+\node[FP32Box] (master) {FP32 Master\\ Weights};
+\node[FP16Box, right=2 of master] (weights16) {FP16\\ Weights};
+\node[FP16Box, below=1.5 of weights16] (forward) {Forward Pass\\ (FP16 Loss)};
+\node[ScaledBox, left=2 of forward] (scaled) {Scaled Loss\\ (FP32)};
+\node[ScaledBox, above=1.5 of scaled] (grad16) {Scaled FP16\\ Gradients};
+\node[FP32Box, above=1.5 of grad16] (grad32) {FP32\\ Gradients};
+
+% Cycle Connections
+\draw[Line] (master) -- node[StepLabel] {1. Cast} (weights16);
+\draw[Line] (weights16) -- node[StepLabel] {2. Forward} (forward);
+\draw[Line] (forward) -- node[StepLabel] {3. Scale} (scaled);
+\draw[Line] (scaled) -- node[StepLabel] {4. Backprop} (grad16);
+\draw[Line] (grad16) -- node[StepLabel] {5. Cast} (grad32);
+\draw[Line] (grad32) -- node[StepLabel] {6. Unscale} (master);
+
+% Label for Step 7
+\draw[Line, dashed] (master.south) -- ++(0,-0.5) -| (master.west) node[StepLabel, pos=0.5] {7. Update};
+
 \end{tikzpicture}
 ```
 :::
@@ -2708,12 +2652,12 @@ NVIDIA's Hopper architecture (H100) introduces FP8 support with two formats. E4M
 
 FP8 training doubles Tensor Core throughput again (3.9 PFLOPs on H100 versus 1.98 PFLOPs for FP16). However, FP8's severely limited precision requires per-tensor scaling factors maintained in higher precision, adding algorithmic complexity. The decision tree becomes:
 
-| **Precision** | **When to Use** | **Hardware Requirement** |
-|:---|:---|---:|
-| **FP8** | Maximum throughput on H100, with careful scaling | H100 or newer |
-| **BF16** | Default for transformers, wide dynamic range | A100, TPU v4+ |
-| **FP16** | Computer vision, controlled gradients | V100, A100 |
-| **FP32** | Numerical stability critical, small models | All GPUs |
+| **Precision** | **When to Use**                                  | **Hardware Requirement** |
+|:------------|:-----------------------------------------------|-----------------------:|
+| **FP8**       | Maximum throughput on H100, with careful scaling |            H100 or newer |
+| **BF16**      | Default for transformers, wide dynamic range     |            A100, TPU v4+ |
+| **FP16**      | Computer vision, controlled gradients            |               V100, A100 |
+| **FP32**      | Numerical stability critical, small models       |                 All GPUs |
 
 #### Memory Bandwidth Utilization {.unnumbered}
 
@@ -2766,11 +2710,11 @@ This selective precision maximizes hardware utilization while maintaining numeri
 
 Optimal mixed-precision training requires matching the precision format to hardware capabilities. @tbl-hw-precision-strategy summarizes the recommended precision strategy for each GPU generation, reflecting the evolution from FP16-only support on Volta to native FP8 on Hopper.
 
-| **Architecture** | **Recommended Precision** | **Key Considerations** |
-|:---|---:|---:|
-| **V100 (Volta)** | FP16 with loss scaling | No BF16 support; gradient clipping essential |
-| **A100 (Ampere)** | BF16 for transformers; FP16 for CNNs | TF32 mode provides automatic 2-3× speedup for legacy FP32 code |
-| **H100 (Hopper)** | FP8 via TransformerEngine | Requires FP8-aware training recipes; `{python} h100_tflops_fp8` TFLOPs peak throughput |
+| **Architecture**  |            **Recommended Precision** |                                                                 **Key Considerations** |
+|:----------------|-----------------------------------:|-------------------------------------------------------------------------------------:|
+| **V100 (Volta)**  |               FP16 with loss scaling |                                           No BF16 support; gradient clipping essential |
+| **A100 (Ampere)** | BF16 for transformers; FP16 for CNNs |                         TF32 mode provides automatic 2-3× speedup for legacy FP32 code |
+| **H100 (Hopper)** |            FP8 via TransformerEngine | Requires FP8-aware training recipes; `{python} h100_tflops_fp8` TFLOPs peak throughput |
 
 : **Precision Strategy by GPU Architecture.** Each generation introduces wider precision support, reducing the engineering burden of loss scaling while increasing throughput. {#tbl-hw-precision-strategy}
 
@@ -2822,9 +2766,15 @@ total_attn_gb = total_attn_mb / 1024
 
 attn_matrix_mb_str = f"{attn_matrix_mb:.0f}"
 total_attn_gb_str = f"{total_attn_gb:.0f}"
+
+# Pre-formatted strings for inline use
+seq_len_str = f"{seq_len:,}"
+embed_dim_str = f"{embed_dim}"
+n_heads_str = f"{n_heads}"
+bytes_fp32_str = f"{bytes_fp32}"
 ```
 
-The memory bottleneck emerges from materializing the $n \times n$ intermediate matrices for scores and probabilities. For a sequence length of `{python} f"{seq_len:,}"` tokens with embedding dimension `{python} embed_dim` (typical for a single attention head), the attention score matrix alone requires $`{python} f"{seq_len:,}"`^2 \times `{python} bytes_fp32` \text{{ bytes}} = `{python} attn_matrix_mb_str` \text{{ MB}}$ in FP32. With `{python} n_heads` attention heads, this grows to `{python} total_attn_gb_str` GB just for intermediate attention matrices, not including the keys, queries, values, or output tensors.
+The memory bottleneck emerges from materializing the $n \times n$ intermediate matrices for scores and probabilities. For a sequence length of `{python} seq_len_str` tokens with embedding dimension `{python} embed_dim_str` (typical for a single attention head), the attention score matrix alone requires $`{python} seq_len_str`^2 \times `{python} bytes_fp32_str` \text{{ bytes}} = `{python} attn_matrix_mb_str` \text{{ MB}}$ in FP32. With `{python} n_heads_str` attention heads, this grows to `{python} total_attn_gb_str` GB just for intermediate attention matrices, not including the keys, queries, values, or output tensors.
 
 Modern GPU memory hierarchy exacerbates this bottleneck. HBM (High Bandwidth Memory) provides 40–80 GB capacity with 1–2 TB/s bandwidth, while SRAM (on-chip memory) provides only 20–40 MB capacity but delivers 20+ TB/s bandwidth (10× faster). Standard attention stores these large matrices in slow HBM and repeatedly loads them during the backward pass. For GPT-2 scale models processing 2048-token sequences, attention operations spend 70-80% of execution time waiting for memory transfers rather than computing, leaving expensive tensor cores underutilized.
 
@@ -2866,6 +2816,7 @@ The online softmax algorithm enables this decomposition. Traditional softmax req
 Flash Attention achieves asymptotic improvements in both memory footprint and memory IO operations, the true bottleneck in bandwidth-limited scenarios.
 
 **Memory Complexity.**
+
 - **Standard Attention**: $O(n^2)$ memory for storing $S$ and $P$ matrices across all sequence positions
 - **Flash Attention**: $O(n)$ memory, storing only input/output tensors $(Q, K, V, O)$ plus a small constant SRAM buffer
 
@@ -2919,6 +2870,7 @@ Flash Attention's performance gains materialize through careful exploitation of 
 import torch
 import torch.nn.functional as F
 
+
 # Standard attention (materializes n×n matrix)
 def standard_attention(q, k, v):
     # q, k, v: [batch, heads, seq_len, head_dim]
@@ -2929,14 +2881,17 @@ def standard_attention(q, k, v):
     output = torch.matmul(attn, v)
     return output
 
+
 # Flash Attention (no n×n materialization)
 def flash_attention(q, k, v):
     # Automatically uses Flash Attention if available
     output = F.scaled_dot_product_attention(q, k, v)
     return output
 
+
 # Explicit Flash Attention 2 (flash-attn library)
 from flash_attn import flash_attn_func
+
 
 def flash_attn_2(q, k, v):
     # q, k, v: [batch, seq_len, heads, head_dim]
@@ -2951,11 +2906,11 @@ def flash_attn_2(q, k, v):
 Training a GPT-2 style transformer on NVIDIA A100 GPU (12 layers, 768 hidden dim, 12 heads) with varying sequence lengths:
 
 | **Sequence Length** | **Standard Forward** | **Flash Forward** | **Standard Backward** | **Flash Backward** | **Memory (Standard)** | **Memory (Flash)** |
-|:---|:---|---:|:---|---:|---:|---:|
-| 512 | 12 ms | 8 ms | 35 ms | 18 ms | 4.2 GB | 2.8 GB |
-| 2048 | 45 ms | 15 ms | 120 ms | 35 ms | 18 GB | 6 GB |
-| 4096 | OOM | 32 ms | OOM | 85 ms | >40 GB | 12 GB |
-| 8192 | OOM | 68 ms | OOM | 180 ms | >80 GB | 24 GB |
+|:------------------|:-------------------|----------------:|:--------------------|-----------------:|--------------------:|-----------------:|
+| 512                 | 12 ms                |              8 ms | 35 ms                 |              18 ms |                4.2 GB |             2.8 GB |
+| 2048                | 45 ms                |             15 ms | 120 ms                |              35 ms |                 18 GB |               6 GB |
+| 4096                | OOM                  |             32 ms | OOM                   |              85 ms |                >40 GB |              12 GB |
+| 8192                | OOM                  |             68 ms | OOM                   |             180 ms |                >80 GB |              24 GB |
 
 ```{python}
 #| label: flash-attention-speedup-calc
@@ -3156,98 +3111,53 @@ With checkpointing, only a subset of the activations is retained during the forw
 
 ::: {#fig-activation-checkpointing fig-env="figure" fig-pos="htb" fig-cap="**Activation Checkpointing**: Trading memory usage for recomputation during backpropagation enables training deeper neural networks. By storing only a subset of activations from the forward pass and recomputing others on demand, this technique reduces peak memory requirements at the cost of increased training time." fig-alt="Two-row diagram showing activation checkpointing. Top row: forward pass with checkpointed nodes (filled) and discarded nodes (dashed). Bottom row: backward pass recomputing discarded activations from checkpoints."}
 ```{.tikz}
-\begin{tikzpicture}[line cap=round,line join=round,font=\small\sffamily]
-\tikzset{%
-Line/.style={line width=1.0pt,black!50,text=black,align=center},
-Box/.style={inner xsep=2pt,
-    node distance=3.2,
-    draw=GreenLine,
-    line width=0.75pt,
-    fill=GreenL,
-    align=flush center,
-    minimum width=22mm, minimum height=9.5mm
-  }
+\begin{tikzpicture}[line cap=round,line join=round,font=\small\usefont{T1}{phv}{m}{n}]
+% Standard color definitions
+\definecolor{GreenLine}{HTML}{008F45}
+\definecolor{GreenL}{HTML}{D4EFDF}
+\definecolor{OrangeLine}{HTML}{CC5500}
+\definecolor{OrangeL}{HTML}{FFE5CC}
+
+\tikzset{
+  Line/.style={line width=1.0pt, black!40, -latex},
+  Node/.style={circle, draw=black!60, line width=0.75pt, minimum size=8mm},
+  Checkpoint/.style={Node, fill=GreenL, draw=GreenLine},
+  Discarded/.style={Node, dashed, fill=gray!10, draw=gray!40},
+  Recomputed/.style={Node, fill=OrangeL, draw=OrangeLine},
+  Label/.style={font=\footnotesize\bfseries\usefont{T1}{phv}{m}{n}, anchor=east, xshift=-0.5cm}
 }
 
-\makeatletter
-\newif\ifbox@dashed
-\box@dashedfalse % default: not dashed
+% Forward Pass
+\node[Label] at (0, 1.2) {Forward Pass};
+\node[Checkpoint] (f1) at (1, 1.2) {};
+\node[Discarded] (f2) at (3, 1.2) {};
+\node[Discarded] (f3) at (5, 1.2) {};
+\node[Checkpoint] (f4) at (7, 1.2) {};
+\node[Discarded] (f5) at (9, 1.2) {};
 
-\tikzset{pics/graph/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\node[circle, draw=\drawchannelcolor, fill=\channelcolor!90, minimum width=8mm,
-line width=\Linewidth,\ifbox@dashed dashed\fi](\picname){};
-     }
-  }
-}
+\draw[Line] (f1) -- (f2);
+\draw[Line] (f2) -- (f3);
+\draw[Line] (f3) -- (f4);
+\draw[Line] (f4) -- (f5);
 
-\pgfkeys{
-  /channel/.cd,
-  channelcolor/.store in=\channelcolor,
-  drawchannelcolor/.store in=\drawchannelcolor,
-  scalefac/.store in=\scalefac,
-  Linewidth/.store in=\Linewidth,
-  picname/.store in=\picname,
-  channelcolor=BrownLine,
-  drawchannelcolor=BrownLine,
-  scalefac=1,
-  Linewidth=1.0pt,
-  dashed/.code={\box@dashedtrue},
-  picname=C
-}
-\makeatother
+% Backward Pass
+\node[Label] at (0, 0) {Backward Pass};
+\node[Checkpoint] (b1) at (1, 0) {};
+\node[Recomputed] (b2) at (3, 0) {};
+\node[Recomputed] (b3) at (5, 0) {};
+\node[Checkpoint] (b4) at (7, 0) {};
+\node[Recomputed] (b5) at (9, 0) {};
 
-\begin{scope}[local bounding box=CIRCLES1,shift={($(0,0)+(0,0)$)},
-scale=1, every node/.append style={transform shape}]
-\foreach \i/\cl/\da in{1/GreenL/,2/white/,3/BlueL/dashed,4/white/,5/GreenL/}{
-\pic[shift={(0,0)}] at  (1.85*\i,0){graph={picname=1C\i,Linewidth=1.0pt,
-    channelcolor=\cl,\da,drawchannelcolor=BrownLine}};
-    }
-\foreach \j in{1,2,3,4}{
-\pgfmathtruncatemacro{\newX}{\j + 1} %
-\draw[Line,-latex](1C\j)--(1C\newX);
-}
-\foreach \i/\cl/\da in{1/white/,2/white/,3/white/,4/BrownLine!40!/,5/GreenL/}{
-\pic[shift={(1.85,0)}] at  (1.85*\i,-1.4){graph={picname=2C\i,Linewidth=1.0pt,
-    channelcolor=\cl,\da,drawchannelcolor=BrownLine}};
-    }
-\foreach \j in{1,2,3,4}{
-\pgfmathtruncatemacro{\newX}{\j + 1} %
-\draw[Line,latex-](2C\j)--(2C\newX);
-\draw[Line,-latex](1C\newX)--(2C\j);
-}
-\node[above= 1pt of 1C3]{\textbf{Forward pass}};
-\node[below= 2pt of 2C3]{\textbf{Backward pass}};
-\draw[](1C3.center)--++(198:3.4)node[below]{Checkpoint};
-\end{scope}
+\draw[Line] (b5) -- (b4);
+\draw[Line] (b4) -- (b3);
+\draw[Line] (b3) -- (b2);
+\draw[Line] (b2) -- (b1);
 
-\begin{scope}[local bounding box=CIRCLES1,shift={($(0,0)+(0,-4.0)$)},
-scale=1, every node/.append style={transform shape}]
-\foreach \i/\cl/\da in{1/GreenL/,2/white/,3/BlueL/dashed,4/GreenL/,5/VioletL/}{
-\pic[shift={(0,0)}] at  (1.85*\i,0){graph={picname=3C\i,Linewidth=1.0pt,
-    channelcolor=\cl,\da,drawchannelcolor=BrownLine}};
-    }
-\foreach \j in{1,2,3,4}{
-\pgfmathtruncatemacro{\newX}{\j + 1} %
-\draw[Line,-latex](1C\j)--(1C\newX);
-}
-\foreach \i/\cl/\da in{1/white/,2/white/,3/BrownLine!40!/,4/GreenL/,5/white/}{
-\pic[shift={(1.85,0)}] at  (1.85*\i,-1.4){graph={picname=4C\i,Linewidth=1.0pt,
-    channelcolor=\cl,\da,drawchannelcolor=BrownLine}};
-    }
-\foreach \j in{1,2,3,4}{
-\pgfmathtruncatemacro{\newX}{\j + 1} %
-\draw[Line,latex-](4C\j)--(4C\newX);
-\draw[Line,-latex](3C\newX)--(4C\j);
-}
-\draw[](3C5.center)--++(0,1)--++(-2.4,0)node[left,align=left]{This node is being recomputed\\
-   and kept in memory temporarily};
-\draw[](3C3.center)--++(198:3.4)node[below]{Checkpoint};
-\draw[](4C3.center)--++(24:4)coordinate(GR)node[right,align=flush left,text width=47mm]{Green nodes are the ones
-  kept in memory to compute the gradient update for this node};
- \end{scope}
-\draw[](2C4.center)--(GR);
+% Annotations
+\node[below=0.2 of b1, font=\tiny] {Stored};
+\node[below=0.2 of b2, font=\tiny] {Recomputed};
+\node[below=0.2 of b4, font=\tiny] {Stored};
+
 \end{tikzpicture}
 ```
 :::
@@ -3262,11 +3172,11 @@ The synergy between gradient accumulation and checkpointing enables training of 
 
 For a network with L layers, each storing A bytes of activations, @tbl-checkpoint-tradeoffs quantifies how the number and placement of checkpoints determines the memory-compute tradeoff. **Note that sub-linear checkpointing strategies can reduce memory consumption from $O(L)$ to $O(\sqrt{L})$ with only a fractional increase in total compute time, enabling the training of much deeper models on existing hardware.**
 
-| **Strategy** | **Memory Cost** | **Recompute Cost** |
-|:---|:---|:---|
-| **No checkpointing** | L x A | 0 forward ops |
-| **Checkpoint every layer** | A | (L-1) forward ops |
-| **k checkpoints** | k x A + (L/k) x A | (L-k) forward ops |
+| **Strategy**               | **Memory Cost**   | **Recompute Cost** |
+|:-------------------------|:----------------|:-----------------|
+| **No checkpointing**       | L x A             | 0 forward ops      |
+| **Checkpoint every layer** | A                 | (L-1) forward ops  |
+| **k checkpoints**          | k x A + (L/k) x A | (L-k) forward ops  |
 
 : **Checkpointing Memory-Compute Tradeoffs.** Different checkpoint strategies trade memory savings against recomputation overhead. The optimal number of checkpoints balances these factors. {#tbl-checkpoint-tradeoffs}
 
@@ -3286,7 +3196,7 @@ Gradient accumulation[^fn-gradient-accumulation-training] simulates larger batch
 
 [^fn-gradient-accumulation-training]: **Gradient Accumulation Impact**: Enables effective batch sizes of 2048+ on single GPUs with only 32-64 micro-batch size, essential for transformer training. BERT-Large training uses effective batch size of 256 (accumulated over 8 steps) achieving 99.5% of full-batch performance while reducing memory requirements by 8x. The technique trades 10-15% compute overhead for massive memory savings.
 
-[^fn-training-activation-checkpointing]: **Activation Checkpointing Trade-offs**: Reduces memory usage by 50--90% at the cost of 15--30% additional compute time due to recomputation. For training GPT-3 on V100s, checkpointing enables 2.8$\times$ larger models (from 1.3 B to 3.7 B parameters) within 32 GB memory constraints, making it essential for memory-bound large model training despite the compute penalty.
+[^fn-training-activation-checkpointing]: **Activation Checkpointing Trade-offs**: Reduces memory usage by 50--90% at the cost of 15--30% additional compute time due to recomputation. For training GPT-3 on V100s, checkpointing enables 2.8$\times$ larger models (from 1.3 B to 3.7 B parameters) within `{python} v100_mem` GB memory constraints, making it essential for memory-bound large model training despite the compute penalty.
 
 Activation checkpointing[^fn-training-activation-checkpointing] significantly reduces the memory footprint of intermediate activations during the forward pass, allowing training of deeper models. By discarding and recomputing activations as needed, checkpointing frees up memory for larger models, additional layers, or higher resolution data. This is especially important in advanced architectures like transformers that require substantial memory for intermediate computations.
 
@@ -3336,11 +3246,14 @@ naive_2wk_str = f"{naive_2wk:.1f}"
 # Communication reduction from gradient accumulation
 comm_reduction_pct = (1 - 1 / accum_steps) * 100
 comm_reduction_pct_str = f"{comm_reduction_pct:.0f}"
+
+# Pre-formatted string for inline use
+accum_steps_str = f"{accum_steps}"
 ```
 
 **Memory Constraints**
 
-- V100 32GB GPU with gradient checkpointing: Can fit batch_size=16 (as shown in activation memory example)
+- V100 `{python} v100_mem` GB GPU with gradient checkpointing: Can fit batch_size=16 (as shown in activation memory example)
 - Desired effective batch_size: 512 (optimal for transformer convergence)
 - Problem: 512 ÷ 16 = `{python} gpus_naive_str` GPUs needed just for batch size
 
@@ -3356,23 +3269,6 @@ Configuration:
 - Global effective batch: 8 GPUs × `{python} batch_per_gpu_str` = **512** ✓
 
 @lst-gradient-accumulation-loop shows the training loop with gradient accumulation.
-
-:::
-
-::: {#lst-gradient-accumulation-loop lst-cap="**Gradient Accumulation Training Loop**: Accumulates gradients over multiple micro-batches before synchronization, reducing communication overhead."}
-```{.python}
-optimizer.zero_grad()
-for step in range(4):  # Accumulation steps
-    micro_batch = next(dataloader)  # 16 samples
-    loss = model(micro_batch) / 4  # Scale loss
-    loss.backward()  # Accumulate gradients
-# Now gradients represent 64 samples
-all_reduce(gradients)  # Sync across 8 GPUs
-optimizer.step()  # Update with effective batch=512
-```
-:::
-
-::: {.callout-notebook title="GPT-2 Gradient Accumulation Strategy (Continued)"}
 
 **Performance Impact**
 
@@ -3393,7 +3289,7 @@ With Accumulation (actual GPT-2 approach):
 
 - Compute overhead: 4$\times$ forward passes per update = ~8% slower (pipeline overlaps some cost)
 - Memory overhead: Gradient accumulation buffer = negligible (gradients already needed)
-- Communication benefit: Sync frequency reduced by `{python} accum_steps`× → communication time drops by `{python} comm_reduction_pct_str`%
+- Communication benefit: Sync frequency reduced by `{python} accum_steps_str`× → communication time drops by `{python} comm_reduction_pct_str`%
 - Cost benefit: Training 2 weeks on 8 GPUs = $`{python} accum_2wk_str`K vs. 32 GPUs = $`{python} naive_2wk_str`K
 
 **Convergence Quality**
@@ -3411,6 +3307,19 @@ $$
 
 :::
 
+::: {#lst-gradient-accumulation-loop lst-cap="**Gradient Accumulation Training Loop**: Accumulates gradients over multiple micro-batches before synchronization, reducing communication overhead."}
+```{.python}
+optimizer.zero_grad()
+for step in range(4):  # Accumulation steps
+    micro_batch = next(dataloader)  # 16 samples
+    loss = model(micro_batch) / 4  # Scale loss
+    loss.backward()  # Accumulate gradients
+# Now gradients represent 64 samples
+all_reduce(gradients)  # Sync across 8 GPUs
+optimizer.step()  # Update with effective batch=512
+```
+:::
+
 #### Practical Considerations {#sec-ai-training-gradient-accumulation-practical-considerations-a5a4}
 
 Gradient accumulation is most valuable when optimal batch sizes exceed GPU memory capacity. Transformer architectures[^fn-transformer-scaling] typically converge best with batch sizes of 256-4096 tokens, far beyond what a single GPU can hold. Accumulation bridges this gap without requiring additional hardware. Activation checkpointing complements this by enabling deeper architectures: models like GPT-3 and T5 rely on checkpointing to fit within single-GPU memory, as do dual-network configurations such as GANs.
@@ -3423,18 +3332,18 @@ Both techniques introduce explicit trade-offs. Activation checkpointing adds app
 
 @tbl-optimization synthesizes the three core optimization strategies, contrasting their primary goals, mechanisms, and trade-offs. The comparison reveals that prefetching improves GPU utilization through parallelism but increases memory overhead, mixed-precision accelerates computation via FP16 but requires careful loss scaling, and gradient accumulation enables larger effective batches but slows parameter updates. Selecting an appropriate strategy depends on the specific bottleneck identified through profiling.
 
-| **Aspect** | **Prefetching and Overlapping** | **Mixed-Precision Training** | **Gradient Accumulation and Checkpointing** |
-|:---|:---|:---|:---|
-| **Primary Goal** | Minimize data transfer delays and maximize GPU utilization | Reduce memory consumption and computational overhead | Overcome memory limitations during backpropagation and parameter updates |
-| **Key Mechanism** | Asynchronous data loading and parallel processing | Combining FP16 and FP32 computations | Simulating larger batch sizes and selective activation storage |
-| **Memory Impact** | Increases memory usage for prefetch buffer | Reduces memory usage by using FP16 | Reduces memory usage for activations and gradients |
-| **Computation Speed** | Improves by reducing idle time | Accelerates computations using FP16 | May slow down due to recomputations in checkpointing |
-| **Scalability** | Highly scalable, especially for large datasets | Enables training of larger models | Allows training deeper models on limited hardware |
-| **Hardware Requirements** | Benefits from fast storage and multi-core CPUs | Requires GPUs with FP16 support (e.g., Tensor Cores) | Works on standard hardware |
-| **Implementation Complexity** | Moderate (requires tuning of prefetch parameters) | Low to moderate (with framework support) | Moderate (requires careful segmentation and accumulation) |
-| **Main Benefits** | Reduces training time, improves hardware utilization | Faster training, larger models, reduced memory usage | Enables larger batch sizes and deeper models |
-| **Primary Challenges** | Tuning buffer sizes, increased memory usage | Potential numerical instability, loss scaling needed | Increased computational overhead, slower parameter updates |
-| **Ideal Use Cases** | Large datasets, complex preprocessing | Large-scale models, especially in NLP and computer vision | Very deep networks, memory-constrained environments |
+| **Aspect**                    | **Prefetching and Overlapping**                            | **Mixed-Precision Training**                              | **Gradient Accumulation and Checkpointing**                              |
+|:----------------------------|:---------------------------------------------------------|:--------------------------------------------------------|:-----------------------------------------------------------------------|
+| **Primary Goal**              | Minimize data transfer delays and maximize GPU utilization | Reduce memory consumption and computational overhead      | Overcome memory limitations during backpropagation and parameter updates |
+| **Key Mechanism**             | Asynchronous data loading and parallel processing          | Combining FP16 and FP32 computations                      | Simulating larger batch sizes and selective activation storage           |
+| **Memory Impact**             | Increases memory usage for prefetch buffer                 | Reduces memory usage by using FP16                        | Reduces memory usage for activations and gradients                       |
+| **Computation Speed**         | Improves by reducing idle time                             | Accelerates computations using FP16                       | May slow down due to recomputations in checkpointing                     |
+| **Scalability**               | Highly scalable, especially for large datasets             | Enables training of larger models                         | Allows training deeper models on limited hardware                        |
+| **Hardware Requirements**     | Benefits from fast storage and multi-core CPUs             | Requires GPUs with FP16 support (e.g., Tensor Cores)      | Works on standard hardware                                               |
+| **Implementation Complexity** | Moderate (requires tuning of prefetch parameters)          | Low to moderate (with framework support)                  | Moderate (requires careful segmentation and accumulation)                |
+| **Main Benefits**             | Reduces training time, improves hardware utilization       | Faster training, larger models, reduced memory usage      | Enables larger batch sizes and deeper models                             |
+| **Primary Challenges**        | Tuning buffer sizes, increased memory usage                | Potential numerical instability, loss scaling needed      | Increased computational overhead, slower parameter updates               |
+| **Ideal Use Cases**           | Large datasets, complex preprocessing                      | Large-scale models, especially in NLP and computer vision | Very deep networks, memory-constrained environments                      |
 
 : **Optimization Strategies.** Prefetching, mixed-precision training, and gradient accumulation address distinct bottlenecks in AI training pipelines: data transfer, memory consumption, and backpropagation. Selecting an appropriate strategy balances implementation complexity against gains in speed and resource utilization, depending on hardware and workload characteristics. {#tbl-optimization}
 
@@ -3443,6 +3352,75 @@ These three techniques—prefetching, mixed precision, and gradient accumulation
 ### Putting It All Together: GPT-2 Optimization Walkthrough {#sec-ai-training-putting-together-gpt2-optimization-walkthrough-def7}
 
 To demonstrate how these techniques compose in practice, let us walk through optimizing GPT-2 (1.5B parameters) training on a single 32 GB V100 GPU.
+
+```{python}
+#| label: gpt2-walkthrough-calc
+#| echo: false
+
+from calc.constants import GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM, V100_MEM_CAPACITY, GiB
+
+# Configuration
+batch_size = 32
+seq_len = 1024
+bytes_fp32 = 4
+bytes_fp16 = 2
+
+# Derive memory from model parameters
+params_b = GPT2_PARAMS.magnitude  # 1.5e9
+
+# Step 1: FP32 Baseline
+params_fp32_gb = params_b * bytes_fp32 / 1e9  # 6.0 GB
+grads_fp32_gb = params_fp32_gb                 # Same as params
+adam_fp32_gb = 2 * params_fp32_gb              # m and v states
+# Activation memory (empirical for GPT-2 XL with batch=32, seq=1024)
+# Includes attention scores, intermediate projections, residuals
+act_fp32_gb = 65.0
+total_fp32_gb = params_fp32_gb + grads_fp32_gb + adam_fp32_gb + act_fp32_gb
+
+# Step 2: Mixed Precision (AMP)
+params_fp16_gb = params_b * bytes_fp16 / 1e9   # 3.0 GB
+grads_fp16_gb = params_fp16_gb                  # Same as params
+master_weights_gb = params_fp32_gb              # FP32 copy for optimizer
+adam_amp_gb = adam_fp32_gb                      # Adam states stay FP32
+act_fp16_gb = act_fp32_gb * (bytes_fp16 / bytes_fp32)  # 32.5 GB
+total_amp_gb = params_fp16_gb + grads_fp16_gb + master_weights_gb + adam_amp_gb + act_fp16_gb
+
+# Step 3: Gradient Checkpointing
+static_mem_gb = params_fp16_gb + grads_fp16_gb + master_weights_gb + adam_amp_gb  # 24.0 GB
+checkpoint_factor = 4  # Checkpoint every 4 layers → 4× reduction
+act_ckpt_gb = act_fp16_gb / checkpoint_factor  # 8.0 GB (approximate)
+total_ckpt_gb = static_mem_gb + act_ckpt_gb
+
+# V100 capacity
+v100_mem_gb = V100_MEM_CAPACITY.to('GB').magnitude
+
+# Improvement calculations
+amp_reduction_pct = (1 - total_amp_gb / total_fp32_gb) * 100
+recompute_overhead_pct = 33  # Empirical: ~33% more compute
+
+# Format strings for inline references
+params_fp32_str = f"{params_fp32_gb:.1f}"
+grads_fp32_str = f"{grads_fp32_gb:.1f}"
+adam_fp32_str = f"{adam_fp32_gb:.1f}"
+act_fp32_str = f"{act_fp32_gb:.1f}"
+total_fp32_str = f"{total_fp32_gb:.1f}"
+
+params_fp16_str = f"{params_fp16_gb:.1f}"
+grads_fp16_str = f"{grads_fp16_gb:.1f}"
+master_weights_str = f"{master_weights_gb:.1f}"
+adam_amp_str = f"{adam_amp_gb:.1f}"
+act_fp16_str = f"{act_fp16_gb:.1f}"
+total_amp_str = f"{total_amp_gb:.1f}"
+
+static_mem_str = f"{static_mem_gb:.1f}"
+act_ckpt_str = f"{act_ckpt_gb:.1f}"
+total_ckpt_str = f"{total_ckpt_gb:.1f}"
+
+v100_mem_str = f"{v100_mem_gb:.0f}"
+amp_reduction_str = f"{amp_reduction_pct:.0f}"
+recompute_overhead_str = f"{recompute_overhead_pct}"
+checkpoint_factor_str = f"{checkpoint_factor}"
+```
 
 ::: {.callout-example title="GPT-2 Optimization on V100"}
 
@@ -3522,12 +3500,12 @@ After optimization:
 
 #### Step 6: Final Profile and Results {.unnumbered}
 
-| **Metric** | **Naive** | **Optimized** | **Improvement** |
-|:---|:---|---:|:---|
-| **Memory** | 101 GB | 26 GB | 3.9× reduction |
-| **GPU utilization** | N/A | 85% | Trainable |
-| **Throughput** | N/A | 1,200 tokens/sec | — |
-| **Time per epoch** | N/A | 8.3 hours | — |
+| **Metric**          | **Naive** |    **Optimized** | **Improvement** |
+|:------------------|:--------|---------------:|:--------------|
+| **Memory**          | 101 GB    |            26 GB | 3.9× reduction  |
+| **GPU utilization** | N/A       |              85% | Trainable       |
+| **Throughput**      | N/A       | 1,200 tokens/sec | —               |
+| **Time per epoch**  | N/A       |        8.3 hours | —               |
 
 **Remaining bottleneck**: Compute-bound (as desired). The 85% utilization indicates good efficiency; remaining 15% is overhead from gradient synchronization, loss scaling, and kernel launch latency.
 
@@ -3598,18 +3576,18 @@ o_cost_str = f"${o_cost:,.0f}"
 o_carbon_str = f"~{o_carbon:.0f} tons CO₂"
 ```
 
-| **Metric** | **FP32 Baseline** | **Optimized** | **Technique Applied** |
-|:---|:---|:---|:---|
-| **Parameters** | `{python} b_param_str` | `{python} o_param_str` | Mixed precision (FP16) |
-| **Gradients** | `{python} b_grad_str` | `{python} o_grad_str` | Mixed precision (FP16) |
-| **Master Weights** | `{python} b_master_str` | `{python} o_master_str` | AMP Overhead |
-| **Optimizer State (Adam)** | `{python} b_opt_str` | `{python} o_opt_str` | Unchanged (FP32 moments) |
-| **Activations (batch=32)** | `{python} b_act_str` | `{python} o_act_str` | Gradient checkpointing + FP16 |
-| **Total Memory** | **`{python} b_total_mem_str`** | **`{python} o_total_mem_str`** | — |
-| **Training Time (32 V100s)** | `{python} b_time_str` | `{python} o_time_str` | 2.4× Tensor Core speedup |
-| **Energy Consumption** | `{python} b_energy_str` | `{python} o_energy_str` | Reduced time + improved efficiency |
-| **Electricity Cost (@$0.10/kWh)** | `{python} b_cost_str` | `{python} o_cost_str` | — |
-| **Carbon Footprint** | `{python} b_carbon_str` | `{python} o_carbon_str` | Regional grid average (0.45 kg/kWh) |
+| **Metric**                        | **FP32 Baseline**              | **Optimized**                  | **Technique Applied**               |
+|:--------------------------------|:-----------------------------|:-----------------------------|:----------------------------------|
+| **Parameters**                    | `{python} b_param_str`         | `{python} o_param_str`         | Mixed precision (FP16)              |
+| **Gradients**                     | `{python} b_grad_str`          | `{python} o_grad_str`          | Mixed precision (FP16)              |
+| **Master Weights**                | `{python} b_master_str`        | `{python} o_master_str`        | AMP Overhead                        |
+| **Optimizer State (Adam)**        | `{python} b_opt_str`           | `{python} o_opt_str`           | Unchanged (FP32 moments)            |
+| **Activations (batch=32)**        | `{python} b_act_str`           | `{python} o_act_str`           | Gradient checkpointing + FP16       |
+| **Total Memory**                  | **`{python} b_total_mem_str`** | **`{python} o_total_mem_str`** | —                                   |
+| **Training Time (32 V100s)**      | `{python} b_time_str`          | `{python} o_time_str`          | 2.4× Tensor Core speedup            |
+| **Energy Consumption**            | `{python} b_energy_str`        | `{python} o_energy_str`        | Reduced time + improved efficiency  |
+| **Electricity Cost (@$0.10/kWh)** | `{python} b_cost_str`          | `{python} o_cost_str`          | —                                   |
+| **Carbon Footprint**              | `{python} b_carbon_str`        | `{python} o_carbon_str`        | Regional grid average (0.45 kg/kWh) |
 
 : **GPT-2 Training Optimization Summary.** Applying mixed-precision training and gradient checkpointing reduces memory from 89 GB to 32 GB, training time by 40%, energy consumption by 58%, and carbon footprint proportionally. {#tbl-gpt2-summary}
 
@@ -3641,7 +3619,7 @@ We have now exhausted the single-machine optimization toolkit. Mixed precision e
 
 ### Scaling Training Systems {#sec-ai-training-scaling-training-systems-adfd}
 
-The optimization techniques examined throughout this chapter extend single-device training capabilities substantially, but they cannot overcome fundamental hardware limits. A single GPU has finite memory capacity, finite compute throughput, and finite memory bandwidth. When model size exceeds device memory even after gradient checkpointing, or when training duration remains unacceptable even at peak utilization, multi-accelerator training becomes necessary. This section examines when and how to scale beyond single-device training, from multi-GPU configurations within a single machine (the ML node scope of this book) to the threshold where distributed systems across multiple machines become essential. The distributed training techniques that operate across network boundaries are covered in detail in Volume II.
+The optimization techniques examined throughout this chapter extend single-device training capabilities substantially, but they cannot overcome fundamental hardware limits. A single GPU has finite memory capacity, finite compute throughput, and finite memory bandwidth. When model size exceeds device memory even after gradient checkpointing, or when training duration remains unacceptable even at peak utilization, multi-accelerator training becomes necessary. This section examines when and how to scale beyond single-device training, from multi-GPU configurations within a single machine (the ML node scope of this book) to the threshold where distributed systems across multiple machines become essential. Distributed training techniques that operate across network boundaries---including collective communication primitives, fault tolerance, and elastic scheduling---constitute an advanced topic that builds on the foundations covered here.
 
 Scaling to multiple devices also amplifies the energy consumption and environmental impact of training. The *carbon footprint of training* grows proportionally with cluster size, making efficiency optimization not just a performance concern but an environmental one.
 
@@ -3691,6 +3669,11 @@ cf_energy_saved_str = f"{cf_energy_saved_kwh:,.0f}"
 cf_co2_str = f"{cf_co2_tons:.1f}"
 cf_gpu_tdp_str = f"{cf_gpu_tdp_w:.0f}"
 cf_household_months_str = f"{cf_household_months:.0f}"
+
+# Pre-formatted strings for inline use
+cf_num_gpus_str = f"{cf_num_gpus}"
+cf_hosts_str = f"{cf_hosts}"
+cf_cpu_tdp_per_host_w_str = f"{cf_cpu_tdp_per_host_w}"
 ```
 
 This scaling leads to a massive *carbon footprint of training*.
@@ -3703,8 +3686,8 @@ Training large models is not just a compute challenge; it's a massive energy sin
 1.  **Workload**: Training a 7B parameter model for 1 trillion tokens.
 2.  **Compute**: $\approx `{python} cf_flops_mantissa` \times 10^{`{python} cf_flops_exp`}$ FLOPs.
 3.  **Efficiency**: 150 TFLOPS sustained on A100 (`{python} a100_tdp`W TDP).
-4.  **Time**: $\approx `{python} cf_time_days_str`$ days on `{python} f"{cf_num_gpus}"` GPUs.
-5.  **Energy**: $(`{python} f"{cf_num_gpus}"` \text{ GPUs} \times `{python} cf_gpu_tdp_str`\text{W} + `{python} f"{cf_hosts}"` \text{ hosts} \times `{python} f"{cf_cpu_tdp_per_host_w}"`\text{W}) \times `{python} cf_time_hours_str` \text{ hours} \approx \mathbf{`{python} cf_energy_kwh_str` \text{ kWh}}$
+4.  **Time**: $\approx `{python} cf_time_days_str`$ days on `{python} cf_num_gpus_str` GPUs.
+5.  **Energy**: $(`{python} cf_num_gpus_str` \text{ GPUs} \times `{python} cf_gpu_tdp_str`\text{W} + `{python} cf_hosts_str` \text{ hosts} \times `{python} cf_cpu_tdp_per_host_w_str`\text{W}) \times `{python} cf_time_hours_str` \text{ hours} \approx \mathbf{`{python} cf_energy_kwh_str` \text{ kWh}}$
 
 **The Systems Conclusion**: This single training run consumes as much electricity as an average US household uses in **`{python} cf_household_months_str` months**.
 
@@ -3771,12 +3754,12 @@ name path=G1,anchor=south west, minimum height=\vi](V)at(B2.north west){};
 
 This architectural progression illuminates why traditional computing systems proved insufficient for neural network training. As shown in @tbl-computing-eras, while HPC systems provided the foundation for parallel numerical computation and warehouse-scale systems demonstrated distributed processing at scale, neither fully addressed the computational patterns of model training. Modern neural networks combine intensive parameter updates, complex memory access patterns, and coordinated distributed computation in ways that demanded new architectural approaches.
 
-| **Era** | **Primary Workload** | **Memory Patterns** | **Processing Model** |
-|:---|:---|:---|:---|
-| **Mainframe** | Sequential batch processing | Simple memory hierarchy | Single instruction stream |
-| **HPC** | Scientific simulation | Regular array access | Synchronized parallel |
-| **Warehouse-scale** | Internet services | Sparse, irregular access | Independent parallel tasks |
-| **AI Hypercomputing** | Neural network training | Parameter-heavy, mixed access | Hybrid parallel, distributed |
+| **Era**               | **Primary Workload**        | **Memory Patterns**           | **Processing Model**         |
+|:--------------------|:--------------------------|:----------------------------|:---------------------------|
+| **Mainframe**         | Sequential batch processing | Simple memory hierarchy       | Single instruction stream    |
+| **HPC**               | Scientific simulation       | Regular array access          | Synchronized parallel        |
+| **Warehouse-scale**   | Internet services           | Sparse, irregular access      | Independent parallel tasks   |
+| **AI Hypercomputing** | Neural network training     | Parameter-heavy, mixed access | Hybrid parallel, distributed |
 
 : **Computing Era Characteristics.** Each computing era optimized for different workload patterns. AI hypercomputing uniquely combines HPC's parallel numerical computation with warehouse-scale's distributed processing, while adding specialized support for gradient-based optimization central to neural network training. {#tbl-computing-eras}
 
@@ -3964,12 +3947,12 @@ Before accepting the complexity of distributed training, practitioners should sy
 
 @tbl-scaling-decision provides quantitative guidance for scaling decisions across different model and data scales.
 
-| **Scale** | **Typical Approach** | **Rationale** |
-|:---|:---|:---|
-| **<1B params, <100GB** | Single GPU | All optimizations fit; fastest iteration |
-| **1-10B params, <1TB** | Single node (1-8 GPUs) | Model parallelism within node avoids network |
-| **10B+ params** | Multi-node cluster | Memory requirements exceed single-node capacity |
-| **>10TB dataset** | Multi-node + streaming | I/O bandwidth requires distributed storage |
+| **Scale**              | **Typical Approach**   | **Rationale**                                   |
+|:---------------------|:---------------------|:----------------------------------------------|
+| **<1B params, <100GB** | Single GPU             | All optimizations fit; fastest iteration        |
+| **1-10B params, <1TB** | Single node (1-8 GPUs) | Model parallelism within node avoids network    |
+| **10B+ params**        | Multi-node cluster     | Memory requirements exceed single-node capacity |
+| **>10TB dataset**      | Multi-node + streaming | I/O bandwidth requires distributed storage      |
 
 : **Scaling Decision Guidelines.** Model size, dataset scale, and available hardware determine when distributed training complexity is justified. Single-machine optimization provides better cost-efficiency below these thresholds. {#tbl-scaling-decision}
 
@@ -4041,6 +4024,8 @@ The training optimizations explored throughout this chapter provide the foundati
 * **Energy and cost scale linearly with training time**: The same optimizations that accelerate training also reduce carbon emissions and cloud costs. Efficiency improvements directly translate to reduced resource consumption.
 
 :::
+
+Training system mastery separates engineers who ship models from those who ship excuses. The practitioners who internalize the Iron Law can look at a slow training job and immediately identify whether the bottleneck is compute-bound (increase batch size, enable mixed precision), memory-bound (activate checkpointing, reduce model size), or communication-bound (adjust gradient accumulation, rethink parallelism strategy). Those who treat training as a black box waste GPU-months on misdiagnosed problems, throwing hardware at bottlenecks that require algorithmic solutions. As training runs scale to millions of dollars and months of calendar time, this diagnostic discipline determines whether organizations can iterate fast enough to remain competitive.
 
 ::: {.callout-chapter-connection title="From Build to Optimize"}
 

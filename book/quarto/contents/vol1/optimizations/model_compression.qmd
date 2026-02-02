@@ -3,6 +3,7 @@ quiz: model_compression_quizzes.json
 concepts: model_compression_concepts.yml
 glossary: model_compression_glossary.json
 crossrefs: model_compression_xrefs.json
+engine: jupyter
 ---
 
 # Model Compression {#sec-model-compression}
@@ -50,11 +51,29 @@ a100_bw_tbs = f"{A100_MEM_BW.to(TB/second).magnitude:.1f}"
 a100_int8_speedup = int(a100_tflops_int8_val / a100_tflops_fp16_val)
 a100_int8_speedup_str = str(a100_int8_speedup)
 
-# Energy
+# Energy (multiply-add operations from constants)
 energy_dram = f"{ENERGY_DRAM_ACCESS_PJ.magnitude:.0f}"
 energy_dram_per_byte = f"{ENERGY_DRAM_PJ_PER_BYTE.magnitude:.0f}"
 energy_flop_fp32 = f"{ENERGY_FLOP_FP32_PJ.magnitude}"
 energy_flop_int8 = f"{ENERGY_FLOP_INT8_PJ.magnitude}"
+
+# Energy for addition operations (Horowitz 2014, 45nm process)
+energy_add_fp32_pj = 0.9
+energy_add_fp16_pj = 0.4
+energy_add_int32_pj = 0.1
+energy_add_int8_pj = 0.03
+energy_mul_fp32_pj = ENERGY_FLOP_FP32_PJ.magnitude  # 3.7 pJ
+
+# Energy strings
+energy_add_fp32_str = f"{energy_add_fp32_pj}"
+energy_add_fp16_str = f"{energy_add_fp16_pj}"
+energy_add_int32_str = f"{energy_add_int32_pj}"
+energy_add_int8_str = f"{energy_add_int8_pj}"
+energy_mul_fp32_str = f"{energy_mul_fp32_pj}"
+
+# INT8 vs FP32 energy ratio
+int8_fp32_energy_ratio = energy_mul_fp32_pj / energy_add_int8_pj
+int8_fp32_energy_ratio_str = f"{int8_fp32_energy_ratio:.1f}"
 
 # V100 specs
 v100_bw_gbs = f"{V100_MEM_BW.to(GB/second).magnitude:.0f}"
@@ -64,15 +83,37 @@ v100_tflops_fp32 = f"{V100_FLOPS_FP32.to(TFLOPs/second).magnitude:.1f}"
 resnet_params_m = f"{RESNET50_PARAMS.to(Mparam).magnitude:.1f}"
 resnet_gflops = f"{RESNET50_FLOPs.to(GFLOPs).magnitude:.1f}"
 mobilenetv2_mflops = f"{MOBILENETV2_FLOPs.to(GFLOPs).magnitude * 1000:.0f}"
+
+# LLM parameter/memory calculations (for model compression intro)
+llm_7b_params = 7  # billion
+llm_7b_mem_fp16_gb = llm_7b_params * 2  # 7B × 2 bytes = 14 GB
+llm_175b_params = GPT3_PARAMS.magnitude / 1e9  # 175B
+llm_175b_mem_fp16_gb = llm_175b_params * 2  # 175B × 2 bytes = 350 GB
+
+# Device memory constraints
+smartphone_ram_gb = 6
+mcu_ram_kb = 512
+
+# GPT-3 training FLOPs
+gpt3_training_flops_exp = 23  # 3.14 × 10^23
+
+# Pre-formatted strings
+llm_7b_str = f"{llm_7b_params}"
+llm_7b_mem_str = f"{llm_7b_mem_fp16_gb:.0f}"
+llm_175b_str = f"{llm_175b_params:.0f}"
+llm_175b_mem_str = f"{llm_175b_mem_fp16_gb:.0f}"
+smartphone_ram_str = f"{smartphone_ram_gb}"
+mcu_ram_str = f"{mcu_ram_kb}"
+gpt3_training_flops_str = f"3.14×10^{gpt3_training_flops_exp}"
 ```
 
 ## Model Optimization Fundamentals {#sec-model-compression-model-optimization-fundamentals-c0d7}
 
-A 7-billion parameter language model requires 14 GB just to store its weights in FP16. Your deployment target is a smartphone with 6 GB of RAM shared across the operating system, applications, and your model. *The math does not work.* No amount of clever engineering changes this arithmetic: 14 GB cannot fit in 6 GB. Yet users expect the model to run: responsively, offline, without draining their battery in an hour. The gap between what training produces and what deployment permits is not a minor inconvenience but a five-orders-of-magnitude chasm that defines the field of model compression.
+A `{python} llm_7b_str`-billion parameter language model requires `{python} llm_7b_mem_str` GB just to store its weights in FP16. Your deployment target is a smartphone with `{python} smartphone_ram_str` GB of RAM shared across the operating system, applications, and your model. *The math does not work.* No amount of clever engineering changes this arithmetic: `{python} llm_7b_mem_str` GB cannot fit in `{python} smartphone_ram_str` GB. Yet users expect the model to run: responsively, offline, without draining their battery in an hour. The gap between what training produces and what deployment permits is not a minor inconvenience but a five-orders-of-magnitude chasm that defines the field of model compression.
 
 Recall the **Silicon Contract**: every model architecture makes an implicit agreement with the hardware about which resource it will saturate: compute throughput, memory bandwidth, or memory capacity. During training, this contract is negotiated upward. Researchers select larger architectures, higher numerical precision, and deeper layers because the training environment, typically a GPU cluster with hundreds of gigabytes of memory, can afford those demands. In @sec-ai-training, we used Mixed Precision (FP16) to speed up these training cycles while maintaining the ability to learn. Here, we go further—to INT8 and beyond—for inference, where we trade the ability to update weights for massive gains in execution efficiency. Deployment reverses these priorities. The production environment is smaller, power-constrained, and latency-sensitive, yet the model was designed for an environment with none of those limitations. Model compression is the systematic process of renegotiating that contract for its new execution context: reducing memory footprint, computational cost, and energy consumption while preserving the model's ability to perform its task.
 
-The scale of this renegotiation makes model optimization an engineering discipline, not a collection of ad hoc tricks. A 175 billion parameter model consumes over 300 GB in FP16 representation alone, yet a smartphone provides 6 GB of RAM and a microcontroller offers 512 KB. Bridging six orders of magnitude between what training produces and what deployment permits requires systematic methods with predictable trade-offs, not trial and error. Every optimization technique removes something from the model, whether redundant parameters, numerical precision, or architectural complexity, and the engineer must understand exactly what is lost, what is preserved, and how these losses compose when techniques are combined.
+The scale of this renegotiation makes model optimization an engineering discipline, not a collection of ad hoc tricks. A `{python} llm_175b_str` billion parameter model consumes over `{python} llm_175b_mem_str` GB in FP16 representation alone, yet a smartphone provides `{python} smartphone_ram_str` GB of RAM and a microcontroller offers `{python} mcu_ram_str` KB. Bridging six orders of magnitude between what training produces and what deployment permits requires systematic methods with predictable trade-offs, not trial and error. Every optimization technique removes something from the model, whether redundant parameters, numerical precision, or architectural complexity, and the engineer must understand exactly what is lost, what is preserved, and how these losses compose when techniques are combined.
 
 This chapter organizes these techniques along three complementary dimensions. *Structural optimization* removes redundancy from the model itself: pruning eliminates parameters that contribute little to output quality, knowledge distillation transfers a large model's learned behavior into a smaller architecture, and neural architecture search discovers designs that are inherently efficient. *Precision optimization* reduces the numerical bit-width of weights and activations, for example converting 32-bit floating point values to 8-bit integers, which shrinks memory footprint and accelerates arithmetic on hardware that supports lower-precision operations. *Hardware-level optimization* ensures that the resulting model executes efficiently on the target processor by fusing operations to reduce memory traffic and exploiting sparsity patterns that the hardware can accelerate. These dimensions are not alternatives but layers in an optimization stack. A practitioner deploying ResNet-50 to a mobile device might prune 50% of its filters, quantize the remaining weights to INT8, and fuse batch normalization into convolution, with each technique compounding the gains of the others.
 
@@ -121,14 +162,14 @@ To understand *why* numerics matter so deeply, consider the *physics of quantiza
 
 According to the **Iron Law** ($T = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot \eta} + L_{lat}$), reducing the bit-width of a weight has a quadratic effect on efficiency:
 
-1.  **Memory Energy ($D$)**: Fetching a 32-bit float from DRAM costs $\approx$ **`{python} energy_dram` pJ**. Fetching an 8-bit integer costs $\approx$ **`{python} energy_dram_per_byte` pJ**.
-2.  **Compute Energy ($Ops$)**: A 32-bit FLOP costs $\approx$ **`{python} energy_flop_fp32` pJ**. An 8-bit integer OP costs $\approx$ **`{python} energy_flop_int8` pJ**.
+1.  **Memory Energy ($D_{vol}$)**: Fetching a 32-bit float from DRAM costs $\approx$ **`{python} energy_dram` pJ**. Fetching an 8-bit integer costs $\approx$ **`{python} energy_dram_per_byte` pJ**.
+2.  **Compute Energy ($O$)**: A 32-bit FLOP costs $\approx$ **`{python} energy_flop_fp32` pJ**. An 8-bit integer OP costs $\approx$ **`{python} energy_flop_int8` pJ**.
 
-| **Operation** | **Bit-Width** | **Relative Energy** |
-|:---|---:|---:|
-| **Integer Add** | 8-bit | 1x |
-| **Float Add** | 32-bit | 30x |
-| **Memory Access** | 64-bit | **40,000x** |
+| **Operation**     | **Bit-Width** | **Relative Energy** |
+|:----------------|------------:|------------------:|
+| **Integer Add**   |         8-bit |                  1x |
+| **Float Add**     |        32-bit |                 30x |
+| **Memory Access** |        64-bit |         **40,000x** |
 
 **For Inference**: Moving from FP32 to INT8 doesn't just save 4× memory; it can reduce the **energy per inference** by nearly **20×** if the hardware supports it.
 
@@ -172,6 +213,7 @@ kv_cache_gb = 1  # approximate KV cache for 4096-token context
 
 # Pre-formatted strings for inputs
 params_b_str = str(params_b)
+billion_exp = "10^9"  # Display string for billion multiplier
 bytes_fp16_str = str(bytes_fp16)
 bytes_int4_str = str(bytes_int4)
 device_ram_gb_str = str(device_ram_gb)
@@ -207,7 +249,7 @@ We call this phenomenon *the quantization speedup*.
 
 **The Math**:
 
-1.  **Model Size**: $`{python} params_b_str` \times 10^9 \text{ params} \times `{python} bytes_fp16_str` \text{ bytes} = `{python} fp16_size_str` \text{ GB}$.
+1.  **Model Size**: $`{python} params_b_str` \times `{python} billion_exp` \text{ params} \times `{python} bytes_fp16_str` \text{ bytes} = `{python} fp16_size_str` \text{ GB}$.
 2.  **KV Cache**: Context window (4096 tokens) requires $\approx `{python} kv_cache_gb_str` \text{ GB}$.
 3.  **Total Memory**: $`{python} fp16_size_str` + `{python} kv_cache_gb_str` =$ `{python} fp16_total_str` GB. This barely fits, leaving no room for OS or buffers.
 4.  **Bandwidth Cost**: Loading `{python} fp16_size_str`GB at `{python} mem_bw_gbs_str` GB/s takes **`{python} fp16_latency_str` ms** per token. That is `{python} fp16_toks_str` tokens/sec, too slow for chat.
@@ -215,7 +257,7 @@ We call this phenomenon *the quantization speedup*.
 **The Fix (INT4)**:
 
 1.  **Quantization**: Convert weights to 4-bit integers (`{python} bytes_int4_str` bytes).
-2.  **New Size**: $`{python} params_b_str` \times 10^9 \times `{python} bytes_int4_str` =$ `{python} int4_size_str` GB.
+2.  **New Size**: $`{python} params_b_str` \times `{python} billion_exp` \times `{python} bytes_int4_str` =$ `{python} int4_size_str` GB.
 3.  **New Speed**: Loading `{python} int4_size_str`GB takes **`{python} int4_latency_str` ms**. Speed jumps to **`{python} int4_toks_str` tokens/sec**.
 
 **The Conclusion**: Quantization is not just about "fitting" the model; it is a **`{python} speedup_str`x Linear Speedup** because LLM generation is bandwidth-bound.
@@ -231,11 +273,11 @@ Before examining deployment scenarios, we must understand these three fundamenta
 
 Optimization requirements vary dramatically across deployment contexts. What matters for cloud inference differs fundamentally from mobile or embedded systems. @tbl-deployment-scenarios summarizes the key constraints across deployment environments.
 
-| **Context** | **Memory** | **Latency** | **Power** | **Primary Goal** |
-|:---|:---|---:|:---|:---|
-| **Cloud** | 10s GB | 10-100ms | Flexible | Throughput, cost |
-| **Mobile/Edge** | 100s MB–GB | 10-50ms | Watts | Size, latency |
-| **TinyML** | KB–MB | 1-10ms | mW | Size, energy |
+| **Context**     | **Memory** | **Latency** | **Power** | **Primary Goal** |
+|:--------------|:---------|----------:|:--------|:---------------|
+| **Cloud**       | 10s GB     |    10-100ms | Flexible  | Throughput, cost |
+| **Mobile/Edge** | 100s MB–GB |     10-50ms | Watts     | Size, latency    |
+| **TinyML**      | KB–MB      |      1-10ms | mW        | Size, energy     |
 
 : **Deployment Constraints**: Each deployment context imposes different optimization priorities. {#tbl-deployment-scenarios}
 
@@ -327,14 +369,14 @@ mobile_cap = f"~{mobile_mem.to(GiB).magnitude:.0f} GB"
 tiny_cap = f"~{tiny_mem.to(KiB).magnitude:.0f} KB"
 ```
 
-| **Model** | **Memory** **(Runtime)** | **Storage** **(Weights)** | **Cloud** **(`{python} cloud_cap`)** | **Mobile** **(`{python} mobile_cap`)** | **TinyML** **(`{python} tiny_cap`)** |
-|:---|:---|:---|:---|:---|:---|
-| **DLRM** | `{python} dlrm_str` | `{python} dlrm_str` | ✓ | `{python} dlrm_mobile` | `{python} dlrm_tiny` |
-| **GPT-2 XL** | `{python} gpt2_str` | `{python} gpt2_str` | ✓ | ✓ | `{python} gpt2_tiny` |
-| **ResNet-50** | `{python} resnet_str` | `{python} resnet_str` | ✓ | ✓ | `{python} resnet_tiny` |
-| **MobileNetV2** | `{python} mobilenet_str` | `{python} mobilenet_str` | ✓ | ✓ | `{python} mobilenet_tiny` |
-| **MobileNetV2 (INT8)** | `{python} mobilenet_int8_str` | `{python} mobilenet_int8_str` | ✓ | ✓ | `{python} mobilenet_int8_tiny` |
-| **DS-CNN (KWS)** | `{python} dscnn_str` | `{python} dscnn_str` | ✓ | ✓ | ✓ |
+| **Model**              | **Memory** **(Runtime)**      | **Storage** **(Weights)**     | **Cloud** **(`{python} cloud_cap`)** | **Mobile** **(`{python} mobile_cap`)** | **TinyML** **(`{python} tiny_cap`)** |
+|:---------------------|:----------------------------|:----------------------------|:-----------------------------------|:-------------------------------------|:-----------------------------------|
+| **DLRM**               | `{python} dlrm_str`           | `{python} dlrm_str`           | ✓                                    | `{python} dlrm_mobile`                 | `{python} dlrm_tiny`                 |
+| **GPT-2 XL**           | `{python} gpt2_str`           | `{python} gpt2_str`           | ✓                                    | ✓                                      | `{python} gpt2_tiny`                 |
+| **ResNet-50**          | `{python} resnet_str`         | `{python} resnet_str`         | ✓                                    | ✓                                      | `{python} resnet_tiny`               |
+| **MobileNetV2**        | `{python} mobilenet_str`      | `{python} mobilenet_str`      | ✓                                    | ✓                                      | `{python} mobilenet_tiny`            |
+| **MobileNetV2 (INT8)** | `{python} mobilenet_int8_str` | `{python} mobilenet_int8_str` | ✓                                    | ✓                                      | `{python} mobilenet_int8_tiny`       |
+| **DS-CNN (KWS)**       | `{python} dscnn_str`          | `{python} dscnn_str`          | ✓                                    | ✓                                      | ✓                                    |
 
 : **The Deployment Gap**: Model memory requirements compared against typical device capacities. Even MobileNetV2 quantized to INT8 exceeds TinyML constraints by 7×, while the purpose-built DS-CNN keyword spotter fits comfortably. Numbers in parentheses show how many times the model exceeds device memory. {#tbl-model-vs-device}
 
@@ -1048,7 +1090,7 @@ Unstructured pruning effectively reduces model size and memory footprint by remo
 
 Structured pruning, in contrast, eliminates entire neurons, channels, or layers, leading to a more hardware-friendly model. This technique provides direct computational savings, as it reduces the number of floating-point operations (FLOPs)[^fn-flops] required during inference.
 
-[^fn-flops]: **FLOPs (Floating-Point Operations)**: Computational complexity metric counting multiply-add operations. ResNet-50 requires approximately 3.8 billion FLOPs per inference [@he2016deep], GPT-3 training required an estimated 3.14E23 FLOPs [@patterson2021carbon]. Modern GPUs achieve 100-300 TFLOPS (trillion FLOPs/second), making FLOP reduction important for efficiency.
+[^fn-flops]: **FLOPs (Floating-Point Operations)**: Computational complexity metric counting multiply-add operations. ResNet-50 requires approximately `{python} resnet_gflops` billion FLOPs per inference [@he2016deep], GPT-3 training required an estimated 3.14E23 FLOPs [@patterson2021carbon]. Modern GPUs achieve 100-300 TFLOPS (trillion FLOPs/second), making FLOP reduction important for efficiency.
 
 The downside is that modifying the network structure can lead to a greater accuracy drop, requiring careful fine-tuning to recover lost performance.
 
@@ -1056,15 +1098,15 @@ Dynamic pruning introduces adaptability into the pruning process by adjusting wh
 
 @tbl-pruning formalizes these comparisons.
 
-| **Aspect** | **Unstructured Pruning** | **Structured Pruning** | **Dynamic Pruning** |
-|:---|:---|:---|:---|
-| **What is removed?** | Individual weights in the model | Entire neurons, channels, filters, or layers | Adjusts pruning based on runtime conditions |
-| **Model structure** | Sparse weight matrices; original architecture remains unchanged | Model architecture is modified; pruned layers are fully removed | Structure adapts dynamically |
-| **Impact on memory** | Reduces model storage by eliminating nonzero weights | Reduces model storage by removing entire components | Varies based on real-time pruning |
-| **Impact on computation** | Limited; dense matrix operations still required unless specialized sparse computation is used | Directly reduces FLOPs and speeds up inference | Balances accuracy and efficiency dynamically |
-| **Hardware compatibility** | Sparse weight matrices require specialized execution support for efficiency | Works efficiently with standard deep learning hardware | Requires adaptive inference engines |
-| **Fine-tuning required?** | Often necessary to recover accuracy after pruning | More likely to require fine-tuning due to larger structural modifications | Adjusts dynamically, reducing the need for fine-tuning |
-| **Use cases** | Memory-efficient model compression for cloud deployment | Real-time inference optimization, mobile/edge AI, and efficient training | Adaptive AI applications, real-time systems |
+| **Aspect**                 | **Unstructured Pruning**                                                                      | **Structured Pruning**                                                    | **Dynamic Pruning**                                    |
+|:-------------------------|:--------------------------------------------------------------------------------------------|:------------------------------------------------------------------------|:-----------------------------------------------------|
+| **What is removed?**       | Individual weights in the model                                                               | Entire neurons, channels, filters, or layers                              | Adjusts pruning based on runtime conditions            |
+| **Model structure**        | Sparse weight matrices; original architecture remains unchanged                               | Model architecture is modified; pruned layers are fully removed           | Structure adapts dynamically                           |
+| **Impact on memory**       | Reduces model storage by eliminating nonzero weights                                          | Reduces model storage by removing entire components                       | Varies based on real-time pruning                      |
+| **Impact on computation**  | Limited; dense matrix operations still required unless specialized sparse computation is used | Directly reduces FLOPs and speeds up inference                            | Balances accuracy and efficiency dynamically           |
+| **Hardware compatibility** | Sparse weight matrices require specialized execution support for efficiency                   | Works efficiently with standard deep learning hardware                    | Requires adaptive inference engines                    |
+| **Fine-tuning required?**  | Often necessary to recover accuracy after pruning                                             | More likely to require fine-tuning due to larger structural modifications | Adjusts dynamically, reducing the need for fine-tuning |
+| **Use cases**              | Memory-efficient model compression for cloud deployment                                       | Real-time inference optimization, mobile/edge AI, and efficient training  | Adaptive AI applications, real-time systems            |
 
 : **Pruning Strategies**: Unstructured, structured, and dynamic pruning each modify model weights differently, impacting both model size and computational efficiency. Unstructured pruning offers the greatest compression but requires specialized hardware, while dynamic pruning adapts to input data for a balance between accuracy and resource usage. {#tbl-pruning}
 
@@ -1966,13 +2008,13 @@ Despite these advantages, knowledge distillation has important limitations. The 
 **Trade-offs.**
 Compared to pruning, knowledge distillation preserves accuracy better but requires higher training complexity through training a new model rather than modifying an existing one. However, pruning provides a more direct computational efficiency gain, especially when structured pruning is used. In practice, combining pruning and distillation often yields the best trade-off, as seen in models like DistilBERT and MobileBERT, where pruning first reduces unnecessary parameters before distillation optimizes a final student model. @tbl-kd-pruning contrasts the key trade-offs between knowledge distillation and pruning across accuracy retention, training cost, inference speed, hardware compatibility, and implementation complexity.
 
-| **Criterion** | **Knowledge Distillation** | **Pruning** |
-|:---|:---|:---|
-| **Accuracy retention** | High – Student learns from teacher, better generalization | Varies – Can degrade accuracy if over-pruned |
-| **Training cost** | Higher – Requires training both teacher and student | Lower – Only fine-tuning needed |
-| **Inference speed** | High – Produces dense, optimized models | Depends – Structured pruning is efficient, unstructured needs special support |
-| **Hardware compatibility** | High – Works on standard accelerators | Limited – Sparse models may need specialized execution |
-| **Ease of implementation** | Complex – Requires designing a teacher-student pipeline | Simple – Applied post-training |
+| **Criterion**              | **Knowledge Distillation**                                | **Pruning**                                                                   |
+|:-------------------------|:--------------------------------------------------------|:----------------------------------------------------------------------------|
+| **Accuracy retention**     | High – Student learns from teacher, better generalization | Varies – Can degrade accuracy if over-pruned                                  |
+| **Training cost**          | Higher – Requires training both teacher and student       | Lower – Only fine-tuning needed                                               |
+| **Inference speed**        | High – Produces dense, optimized models                   | Depends – Structured pruning is efficient, unstructured needs special support |
+| **Hardware compatibility** | High – Works on standard accelerators                     | Limited – Sparse models may need specialized execution                        |
+| **Ease of implementation** | Complex – Requires designing a teacher-student pipeline   | Simple – Applied post-training                                                |
 
 : **Model Compression Trade-Offs**: Knowledge distillation and pruning represent distinct approaches to reducing model size and improving efficiency, each with unique strengths and weaknesses regarding accuracy, computational cost, and implementation complexity. Distillation prioritizes preserving accuracy through knowledge transfer, while pruning directly reduces computational demands by eliminating redundant parameters, making their combined use a common strategy for optimal performance. {#tbl-kd-pruning}
 
@@ -2315,16 +2357,16 @@ Tensor decomposition applies to convolutional filters (approximating 4D weight t
 **Comparing Factorization Approaches.**
 @tbl-lrmf-tensor compares LRMF and tensor decomposition:
 
-| **Feature** | **Low-Rank Matrix Factorization (LRMF)** | **Tensor Decomposition** |
-|:---|:---|:---|
-| **Applicable Data Structure** | Two-dimensional matrices | Multi-dimensional tensors |
-| **Compression Mechanism** | Factorizes a matrix into two or more lower-rank matrices | Decomposes a tensor into multiple lower-rank components |
-| **Common Methods** | Singular Value Decomposition (SVD), Alternating Least Squares (ALS) | CP Decomposition, Tucker Decomposition, Tensor-Train (TT) |
-| **Computational Complexity** | Generally lower, often $ O(mnk) $ for a rank-$ k $ approximation | Higher, due to iterative optimization and tensor contractions |
-| **Storage Reduction** | Reduces storage from $ O(mn) $ to $ O(mk + kn) $ | Achieves higher compression but requires more complex storage representations |
-| **Inference Overhead** | Requires additional matrix multiplication | Introduces additional tensor operations, potentially increasing inference latency |
-| **Primary Use Cases** | Fully connected layers, embeddings, recommendation systems | Convolutional filters, attention mechanisms, multi-modal learning |
-| **Implementation Complexity** | Easier to implement, often involves direct factorization methods | More complex, requiring iterative optimization and rank selection |
+| **Feature**                   | **Low-Rank Matrix Factorization (LRMF)**                            | **Tensor Decomposition**                                                          |
+|:----------------------------|:------------------------------------------------------------------|:--------------------------------------------------------------------------------|
+| **Applicable Data Structure** | Two-dimensional matrices                                            | Multi-dimensional tensors                                                         |
+| **Compression Mechanism**     | Factorizes a matrix into two or more lower-rank matrices            | Decomposes a tensor into multiple lower-rank components                           |
+| **Common Methods**            | Singular Value Decomposition (SVD), Alternating Least Squares (ALS) | CP Decomposition, Tucker Decomposition, Tensor-Train (TT)                         |
+| **Computational Complexity**  | Generally lower, often $ O(mnk) $ for a rank-$ k $ approximation    | Higher, due to iterative optimization and tensor contractions                     |
+| **Storage Reduction**         | Reduces storage from $ O(mn) $ to $ O(mk + kn) $                    | Achieves higher compression but requires more complex storage representations     |
+| **Inference Overhead**        | Requires additional matrix multiplication                           | Introduces additional tensor operations, potentially increasing inference latency |
+| **Primary Use Cases**         | Fully connected layers, embeddings, recommendation systems          | Convolutional filters, attention mechanisms, multi-modal learning                 |
+| **Implementation Complexity** | Easier to implement, often involves direct factorization methods    | More complex, requiring iterative optimization and rank selection                 |
 
 : **Dimensionality & Factorization**: Low-rank matrix factorization (LRMF) and tensor decomposition reduce model storage requirements by representing data with fewer parameters, but introduce computational trade-offs during inference; LRMF applies to two-dimensional matrices, while tensor decomposition extends this approach to multi-dimensional tensors for greater compression potential. {#tbl-lrmf-tensor}
 
@@ -2447,11 +2489,11 @@ Hardware-aware NAS extends search spaces to include deployment constraints as fi
 
 Search strategies determine how to explore the architecture space efficiently without exhaustive enumeration. @tbl-nas-strategies compares the trade-offs between search cost, architectural diversity, and optimality guarantees for each approach.
 
-| **Strategy** | **Search Efficiency** | **When to Use** | **Key Challenge** |
-|:---|---:|:---|:---|
-| **Reinforcement Learning** | 400-1000 GPU-days | Novel domains, unconstrained search | High computational cost |
-| **Evolutionary Algorithms** | 200-500 GPU-days | Parallel infrastructure available | Requires large populations |
-| **Gradient-Based (DARTS)** | 1-4 GPU-days | Limited compute budget | May converge to suboptimal local minima |
+| **Strategy**                | **Search Efficiency** | **When to Use**                     | **Key Challenge**                       |
+|:--------------------------|--------------------:|:----------------------------------|:--------------------------------------|
+| **Reinforcement Learning**  |     400-1000 GPU-days | Novel domains, unconstrained search | High computational cost                 |
+| **Evolutionary Algorithms** |      200-500 GPU-days | Parallel infrastructure available   | Requires large populations              |
+| **Gradient-Based (DARTS)**  |          1-4 GPU-days | Limited compute budget              | May converge to suboptimal local minima |
 
 : **NAS Search Strategy Comparison**: Trade-offs between search efficiency, use cases, and limitations for different NAS approaches. Reinforcement learning offers unconstrained exploration at high cost, evolutionary methods leverage parallelism, and gradient-based approaches achieve dramatic speedups with potential optimality trade-offs. {#tbl-nas-strategies}
 
@@ -2539,7 +2581,7 @@ Efficient numerical representations enable significant reductions in storage req
 
 #### Energy Costs {#sec-model-compression-energy-costs-fb60}
 
-Beyond computational and memory benefits, the energy costs associated with different numerical precisions reinforce the case for reduced precision. @fig-quantized-energy quantifies these energy differences: a 32-bit floating-point addition (FAdd) consumes approximately 0.9 pJ, whereas a 16-bit floating-point addition requires only 0.4 pJ. Similarly, a 32-bit integer addition costs 0.1 pJ, while an 8-bit integer addition is just 0.03 pJ. These savings compound across large-scale models operating over billions of operations, supporting both cost reduction and sustainability goals.
+Beyond computational and memory benefits, the energy costs associated with different numerical precisions reinforce the case for reduced precision. @fig-quantized-energy quantifies these energy differences: a 32-bit floating-point addition (FAdd) consumes approximately `{python} energy_add_fp32_str` pJ, whereas a 16-bit floating-point addition requires only `{python} energy_add_fp16_str` pJ. Similarly, a 32-bit integer addition costs `{python} energy_add_int32_str` pJ, while an 8-bit integer addition is just `{python} energy_add_int8_str` pJ. These savings compound across large-scale models operating over billions of operations, supporting both cost reduction and sustainability goals.
 
 ::: {#fig-quantized-energy fig-env="figure" fig-pos="htb" fig-cap="**Energy per Operation by Precision.** Bar chart comparing energy in picojoules for arithmetic operations (FP32 multiply: 3.7 pJ, INT8 add: 0.03 pJ) and SRAM memory accesses (5 to 50 pJ by cache size). Lower precision yields order-of-magnitude energy savings. Source: IEEE Spectrum." fig-alt="Bar chart comparing energy consumption in picojoules for arithmetic operations and memory accesses. FP32 multiply uses 3.7 pJ, INT8 add uses 0.03 pJ. SRAM reads range from 5 to 50 pJ depending on cache size."}
 ```{.tikz}
@@ -2763,6 +2805,7 @@ int4_size_gb = llm_params_b * 1e9 * int4_bytes / 1e9
 compression_ratio = int(fp16_size_gb / int4_size_gb)
 
 llm_params_b_str = str(llm_params_b)
+billion_exp = "10^9"  # Display string for billion multiplier
 fp16_bytes_str = str(fp16_bytes)
 int4_bytes_str = str(int4_bytes)
 fp16_size_gb_str = f"{fp16_size_gb:.0f}"
@@ -2775,12 +2818,12 @@ compression_ratio_str = str(compression_ratio)
 
 **FP16 (Half Precision)**
 
-- **Size**: $`{python} llm_params_b_str` \times 10^9 \times `{python} fp16_bytes_str` \text{ bytes (16-bit)} = `{python} fp16_size_gb_str` \text{ GB}$
+- **Size**: $`{python} llm_params_b_str` \times `{python} billion_exp` \times `{python} fp16_bytes_str` \text{ bytes (16-bit)} = `{python} fp16_size_gb_str` \text{ GB}$
 - **Hardware Req**: Requires 24GB GPU (e.g., A10G, 3090, 4090).
 
 **INT4 (4-bit Quantization)**
 
-- **Size**: $`{python} llm_params_b_str` \times 10^9 \times `{python} int4_bytes_str` \text{ bytes (4-bit)} = `{python} int4_size_gb_str` \text{ GB}$
+- **Size**: $`{python} llm_params_b_str` \times `{python} billion_exp` \times `{python} int4_bytes_str` \text{ bytes (4-bit)} = `{python} int4_size_gb_str` \text{ GB}$
 - **Hardware Req**: Fits comfortably on 8GB GPU (e.g., T4, consumer laptops).
 
 **Impact**: `{python} compression_ratio_str`x compression allows deployment on commodity hardware, reducing cost by 5-10x.
@@ -2831,7 +2874,7 @@ Reducing numerical precision introduces trade-offs, however. Lower-precision for
 
 ![**Quantization Error Distribution**: Histogram of quantization error weighted by probability density p(x), showing a bell-shaped curve centered near zero with tails that introduce quantization noise affecting model accuracy.](images/png/modeloptimization_quant_hist.png){#fig-quantization width=80% fig-alt="Histogram showing quantization error distribution weighted by probability density. Bell-shaped curve centered near zero with tails extending to positive and negative errors, illustrating typical quantization noise pattern."}
 
-::: {.callout-notebook title="The Quantization Speedup: Compute-Bound vs. Memory-Bound"}
+::: {.callout-notebook title="The Quantization Speedup"}
 **Problem**: You have a compute-bound matrix multiplication (e.g., in a Transformer MLP block). You switch from FP16 to INT8. What is the expected speedup?
 
 **The Math**: On modern hardware with dedicated INT8 units:
@@ -2847,16 +2890,16 @@ Reducing numerical precision introduces trade-offs, however. Lower-precision for
 
 @tbl-numerics compares commonly used numerical precision formats in machine learning, each exhibiting distinct trade-offs in storage efficiency, computational speed, and energy consumption. Emerging formats like FP8 and TF32 have been introduced to further optimize performance, especially on AI accelerators.
 
-| **Precision Format** | **Bit-Width** | **Storage Reduction (vs FP32)** | **Compute Speed (vs FP32)** | **Power Consumption** | **Use Cases** |
-|:---|---:|---:|---:|:---|:---|
-| **FP32 (Single-Precision Floating Point)** | 32-bit | Baseline (1×) | Baseline (1×) | High | Training & inference (general-purpose) |
-| **FP16 (Half-Precision Floating Point)** | 16-bit | 2× smaller | 2× faster on FP16-optimized hardware | Lower | Accelerated training, inference (NVIDIA Tensor Cores, TPUs) |
-| **bfloat16 (Brain Floating Point)** | 16-bit | 2× smaller | Similar speed to FP16, better dynamic range | Lower | Training on TPUs, transformer-based models |
-| **TF32 (TensorFloat-32)** | 19-bit | Similar to FP16 | Up to 8× faster on NVIDIA Ampere GPUs | Lower | Training on NVIDIA GPUs |
-| **FP8 (Floating-Point 8-bit)** | 8-bit | 4× smaller | Faster than INT8 in some cases | Significantly lower | Efficient training/inference (H100, AI accelerators) |
-| **INT8 (8-bit Integer)** | 8-bit | 4× smaller | 4–8× faster than FP32 | Significantly lower | Quantized inference (Edge AI, mobile AI, NPUs) |
-| **INT4 (4-bit Integer)** | 4-bit | 8× smaller | Hardware-dependent | Extremely low | Ultra-low-power AI, experimental quantization |
-| **Binary/Ternary (1-bit / 2-bit)** | 1–2-bit | 16–32× smaller | Highly hardware-dependent | Lowest | Extreme efficiency (binary/ternary neural networks) |
+| **Precision Format**                       | **Bit-Width** | **Storage Reduction (vs FP32)** |                 **Compute Speed (vs FP32)** | **Power Consumption** | **Use Cases**                                               |
+|:-----------------------------------------|------------:|------------------------------:|------------------------------------------:|:--------------------|:----------------------------------------------------------|
+| **FP32 (Single-Precision Floating Point)** |        32-bit |                   Baseline (1×) |                               Baseline (1×) | High                  | Training & inference (general-purpose)                      |
+| **FP16 (Half-Precision Floating Point)**   |        16-bit |                      2× smaller |        2× faster on FP16-optimized hardware | Lower                 | Accelerated training, inference (NVIDIA Tensor Cores, TPUs) |
+| **bfloat16 (Brain Floating Point)**        |        16-bit |                      2× smaller | Similar speed to FP16, better dynamic range | Lower                 | Training on TPUs, transformer-based models                  |
+| **TF32 (TensorFloat-32)**                  |        19-bit |                 Similar to FP16 |       Up to 8× faster on NVIDIA Ampere GPUs | Lower                 | Training on NVIDIA GPUs                                     |
+| **FP8 (Floating-Point 8-bit)**             |         8-bit |                      4× smaller |              Faster than INT8 in some cases | Significantly lower   | Efficient training/inference (H100, AI accelerators)        |
+| **INT8 (8-bit Integer)**                   |         8-bit |                      4× smaller |                       4–8× faster than FP32 | Significantly lower   | Quantized inference (Edge AI, mobile AI, NPUs)              |
+| **INT4 (4-bit Integer)**                   |         4-bit |                      8× smaller |                          Hardware-dependent | Extremely low         | Ultra-low-power AI, experimental quantization               |
+| **Binary/Ternary (1-bit / 2-bit)**         |       1–2-bit |                  16–32× smaller |                   Highly hardware-dependent | Lowest                | Extreme efficiency (binary/ternary neural networks)         |
 
 : **Numerical Precision Formats**: Comparison of precision formats by bit width, memory reduction, computational efficiency, accuracy retention, and typical use cases across deployment contexts. {#tbl-numerics}
 
@@ -2948,7 +2991,7 @@ For KWS, INT8 quantization is often just the *starting point*. To fit complex ac
 
 ### Energy Efficiency and Sustainability {#sec-model-compression-energy-efficiency-sustainability-8f3a}
 
-Quantization reduces energy consumption through two complementary mechanisms: smaller data types require fewer memory accesses (the dominant energy cost, as established in the Physics of Quantization analysis above), and lower-precision arithmetic units consume less power per operation. An INT8 multiply, for example, uses roughly $18.5\times$ less energy than its FP32 equivalent, compounding the memory energy savings into substantial reductions at system scale.
+Quantization reduces energy consumption through two complementary mechanisms: smaller data types require fewer memory accesses (the dominant energy cost, as established in the Physics of Quantization analysis above), and lower-precision arithmetic units consume less power per operation. An INT8 operation, for example, uses roughly `{python} int8_fp32_energy_ratio_str`× less energy than its FP32 equivalent, compounding the memory energy savings into substantial reductions at system scale.
 
 These gains depend on hardware support. AI accelerators with dedicated low-precision units (Tensor Cores for FP16/INT8, or the newer FP8 units on H100-class hardware) realize the full energy benefit, while general-purpose CPUs lacking such units see limited improvement. The practical implication is that energy efficiency from quantization is not a software-only optimization; it requires matching the chosen precision format to the target hardware's arithmetic capabilities.
 
@@ -3650,21 +3693,21 @@ Dynamic quantization instead calculates the range for each activation map at run
 
 These timing and granularity decisions interact with the broader choice of quantization methodology. @tbl-quantization_methods compares post-training quantization, quantization-aware training, and dynamic quantization, each offering distinct strengths and trade-offs for different deployment scenarios.
 
-| **Aspect** | **Post Training Quantization** | **Quantization-Aware Training** | **Dynamic Quantization** |
-|:---|:---|:---|:---|
-| **Pros** |  |  |  |
-| **Simplicity** | ✓ | ✗ | ✗ |
-| **Accuracy Preservation** | ✗ | ✓ | ✓ |
-| **Adaptability** | ✗ | ✗ | ✓ |
-| **Optimized Performance** | ✗ | ✓ | △ |
-| **Cons** |  |  |  |
-| **Accuracy Degradation** | ✓ | ✗ | △ |
-| **Computational Overhead** | ✗ | ✓ | ✓ |
-| **Implementation Complexity** | ✗ | ✓ | ✓ |
-| **Tradeoffs** |  |  |  |
-| **Speed vs. Accuracy** | ✓ | ✗ | ✗ |
-| **Accuracy vs. Cost** | ✗ | ✓ | ✗ |
-| **Adaptability vs. Overhead** | ✗ | ✗ | ✓ |
+| **Aspect**                    | **Post Training Quantization** | **Quantization-Aware Training** | **Dynamic Quantization** |
+|:----------------------------|:-----------------------------|:------------------------------|:-----------------------|
+| **Pros**                      |                                |                                 |                          |
+| **Simplicity**                | ✓                              | ✗                               | ✗                        |
+| **Accuracy Preservation**     | ✗                              | ✓                               | ✓                        |
+| **Adaptability**              | ✗                              | ✗                               | ✓                        |
+| **Optimized Performance**     | ✗                              | ✓                               | △                        |
+| **Cons**                      |                                |                                 |                          |
+| **Accuracy Degradation**      | ✓                              | ✗                               | △                        |
+| **Computational Overhead**    | ✗                              | ✓                               | ✓                        |
+| **Implementation Complexity** | ✗                              | ✓                               | ✓                        |
+| **Tradeoffs**                 |                                |                                 |                          |
+| **Speed vs. Accuracy**        | ✓                              | ✗                               | ✗                        |
+| **Accuracy vs. Cost**         | ✗                              | ✓                               | ✗                        |
+| **Adaptability vs. Overhead** | ✗                              | ✗                               | ✓                        |
 
 : **Quantization Method Comparison**: Post-training quantization, quantization-aware training, and dynamic quantization represent distinct approaches to model compression. Legend: ✓ = present, ✗ = absent, △ = input-dependent. {#tbl-quantization_methods}
 
@@ -3978,13 +4021,13 @@ QAT introduces extra hyperparameters and design considerations, such as choosing
 
 @tbl-qat contrasts QAT and PTQ across accuracy retention, training complexity, and deployment readiness:
 
-| **Aspect** | **QAT (Quantization-Aware Training)** | **PTQ (Post-Training Quantization)** |
-|:---|:---|:---|
-| **Accuracy Retention** | Minimizes accuracy loss from quantization | May suffer from accuracy degradation |
-| **Inference Efficiency** | Optimized for low-precision hardware (e.g., INT8 on TPUs) | Optimized but may require calibration |
-| **Training Complexity** | Requires fine-tuning with quantization constraints | No retraining required |
-| **Training Time** | Slower due to simulated quantization in forward pass | Faster, as quantization is applied post hoc |
-| **Deployment Readiness** | Best for models sensitive to quantization errors | Fastest way to optimize models for inference |
+| **Aspect**               | **QAT (Quantization-Aware Training)**                     | **PTQ (Post-Training Quantization)**         |
+|:-----------------------|:--------------------------------------------------------|:-------------------------------------------|
+| **Accuracy Retention**   | Minimizes accuracy loss from quantization                 | May suffer from accuracy degradation         |
+| **Inference Efficiency** | Optimized for low-precision hardware (e.g., INT8 on TPUs) | Optimized but may require calibration        |
+| **Training Complexity**  | Requires fine-tuning with quantization constraints        | No retraining required                       |
+| **Training Time**        | Slower due to simulated quantization in forward pass      | Faster, as quantization is applied post hoc  |
+| **Deployment Readiness** | Best for models sensitive to quantization errors          | Fastest way to optimize models for inference |
 
 : **QAT versus PTQ**: Quantization-aware training (QAT) minimizes accuracy loss by incorporating quantization into the training process, while post-training quantization (PTQ) offers faster deployment but may require calibration to mitigate accuracy degradation. QAT increases training complexity compared to the simplicity of applying PTQ to a pre-trained model. {#tbl-qat}
 
@@ -4045,12 +4088,12 @@ Hardware-aware design incorporates target platform constraints, including memory
 
 Designing for hardware efficiency requires structuring architectures to account for computational cost, memory usage, inference latency, and power consumption while maintaining strong predictive performance. A key aspect involves leveraging the strengths of specific hardware platforms (GPUs, TPUs, mobile or edge devices) to maximize parallelism, optimize memory hierarchies, and minimize latency through hardware-optimized operations. @tbl-hardware-efficient-design categorizes these design principles, each addressing a core aspect of computational and system constraints.
 
-| **Principle** | **Goal** | **Example Networks** |
-|:---|:---|:---|
-| **Scaling Optimization** | Adjust model depth, width, and resolution to balance efficiency and hardware constraints. | EfficientNet, RegNet |
-| **Computation Reduction** | Minimize redundant operations to reduce computational cost, using hardware-specific optimizations (e.g., depthwise separable convolutions on mobile chips). | MobileNet, ResNeXt |
-| **Memory Optimization** | Ensure efficient memory usage by reducing activation and parameter storage requirements, using hardware-specific memory hierarchies (e.g., local and global memory in GPUs). | DenseNet, SqueezeNet |
-| **Hardware-Aware Design** | Optimize architectures for specific hardware constraints (e.g., low power, parallelism, high throughput). | TPU-optimized models, MobileNet |
+| **Principle**             | **Goal**                                                                                                                                                                     | **Example Networks**            |
+|:------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------|
+| **Scaling Optimization**  | Adjust model depth, width, and resolution to balance efficiency and hardware constraints.                                                                                    | EfficientNet, RegNet            |
+| **Computation Reduction** | Minimize redundant operations to reduce computational cost, using hardware-specific optimizations (e.g., depthwise separable convolutions on mobile chips).                  | MobileNet, ResNeXt              |
+| **Memory Optimization**   | Ensure efficient memory usage by reducing activation and parameter storage requirements, using hardware-specific memory hierarchies (e.g., local and global memory in GPUs). | DenseNet, SqueezeNet            |
+| **Hardware-Aware Design** | Optimize architectures for specific hardware constraints (e.g., low power, parallelism, high throughput).                                                                    | TPU-optimized models, MobileNet |
 
 : **Hardware-Aware Design Principles**: Categorizing model design choices by their impact on computational cost, memory usage, and inference latency enables structured optimization for diverse hardware platforms and deployment scenarios. MobileNet exemplifies computation reduction through depthwise separable convolutions, while DenseNet and SqueezeNet demonstrate memory optimization strategies. {#tbl-hardware-efficient-design}
 
@@ -4173,6 +4216,7 @@ Common fusion patterns in neural network inference optimize specific operation s
 conv_out = conv2d(input, weight)
 bn_out = batch_norm(conv_out, ...)
 relu_out = relu(bn_out)
+
 
 # === FUSED: 1 kernel launch, 2 memory transfers ===
 def conv_bn_relu_fused(input, weight, gamma, beta, mean, var):
@@ -5937,14 +5981,14 @@ Modern hardware accelerators provide specialized support for sparse operations, 
 
 While sparsity offers significant efficiency advantages, several challenges limit its practical effectiveness. @tbl-sparsity-optimization summarizes these challenges.
 
-| **Challenge** | **Description** | **Impact** |
-|:---|:---|:---|
-| **Unstructured Sparsity Optimization** | Irregular sparse patterns make it difficult to exploit sparsity on hardware. | Limited hardware acceleration and reduced computational savings. |
-| **Algorithmic Complexity** | Sophisticated pruning and sparse matrix operations require complex algorithms. | High computational overhead and algorithmic complexity for large models. |
-| **Hardware Support** | Hardware accelerators are optimized for structured sparsity, making unstructured sparsity harder to optimize. | Suboptimal hardware utilization and lower performance for unstructured sparsity. |
-| **Accuracy Trade-off** | Aggressive sparsity may degrade model accuracy if not carefully balanced. | Potential loss in performance, requiring careful tuning and validation. |
-| **Energy Efficiency** | Overhead from sparse matrix storage and management can offset the energy savings from reduced computation. | Power consumption may not improve if the overhead surpasses savings from sparse computations. |
-| **Limited Applicability** | Sparsity may not benefit all models or tasks, especially in domains requiring dense representations. | Not all models or hardware benefit equally from sparsity. |
+| **Challenge**                          | **Description**                                                                                               | **Impact**                                                                                    |
+|:-------------------------------------|:------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------|
+| **Unstructured Sparsity Optimization** | Irregular sparse patterns make it difficult to exploit sparsity on hardware.                                  | Limited hardware acceleration and reduced computational savings.                              |
+| **Algorithmic Complexity**             | Sophisticated pruning and sparse matrix operations require complex algorithms.                                | High computational overhead and algorithmic complexity for large models.                      |
+| **Hardware Support**                   | Hardware accelerators are optimized for structured sparsity, making unstructured sparsity harder to optimize. | Suboptimal hardware utilization and lower performance for unstructured sparsity.              |
+| **Accuracy Trade-off**                 | Aggressive sparsity may degrade model accuracy if not carefully balanced.                                     | Potential loss in performance, requiring careful tuning and validation.                       |
+| **Energy Efficiency**                  | Overhead from sparse matrix storage and management can offset the energy savings from reduced computation.    | Power consumption may not improve if the overhead surpasses savings from sparse computations. |
+| **Limited Applicability**              | Sparsity may not benefit all models or tasks, especially in domains requiring dense representations.          | Not all models or hardware benefit equally from sparsity.                                     |
 
 : **Sparsity Optimization Challenges**: Unstructured sparsity, while reducing model size, hinders hardware acceleration due to irregular memory access patterns, limiting potential computational savings and requiring specialized hardware or software to realize efficiency gains. {#tbl-sparsity-optimization}
 
@@ -5981,13 +6025,13 @@ The preceding sections have systematically explored all three dimensions of our 
 
 Understanding how system constraints map to optimization dimensions guides practitioners toward the most relevant approaches. @tbl-constraint-opt-mapping maps system constraints to specific optimization dimensions, guiding technique selection based on deployment requirements.
 
-| **System Constraint** | **Model Representation** | **Numerical Precision** | **Architectural Efficiency** |
-|:---|:---|:---|:---|
-| **Computational Cost** | ✗ | ✓ | ✓ |
-| **Memory and Storage** | ✓ | ✓ | ✗ |
-| **Latency and Throughput** | ✓ | ✗ | ✓ |
-| **Energy Efficiency** | ✗ | ✓ | ✓ |
-| **Scalability** | ✓ | ✗ | ✓ |
+| **System Constraint**      | **Model Representation** | **Numerical Precision** | **Architectural Efficiency** |
+|:-------------------------|:-----------------------|:----------------------|:---------------------------|
+| **Computational Cost**     | ✗                        | ✓                       | ✓                            |
+| **Memory and Storage**     | ✓                        | ✓                       | ✗                            |
+| **Latency and Throughput** | ✓                        | ✗                       | ✓                            |
+| **Energy Efficiency**      | ✗                        | ✓                       | ✓                            |
+| **Scalability**            | ✓                        | ✗                       | ✓                            |
 
 : **Optimization Dimensions**: System constraints drive optimization along three core dimensions: model representation, numerical precision, and architectural efficiency, each addressing different resource limitations and performance goals. {#tbl-constraint-opt-mapping}
 
@@ -6446,11 +6490,11 @@ Having explored the three major optimization approaches in depth, along with fra
 
 @tbl-optimization-comparison enables systematic technique selection based on these trade-offs. Pruning works best when sparse computation hardware is available and when reducing floating-point operations is critical. Quantization provides the most versatile approach with broad hardware support, making it ideal for diverse deployment scenarios. Knowledge distillation requires significant computational investment but produces consistently high-quality compressed models, making it valuable when accuracy preservation is paramount.
 
-| **Technique** | **Primary Goal** | **Accuracy Impact** | **Training Cost** | **Hardware Dependency** | **Best For** |
-|:---|:---|:---|:---|:---|:---|
-| **Pruning** | Reduce FLOPs/Size | Moderate | Low (fine-tuning) | High (for sparse ops) | Latency-critical apps |
-| **Quantization** | Reduce Size/Latency | Low | Low (PTQ) / High (QAT) | High (INT8 support) | Edge/Mobile deployment |
-| **Distillation** | Reduce Size | Low-Moderate | High (student training) | Low | Creating smaller, high-quality models |
+| **Technique**    | **Primary Goal**    | **Accuracy Impact** | **Training Cost**       | **Hardware Dependency** | **Best For**                          |
+|:---------------|:------------------|:------------------|:----------------------|:----------------------|:------------------------------------|
+| **Pruning**      | Reduce FLOPs/Size   | Moderate            | Low (fine-tuning)       | High (for sparse ops)   | Latency-critical apps                 |
+| **Quantization** | Reduce Size/Latency | Low                 | Low (PTQ) / High (QAT)  | High (INT8 support)     | Edge/Mobile deployment                |
+| **Distillation** | Reduce Size         | Low-Moderate        | High (student training) | Low                     | Creating smaller, high-quality models |
 
 : **Optimization Technique Trade-offs**: Comparison of the three major optimization approaches across key performance dimensions, highlighting how each technique addresses different constraints and deployment scenarios. Pruning excels for computational reduction but requires sparse hardware support, quantization provides balanced size and speed improvements with wide hardware compatibility, while distillation produces high-quality compressed models at higher training cost. {#tbl-optimization-comparison}
 

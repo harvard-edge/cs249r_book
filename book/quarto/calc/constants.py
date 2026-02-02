@@ -141,6 +141,7 @@ NETWORK_5G_ENERGY_PER_MB_MJ = 100 * ureg.millijoule / MB
 NVLINK_V100_BW = 300 * GB / second        # NVLink 2.0 (V100, 6 links × 50 GB/s)
 NVLINK_A100_BW = 600 * GB / second        # NVLink 3.0 (A100, 12 links × 50 GB/s)
 NVLINK_H100_BW = 900 * GB / second        # NVLink 4.0 (H100, 18 links × 50 GB/s)
+PCIE_GEN3_BW = 15.75 * GB / second        # PCIe Gen3 x16 (after 128b/130b encoding)
 PCIE_GEN4_BW = 32 * GB / second           # PCIe Gen4 x16 (bidirectional)
 PCIE_GEN5_BW = 64 * GB / second           # PCIe Gen5 x16 (bidirectional)
 
@@ -215,6 +216,15 @@ RESNET50_FLOPs = 4.1e9 * flop
 # MobileNetV2
 MOBILENETV2_PARAMS = 3.5e6 * param
 MOBILENETV2_FLOPs = 0.3e9 * flop
+
+# KWS DS-CNN (Keyword Spotting Depthwise Separable CNN)
+KWS_DSCNN_PARAMS = 200e3 * param
+KWS_DSCNN_FLOPs = 20e6 * flop
+
+# DLRM (Deep Learning Recommendation Model) — Meta benchmark
+DLRM_EMBEDDING_ENTRIES = 25e9  # 25 Billion entries (dimensionless count)
+DLRM_EMBEDDING_DIM = 128
+DLRM_MODEL_SIZE_FP32 = 100 * GB  # Approximate total model size
 
 # YOLOv8-nano
 YOLOV8_NANO_FLOPs = 3.2e9 * flop

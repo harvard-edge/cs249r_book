@@ -3,7 +3,18 @@
 # centralizing the logic for TCO, Physics, and Performance math.
 
 from .constants import ureg, SPEED_OF_LIGHT_FIBER_KM_S, MS, MB, GB, hour
-from IPython.display import Markdown
+
+# Lazy import for IPython.display.Markdown
+# This allows modules that only use fmt/sci to work without IPython installed
+_Markdown = None
+
+def _get_markdown():
+    """Lazily import IPython.display.Markdown when first needed."""
+    global _Markdown
+    if _Markdown is None:
+        from IPython.display import Markdown
+        _Markdown = Markdown
+    return _Markdown
 
 def _ensure_unit(val, unit):
     """Helper to attach unit if value is a raw number."""
@@ -101,7 +112,8 @@ def sci(val, precision=2):
     Formats a number or Pint Quantity into scientific notation using Unicode.
     Example: 4.1e9 -> "4.10 × 10⁹"
     
-    For Pint quantities, converts to base units first to get the full magnitude.
+    For Pint quantities, extracts the magnitude directly (do NOT use
+    to_base_units() as it converts bytes->bits, causing display errors).
     Uses Unicode × and superscript digits to avoid escaping issues
     when interpolated via inline Python in Quarto documents.
     """
@@ -109,10 +121,7 @@ def sci(val, precision=2):
     SUPERSCRIPTS = {'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
                     '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '-': '⁻'}
     
-    if hasattr(val, "to_base_units"):
-        # Pint quantity - convert to base units to get full magnitude
-        val = val.to_base_units().magnitude
-    elif hasattr(val, "magnitude"):
+    if hasattr(val, "magnitude"):
         val = val.magnitude
     s = f"{val:.{precision}e}"
     base, exp = s.split('e')
@@ -142,6 +151,7 @@ def md(latex_str):
         ...
         `{python} result`
     """
+    Markdown = _get_markdown()
     return Markdown(latex_str)
 
 def md_frac(numerator, denominator, result=None, unit=None):
@@ -155,6 +165,7 @@ def md_frac(numerator, denominator, result=None, unit=None):
     
     Returns: $\frac{num}{denom}$ or $\frac{num}{denom} = result$ unit
     """
+    Markdown = _get_markdown()
     latex = f'$\\frac{{{numerator}}}{{{denominator}}}$'
     if result is not None:
         latex += f' = {result}'
@@ -167,13 +178,11 @@ def sci_latex(val, precision=2):
     Formats a number or Pint Quantity into LaTeX scientific notation.
     Example: 4.1e9 -> "4.10 \\times 10^{9}"
     
-    For Pint quantities, converts to base units first to get the full magnitude.
+    For Pint quantities, extracts the magnitude directly (do NOT use
+    to_base_units() as it converts bytes->bits, causing display errors).
     Use this instead of sci() when the output will be inside a LaTeX fraction.
     """
-    if hasattr(val, "to_base_units"):
-        # Pint quantity - convert to base units to get full magnitude
-        val = val.to_base_units().magnitude
-    elif hasattr(val, "magnitude"):
+    if hasattr(val, "magnitude"):
         val = val.magnitude
     s = f"{val:.{precision}e}"
     base, exp = s.split('e')
@@ -189,6 +198,7 @@ def md_sci(val, precision=2):
     
     Example: 4.1e9 -> Markdown("$4.10 \\times 10^{9}$")
     """
+    Markdown = _get_markdown()
     if hasattr(val, "magnitude"): val = val.magnitude
     s = f"{val:.{precision}e}"
     base, exp = s.split('e')
@@ -204,4 +214,5 @@ def md_math(expression):
         ...
         `{python} eq`
     """
+    Markdown = _get_markdown()
     return Markdown(f'${expression}$')

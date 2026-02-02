@@ -296,9 +296,9 @@ Where:
 Note: Bullets can be consecutive - only need blank line BEFORE the list starts.
 
 ### Lesson 5: (Add new lessons here)
-**Issue:** 
-**Cause:** 
-**Fix:** 
+**Issue:**
+**Cause:**
+**Fix:**
 
 ---
 

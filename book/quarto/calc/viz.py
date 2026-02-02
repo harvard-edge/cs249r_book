@@ -824,9 +824,11 @@ def plot_business_cost(ax=None):
     opt_thresh = thresholds[min_idx]
     opt_cost = total_cost[min_idx]
     
+    ax.axvline(opt_thresh, color=COLORS['GreenLine'], linestyle='--', alpha=0.5)
     ax.plot(opt_thresh, opt_cost, 'o', color=COLORS['GreenLine'], markersize=8)
     ax.annotate(f"Optimal Threshold\n(T={opt_thresh:.2f})", 
-                xy=(opt_thresh, opt_cost), xytext=(opt_thresh+0.1, opt_cost+20),
+                xy=(opt_thresh, opt_cost), xytext=(0, 30), textcoords='offset points',
+                ha='center',
                 arrowprops=dict(facecolor=COLORS['primary'], arrowstyle='->', lw=1.5),
                 fontsize=9, fontweight='bold')
     
@@ -1075,38 +1077,47 @@ def plot_communication_tax(ax=None):
     """Visualizes 'The Communication Tax' (Distributed Training Scaling)."""
     if ax is None: fig, ax = plt.subplots()
     
-    gpus = np.array([1, 2, 4, 8, 16, 32, 64, 128])
+    # Extended range for modern clusters
+    N = np.array([1, 2, 4, 8, 16, 32, 64, 128, 256])
     
-    # Scaling efficiency models
-    ideal = gpus
-    linear_scaling = gpus * 1.0
+    # Scenarios with Amdahl's Law style scaling: Speedup = N / (1 + (N-1)*r)
+    scenarios = [
+        {'r': 0.0, 'name': 'Ideal Linear', 'color': COLORS['grid'], 'style': '--', 'marker': None},
+        {'r': 0.05, 'name': 'Compute Bound (ResNet)', 'color': COLORS['BlueLine'], 'style': '-', 'marker': 'o'},
+        {'r': 0.15, 'name': 'Balanced (LLM + NVLink)', 'color': COLORS['GreenLine'], 'style': '-', 'marker': 's'}, 
+        {'r': 0.40, 'name': 'Bandwidth Bound (Slow Net)', 'color': COLORS['RedLine'], 'style': '-', 'marker': '^'}
+    ]
     
-    # Compute bound (ResNet) - high scaling (95% efficient)
-    compute_bound = gpus / (1 + (gpus-1) * 0.05)
+    # Plot Lines
+    for sc in scenarios:
+        speedup = N / (1 + (N - 1) * sc['r'])
+        if sc['marker']:
+            ax.plot(N, speedup, sc['style'], color=sc['color'], label=sc['name'], linewidth=2.5, marker=sc['marker'], markersize=7)
+        else:
+            ax.plot(N, speedup, sc['style'], color=sc['color'], label=sc['name'], linewidth=2)
+
+    # Shaded Tax Region (Between Ideal and Bandwidth Bound)
+    ideal_speedup = N
+    worst_speedup = N / (1 + (N - 1) * 0.40)
+    ax.fill_between(N, ideal_speedup, worst_speedup, color=COLORS['RedL'], alpha=0.15)
     
-    # Bandwidth bound (LLM) - diminishing (70% efficient at scale)
-    comm_bound = gpus / (1 + (gpus-1) * 0.2)
-    
-    ax.plot(gpus, ideal, '--', color='gray', alpha=0.5, label='Ideal Linear Scaling')
-    ax.plot(gpus, compute_bound, 'o-', color=COLORS['BlueLine'], linewidth=2.5, label='Compute Bound (ResNet)')
-    ax.plot(gpus, comm_bound, 's-', color=COLORS['RedLine'], linewidth=2.5, label='Bandwidth Bound (LLM)')
-    
+    # Annotations
     ax.set_xscale('log', base=2)
     ax.set_yscale('log', base=2)
+    ax.set_xticks(N)
+    ax.set_xticklabels(N)
+    ax.set_yticks(N)
+    ax.set_yticklabels(N)
     
-    ax.set_xticks(gpus)
-    ax.set_xticklabels(gpus)
-    ax.set_yticks(gpus)
-    ax.set_yticklabels(gpus)
-    
-    # Annotation for the gap
-    ax.annotate("The Communication Tax", xy=(64, 20), xytext=(8, 40),
+    # Tax Annotation
+    ax.annotate("The Communication Tax", xy=(128, 128/(1+127*0.4)), xytext=(16, 100),
                 arrowprops=dict(facecolor=COLORS['RedLine'], arrowstyle='->', lw=1.5), 
-                color=COLORS['RedLine'], fontsize=9, fontweight='bold')
+                color=COLORS['RedLine'], fontsize=10, fontweight='bold',
+                bbox=dict(facecolor='white', alpha=0.9, edgecolor=COLORS['RedL'], pad=4))
     
-    ax.set_xlabel('Number of GPUs')
-    ax.set_ylabel('Effective Throughput (Speedup)')
-    ax.legend(loc='upper left', fontsize=9)
+    ax.set_xlabel('Number of GPUs (N)')
+    ax.set_ylabel('Effective Speedup')
+    ax.legend(loc='upper left', fontsize=9, framealpha=0.9)
     
     return ax
 
@@ -1303,3 +1314,271 @@ def plot_invariants_cycle(ax=None):
 
     return ax
 
+def plot_selection_inequality(ax=None):
+    """Visualizes 'The Selection Inequality' (Overhead vs Savings)."""
+    if ax is None: fig, ax = plt.subplots(figsize=(8, 6))
+    
+    categories = ['Baseline', 'Efficient Selection', 'Expensive Selection']
+    
+    # Data components
+    full_train_cost = np.array([100, 0, 0])
+    selection_overhead = np.array([0, 5, 60])
+    subset_train_cost = np.array([0, 40, 40])
+    
+    # Plotting
+    x = np.arange(len(categories))
+    width = 0.6
+    
+    # Stacked bars
+    p1 = ax.bar(x, full_train_cost, width, label='Full Training', color=COLORS['BlueFill'], edgecolor=COLORS['BlueLine'])
+    p2 = ax.bar(x, selection_overhead, width, bottom=full_train_cost, label='Selection Overhead', color=COLORS['OrangeL'], edgecolor=COLORS['OrangeLine'])
+    p3 = ax.bar(x, subset_train_cost, width, bottom=full_train_cost + selection_overhead, label='Subset Training', color=COLORS['GreenFill'], edgecolor=COLORS['GreenLine'])
+    
+    # Labels
+    ax.set_ylabel('Total Time (Normalized)')
+    ax.set_xticks(x)
+    ax.set_xticklabels(categories)
+    ax.set_ylim(0, 130)
+    
+    # Legend
+    ax.legend(loc='upper right', ncol=3, fontsize=9)
+    
+    # Annotations
+    
+    # Arrow for savings (Baseline -> Efficient)
+    ax.annotate("", xy=(1, 45), xytext=(1, 100), arrowprops=dict(arrowstyle="<->", color=COLORS['GreenLine'], lw=2))
+    ax.text(1.1, 72, "55% Savings", color=COLORS['GreenLine'], fontweight='bold', va='center')
+    
+    # Arrow for no savings (Baseline -> Expensive)
+    ax.annotate("", xy=(2, 100), xytext=(0, 100), arrowprops=dict(arrowstyle="-", linestyle="--", color=COLORS['grid']))
+    ax.text(2, 105, "No Savings!", color=COLORS['RedLine'], fontweight='bold', ha='center')
+    
+    return ax
+
+def plot_ppd_curve(ax=None):
+    """Visualizes 'Diminishing Returns of Data'."""
+    if ax is None: fig, ax = plt.subplots(figsize=(8, 6))
+    
+    x = np.linspace(0, 100, 200)
+    # Random: Slow exponential approach
+    y_random = 95 * (1 - np.exp(-0.04 * x))
+    # Efficient: Fast exponential approach
+    y_efficient = 95 * (1 - np.exp(-0.15 * x))
+    
+    ax.plot(x, y_random, '--', color=COLORS['grid'], label='Random Sampling', linewidth=2)
+    ax.plot(x, y_efficient, '-', color=COLORS['BlueLine'], label='Efficient Selection', linewidth=2.5)
+    
+    # Fill gap
+    ax.fill_between(x, y_random, y_efficient, color=COLORS['BlueL'], alpha=0.1)
+    
+    ax.set_xlabel('Dataset Size (% of Total)')
+    ax.set_ylabel('Model Accuracy (%)')
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 100)
+    
+    # Annotations
+    idx = 40 # x=20
+    x_val = x[idx]
+    y_eff = y_efficient[idx]
+    y_rnd = y_random[idx]
+    
+    # Vertical line showing efficiency gap
+    ax.annotate("", xy=(x_val, y_eff), xytext=(x_val, y_rnd),
+                arrowprops=dict(arrowstyle="<->", color=COLORS['RedLine'], lw=1.5))
+    ax.text(x_val+2, (y_eff+y_rnd)/2, "Efficiency Gap\n(Saved Compute)", color=COLORS['RedLine'], fontsize=9, va='center', fontweight='bold')
+    
+    ax.legend(loc='lower right', fontsize=9)
+    return ax
+
+def plot_power_differentials(ax=None):
+    """Visualizes 'Power Consumption Differentials' across ML system types."""
+    if ax is None: fig, ax = plt.subplots()
+    
+    # Data
+    system_types = ["Tiny", "Edge", "Datacenter", "Training"]
+    min_power = [5.6, 3.9, 266.9, 5.5]
+    max_power = [166.6, 1100, 6300, 498000]
+
+    # Plot vertical lines connecting min and max
+    for i, (minp, maxp) in enumerate(zip(min_power, max_power)):
+        ax.plot([i, i], [minp, maxp], color=COLORS['grid'], linewidth=2, zorder=1)
+
+    # Plot points
+    ax.scatter(range(len(system_types)), min_power, color=COLORS['BlueLine'], s=80, 
+               label='Minimum Power', zorder=2, edgecolors='white')
+    ax.scatter(range(len(system_types)), max_power, color=COLORS['RedLine'], s=80, 
+               label='Maximum Power', zorder=2, edgecolors='white')
+
+    # Logarithmic scale
+    ax.set_yscale('log')
+    ax.set_ylabel('Power Consumption (Log Scale)')
+    ax.set_xlabel('System Type')
+    ax.set_xticks(range(len(system_types)))
+    ax.set_xticklabels(system_types)
+    ax.legend(loc='upper left', fontsize=8)
+    
+    return ax
+
+def plot_imagenet_challenge(ax=None):
+    """Visualizes 'ImageNet Challenge Progression' from 2010-2015."""
+    if ax is None: fig, ax = plt.subplots()
+    
+    # Data
+    years = [2010, 2011, 2012, 2013, 2014, 2014, 2015]
+    models = ["Baseline", "Baseline", "AlexNet", "ZFNet", "VGGNet", "GoogleNet", "ResNet"]
+    errors = [28.2, 25.8, 16.4, 11.7, 7.3, 6.7, 3.57]
+
+    # Plot line and points
+    ax.plot(years, errors, color=COLORS['BlueLine'], linewidth=1.5, zorder=1)
+    ax.scatter(years, errors, color=COLORS['RedLine'], s=50, zorder=2, edgecolors='white')
+
+    # Add labels with smart positioning
+    offsets = [
+        (5, 8), (5, 8), (5, 8), (5, 8), (-40, 8), (5, -15), (0, 8)
+    ]
+    for year, model, error, (ox, oy) in zip(years, models, errors, offsets):
+        ax.annotate(model, (year, error), textcoords='offset points',
+                    xytext=(ox, oy), fontsize=9, ha='left' if ox >= 0 else 'right')
+
+    ax.set_ylim(0, 30)
+    ax.set_xlabel('Year')
+    ax.set_ylabel('Top-5 Error (%)')
+    
+    return ax
+
+def plot_compute_memory_imbalance(ax=None):
+    """Visualizes 'The Compute-Bandwidth Divergence' (AI Memory Wall)."""
+    if ax is None: fig, ax = plt.subplots()
+    
+    # Data
+    years = [2000, 2005, 2010, 2015, 2020, 2025]
+    compute_performance = [1e3, 1e5, 1e7, 1e9, 1e12, 1e15]  # FLOPs
+    memory_bandwidth = [1, 10, 50, 100, 500, 1000]  # GB/s
+
+    # Shaded area between curves
+    ax.fill_between(years, memory_bandwidth, compute_performance, color=COLORS['grid'], alpha=0.3)
+
+    # Plot lines and points
+    ax.plot(years, compute_performance, 'o-', color=COLORS['BlueLine'], linewidth=1.5, 
+            markersize=6, label='Compute Performance')
+    ax.plot(years, memory_bandwidth, 's-', color=COLORS['OrangeLine'], linewidth=1.5, 
+            markersize=6, label='Memory Bandwidth')
+
+    # Double-headed arrow at 2023
+    ax.annotate('', xy=(2023, 1e13), xytext=(2023, 1e4),
+                arrowprops=dict(arrowstyle='<->', color=COLORS['primary'], lw=1.5))
+
+    # Memory Wall label
+    ax.text(2022, 3e6, 'Memory Wall', rotation=90, va='bottom', fontsize=10, 
+            color=COLORS['primary'], fontweight='bold')
+
+    ax.set_yscale('log')
+    ax.set_xlabel('Year')
+    ax.set_ylabel('Performance (Log Scale)')
+    ax.legend(loc='upper left', frameon=True, edgecolor=COLORS['grid'])
+    
+    return ax
+
+def plot_model_vs_bandwidth(ax=None):
+    """Visualizes 'Model Size vs. Hardware Bandwidth' (Memory Wall Growth)."""
+    if ax is None: fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # AI Processor Data
+    proc_names = ["NVIDIA Tesla K80", "Google TPU v2", "NVIDIA Tesla V100",
+                  "NVIDIA A100", "Google TPU v4", "NVIDIA H100", "Google TPU v6e"]
+    proc_years = [2014, 2017, 2017, 2020, 2021, 2022, 2024]
+    proc_bw = [480, 600, 900, 2000, 1200, 3000, 1640]
+    proc_log_bw = np.log10(proc_bw)
+
+    # ML Model Data
+    model_names = ["AlexNet", "VGG-16", "ResNet-50", "BERT Large",
+                   "GPT-3", "PaLM", "GPT-4", "Gemini 1"]
+    model_years = [2012, 2014, 2015, 2018, 2020, 2022, 2023, 2024]
+    model_params = [60, 138, 25.6, 340, 175000, 540000, 1000000, 1500000]
+    model_log_params = np.log10(model_params)
+
+    # Fit trend lines
+    proc_fit = np.polyfit(proc_years, proc_log_bw, 1)
+    model_fit = np.polyfit(model_years, model_log_params, 1)
+
+    years_range = np.arange(2012, 2025)
+    proc_trend = np.polyval(proc_fit, years_range)
+    model_trend = np.polyval(model_fit, years_range)
+
+    # Shaded area (from 2016 onward)
+    mask = years_range >= 2016
+    ax.fill_between(years_range[mask], proc_trend[mask], model_trend[mask], 
+                    color=COLORS['grid'], alpha=0.2)
+
+    # Trend lines
+    ax.plot(years_range, proc_trend, '--', color=COLORS['BlueLine'], linewidth=1)
+    ax.plot(years_range, model_trend, '--', color=COLORS['RedLine'], linewidth=1)
+
+    # Scatter points
+    ax.scatter(proc_years, proc_log_bw, color=COLORS['BlueLine'], s=50, zorder=3, edgecolors='white')
+    ax.scatter(model_years, model_log_params, color=COLORS['RedLine'], s=50, zorder=3, edgecolors='white')
+
+    # Processor labels
+    proc_offsets = [(0, 10), (0, -15), (0, 10), (-40, -15), (0, 15), (0, 10), (0, -15)]
+    for name, year, val, offset in zip(proc_names, proc_years, proc_log_bw, proc_offsets):
+        ax.annotate(name, (year, val), textcoords='offset points', xytext=offset,
+                    fontsize=8, color=COLORS['BlueLine'], ha='center')
+
+    # Model labels
+    model_offsets = [(0, -12), (0, 8), (0, 8), (-30, -12), (0, 8), (0, 8), (0, 8), (0, 8)]
+    for name, year, val, offset in zip(model_names, model_years, model_log_params, model_offsets):
+        ax.annotate(name, (year, val), textcoords='offset points', xytext=offset,
+                    fontsize=8, color=COLORS['RedLine'], ha='center')
+
+    # Memory Wall label
+    mid_y = (np.polyval(proc_fit, 2020) + np.polyval(model_fit, 2020)) / 2
+    ax.text(2020, mid_y, 'AI Memory Wall', fontsize=10, fontweight='bold', 
+            ha='center', color=COLORS['primary'])
+
+    ax.set_xlabel('Year')
+    ax.set_ylabel('Log Scale (Base 10)')
+    ax.set_xlim(2011, 2025)
+    
+    return ax
+
+def plot_ai_datacenter_demand(ax=None):
+    """Visualizes 'Projected AI Data Center Power Demand' to 2030."""
+    if ax is None: fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Data
+    years = list(range(2015, 2031))
+    dc_demand = [200, 200, 200, 200, 200, 210, 220, 230, 250, 290, 340, 400, 480, 570, 670, 780]
+    ai_demand = [0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 20, 40, 70, 110, 170, 240]
+    efficiency_gains = [20, 19, 18, 17, 15, 12, 9, 6, 3, 1.5, 2, 2.5, 3, 3.2, 3.5, 3.7]
+
+    # Stacked bar chart
+    bar_width = 0.8
+    ax.bar(years, dc_demand, bar_width, label='Data Center ex-AI', 
+           color=COLORS['BlueLine'], edgecolor='white')
+    ax.bar(years, ai_demand, bar_width, bottom=dc_demand, label='AI', 
+           color=COLORS['BlueL'], edgecolor='white')
+
+    ax.set_xlabel('Year')
+    ax.set_ylabel('Data Center Power Demand (TWh)')
+    ax.legend(loc='upper left', fontsize=9)
+
+    # Secondary axis for efficiency gains
+    ax2 = ax.twinx()
+    ax2.plot(years, efficiency_gains, color=COLORS['grid'], linewidth=2)
+    ax2.set_ylabel('Power Efficiency Gains (%)')
+    ax2.set_ylim(0, 25)
+    ax2.spines['right'].set_visible(True)
+    ax2.spines['top'].set_visible(False)
+
+    # Vertical dashed line at 2024
+    ax.axvline(x=2024, linestyle='--', color=COLORS['OrangeLine'], linewidth=1.5)
+
+    # Annotations
+    ax.text(2022, 900, 'Power Demand\nIncreasing', fontsize=9, fontweight='bold', 
+            ha='center', color=COLORS['primary'])
+    ax.text(2018, 850, 'Efficiency Gains\nDecelerating', fontsize=9, fontweight='bold', 
+            ha='center', color=COLORS['primary'])
+
+    ax.set_ylim(0, 1100)
+    
+    return ax, ax2

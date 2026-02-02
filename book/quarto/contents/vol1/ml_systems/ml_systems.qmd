@@ -34,6 +34,47 @@ Managing the dual mandate of statistical uncertainty and physical constraints me
 
 :::
 
+```{python}
+#| label: ml-systems-setup
+#| echo: false
+
+from calc.constants import *
+from calc.formulas import fmt
+
+# Mobile hardware specs
+mobile_tdp_w = MOBILE_TDP_W.magnitude  # 3W typical
+mobile_tdp_str = f"{mobile_tdp_w:.0f}"
+mobile_tdp_range = "3-5"
+mobile_npu_tops = MOBILE_NPU_TOPS_INT8.to(TFLOPs/second).magnitude  # 35 TOPS
+mobile_npu_tops_str = f"{mobile_npu_tops:.0f}"
+mobile_npu_range = "1-10"
+phone_battery_wh = PHONE_BATTERY_WH.to(watt * hour).magnitude  # 15 Wh
+phone_battery_str = f"{phone_battery_wh:.0f}"
+
+# Mobile RAM/storage (typical ranges)
+mobile_ram_range = "8-16"
+mobile_storage_range = "128 GB-1 TB"
+mobile_bw_range = "25-50"
+
+# Cloud/Edge latency (typical ranges)
+cloud_latency_range = "100-500"
+edge_latency_range = "10-100"
+mobile_latency_range = "5-50"
+tiny_latency_range = "1-10"
+
+# KWS model specs
+kws_params = int(KWS_DSCNN_PARAMS.magnitude / 1000)  # ~200K → display as 70K typical
+kws_params_str = "70,000"  # Typical KWS model
+kws_size_kb = "100"
+
+# DLRM embedding size
+dlrm_embedding_gb = int(DLRM_MODEL_SIZE_FP32.to(GB).magnitude)
+dlrm_embedding_str = f"{dlrm_embedding_gb}"
+
+# MobileNet efficiency
+mobilenet_flops_reduction = "8-9"
+```
+
 ## Deployment Paradigm Framework {#sec-ml-system-architecture-deployment-paradigm-framework-0d25}
 
 Where an ML model runs fundamentally shapes what is possible. Yet deployment is far harder than it appears, and the reason is not the model itself. In production ML systems, the model accounts for roughly 5% of the total codebase. The remaining 95% consists of data collection, feature processing, serving infrastructure, monitoring, and resource management. All of this surrounding infrastructure changes dramatically depending on where the model executes. A wake-word detector on a smartwatch and a recommendation engine in a data center solve different problems under opposite physical constraints, and the systems that support them share almost nothing in common. This reality transforms deployment from an operational afterthought into a first-order engineering decision, one that the AI Triad framework from @sec-introduction helps us reason about by foregrounding infrastructure alongside data and algorithms.
@@ -228,12 +269,12 @@ pics/mobile/.style = {
 ```
 :::
 
-| **Paradigm** | **Where** | **Latency** | **Power** | **Memory** | **Best For** |
-|:---|:---|---:|:---|:---|:---|
-| **Cloud ML** | Data centers | 100-500 ms | MW | TB | Training, complex inference |
-| **Edge ML** | Local servers | 10-100 ms | 100s W | GB | Real-time inference, privacy |
-| **Mobile ML** | Smartphones | 5-50 ms | 1-5 W | GB | Personal AI, offline |
-| **TinyML** | Microcontrollers | 1-10 ms | mW | KB | Always-on sensing |
+| **Paradigm**  | **Where**        |                        **Latency** | **Power**                     | **Memory** | **Best For**                 |
+|:------------|:---------------|---------------------------------:|:----------------------------|:---------|:---------------------------|
+| **Cloud ML**  | Data centers     |  `{python} cloud_latency_range` ms | MW                            | TB         | Training, complex inference  |
+| **Edge ML**   | Local servers    |   `{python} edge_latency_range` ms | 100s W                        | GB         | Real-time inference, privacy |
+| **Mobile ML** | Smartphones      | `{python} mobile_latency_range` ms | `{python} mobile_tdp_range` W | GB         | Personal AI, offline         |
+| **TinyML**    | Microcontrollers |   `{python} tiny_latency_range` ms | mW                            | KB         | Always-on sensing            |
 
 : **The Deployment Spectrum (Conceptual)**: Four paradigms span nine orders of magnitude in power (MW to mW) and memory (TB to KB). This conceptual overview defines each paradigm by its operating regime; @tbl-representative-systems later grounds these categories in specific hardware platforms and quantitative decision thresholds. {#tbl-deployment-paradigms-overview}
 
@@ -276,10 +317,6 @@ Deployment choices are governed by physics, not just preference. Check your unde
 - [ ] **Light Barrier**: Can you explain why the speed of light makes Cloud ML impossible for <10ms safety tasks?
 - [ ] **Power Wall**: Do you understand why thermodynamics (heat dissipation) prevents datacenter models from running on mobile devices?
 - [ ] **Memory Wall**: Can you explain why data movement is often more expensive (in time and energy) than computation?
-
-**The Lesson**
-
-**Physics is non-negotiable.** You cannot optimize your way out of the speed of light or thermodynamics; you must design *around* them.
 :::
 
 These physical laws explain *why* the four paradigms exist. But given a specific ML workload, *how* do we determine which paradigm fits? The answer requires analytical tools that connect workload characteristics to physical constraints.
@@ -358,10 +395,6 @@ The Iron Law ($T = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot \eta} + L_{lat}$
 **The Trade-off**
 
 - [ ] **Latency vs. Throughput**: Why does training optimize for throughput (large batches, hiding $L$) while serving optimizes for latency (small batches, minimizing $L$)?
-
-**The Lesson**
-
-**Fix the bottleneck.** Improving a non-binding constraint (e.g., faster compute on a memory-bound system) yields exactly zero speedup.
 :::
 
 The Introduction presented the Iron Law as a sum. *Why* do we now use $\max()$? The distinction lies in whether operations happen sequentially or overlap. In **Serial Execution**, costs add up. However, modern accelerators use **Pipelined Execution** to overlap memory transfers with computation. With perfect overlap, the total time is determined by whichever operation is slower. The Iron Law tells you the *cost of each ingredient*; the Bottleneck Principle tells you the *speed of the assembly line*.
@@ -397,13 +430,13 @@ These archetypes map naturally to deployment paradigms: **Compute Beasts** and *
 ::: {.callout-lighthouse title="Five Reference Workloads"}
 Throughout this book, we use five **Lighthouse Models** introduced in @sec-introduction—concrete workloads that span the deployment spectrum and isolate distinct system bottlenecks. @sec-dnn-architectures provides full architectural details and model biographies.
 
-| **Lighthouse** | **Archetype** | **Deployment Paradigm** |
-|:---|:---|:---|
-| **ResNet-50** | Compute Beast | Cloud training, edge inference |
-| **GPT-2 / Llama** | Bandwidth Hog | Cloud inference |
-| **DLRM** | Sparse Scatter | Cloud only (distributed) |
-| **MobileNet** | Compute Beast (efficient) | Mobile, edge |
-| **Keyword Spotting (KWS)** | Tiny Constraint | TinyML, always-on |
+| **Lighthouse**             | **Archetype**             | **Deployment Paradigm**        |
+|:-------------------------|:------------------------|:-----------------------------|
+| **ResNet-50**              | Compute Beast             | Cloud training, edge inference |
+| **GPT-2 / Llama**          | Bandwidth Hog             | Cloud inference                |
+| **DLRM**                   | Sparse Scatter            | Cloud only (distributed)       |
+| **MobileNet**              | Compute Beast (efficient) | Mobile, edge                   |
+| **Keyword Spotting (KWS)** | Tiny Constraint           | TinyML, always-on              |
 
 To ground the abstract interdependencies of the Iron Law in concrete practice, we analyze the **Lighthouse Models** introduced in @sec-introduction. The following summaries recap each workload from a systems perspective, connecting them to the specific Iron Law bottlenecks they exemplify.
 
@@ -423,11 +456,11 @@ gpt2_params_b = f"{GPT2_PARAMS.to(Mparam).magnitude/1000:.1f}"
 
 **GPT-2 / Llama** generate text one token at a time, requiring the model to read its full parameter set (`{python} gpt2_params_b` billion for GPT-2, 7 to 70 billion for Llama) from memory for each output token. This sequential memory access pattern creates the autoregressive bottleneck that dominates serving costs.
 
-**DLRM** (Deep Learning Recommendation Model) maps users and items to embedding vectors stored in tables that can exceed 100 GB, making memory capacity rather than computation the binding constraint.
+**DLRM** (Deep Learning Recommendation Model) maps users and items to embedding vectors stored in tables that can exceed `{python} dlrm_embedding_str` GB, making memory capacity rather than computation the binding constraint.
 
-**MobileNet** performs the same image classification task as ResNet but uses depthwise separable convolutions to reduce computation by 8 to 9x, enabling real-time inference on smartphones at 3 to 5 watts.
+**MobileNet** performs the same image classification task as ResNet but uses depthwise separable convolutions to reduce computation by `{python} mobilenet_flops_reduction`×, enabling real-time inference on smartphones at `{python} mobile_tdp_range` watts.
 
-**Keyword Spotting (KWS)** represents the always-on TinyML archetype. Used in applications like Smart Doorbells, it detects wake words ("Ding Dong", "Hello") using a depthwise separable CNN with approximately 70,000 parameters fitting in under 100 KB, running continuously at under 1 milliwatt.
+**Keyword Spotting (KWS)** represents the always-on TinyML archetype. Used in applications like Smart Doorbells, it detects wake words ("Ding Dong", "Hello") using a depthwise separable CNN with approximately `{python} kws_params_str` parameters fitting in under `{python} kws_size_kb` KB, running continuously at under 1 milliwatt.
 
 **Key insight**: The huge range in compute requirements (20 MFLOPs → 4 GFLOPs) and memory (800 KB → 100 GB) explains why no single deployment paradigm fits all workloads. A keyword spotter runs comfortably on a \$2 microcontroller; a recommendation system requires a warehouse-scale computer.
 :::
@@ -464,25 +497,25 @@ lat_gpt4 = "200–500 ms"
 lat_train = "200–400 ms"
 ```
 
-| **Operation** | **Latency** | **Deployment Implication** |
-|:---|:---|:---|
-| **Compute** |  |  |
-| **GPU matrix multiply (per op)** | `{python} lat_compute` | Compute is rarely the bottleneck |
-| **NPU inference (MobileNet)** | `{python} lat_npu` | Mobile can do real-time vision |
-| **LLM token generation** | `{python} lat_llm` | Perceived as "typing speed" |
-| **Memory** |  |  |
-| **L1 cache hit** | `{python} lat_l1` | Keep hot data in registers |
-| **HBM read (GPU)** | `{python} lat_hbm` | 100× slower than compute |
-| **DRAM read (mobile)** | `{python} lat_dram` | Memory-bound on most devices |
-| **Network** |  |  |
-| **Same datacenter** | `{python} lat_net_dc` | Microservices feasible |
-| **Same region** | `{python} lat_net_region` | Edge servers viable |
-| **Cross-region** | `{python} lat_net_cross` | Batch processing only |
-| **ML Operations** |  |  |
-| **Wake-word detection (TinyML)** | `{python} lat_kws` | Always-on feasible at <1 mW |
-| **Face detection (mobile)** | `{python} lat_face` | Real-time at 30 FPS |
-| **GPT-4 first token** | `{python} lat_gpt4` | User notices delay |
-| **ResNet-50 training step** | `{python} lat_train` | Throughput-optimized |
+| **Operation**                    | **Latency**               | **Deployment Implication**       |
+|:-------------------------------|:------------------------|:-------------------------------|
+| **Compute**                      |                           |                                  |
+| **GPU matrix multiply (per op)** | `{python} lat_compute`    | Compute is rarely the bottleneck |
+| **NPU inference (MobileNet)**    | `{python} lat_npu`        | Mobile can do real-time vision   |
+| **LLM token generation**         | `{python} lat_llm`        | Perceived as "typing speed"      |
+| **Memory**                       |                           |                                  |
+| **L1 cache hit**                 | `{python} lat_l1`         | Keep hot data in registers       |
+| **HBM read (GPU)**               | `{python} lat_hbm`        | 100× slower than compute         |
+| **DRAM read (mobile)**           | `{python} lat_dram`       | Memory-bound on most devices     |
+| **Network**                      |                           |                                  |
+| **Same datacenter**              | `{python} lat_net_dc`     | Microservices feasible           |
+| **Same region**                  | `{python} lat_net_region` | Edge servers viable              |
+| **Cross-region**                 | `{python} lat_net_cross`  | Batch processing only            |
+| **ML Operations**                |                           |                                  |
+| **Wake-word detection (TinyML)** | `{python} lat_kws`        | Always-on feasible at <1 mW      |
+| **Face detection (mobile)**      | `{python} lat_face`       | Real-time at 30 FPS              |
+| **GPT-4 first token**            | `{python} lat_gpt4`       | User notices delay               |
+| **ResNet-50 training step**      | `{python} lat_train`      | Throughput-optimized             |
 
 : **Latency Numbers for ML System Design**: Order-of-magnitude latencies across compute, memory, network, and ML operations that determine deployment feasibility. Spanning eight orders of magnitude, from nanosecond compute operations to hundreds of milliseconds for cross-region network calls, these physical constraints shape architectural decisions. {#tbl-latency-numbers}
 
@@ -499,24 +532,24 @@ For a systematic diagnostic guide to identifying these bottlenecks, see @sec-app
 
 The **dominant term varies by paradigm and workload**, fundamentally changing optimization strategy:
 
-| **Paradigm** | **Dominant Constraint** | **Why** | **Optimization Focus** |
-|:---|:---|:---|:---|
-| **Cloud Training** | $O/R_{peak}$ (Compute) | Abundant memory/network; FLOPS limit throughput | Maximize GPU utilization, batch size |
-| **Cloud LLM Inference** | $D_{vol}/BW$ (Memory BW) | Autoregressive: ~1 FLOP/byte, memory-bound | KV-caching, quantization, batching |
-| **Edge Inference** | $D_{vol}/BW$ (Memory BW) | Limited HBM; models often memory-bound | Model compression, operator fusion |
-| **Mobile** | Energy (implicit) | Battery = $\int \text{Power} \cdot dt$; thermal throttling | Reduced precision, duty cycling |
-| **TinyML** | $D_{vol}/\text{Capacity}$ | 256 KB total; model must fit on-chip | Extreme compression, binary networks |
+| **Paradigm**            | **Dominant Constraint**   | **Why**                                                    | **Optimization Focus**               |
+|:----------------------|:------------------------|:---------------------------------------------------------|:-----------------------------------|
+| **Cloud Training**      | $O/R_{peak}$ (Compute)    | Abundant memory/network; FLOPS limit throughput            | Maximize GPU utilization, batch size |
+| **Cloud LLM Inference** | $D_{vol}/BW$ (Memory BW)  | Autoregressive: ~1 FLOP/byte, memory-bound                 | KV-caching, quantization, batching   |
+| **Edge Inference**      | $D_{vol}/BW$ (Memory BW)  | Limited HBM; models often memory-bound                     | Model compression, operator fusion   |
+| **Mobile**              | Energy (implicit)         | Battery = $\int \text{Power} \cdot dt$; thermal throttling | Reduced precision, duty cycling      |
+| **TinyML**              | $D_{vol}/\text{Capacity}$ | 256 KB total; model must fit on-chip                       | Extreme compression, binary networks |
 
 The same ResNet-50 model is **compute-bound** during cloud training (high batch size, high arithmetic intensity) but **memory-bound** during single-image inference (batch=1, low arithmetic intensity) [@williams2009roofline]. Deployment paradigm selection must account for this shift.
 :::
 
 This shift between training and inference is fundamental. Recall the AI Triad from @sec-introduction: every ML system comprises Data, Algorithm[^fn-algorithm], and Machine. The DAM Taxonomy (@tbl-dam-phase) shows how each component behaves differently depending on whether the system is training (learning patterns) or serving (applying them).
 
-| **Component** | **Training (Mutable)** | **Inference (Immutable)** |
-|:---|:---|:---|
-| **Data** | Massive throughput: large batches, shuffling, augmentation | Low latency: single samples, freshness, speed |
-| **Algorithm** | Bidirectional: forward + backward pass, optimizer state | Unidirectional: forward pass only, weights frozen |
-| **Machine** | Throughput-optimized: high-bandwidth clusters, large memory | Latency-optimized: edge devices, inference accelerators |
+| **Component** | **Training (Mutable)**                                      | **Inference (Immutable)**                               |
+|:------------|:----------------------------------------------------------|:------------------------------------------------------|
+| **Data**      | Massive throughput: large batches, shuffling, augmentation  | Low latency: single samples, freshness, speed           |
+| **Algorithm** | Bidirectional: forward + backward pass, optimizer state     | Unidirectional: forward pass only, weights frozen       |
+| **Machine**   | Throughput-optimized: high-bandwidth clusters, large memory | Latency-optimized: edge devices, inference accelerators |
 
 : **DAM × Phase**: The same model imposes fundamentally different demands on Data, Algorithm, and Machine depending on whether the system is training or serving. When bottlenecks shift unexpectedly, check which phase you're optimizing for. {#tbl-dam-phase}
 
@@ -650,12 +683,12 @@ As systems transition from Cloud to Edge to TinyML, available resources decrease
 
 [^fn-pue]: **Power Usage Effectiveness (PUE)**: Data center efficiency metric measuring total facility power divided by IT equipment power. A PUE of 1.0 represents the theoretical lower bound (not achievable in practice), while 1.1-1.3 indicates highly efficient facilities using advanced cooling and power management. Google's data centers achieve fleet-wide PUE of approximately 1.10 (with some facilities as low as 1.06) compared to industry average of approximately 1.58.
 
-| **Category** | **Example Device** | **Processor** | **Memory** | **Storage** | **Power** | **Price Range** | **Example Models/Tasks** | **Quantitative Thresholds** |
-|:---|:---|---:|---:|:---|---:|:---|:---|---:|
-| **Cloud ML** | Google TPU v4 Pod | 4,096 TPU v4 chips (>1 exaflop peak) | 131 TB HBM2 | Cloud-scale (PB-scale) | ~3 MW | Cloud service (rental only) | Large language models, massive-scale training | >1000 TFLOPS compute, real-time video processing, >100GB/s memory bandwidth, PUE 1.1-1.3, 100-500ms latency |
-| **Edge ML** | NVIDIA DGX Spark | GB10 Grace Blackwell Superchip (20-core Arm, 1 PFLOPS AI) | 128 GB LPDDR5x | 4 TB NVMe | ~200 W | ~$3,000-5,000 (2025 estimate) | Model fine-tuning, on-premise inference, prototype development | ~1 PFLOPS AI compute, >270 GB/s memory bandwidth, desktop deployment, local processing |
-| **Mobile ML** | Flagship Smartphone (e.g., iPhone, Pixel) | Modern mobile SoC (multi-core CPU, GPU, NPU) | 8-16 GB RAM | 128 GB-1 TB | 3-5 W | $999+ | Face ID, computational photography, voice recognition | 1-10 TOPS compute, <2W sustained power, <50ms UI response |
-| **TinyML** | ESP32-CAM | Dual-core @ 240MHz | 520 KB RAM | 4 MB Flash | 0.05-0.25 W | $10 | Image classification, motion detection | <1 TOPS compute, <1mW power, microsecond response times |
+| **Category**  | **Example Device**                        |                                             **Processor** |                         **Memory** | **Storage**                     |                     **Power** | **Price Range**               | **Example Models/Tasks**                                       |                                                                                   **Quantitative Thresholds** |
+|:------------|:----------------------------------------|--------------------------------------------------------:|---------------------------------:|:------------------------------|----------------------------:|:----------------------------|:-------------------------------------------------------------|------------------------------------------------------------------------------------------------------------:|
+| **Cloud ML**  | Google TPU v4 Pod                         |                      4,096 TPU v4 chips (>1 exaflop peak) |                        131 TB HBM2 | Cloud-scale (PB-scale)          |                         ~3 MW | Cloud service (rental only)   | Large language models, massive-scale training                  |   >1000 TFLOPS compute, real-time video processing, >100GB/s memory bandwidth, PUE 1.1-1.3, 100-500ms latency |
+| **Edge ML**   | NVIDIA DGX Spark                          | GB10 Grace Blackwell Superchip (20-core Arm, 1 PFLOPS AI) |                     128 GB LPDDR5x | 4 TB NVMe                       |                        ~200 W | ~$3,000-5,000 (2025 estimate) | Model fine-tuning, on-premise inference, prototype development |                        ~1 PFLOPS AI compute, >270 GB/s memory bandwidth, desktop deployment, local processing |
+| **Mobile ML** | Flagship Smartphone (e.g., iPhone, Pixel) |              Modern mobile SoC (multi-core CPU, GPU, NPU) | `{python} mobile_ram_range` GB RAM | `{python} mobile_storage_range` | `{python} mobile_tdp_range` W | $999+                         | Face ID, computational photography, voice recognition          | `{python} mobile_npu_range` TOPS compute, <2W sustained power, <`{python} mobile_latency_range`ms UI response |
+| **TinyML**    | ESP32-CAM                                 |                                        Dual-core @ 240MHz |                         520 KB RAM | 4 MB Flash                      |                   0.05-0.25 W | $10                           | Image classification, motion detection                         |                                                       <1 TOPS compute, <1mW power, microsecond response times |
 
 : **Hardware Spectrum (Concrete Platforms)**: Representative devices that instantiate each deployment paradigm from @tbl-deployment-paradigms-overview. Where the conceptual table defines operating regimes, this table provides the specific processors, memory capacities, power envelopes, and quantitative thresholds that practitioners use to match workloads to hardware. {#tbl-representative-systems}
 
@@ -906,24 +939,24 @@ labor_pct_str = f"{labor_pct:.0f}%"
 
 **Cloud Implementation** (AWS/GCP pricing, 2024)
 
-| **Cost Component** | **Calculation** | **Annual Cost** |
-|:---|---:|---:|
-| **GPU inference (A10G)** | `{python} gpu_instances_str` instances × 8,760 hrs × `{python} gpu_price_str`/hr | `{python} c_gpu_str` |
-| **Network egress** | `{python} egress_gb_str` GB/day × 365 × $0.09/GB | `{python} c_egress_str` |
-| **Load balancer** | $0.025/hr + LCU charges | `{python} c_lb_str` |
-| **CloudWatch/logging** | Monitoring, alerts | `{python} c_logs_str` |
-| **Total Cloud** |  | **`{python} c_total_str`** |
+| **Cost Component**       |                                                                  **Calculation** |            **Annual Cost** |
+|:-----------------------|-------------------------------------------------------------------------------:|-------------------------:|
+| **GPU inference (A10G)** | `{python} gpu_instances_str` instances × 8,760 hrs × `{python} gpu_price_str`/hr |       `{python} c_gpu_str` |
+| **Network egress**       |                                 `{python} egress_gb_str` GB/day × 365 × $0.09/GB |    `{python} c_egress_str` |
+| **Load balancer**        |                                                          $0.025/hr + LCU charges |        `{python} c_lb_str` |
+| **CloudWatch/logging**   |                                                               Monitoring, alerts |      `{python} c_logs_str` |
+| **Total Cloud**          |                                                                                  | **`{python} c_total_str`** |
 
 **Edge Implementation** (On-premise NVIDIA T4 server)
 
-| **Cost Component** | **Calculation** | **Annual Cost** |
-|:---|---:|---:|
-| **Hardware CAPEX** | `{python} server_cost_str` server ÷ `{python} server_life_str`-year life | `{python} e_capex_str` |
-| **Power (24/7)** | `{python} power_str` × 8,760 hrs × `{python} electricity_str`/kWh | `{python} e_power_str` |
-| **Cooling overhead** | ~30% of power | `{python} e_cool_str` |
-| **Network (fiber)** | Fixed line for remote management | `{python} e_net_str` |
-| **DevOps labor** | `{python} devops_fte_str` FTE × `{python} devops_salary_str` salary | `{python} e_labor_str` |
-| **Total Edge** |  | **`{python} e_total_str`** |
+| **Cost Component**   |                                                          **Calculation** |            **Annual Cost** |
+|:-------------------|-----------------------------------------------------------------------:|-------------------------:|
+| **Hardware CAPEX**   | `{python} server_cost_str` server ÷ `{python} server_life_str`-year life |     `{python} e_capex_str` |
+| **Power (24/7)**     |        `{python} power_str` × 8,760 hrs × `{python} electricity_str`/kWh |     `{python} e_power_str` |
+| **Cooling overhead** |                                                            ~30% of power |      `{python} e_cool_str` |
+| **Network (fiber)**  |                                         Fixed line for remote management |       `{python} e_net_str` |
+| **DevOps labor**     |      `{python} devops_fte_str` FTE × `{python} devops_salary_str` salary |     `{python} e_labor_str` |
+| **Total Edge**       |                                                                          | **`{python} e_total_str`** |
 
 **Break-even Analysis**
 
@@ -1245,19 +1278,19 @@ cost_ratio_str       = f"{jetson_cost // coral_cost}"
 
 **Requirements Analysis**
 
-| **Metric** | **Calculation** | **Result** |
-|:---|:---|:---|
-| **Inferences per store** | `{python} cameras_per_store_str` cameras × `{python} fps_str` FPS | `{python} inf_per_sec_str` inferences/sec |
-| **Model compute** | YOLOv8-nano: `{python} yolo_gflops_str` GFLOPs/inference | `{python} sustained_gf_str` GFLOPs/sec |
-| **Required throughput** | `{python} sustained_gf_str` GFLOPs × `{python} headroom_str` (headroom) | ~`{python} req_tflops_str` TFLOPS |
+| **Metric**               | **Calculation**                                                         | **Result**                                |
+|:-----------------------|:----------------------------------------------------------------------|:----------------------------------------|
+| **Inferences per store** | `{python} cameras_per_store_str` cameras × `{python} fps_str` FPS       | `{python} inf_per_sec_str` inferences/sec |
+| **Model compute**        | YOLOv8-nano: `{python} yolo_gflops_str` GFLOPs/inference                | `{python} sustained_gf_str` GFLOPs/sec    |
+| **Required throughput**  | `{python} sustained_gf_str` GFLOPs × `{python} headroom_str` (headroom) | ~`{python} req_tflops_str` TFLOPS         |
 
 **Hardware Selection**
 
-| **Edge Device** | **INT8 TOPS** | **Power** | **Unit Cost** | **Fleet Cost** |
-|:---|---:|:---|:---|---:|
+| **Edge Device**           |                   **INT8 TOPS** | **Power**                           | **Unit Cost**                |                      **Fleet Cost** |
+|:------------------------|------------------------------:|:----------------------------------|:---------------------------|----------------------------------:|
 | **NVIDIA Jetson Orin NX** | `{python} jetson_tops_str` TOPS | `{python} jetson_power_range_str` W | \$`{python} jetson_cost_str` | \$`{python} jetson_fleet_k_str`,000 |
-| **Intel NUC + Movidius** | `{python} nuc_tops_str` TOPS | `{python} nuc_power_w_str` W | \$`{python} nuc_cost_str` | \$`{python} nuc_fleet_k_str`,000 |
-| **Google Coral Dev** | `{python} coral_tops_str` TOPS | `{python} coral_power_w_str` W | \$`{python} coral_cost_str` | \$`{python} coral_fleet_k_str`,000 |
+| **Intel NUC + Movidius**  |    `{python} nuc_tops_str` TOPS | `{python} nuc_power_w_str` W        | \$`{python} nuc_cost_str`    |    \$`{python} nuc_fleet_k_str`,000 |
+| **Google Coral Dev**      |  `{python} coral_tops_str` TOPS | `{python} coral_power_w_str` W      | \$`{python} coral_cost_str`  |  \$`{python} coral_fleet_k_str`,000 |
 
 **Decision**: At `{python} req_tflops_str` TFLOPS required and INT8 quantization providing ~`{python} int8_mult_str`× effective throughput, the Coral Dev Board (`{python} coral_tops_str` TOPS) meets requirements at 1/`{python} cost_ratio_str` the cost of Jetson, with `{python} power_ratio_str`× lower power consumption.
 
@@ -1286,7 +1319,7 @@ Edge ML solves the distance problem that limits cloud deployments, achieving sub
 
 Mobile ML addresses this challenge by integrating machine learning directly into portable devices like smartphones and tablets, providing users with real-time, personalized capabilities. This paradigm excels when user privacy, offline operation, and immediate responsiveness matter more than computational sophistication, supporting applications such as voice recognition[^fn-voice-recognition], computational photography[^fn-computational-photography], and health monitoring while maintaining data privacy through on-device computation. These battery-powered devices must balance performance with power efficiency and thermal management, making them suited to frequent, short-duration AI tasks.
 
-The mobile environment introduces a critical constraint absent from stationary deployments: *energy per inference* becomes a first-order design parameter. A **Compute Beast** workload like image classification must be transformed through architectural efficiency (e.g., depthwise separable convolutions[^fn-depthwise-separable] in MobileNet) to reduce FLOPs by 8-9× while preserving accuracy. This is not merely optimization; it represents a fundamental shift in the arithmetic intensity trade-off, accepting lower peak throughput in exchange for sustainable operation within a 3-5 W thermal envelope.
+The mobile environment introduces a critical constraint absent from stationary deployments: *energy per inference* becomes a first-order design parameter. A **Compute Beast** workload like image classification must be transformed through architectural efficiency (e.g., depthwise separable convolutions[^fn-depthwise-separable] in MobileNet) to reduce FLOPs by `{python} mobilenet_flops_reduction`× while preserving accuracy. This is not merely optimization; it represents a fundamental shift in the arithmetic intensity trade-off, accepting lower peak throughput in exchange for sustainable operation within a `{python} mobile_tdp_range` W thermal envelope.
 
 [^fn-voice-recognition]: **Voice Recognition Evolution**: Apple Siri (2011) required cloud processing with 200-500ms latency and privacy concerns. By 2017, on-device models reduced latency to <50ms while keeping audio local. Modern NPUs process 16kHz audio in 20-30ms using transformer-based models; Google's on-device transcription achieves 95%+ accuracy entirely locally.
 
@@ -1436,7 +1469,7 @@ quant_red_str = f"{quant_reduction:.0f}"
 
 ### Mobile ML Benefits and Resource Constraints {#sec-ml-system-architecture-mobile-ml-benefits-resource-constraints-c568}
 
-**Battery and Thermal Constraints.** Mobile devices exemplify intermediate constraints: 8-24GB RAM (varying from mid-range to flagship), 128GB-1TB storage, 1-10 TOPS AI compute through Neural Processing Units[^fn-npu] consuming 3-5W power. System-on-Chip architectures[^fn-mobile-soc] integrate computation and memory to minimize energy costs. Memory bandwidth of 25-50 GB/s limits models to 10-100MB parameters, requiring the aggressive optimization techniques that @sec-model-compression details. Battery constraints (18-22Wh capacity) make energy optimization critical: 1W continuous ML processing reduces device lifetime from 24 to 18 hours. Specialized frameworks (TensorFlow Lite[^fn-tflite], Core ML[^fn-coreml]) provide hardware-optimized inference enabling <50ms UI response times.
+**Battery and Thermal Constraints.** Mobile devices exemplify intermediate constraints: `{python} mobile_ram_range` GB RAM (varying from mid-range to flagship), `{python} mobile_storage_range` storage, `{python} mobile_npu_range` TOPS AI compute through Neural Processing Units[^fn-npu] consuming `{python} mobile_tdp_range`W power. System-on-Chip architectures[^fn-mobile-soc] integrate computation and memory to minimize energy costs. Memory bandwidth of `{python} mobile_bw_range` GB/s limits models to 10-100MB parameters, requiring the aggressive optimization techniques that @sec-model-compression details. Battery constraints (`{python} phone_battery_str`-22Wh capacity) make energy optimization critical: 1W continuous ML processing reduces device lifetime from 24 to 18 hours. Specialized frameworks (TensorFlow Lite[^fn-tflite], Core ML[^fn-coreml]) provide hardware-optimized inference enabling <`{python} mobile_latency_range` ms UI response times.
 
 [^fn-mobile-soc]: **Mobile System-on-Chip (SoC)**: Heterogeneous processors integrating CPU, GPU, NPU, ISP, and memory controller on a single die. Apple's A17 Pro (3nm, 19B transistors) delivers 35 TOPS via its 16-core Neural Engine; Qualcomm's Snapdragon 8 Gen 3 delivers approximately 34 TOPS through its Hexagon NPU. SoC integration reduces data movement energy 10-100× compared to discrete components.
 
@@ -1503,12 +1536,12 @@ TinyML's milliwatt-scale power consumption represents a six-order-of-magnitude r
 Energy consumption spans eight orders of magnitude across deployment paradigms:
 
 | **Paradigm** | **Example Workload** | **Energy/Inference** | **Battery Life (3.7V, 3000mAh)** |
-|:---|:---|---:|---:|
-| **Cloud** | GPT-4 query | ~1 kJ | 0.01 queries |
-| **Cloud** | ResNet-50 (A100) | ~10 J | 1 query |
-| **Edge** | ResNet-50 (Jetson) | ~500 mJ | 20 queries |
-| **Mobile** | MobileNet (NPU) | ~50 mJ | 200 queries |
-| **TinyML** | Keyword spotting | ~10 µJ | 1 billion inferences |
+|:-----------|:-------------------|-------------------:|-------------------------------:|
+| **Cloud**    | GPT-4 query          |                ~1 kJ |                     0.01 queries |
+| **Cloud**    | ResNet-50 (A100)     |                ~10 J |                          1 query |
+| **Edge**     | ResNet-50 (Jetson)   |              ~500 mJ |                       20 queries |
+| **Mobile**   | MobileNet (NPU)      |               ~50 mJ |                      200 queries |
+| **TinyML**   | Keyword spotting     |               ~10 µJ |             1 billion inferences |
 
 **Key insight**: A TinyML wake-word detector at 10 µJ/inference is **100,000,000×** more energy-efficient than a cloud LLM query. This gap explains why always-on sensing is only practical at the TinyML tier—a smartphone running continuous cloud queries would drain in minutes.
 :::
@@ -1655,22 +1688,22 @@ mobile_cost = "Low ($0-10s)"
 tiny_cost = "Very Low ($1-10s)"
 ```
 
-| **Aspect** | **Cloud ML** | **Edge ML** | **Mobile ML** | **TinyML** |
-|:---|:---|:---|:---|:---|
-| **Processing Location** | Centralized cloud servers (Data Centers) | Local edge devices (gateways, servers) | Smartphones and tablets | Ultra-low-power microcontrollers and embedded systems |
-| **Latency** | `{python} cloud_lat` | `{python} edge_lat` | `{python} mobile_lat` | `{python} tiny_lat` |
-| **Compute Power** | `{python} cloud_comp` | `{python} edge_comp` | `{python} mobile_comp` | `{python} tiny_comp` |
-| **Storage Capacity** | `{python} cloud_stor` | `{python} edge_stor` | `{python} mobile_stor` | `{python} tiny_stor` |
-| **Energy Consumption** | `{python} cloud_pwr` | `{python} edge_pwr` | `{python} mobile_pwr` | `{python} tiny_pwr` |
-| **Scalability** | Excellent (virtually unlimited) | Good (limited by edge hardware) | Moderate (per-device scaling) | Limited (fixed hardware) |
-| **Data Privacy** | Basic-Moderate (Data leaves device) | High (Data stays in local network) | High (Data stays on phone) | Very High (Raw data can remain local) |
-| **Connectivity Required** | Constant high-bandwidth | Intermittent | Optional | None |
-| **Offline Capability** | None | Good | Excellent | Complete |
-| **Real-time Processing** | Dependent on network | Good | Very Good | Excellent |
-| **Cost** | `{python} cloud_cost` | `{python} edge_cost` | `{python} mobile_cost` | `{python} tiny_cost` |
-| **Hardware Requirements** | Cloud infrastructure | Edge servers/gateways | Modern smartphones | MCUs/embedded systems |
-| **Development Complexity** | High (cloud expertise needed) | Moderate-High (edge+networking) | Moderate (mobile SDKs) | High (embedded expertise) |
-| **Deployment Speed** | Fast | Moderate | Fast | Slow |
+| **Aspect**                 | **Cloud ML**                             | **Edge ML**                            | **Mobile ML**                 | **TinyML**                                            |
+|:-------------------------|:---------------------------------------|:-------------------------------------|:----------------------------|:----------------------------------------------------|
+| **Processing Location**    | Centralized cloud servers (Data Centers) | Local edge devices (gateways, servers) | Smartphones and tablets       | Ultra-low-power microcontrollers and embedded systems |
+| **Latency**                | `{python} cloud_lat`                     | `{python} edge_lat`                    | `{python} mobile_lat`         | `{python} tiny_lat`                                   |
+| **Compute Power**          | `{python} cloud_comp`                    | `{python} edge_comp`                   | `{python} mobile_comp`        | `{python} tiny_comp`                                  |
+| **Storage Capacity**       | `{python} cloud_stor`                    | `{python} edge_stor`                   | `{python} mobile_stor`        | `{python} tiny_stor`                                  |
+| **Energy Consumption**     | `{python} cloud_pwr`                     | `{python} edge_pwr`                    | `{python} mobile_pwr`         | `{python} tiny_pwr`                                   |
+| **Scalability**            | Excellent (virtually unlimited)          | Good (limited by edge hardware)        | Moderate (per-device scaling) | Limited (fixed hardware)                              |
+| **Data Privacy**           | Basic-Moderate (Data leaves device)      | High (Data stays in local network)     | High (Data stays on phone)    | Very High (Raw data can remain local)                 |
+| **Connectivity Required**  | Constant high-bandwidth                  | Intermittent                           | Optional                      | None                                                  |
+| **Offline Capability**     | None                                     | Good                                   | Excellent                     | Complete                                              |
+| **Real-time Processing**   | Dependent on network                     | Good                                   | Very Good                     | Excellent                                             |
+| **Cost**                   | `{python} cloud_cost`                    | `{python} edge_cost`                   | `{python} mobile_cost`        | `{python} tiny_cost`                                  |
+| **Hardware Requirements**  | Cloud infrastructure                     | Edge servers/gateways                  | Modern smartphones            | MCUs/embedded systems                                 |
+| **Development Complexity** | High (cloud expertise needed)            | Moderate-High (edge+networking)        | Moderate (mobile SDKs)        | High (embedded expertise)                             |
+| **Deployment Speed**       | Fast                                     | Moderate                               | Fast                          | Slow                                                  |
 
 : **Deployment Locations**: Machine learning systems vary in where computation occurs, from centralized cloud servers to local edge devices and ultra-low-power TinyML chips, each impacting latency, bandwidth, and energy consumption. Deployments are categorized by processing location and associated characteristics, enabling informed decisions about system architecture and resource allocation. {#tbl-big_vs_tiny}
 
@@ -1945,10 +1978,6 @@ The central trade-off is often **Accuracy vs. Complexity**.
 
 - [ ] **The Baseline**: Have you measured the accuracy of a simple heuristic (regex, logistic regression) before training a Deep Network?
 - [ ] **The Infrastructure Cost**: Is the 2% accuracy gain from a Transformer worth the 10x inference cost and maintenance burden compared to a smaller model?
-
-**The Lesson**
-
-**Complexity is a tax.** Always measure the value of intelligence against a simple non-ML baseline before paying the maintenance cost.
 :::
 
 Successful deployment emerges from balancing technical optimization against organizational capability. Paradigm selection represents systems engineering challenges that extend well beyond pure technical requirements, encompassing team skills, operational capacity, and economic constraints. These decisions remain constrained by fundamental scaling laws, with operational aspects detailed in @sec-machine-learning-operations-mlops and benchmarking approaches covered in @sec-benchmarking-ai.
@@ -1995,7 +2024,7 @@ With three integration patterns available, selecting the right one for a given a
 
 **Common combinations**: Voice assistants use Train-Serve Split + Progressive Deployment + Hierarchical Processing. Autonomous vehicles combine Hierarchical Processing with Progressive Deployment to run optimized models at each tier.
 
-Additional patterns including federated and collaborative learning, which enable privacy-preserving distributed training across devices, are addressed in *Distributed Training Systems* (Volume II).
+Additional patterns including federated and collaborative learning, which enable privacy-preserving distributed training across devices, constitute advanced topics that build on the single-node foundations covered here.
 :::
 
 ### Production System Integration {#sec-ml-system-architecture-production-system-integration-3bb3}
