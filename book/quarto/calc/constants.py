@@ -53,12 +53,16 @@ NS = ureg.NS
 
 # FLOPs are dimensionless "operations"
 ureg.define('flop = 1 * count')
+ureg.define('GFLOP = 1e9 * flop')
 ureg.define('GFLOPs = 1e9 * flop')
+ureg.define('TFLOP = 1e12 * flop')
 ureg.define('TFLOPs = 1e12 * flop')
 ureg.define('ZFLOPs = 1e21 * flop')
 
 flop = ureg.flop
+GFLOP = ureg.GFLOP
 GFLOPs = ureg.GFLOPs
+TFLOP = ureg.TFLOP
 TFLOPs = ureg.TFLOPs
 ZFLOPs = ureg.ZFLOPs
 
