@@ -578,6 +578,9 @@ def forward(x):
 ```
 :::
 
+```
+:::
+
 ::: {#lst-torchscript-conditional lst-cap="**Scripted Control Flow**: Unlike tracing, scripting preserves both branches of conditionals in the IR, enabling correct execution based on runtime input values."}
 ```{.python}
 @torch.jit.script
@@ -589,25 +592,6 @@ def conditional_forward(x: torch.Tensor) -> torch.Tensor:
 
 # Both branches preserved in IR
 # Correct branch executes based on runtime input values
-```
-:::
-
-::: {#lst-torchscript-restrictions lst-cap="**TorchScript Restrictions**: Scripting requires a restricted Python subset. Common unsupported features include arbitrary imports, NumPy operations, and f-strings."}
-```{.python}
-@torch.jit.script
-def invalid_script(x):
-    import numpy as np  # ERROR: Cannot import arbitrary modules
-
-    result = np.array([1, 2, 3])  # ERROR: NumPy not supported
-    print(f"Debug: {x}")  # ERROR: f-strings not supported
-    return result
-
-# Valid alternative:
-@torch.jit.script
-def valid_script(x: torch.Tensor) -> torch.Tensor:
-    # Use TorchScript-compatible operations
-    result = torch.tensor([1, 2, 3], dtype=x.dtype, device=x.device)
-    return result
 ```
 :::
 
@@ -625,6 +609,22 @@ print(example.graph)
 #   %3 : int = prim::Constant[value=1]()
 #   %4 : Tensor = aten::add(%2, %3, %3)
 #   return (%4)
+::: {#lst-torchscript-restrictions lst-cap="**TorchScript Restrictions**: Scripting requires a restricted Python subset. Common unsupported features include arbitrary imports, NumPy operations, and f-strings."}
+```{.python}
+@torch.jit.script
+def invalid_script(x):
+    import numpy as np  # ERROR: Cannot import arbitrary modules
+
+    result = np.array([1, 2, 3])  # ERROR: NumPy not supported
+    print(f"Debug: {x}")  # ERROR: f-strings not supported
+    return result
+
+# Valid alternative:
+@torch.jit.script
+def valid_script(x: torch.Tensor) -> torch.Tensor:
+    # Use TorchScript-compatible operations
+    result = torch.tensor([1, 2, 3], dtype=x.dtype, device=x.device)
+    return result
 ```
 :::
 
@@ -1222,7 +1222,7 @@ dresult = 2.805  # 4.0 * (-0.416) + 0.909 * 4.0
 
 The dual number trace demonstrates the 2x computational overhead per input: every arithmetic operation (multiply, sine, product rule combination) is performed twice, once for the value and once for the derivative. For this single-input function, the overhead is acceptable. For a neural network with $N = 100{,}000{,}000$ parameters, computing all gradients would require 100 million such passes, which is why forward mode is restricted to the few-input applications described above.
 
-Forward mode's strength in single-input analysis becomes its fatal weakness for training. A neural network has one scalar loss but millions of parameters, and forward mode would require a separate pass for each one. The following examples provide additional perspectives on forward mode AD: the bare computation structure (@lst-forward_structure), dual-number tuple representation (@lst-dual_tracking), and application to sensitivity analysis (@lst-image_sensitivity) and feature importance (@lst-feature_importance).
+Forward mode's strength in single-input analysis becomes its fatal weakness for training. A neural network has one scalar loss but millions of parameters, and forward mode would require a separate pass for each one. The following examples provide additional perspectives on forward mode AD: the bare computation structure (@lst-forward_structure), and application to sensitivity analysis (@lst-image_sensitivity) and feature importance (@lst-feature_importance).
 
 ::: {#lst-forward_structure lst-cap="**Forward Mode AD Structure**: Each operation tracks values and derivatives simultaneously, highlighting how computations are structured in forward mode automatic differentiation."}
 ```{.python}
@@ -1233,9 +1233,6 @@ def f(x):
 ```
 :::
 
-When a framework executes this function in forward mode, it augments each computation to carry two pieces of information: the value itself and how that value changes with respect to the input.
-
-::: {#lst-dual_tracking lst-cap="**Dual Tracking**: Forward mode AD augments each value with its derivative, propagating both through the computation."}
 ```{.python}
 # Conceptually, each computation tracks (value, derivative)
 x = (2.0, 1.0)  # Input value and its derivative
@@ -1245,6 +1242,19 @@ result = (3.637, 2.805)  # Final value and derivative
 ```
 :::
 
+::: {#lst-feature_importance lst-cap="**Forward Mode AD**: Efficiently computes feature importance by tracking input perturbations through network operations."}
+```{.python}
+def compute_feature_importance(model, input_features):
+    # Track influence of each input feature
+    # through the network's computation
+    hidden = tanh(W1 @ input_features + b1)
+    logits = W2 @ hidden + b2
+    # Forward mode efficiently computes d(logits)/d(input)
+    return logits
+```
+:::
+
+When a framework executes this function in forward mode, it augments each computation to carry two pieces of information: the value itself and how that value changes with respect to the input.
 Sensitivity analysis measures how changing a single pixel or feature affects the model's output. Forward mode tracks input perturbations through each layer to the final prediction.
 
 ::: {#lst-image_sensitivity lst-cap="**Sensitivity Analysis**: Forward mode AD tracks how input perturbations propagate through the network to affect predictions."}
@@ -1260,18 +1270,6 @@ def analyze_image_sensitivity(model, image):
 :::
 
 Neural network interpretation presents another application. Forward mode efficiently computes feature importance by tracking input perturbations through each network layer to the output logits.
-
-::: {#lst-feature_importance lst-cap="**Forward Mode AD**: Efficiently computes feature importance by tracking input perturbations through network operations."}
-```{.python}
-def compute_feature_importance(model, input_features):
-    # Track influence of each input feature
-    # through the network's computation
-    hidden = tanh(W1 @ input_features + b1)
-    logits = W2 @ hidden + b2
-    # Forward mode efficiently computes d(logits)/d(input)
-    return logits
-```
-:::
 
 #### Reverse Mode {#sec-ai-frameworks-reverse-mode-d328}
 
