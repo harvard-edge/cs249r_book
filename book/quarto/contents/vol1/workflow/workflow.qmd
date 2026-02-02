@@ -407,7 +407,7 @@ Where traditional software follows requirements through implementation to testin
 
 :::
 
-To make these stages concrete, consider *how* they apply to MobileNetV2 (@sec-dnn-architectures), one of our Lighthouse Archetypes targeting mobile deployment. A DR screening model optimized for rural clinic deployment would face similar constraints: limited device memory, strict power budgets, and the need for real-time inference without reliable connectivity. The Lighthouse Archetypes illustrate these distinct workload pressures that any real system encounters as it moves from training to deployment. For MobileNetV2 specifically, Problem Definition establishes the constraint: <14 MB model size, <300 MFLOPs, real-time inference on mobile GPUs. Data Collection must account for on-device preprocessing limitations. Model Development uses depthwise separable convolutions[^fn-depthwise-sep] specifically designed to meet the FLOP budget. Evaluation validates not just accuracy but latency on target devices. Deployment targets mobile NPUs with quantization. Monitoring tracks performance across diverse device populations. Each stage's decisions propagate through subsequent stages, and the workflow framework makes these dependencies explicit.
+To make these stages concrete, consider *how* they apply to MobileNetV2 (@sec-dnn-architectures), one of our Lighthouse Models targeting mobile deployment. A DR screening model optimized for rural clinic deployment would face similar constraints: limited device memory, strict power budgets, and the need for real-time inference without reliable connectivity. The Lighthouse Models illustrate these distinct workload pressures that any real system encounters as it moves from training to deployment. For MobileNetV2 specifically, Problem Definition establishes the constraint: <14 MB model size, <300 MFLOPs, real-time inference on mobile GPUs. Data Collection must account for on-device preprocessing limitations. Model Development uses depthwise separable convolutions[^fn-depthwise-sep] specifically designed to meet the FLOP budget. Evaluation validates not just accuracy but latency on target devices. Deployment targets mobile NPUs with quantization. Monitoring tracks performance across diverse device populations. Each stage's decisions propagate through subsequent stages, and the workflow framework makes these dependencies explicit.
 
 [^fn-depthwise-sep]: **Depthwise Separable Convolutions**: A technique that factorizes a standard convolution into two simpler operations: one that filters spatial information independently per channel (*depthwise* convolution) and one that combines channels (*pointwise* convolution). This factorization reduces computation by roughly an order of magnitude compared to standard convolutions, making it essential for mobile and edge deployment. @sec-dnn-architectures covers these architectural techniques in depth.
 
@@ -439,7 +439,7 @@ Viewed this way, managing the workflow is mathematically equivalent to minimizin
 
 :::
 
-The binding constraint differs dramatically across workload archetypes, causing each lifecycle stage to optimize different Iron Law terms. @tbl-lighthouse-workflow-comparison shows *how* the same workflow stages manifest for three Lighthouse Archetypes introduced in @sec-introduction:
+The binding constraint differs dramatically across workload archetypes, causing each lifecycle stage to optimize different Iron Law terms. @tbl-lighthouse-workflow-comparison shows *how* the same workflow stages manifest for three of the five **Lighthouse Models** introduced in @sec-introduction:
 
 | **Stage** | **ResNet-50 (Compute Beast)** | **DLRM (Sparse Scatter)** | **TinyML (Constraint-Driven)** |
 |:---|:---|:---|:---|
@@ -447,7 +447,7 @@ The binding constraint differs dramatically across workload archetypes, causing 
 | **Training** | *Compute Bound*: Maximize MFU ($\eta$); mixed precision to saturate Tensor Cores | *I/O Bound*: Optimize sparse embedding lookups; memory bandwidth ($B$) limits throughput | *Model Search*: NAS for smallest architecture; quantization-aware training (QAT) required |
 | **Deploy** | *Batching*: Batch size **> 128** to maximize throughput; latency secondary to cost | *SLA*: Strict **< 10ms p99** latency; feature freshness requirements | *Energy*: **< 1mW** budget; always-on inference without battery drain |
 
-: **Workflow Variations by Lighthouse Archetype**: The same lifecycle stages target different Iron Law terms depending on the workload's binding constraint. ResNet-50 optimizes for Throughput ($O/s$); DLRM is bound by Memory Bandwidth ($D_{vol}/BW$); TinyML is strictly bound by Energy ($J$) and Memory Capacity. {#tbl-lighthouse-workflow-comparison}
+: **Workflow Variations by Lighthouse Model**: The same lifecycle stages target different Iron Law terms depending on the workload's binding constraint. ResNet-50 optimizes for Throughput ($O/s$); DLRM is bound by Memory Bandwidth ($D_{vol}/BW$); TinyML is strictly bound by Energy ($J$) and Memory Capacity. {#tbl-lighthouse-workflow-comparison}
 
 Our DR screening system encounters several of these archetype pressures simultaneously. Training the base retinal classification model is compute-bound, much like ResNet-50, requiring sustained GPU utilization over large image datasets. Yet deploying that model to rural clinic devices imposes strict energy and memory constraints akin to the TinyML archetype. Understanding *how* the same workflow framework adapts to each archetype prepares us for the detailed DR case study that follows.
 
@@ -560,16 +560,59 @@ Building this foundation in such a system might require assembling a development
 
 High-resolution retinal scans can generate files on the order of tens of megabytes per image (depending on resolution and compression), creating substantial infrastructure challenges. A clinic processing dozens of patients per day can produce gigabytes to tens of gigabytes of imaging data per week, exceeding the capacity of rural internet connections with only a few megabits per second of upload. This tension between *bandwidth vs. compute* forces architectural decisions toward edge-computing solutions rather than cloud-based processing.
 
+```{python}
+#| label: bandwidth-vs-compute-calc
+#| echo: false
+
+# Bandwidth vs Compute calculation
+bw_patients_per_day = 100
+bw_photos_per_patient = 10
+bw_mb_per_photo = 5
+bw_daily_data_mb = bw_patients_per_day * bw_photos_per_patient * bw_mb_per_photo
+bw_daily_data_gb = bw_daily_data_mb / 1000
+
+# Upload bandwidth (rural clinic)
+bw_upload_mbps = 2  # Mbps
+bw_upload_mbs = bw_upload_mbps / 8  # MB/s (bits to bytes)
+bw_upload_time_sec = bw_daily_data_mb / bw_upload_mbs
+bw_upload_time_hours = bw_upload_time_sec / 3600
+
+# Clinic operation
+bw_clinic_hours = 8
+bw_bandwidth_pct = (bw_upload_time_hours / bw_clinic_hours) * 100
+
+# Edge summary comparison
+bw_summary_kb_per_patient = 10
+bw_summary_total_kb = bw_patients_per_day * bw_summary_kb_per_patient
+bw_original_kb = bw_daily_data_mb * 1000
+bw_reduction_factor = int(bw_original_kb / bw_summary_total_kb)
+
+# Pre-formatted strings
+bw_patients_str = str(bw_patients_per_day)
+bw_photos_str = str(bw_photos_per_patient)
+bw_mb_per_photo_str = str(bw_mb_per_photo)
+bw_daily_mb_str = f"{bw_daily_data_mb:,}"
+bw_daily_gb_str = f"{bw_daily_data_gb:.0f}"
+bw_upload_mbps_str = str(bw_upload_mbps)
+bw_upload_mbs_str = f"{bw_upload_mbs}"
+bw_upload_sec_str = f"{bw_upload_time_sec:,.0f}"
+bw_upload_hours_str = f"{bw_upload_time_hours:.1f}"
+bw_clinic_hours_str = str(bw_clinic_hours)
+bw_bandwidth_pct_str = f"{bw_bandwidth_pct:.0f}"
+bw_summary_kb_str = str(bw_summary_kb_per_patient)
+bw_reduction_str = f"{bw_reduction_factor:,}"
+```
+
 ::: {.callout-notebook title="Bandwidth vs. Compute"}
 **Problem**: You have a cluster of 8 GPUs. Training is slow. Should you buy faster GPUs or a faster network switch?
 
 **The Math**:
 
-1.  **Daily Data**: $100 \text{ patients} \times 10 \text{ photos} \times 5 \text{ MB/photo} = \mathbf{5 \text{ GB/day}}$.
-2.  **Upload Time**: $5,000 \text{ MB} / (2/8 \text{ MB/s}) = 20,000 \text{ seconds} \approx \mathbf{5.5 \text{ hours}}$.
-3.  **The Constraint**: If the clinic operates for 8 hours, you are consuming **70%** of their total bandwidth just for one AI feature.
+1.  **Daily Data**: $`{python} bw_patients_str` \text{ patients} \times `{python} bw_photos_str` \text{ photos} \times `{python} bw_mb_per_photo_str` \text{ MB/photo} = \mathbf{`{python} bw_daily_gb_str` \text{ GB/day}}$.
+2.  **Upload Time**: $`{python} bw_daily_mb_str` \text{ MB} / (`{python} bw_upload_mbps_str`/8 \text{ MB/s}) = `{python} bw_upload_sec_str` \text{ seconds} \approx \mathbf{`{python} bw_upload_hours_str` \text{ hours}}$.
+3.  **The Constraint**: If the clinic operates for `{python} bw_clinic_hours_str` hours, you are consuming **`{python} bw_bandwidth_pct_str`%** of their total bandwidth just for one AI feature.
 
-**The Engineering Conclusion**: A Cloud-only architecture is too "expensive" in terms of bandwidth. By moving to the **Edge**, you only need to upload **Detection Summaries** (~10 KB/patient), reducing bandwidth usage by **500,000$\times$**.
+**The Engineering Conclusion**: A Cloud-only architecture is too "expensive" in terms of bandwidth. By moving to the **Edge**, you only need to upload **Detection Summaries** (~`{python} bw_summary_kb_str` KB/patient), reducing bandwidth usage by **`{python} bw_reduction_str`$\times$**.
 :::
 
 ### Bridging Laboratory and Real-World Data {#sec-ai-development-workflow-bridging-laboratory-realworld-data-e5b6}
