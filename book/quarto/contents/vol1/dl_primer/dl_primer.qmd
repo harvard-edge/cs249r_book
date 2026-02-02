@@ -1786,7 +1786,7 @@ training_ratio_str = f"{training_ratio:.1f}"
 The memory requirements above seem modest for our small MNIST classifier. But what happens when we scale to production-sized models? This scaling leads to a phenomenon we call the *memory explosion*, which fundamentally alters hardware requirements.
 
 ::: {.callout-notebook title="The Memory Explosion"}
-How does the scale of our Lighthouse Archetypes affect the **Data ($D$)** term of the Iron Law? Compare our MNIST classifier to **GPT-2**.
+How does the scale of our Lighthouse Archetypes affect the **Data ($D_{vol}$)** term of the Iron Law? Compare our MNIST classifier to **GPT-2**.
 
 -   **MNIST Archetype**: 100,000 parameters × 4 bytes (FP32) $\approx$ **`{python} mnist_mem_str` KB**. This entire model fits inside the L2 cache of a modern processor.
 -   **GPT-2 Archetype**: `{python} gpt2_params_count` parameters × 4 bytes (FP32) $\approx$ **`{python} gpt2_mem_str` GB**. This requires dedicated GPU VRAM and high-speed memory bandwidth.
@@ -1816,15 +1816,11 @@ Detailed calculations are essential for design documents, but experienced engine
 
 **Quick Sanity Checks**
 
-+----------------------------------------------+----------------------------------------------------+
 | **Question**                                 | **Quick Estimate**                                 |
-+:=============================================+===================================================:+
+|:---------------------------------------------|---------------------------------------------------:|
 | **"Will this model fit in GPU memory?"**     | Parameters × 4 bytes × 4 (training) < VRAM         |
-+----------------------------------------------+----------------------------------------------------+
 | **"How long per epoch on MNIST?"**           | 60K images × FLOPs/image ÷ GPU TFLOPS              |
-+----------------------------------------------+----------------------------------------------------+
 | **"Is this compute-bound or memory-bound?"** | If batch × layer_width < 1000, likely memory-bound |
-+----------------------------------------------+----------------------------------------------------+
 
 ```{python}
 #| label: mental-math-calc
@@ -2024,13 +2020,10 @@ This composition reveals that forward propagation is fundamentally a chain of ma
 ::: {.callout-perspective title="Why Matrix Multiplication Dominates AI"}
 **The Arithmetic Intensity Gap**: Not all operations are created equal. Systems engineers distinguish between **Compute-Bound** operations (dense math) and **Memory-Bound** operations (simple math).
 
-+-------------------------------+----------------------+------------------------+--------------------------+------------------+
 | **Operation**                 | **Complexity (Ops)** | **Data Movement (IO)** | **Intensity (Ops/Byte)** | **Hardware Fit** |
-+:==============================+=====================:+=======================:+=========================:+:=================+
+|:------------------------------|---------------------:|-----------------------:|-------------------------:|:-----------------|
 | **Matrix Mul ($N \times N$)** | $2N^3$               | $3N^2$                 | $\approx 2N/3$ (High)    | **GPU / TPU**    |
-+-------------------------------+----------------------+------------------------+--------------------------+------------------+
 | **Element-wise (ReLU)**       | $N^2$                | $2N^2$                 | $0.5$ (Low)              | **CPU / Vector** |
-+-------------------------------+----------------------+------------------------+--------------------------+------------------+
 
 Modern AI accelerators (GPUs) have massive compute arrays but limited memory bandwidth. They only achieve peak performance on **High Intensity** operations like Matrix Multiplication where data is reused many times. This is why "fully connected" and "convolutional" layers are preferred over complex, custom element-wise logic.
 
@@ -2122,23 +2115,15 @@ l3_bias_str = f"{flops_l3_bias:,}"
 total_mops_str = f"{total_mops:.1f}"
 ```
 
-+-------------+----------------+----------------------+------------------------------------------------------------+
 | **Layer**   | **Operation**  | **Dimensions**       | **Ops**                                                    |
-+:============+:===============+=====================:+===========================================================:+
+|:------------|:---------------|---------------------:|-----------------------------------------------------------:|
 | **Layer 1** | MatMul         | (32×784) × (784×128) | $2 \times 32 \times 784 \times 128 =$ `{python} l1_mm_str` |
-+-------------+----------------+----------------------+------------------------------------------------------------+
 | **Layer 1** | Bias + ReLU    | 32 × 128             | $2 \times 4,096 =$ `{python} l1_bias_str`                  |
-+-------------+----------------+----------------------+------------------------------------------------------------+
 | **Layer 2** | MatMul         | (32×128) × (128×64)  | $2 \times 32 \times 128 \times 64 =$ `{python} l2_mm_str`  |
-+-------------+----------------+----------------------+------------------------------------------------------------+
 | **Layer 2** | Bias + ReLU    | 32 × 64              | $2 \times 2,048 =$ `{python} l2_bias_str`                  |
-+-------------+----------------+----------------------+------------------------------------------------------------+
 | **Layer 3** | MatMul         | (32×64) × (64×10)    | $2 \times 32 \times 64 \times 10 =$ `{python} l3_mm_str`   |
-+-------------+----------------+----------------------+------------------------------------------------------------+
 | **Layer 3** | Bias + Softmax | 32 × 10              | ~`{python} l3_bias_str` (simplified)                       |
-+-------------+----------------+----------------------+------------------------------------------------------------+
 | **Total**   |                |                      | **~`{python} total_mops_str` MOps**                        |
-+-------------+----------------+----------------------+------------------------------------------------------------+
 
 **Per-image cost**: `{python} total_mops_str` MOps ÷ 32 = **~`{python} per_image_kops_str` KOps per image**
 
@@ -2763,21 +2748,12 @@ minimum height=13mm,minimum width=22mm,\ifbox@dashed dashed\fi](\picname){};
 
 These architectural differences translate directly into distinct resource profiles. @tbl-forward-pass-comparison summarizes how the computational flow differences manifest in practical system behavior.
 
-+------------------------+-------------------------------+-----------------------------+
-| **Characteristic**     | **Training Forward Pass**     | **Inference Forward Pass**  |
-+:=======================+:==============================+:============================+
-| **Activation Storage** | Maintains complete activation | Retains only current layer  |
-|                        | history for backpropagation   | activations                 |
-+------------------------+-------------------------------+-----------------------------+
-| **Memory Pattern**     | Preserves intermediate states | Releases memory after layer |
-|                        | throughout forward pass       | computation completes       |
-+------------------------+-------------------------------+-----------------------------+
-| **Computational Flow** | Structured for gradient       | Optimized for direct output |
-|                        | computation preparation       | generation                  |
-+------------------------+-------------------------------+-----------------------------+
-| **Resource Profile**   | Higher memory requirements    | Minimized memory footprint  |
-|                        | for training operations       | for efficient execution     |
-+------------------------+-------------------------------+-----------------------------+
+| **Characteristic**     | **Training Forward Pass**                               | **Inference Forward Pass**                            |
+|:-----------------------|:--------------------------------------------------------|:------------------------------------------------------|
+| **Activation Storage** | Maintains complete activation history for backprop      | Retains only current layer activations                |
+| **Memory Pattern**     | Preserves intermediate states throughout forward pass   | Releases memory after layer computation completes     |
+| **Computational Flow** | Structured for gradient computation preparation         | Optimized for direct output generation                |
+| **Resource Profile**   | Higher memory requirements for training operations      | Minimized memory footprint for efficient execution    |
 
 : **Training vs. Inference Forward Pass**: While both phases execute the same mathematical operations layer-by-layer, they differ fundamentally in memory management and computational organization. Training must preserve intermediate values for gradient computation; inference can discard them immediately, enabling significant memory optimization. {#tbl-forward-pass-comparison}
 
@@ -2969,21 +2945,14 @@ Neural network-based ZIP code recognition transformed USPS mail processing opera
 
 ::: {.callout-example title="USPS Digit Recognition: By the Numbers"}
 
-+----------------------+--------------------+---------------------+
 | **Metric**           | **Neural Network** | **Human Operators** |
-+:=====================+===================:+:====================+
+|:---------------------|-------------------:|:--------------------|
 | **Error rate**       | 1.0%               | 2.5%                |
-+----------------------+--------------------+---------------------+
 | **Rejection rate**   | 9%                 | N/A                 |
-+----------------------+--------------------+---------------------+
 | **Throughput**       | 10-30 digits/sec   | ~1 digit/sec        |
-+----------------------+--------------------+---------------------+
 | **Model parameters** | ~10,000            | N/A                 |
-+----------------------+--------------------+---------------------+
 | **Training time**    | 3 days (Sun-4/260) | N/A                 |
-+----------------------+--------------------+---------------------+
 | **Training epochs**  | 23                 | N/A                 |
-+----------------------+--------------------+---------------------+
 
 : **USPS LeNet Deployment Results**: Performance comparison of LeNet neural network against human operators for ZIP code recognition (1989), including accuracy, throughput, and training specifications. {#tbl-usps-numbers}
 
@@ -3011,23 +2980,15 @@ The success of this early large-scale neural network deployment helped establish
 
 The same neural network computation that required industrial-scale infrastructure in 1990 runs on pocket-sized devices today. @tbl-then-vs-now quantifies four decades of progress:
 
-+-----------------------+-------------------------------+------------------------+-----------------+
 | **Aspect**            | **1990s USPS System**         | **2025 Equivalent**    | **Improvement** |
-+:======================+==============================:+=======================:+================:+
+|:----------------------|------------------------------:|-----------------------:|----------------:|
 | **Hardware cost**     | ~\$50,000 (Sun-4 workstation) | ~\$50 (Raspberry Pi 5) | 1,000×          |
-+-----------------------+-------------------------------+------------------------+-----------------+
 | **Inference latency** | ~100 ms/digit                 | ~0.1 ms/digit          | 1,000×          |
-+-----------------------+-------------------------------+------------------------+-----------------+
 | **Power consumption** | 50-100 W                      | 5 W                    | 10-20×          |
-+-----------------------+-------------------------------+------------------------+-----------------+
 | **Training time**     | 3 days                        | ~30 seconds            | 8,640×          |
-+-----------------------+-------------------------------+------------------------+-----------------+
 | **Model storage**     | ~40 KB                        | ~40 KB (unchanged)     | 1× (same model) |
-+-----------------------+-------------------------------+------------------------+-----------------+
 | **Energy/inference**  | ~10 J                         | ~0.5 mJ                | 20,000×         |
-+-----------------------+-------------------------------+------------------------+-----------------+
 | **\$/inference**      | ~\$0.001                      | ~\$0.000001            | 1,000×          |
-+-----------------------+-------------------------------+------------------------+-----------------+
 
 : **Hardware Progress for Neural Network Computation**: Four decades of efficiency improvement for equivalent neural network computation, comparing the original 1990s USPS deployment infrastructure against modern 2025 hardware. {#tbl-then-vs-now}
 
