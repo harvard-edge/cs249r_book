@@ -3,6 +3,7 @@
 # centralizing the logic for TCO, Physics, and Performance math.
 
 from .constants import ureg, SPEED_OF_LIGHT_FIBER_KM_S, MS, MB, GB, hour
+from IPython.display import Markdown
 
 def _ensure_unit(val, unit):
     """Helper to attach unit if value is a raw number."""
@@ -97,15 +98,28 @@ def fmt(quantity, unit=None, precision=1, commas=True):
 
 def sci(val, precision=2):
     """
-    Formats a number or Pint Quantity into LaTeX scientific notation.
-    Example: 4.1e9 -> "4.10 \\times 10^{9}"
+    Formats a number or Pint Quantity into scientific notation using Unicode.
+    Example: 4.1e9 -> "4.10 × 10⁹"
+    
+    For Pint quantities, converts to base units first to get the full magnitude.
+    Uses Unicode × and superscript digits to avoid escaping issues
+    when interpolated via inline Python in Quarto documents.
     """
-    if hasattr(val, "magnitude"): val = val.magnitude
+    # Unicode superscript digits
+    SUPERSCRIPTS = {'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+                    '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '-': '⁻'}
+    
+    if hasattr(val, "to_base_units"):
+        # Pint quantity - convert to base units to get full magnitude
+        val = val.to_base_units().magnitude
+    elif hasattr(val, "magnitude"):
+        val = val.magnitude
     s = f"{val:.{precision}e}"
     base, exp = s.split('e')
-    # Remove leading zero from exponent if present, but handle sign
-    exp_int = int(exp) 
-    return f"{float(base):.{precision}f} \\times 10^{{{exp_int}}}"
+    exp_int = int(exp)
+    # Convert exponent to Unicode superscript
+    exp_str = ''.join(SUPERSCRIPTS.get(c, c) for c in str(exp_int))
+    return f"{float(base):.{precision}f} × 10{exp_str}"
 
 class Namespace:
     """Helper to store calculation results for easy access in prose."""
@@ -113,3 +127,81 @@ class Namespace:
         self.__dict__.update(kwargs)
     def fmt(self, name, unit=None, precision=1):
         return fmt(getattr(self, name), unit, precision)
+
+
+# ── LaTeX Markdown Helpers ──────────────────────────────────────────────────
+# These return IPython Markdown objects that preserve LaTeX formatting
+# when used with inline Python in Quarto: `{python} md_frac(a, b)`
+
+def md(latex_str):
+    """
+    Wrap a LaTeX string in Markdown() to preserve formatting in inline code.
+    
+    Usage in QMD:
+        result = md(f'$T = {value}$ ms')
+        ...
+        `{python} result`
+    """
+    return Markdown(latex_str)
+
+def md_frac(numerator, denominator, result=None, unit=None):
+    """
+    Create a LaTeX fraction with optional result and unit.
+    
+    Usage in QMD:
+        frac = md_frac("4.1 × 10⁹", "3.12 × 10¹⁴", "0.013", "ms")
+        ...
+        `{python} frac`
+    
+    Returns: $\frac{num}{denom}$ or $\frac{num}{denom} = result$ unit
+    """
+    latex = f'$\\frac{{{numerator}}}{{{denominator}}}$'
+    if result is not None:
+        latex += f' = {result}'
+    if unit is not None:
+        latex += f' {unit}'
+    return Markdown(latex)
+
+def sci_latex(val, precision=2):
+    """
+    Formats a number or Pint Quantity into LaTeX scientific notation.
+    Example: 4.1e9 -> "4.10 \\times 10^{9}"
+    
+    For Pint quantities, converts to base units first to get the full magnitude.
+    Use this instead of sci() when the output will be inside a LaTeX fraction.
+    """
+    if hasattr(val, "to_base_units"):
+        # Pint quantity - convert to base units to get full magnitude
+        val = val.to_base_units().magnitude
+    elif hasattr(val, "magnitude"):
+        val = val.magnitude
+    s = f"{val:.{precision}e}"
+    base, exp = s.split('e')
+    exp_int = int(exp)
+    return f"{float(base):.{precision}f} \\times 10^{{{exp_int}}}"
+
+def md_sci(val, precision=2):
+    """
+    Format a number in LaTeX scientific notation, wrapped in Markdown().
+    
+    Unlike sci() which returns Unicode, this returns proper LaTeX
+    that can be used inside larger LaTeX expressions.
+    
+    Example: 4.1e9 -> Markdown("$4.10 \\times 10^{9}$")
+    """
+    if hasattr(val, "magnitude"): val = val.magnitude
+    s = f"{val:.{precision}e}"
+    base, exp = s.split('e')
+    exp_int = int(exp)
+    return Markdown(f'${float(base):.{precision}f} \\times 10^{{{exp_int}}}$')
+
+def md_math(expression):
+    """
+    Wrap a math expression in $...$ and Markdown().
+    
+    Usage:
+        eq = md_math(f'T_{{comp}} = {value}')
+        ...
+        `{python} eq`
+    """
+    return Markdown(f'${expression}$')
