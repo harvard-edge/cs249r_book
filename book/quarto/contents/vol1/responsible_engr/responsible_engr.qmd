@@ -772,19 +772,6 @@ This conversion allows us to track "Carbon Cost" alongside "Dollar Cost" in our 
 
 Engineers can estimate three-year total cost of ownership using a structured approach that accounts for training, inference, and operational costs. The following methodology applies to the recommendation system example discussed above.
 
-**Training Costs** include both initial development and ongoing retraining. @tbl-tco-training breaks down these costs, showing how quarterly retraining cycles accumulate over a three-year operational period.
-
-| **Cost Component** | **Calculation** | **Financial Cost** | **Carbon (kg CO2)** |
-|:---|:---|:---|---:|
-| **Initial data preparation** | hours × rate | 100 GPU-hr × $4 = $400 | 16 kg |
-| **Hyperparameter search** | experiments × cost/experiment | 50 × $40 = $2,000 | 80 kg |
-| **Final training** | hours × rate | 200 GPU-hr × $4 = $800 | 32 kg |
-| **Subtotal per training cycle** |  | **`{python} t_subtotal_str`** | **128 kg** |
-| **Retraining frequency** | cycles/year × years | 4/year × 3 years = 12 | 12 |
-| **Total training cost** | subtotal x cycles | **`{python} t_total_str`** | **1,536 kg** |
-
-: **Training Cost Calculation**: Training costs accumulate through initial development ($3,200 per cycle) and quarterly retraining over a three-year operational period. Data preparation, hyperparameter search, and final training each consume GPU hours at $4/hour, totaling $38,400 across 12 training cycles. Despite appearing substantial, training represents only 2% of total cost of ownership. {#tbl-tco-training}
-
 ```{python}
 #| label: tco-calc
 #| echo: false
@@ -794,65 +781,151 @@ gpu_rate = 4.0
 inf_gpu_rate = 2.50
 carbon_per_gpu_hr = 0.16 # kg
 
-# Training (1 cycle)
-t_data_prep = 100 * gpu_rate
-t_hparam = 50 * 40 # 50 experiments at $40
-t_final = 200 * gpu_rate
-t_subtotal = t_data_prep + t_hparam + t_final
+# Training inputs
+t_data_prep_hrs = 100
+t_hparam_exp = 50
+t_hparam_cost_per_exp = 40
+t_final_hrs = 200
 t_cycles = 12
+t_years = 3
+t_cycles_per_year = t_cycles // t_years
+
+# Training (1 cycle)
+t_data_prep = t_data_prep_hrs * gpu_rate
+t_hparam = t_hparam_exp * t_hparam_cost_per_exp
+t_final = t_final_hrs * gpu_rate
+t_subtotal = t_data_prep + t_hparam + t_final
+
+# Training carbon (per cycle)
+t_data_prep_carbon = t_data_prep_hrs * carbon_per_gpu_hr
+t_hparam_hrs = t_hparam / gpu_rate  # convert cost back to hours
+t_hparam_carbon = t_hparam_hrs * carbon_per_gpu_hr
+t_final_carbon = t_final_hrs * carbon_per_gpu_hr
+t_subtotal_carbon = t_data_prep_carbon + t_hparam_carbon + t_final_carbon
+
+# Training totals
 t_total = t_subtotal * t_cycles
-t_carbon = t_total / gpu_rate * carbon_per_gpu_hr
+t_total_carbon = t_subtotal_carbon * t_cycles
+
+# Inference inputs
+i_users = 10_000_000
+i_queries_per_user = 20
+i_daily_q = i_users * i_queries_per_user
+i_latency = 0.01  # seconds
 
 # Inference (3 years)
-i_daily_q = 200e6
-i_latency = 0.01
-i_gpu_hr_day = (i_daily_q * i_latency) / 3600
+i_gpu_sec_day = i_daily_q * i_latency
+i_gpu_hr_day = i_gpu_sec_day / 3600
+i_daily_carbon = i_gpu_hr_day * carbon_per_gpu_hr
 i_annual_cost = i_gpu_hr_day * 365 * inf_gpu_rate
+i_annual_carbon = i_gpu_hr_day * 365 * carbon_per_gpu_hr
 i_total = i_annual_cost * 3
-i_carbon = (i_gpu_hr_day * 365 * 3) * carbon_per_gpu_hr
+i_carbon = i_annual_carbon * 3
+
+# Operations inputs (annual)
+o_monitor_annual = 50000
+o_oncall_annual = 100000
+o_incident_annual = 20000
 
 # Operations (3 years)
-o_monitor = 150000
-o_oncall = 300000
-o_incident = 60000
+o_monitor = o_monitor_annual * 3
+o_oncall = o_oncall_annual * 3
+o_incident = o_incident_annual * 3
 o_total = o_monitor + o_oncall + o_incident
 
 # Summary
 total_tco = t_total + i_total + o_total
+total_carbon = t_total_carbon + i_carbon
 p_train = t_total / total_tco * 100
 p_inf = i_total / total_tco * 100
 p_ops = o_total / total_tco * 100
 
-# Strings
+# Training table strings
+t_data_prep_calc_str = f"{t_data_prep_hrs} GPU-hr × ${gpu_rate:.0f} = ${t_data_prep:,.0f}"
+t_data_prep_carbon_str = f"{t_data_prep_carbon:.0f} kg"
+t_hparam_calc_str = f"{t_hparam_exp} × ${t_hparam_cost_per_exp} = ${t_hparam:,.0f}"
+t_hparam_carbon_str = f"{t_hparam_carbon:.0f} kg"
+t_final_calc_str = f"{t_final_hrs} GPU-hr × ${gpu_rate:.0f} = ${t_final:,.0f}"
+t_final_carbon_str = f"{t_final_carbon:.0f} kg"
 t_subtotal_str = f"${t_subtotal:,.0f}"
+t_subtotal_carbon_str = f"{t_subtotal_carbon:.0f} kg"
+t_cycles_calc_str = f"{t_cycles_per_year}/year × {t_years} years = {t_cycles}"
 t_total_str = f"${t_total:,.0f}"
+t_total_carbon_str = f"{t_total_carbon:,.0f} kg"
+
+# Inference table strings
+i_daily_q_calc_str = f"{i_users/1e6:.0f}M × {i_queries_per_user} = {i_daily_q/1e6:.0f}M"
+i_gpu_sec_calc_str = f"{i_daily_q/1e6:.0f}M × {i_latency} s = {i_gpu_sec_day/1e6:.0f}M sec"
+i_gpu_hr_day_str = f"{i_gpu_hr_day:.0f} GPU-hr"
+i_daily_carbon_str = f"{i_daily_carbon:.0f} kg"
+i_annual_calc_str = f"{i_gpu_hr_day:.0f} × 365 × ${inf_gpu_rate:.2f} = ${i_annual_cost/1e3:.0f}K"
+i_annual_carbon_str = f"{i_annual_carbon:,.0f} kg"
 i_total_str = f"${i_total/1e6:.2f}M"
+i_carbon_str = f"{i_carbon:,.0f} kg"
+
+# Operations table strings
+o_monitor_annual_str = f"${o_monitor_annual/1e3:.0f}K"
+o_monitor_str = f"${o_monitor/1e3:.0f}K"
+o_oncall_annual_str = f"${o_oncall_annual/1e3:.0f}K"
+o_oncall_str = f"${o_oncall/1e3:.0f}K"
+o_incident_annual_str = f"${o_incident_annual/1e3:.0f}K"
+o_incident_str = f"${o_incident/1e3:.0f}K"
 o_total_str = f"${o_total/1e3:.0f}K"
+
+# Summary table strings
+t_total_k_str = f"${t_total/1e3:.0f}K"
+t_total_carbon_tons_str = f"{t_total_carbon/1000:.1f} tons"
+i_carbon_tons_str = f"{i_carbon/1000:.1f} tons"
 total_tco_str = f"${total_tco/1e6:.2f}M"
+total_carbon_tons_str = f"~{total_carbon/1000:.0f} tons"
+
+# Caption strings
+gpu_rate_str = f"${gpu_rate:.0f}"
+t_cycles_str = f"{t_cycles}"
+p_train_str = f"{p_train:.0f}"
+p_inf_str = f"{p_inf:.0f}"
+p_ops_str = f"{p_ops:.0f}"
+i_daily_q_m_str = f"{i_daily_q/1e6:.0f}"
+i_latency_ms_str = f"{i_latency*1000:.0f}"
+i_annual_k_str = f"${i_annual_cost/1e3:.0f}K"
+i_users_m_str = f"{i_users/1e6:.0f}"
 ```
+
+**Training Costs** include both initial development and ongoing retraining. @tbl-tco-training breaks down these costs, showing how quarterly retraining cycles accumulate over a three-year operational period.
+
+| **Cost Component** | **Calculation** | **Financial Cost** | **Carbon (kg CO2)** |
+|:---|:---|:---|---:|
+| **Initial data preparation** | hours × rate | `{python} t_data_prep_calc_str` | `{python} t_data_prep_carbon_str` |
+| **Hyperparameter search** | experiments × cost/experiment | `{python} t_hparam_calc_str` | `{python} t_hparam_carbon_str` |
+| **Final training** | hours × rate | `{python} t_final_calc_str` | `{python} t_final_carbon_str` |
+| **Subtotal per training cycle** |  | **`{python} t_subtotal_str`** | **`{python} t_subtotal_carbon_str`** |
+| **Retraining frequency** | cycles/year × years | `{python} t_cycles_calc_str` | `{python} t_cycles` |
+| **Total training cost** | subtotal × cycles | **`{python} t_total_str`** | **`{python} t_total_carbon_str`** |
+
+: **Training Cost Calculation**: Training costs accumulate through initial development (`{python} t_subtotal_str` per cycle) and quarterly retraining over a three-year operational period. Data preparation, hyperparameter search, and final training each consume GPU hours at `{python} gpu_rate_str`/hour, totaling `{python} t_total_str` across `{python} t_cycles_str` training cycles. Despite appearing substantial, training represents only `{python} p_train_str`% of total cost of ownership. {#tbl-tco-training}
 
 **Inference Costs** typically dominate total cost of ownership for production systems, as @tbl-tco-inference details.
 
 | **Cost Component** | **Calculation** | **Financial Cost** | **Carbon (kg CO2)** |
 |:---|:---|---:|:---|
-| **Daily queries** | users × queries/user | 10M × 20 = 200M | - |
-| **GPU-seconds/day** | queries × latency | 200M × 0.01 s = 2M sec | - |
-| **GPU-hours/day** | seconds ÷ 3600 | 556 GPU-hr | 89 kg |
-| **Annual GPU cost** | hours × 365 × rate | 556 × 365 × $2.50 = $507K | 32,470 kg |
-| **3-year inference cost** | annual x 3 | **`{python} i_total_str`** | **97,410 kg** |
+| **Daily queries** | users × queries/user | `{python} i_daily_q_calc_str` | - |
+| **GPU-seconds/day** | queries × latency | `{python} i_gpu_sec_calc_str` | - |
+| **GPU-hours/day** | seconds ÷ 3600 | `{python} i_gpu_hr_day_str` | `{python} i_daily_carbon_str` |
+| **Annual GPU cost** | hours × 365 × rate | `{python} i_annual_calc_str` | `{python} i_annual_carbon_str` |
+| **3-year inference cost** | annual × 3 | **`{python} i_total_str`** | **`{python} i_carbon_str`** |
 
-: **Inference Cost Calculation**: Inference costs scale with query volume: 200 million daily queries at 10 ms each require 556 GPU-hours daily, totaling $507K annually and $1.52M over three years. At 74% of total cost, inference dominates for high-traffic systems and justifies aggressive per-query optimization through quantization, pruning, and efficient serving. {#tbl-tco-inference}
+: **Inference Cost Calculation**: Inference costs scale with query volume: `{python} i_daily_q_m_str` million daily queries at `{python} i_latency_ms_str` ms each require `{python} i_gpu_hr_day_str` daily, totaling `{python} i_annual_k_str` annually and `{python} i_total_str` over three years. At `{python} p_inf_str`% of total cost, inference dominates for high-traffic systems and justifies aggressive per-query optimization through quantization, pruning, and efficient serving. {#tbl-tco-inference}
 
 **Operational Costs** encompass infrastructure, personnel, and incident response. @tbl-tco-operations itemizes these ongoing expenses, which often surprise teams focused primarily on compute costs.
 
 | **Cost Component** | **Annual Estimate** | **3-Year Total** |
 |:---|---:|---:|
-| **Monitoring infrastructure** | $50K | $150K |
-| **On-call engineering (0.5 FTE)** | $100K | $300K |
-| **Incident response (estimated)** | $20K | $60K |
+| **Monitoring infrastructure** | `{python} o_monitor_annual_str` | `{python} o_monitor_str` |
+| **On-call engineering (0.5 FTE)** | `{python} o_oncall_annual_str` | `{python} o_oncall_str` |
+| **Incident response (estimated)** | `{python} o_incident_annual_str` | `{python} o_incident_str` |
 | **Total operational** |  | **`{python} o_total_str`** |
 
-: **Operational Cost Calculation**: Operational costs include monitoring infrastructure ($50K/year), on-call engineering at 0.5 FTE ($100K/year), and incident response reserves ($20K/year). The $510K three-year total represents 24% of TCO and often surprises teams focused primarily on compute costs. These expenses persist regardless of model performance and grow with system complexity. {#tbl-tco-operations}
+: **Operational Cost Calculation**: Operational costs include monitoring infrastructure (`{python} o_monitor_annual_str`/year), on-call engineering at 0.5 FTE (`{python} o_oncall_annual_str`/year), and incident response reserves (`{python} o_incident_annual_str`/year). The `{python} o_total_str` three-year total represents `{python} p_ops_str`% of TCO and often surprises teams focused primarily on compute costs. These expenses persist regardless of model performance and grow with system complexity. {#tbl-tco-operations}
 
 ```{python}
 #| label: tco-summary-calc
@@ -870,16 +943,16 @@ quant_savings_str = f"{quant_savings_k:.0f}"
 quant_carbon_str = f"{quant_carbon_tons:.0f}"
 ```
 
-The stark breakdown in @tbl-tco-summary answers where the money actually goes: inference at 74%, operations at 24%, and training at just 2%.
+The stark breakdown in @tbl-tco-summary answers where the money actually goes: inference at `{python} p_inf_str`%, operations at `{python} p_ops_str`%, and training at just `{python} p_train_str`%.
 
 | **Category** | **3-Year Cost** | **Percentage** | **Carbon Impact** |
 |:---|:---|---:|---:|
-| **Training** | `{python} f"${t_total/1e3:.0f}K"` | `{python} f"{p_train:.0f}%"` | 1.5 tons |
-| **Inference** | `{python} i_total_str` | `{python} f"{p_inf:.0f}%"` | 97.4 tons |
-| **Operations** | `{python} o_total_str` | `{python} f"{p_ops:.0f}%"` | - |
-| **Total TCO** | **`{python} total_tco_str`** | 100% | **~99 tons** |
+| **Training** | `{python} t_total_k_str` | `{python} p_train_str`% | `{python} t_total_carbon_tons_str` |
+| **Inference** | `{python} i_total_str` | `{python} p_inf_str`% | `{python} i_carbon_tons_str` |
+| **Operations** | `{python} o_total_str` | `{python} p_ops_str`% | - |
+| **Total TCO** | **`{python} total_tco_str`** | 100% | **`{python} total_carbon_tons_str`** |
 
-: **Total Cost of Ownership Summary**: Three-year TCO of $2.07M breaks down as: training $38K (2%), inference $1.52M (74%), and operations $510K (24%). The `{python} inf_train_ratio_str`:1 ratio between inference and training costs is typical for production systems serving 10 million daily users. A 20% reduction in inference latency through quantization would save $`{python} quant_savings_str`K and approximately `{python} quant_carbon_str` tons of CO2, easily justifying the optimization engineering investment. {#tbl-tco-summary}
+: **Total Cost of Ownership Summary**: Three-year TCO of `{python} total_tco_str` breaks down as: training `{python} t_total_k_str` (`{python} p_train_str`%), inference `{python} i_total_str` (`{python} p_inf_str`%), and operations `{python} o_total_str` (`{python} p_ops_str`%). The `{python} inf_train_ratio_str`:1 ratio between inference and training costs is typical for production systems serving `{python} i_users_m_str` million daily users. A 20% reduction in inference latency through quantization would save $`{python} quant_savings_str`K and approximately `{python} quant_carbon_str` tons of CO2, easily justifying the optimization engineering investment. {#tbl-tco-summary}
 
 **Environmental Impact.**
 The TCO analysis above captures costs that appear on invoices, but computational resources carry costs that no invoice reflects. Environmental impact follows from computational efficiency: the same optimization techniques that reduce TCO also reduce carbon emissions. The optimization techniques from @sec-data-selection and @sec-model-compression reduce energy consumption per inference, directly lowering carbon footprint. Data centers consume approximately 1–2% of global electricity (estimated at 1–1.3% in 2022, rising toward 2% by 2025), with ML workloads representing a growing fraction [@henderson2020towards]. Engineers can reduce this impact by selecting cloud regions powered by renewable energy (5× carbon reduction), applying model efficiency techniques (2–4× reduction through quantization), and scheduling intensive workloads during periods of abundant renewable energy.
