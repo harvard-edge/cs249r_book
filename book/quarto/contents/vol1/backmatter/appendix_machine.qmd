@@ -82,26 +82,6 @@ relu_util_str = f"{relu_utilization:.2f}"
 # Energy constants (Horowitz 2014)
 dram_pj = int(ENERGY_DRAM_ACCESS_PJ.magnitude)                         # 640
 flop_pj = f"{ENERGY_FLOP_FP16_PJ.magnitude:.0f}"                       # "1" (1.1 rounds)
-
-# Latency Hierarchy (ns)
-l1_ns = int(LATENCY_L1_REGISTER.to(NS).magnitude)
-l2_ns = int(LATENCY_L2_CACHE.to(NS).magnitude)
-hbm_ns = int(LATENCY_HBM3.to(NS).magnitude)
-nvlink_ns = int(LATENCY_NVLINK.to(NS).magnitude)
-pcie_ns = int(LATENCY_PCIE_GEN5.to(NS).magnitude)
-ib_ns = int(LATENCY_INFINIBAND.to(NS).magnitude)
-ssd_ns = int(LATENCY_NVME_SSD.to(NS).magnitude)
-
-# Hardware Cheat Sheet
-h100_flops = fmt(H100_FLOPS_FP16_TENSOR, "TFLOP/s", precision=0)
-h100_bw = fmt(H100_MEM_BW, "TB/s", precision=2)
-h100_cap = int(H100_MEM_CAPACITY.to(GiB).magnitude)
-h100_nvlink = int(NVLINK_H100_BW.to(GB/second).magnitude)
-
-tpuv5_flops = fmt(TPUV5P_FLOPS_BF16, "TFLOP/s", precision=0)
-tpuv5_bw = fmt(TPUV5P_MEM_BW, "TB/s", precision=2)
-tpuv5_cap = int(TPUV5P_MEM_CAPACITY.to(GiB).magnitude)
-tpuv5_ici = int(TPUV5P_ICI_BW.to(GB/second).magnitude)
 ```
 
 #### A Concrete Example: The A100 Analysis {#sec-system-foundations-concrete-example-a100-analysis-0bb9}
@@ -214,16 +194,14 @@ throughput = N_gpus * X_flops * U_mfu
 T_seconds = total_flops / throughput
 T_minutes = T_seconds / 60
 
-total_flops_str = f"{total_flops:.1e}".replace("e+20", r" \times 10^{20}")   # "1.2 \times 10^{20}"
-throughput_str = f"{throughput:.2e}".replace("e+14", r" \times 10^{14}")      # "1.25 \times 10^{14}"
 T_seconds_str = f"{T_seconds:.0f}"                                            # "960"
 T_minutes_str = f"{T_minutes:.0f}"                                            # "16"
 ```
 
 **Example**: Training a **1B parameter** model on **20B tokens** using **1 A100** (`{python} a100_fp16` TFLOPS) at **40% utilization**.
-$$ \text{Total FLOPs} = 6 \times 10^9 \times 20 \times 10^9 = `{python} total_flops_str` \text{ FLOPs} $$
-$$ \text{Throughput} = 1 \times (312 \times 10^{12}) \times 0.40 \approx `{python} throughput_str` \text{ FLOP/s} $$
-$$ T = \frac{`{python} total_flops_str`}{`{python} throughput_str`} \approx `{python} T_seconds_str` \text{ seconds} \approx `{python} T_minutes_str` \text{ minutes} $$
+$$ \text{Total FLOPs} = 6 \times 10^9 \times 20 \times 10^9 = 1.2 \times 10^{20} \text{ FLOPs} $$
+$$ \text{Throughput} = 1 \times (312 \times 10^{12}) \times 0.40 \approx 1.25 \times 10^{14} \text{ FLOP/s} $$
+$$ T = \frac{1.2 \times 10^{20}}{1.25 \times 10^{14}} \approx `{python} T_seconds_str` \text{ seconds} \approx `{python} T_minutes_str` \text{ minutes} $$
 
 ::::
 
@@ -260,23 +238,23 @@ To design these systems, we must move beyond abstract concepts and look at the a
 
 The first step in systems intuition is understanding the cost of distance. To write efficient kernels or distributed algorithms, you must have an intuitive sense of how long the processor waits for data. If accessing a register is like picking up a pencil from your desk, fetching from HBM is walking across the office, and fetching from disk is flying to the moon.
 
-+--------------------------+--------------------------+---------------------+-------------------------+
-| **Component**            | **Latency (ns)**         | **Cycles (Approx)** | **Relative "Distance"** |
-+:=========================+:=========================+====================:+========================:+
-| **L1 Cache / Register**  | ~`{python} l1_ns` ns     | 3-4 cycles          | 1 minute                |
-+--------------------------+--------------------------+---------------------+-------------------------+
-| **L2 Cache**             | ~`{python} l2_ns` ns     | 12 cycles           | 4 minutes               |
-+--------------------------+--------------------------+---------------------+-------------------------+
-| **HBM3 (GPU Memory)**    | ~`{python} hbm_ns` ns    | 1,000 cycles        | 5 hours                 |
-+--------------------------+--------------------------+---------------------+-------------------------+
-| **NVLink (GPU-GPU)**     | ~`{python} nvlink_ns` ns | 1,500 cycles        | 8 hours                 |
-+--------------------------+--------------------------+---------------------+-------------------------+
-| **PCIe (CPU-GPU)**       | ~`{python} pcie_ns` ns   | 3,000 cycles        | 1 day                   |
-+--------------------------+--------------------------+---------------------+-------------------------+
-| **InfiniBand (Network)** | ~`{python} ib_ns` ns     | 15,000 cycles       | 1 week                  |
-+--------------------------+--------------------------+---------------------+-------------------------+
-| **SSD (NVMe)**           | ~`{python} ssd_ns` ns    | 300,000 cycles      | 3 months                |
-+--------------------------+--------------------------+---------------------+-------------------------+
++--------------------------+------------------+---------------------+-------------------------+
+| **Component**            | **Latency (ns)** | **Cycles (Approx)** | **Relative "Distance"** |
++:=========================+=================:+====================:+========================:+
+| **L1 Cache / Register**  | ~1 ns            | 3-4 cycles          | 1 minute                |
++--------------------------+------------------+---------------------+-------------------------+
+| **L2 Cache**             | ~4 ns            | 12 cycles           | 4 minutes               |
++--------------------------+------------------+---------------------+-------------------------+
+| **HBM3 (GPU Memory)**    | ~300 ns          | 1,000 cycles        | 5 hours                 |
++--------------------------+------------------+---------------------+-------------------------+
+| **NVLink (GPU-GPU)**     | ~500 ns          | 1,500 cycles        | 8 hours                 |
++--------------------------+------------------+---------------------+-------------------------+
+| **PCIe (CPU-GPU)**       | ~1,000 ns        | 3,000 cycles        | 1 day                   |
++--------------------------+------------------+---------------------+-------------------------+
+| **InfiniBand (Network)** | ~5,000 ns        | 15,000 cycles       | 1 week                  |
++--------------------------+------------------+---------------------+-------------------------+
+| **SSD (NVMe)**           | ~100,000 ns      | 300,000 cycles      | 3 months                |
++--------------------------+------------------+---------------------+-------------------------+
 
 : **The Latency Hierarchy.** Access times for modern AI hardware. Note the massive jump from SRAM (Cache) to HBM. Any kernel that misses cache pays a heavy penalty. {#tbl-latency-numbers}
 
@@ -284,19 +262,19 @@ The first step in systems intuition is understanding the cost of distance. To wr
 
 While latency tells us how long we wait for the *first* byte, bandwidth tells us how many bytes follow. Use these constants for back-of-the-envelope "Roofline" calculations. These represent the "standard units of compute" for the 2025 era of machine learning.
 
-+----------------------+--------------------------------------+---------------------------------+-----------------------------------------+
-| **Spec**             | **NVIDIA H100 (SXM)**                | **Google TPU v5p**              | **System Impact**                       |
-+:=====================+=====================================:+================================:+:========================================+
-| **FP16/BF16 Peak**   | `{python} h100_flops` TFLOPS         | `{python} tpuv5_flops` TFLOPS   | The "Speed Limit" ($R_{peak}$)          |
-+----------------------+--------------------------------------+---------------------------------+-----------------------------------------+
-| **Memory Bandwidth** | `{python} h100_bw`                   | `{python} tpuv5_bw`             | The "Width of the Pipe" ($BW$)          |
-+----------------------+--------------------------------------+---------------------------------+-----------------------------------------+
-| **HBM Capacity**     | `{python} h100_cap` GB               | `{python} tpuv5_cap` GB         | Max Model Size ($P$) / Batch Size ($B$) |
-+----------------------+--------------------------------------+---------------------------------+-----------------------------------------+
-| **L2/SRAM Cache**    | 50 MB                                | ~100 MB                         | Critical for Operator Fusion            |
-+----------------------+--------------------------------------+---------------------------------+-----------------------------------------+
-| **Interconnect**     | `{python} h100_nvlink` GB/s (NVLink) | `{python} tpuv5_ici` GB/s (ICI) | Determines Model Parallelism Scaling    |
-+----------------------+--------------------------------------+---------------------------------+-----------------------------------------+
++----------------------+-----------------------+--------------------+-----------------------------------------+
+| **Spec**             | **NVIDIA H100 (SXM)** | **Google TPU v5p** | **System Impact**                       |
++:=====================+======================:+===================:+:========================================+
+| **FP16/BF16 Peak**   | 989 TFLOPS            | 459 TFLOPS         | The "Speed Limit" ($R_{peak}$)          |
++----------------------+-----------------------+--------------------+-----------------------------------------+
+| **Memory Bandwidth** | 3.35 TB/s             | 2.76 TB/s          | The "Width of the Pipe" ($BW$)          |
++----------------------+-----------------------+--------------------+-----------------------------------------+
+| **HBM Capacity**     | 80 GB                 | 95 GB              | Max Model Size ($P$) / Batch Size ($B$) |
++----------------------+-----------------------+--------------------+-----------------------------------------+
+| **L2/SRAM Cache**    | 50 MB                 | ~100 MB            | Critical for Operator Fusion            |
++----------------------+-----------------------+--------------------+-----------------------------------------+
+| **Interconnect**     | 900 GB/s (NVLink)     | 1,600 GB/s (ICI)   | Determines Model Parallelism Scaling    |
++----------------------+-----------------------+--------------------+-----------------------------------------+
 
 : **Reference Specs (2025).** Key constants for quantitative analysis. Always check specific datasheets, but these serve as standard units of compute. {#tbl-hardware-cheatsheet}
 
