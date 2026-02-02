@@ -111,21 +111,25 @@ def build_chapter(
     
     # Determine the output file path and delete it before building
     # This ensures we're checking if THIS build created the file, not a previous one
+    # Note: The PDF filename can vary (e.g., "Machine-Learning-Systems.pdf" or 
+    # "Introduction-to-Machine-Learning-Systems.pdf"), so we use glob to find any PDF
+    output_dir = book_dir / "_build" / f"{format_type}-{volume}"
     if format_type == "pdf":
-        output_path = book_dir / "_build" / f"pdf-{volume}" / "Machine-Learning-Systems.pdf"
+        output_pattern = "*.pdf"
     elif format_type == "epub":
-        output_path = book_dir / "_build" / f"epub-{volume}" / "Machine-Learning-Systems.epub"
+        output_pattern = "*.epub"
     elif format_type == "html":
-        output_path = book_dir / "_build" / f"html-{volume}" / "index.html"
+        output_pattern = "index.html"
     else:
-        output_path = None
+        output_pattern = None
     
-    # Delete the output file if it exists (to ensure clean test)
-    if output_path and output_path.exists():
-        try:
-            output_path.unlink()
-        except Exception:
-            pass  # Ignore deletion errors
+    # Delete any existing output files (to ensure clean test)
+    if output_pattern and output_dir.exists():
+        for f in output_dir.glob(output_pattern):
+            try:
+                f.unlink()
+            except Exception:
+                pass  # Ignore deletion errors
     
     start = time.time()
     try:
@@ -163,15 +167,16 @@ def build_chapter(
         has_duplicate_footnote = 'Duplicate note reference' in combined
         
         # Ultimate test: did the output file get created?
-        # Ignore exit code - only check if the file exists
-        if output_path and output_path.exists():
+        # Ignore exit code - only check if any matching output file exists
+        output_files = list(output_dir.glob(output_pattern)) if output_pattern and output_dir.exists() else []
+        if output_files:
             return True, duration, "", warning_count, error_count, chapter_log_dir
         else:
             # Build failed - capture last 50 lines of output for error summary
             error_lines = combined.strip().split('\n')
             error_summary = '\n'.join(error_lines[-50:])
             file_type = format_type.upper()
-            return False, duration, f"{file_type} not created: {output_path}\n\n{error_summary}", warning_count, error_count + 1, chapter_log_dir
+            return False, duration, f"{file_type} not created in {output_dir}\n\n{error_summary}", warning_count, error_count + 1, chapter_log_dir
             
     except subprocess.TimeoutExpired:
         log_file.write_text(f"TIMEOUT: Build exceeded 10 minutes\nCommand: {' '.join(cmd)}")
@@ -193,25 +198,25 @@ def _copy_build_artifacts(book_dir: Path, chapter_log_dir: Path, format_type: st
     copied_files = []
     
     if format_type == "pdf":
-        # Primary artifact: Machine-Learning-Systems.tex in quarto/ directory
-        tex_file = book_dir / "Machine-Learning-Systems.tex"
-        if tex_file.exists():
-            dst = artifacts_dir / "Machine-Learning-Systems.tex"
+        # Primary artifact: any .tex file in quarto/ directory (name varies)
+        for tex_file in book_dir.glob("*.tex"):
             try:
+                dst = artifacts_dir / tex_file.name
                 shutil.copy2(tex_file, dst)
-                copied_files.append("Machine-Learning-Systems.tex")
+                copied_files.append(tex_file.name)
             except Exception as e:
-                (artifacts_dir / "Machine-Learning-Systems.tex.error").write_text(f"Failed to copy: {e}")
+                (artifacts_dir / f"{tex_file.name}.error").write_text(f"Failed to copy: {e}")
         
-        # Copy the generated PDF
-        pdf_file = book_dir / "_build" / f"pdf-{volume}" / "Machine-Learning-Systems.pdf"
-        if pdf_file.exists():
-            dst = artifacts_dir / "Machine-Learning-Systems.pdf"
-            try:
-                shutil.copy2(pdf_file, dst)
-                copied_files.append("Machine-Learning-Systems.pdf")
-            except Exception as e:
-                (artifacts_dir / "Machine-Learning-Systems.pdf.error").write_text(f"Failed to copy: {e}")
+        # Copy any generated PDF (name varies)
+        pdf_dir = book_dir / "_build" / f"pdf-{volume}"
+        if pdf_dir.exists():
+            for pdf_file in pdf_dir.glob("*.pdf"):
+                try:
+                    dst = artifacts_dir / pdf_file.name
+                    shutil.copy2(pdf_file, dst)
+                    copied_files.append(pdf_file.name)
+                except Exception as e:
+                    (artifacts_dir / f"{pdf_file.name}.error").write_text(f"Failed to copy: {e}")
         
         # Also copy any .log files from quarto/ (LaTeX logs)
         for log_file in book_dir.glob("*.log"):
@@ -316,9 +321,11 @@ def main():
         sys.exit(1)
     
     # Filter chapters if --only specified
+    # Note: --only bypasses the normal exclusion list, allowing any chapter to be built
     if args.only:
         only_chapters = [c.strip() for c in args.only.split(',')]
-        chapters = [c for c in chapters if c in only_chapters]
+        # Use the specified chapters directly (bypass exclusion filter)
+        chapters = only_chapters
     
     # Skip chapters if --start-from specified
     if args.start_from:
