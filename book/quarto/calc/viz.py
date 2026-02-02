@@ -1641,3 +1641,46 @@ def plot_training_roofline(ax=None):
     ax.set_ylabel('Attainable TFLOP/s')
     
     return ax
+
+def plot_compilation_continuum(ax=None):
+    """Visualizes 'The Compilation Continuum' (Eager vs JIT vs AOT)."""
+    if ax is None: fig, ax = plt.subplots()
+
+    # X-axis: Production Executions (Log Scale)
+    x = np.logspace(2, 7, 200) # 100 to 10,000,000
+
+    # Cost Models (Arbitrary Units)
+    # Eager: 0 compile + 10e-6 * x
+    y_eager = 0 + 10e-6 * x
+    
+    # JIT: 10 compile + 5e-6 * x
+    y_jit = 10 + 5e-6 * x
+    
+    # AOT: 30 compile + 2e-6 * x
+    y_aot = 30 + 2e-6 * x
+
+    # Plot Lines
+    ax.plot(x, y_eager, color=COLORS['BlueLine'], linewidth=2.5, label=r'Eager ($T_{compile}=0, T_{exec}=10\mu s$)')
+    ax.plot(x, y_jit, color=COLORS['OrangeLine'], linewidth=2.5, label=r'JIT ($T_{compile}=30s, T_{exec}=5\mu s$)')
+    ax.plot(x, y_aot, color=COLORS['GreenLine'], linewidth=2.5, label=r'AOT ($T_{compile}=2min, T_{exec}=2\mu s$)')
+
+    # Region Labels
+    # Eager wins: x < 2e6. At x=1000, Eager~0, JIT=10. Place in between.
+    ax.text(1000, 5, "Eager wins", color=COLORS['BlueLine'], ha='center', va='center', fontweight='bold', fontsize=9)
+    
+    # JIT wins: 2e6 < x < 6.6e6. At x=4e6, JIT=30, AOT=38. Place in between.
+    ax.text(4e6, 34, "JIT wins", color=COLORS['OrangeLine'], ha='center', va='center', fontweight='bold', fontsize=9)
+    
+    # AOT wins: x > 6.6e6. At x=8e6, AOT=46, JIT=50. Tight gap. Place below AOT line.
+    ax.text(8e6, 42, "AOT wins", color=COLORS['GreenLine'], ha='center', va='top', fontweight='bold', fontsize=9)
+
+    # Styling
+    ax.set_xscale('log')
+    ax.set_xlabel(r'Production Executions ($N_{prod}$)')
+    ax.set_ylabel('Total Time (arbitrary units)')
+    ax.set_xlim(100, 1e7)
+    ax.set_ylim(0, 100)
+    
+    ax.legend(loc='upper left', fontsize=8)
+    
+    return ax
