@@ -1840,7 +1840,7 @@ stream_cost_day = stream_cores * stream_hours * stream_cost_per_hr
 
 # Batch: 3.6 TB/hour, process in 10 min
 hourly_data_tb = throughput_gbs * 3600 / 1000  # TB per hour
-batch_core_hours = 33  # 200 cores × 10min/hr = 33 core-hours/day
+batch_core_hours = 200 * (10/60) * 24  # 200 cores × 10min/hr × 24 hours = 800 core-hours/day
 batch_cost_day = batch_core_hours * stream_cost_per_hr
 
 cost_ratio = stream_cost_day / batch_cost_day
@@ -1848,14 +1848,14 @@ cost_ratio = stream_cost_day / batch_cost_day
 throughput_str = f"{throughput_gbs:.0f}"
 hourly_tb_str = f"{hourly_data_tb:.1f}"
 stream_cost_str = f"{stream_cost_day:.0f}"
-batch_cost_str = f"{batch_cost_day:.2f}"
+batch_cost_str = f"{batch_cost_day:.0f}"
 cost_ratio_str = f"{cost_ratio:.0f}"
 events_per_sec_str = f"{events_per_sec / 1e6:.0f}M"
 event_size_kb_str = str(event_size_kb)
 stream_cores_str = str(stream_cores)
 stream_hours_str = str(stream_hours)
 stream_cost_per_hr_str = f"{stream_cost_per_hr}"
-batch_core_hours_str = str(batch_core_hours)
+batch_core_hours_str = f"{batch_core_hours:.0f}"
 ```
 
 ::: {.callout-notebook title="The Cost of Real-Time"}
@@ -1865,7 +1865,7 @@ batch_core_hours_str = str(batch_core_hours)
 
 1.  **Throughput**: `{python} events_per_sec_str` events/sec $\times$ `{python} event_size_kb_str`KB/event = **`{python} throughput_str` GB/s**.
 2.  **Stream Requirements**: To sustain `{python} throughput_str` GB/s with <100ms latency, you need ~50 dedicated cores + redundant backups (always on). Cost: `{python} stream_cores_str` cores $\times$ `{python} stream_hours_str` hrs $\times$ $`{python} stream_cost_per_hr_str`/hr = **$`{python} stream_cost_str`/day**.
-3.  **Batch Requirements**: Process `{python} hourly_tb_str`TB (1 hour data) in 10 mins. High throughput (sequential I/O) is efficient. You need 200 cores for 10 mins/hour = `{python} batch_core_hours_str` core-hours/day. Cost: `{python} batch_core_hours_str` $\times$ $`{python} stream_cost_per_hr_str` = **$`{python} batch_cost_str`/day**.
+3.  **Batch Requirements**: Process `{python} hourly_tb_str`TB (1 hour data) in 10 mins. High throughput (sequential I/O) is efficient. You need 200 cores for 10 mins/hour $\times$ 24 hours = `{python} batch_core_hours_str` core-hours/day. Cost: `{python} batch_core_hours_str` $\times$ $`{python} stream_cost_per_hr_str` = **$`{python} batch_cost_str`/day**.
 
 **The Engineering Conclusion**: Real-time is **~`{python} cost_ratio_str`× more expensive** for the same data volume. Only pay this tax if the value of <1s latency justifies it.
 :::
@@ -2530,7 +2530,7 @@ The cost structure of labeling operations\index{Labeling Cost!multiplicative mod
 
 $$\text{Total Cost} = N \times \text{Cost}_{\text{label}} \times (1 + R_{\text{review}}) \times (1 + R_{\text{rework}})$$
 
-where $N$ represents the number of examples, $\text{Cost}_{\text{label}}$ is the base cost per label, $R_{\text{review}}$ is the fraction requiring expert review (typically 0.05-0.15), and $R_{\text{rework}}$ accounts for labels requiring correction (typically 0.10-0.30). This equation reveals how quality requirements compound costs: a dataset requiring 1 million labels at $0.10 per label with 10% expert review (costing 5x more, or $0.50) and 20% rework reaches $138,000, not the $100,000 that naive calculation suggests. For comparison, training a ResNet-50 model on this data might cost only $50 for compute—nearly 3,000x less than labeling, demonstrating why labeling economics dominate total system costs yet receive insufficient attention during planning phases. Though Amdahl's Law is typically applied to CPU parallelization, the same principle governs human labor: when 70% of effort is inherently serial (requiring human judgment), no amount of parallelizing the remaining 30% can yield more than modest speedup. We formalize this as *Amdahl's Law for data pipelines*.
+where $N$ represents the number of examples, $\text{Cost}_{\text{label}}$ is the base cost per label, $R_{\text{review}}$ is the fraction requiring expert review (typically 0.05-0.15), and $R_{\text{rework}}$ accounts for labels requiring correction (typically 0.10-0.30). This equation reveals how quality requirements compound costs: a dataset requiring 1 million labels at $0.10 per label with 10% expert review (costing 5x more, or $0.50) and 20% rework reaches $132,000 (1,000,000 × 0.10 × 1.10 × 1.20), not the $100,000 that naive calculation suggests. For comparison, training a ResNet-50 model on this data might cost only $50 for compute—about 2,640x less than labeling (132,000 ÷ 50), demonstrating why labeling economics dominate total system costs yet receive insufficient attention during planning phases. Though Amdahl's Law is typically applied to CPU parallelization, the same principle governs human labor: when 70% of effort is inherently serial (requiring human judgment), no amount of parallelizing the remaining 30% can yield more than modest speedup. We formalize this as *Amdahl's Law for data pipelines*.
 
 ```{python}
 #| label: amdahl-pipeline-calc
@@ -3358,7 +3358,7 @@ Conventional wisdom holds that larger datasets improve model performance by prov
 
 ##### Pitfall: *Treating data labeling as a simple mechanical task that can be outsourced without oversight.* {.unnumbered}
 
-Teams assume labeling is conceptually simple (show image, get label), but @sec-data-engineering-ml-scaling-aiassisted-labeling-9360 reveals labeling economics dominate total costs. Expert review costs 10 to 50x more than crowdsourcing ($0.50-2.00 vs $0.01-0.05 per label), yet skipping oversight triggers expensive rework. A 1-million-label dataset at $0.10 per label with 10% expert review and 20% rework costs $138,000, not the naive $100,000 estimate. Training a ResNet-50 on this data costs approximately $50 in compute, meaning labeling exceeds training costs by 2,760x. Quality degradation compounds the economic waste: annotators scoring below 85% on gold standards introduce systematic errors that models amplify. Without consensus mechanisms (3 to 5 labels per example, Fleiss' kappa greater than 0.4), ambiguous cases receive arbitrary labels causing 8 to 15% accuracy drops on production edge cases that require costly relabeling and retraining cycles.
+Teams assume labeling is conceptually simple (show image, get label), but @sec-data-engineering-ml-scaling-aiassisted-labeling-9360 reveals labeling economics dominate total costs. Expert review costs 10 to 50x more than crowdsourcing ($0.50-2.00 vs $0.01-0.05 per label), yet skipping oversight triggers expensive rework. A 1-million-label dataset at $0.10 per label with 10% expert review and 20% rework costs $132,000 (1,000,000 × 0.10 × 1.10 × 1.20), not the naive $100,000 estimate. Training a ResNet-50 on this data costs approximately $50 in compute, meaning labeling exceeds training costs by 2,640x (132,000 ÷ 50). Quality degradation compounds the economic waste: annotators scoring below 85% on gold standards introduce systematic errors that models amplify. Without consensus mechanisms (3 to 5 labels per example, Fleiss' kappa greater than 0.4), ambiguous cases receive arbitrary labels causing 8 to 15% accuracy drops on production edge cases that require costly relabeling and retraining cycles.
 
 ##### Fallacy: *Data engineering is a one-time setup that can be completed before model development begins.* {.unnumbered}
 

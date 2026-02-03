@@ -425,7 +425,7 @@ node[Text](BB6){Repeat\\ Until Done};
 **Systems Implications: Overhead.** The flexibility of eager execution with autograd tape comes with performance costs. Each overhead category maps to a specific term in the Iron Law of performance (introduced in @sec-silicon-contract), revealing why eager execution creates a performance ceiling for small models:
 
 - **Graph construction overhead** ($L_{lat}$): Each forward pass rebuilds the autograd tape from scratch, adding Python object creation, reference counting, and node linking cost to every iteration.
-- **Python interpreter overhead** ($L_{lat}$): Every operation goes through Python dispatch, including function lookup, argument parsing, and type checking. At ~1μs per operation, this becomes significant for models with thousands of operations.
+- **Python interpreter overhead** ($L_{lat}$): Every operation goes through Python dispatch, including function lookup, argument parsing, and type checking. At ~10μs per operation, this becomes significant for models with thousands of operations.
 - **Limited optimization opportunities** ($O$, $D_{vol}$): Because the graph is built during execution, the framework cannot optimize across operations. Each operation launches its own GPU kernel, preventing kernel fusion that would reduce both operation count and memory traffic.
 - **Memory overhead** ($D_{vol}$): The autograd tape stores references to all intermediate tensors and Function nodes, increasing memory consumption by 2--3$\times$ compared to forward-only execution and adding pressure to the memory hierarchy.
 
@@ -857,7 +857,7 @@ This prints each break location and reason: `Graph break in user code at file.py
 
 - **backend='inductor'** (default): Generates Triton kernels for CUDA and C++ for CPU. Best general-purpose performance for both training and inference.
 - **backend='onnxrt'**\index{ONNX Runtime!torch.compile backend}: Exports FX graph to ONNX format and executes using ONNX Runtime. Enables cross-platform deployment (CPU, GPU, mobile, edge devices) but may cause more graph breaks due to limited ONNX operation coverage.
-- **backend='tensorrt'**\index{TensorRT!torch.compile backend}: Compiles to NVIDIA TensorRT inference engine with aggressive optimizations (int8 quantization, layer fusion, kernel autotuning). Inference-only (no backward pass), NVIDIA GPUs only, often achieves 2--5$\times$ speedup over TorchInductor for inference.
+- **backend='tensorrt'**\index{TensorRT!torch.compile backend}: Compiles to NVIDIA TensorRT inference engine with aggressive optimizations (int8 quantization, layer fusion, kernel autotuning). Inference-only (no backward pass), NVIDIA GPUs only, often achieves 1.5--2$\times$ speedup over TorchInductor for inference.
 
 **Practical Example: Measuring Speedup.** @lst-torch-compile-benchmark implements correct GPU benchmarking methodology, incorporating CUDA synchronization, warmup iterations to exclude compilation time, and sufficient iterations to amortize measurement overhead:
 
@@ -1216,8 +1216,8 @@ b = 0.909  # sin(2.0)
 db = -0.416  # cos(2.0)
 
 # Final result
-result = 3.637  # 4.0 * 0.909
-dresult = 2.805  # 4.0 * (-0.416) + 0.909 * 4.0
+result = 3.636  # 4.0 * 0.909 = 3.636
+dresult = 1.972  # 4.0 * (-0.416) + 0.909 * 4.0 = -1.664 + 3.636 = 1.972
 ```
 :::
 
@@ -1315,7 +1315,7 @@ dc/db = a            # ∂(a*b)/∂b = a = 4.0
 dc/dx = (2 * x * dc/da) + (cos(x) * dc/db)
       = (2 * 2.0 * 0.909) + (cos(2.0) * 4.0)
       = 3.636 + (-0.416 * 4.0)
-      = 2.805
+      = 1.972  # 3.636 - 1.664 = 1.972
 ```
 :::
 
@@ -2375,7 +2375,7 @@ Frameworks address this throughput requirement through three mechanisms. The fir
 
 The second mechanism is *prefetching*. The `prefetch_factor` parameter (default 2) controls how many batches each worker prepares in advance. With 4 workers and `prefetch_factor=2`, the pipeline maintains 8 batches in flight, ensuring the GPU never stalls waiting for data. While the model processes batch $N$ on the GPU, workers simultaneously load and preprocess batch $N+1$ through $N+8$ on CPUs, effectively hiding data loading latency behind computation. The cost is memory consumption proportional to batch size times prefetch depth.
 
-The third mechanism is *pinned memory for DMA transfers*\index{DataLoader!pin\_memory option}. The `pin_memory=True` option allocates batch data in page-locked (pinned) host memory rather than pageable memory. Pageable memory can be swapped to disk by the operating system, forcing the CUDA runtime to first copy data to a temporary pinned buffer before initiating the GPU transfer. Pinned memory bypasses this intermediate copy, enabling direct memory access (DMA) transfers where the GPU's memory controller reads directly from host memory while the CPU continues other work. For a batch of 64 images at 224x224x3 resolution (37 MB), pinned memory transfer takes approximately 0.5 ms over PCIe 4.0 x16 (31.5 GB/s) compared to 1.5 ms with pageable memory, a 2 to 3x speedup. The cost is reduced available system memory, as pinned pages cannot be swapped.
+The third mechanism is *pinned memory for DMA transfers*\index{DataLoader!pin\_memory option}. The `pin_memory=True` option allocates batch data in page-locked (pinned) host memory rather than pageable memory. Pageable memory can be swapped to disk by the operating system, forcing the CUDA runtime to first copy data to a temporary pinned buffer before initiating the GPU transfer. Pinned memory bypasses this intermediate copy, enabling direct memory access (DMA) transfers where the GPU's memory controller reads directly from host memory while the CPU continues other work. For a batch of 64 images at 224x224x3 resolution (37 MB), pinned memory transfer takes approximately 1.2 ms over PCIe 4.0 x16 (31.5 GB/s) compared to 3.0 ms with pageable memory, a 2 to 3x speedup. The cost is reduced available system memory, as pinned pages cannot be swapped.
 
 These three mechanisms appear together in the DataLoader configuration. Understanding how each parameter connects to the underlying systems principle helps practitioners diagnose data pipeline bottlenecks. @lst-dataloader-throughput shows a typical setup where `num_workers` enables parallel loading, `prefetch_factor` controls pipeline depth, and `pin_memory` enables DMA transfers:
 
