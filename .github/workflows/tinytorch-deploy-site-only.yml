@@ -1,0 +1,166 @@
+name: '🔥 TinyTorch · 🌐 Deploy Site Only'
+
+# =============================================================================
+# TinyTorch Website-Only Deploy (No Version Bump)
+# =============================================================================
+#
+# Use this workflow for website content updates that don't warrant a version bump:
+# - Typo fixes, documentation updates
+# - Team page changes, community content
+# - CSS/styling tweaks
+# - Navigation updates
+#
+# This workflow:
+# ✅ Builds and deploys to production (gh-pages)
+# ✅ Syncs dev → main first
+# ❌ Does NOT bump version numbers
+# ❌ Does NOT create tags or releases
+# ❌ Does NOT update announcement bar
+#
+# For releases with version bumps, use "TinyTorch · 🚀 Publish (Live)" instead.
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      description:
+        description: 'What are you deploying? [e.g., "Team page update"]'
+        required: true
+        default: 'Website content update'
+      confirm:
+        description: 'Type "DEPLOY" to confirm (safety check)'
+        required: true
+        default: ''
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: gh-pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: '🔍 Validate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event.inputs.confirm == 'DEPLOY'
+
+    steps:
+      - name: ✅ Inputs validated
+        run: |
+          echo "📋 Deploying: ${{ github.event.inputs.description }}"
+          echo "👤 Triggered by: ${{ github.actor }}"
+
+  preflight:
+    name: '✈️ Preflight Checks'
+    needs: validate
+    uses: ./.github/workflows/tinytorch-validate-dev.yml
+    with:
+      test_type: 'build'  # Just verify it builds, skip full tests for hotfixes
+
+  sync-from-dev:
+    name: '🔄 Sync dev → main'
+    runs-on: ubuntu-latest
+    needs: preflight
+    if: needs.preflight.result == 'success'
+
+    steps:
+      - name: 📥 Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔄 Merge dev into main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          echo "📥 Fetching dev branch..."
+          git fetch origin dev
+
+          echo "🔄 Merging dev into main..."
+          git merge origin/dev --no-edit -m "🌐 Website update: ${{ github.event.inputs.description }}"
+
+          echo "🚀 Pushing updated main..."
+          git push origin main
+
+  build-and-deploy:
+    name: '🔥 Build & Deploy'
+    runs-on: ubuntu-latest
+    needs: [preflight, sync-from-dev]
+    if: needs.sync-from-dev.result == 'success'
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'tinytorch/site/requirements.txt'
+
+      - name: 📦 Install dependencies
+        working-directory: tinytorch
+        run: |
+          pip install --upgrade pip
+          pip install -r site/requirements.txt
+
+      - name: 🔨 Build Jupyter Book
+        working-directory: tinytorch/site
+        run: |
+          jupyter-book build . --all
+          touch _build/html/.nojekyll
+
+      - name: 🚀 Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./tinytorch/site/_build/html
+          destination_dir: tinytorch
+          publish_branch: gh-pages
+          keep_files: true
+          commit_message: '🌐 TinyTorch website update - ${{ github.event.inputs.description }}'
+
+  summary:
+    name: '📋 Deploy Summary'
+    runs-on: ubuntu-latest
+    needs: [build-and-deploy]
+    if: always()
+
+    steps:
+      - name: 📋 Summary
+        run: |
+          echo "## 🌐 TinyTorch Website Deploy Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Description:** ${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Deployed by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Type:** Website-only (no version bump)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🌐 Access:" >> $GITHUB_STEP_SUMMARY
+          echo "- 📖 [TinyTorch Website](https://mlsysbook.ai/tinytorch/)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "*💡 For versioned releases, use the 'TinyTorch · 🚀 Publish (Live)' workflow instead.*" >> $GITHUB_STEP_SUMMARY
+
+  fail-validation:
+    name: '❌ Validation Failed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event.inputs.confirm != 'DEPLOY'
+
+    steps:
+      - name: ❌ Invalid confirmation
+        run: |
+          echo "## ❌ Deploy Cancelled" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Reason:** You must type exactly 'DEPLOY' to confirm" >> $GITHUB_STEP_SUMMARY
+          echo "**Received:** ${{ github.event.inputs.confirm }}" >> $GITHUB_STEP_SUMMARY
+          exit 1
