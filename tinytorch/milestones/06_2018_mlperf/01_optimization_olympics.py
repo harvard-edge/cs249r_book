@@ -228,7 +228,6 @@ def step_1_profile(model, X_test, y_test, Profiler, Tensor):
     table.add_row("Throughput", f"{throughput:.0f} samples/sec", "Inference speed")
 
     console.print(table)
-    console.print()
 
     return {
         'param_count': param_count,
@@ -292,7 +291,6 @@ def step_2_quantize(model, param_bytes, Quantizer):
     )
 
     console.print(table)
-    console.print()
 
     return {
         'quant_result': quant_result,
@@ -367,7 +365,6 @@ def step_3_prune(model, baseline_acc, X_test, y_test, Compressor, DigitMLP):
     )
 
     console.print(table)
-    console.print()
 
     return {
         'sparsity_before': sparsity_before,
@@ -434,7 +431,6 @@ def step_4_kv_cache(KVCache, MinimalTransformer):
 
         console.print(table)
         console.print("  [green]✓[/green] KV Cache ready for generation!")
-        console.print()
 
         return {'cache_memory': cache_memory, 'kv_cache': kv_cache}
 
@@ -501,7 +497,6 @@ def step_5_accelerate(vectorized_matmul, Tensor):
 
     console.print(table)
     console.print("  [green]✓[/green] Vectorized operations ready!")
-    console.print()
 
     return {
         'standard_time': standard_time,
@@ -571,7 +566,6 @@ def step_6_benchmark(model, X_test, y_test, baseline_acc, Benchmark):
     table.add_row("Accuracy", f"{baseline_acc:.1f}%", "> 80%")
 
     console.print(table)
-    console.print()
 
     return {
         'mean_latency': mean_latency,
@@ -580,6 +574,13 @@ def step_6_benchmark(model, X_test, y_test, baseline_acc, Benchmark):
         'throughput': throughput,
     }
 
+def press_enter_to_continue() :
+    if sys.stdin.isatty() and sys.stdout.isatty() :
+        try :
+            console.input("\n[yellow]Press Enter to continue...[/yellow] ")
+        except EOFError :
+            pass
+        console.print()
 
 # =============================================================================
 # FINAL RESULTS
@@ -672,6 +673,8 @@ def print_final_results(baseline, quant, prune, profile_results):
         box=box.ROUNDED
     ))
 
+    press_enter_to_continue()
+
     # Success message
     console.print(Panel(
         "[bold green]🏆 MILESTONE COMPLETE![/bold green]\n\n"
@@ -697,6 +700,8 @@ def print_final_results(baseline, quant, prune, profile_results):
         box=box.DOUBLE,
         padding=(1, 2)
     ))
+
+    press_enter_to_continue()
 
     return 0
 
@@ -733,16 +738,17 @@ def main():
         "[bold magenta]║[/bold magenta] MLPerf 2018: Where accuracy [bold magenta]║[/bold magenta]\n"
         "[bold magenta]║[/bold magenta] meets efficiency            [bold magenta]║[/bold magenta]\n"
         "[bold magenta]║[/bold magenta]                             [bold magenta]║[/bold magenta]\n"
-        "[bold magenta]║[/bold magenta] [cyan]Using YOUR implementations[/cyan] [bold magenta]║[/bold magenta]\n"
-        "[bold magenta]║[/bold magenta] [cyan]from every module![/cyan]        [bold magenta]║[/bold magenta]\n"
+        "[bold magenta]║[/bold magenta] [cyan]Using YOUR implementations [/cyan] [bold magenta]║[/bold magenta]\n"
+        "[bold magenta]║[/bold magenta] [cyan]from every module!  [/cyan]        [bold magenta]║[/bold magenta]\n"
         "[bold magenta]╚═════════════════════════════╝[/bold magenta]",
         border_style="bright_magenta"
     ))
+    press_enter_to_continue()
 
     # ─────────────────────────────────────────────────────────────────────────
     # IMPORT YOUR IMPLEMENTATIONS
     # ─────────────────────────────────────────────────────────────────────────
-    console.print("\n[bold cyan]📦 Loading YOUR Tiny🔥Torch implementations...[/bold cyan]\n")
+    console.print("[bold cyan]📦 Loading YOUR Tiny🔥Torch implementations...[/bold cyan]\n")
 
     try:
         from tinytorch.core.tensor import Tensor
@@ -778,7 +784,8 @@ def main():
         ))
         return 1
 
-    console.print("\n[green]✅ All YOUR implementations loaded![/green]\n")
+    console.print("\n[green]✅ All YOUR implementations loaded![/green]")
+    press_enter_to_continue()
 
     # ─────────────────────────────────────────────────────────────────────────
     # LOAD MODEL AND DATA
@@ -878,7 +885,8 @@ def main():
 
             progress.advance(task)
 
-    console.print("  [green]✓[/green] Training complete\n")
+    console.print("  [green]✓[/green] Training complete")
+    press_enter_to_continue()
 
     # ─────────────────────────────────────────────────────────────────────────
     # RUN OPTIMIZATION STEPS
@@ -886,12 +894,15 @@ def main():
 
     # Step 1: Profile baseline
     baseline = step_1_profile(model, X_test, y_test, Profiler, Tensor)
+    press_enter_to_continue()
 
     # Step 2: Quantize
     quant = step_2_quantize(model, baseline['param_bytes'], Quantizer)
+    press_enter_to_continue()
 
     # Step 3: Prune
     prune = step_3_prune(model, baseline['baseline_acc'], X_test, y_test, Compressor, DigitMLP)
+    press_enter_to_continue()
 
     # Step 4: KV Cache (transformers only)
     if MinimalTransformer is not None:
@@ -902,12 +913,15 @@ def main():
             border_style="dim"
         ))
         console.print()
+    press_enter_to_continue()
 
     # Step 5: Acceleration
     step_5_accelerate(vectorized_matmul, Tensor)
+    press_enter_to_continue()
 
     # Step 6: Benchmark
     step_6_benchmark(model, X_test, y_test, baseline['baseline_acc'], Benchmark)
+    press_enter_to_continue()
 
     # ─────────────────────────────────────────────────────────────────────────
     # FINAL RESULTS
