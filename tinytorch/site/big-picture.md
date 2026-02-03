@@ -31,6 +31,11 @@ This page answers: *How do all the pieces fit together?* Read this before diving
 .pdf-title-icon {
   font-size: 1rem;
 }
+.pdf-subtitle {
+  color: #64748b;
+  font-weight: 400;
+  font-size: 0.75rem;
+}
 .pdf-toolbar {
   display: flex;
   align-items: center;
@@ -218,6 +223,7 @@ This page answers: *How do all the pieces fit together?* Read this before diving
     <div class="pdf-title">
       <span class="pdf-title-icon">🔥</span>
       <span>TinyTorch Overview</span>
+      <span class="pdf-subtitle">· AI-generated</span>
     </div>
     <div class="pdf-toolbar">
       <div class="pdf-nav-group">
@@ -241,7 +247,7 @@ This page answers: *How do all the pieces fit together?* Read this before diving
     </div>
   </div>
   <div class="pdf-footer">
-    <a href="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-slides-v0.1.0/00_tinytorch.pdf" download>
+    <a href="_static/downloads/00_tinytorch.pdf" download>
       ⬇️ Download
     </a>
     <a href="#" onclick="pdfFullscreen(); return false;" class="secondary">
