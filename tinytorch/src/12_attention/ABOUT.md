@@ -16,7 +16,7 @@ If you can explain why `softmax(x).sum(axis=-1)` equals 1.0 and how embeddings c
 :::
 
 `````{only} html
-````{grid} 1 2 2 2
+````{grid} 1 1 3 3
 :gutter: 3
 
 ```{grid-item-card} 🎧 Audio Overview
@@ -42,14 +42,283 @@ Browse the source code on GitHub.
 <a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/12_attention/12_attention.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #14b8a6; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
 ```
 
-```{grid-item-card} 📊 Slide Deck
-
-Download the AI-generated PDF. 
-
-<a href="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-slides-v0.1.0/12_attention.pdf" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #0ea5e9; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Download PDF →</a>
-```
-
 ````
+
+```{raw} html
+<style>
+.slide-viewer-container {
+  margin: 0.5rem 0 1.5rem 0;
+  background: #0f172a;
+  border-radius: 1rem;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+.slide-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1rem;
+  background: rgba(255,255,255,0.03);
+}
+.slide-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #94a3b8;
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+.slide-subtitle {
+  color: #64748b;
+  font-weight: 400;
+  font-size: 0.75rem;
+}
+.slide-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+.slide-toolbar button {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  width: 32px;
+  height: 32px;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  font-size: 1.1rem;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.slide-toolbar button:hover {
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
+}
+.slide-nav-group {
+  display: flex;
+  align-items: center;
+}
+.slide-page-info {
+  color: #64748b;
+  font-size: 0.75rem;
+  padding: 0 0.5rem;
+  font-weight: 500;
+}
+.slide-zoom-group {
+  display: flex;
+  align-items: center;
+  margin-left: 0.25rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid rgba(255,255,255,0.1);
+}
+.slide-canvas-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0.5rem 1rem 1rem 1rem;
+  min-height: 380px;
+  background: #0f172a;
+}
+.slide-canvas {
+  max-width: 100%;
+  max-height: 350px;
+  height: auto;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+.slide-progress-wrapper {
+  padding: 0 1rem 0.5rem 1rem;
+}
+.slide-progress-bar {
+  height: 3px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 1.5px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.slide-progress-fill {
+  height: 100%;
+  background: #f97316;
+  border-radius: 1.5px;
+  transition: width 0.2s ease;
+}
+.slide-loading {
+  color: #f97316;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.slide-loading::before {
+  content: '';
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(249, 115, 22, 0.2);
+  border-top-color: #f97316;
+  border-radius: 50%;
+  animation: slide-spin 0.8s linear infinite;
+}
+@keyframes slide-spin {
+  to { transform: rotate(360deg); }
+}
+.slide-footer {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  background: rgba(255,255,255,0.02);
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.slide-footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: #f97316;
+  color: white;
+  padding: 0.4rem 0.9rem;
+  border-radius: 2rem;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.75rem;
+  transition: all 0.15s;
+}
+.slide-footer a:hover {
+  background: #ea580c;
+  color: white;
+}
+.slide-footer a.secondary {
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.slide-footer a.secondary:hover {
+  background: rgba(255,255,255,0.05);
+  color: #f8fafc;
+}
+@media (max-width: 600px) {
+  .slide-header { flex-direction: column; gap: 0.5rem; padding: 0.5rem 0.75rem; }
+  .slide-toolbar button { width: 28px; height: 28px; }
+  .slide-canvas-wrapper { min-height: 260px; padding: 0.5rem; }
+  .slide-canvas { max-height: 220px; }
+}
+</style>
+
+<div class="slide-viewer-container" id="slide-viewer-12_attention">
+  <div class="slide-header">
+    <div class="slide-title">
+      <span>🔥</span>
+      <span>Slide Deck</span>
+      <span class="slide-subtitle">· AI-generated</span>
+    </div>
+    <div class="slide-toolbar">
+      <div class="slide-nav-group">
+        <button onclick="slideNav('12_attention', -1)" title="Previous">‹</button>
+        <span class="slide-page-info"><span id="slide-num-12_attention">1</span> / <span id="slide-count-12_attention">-</span></span>
+        <button onclick="slideNav('12_attention', 1)" title="Next">›</button>
+      </div>
+      <div class="slide-zoom-group">
+        <button onclick="slideZoom('12_attention', -0.25)" title="Zoom out">−</button>
+        <button onclick="slideZoom('12_attention', 0.25)" title="Zoom in">+</button>
+      </div>
+    </div>
+  </div>
+  <div class="slide-canvas-wrapper">
+    <div id="slide-loading-12_attention" class="slide-loading">Loading slides...</div>
+    <canvas id="slide-canvas-12_attention" class="slide-canvas" style="display:none;"></canvas>
+  </div>
+  <div class="slide-progress-wrapper">
+    <div class="slide-progress-bar" onclick="slideProgress('12_attention', event)">
+      <div class="slide-progress-fill" id="slide-progress-12_attention" style="width: 0%;"></div>
+    </div>
+  </div>
+  <div class="slide-footer">
+    <a href="../_static/slides/12_attention.pdf" download>⬇ Download</a>
+    <a href="#" onclick="slideFullscreen('12_attention'); return false;" class="secondary">⛶ Fullscreen</a>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+(function() {
+  if (window.slideViewersInitialized) return;
+  window.slideViewersInitialized = true;
+
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  window.slideViewers = {};
+
+  window.initSlideViewer = function(id, pdfUrl) {
+    const viewer = { pdf: null, page: 1, scale: 1.3, rendering: false, pending: null };
+    window.slideViewers[id] = viewer;
+
+    const canvas = document.getElementById('slide-canvas-' + id);
+    const ctx = canvas.getContext('2d');
+
+    function render(num) {
+      viewer.rendering = true;
+      viewer.pdf.getPage(num).then(function(page) {
+        const viewport = page.getViewport({scale: viewer.scale});
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        page.render({canvasContext: ctx, viewport: viewport}).promise.then(function() {
+          viewer.rendering = false;
+          if (viewer.pending !== null) { render(viewer.pending); viewer.pending = null; }
+        });
+      });
+      document.getElementById('slide-num-' + id).textContent = num;
+      document.getElementById('slide-progress-' + id).style.width = (num / viewer.pdf.numPages * 100) + '%';
+    }
+
+    function queue(num) { if (viewer.rendering) viewer.pending = num; else render(num); }
+
+    pdfjsLib.getDocument(pdfUrl).promise.then(function(pdf) {
+      viewer.pdf = pdf;
+      document.getElementById('slide-count-' + id).textContent = pdf.numPages;
+      document.getElementById('slide-loading-' + id).style.display = 'none';
+      canvas.style.display = 'block';
+      render(1);
+    }).catch(function() {
+      document.getElementById('slide-loading-' + id).innerHTML = 'Unable to load. <a href="' + pdfUrl + '" style="color:#f97316;">Download PDF</a>';
+    });
+
+    viewer.queue = queue;
+  };
+
+  window.slideNav = function(id, dir) {
+    const v = window.slideViewers[id];
+    if (!v || !v.pdf) return;
+    const newPage = v.page + dir;
+    if (newPage >= 1 && newPage <= v.pdf.numPages) { v.page = newPage; v.queue(newPage); }
+  };
+
+  window.slideZoom = function(id, delta) {
+    const v = window.slideViewers[id];
+    if (!v) return;
+    v.scale = Math.max(0.5, Math.min(3, v.scale + delta));
+    v.queue(v.page);
+  };
+
+  window.slideProgress = function(id, event) {
+    const v = window.slideViewers[id];
+    if (!v || !v.pdf) return;
+    const bar = event.currentTarget;
+    const pct = (event.clientX - bar.getBoundingClientRect().left) / bar.offsetWidth;
+    const newPage = Math.max(1, Math.min(v.pdf.numPages, Math.ceil(pct * v.pdf.numPages)));
+    if (newPage !== v.page) { v.page = newPage; v.queue(newPage); }
+  };
+
+  window.slideFullscreen = function(id) {
+    const el = document.getElementById('slide-viewer-' + id);
+    if (el.requestFullscreen) el.requestFullscreen();
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  };
+})();
+
+initSlideViewer('12_attention', '../_static/slides/12_attention.pdf');
+</script>
+```
 `````
 
 ## Overview
