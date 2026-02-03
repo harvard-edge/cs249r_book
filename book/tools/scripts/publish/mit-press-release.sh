@@ -18,7 +18,7 @@ set -e
 # Configurable settings — edit these as needed
 # =============================================================================
 REGULAR_FONTSIZE="9pt"        # Font size for regular PDF
-COPYEDIT_FONTSIZE="12pt"      # Font size for copy-edit PDF
+COPYEDIT_FONTSIZE="9pt"       # Font size for copy-edit PDF (same as regular)
 COPYEDIT_LINESTRETCH="2"      # Line spacing for copy-edit PDF (2 = double)
 
 # =============================================================================
@@ -100,7 +100,8 @@ echo "  Config:    $SOURCE_CONFIG"
 echo "  Output:    $QUARTO_DIR/$OUTPUT_DIR"
 echo "============================================="
 
-# Copy base config
+# Copy base config (remove symlink first if it exists, then copy)
+rm -f "$TARGET_CONFIG"
 cp "$SOURCE_CONFIG" "$TARGET_CONFIG"
 
 # For copyedit mode, patch fontsize and linestretch in-place
@@ -116,6 +117,15 @@ if [[ "$COPYEDIT" == true ]]; then
     # Add linestretch after fontsize line
     sed -i.bak "/fontsize: ${COPYEDIT_FONTSIZE}/a\\
     linestretch: ${COPYEDIT_LINESTRETCH}" "$TARGET_CONFIG"
+
+    # Add extra float capacity for copy-edit (double-spacing needs more floats)
+    # Insert after the existing include-in-header section
+    sed -i.bak '/include-in-header:/,/include-before-body:/ {
+        /include-before-body:/i\
+      - text: |\
+          \\extrafloats{1000}\
+          \\AtBeginDocument{\\let\\dumpmargins\\relax}
+    }' "$TARGET_CONFIG"
 
     # Clean up sed backup files
     rm -f "$TARGET_CONFIG.bak"
