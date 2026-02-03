@@ -287,6 +287,7 @@ Thanks to these wonderful people who helped improve TinyTorch!
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Kobra299"><img src="https://avatars.githubusercontent.com/u/4283156?v=4?v=4?s=80" width="80px;" alt="Wayne Norman"/><br /><sub><b>Wayne Norman</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/lalalostcode"><img src="https://avatars.githubusercontent.com/u/149884766?v=4?v=4?s=80" width="80px;" alt="Ilham Rafiqin"/><br /><sub><b>Ilham Rafiqin</b></sub></a><br />🪲</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/AndreaMattiaGaravagn"><img src="https://avatars.githubusercontent.com/AndreaMattiaGaravagn?v=4?s=80" width="80px;" alt="AndreaMattiaGaravagn"/><br /><sub><b>AndreaMattiaGaravagn</b></sub></a><br />✍️</td>
     </tr>
   </tbody>
 </table>
