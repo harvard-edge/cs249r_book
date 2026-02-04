@@ -38,10 +38,10 @@ class ConfigManager:
             # Fallback
             self.book_dir = self.root_dir
 
-        # Configuration file paths (combined configs)
+        # Configuration file paths (default to vol1 configs since combined configs don't exist)
         self.html_config = self.book_dir / "config" / "_quarto-html-vol1.yml"
-        self.pdf_config = self.book_dir / "config" / "_quarto-pdf.yml"
-        self.epub_config = self.book_dir / "config" / "_quarto-epub.yml"
+        self.pdf_config = self.book_dir / "config" / "_quarto-pdf-vol1.yml"
+        self.epub_config = self.book_dir / "config" / "_quarto-epub-vol1.yml"
 
         # Volume-specific configuration file paths
         self.html_vol1_config = self.book_dir / "config" / "_quarto-html-vol1.yml"
