@@ -128,12 +128,14 @@ def extract_qmd_figures(quarto_dir: Path, scan_all: bool = False) -> list[dict]:
     md_image_pattern = re.compile(
         r'!\[((?:[^\[\]]|\[[^\]]*\])*)\]'
         r'\([^)]+\)'
-        r'\{([^}]*#fig-[^}]+)\}',
+        r'\{(.*#fig-[^\n]*)\}\s*$',
         re.MULTILINE
     )
     
+    # Use greedy .* anchored to end-of-line so interior } (from LaTeX like
+    # $W_{hh}$, \mathcal{F}, \index{...}) don't truncate the match.
     div_pattern = re.compile(
-        r':{3,}\s*\{([^}]*#fig-[^}]+)\}',
+        r':{3,}\s*\{(.*#fig-.*)\}\s*$',
         re.MULTILINE
     )
     
@@ -169,8 +171,8 @@ def extract_qmd_figures(quarto_dir: Path, scan_all: bool = False) -> list[dict]:
             attrs = match.group(2)
             
             label = re.search(r'#(fig-[\w-]+)', attrs)
-            alt = re.search(r'fig-alt=["\']([^"\']+)["\']', attrs)
-            
+            alt = re.search(r'fig-alt="([^"]*)"', attrs)
+
             if label:
                 chapter_figures.append({
                     'label': label.group(1),
@@ -185,8 +187,10 @@ def extract_qmd_figures(quarto_dir: Path, scan_all: bool = False) -> list[dict]:
             attrs = match.group(1)
             
             label = re.search(r'#(fig-[\w-]+)', attrs)
-            cap = re.search(r'fig-cap=["\']([^"\']+)["\']', attrs)
-            alt = re.search(r'fig-alt=["\']([^"\']+)["\']', attrs)
+            # Use double-quote-only matching so LaTeX primes like F'(x)
+            # aren't treated as closing delimiters.
+            cap = re.search(r'fig-cap="([^"]*)"', attrs)
+            alt = re.search(r'fig-alt="([^"]*)"', attrs)
             
             if label:
                 chapter_figures.append({
@@ -206,11 +210,12 @@ def extract_qmd_figures(quarto_dir: Path, scan_all: bool = False) -> list[dict]:
             if not label_match:
                 continue
             
-            # Extract caption (can be single or double quoted, may span lines)
-            cap_match = re.search(r'#\|\s*fig-cap:\s*["\']([^"\']+)["\']', cell_options)
-            
+            # Extract caption — match double-quote delimiters only so
+            # apostrophes (e.g., Moore's) don't truncate the match.
+            cap_match = re.search(r'#\|\s*fig-cap:\s*"([^"]*)"', cell_options)
+
             # Extract alt-text
-            alt_match = re.search(r'#\|\s*fig-alt:\s*["\']([^"\']+)["\']', cell_options)
+            alt_match = re.search(r'#\|\s*fig-alt:\s*"([^"]*)"', cell_options)
             
             chapter_figures.append({
                 'label': label_match.group(1),
@@ -221,6 +226,21 @@ def extract_qmd_figures(quarto_dir: Path, scan_all: bool = False) -> list[dict]:
             })
         
         chapter_figures.sort(key=lambda x: x['position'])
+
+        # Deduplicate: when a ::: div wraps a code block, both patterns
+        # match the same figure.  Keep the entry with the richer caption.
+        seen_labels = {}
+        for fig in chapter_figures:
+            lbl = fig['label']
+            if lbl in seen_labels:
+                prev = seen_labels[lbl]
+                # Keep whichever has a non-empty caption (prefer first)
+                if not prev['caption'] and fig['caption']:
+                    seen_labels[lbl] = fig
+            else:
+                seen_labels[lbl] = fig
+        chapter_figures = sorted(seen_labels.values(), key=lambda x: x['position'])
+
         figures.extend(chapter_figures)
     
     return figures

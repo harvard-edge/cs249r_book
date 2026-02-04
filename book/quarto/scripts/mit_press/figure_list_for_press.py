@@ -25,16 +25,19 @@ def extract_figures_from_qmd(qmd_path: Path) -> list[dict]:
     content = qmd_path.read_text(encoding='utf-8')
     
     # Pattern for markdown images: ![caption](path){#fig-label fig-alt="..."}
+    # Use greedy match anchored to end-of-line so LaTeX {} don't truncate.
     md_image_pattern = re.compile(
         r'!\[((?:[^\[\]]|\[[^\]]*\])*)\]'  # ![caption] - handles [@cite]
         r'\([^)]+\)'                        # (path)
-        r'\{([^}]*#fig-[^}]+)\}',           # {#fig-xxx ...attrs...}
+        r'\{(.*#fig-[^\n]*)\}\s*$',         # {#fig-xxx ...attrs...}
         re.MULTILINE
     )
-    
+
     # Pattern for fenced divs: :::: {#fig-xxx fig-cap="..." fig-alt="..."}
+    # Use greedy .* anchored to end-of-line so interior } (from LaTeX like
+    # $W_{hh}$, \mathcal{F}, \index{...}) don't truncate the match.
     div_pattern = re.compile(
-        r':{3,}\s*\{([^}]*#fig-[^}]+)\}',
+        r':{3,}\s*\{(.*#fig-.*)\}\s*$',
         re.MULTILINE
     )
     
@@ -49,10 +52,10 @@ def extract_figures_from_qmd(qmd_path: Path) -> list[dict]:
     for match in md_image_pattern.finditer(content):
         caption = match.group(1).strip()
         attrs = match.group(2)
-        
+
         label = re.search(r'#(fig-[\w-]+)', attrs)
-        alt = re.search(r'fig-alt=["\']([^"\']+)["\']', attrs)
-        
+        alt = re.search(r'fig-alt="([^"]*)"', attrs)
+
         if label:
             figures.append({
                 'label': label.group(1),
@@ -60,15 +63,17 @@ def extract_figures_from_qmd(qmd_path: Path) -> list[dict]:
                 'alt_text': alt.group(1) if alt else '',
                 'position': match.start()
             })
-    
+
     # Extract fenced divs
     for match in div_pattern.finditer(content):
         attrs = match.group(1)
-        
+
         label = re.search(r'#(fig-[\w-]+)', attrs)
-        cap = re.search(r'fig-cap=["\']([^"\']+)["\']', attrs)
-        alt = re.search(r'fig-alt=["\']([^"\']+)["\']', attrs)
-        
+        # Use double-quote-only matching so LaTeX primes like F'(x)
+        # aren't treated as closing delimiters.
+        cap = re.search(r'fig-cap="([^"]*)"', attrs)
+        alt = re.search(r'fig-alt="([^"]*)"', attrs)
+
         if label:
             figures.append({
                 'label': label.group(1),
@@ -86,11 +91,12 @@ def extract_figures_from_qmd(qmd_path: Path) -> list[dict]:
         if not label_match:
             continue
         
-        # Extract caption (can be single or double quoted)
-        cap_match = re.search(r'#\|\s*fig-cap:\s*["\']([^"\']+)["\']', cell_options)
-        
+        # Extract caption — match double-quote delimiters only so
+        # apostrophes (e.g., Moore's) don't truncate the match.
+        cap_match = re.search(r'#\|\s*fig-cap:\s*"([^"]*)"', cell_options)
+
         # Extract alt-text
-        alt_match = re.search(r'#\|\s*fig-alt:\s*["\']([^"\']+)["\']', cell_options)
+        alt_match = re.search(r'#\|\s*fig-alt:\s*"([^"]*)"', cell_options)
         
         figures.append({
             'label': label_match.group(1),
@@ -101,6 +107,20 @@ def extract_figures_from_qmd(qmd_path: Path) -> list[dict]:
     
     # Sort by position in file
     figures.sort(key=lambda x: x['position'])
+
+    # Deduplicate: when a ::: div wraps a code block, both patterns
+    # match the same figure.  Keep the entry with the richer caption.
+    seen_labels = {}
+    for fig in figures:
+        lbl = fig['label']
+        if lbl in seen_labels:
+            prev = seen_labels[lbl]
+            if not prev['caption'] and fig['caption']:
+                seen_labels[lbl] = fig
+        else:
+            seen_labels[lbl] = fig
+    figures = sorted(seen_labels.values(), key=lambda x: x['position'])
+
     return figures
 
 
