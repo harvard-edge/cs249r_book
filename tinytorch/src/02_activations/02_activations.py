@@ -615,7 +615,7 @@ class GELU:
         >>> print(result.data)
         [-0.159, 0.0, 0.841]  # Smooth, like ReLU but differentiable everywhere
 
-        HINT: The 1.702 constant comes from √(2/π) approximation
+        HINT: The 1.702 constant is empirically fitted so that sigmoid(1.702x) ≈ Φ(x)
         """
         ### BEGIN SOLUTION
         # GELU approximation: x * sigmoid(1.702 * x)
