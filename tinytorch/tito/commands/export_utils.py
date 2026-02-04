@@ -156,8 +156,9 @@ def convert_py_to_notebook(module_path: Path, venv_path: Path, console) -> bool:
     console.print("[dim]🔄 Overwriting existing notebook (Python file is source of truth)[/dim]" if notebook_file.exists() else "[dim]✨ Creating new notebook from Python file[/dim]")
 
     try:
+        from ..core.virtual_env_manager import get_venv_bin_dir
         jupytext_path = "jupytext"
-        venv_jupytext = venv_path / "bin" / "jupytext"
+        venv_jupytext = get_venv_bin_dir(venv_path) / "jupytext"
 
         if venv_jupytext.exists():
             test_result = subprocess.run([str(venv_jupytext), "--version"], capture_output=True, text=True)

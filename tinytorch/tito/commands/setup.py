@@ -134,6 +134,8 @@ class SetupCommand(BaseCommand):
             ("jupyter", "jupyter>=1.0.0"),
             ("jupyterlab", "jupyterlab>=3.0.0"),
             ("jupytext", "jupytext>=1.13.0"),
+            ("ipykernel", "ipykernel>=6.29.0"),
+            ("nbdev", "nbdev>=2.3.0"),
             ("rich", "rich>=12.0.0"),
             ("pyyaml", "pyyaml>=6.0"),
             ("psutil", "psutil>=5.8.0"),
@@ -208,7 +210,6 @@ class SetupCommand(BaseCommand):
 
                 if result.returncode == 0:
                     progress.update(task, description="[green]✅ Tiny🔥Torch installed[/green]")
-                    return True
                 else:
                     progress.update(task, description="[red]❌ Tiny🔥Torch install failed[/red]")
                     self.console.print(f"[red]Failed to install Tiny🔥Torch: {result.stderr}[/red]")
@@ -218,6 +219,36 @@ class SetupCommand(BaseCommand):
                 progress.update(task, description="[red]❌ Tiny🔥Torch error[/red]")
                 self.console.print(f"[red]Error installing Tiny🔥Torch: {e}[/red]")
                 return False
+
+        # Register Jupyter kernel so notebooks use this Python environment
+        self.console.print()
+        self.console.print("[bold]Registering Jupyter kernel...[/bold]")
+        try:
+            result = subprocess.run([
+                sys.executable, "-m", "ipykernel", "install",
+                "--user",
+                "--name", "tinytorch",
+                "--display-name", "TinyTorch (Python 3)"
+            ], capture_output=True, text=True, timeout=60)
+
+            if result.returncode == 0:
+                self.console.print("[green]✅ Jupyter kernel 'tinytorch' registered[/green]")
+                self.console.print("[dim]   Notebooks will use this Python environment[/dim]")
+            else:
+                self.console.print("[red]❌ Jupyter kernel registration failed[/red]")
+                self.console.print(f"[dim]   {result.stderr.strip()}[/dim]")
+                self.console.print("[yellow]   Fix: pip install ipykernel && "
+                                  "python -m ipykernel install --user --name tinytorch[/yellow]")
+                return False
+        except FileNotFoundError:
+            self.console.print("[red]❌ ipykernel not found — cannot register Jupyter kernel[/red]")
+            self.console.print("[yellow]   Fix: pip install ipykernel[/yellow]")
+            return False
+        except Exception as e:
+            self.console.print(f"[red]❌ Kernel registration error: {e}[/red]")
+            return False
+
+        return True
 
     def create_virtual_environment(self, force: bool = False) -> bool:
         """Create a virtual environment for Tiny🔥Torch development.
@@ -293,7 +324,9 @@ class SetupCommand(BaseCommand):
             self.console.print(f"✅ Virtual environment created at {venv_path}")
 
             # Verify architecture
-            venv_python = venv_path / "bin" / "python3"
+            from ..core.virtual_env_manager import get_venv_bin_dir
+            venv_bin = get_venv_bin_dir(venv_path)
+            venv_python = venv_bin / ("python.exe" if sys.platform == "win32" else "python3")
             if venv_python.exists():
                 arch_check = subprocess.run(
                     [str(venv_python), "-c", "import platform; print(platform.machine())"],
@@ -371,6 +404,7 @@ class SetupCommand(BaseCommand):
             ("Python version (≥3.8)", self.check_python_version),
             ("NumPy", self.check_numpy),
             ("Jupyter", self.check_jupyter),
+            ("Jupyter kernel (tinytorch)", self.check_jupyter_kernel),
             ("TinyTorch CLI", self.check_tinytorch_package)
         ]
 
@@ -426,6 +460,17 @@ class SetupCommand(BaseCommand):
             import jupyterlab
             return True
         except ImportError:
+            return False
+
+    def check_jupyter_kernel(self) -> bool:
+        """Check if a TinyTorch Jupyter kernel is registered."""
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "jupyter", "kernelspec", "list"],
+                capture_output=True, text=True, timeout=10
+            )
+            return result.returncode == 0 and "tinytorch" in result.stdout
+        except Exception:
             return False
 
     def check_tinytorch_package(self) -> bool:
