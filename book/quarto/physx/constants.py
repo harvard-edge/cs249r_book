@@ -161,6 +161,15 @@ ENERGY_SRAM_L2_PJ = 2.0 * ureg.picojoule             # L2 cache access
 ENERGY_REG_PJ = 0.01 * ureg.picojoule                # Register file access
 ENERGY_MOBILENET_INF_MJ = 0.1 * ureg.millijoule
 
+# Addition energy (Horowitz 2014, 45nm process)
+ENERGY_ADD_FP32_PJ = 0.9 * ureg.picojoule
+ENERGY_ADD_FP16_PJ = 0.4 * ureg.picojoule
+ENERGY_ADD_INT32_PJ = 0.1 * ureg.picojoule
+ENERGY_ADD_INT8_PJ = 0.03 * ureg.picojoule
+
+# Network transfer energy (reference)
+NETWORK_ENERGY_1KB_PJ = 1_000_000 * ureg.picojoule  # ~1 microjoule for 1KB
+
 # --- Physics ---
 SPEED_OF_LIGHT_FIBER_KM_S = 200000 * ureg.kilometer / second
 
@@ -169,6 +178,9 @@ ureg.define('dollar = 1 * count')
 USD = ureg.dollar
 CLOUD_EGRESS_PER_GB = 0.09 * USD / GB
 CLOUD_ELECTRICITY_PER_KWH = 0.12 * USD / ureg.kilowatt_hour
+
+# --- Carbon (Scenario Baseline) ---
+CARBON_PER_GPU_HR_KG = 0.16 * ureg.kilogram
 
 # --- Mobile / Battery ---
 MOBILE_TDP_W = 3 * watt
@@ -204,6 +216,9 @@ GPT4_TRAINING_GPU_DAYS = 2.5e6 # A100 days
 # BERT-Base
 BERT_BASE_PARAMS = 110e6 * param
 BERT_BASE_FLOPs = 22e9 * flop              # Per inference (seq_len=512)
+
+# AlexNet (Reference)
+ALEXNET_PARAMS = 60e6 * param
 
 # Google Search (Reference)
 GOOGLE_SEARCHES_PER_DAY = 8.5e9
