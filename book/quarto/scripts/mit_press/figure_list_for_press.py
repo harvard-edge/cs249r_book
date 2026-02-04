@@ -38,6 +38,13 @@ def extract_figures_from_qmd(qmd_path: Path) -> list[dict]:
         re.MULTILINE
     )
     
+    # Pattern for executable code block figures (```{python} with #| label: fig-xxx)
+    code_block_pattern = re.compile(
+        r'```\{(?:python|r|julia|ojs)\}[^\n]*\n'  # Opening fence
+        r'((?:#\|[^\n]*\n)+)',                     # Cell options (one or more #| lines)
+        re.MULTILINE
+    )
+    
     # Extract markdown images
     for match in md_image_pattern.finditer(content):
         caption = match.group(1).strip()
@@ -69,6 +76,28 @@ def extract_figures_from_qmd(qmd_path: Path) -> list[dict]:
                 'alt_text': alt.group(1) if alt else '',
                 'position': match.start()
             })
+    
+    # Extract executable code block figures (```{python} with #| label: fig-xxx)
+    for match in code_block_pattern.finditer(content):
+        cell_options = match.group(1)
+        
+        # Extract label - must be a figure label
+        label_match = re.search(r'#\|\s*label:\s*(fig-[\w-]+)', cell_options)
+        if not label_match:
+            continue
+        
+        # Extract caption (can be single or double quoted)
+        cap_match = re.search(r'#\|\s*fig-cap:\s*["\']([^"\']+)["\']', cell_options)
+        
+        # Extract alt-text
+        alt_match = re.search(r'#\|\s*fig-alt:\s*["\']([^"\']+)["\']', cell_options)
+        
+        figures.append({
+            'label': label_match.group(1),
+            'caption': clean_text(cap_match.group(1)) if cap_match else '',
+            'alt_text': alt_match.group(1) if alt_match else '',
+            'position': match.start()
+        })
     
     # Sort by position in file
     figures.sort(key=lambda x: x['position'])
