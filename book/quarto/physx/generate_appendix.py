@@ -42,7 +42,7 @@ def main():
 title: "Appendix: System Assumptions"
 ---
 
-This appendix lists the physical constants, hardware specifications, and economic assumptions used to calculate the "Napkin Math" throughout this book. These values are defined in the book's source code (`calc/constants.py`) and ensure that all derivations are consistent.
+This appendix lists the physical constants, hardware specifications, and economic assumptions used to calculate the "Napkin Math" throughout this book. These values are defined in the book's source code (`physx/constants.py`) and ensure that all derivations are consistent.
 
 ::: {{.column-page}}
 {df.to_markdown(index=False)}

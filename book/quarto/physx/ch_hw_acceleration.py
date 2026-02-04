@@ -7,7 +7,7 @@ import sys
 # Ensure the 'quarto' directory is in sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from calc import viz
+from physx import viz
 
 def plot_technology_s_curve(ax=None):
     if ax is None: fig, ax = plt.subplots(figsize=(10, 6))
