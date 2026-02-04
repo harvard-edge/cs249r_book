@@ -12,7 +12,12 @@ registered in pint's registry, not just a Python variable.
 """
 
 import sys
-sys.path.insert(0, "book/quarto")
+import os
+
+# Add book/quarto to path (works from any working directory)
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_quarto_dir = os.path.dirname(_script_dir)
+sys.path.insert(0, _quarto_dir)
 
 from physx.constants import *
 from physx.formulas import *
