@@ -191,7 +191,7 @@ SPEED_OF_LIGHT_FIBER_KM_S = 200000 * ureg.kilometer / second
 # --- Cloud Pricing ---
 ureg.define('dollar = 1 * count')
 USD = ureg.dollar
-CLOUD_EGRESS_PER_GB = 0.09 * USD / GB
+CLOUD_EGRESS_PER_GB = 0.09 * USD / GB  # AWS data transfer out (2024 baseline)
 CLOUD_ELECTRICITY_PER_KWH = 0.12 * USD / ureg.kilowatt_hour
 
 # GPU pricing (scenario baselines)
