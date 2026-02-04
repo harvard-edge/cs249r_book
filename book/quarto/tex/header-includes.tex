@@ -109,6 +109,10 @@ labelformat=mylabel,justification=raggedright,singlelinecheck=false,font={ninept
 \renewcommand\raggedrightmarginnote{\sloppy}
 \renewcommand\raggedleftmarginnote{\sloppy}
 
+% Safety fallback: ensure \sidenote is defined even if sidenotes package fails
+% This allows graceful degradation to footnotes
+\providecommand{\sidenote}[1]{\footnote{#1}}
+
 % Typography improvements
 \usepackage{ragged2e}       % Better ragged text
 \usepackage[all]{nowidow}   % Prevent widows and orphans
@@ -127,7 +131,8 @@ labelformat=mylabel,justification=raggedright,singlelinecheck=false,font={ninept
 % FLOAT CONFIGURATION
 % =============================================================================
 % Allow more floats per page to handle figure-heavy chapters
-\extrafloats{200}
+% Note: 1000 is needed for copyedit builds with double-spacing
+\extrafloats{1000}
 \setcounter{topnumber}{12}       % Max floats at top of page
 \setcounter{bottomnumber}{12}    % Max floats at bottom of page
 \setcounter{totalnumber}{24}     % Max floats per page
@@ -1030,3 +1035,57 @@ align=right,font={\fontsize{40pt}{40}\selectfont}]
 %   - columnseprule=true: Vertical line between columns
 \usepackage{imakeidx}
 \makeindex[intoc=true, columns=2, columnseprule=true]
+
+% =============================================================================
+% FIGURE MANIFEST GENERATION FOR MIT PRESS
+% =============================================================================
+% Captures figure metadata during PDF compilation:
+%   - Label (fig-xxx) for traceability to source code
+%   - Figure number as assigned by LaTeX
+%   - Page number
+%   - Caption text exactly as rendered
+%
+% Output: figure_manifest.txt with format:
+%   FIG|{label}|{number}|{page}|{caption}
+%
+% Alt text is captured separately by Lua filter (Quarto strips it before LaTeX)
+% Post-render script merges both files into final FIGURE_LIST_VOL{N}.md
+%
+\newwrite\figmanifest
+\AtBeginDocument{%
+  \immediate\openout\figmanifest=figure_manifest.txt%
+}
+\AtEndDocument{%
+  \immediate\closeout\figmanifest%
+}
+
+% Storage for current figure's label
+\makeatletter
+\newcommand{\currentfiglabel}{}
+
+% Hook into \label to capture figure labels
+\let\origlabel\label
+\renewcommand{\label}[1]{%
+  \ifx\@captype\undefined\else
+    \def\@captype@test{figure}%
+    \ifx\@captype\@captype@test
+      \gdef\currentfiglabel{#1}%
+    \fi
+  \fi
+  \origlabel{#1}%
+}
+
+% Hook into \caption to log figure with its label
+\let\origcaption\caption
+\renewcommand{\caption}[2][]{%
+  \origcaption[#1]{#2}%
+  \ifx\@captype\undefined\else
+    \def\@captype@test{figure}%
+    \ifx\@captype\@captype@test
+      % Write: FIG|label|number|page|caption
+      \immediate\write\figmanifest{FIG|\currentfiglabel|\thefigure|\thepage|#2}%
+      \gdef\currentfiglabel{}% Reset for next figure
+    \fi
+  \fi
+}
+\makeatother

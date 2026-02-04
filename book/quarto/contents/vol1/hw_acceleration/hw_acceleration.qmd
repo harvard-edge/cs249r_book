@@ -39,8 +39,8 @@ Compression reduces model complexity through fewer parameters, lower precision, 
 #| label: hw-accel-setup
 #| echo: false
 
-from calc.constants import *
-from calc.formulas import fmt, sci
+from physx.constants import *
+from physx.formatting import fmt, sci
 
 # GPU specs for tables and prose
 v100_tflops = f"{V100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
@@ -136,10 +136,11 @@ Amdahl's Law is not merely theoretical: it explains *why* many GPU upgrades disa
 #| fig-alt: "Heatmap of Speedup vs Accelerator Speed and Parallel Fraction. High speedup (green/yellow) is only achieved in the bottom right corner where Parallel Fraction is near 1.0. The rest of the map is dominated by blue (low speedup), showing the serial bottleneck."
 
 import sys
+import os
 import matplotlib.pyplot as plt
-# Ensure calc directory is in path
-sys.path.append('../../../calc')
-import viz
+# Ensure physx directory is in path
+sys.path.append(os.path.abspath("physx"))
+from physx import viz
 
 viz.set_book_style()
 viz.plot_iron_law_heatmap()
@@ -162,51 +163,66 @@ To see Amdahl's Law in action, consider how the parallel fraction $P$ differs dr
 ```{python}
 #| label: amdahl-h100-calc
 #| echo: false
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Calculate Amdahl's Law speedup for ResNet-50 and GPT-2 on H100
+# Used in: Lighthouse callout "Amdahl's Law on H100"
 
-# Amdahl's Law on H100
-hw_speedup = 500  # H100 vs CPU for matmul
+# =============================================================================
+# INPUT
+# =============================================================================
+hw_speedup_value = 500  # H100 vs CPU for matmul
+p_resnet_value = 0.95  # ResNet-50: 95% parallelizable
+p_gpt2_value = 0.80  # GPT-2: 80% parallelizable
 
-# ResNet-50: 95% parallelizable
-p_resnet = 0.95
-serial_resnet = 1 - p_resnet
-amdahl_resnet = 1 / (serial_resnet + p_resnet / hw_speedup)
+# =============================================================================
+# PROCESS
+# =============================================================================
+# ResNet-50 calculations
+serial_resnet_value = 1 - p_resnet_value
+amdahl_resnet_value = 1 / (serial_resnet_value + p_resnet_value / hw_speedup_value)
 
-# GPT-2: 80% parallelizable
-p_gpt2 = 0.80
-serial_gpt2 = 1 - p_gpt2
-amdahl_gpt2 = 1 / (serial_gpt2 + p_gpt2 / hw_speedup)
-amdahl_gpt2_ceiling = 1 / (1 - p_gpt2)
+# GPT-2 calculations
+serial_gpt2_value = 1 - p_gpt2_value
+amdahl_gpt2_value = 1 / (serial_gpt2_value + p_gpt2_value / hw_speedup_value)
+amdahl_gpt2_ceiling_value = 1 / (1 - p_gpt2_value)
 
-# Pre-formatted strings
-hw_speedup_str = str(hw_speedup)
-p_resnet_str = f"{p_resnet:.2f}"
-p_gpt2_str = f"{p_gpt2:.2f}"
-serial_resnet_str = f"{serial_resnet:.2f}"
-serial_gpt2_str = f"{serial_gpt2:.2f}"
-
-amdahl_resnet_str = f"{amdahl_resnet:.1f}"
-amdahl_gpt2_str = f"{amdahl_gpt2:.1f}"
-amdahl_gpt2_ceil_str = f"{amdahl_gpt2_ceiling:.0f}"
+# =============================================================================
+# OUTPUT
+# =============================================================================
+hw_speedup_str = str(hw_speedup_value)
+p_resnet_str = f"{p_resnet_value:.2f}"
+p_gpt2_str = f"{p_gpt2_value:.2f}"
+serial_resnet_str = f"{serial_resnet_value:.2f}"
+serial_gpt2_str = f"{serial_gpt2_value:.2f}"
+amdahl_resnet_str = f"{amdahl_resnet_value:.1f}"
+amdahl_gpt2_str = f"{amdahl_gpt2_value:.1f}"
+amdahl_gpt2_ceil_str = f"{amdahl_gpt2_ceiling_value:.0f}"
+p_resnet_pct_str = f"{p_resnet_value*100:.0f}"
+serial_resnet_pct_str = f"{serial_resnet_value*100:.0f}"
+amdahl_resnet_round_str = f"{amdahl_resnet_value:.0f}"
+serial_gpt2_pct_str = f"{(1 - p_gpt2_value)*100:.0f}"
 ```
 
 ::: {.callout-lighthouse #lighthouse-amdahl-h100 title="Amdahl's Law on H100"}
 
 **ResNet-50 inference on NVIDIA H100:**
 
-- H100 delivers $S = `{python} hw_speedup`\times$ speedup over CPU for matrix multiply (`{python} h100_tflops_int8` TOPS INT8 vs. ~8 TOPS on baseline CPU without AMX extensions)
-- Typical inference has $P = `{python} p_resnet`$ (`{python} f"{p_resnet*100:.0f}"`% parallelizable, `{python} f"{serial_resnet*100:.0f}"`% serial: data loading, preprocessing, postprocessing)
+- H100 delivers S = `{python} hw_speedup_str`× speedup over CPU for matrix multiply (`{python} h100_tflops_int8` TOPS INT8 vs. ~8 TOPS on baseline CPU without AMX extensions)
+- Typical inference has P = `{python} p_resnet_str` (`{python} p_resnet_pct_str`% parallelizable, `{python} serial_resnet_pct_str`% serial: data loading, preprocessing, postprocessing)
 
-$$Speedup = \frac{1}{(1-`{python} p_resnet_str`) + \frac{`{python} p_resnet_str`}{`{python} hw_speedup_str`}} = \frac{1}{`{python} serial_resnet_str` + 0.0019} = \frac{1}{0.0519} \approx `{python} amdahl_resnet_str`\times$$
+Speedup = 1 / ((1-`{python} p_resnet_str`) + `{python} p_resnet_str` / `{python} hw_speedup_str`) = 1 / (`{python} serial_resnet_str` + 0.0019) ≈ `{python} amdahl_resnet_str`×
 
-Despite a `{python} hw_speedup`× hardware advantage, total system speedup is only **`{python} f"{amdahl_resnet:.0f}"`×**. The `{python} f"{serial_resnet*100:.0f}"`% serial fraction caps practical gains.
+Despite a `{python} hw_speedup_str`× hardware advantage, total system speedup is only **`{python} amdahl_resnet_round_str`×**. The `{python} serial_resnet_pct_str`% serial fraction caps practical gains.
 
 **Contrast with GPT-2 (autoregressive):**
 
-- Same H100, but GPT-2 token generation has $P = `{python} p_gpt2`$ (`{python} f"{(1-p_gpt2)*100:.0f}"`% serial: KV-cache updates, sampling, Python overhead)
+- Same H100, but GPT-2 token generation has P = `{python} p_gpt2_str` (`{python} serial_gpt2_pct_str`% serial: KV-cache updates, sampling, Python overhead)
 
-$$Speedup = \frac{1}{(1-`{python} p_gpt2_str`) + \frac{`{python} p_gpt2_str`}{`{python} hw_speedup_str`}} = \frac{1}{`{python} serial_gpt2_str` + 0.0016} \approx `{python} amdahl_gpt2_str`\times$$
+Speedup = 1 / ((1-`{python} p_gpt2_str`) + `{python} p_gpt2_str` / `{python} hw_speedup_str`) = 1 / (`{python} serial_gpt2_str` + 0.0016) ≈ `{python} amdahl_gpt2_str`×
 
-The **Bandwidth Hog** archetype suffers more from serial bottlenecks. Even infinite accelerator speed yields only $1/(1-P) = `{python} amdahl_gpt2_ceil_str`\times$ maximum speedup. This is *why* LLM inference optimization focuses on reducing the serial fraction (batching, speculative decoding) rather than raw hardware speed.
+The **Bandwidth Hog** archetype suffers more from serial bottlenecks. Even infinite accelerator speed yields only 1/(1-P) = `{python} amdahl_gpt2_ceil_str`× maximum speedup. This is *why* LLM inference optimization focuses on reducing the serial fraction (batching, speculative decoding) rather than raw hardware speed.
 :::
 
 These examples reveal that the critical question for any hardware optimization is not "how fast is the chip?" but rather: *is this workload limited by how fast we can compute, or how fast we can move data?* The answer determines which accelerator to choose, which optimizations matter, and whether a 10x more powerful chip will actually help. The **Roofline Model** (formally defined in @sec-system-foundations-roofline-model-5f7c) provides the analytical framework for answering this question. It plots an operation's **arithmetic intensity** (operations per byte of memory traffic) against hardware capabilities, revealing whether performance is capped by compute or bandwidth. A dense matrix multiplication with high arithmetic intensity benefits from more TFLOPS; a LayerNorm with low arithmetic intensity benefits from more memory bandwidth. ResNet-50's convolutions are compute-bound while GPT-2's attention layers are memory-bound, and this distinction is precisely *why* these architectures require different optimization strategies.
@@ -334,10 +350,11 @@ These diverse acceleration patterns converged in a broader architectural shift. 
 #| fig-alt: "Log-scale line chart from 2012 to 2024. Red line (Model Demand) rises steeply. Blue line (GPU Supply) rises moderately. Gray line (CPU Trend) rises slowly. A large purple shaded area between Red and Blue is labeled 'THE SYSTEMS GAP'."
 
 import sys
+import os
 import matplotlib.pyplot as plt
-# Ensure calc directory is in path
-sys.path.append('../../../calc')
-import viz
+# Ensure physx directory is in path
+sys.path.append(os.path.abspath("physx"))
+from physx import viz
 
 viz.set_book_style()
 viz.plot_systems_gap()
@@ -365,8 +382,8 @@ As @fig-tech-s-curve illustrates, general-purpose computing has entered its satu
 #| echo: false
 
 import matplotlib.pyplot as plt
-from calc import viz
-from calc.ch_hw_acceleration import plot_technology_s_curve
+from physx import viz
+from physx.ch_hw_acceleration import plot_technology_s_curve
 
 viz.set_book_style()
 plot_technology_s_curve()
@@ -839,13 +856,30 @@ output = relu(Z)  # Vector: applies activation to
 ```{python}
 #| label: weight-matrix-calc
 #| echo: false
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Calculate weight matrix parameter count for matrix operation example
+# Used in: Prose describing matrix operation scale
 
-wm_in = 256; wm_out = 512
-wm_params = wm_in * wm_out
-wm_params_str = f"{wm_params:,}"
+# =============================================================================
+# INPUT
+# =============================================================================
+wm_in_value = 256
+wm_out_value = 512
+
+# =============================================================================
+# PROCESS
+# =============================================================================
+wm_params_value = wm_in_value * wm_out_value
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
+wm_params_str = f"{wm_params_value:,}"
 ```
 
-This computation demonstrates the scale of matrix operations in neural networks. Each output neuron (512 total) must process all input features (256 total) for every sample in the batch (32 samples). The weight matrix alone contains $256 \times 512 =$ `{python} wm_params_str` parameters that define these transformations, illustrating why efficient matrix multiplication dominates performance considerations.
+This computation demonstrates the scale of matrix operations in neural networks. Each output neuron (512 total) must process all input features (256 total) for every sample in the batch (32 samples). The weight matrix alone contains 256 × 512 = `{python} wm_params_str` parameters that define these transformations, illustrating why efficient matrix multiplication dominates performance considerations.
 
 Neural networks employ matrix operations across diverse architectural patterns beyond simple linear layers.
 
@@ -1497,32 +1531,44 @@ While tensor cores package matrix operations into structured computational units
 ```{python}
 #| label: systolic-energy-calc
 #| echo: false
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Calculate energy efficiency comparison between vector unit and systolic array
+# Used in: Callout "The Energy Advantage of Pulsing Data"
 
-# Systolic array energy efficiency calculation
-dram_access_pj = 640  # pJ per DRAM access
-vector_accesses = 4   # 3 loads + 1 write
-systolic_size = 128   # 128x128 array
-compute_energy_pj = 1 # pJ per MAC operation
+# =============================================================================
+# INPUT
+# =============================================================================
+dram_access_pj_value = 640  # pJ per DRAM access
+vector_accesses_value = 4   # 3 loads + 1 write
+systolic_size_value = 128   # 128x128 array
+compute_energy_pj_value = 1 # pJ per MAC operation
 
+# =============================================================================
+# PROCESS
+# =============================================================================
 # Vector unit: 4 DRAM accesses per operation
-vector_energy_pj = vector_accesses * dram_access_pj
-vector_energy_str = f"{vector_energy_pj:,}"
+vector_energy_pj_value = vector_accesses_value * dram_access_pj_value
 
 # Systolic array: 2 loads per 128 operations
-systolic_accesses_per_op = 2 / systolic_size
-systolic_energy_pj = systolic_accesses_per_op * dram_access_pj + compute_energy_pj
-systolic_energy_str = f"{systolic_energy_pj:.0f}"
-systolic_access_str = f"{systolic_accesses_per_op:.3f}"
-
-# Pre-formatted strings for inputs
-dram_access_str = str(dram_access_pj)
-systolic_size_str = str(systolic_size)
-vector_accesses_str = str(vector_accesses)
-compute_energy_str = str(compute_energy_pj)
+systolic_accesses_per_op_value = 2 / systolic_size_value
+systolic_energy_pj_value = systolic_accesses_per_op_value * dram_access_pj_value + compute_energy_pj_value
 
 # Efficiency ratio
-energy_ratio = vector_energy_pj / systolic_energy_pj
-energy_ratio_str = f"{energy_ratio:.0f}"
+energy_ratio_value = vector_energy_pj_value / systolic_energy_pj_value
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
+dram_access_str = str(dram_access_pj_value)
+systolic_size_str = str(systolic_size_value)
+vector_accesses_str = str(vector_accesses_value)
+compute_energy_str = str(compute_energy_pj_value)
+vector_energy_str = f"{vector_energy_pj_value:,}"
+systolic_access_str = f"{systolic_accesses_per_op_value:.3f}"
+systolic_energy_str = f"{systolic_energy_pj_value:.0f}"
+energy_ratio_str = f"{energy_ratio_value:.0f}"
 ```
 
 This architecture provides *the energy advantage of pulsing data*.
@@ -1534,11 +1580,11 @@ The "Systolic" (heartbeat) metaphor is not just about timing; it reflects a fund
 
 1.  **Vector Unit**: Loads $A$, loads $B$, computes $A \times B + C$, writes $C$.
     - **Data Movement**: 3 loads + 1 write = `{python} vector_accesses_str` DRAM accesses (per operation).
-    - **Energy**: $\approx `{python} vector_accesses_str` \times `{python} dram_access_str`\text{ pJ} = \mathbf{`{python} vector_energy_str` \text{ pJ/OP}}$.
+    - **Energy**: ≈ `{python} vector_accesses_str` × `{python} dram_access_str` pJ = **`{python} vector_energy_str` pJ/OP**.
 
-2.  **Systolic Array ($`{python} systolic_size_str` \times `{python} systolic_size_str`$ size)**: Loads $A$ and $B$ once at the edges. Data "pulses" through `{python} systolic_size_str` processing elements.
+2.  **Systolic Array (`{python} systolic_size_str` × `{python} systolic_size_str` size)**: Loads A and B once at the edges. Data "pulses" through `{python} systolic_size_str` processing elements.
     - **Data Movement**: 2 loads per `{python} systolic_size_str` operations = `{python} systolic_access_str` DRAM accesses (per operation).
-    - **Energy**: $\approx `{python} systolic_access_str` \times `{python} dram_access_str`\text{ pJ} + `{python} compute_energy_str` \text{ pJ (compute)} \approx \mathbf{`{python} systolic_energy_str` \text{ pJ/OP}}$.
+    - **Energy**: ≈ `{python} systolic_access_str` × `{python} dram_access_str` pJ + `{python} compute_energy_str` pJ (compute) ≈ **`{python} systolic_energy_str` pJ/OP**.
 
 **The Systems Conclusion**: A systolic array is **`{python} energy_ratio_str`x more energy-efficient** than a naive vector unit for large matrix multiplications.
 - This efficiency is what allows a Google TPU to pack 100,000+ MAC units into a single chip without melting.
@@ -1689,17 +1735,32 @@ The underlying principle remains consistent: data flows systematically through p
 ```{python}
 #| label: systolic-array-calc
 #| echo: false
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Calculate systolic array operations per cycle and tensor storage
+# Used in: Prose describing systolic array throughput
 
-# Systolic array ops per cycle
-systolic_dim = 128
-systolic_ops = systolic_dim * systolic_dim
-systolic_ops_str = f"{systolic_ops:,}"
+# =============================================================================
+# INPUT
+# =============================================================================
+systolic_dim_value = 128
+
+# =============================================================================
+# PROCESS
+# =============================================================================
+systolic_ops_value = systolic_dim_value * systolic_dim_value
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
+systolic_ops_str = f"{systolic_ops_value:,}"
 
 # Tensor life: KWS audio
-kws_samples = 16_000
-kws_bytes_fp16 = 2
-kws_tensor_kb = kws_samples * kws_bytes_fp16 / 1024
-kws_tensor_str = f"{kws_tensor_kb:.0f}"
+kws_samples_value = 16_000
+kws_bytes_fp16_value = 2
+kws_tensor_kb_value = kws_samples_value * kws_bytes_fp16_value / 1024
+kws_tensor_str = f"{kws_tensor_kb_value:.0f}"
 ```
 
 A 128×128 systolic array capable of `{python} systolic_ops_str` operations per cycle requires continuous data feed to maintain utilization. Each cycle demands fresh input activations and weight parameters that must traverse from off-chip memory through on-chip buffers to the array edges. The TPU's 1,200 GB/s on-chip bandwidth enables high utilization, but even this substantial bandwidth becomes limiting when processing large transformer models where memory requirements exceed on-chip capacity.
@@ -1771,7 +1832,7 @@ These dynamics help explain the rapid adoption of newer accelerators despite hig
 #| label: accelerator-economics-calc
 #| echo: false
 
-from calc.constants import (
+from physx.constants import (
     V100_FLOPS_FP16_TENSOR,
     A100_FLOPS_FP16_TENSOR,
     H100_FLOPS_TF32,
@@ -1869,10 +1930,11 @@ The underlying cause of this wall is physical: moving data costs orders of magni
 #| fig-alt: "Horizontal bar chart of Energy (pJ) per operation on log scale. INT8 Add is tiny (0.03). DRAM Read is huge (640). An arrow highlights the massive gap between computation and memory access."
 
 import sys
+import os
 import matplotlib.pyplot as plt
-# Ensure calc directory is in path
-sys.path.append('../../calc')
-import viz
+# Ensure physx directory is in path
+sys.path.append(os.path.abspath("physx"))
+from physx import viz
 
 viz.set_book_style()
 viz.plot_energy_hierarchy()
@@ -1895,7 +1957,7 @@ The memory wall manifests through three critical constraints.[^fn-bw-analogy] Fi
 #| fig-cap: "**The Compute-Bandwidth Divergence**: Computational capability and memory bandwidth plotted on a log scale (2000–2025). While arithmetic throughput (FLOPs) has grown exponentially, memory bandwidth has improved at a significantly slower linear rate. This widening 'Systems Gap' defines the AI Memory Wall, forcing architects to design systems that minimize data movement to avoid idling powerful compute units."
 #| fig-alt: "Line graph comparing compute performance and memory bandwidth from 2000 to 2025 on log scale. Compute grows exponentially; bandwidth grows linearly. Shaded gap labeled Memory Wall widens over time."
 
-from calc import viz
+from physx import viz
 import matplotlib.pyplot as plt
 
 viz.set_book_style()
@@ -1912,10 +1974,11 @@ As visualized in @fig-rising-ridge, which shows how the hardware's "Ridge Point"
 #| fig-alt: "Line plot showing the Arithmetic Intensity Ridge Point growing from ~140 in 2017 (V100) to over 500 in 2024 (B200). Shaded regions indicate 'Memory-Rich' and 'Compute-Dense' zones."
 
 import sys
+import os
 import matplotlib.pyplot as plt
-# Ensure calc directory is in path
-sys.path.append('../../../calc')
-import viz
+# Ensure physx directory is in path
+sys.path.append(os.path.abspath("physx"))
+from physx import viz
 
 viz.set_book_style()
 viz.plot_rising_ridge()
@@ -1933,7 +1996,7 @@ To make these energy costs concrete, we can trace a single tensor through every 
 Recall the 1-second audio clip from @sec-ml-system-architecture. Here is its physical path through the hardware during inference:
 
 1.  **DRAM (HBM)**: The tensor starts here.
-    *   **Size**: 16,000 samples $\times$ 2 bytes (FP16) = **`{python} kws_tensor_str` KB**.
+    *   **Size**: 16,000 samples × 2 bytes (FP16) = **`{python} kws_tensor_str` KB**.
     *   **Latency**: Fetching this from off-chip memory takes **~100 ns** (plus queuing delay).
     *   **Energy**: Cost is **~200 pJ/bit**. High cost.
 
@@ -1985,7 +2048,7 @@ Unlike traditional computing workloads, where memory access follows well-structu
 #| fig-alt: "Scatter plot with trend lines comparing AI model parameters (red) and hardware bandwidth (blue) from 2012 to 2024. Models grow from AlexNet to Gemini 1. Shaded gap shows widening memory wall."
 #| echo: false
 
-from calc import viz
+from physx import viz
 import matplotlib.pyplot as plt
 
 viz.set_book_style()
@@ -2335,7 +2398,7 @@ These ridge point values reveal a surprising trend: as hardware has become more 
 
 **The Evolution**:
 
-*   **V100 (2017)**: $`{python} v100_tflops` \text{ TF} / 0.9 \text{ TB/s} \approx \mathbf{`{python} v100_ridge` \text{ Ops/Byte}}$.
+*   **V100 (2017)**: `{python} v100_tflops` TF / 0.9 TB/s ≈ **`{python} v100_ridge` Ops/Byte**.
 *   **A100 (2020)**: `{python} a100_tflops_fp16` TF / `{python} a100_bw_tbs` TB/s ≈ **`{python} a100_ridge` Ops/Byte**.
 *   **H100 (2023)**: `{python} h100_tflops_fp16` TF / `{python} h100_bw_tbs` TB/s ≈ **`{python} h100_ridge` Ops/Byte**.
 
@@ -2383,51 +2446,66 @@ To see how these intensity values translate into real performance predictions, w
 ```{python}
 #| label: transformer-layer-calc
 #| echo: false
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Analyze transformer layer arithmetic intensity for QKV projection and softmax
+# Used in: Callout "Transformer Layer Analysis"
 
-# Transformer layer analysis: hidden_dim=768, batch=32, seq=512
-t_hidden = 768; t_batch = 32; t_seq = 512; t_heads = 12
-t_fp_bytes = 2  # FP16
+# =============================================================================
+# INPUT
+# =============================================================================
+t_hidden_value = 768
+t_batch_value = 32
+t_seq_value = 512
+t_heads_value = 12
+t_fp_bytes_value = 2  # FP16
 
-# Pre-formatted strings for inputs
-t_hidden_str = str(t_hidden)
-t_batch_str = str(t_batch)
-t_seq_str = str(t_seq)
-t_heads_str = str(t_heads)
-
+# =============================================================================
+# PROCESS
+# =============================================================================
 # === QKV Projection ===
 # FLOPs: 3 projections × batch × seq × hidden × hidden × 2 (multiply-add)
 # The "× 2" for multiply-add is often folded into "FLOPs" convention;
 # here the text uses: 3 × batch × seq × hidden × hidden
-qkv_flops = 3 * t_batch * t_seq * t_hidden * t_hidden
-qkv_flops_b = qkv_flops / 1e9
-qkv_flops_b_str = f"{qkv_flops_b:.0f}"
+qkv_flops_value = 3 * t_batch_value * t_seq_value * t_hidden_value * t_hidden_value
+qkv_flops_b_value = qkv_flops_value / 1e9
 
 # Bytes: (input + weights + output) × 2 bytes
-qkv_input = t_batch * t_seq * t_hidden
-qkv_weights = 3 * t_hidden * t_hidden
-qkv_output = t_batch * t_seq * t_hidden * 3
-qkv_bytes = (qkv_input + qkv_weights + qkv_output) * t_fp_bytes
-qkv_mb = qkv_bytes / 1e6
-qkv_mb_str = f"{qkv_mb:.0f}"
+qkv_input_value = t_batch_value * t_seq_value * t_hidden_value
+qkv_weights_value = 3 * t_hidden_value * t_hidden_value
+qkv_output_value = t_batch_value * t_seq_value * t_hidden_value * 3
+qkv_bytes_value = (qkv_input_value + qkv_weights_value + qkv_output_value) * t_fp_bytes_value
+qkv_mb_value = qkv_bytes_value / 1e6
 
 # Arithmetic intensity
-qkv_ai = qkv_flops / qkv_bytes
-qkv_ai_str = f"{qkv_ai:.0f}"
+qkv_ai_value = qkv_flops_value / qkv_bytes_value
 
 # === Softmax ===
 # FLOPs: batch × heads × seq × seq × 3 (exp, sum, div)
-softmax_flops = t_batch * t_heads * t_seq * t_seq * 3
-softmax_flops_m = softmax_flops / 1e6
-softmax_flops_m_str = f"{softmax_flops_m:.0f}"
+softmax_flops_value = t_batch_value * t_heads_value * t_seq_value * t_seq_value * 3
+softmax_flops_m_value = softmax_flops_value / 1e6
 
 # Bytes: batch × heads × seq × seq × 2 (read + write) × 2 bytes
-softmax_bytes = t_batch * t_heads * t_seq * t_seq * 2 * t_fp_bytes
-softmax_mb = softmax_bytes / 1e6
-softmax_mb_str = f"{softmax_mb:.0f}"
+softmax_bytes_value = t_batch_value * t_heads_value * t_seq_value * t_seq_value * 2 * t_fp_bytes_value
+softmax_mb_value = softmax_bytes_value / 1e6
 
 # Arithmetic intensity
-softmax_ai = softmax_flops / softmax_bytes
-softmax_ai_str = f"{softmax_ai:.2f}"
+softmax_ai_value = softmax_flops_value / softmax_bytes_value
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
+t_hidden_str = str(t_hidden_value)
+t_batch_str = str(t_batch_value)
+t_seq_str = str(t_seq_value)
+t_heads_str = str(t_heads_value)
+qkv_flops_b_str = f"{qkv_flops_b_value:.0f}"
+qkv_mb_str = f"{qkv_mb_value:.0f}"
+qkv_ai_str = f"{qkv_ai_value:.0f}"
+softmax_flops_m_str = f"{softmax_flops_m_value:.0f}"
+softmax_mb_str = f"{softmax_mb_value:.0f}"
+softmax_ai_str = f"{softmax_ai_value:.2f}"
 ```
 
 ::: {.callout-notebook #notebook-transformer-layers title="Transformer Layer Analysis"}
@@ -2436,14 +2514,14 @@ For a transformer with hidden_dim=`{python} t_hidden_str`, batch=`{python} t_bat
 
 *Attention QKV Projection*:
 
-- FLOPs: $3 \times `{python} t_batch_str` \times `{python} t_seq_str` \times `{python} t_hidden_str` \times `{python} t_hidden_str`$ = `{python} qkv_flops_b_str` billion FLOPs
-- Bytes: (input + weights + output) $= (`{python} t_batch_str` \times `{python} t_seq_str` \times `{python} t_hidden_str` + 3 \times `{python} t_hidden_str` \times `{python} t_hidden_str` + `{python} t_batch_str` \times `{python} t_seq_str` \times `{python} t_hidden_str` \times 3) \times 2$ ≈ `{python} qkv_mb_str` MB
+- FLOPs: 3 × `{python} t_batch_str` × `{python} t_seq_str` × `{python} t_hidden_str` × `{python} t_hidden_str` = `{python} qkv_flops_b_str` billion FLOPs
+- Bytes: (input + weights + output) = (`{python} t_batch_str` × `{python} t_seq_str` × `{python} t_hidden_str` + 3 × `{python} t_hidden_str` × `{python} t_hidden_str` + `{python} t_batch_str` × `{python} t_seq_str` × `{python} t_hidden_str` × 3) × 2 ≈ `{python} qkv_mb_str` MB
 - AI = `{python} qkv_flops_b_str`B / `{python} qkv_mb_str`M = `{python} qkv_ai_str` FLOP/byte, which is **compute-bound on A100** (above `{python} a100_ridge` threshold)
 
 *Softmax*:
 
-- FLOPs: $`{python} t_batch_str` \times `{python} t_heads_str` \times `{python} t_seq_str` \times `{python} t_seq_str` \times 3$ ≈ `{python} softmax_flops_m_str`M FLOPs (exp, sum, div)
-- Bytes: $`{python} t_batch_str` \times `{python} t_heads_str` \times `{python} t_seq_str` \times `{python} t_seq_str` \times 2 \times 2$ = `{python} softmax_mb_str` MB
+- FLOPs: `{python} t_batch_str` × `{python} t_heads_str` × `{python} t_seq_str` × `{python} t_seq_str` × 3 ≈ `{python} softmax_flops_m_str`M FLOPs (exp, sum, div)
+- Bytes: `{python} t_batch_str` × `{python} t_heads_str` × `{python} t_seq_str` × `{python} t_seq_str` × 2 × 2 = `{python} softmax_mb_str` MB
 - AI = `{python} softmax_flops_m_str`M / `{python} softmax_mb_str`M = `{python} softmax_ai_str` FLOP/byte, which is **memory-bound**
 
 This analysis explains why FlashAttention\index{FlashAttention!memory optimization} focuses on reducing memory traffic in attention rather than reducing FLOPs.
@@ -2571,19 +2649,19 @@ Consider a Conv2D layer with input shape (batch=32, channels=128, height=56, wid
 
 *Computational Requirements*:
 
-- Output size: $32 \times 256 \times 56 \times 56 =$ `{python} conv_out_m_str`M elements
-- FLOPs per output: $128 \times 3 \times 3 \times 2 =$ `{python} conv_flops_per_out_str` (multiply-add)
+- Output size: 32 × 256 × 56 × 56 = `{python} conv_out_m_str`M elements
+- FLOPs per output: 128 × 3 × 3 × 2 = `{python} conv_flops_per_out_str` (multiply-add)
 - Total FLOPs: `{python} conv_out_m_str`M × `{python} conv_flops_per_out_str` = `{python} conv_total_gflops_str` billion FLOPs
 
 *Memory Traffic Analysis*:
 
-- Input: $32 \times 128 \times 56 \times 56 \times 2 =$ `{python} conv_input_mb_str` MB (FP16)
-- Weights: $256 \times 128 \times 3 \times 3 \times 2 \approx$ `{python} conv_weights_mb_str` MB (FP16)
-- Output: $32 \times 256 \times 56 \times 56 \times 2 =$ `{python} conv_output_mb_str` MB (FP16)
+- Input: 32 × 128 × 56 × 56 × 2 = `{python} conv_input_mb_str` MB (FP16)
+- Weights: 256 × 128 × 3 × 3 × 2 ≈ `{python} conv_weights_mb_str` MB (FP16)
+- Output: 32 × 256 × 56 × 56 × 2 = `{python} conv_output_mb_str` MB (FP16)
 - Total: `{python} conv_total_mb_str` MB
 
 *Arithmetic Intensity*:
-$$\text{AI} = \frac{`{python} conv_total_gflops_str` \text{ GFLOPs}}{`{python} conv_total_mb_str` \text{ MB}} = `{python} conv_ai_str` \text{ FLOP/byte}$$
+AI = `{python} conv_total_gflops_str` GFLOPs / `{python} conv_total_mb_str` MB = `{python} conv_ai_str` FLOP/byte
 
 This is **well above** A100's ridge point of `{python} a100_ridge` FLOP/byte, making this operation **compute-bound**. The layer will achieve near-peak performance of ~`{python} a100_tflops_fp16` TFLOPS (FP16 with Tensor Cores).
 :::
@@ -2598,21 +2676,21 @@ Consider a fully connected layer: input (batch=32, features=2048) → output (ba
 
 *Computational Requirements*:
 
-- Matrix multiply: $(32 \times 2048) \times (2048 \times 2048)$
-- Total FLOPs: $2 \times 32 \times 2048 \times 2048 =$ `{python} dense_total_mflops_str` million FLOPs
+- Matrix multiply: (32 × 2048) × (2048 × 2048)
+- Total FLOPs: 2 × 32 × 2048 × 2048 = `{python} dense_total_mflops_str` million FLOPs
 
 *Memory Traffic Analysis*:
 
-- Input: $32 \times 2048 \times 2 =$ `{python} dense_input_kb_str` KB (FP16)
-- Weights: $2048 \times 2048 \times 2 =$ `{python} dense_weights_mb_str` MB (FP16)
-- Output: $32 \times 2048 \times 2 =$ `{python} dense_output_kb_str` KB (FP16)
+- Input: 32 × 2048 × 2 = `{python} dense_input_kb_str` KB (FP16)
+- Weights: 2048 × 2048 × 2 = `{python} dense_weights_mb_str` MB (FP16)
+- Output: 32 × 2048 × 2 = `{python} dense_output_kb_str` KB (FP16)
 - Total: `{python} dense_total_mb_str` MB
 
 *Arithmetic Intensity*:
-$$\text{AI} = \frac{`{python} dense_total_mflops_str` \text{ MFLOPs}}{`{python} dense_total_mb_str` \text{ MB}} = `{python} dense_ai_str` \text{ FLOP/byte}$$
+AI = `{python} dense_total_mflops_str` MFLOPs / `{python} dense_total_mb_str` MB = `{python} dense_ai_str` FLOP/byte
 
 This is **below** A100's ridge point of `{python} a100_ridge` FLOP/byte, making this operation **memory-bound**. Attainable performance:
-$$P_{\text{attainable}} = `{python} a100_bw` \text{ GB/s} \times `{python} dense_ai_str` \text{ FLOP/byte} = `{python} dense_attainable_str` \text{ TFLOPS}$$
+Pattainable = `{python} a100_bw` GB/s × `{python} dense_ai_str` FLOP/byte = `{python} dense_attainable_str` TFLOPS
 
 This is only `{python} dense_util_pct_str`% of peak compute capability, demonstrating the memory wall effect for small batch sizes.
 :::
@@ -2627,22 +2705,22 @@ LayerNorm with input shape (batch=32, seq=512, hidden=768):
 
 *Computational Requirements*:
 
-- Elements: $32 \times 512 \times 768 =$ `{python} ln_elements_m_str`M
+- Elements: 32 × 512 × 768 = `{python} ln_elements_m_str`M
 - Operations per element: mean (1 ADD), variance (2 ADD, 1 MUL), normalize (1 ADD, 1 MUL, 1 DIV) ≈ 6 FLOPs
-- Total FLOPs: `{python} ln_elements_m_str`M $\times$ 6 $=$ `{python} ln_total_mflops_str`M FLOPs
+- Total FLOPs: `{python} ln_elements_m_str`M × 6 = `{python} ln_total_mflops_str`M FLOPs
 
 *Memory Traffic*:
 
-- Input: `{python} ln_elements_m_str`M $\times$ 2 $=$ `{python} ln_input_mb_str` MB
-- Parameters (scale, bias): $768 \times 2 \times 2 =$ `{python} ln_params_kb_str` KB (negligible)
-- Output: `{python} ln_elements_m_str`M $\times$ 2 $=$ `{python} ln_output_mb_str` MB
+- Input: `{python} ln_elements_m_str`M × 2 = `{python} ln_input_mb_str` MB
+- Parameters (scale, bias): 768 × 2 × 2 = `{python} ln_params_kb_str` KB (negligible)
+- Output: `{python} ln_elements_m_str`M × 2 = `{python} ln_output_mb_str` MB
 - Total: `{python} ln_total_mb_str` MB
 
 *Arithmetic Intensity*:
-$$\text{AI} = \frac{`{python} ln_total_mflops_str` \text{ MFLOPs}}{`{python} ln_total_mb_str` \text{ MB}} = `{python} ln_ai_str` \text{ FLOP/byte}$$
+AI = `{python} ln_total_mflops_str` MFLOPs / `{python} ln_total_mb_str` MB = `{python} ln_ai_str` FLOP/byte
 
 This is **severely memory-bound** (156× below ridge point). Performance is limited to:
-$$P_{\text{attainable}} = `{python} a100_bw_str` \text{ GB/s} \times `{python} ln_ai_str` \text{ FLOP/byte} = `{python} ln_attainable_str` \text{ TFLOPS}$$
+Pattainable = `{python} a100_bw_str` GB/s × `{python} ln_ai_str` FLOP/byte = `{python} ln_attainable_str` TFLOPS
 
 This represents less than 1% of A100's compute capacity, explaining why normalization layers contribute negligible compute time but significant latency.
 :::
@@ -2740,17 +2818,17 @@ This bandwidth constraint creates *the throughput ceiling*.
 *   **Model:** GPT-2 XL (1.5B parameters).
 *   **Operation:** Autoregressive generation (1 token at a time).
 *   **Data Movement:** Must load all weights (`{python} gpt2_weight_gb_str` GB @ FP16) for every token.
-*   **Compute:** Vector-Matrix multiplication. $2 \times \text{Params} \approx `{python} gpt2_decode_gflops_str` \text{ GFLOPs}$.
+*   **Compute:** Vector-Matrix multiplication. 2 × Params ≈ `{python} gpt2_decode_gflops_str` GFLOPs.
 *   **Arithmetic Intensity:**
-    $$ \frac{`{python} gpt2_decode_gflops_str` \text{ GFLOPs}}{`{python} gpt2_weight_gb_str` \text{ GB}} = \mathbf{`{python} gpt2_decode_ai_str` \text{ FLOP/Byte}} $$
+    `{python} gpt2_decode_gflops_str` GFLOPs / `{python} gpt2_weight_gb_str` GB = **`{python} gpt2_decode_ai_str` FLOP/Byte**
 
 **3. The Prediction (Iron Law)**
 
-Since Actual Intensity ($`{python} gpt2_decode_ai_str`$) $\ll$ Ridge Point ($`{python} a100_ridge`$), the system is **Bandwidth Bound**.
+Since Actual Intensity (`{python} gpt2_decode_ai_str`) ≪ Ridge Point (`{python} a100_ridge`), the system is **Bandwidth Bound**.
 
 *   **Maximum Throughput:** `{python} gpt2_decode_ai_str` FLOP/Byte × `{python} a100_bw_tbs` TB/s = **`{python} gpt2_max_tflops_str` TFLOPS**.
 *   **Utilization Ceiling:**
-    $$ \frac{`{python} gpt2_max_tflops_str` \text{ TFLOPS (Actual)}}{`{python} a100_tflops_fp16` \text{ TFLOPS (Peak)}} \approx \mathbf{`{python} gpt2_utilization_str`\%} $$
+    `{python} gpt2_max_tflops_str` TFLOPS (Actual) / `{python} a100_tflops_fp16` TFLOPS (Peak) ≈ **`{python} gpt2_utilization_str`%**
 
 **The Systems Conclusion:**
 Without batching or caching, a \$15,000 GPU runs at **less than 1% efficiency** on LLM inference. This "Utilization Gap" drives the need for Key-Value Caching and Quantization.
@@ -3931,7 +4009,7 @@ Teams expect 8 GPUs to train 8× faster than 1 GPU. Multi-accelerator scaling in
 
 ##### Fallacy: *Peak FLOPS specifications determine real-world accelerator performance.* {.unnumbered}
 
-Vendors advertise peak FLOPS as the definitive measure of accelerator capability, but real-world performance equals Peak FLOPS $\times$ Utilization, where utilization is dictated by the Roofline Model. An A100 advertises `{python} a100_tflops_fp16` TFLOPS at FP16, yet transformer training typically achieves only 120 to 180 TFLOPS (40 to 60% utilization) because memory-bound operations such as attention and LayerNorm drag down the average throughput. Recommendation models fare even worse, often reaching only 10 to 30 TFLOPS (3 to 10% utilization) due to sparse, irregular memory access patterns that leave compute units idle. Engineers should budget projects based on sustained throughput, measured or estimated via the Roofline Model, rather than peak marketing specifications.
+Vendors advertise peak FLOPS as the definitive measure of accelerator capability, but real-world performance equals Peak FLOPS × Utilization, where utilization is dictated by the Roofline Model. An A100 advertises `{python} a100_tflops_fp16` TFLOPS at FP16, yet transformer training typically achieves only 120 to 180 TFLOPS (40 to 60% utilization) because memory-bound operations such as attention and LayerNorm drag down the average throughput. Recommendation models fare even worse, often reaching only 10 to 30 TFLOPS (3 to 10% utilization) due to sparse, irregular memory access patterns that leave compute units idle. Engineers should budget projects based on sustained throughput, measured or estimated via the Roofline Model, rather than peak marketing specifications.
 
 ##### Pitfall: *Deploying small-batch inference workloads on high-compute accelerators.* {.unnumbered}
 
@@ -3980,7 +4058,7 @@ Before procuring hardware, validate feasibility by calculating these hard constr
 
 *   **Formula**: $T_{token} = \frac{\text{Model Size}}{\text{Memory Bandwidth}}$
 *   **Constraint**: $T_{token} < \text{Latency Target}$
-*   **Example**: Serving a 70B model (140GB) on a GPU with 1TB/s bandwidth yields $\approx `{python} token_latency_ms_str`$ms per token. If you need 50ms latency, this hardware fails regardless of compute power.
+*   **Example**: Serving a 70B model (140GB) on a GPU with 1TB/s bandwidth yields ≈ `{python} token_latency_ms_str` ms per token. If you need 50ms latency, this hardware fails regardless of compute power.
 
 **3. Compute Check**
 

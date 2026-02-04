@@ -3,13 +3,13 @@ import sys
 import os
 import matplotlib.pyplot as plt
 
-# Setup path to import from quarto/calc
+# Setup path to import from quarto/physx
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(os.path.join(project_root, 'quarto'))
 
-from calc import viz
-from calc import ch_hw_acceleration
-from calc import ch_appendix_algorithm
+from physx import viz
+from physx import ch_hw_acceleration
+from physx import ch_appendix_algorithm
 
 def generate_preview_assets():
     output_dir = os.path.join(project_root, "quarto/assets/images/generated")

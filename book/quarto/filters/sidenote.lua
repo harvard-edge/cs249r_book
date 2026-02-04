@@ -1,8 +1,9 @@
 function Note (note)
   -- Only process for latex, pdf, or epub formats
   if quarto.doc.is_format("latex") or quarto.doc.is_format("pdf") or quarto.doc.is_format("epub") then
-    -- For PDF/LaTeX, convert footnote to sidenote with content inline
-    -- We need to construct this carefully to preserve citation processing
+    -- For PDF/LaTeX, convert footnote to sidenote for margin placement
+    -- Requires sidenotes package (loaded in header-includes.tex)
+    -- Fallback to \footnote is defined in header-includes.tex if package fails
     local sidenote_content = {}
     table.insert(sidenote_content, pandoc.RawInline('latex', '\\sidenote{'))
 

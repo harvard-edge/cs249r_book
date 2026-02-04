@@ -3,8 +3,14 @@
 # It ensures that the mathematical conclusions drawn in the prose
 # remain valid even as underlying hardware constants are updated.
 
+import os
+import sys
 import pytest
-from calc.constants import (
+
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(project_root, 'quarto'))
+
+from physx.constants import (
     ureg,
     SPEED_OF_LIGHT_FIBER_KM_S,
     NETWORK_10G_BW,
@@ -19,7 +25,7 @@ from calc.constants import (
     NETWORK_5G_ENERGY_PER_MB_MJ, ENERGY_MOBILENET_INF_MJ,
     MB, GB
 )
-from calc.formulas import (
+from physx.formulas import (
     calc_network_latency_ms,
     calc_monthly_egress_cost,
     calc_fleet_tco,

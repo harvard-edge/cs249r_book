@@ -8,44 +8,58 @@ engine: jupyter
 #| label: appendix-algorithm-setup
 #| echo: false
 
-from calc.constants import *
-from calc.formulas import fmt
+from physx.constants import *
+from physx.formatting import fmt
 
-# Sparse matrix example: 100,000 × 10,000 embedding matrix
-vocab_size = 100_000
-embed_dim = 10_000
-total_elements = vocab_size * embed_dim  # 1 billion
-bytes_per_fp32 = 4
-dense_bytes = total_elements * bytes_per_fp32
-dense_gb = dense_bytes / 1e9  # 4 GB
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Compute sparse vs dense storage and GEMM intensity examples
+# Used in: Appendix algorithm foundations
 
-# Sparse at 1% density
-sparsity_pct = 1
-nonzeros = int(total_elements * sparsity_pct / 100)  # 10 million
-# CSR format: value (4 bytes) + column index (4 bytes) per nonzero
-sparse_bytes = nonzeros * (4 + 4)  # ~80 MB
-sparse_mb = sparse_bytes / 1e6
-reduction_factor = int(dense_bytes / sparse_bytes)  # 50x
+# =============================================================================
+# INPUT
+# =============================================================================
+vocab_size_value = 100_000
+embed_dim_value = 10_000
+bytes_per_fp32_value = 4
+sparsity_pct_value = 1
+n_small_value = 64
 
-# 64x64 GEMM efficiency example
-# Arithmetic intensity = n/3 for n×n matrices
-n_small = 64
-small_intensity = n_small / 3  # ~21 FLOP/byte
-# Ridge point for A100: ~153 FLOP/byte (312 TFLOP/s ÷ 2.039 TB/s)
-a100_ridge = int(A100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude /
-                 A100_MEM_BW.to(TB / second).magnitude)
-# When memory-bound, efficiency ≈ intensity / ridge_point
-small_efficiency_pct = small_intensity / a100_ridge * 100  # ~14%
+# =============================================================================
+# PROCESS
+# =============================================================================
+total_elements_value = vocab_size_value * embed_dim_value
+dense_bytes_value = total_elements_value * bytes_per_fp32_value
+dense_gb_value = dense_bytes_value / 1e9
 
-# Pre-formatted strings for display
-small_intensity_str = f"{int(small_intensity)}"
-small_efficiency_pct_str = f"{int(small_efficiency_pct)}"
-vocab_size_str = f"{vocab_size:,}"
-embed_dim_str = f"{embed_dim:,}"
-total_elements_str = f"{total_elements/1e9:.0f}"
-dense_gb_str = f"{dense_gb:.0f}"
-nonzeros_str = f"{nonzeros/1e6:.0f}"
-sparse_mb_str = f"{sparse_mb:.0f}"
+nonzeros_value = int(total_elements_value * sparsity_pct_value / 100)
+sparse_bytes_value = nonzeros_value * (4 + 4)
+sparse_mb_value = sparse_bytes_value / 1e6
+reduction_factor_value = int(dense_bytes_value / sparse_bytes_value)
+
+small_intensity_value = n_small_value / 3
+a100_ridge_value = int(
+    A100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude
+    / A100_MEM_BW.to(TB / second).magnitude
+)
+small_efficiency_pct_value = small_intensity_value / a100_ridge_value * 100
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
+n_small_str = f"{n_small_value}"
+small_intensity_str = f"{int(small_intensity_value)}"
+small_efficiency_pct_str = f"{int(small_efficiency_pct_value)}"
+a100_ridge_str = f"{a100_ridge_value}"
+sparsity_pct_str = f"{sparsity_pct_value}"
+reduction_factor_str = f"{reduction_factor_value}"
+vocab_size_str = f"{vocab_size_value:,}"
+embed_dim_str = f"{embed_dim_value:,}"
+total_elements_str = f"{total_elements_value/1e9:.0f}"
+dense_gb_str = f"{dense_gb_value:.0f}"
+nonzeros_str = f"{nonzeros_value/1e6:.0f}"
+sparse_mb_str = f"{sparse_mb_value:.0f}"
 ```
 
 This appendix covers the mathematical and computational machinery that powers neural networks. From the linear algebra at the heart of every layer to the backpropagation algorithm that enables learning, these foundations explain *how* models compute and *why* certain implementation choices affect performance. The concepts here support the deep learning foundations in @sec-deep-learning-systems-foundations, the framework internals in @sec-ai-frameworks, and the training strategies in @sec-ai-training.
@@ -62,9 +76,8 @@ Every neural network, regardless of architecture, spends most of its time doing 
 
 ### Tensor Operations and Notation {#sec-system-foundations-tensor-operations-notation-de17}
 
-We use **Einstein summation** notation throughout this book because it makes complex operations explicit.[^fn-einsum] Matrix multiplication $C = AB$ becomes:
+We use **Einstein summation** notation throughout this book because it makes complex operations explicit (implemented as `torch.einsum` in PyTorch and `np.einsum` in NumPy). Matrix multiplication $C = AB$ becomes:
 
-[^fn-einsum]: **Einstein Summation**: Implemented as `torch.einsum` in PyTorch and `np.einsum` in NumPy. It provides a unified DSL for dot products, outer products, transposes, and matrix multiplications.
 
 $$ C_{ij} = \sum_k A_{ik} B_{kj} $$
 
@@ -98,7 +111,7 @@ This explains several important phenomena:
 
 - **Larger batches improve efficiency**: Batching increases the effective matrix dimensions, pushing workloads toward the compute-bound region of the roofline.
 - **Power-of-two dimensions help**: Hardware tensor cores are optimized for specific tile sizes (typically 16x16 or 32x32). Dimensions that align with these sizes avoid padding overhead.
-- **Small matrices are inefficient**: A `{python} n_small`×`{python} n_small` GEMM has intensity `{python} n_small`/3 ≈ `{python} small_intensity_str` FLOP/byte, well below the ridge point (`{python} a100_ridge`), achieving only ~`{python} small_efficiency_pct_str`% of peak throughput.
+- **Small matrices are inefficient**: A `{python} n_small_str`×`{python} n_small_str` GEMM has intensity `{python} n_small_str`/3 ≈ `{python} small_intensity_str` FLOP/byte, well below the ridge point (`{python} a100_ridge_str`), achieving only ~`{python} small_efficiency_pct_str`% of peak throughput.
 
 ### Sparse Matrix Formats {#sec-system-foundations-sparse-matrix-formats-7920}
 
@@ -115,8 +128,8 @@ CSR is essential for recommendation systems (sparse embedding tables) and pruned
 **Example**: A vocabulary embedding matrix of size `{python} vocab_size_str`×`{python} embed_dim_str` (`{python} total_elements_str` billion parameters).
 
 *   **Dense (FP32)**: `{python} total_elements_str` × 10⁹ × 4 bytes = **`{python} dense_gb_str` GB**.
-*   **Sparse (`{python} sparsity_pct`% density)**: Storing only non-zeros requires roughly `{python} nonzeros_str` × 10⁶ × (4 bytes value + 4 bytes index) ≈ **`{python} sparse_mb_str` MB**.
-*   *Result*: A `{python} reduction_factor`× reduction in memory footprint, fitting a model that would otherwise OOM (Out of Memory).
+*   **Sparse (`{python} sparsity_pct_str`% density)**: Storing only non-zeros requires roughly `{python} nonzeros_str` × 10⁶ × (4 bytes value + 4 bytes index) ≈ **`{python} sparse_mb_str` MB**.
+*   *Result*: A `{python} reduction_factor_str`× reduction in memory footprint, fitting a model that would otherwise OOM (Out of Memory).
 
 ## Tensor Programming Primitives {#sec-system-foundations-tensor-programming-primitives-7baf}
 
