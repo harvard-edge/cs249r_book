@@ -123,11 +123,11 @@ a100_tdp_value = a100_tdp_value
 # Model calculations
 gpt2_params_b_value = gpt2_params_value / 1000
 gpt2_layers_value = gpt2_layers_value
-gpt2_params_gb_fp32_value = GPT2_PARAMS.magnitude * 4 / 1e9  # FP32 = 4 bytes
-gpt2_adam_gb_value = GPT2_PARAMS.magnitude * 8 / 1e9  # Adam m + v = 8 bytes total
+gpt2_params_gb_fp32_value = GPT2_PARAMS.magnitude * BYTES_FP32.to(byte).magnitude / 1e9
+gpt2_adam_gb_value = GPT2_PARAMS.magnitude * BYTES_ADAM_STATE.to(byte).magnitude / 1e9
 gpt3_params_b_value = gpt3_params_value / 1000
 resnet50_params_m_value = resnet50_params_value
-resnet50_params_gb_value = RESNET50_PARAMS.magnitude * 4 / 1e9  # FP32
+resnet50_params_gb_value = RESNET50_PARAMS.magnitude * BYTES_FP32.to(byte).magnitude / 1e9
 
 # =============================================================================
 # OUTPUT
@@ -798,7 +798,7 @@ v_t = \beta_2 v_{t-1} + (1-\beta_2)\big(\nabla L(\theta_t)\big)^2
 # INPUT
 # =============================================================================
 adam_example_params_m_value = 100  # million
-adam_bytes_value = 4  # FP32
+adam_bytes_value = BYTES_FP32.to(byte).magnitude
 adam_vectors_value = 2  # m_t and v_t
 
 # =============================================================================
@@ -863,8 +863,8 @@ from physx.constants import GPT2_PARAMS, Mparam, V100_MEM_CAPACITY, GiB
 from physx.formatting import fmt
 
 gpt2_b_value = GPT2_PARAMS.to(Mparam).magnitude / 1000  # 1.5 B
-bytes_fp32_value = 4
-bytes_fp16_value = 2
+bytes_fp32_value = BYTES_FP32.to(byte).magnitude
+bytes_fp16_value = BYTES_FP16.to(byte).magnitude
 
 v100_mem_gib_value = V100_MEM_CAPACITY.to(GiB).magnitude  # 32 GiB
 
@@ -1150,8 +1150,8 @@ seq_len_value = 1024
 hidden_dim_value = GPT2_HIDDEN_DIM  # 1600 for GPT-2 XL (1.5B)
 n_layers_value = GPT2_LAYERS  # 48
 ffn_expansion_value = 4
-bytes_fp16_value = 2
-bytes_fp32_value = 4
+bytes_fp16_value = BYTES_FP16.to(byte).magnitude
+bytes_fp32_value = BYTES_FP32.to(byte).magnitude
 
 v100_mem_gb_value = V100_MEM_CAPACITY.to(GiB).magnitude
 
@@ -1818,7 +1818,7 @@ network_bw_gbs_value = 12.5  # 100 Gbps = 12.5 GB/s
 # PROCESS
 # =============================================================================
 gradient_size_gb_value = model_params_b_value * 1e9 * bytes_per_param_fp16_value / 1e9
-allreduce_total_gb_value = 2 * gradient_size_gb_value  # Ring AllReduce sends 2× gradients
+allreduce_total_gb_value = ALLREDUCE_FACTOR * gradient_size_gb_value  # Ring AllReduce sends ~2× gradients
 network_time_s_value = allreduce_total_gb_value / network_bw_gbs_value
 
 # =============================================================================
@@ -1946,9 +1946,9 @@ from physx.formatting import fmt
 # VRAM requirements estimation for LLM training
 vram_params_b = 7           # billion parameters
 vram_gpu_capacity_gb = 24   # GPU memory
-vram_fp16_bytes = 2
-vram_fp32_bytes = 4
-vram_adam_bytes = 8         # 2 FP32 states per parameter
+vram_fp16_bytes = BYTES_FP16.to(byte).magnitude
+vram_fp32_bytes = BYTES_FP32.to(byte).magnitude
+vram_adam_bytes = BYTES_ADAM_STATE.to(byte).magnitude
 
 vram_weights_gb = vram_params_b * vram_fp16_bytes
 vram_gradients_gb = vram_params_b * vram_fp16_bytes
@@ -2008,7 +2008,7 @@ from physx.formatting import fmt
 
 # ResNet-50 activation memory scaling (batch=32)
 first_conv_h, first_conv_w, first_conv_c = 112, 112, 64
-bytes_fp32 = 4
+bytes_fp32 = BYTES_FP32.to(byte).magnitude
 first_conv_mb = first_conv_h * first_conv_w * first_conv_c * bytes_fp32 / (1024**2)
 
 # ResNet-50 parameters: 25.6M params × 4 bytes ≈ 100MB
@@ -3026,7 +3026,7 @@ from physx.formatting import fmt
 seq_len = 4096
 embed_dim = 64  # per head
 n_heads = 16
-bytes_fp32 = 4
+bytes_fp32 = BYTES_FP32.to(byte).magnitude
 
 attn_matrix_bytes = seq_len ** 2 * bytes_fp32
 attn_matrix_mb = attn_matrix_bytes / (1024 ** 2)
@@ -3637,8 +3637,8 @@ from physx.formatting import fmt
 # Configuration
 batch_size = 32
 seq_len = 1024
-bytes_fp32 = 4
-bytes_fp16 = 2
+bytes_fp32 = BYTES_FP32.to(byte).magnitude
+bytes_fp16 = BYTES_FP16.to(byte).magnitude
 
 # Derive memory from model parameters
 params_b = GPT2_PARAMS.magnitude  # 1.5e9
@@ -3851,18 +3851,18 @@ o_cost_str = f"${o_cost:,.0f}"
 o_carbon_str = f"~{o_carbon:.0f} tons CO₂"
 ```
 
-| **Metric**                           | **FP32 Baseline**              | **Optimized**                  | **Technique Applied**               |
-|:-----------------------------------|:-----------------------------|:-----------------------------|:----------------------------------|
-| **Parameters**                       | `{python} b_param_str`         | `{python} o_param_str`         | Mixed precision (FP16)              |
-| **Gradients**                        | `{python} b_grad_str`          | `{python} o_grad_str`          | Mixed precision (FP16)              |
-| **Master Weights**                   | `{python} b_master_str`        | `{python} o_master_str`        | AMP Overhead                        |
-| **Optimizer State (Adam)**           | `{python} b_opt_str`           | `{python} o_opt_str`           | Unchanged (FP32 moments)            |
-| **Activations (batch=32)**           | `{python} b_act_str`           | `{python} o_act_str`           | Gradient checkpointing + FP16       |
-| **Total Memory**                     | **`{python} b_total_mem_str`** | **`{python} o_total_mem_str`** | —                                   |
-| **Training Time (32 V100s)**         | `{python} b_time_str`          | `{python} o_time_str`          | 2.4× Tensor Core speedup            |
-| **Energy Consumption**               | `{python} b_energy_str`        | `{python} o_energy_str`        | Reduced time + improved efficiency  |
-| **Electricity Cost (@USD 0.10/kWh)** | `{python} b_cost_str`          | `{python} o_cost_str`          | —                                   |
-| **Carbon Footprint**                 | `{python} b_carbon_str`        | `{python} o_carbon_str`        | Regional grid average (0.45 kg/kWh) |
+| **Metric**                          | **FP32 Baseline**              | **Optimized**                  | **Technique Applied**               |
+|:----------------------------------|:-----------------------------|:-----------------------------|:----------------------------------|
+| **Parameters**                      | `{python} b_param_str`         | `{python} o_param_str`         | Mixed precision (FP16)              |
+| **Gradients**                       | `{python} b_grad_str`          | `{python} o_grad_str`          | Mixed precision (FP16)              |
+| **Master Weights**                  | `{python} b_master_str`        | `{python} o_master_str`        | AMP Overhead                        |
+| **Optimizer State (Adam)**          | `{python} b_opt_str`           | `{python} o_opt_str`           | Unchanged (FP32 moments)            |
+| **Activations (batch=32)**          | `{python} b_act_str`           | `{python} o_act_str`           | Gradient checkpointing + FP16       |
+| **Total Memory**                    | **`{python} b_total_mem_str`** | **`{python} o_total_mem_str`** | —                                   |
+| **Training Time (32 V100s)**        | `{python} b_time_str`          | `{python} o_time_str`          | 2.4× Tensor Core speedup            |
+| **Energy Consumption**              | `{python} b_energy_str`        | `{python} o_energy_str`        | Reduced time + improved efficiency  |
+| **Electricity Cost (USD 0.10/kWh)** | `{python} b_cost_str`          | `{python} o_cost_str`          | —                                   |
+| **Carbon Footprint**                | `{python} b_carbon_str`        | `{python} o_carbon_str`        | Regional grid average (0.45 kg/kWh) |
 
 : **GPT-2 Training Optimization Summary.** Applying mixed-precision training and gradient checkpointing reduces memory from 89 GB to 32 GB, training time by 40%, energy consumption by 58%, and carbon footprint proportionally. {#tbl-gpt2-summary}
 

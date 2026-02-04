@@ -29,6 +29,13 @@ GB = ureg.GB
 TB = ureg.TB
 PB = ureg.PB
 
+# Common precision sizes
+BYTES_FP32 = 4 * byte
+BYTES_FP16 = 2 * byte
+BYTES_INT8 = 1 * byte
+BYTES_INT4 = 0.5 * byte
+BYTES_ADAM_STATE = 8 * byte
+
 # Binary units (pint has kibibyte etc. built-in, register short aliases)
 ureg.define('KiB = 1024 * byte')
 ureg.define('MiB = 1048576 * byte')
@@ -48,6 +55,14 @@ ureg.define('NS = 1e-9 * second')
 MS = ureg.MS
 US = ureg.US
 NS = ureg.NS
+
+# Common time conversions (unitless scalars)
+SECONDS_PER_MINUTE = 60
+MINUTES_PER_HOUR = 60
+HOURS_PER_DAY = 24
+DAYS_PER_MONTH = 30
+DAYS_PER_YEAR = 365
+HOURS_PER_YEAR = 8760
 
 # --- Hardware Specifications (The Silicon Contract) ---
 
@@ -179,6 +194,11 @@ USD = ureg.dollar
 CLOUD_EGRESS_PER_GB = 0.09 * USD / GB
 CLOUD_ELECTRICITY_PER_KWH = 0.12 * USD / ureg.kilowatt_hour
 
+# GPU pricing (scenario baselines)
+CLOUD_GPU_TRAINING_PER_HOUR = 4.0 * USD / hour
+CLOUD_GPU_INFERENCE_PER_HOUR = 2.5 * USD / hour
+TPU_V4_PER_HOUR = 4.0 * USD / hour
+
 # --- Carbon (Scenario Baseline) ---
 CARBON_PER_GPU_HR_KG = 0.16 * ureg.kilogram
 
@@ -186,6 +206,11 @@ CARBON_PER_GPU_HR_KG = 0.16 * ureg.kilogram
 MOBILE_TDP_W = 3 * watt
 PHONE_BATTERY_WH = 15 * watt * hour
 OBJECT_DETECTOR_POWER_W = 2 * watt
+SERVER_POWER_W = 300 * watt
+
+# Reference energies
+ENERGY_SMARTPHONE_CHARGE_J = 40000 * joule
+ENERGY_BOILING_WATER_J = 100000 * joule
 
 # --- Video ---
 VIDEO_1080P_WIDTH = 1920
@@ -219,6 +244,30 @@ BERT_BASE_FLOPs = 22e9 * flop              # Per inference (seq_len=512)
 
 # AlexNet (Reference)
 ALEXNET_PARAMS = 60e6 * param
+
+# Reference model/dataset dimensions
+TRANSFORMER_HIDDEN_DIM_EXAMPLE = 768
+TRANSFORMER_SEQ_LEN_EXAMPLE = 512
+TRANSFORMER_HEADS_EXAMPLE = 12
+SYSTOLIC_ARRAY_DIM = 128
+SIMD_REGISTER_BITS = 512
+FP32_BITS = 32
+INT8_BITS = 8
+MNIST_IMAGE_WIDTH = 28
+MNIST_IMAGE_HEIGHT = 28
+
+# Statistics
+KS_TEST_COEFFICIENT = 1.36
+
+# Deployment tiers (reference capacities)
+SMARTPHONE_RAM_GB = 6 * GB
+MCU_RAM_KIB = 512 * KiB
+CLOUD_MEM_GIB = 100 * GiB
+MOBILE_MEM_GIB = 8 * GiB
+TINY_MEM_KIB = 512 * KiB
+
+# Communication assumptions
+ALLREDUCE_FACTOR = 2
 
 # Google Search (Reference)
 GOOGLE_SEARCHES_PER_DAY = 8.5e9
