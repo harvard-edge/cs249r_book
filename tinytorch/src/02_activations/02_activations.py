@@ -553,10 +553,21 @@ if __name__ == "__main__":
 GELU (Gaussian Error Linear Unit) is a smooth approximation to ReLU that's become popular in modern architectures like transformers. Unlike ReLU's sharp corner, GELU is smooth everywhere.
 
 ### Mathematical Definition
+
+The exact GELU multiplies x by Φ(x), the probability that a standard
+normal random variable is ≤ x (an S-curve from 0 to 1):
 ```
-f(x) = x * Φ(x) ≈ x * Sigmoid(1.702 * x)
+GELU(x) = x · Φ(x)
 ```
-Where Φ(x) is the cumulative distribution function of standard normal distribution.
+
+Two common approximations exist (Hendrycks & Gimpel, 2016):
+```
+Tanh:    0.5x(1 + tanh[√(2/π)(x + 0.044715x³)])   ← more accurate
+Sigmoid: x · σ(1.702x)                              ← faster, used here
+```
+
+We use the sigmoid form because it reuses sigmoid (which you just built!)
+and the single constant 1.702 is empirically fitted so that σ(1.702x) ≈ Φ(x).
 
 ### Visual Behavior
 ```
@@ -615,7 +626,7 @@ class GELU:
         >>> print(result.data)
         [-0.159, 0.0, 0.841]  # Smooth, like ReLU but differentiable everywhere
 
-        HINT: The 1.702 constant comes from √(2/π) approximation
+        HINT: The 1.702 constant is empirically fitted so that sigmoid(1.702x) ≈ Φ(x)
         """
         ### BEGIN SOLUTION
         # GELU approximation: x * sigmoid(1.702 * x)

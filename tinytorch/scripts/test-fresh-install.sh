@@ -139,7 +139,7 @@ OUTER_EOF
 echo "Testing TinyTorch installation from branch: $BRANCH"
 
 # Build test script with branch substituted
-TEST_SCRIPT=$(build_test_script | sed "s/__BRANCH__/$BRANCH/g")
+TEST_SCRIPT=$(build_test_script | sed "s|__BRANCH__|$BRANCH|g")
 
 if [ "$CI_MODE" = true ]; then
     print_step "Running in CI mode (no Docker)"
