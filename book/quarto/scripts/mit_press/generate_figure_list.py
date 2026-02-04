@@ -39,7 +39,7 @@ def parse_latex_figures(latex_file: Path) -> list[dict]:
         return figures
     
     content = latex_file.read_text()
-    pattern = re.compile(r'Figure\s+(\d+\.\d+)\s*\|\s*Page\s*(\d+)')
+    pattern = re.compile(r'Figure\s+([A-Z\d]+\.\d+)\s*\|\s*Page\s*(\d+)')
     
     for match in pattern.finditer(content):
         figures.append({
@@ -148,8 +148,8 @@ def extract_qmd_figures(quarto_dir: Path, scan_all: bool = False) -> list[dict]:
     )
     
     for qmd_path in qmd_files:
-        # Skip index, 404, and parts files
-        if qmd_path.name in ['index.qmd', '404.qmd'] or 'parts' in str(qmd_path):
+        # Skip index, 404, parts, and shelved files
+        if qmd_path.name in ['index.qmd', '404.qmd'] or 'parts' in str(qmd_path) or qmd_path.name.startswith('_shelved'):
             continue
         
         try:
