@@ -246,13 +246,49 @@ Scaling efficiency depends critically on workload characteristics. Not all workl
 
 import sys
 import os
-import matplotlib.pyplot as plt
-# Ensure physx directory is in path
+import numpy as np
+
 sys.path.append(os.path.abspath("physx"))
 from physx import viz
 
-viz.set_book_style()
-viz.plot_communication_tax()
+fig, ax, COLORS = viz.setup_plot()
+
+# =============================================================================
+# PLOT: The Communication Tax
+# =============================================================================
+N = np.array([1, 2, 4, 8, 16, 32, 64, 128, 256])
+
+scenarios = [
+    {'r': 0.0, 'name': 'Ideal Linear', 'color': COLORS['grid'], 'style': '--', 'marker': None},
+    {'r': 0.05, 'name': 'Compute Bound (ResNet)', 'color': COLORS['BlueLine'], 'style': '-', 'marker': 'o'},
+    {'r': 0.15, 'name': 'Balanced (LLM + NVLink)', 'color': COLORS['GreenLine'], 'style': '-', 'marker': 's'},
+    {'r': 0.40, 'name': 'Bandwidth Bound (Slow Net)', 'color': COLORS['RedLine'], 'style': '-', 'marker': '^'}
+]
+
+for sc in scenarios:
+    speedup = N / (1 + (N - 1) * sc['r'])
+    if sc['marker']:
+        ax.plot(N, speedup, sc['style'], color=sc['color'], label=sc['name'], linewidth=2.5, marker=sc['marker'], markersize=7)
+    else:
+        ax.plot(N, speedup, sc['style'], color=sc['color'], label=sc['name'], linewidth=2)
+
+ideal_speedup = N
+worst_speedup = N / (1 + (N - 1) * 0.40)
+ax.fill_between(N, ideal_speedup, worst_speedup, color=COLORS['RedL'], alpha=0.15)
+
+ax.set_xscale('log', base=2)
+ax.set_yscale('log', base=2)
+ax.set_xticks(N); ax.set_xticklabels(N)
+ax.set_yticks(N); ax.set_yticklabels(N)
+
+ax.annotate("The Communication Tax", xy=(128, 128/(1+127*0.4)), xytext=(16, 100),
+            arrowprops=dict(facecolor=COLORS['RedLine'], arrowstyle='->', lw=1.5),
+            color=COLORS['RedLine'], fontsize=10, fontweight='bold',
+            bbox=dict(facecolor='white', alpha=0.9, edgecolor=COLORS['RedL'], pad=4))
+
+ax.set_xlabel('Number of GPUs (N)')
+ax.set_ylabel('Effective Speedup')
+ax.legend(loc='upper left', fontsize=9, framealpha=0.9)
 plt.show()
 ```
 
@@ -1273,12 +1309,54 @@ Consider @tbl-training-arithmetic-intensity: dense matrix multiplication achieve
 #| fig-alt: "Log-log plot showing roofline model with memory-bound slope and compute-bound ceiling. Points show different training operations: MatMul above ridge point, LayerNorm and Softmax below. Arrow shows FlashAttention improvement."
 #| echo: false
 
-from physx import viz
-import matplotlib.pyplot as plt
+import sys
+import os
+import numpy as np
 
-viz.set_book_style()
-fig, ax = plt.subplots(figsize=(8, 5))
-viz.plot_training_roofline(ax)
+sys.path.append(os.path.abspath("physx"))
+from physx import viz
+
+fig, ax, COLORS = viz.setup_plot()
+
+# =============================================================================
+# PLOT: Training Roofline Model
+# =============================================================================
+peak_flops, peak_bw = 312, 2.0  # A100 specs
+ridge = peak_flops / peak_bw
+
+x = np.logspace(0, np.log10(500), 100)
+y_mem = peak_bw * x
+y_compute = np.full_like(x, peak_flops)
+y = np.minimum(y_mem, y_compute)
+
+ax.plot(x, y, color=COLORS['BlueLine'], linewidth=2.5, label='A100 Roofline')
+ax.vlines(ridge, 1, peak_flops, colors=COLORS['BlueLine'], linestyles='--', alpha=0.6)
+ax.text(ridge * 0.9, 2, f"Ridge: {ridge:.0f}", rotation=90, color=COLORS['BlueLine'], fontsize=9, ha='right')
+ax.text(450, 340, "A100 Peak (312 TF)", color=COLORS['BlueLine'], fontsize=9, fontweight='bold', ha='right')
+
+ops = [
+    {'name': 'Softmax', 'x': 5, 'y': 10, 'color': COLORS['RedLine'], 'offset': (0, 10)},
+    {'name': 'LayerNorm', 'x': 10, 'y': 20, 'color': COLORS['RedLine'], 'offset': (0, 10)},
+    {'name': 'Std Attention', 'x': 50, 'y': 100, 'color': COLORS['OrangeLine'], 'offset': (-20, 10)},
+    {'name': 'MatMul', 'x': 200, 'y': 312, 'color': COLORS['GreenLine'], 'offset': (-15, -20)},
+    {'name': 'FlashAttn', 'x': 300, 'y': 312, 'color': COLORS['GreenLine'], 'offset': (15, -20)}
+]
+
+for op in ops:
+    ax.scatter(op['x'], op['y'], color=op['color'], s=100, zorder=3, edgecolors='white')
+    ax.annotate(op['name'], (op['x'], op['y']), xytext=op['offset'], textcoords='offset points',
+                ha='center', fontsize=9, fontweight='bold', color=op['color'],
+                bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=1))
+
+ax.annotate("", xy=(300, 312), xytext=(50, 100), arrowprops=dict(arrowstyle="->", color=COLORS['VioletLine'], lw=2.5))
+ax.text(90, 180, "Flash Attention", color=COLORS['VioletLine'], rotation=32, fontsize=9, fontweight='bold', ha='right')
+ax.text(15, 200, "Memory-bound", color='gray', style='italic', fontsize=10)
+ax.text(300, 180, "Compute-bound", color='gray', style='italic', fontsize=10)
+
+ax.set_xscale('log'); ax.set_yscale('log')
+ax.set_xlim(1, 500); ax.set_ylim(1, 400)
+ax.set_xlabel('Arithmetic Intensity (FLOP/byte)')
+ax.set_ylabel('Attainable TFLOP/s')
 plt.show()
 ```
 
@@ -2117,13 +2195,30 @@ If you double the batch size, you perform half as many updates per epoch. If the
 
 import sys
 import os
-import matplotlib.pyplot as plt
-# Ensure physx directory is in path
+import numpy as np
+
 sys.path.append(os.path.abspath("physx"))
 from physx import viz
 
-viz.set_book_style()
-viz.plot_linear_scaling_failure()
+fig, ax, COLORS = viz.setup_plot()
+
+# =============================================================================
+# PLOT: The Linear Scaling Failure
+# =============================================================================
+steps = np.arange(0, 1000)
+loss_base = 2.0 * np.exp(-0.01 * steps) + 0.2
+loss_large_naive = 2.0 * np.exp(-0.00125 * steps) + 0.2
+loss_large_scaled = 2.0 * np.exp(-0.009 * steps) + 0.25
+
+ax.plot(steps, loss_base, '-', color=COLORS['BlueLine'], label='Batch 32')
+ax.plot(steps, loss_large_naive, '--', color=COLORS['grid'], label='Batch 256 (Fixed LR)')
+ax.plot(steps, loss_large_scaled, '-', color=COLORS['GreenLine'], label='Batch 256 (Scaled LR)')
+
+ax.annotate("Generalization Gap", xy=(800, 0.5), xytext=(800, 1.5),
+            arrowprops=dict(arrowstyle="<->", color=COLORS['RedLine']))
+ax.set_xlabel('Steps')
+ax.set_ylabel('Loss')
+ax.legend(fontsize=8)
 plt.show()
 ```
 
