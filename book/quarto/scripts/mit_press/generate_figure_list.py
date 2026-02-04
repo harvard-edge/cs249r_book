@@ -1,18 +1,34 @@
 #!/usr/bin/env python3
 """
-Post-Render: Generate Figure List for MIT Press
+Figure List Generator for MIT Press
 
-Runs after PDF build to create a complete figure list with:
+Usage:
+  Pre-render:  python generate_figure_list.py --clear
+  Post-render: python generate_figure_list.py
+
+Pre-render clears stale LaTeX data from previous builds.
+Post-render creates a complete figure list with:
   - Figure numbers and page numbers (from LaTeX output)
   - Labels, captions, alt-text (from QMD sources)
 
-Output: FIGURE_LIST.csv in the same directory as the PDF
+Output: FIGURE_LIST.txt in the same directory as the PDF
 """
 
 import re
 import os
 import sys
 from pathlib import Path
+
+
+def clear_cache(quarto_dir: Path) -> None:
+    """Clear stale figure data from previous builds."""
+    latex_file = quarto_dir / 'index_figures.txt'
+    
+    if latex_file.exists():
+        latex_file.unlink()
+        print(f"[Figure List] Cleared: {latex_file.name}", file=sys.stderr)
+    else:
+        print(f"[Figure List] Clean (no stale data)", file=sys.stderr)
 
 
 def parse_latex_figures(latex_file: Path) -> list[dict]:
@@ -183,10 +199,21 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description='Generate figure list for MIT Press')
+    parser.add_argument('--clear', action='store_true',
+                        help='Clear stale LaTeX data (run as pre-render)')
     parser.add_argument('--scan-all', action='store_true', 
                         help='Scan all QMD files instead of reading from config')
     parser.add_argument('--output', '-o', help='Output directory (default: from QUARTO_PROJECT_OUTPUT_DIR)')
     args = parser.parse_args()
+    
+    # Get quarto directory
+    script_dir = Path(__file__).parent
+    quarto_dir = script_dir.parent.parent
+    
+    # Pre-render mode: just clear cache and exit
+    if args.clear:
+        clear_cache(quarto_dir)
+        return
     
     # Get output directory from Quarto environment or use default
     output_dir = args.output or os.environ.get('QUARTO_PROJECT_OUTPUT_DIR', '')
@@ -198,8 +225,6 @@ def main():
         output_dir = script_dir.parent.parent / '_build/pdf-vol1'
     
     # Find LaTeX figures file (written by header-includes.tex)
-    script_dir = Path(__file__).parent
-    quarto_dir = script_dir.parent.parent
     latex_file = quarto_dir / 'index_figures.txt'
     
     latex_figures = parse_latex_figures(latex_file)
