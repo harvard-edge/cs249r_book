@@ -381,6 +381,13 @@ def train_epoch(model, dataloader, optimizer, loss_fn):
 
     return total_loss / total_samples, (correct_sequences / total_samples) * 100
 
+def press_enter_to_continue() :
+    if sys.stdin.isatty() and sys.stdout.isatty() :
+        try :
+            console.input("\n[yellow]Press Enter to continue...[/yellow] ")
+        except EOFError :
+            pass
+        console.print()
 
 def evaluate(model, dataset):
     """Evaluate model on dataset."""
@@ -401,7 +408,7 @@ def evaluate(model, dataset):
 
 def run_challenge(name, model, train_data, test_data, optimizer, loss_fn, epochs, target_acc, batch_size=16):
     """Run a single challenge using YOUR DataLoader."""
-    console.print(f"\n[bold cyan]{'='*60}[/bold cyan]")
+    console.print(f"[bold cyan]{'='*60}[/bold cyan]")
     console.print(f"[bold]{name}[/bold]")
     console.print(f"[bold cyan]{'='*60}[/bold cyan]\n")
 
@@ -409,7 +416,7 @@ def run_challenge(name, model, train_data, test_data, optimizer, loss_fn, epochs
     console.print("[dim]Examples:[/dim]")
     for inp, tgt in train_data[:3]:
         console.print(f"  {tokens_to_letters(inp)} -> {tokens_to_letters(tgt)}")
-    console.print()
+    press_enter_to_continue()
 
     # Create DataLoader for training (YOUR Module 05!)
     train_dataset = SequenceDataset(train_data)
@@ -458,12 +465,16 @@ def run_challenge(name, model, train_data, test_data, optimizer, loss_fn, epochs
     else:
         console.print(f"[bold red]FAILED[/bold red] Accuracy: {final_acc:.1f}% (target: {target_acc}%)")
 
+    press_enter_to_continue()
+
     # Show sample predictions
-    console.print("\n[dim]Sample predictions:[/dim]")
+    console.print("[dim]Sample predictions:[/dim]")
     for inp, tgt, pred in predictions[:5]:
         match = "" if np.array_equal(pred, tgt) else ""
         style = "green" if np.array_equal(pred, tgt) else "red"
         console.print(f"  [{style}]{match}[/{style}] {tokens_to_letters(inp)} -> {tokens_to_letters(pred)}")
+
+    press_enter_to_continue()
 
     return passed, final_acc
 
@@ -659,9 +670,9 @@ def challenge_3_mixed(config=CONFIG):
     """
     seq_len = config['seq_len']
 
-    console.print("\n[dim]Building fresh model for mixed task learning...[/dim]")
+    console.print("[dim]Building fresh model for mixed task learning...[/dim]")
     model, optimizer, loss_fn = build_model(config)
-    console.print(f"[dim]  Total parameters: {model.total_params:,}[/dim]")
+    console.print(f"[dim]  Total parameters: {model.total_params:,}[/dim]\n")
 
     train_data = generate_mixed_data(800, seq_len)
     test_data = generate_mixed_data(300, seq_len)
@@ -692,7 +703,7 @@ def print_final_results(results):
     passed2, acc2 = results['copying']
     passed3, acc3 = results['mixed']
 
-    console.print("\n" + "=" * 60)
+    console.print("=" * 60)
     console.print(Panel.fit("[bold]FINAL RESULTS[/bold]", border_style="cyan"))
 
     table = Table(box=box.ROUNDED)
@@ -721,7 +732,7 @@ def print_final_results(results):
     )
 
     console.print(table)
-    console.print()
+    press_enter_to_continue()
 
     all_passed = passed1 and passed2 and passed3
 
@@ -737,6 +748,7 @@ def print_final_results(results):
             border_style="green",
             title="ATTENTION IS ALL YOU NEED"
         ))
+        press_enter_to_continue()
         return 0
     else:
         failed = []
@@ -757,6 +769,7 @@ def print_final_results(results):
             border_style="yellow",
             title="Keep Working"
         ))
+        press_enter_to_continue()
         return 1
 
 
@@ -791,7 +804,7 @@ def main():
         border_style="cyan",
         title="The Transformer Challenge"
     ))
-    console.print()
+    press_enter_to_continue()
 
     # ─────────────────────────────────────────────────────────────────────────
     # CONFIGURATION
@@ -807,13 +820,15 @@ def main():
         title="Configuration",
         border_style="blue"
     ))
+    press_enter_to_continue()
 
     # ─────────────────────────────────────────────────────────────────────────
     # BUILD MODEL (shared for challenges 1 & 2)
     # ─────────────────────────────────────────────────────────────────────────
-    console.print("\n[bold]Building Transformer...[/bold]")
+    console.print("[bold]Building Transformer...[/bold]")
     model, optimizer, loss_fn = build_model()
     console.print(f"  Total parameters: {model.total_params:,}")
+    press_enter_to_continue()
 
     # ─────────────────────────────────────────────────────────────────────────
     # RUN CHALLENGES

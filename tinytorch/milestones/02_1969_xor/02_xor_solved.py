@@ -268,6 +268,13 @@ def train_network(model, X, y, epochs=500, lr=0.5):
 
     return history
 
+def press_enter_to_continue() :
+    if sys.stdin.isatty() and sys.stdout.isatty() :
+        try :
+            console.input("\n[yellow]Press Enter to continue...[/yellow] ")
+        except EOFError :
+            pass
+        console.print()
 
 # ============================================================================
 # 📊 EVALUATION & CELEBRATION
@@ -302,7 +309,9 @@ def evaluate_and_celebrate(model, X, y, history):
 
     console.print(table)
 
-    console.print("\n[bold]🔍 XOR Truth Table vs Predictions:[/bold]")
+    press_enter_to_continue()
+
+    console.print("[bold]🔍 XOR Truth Table vs Predictions:[/bold]")
     console.print("[dim](The ultimate test - all 4 XOR cases!)[/dim]\n")
     test_inputs = np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
     test_preds = model(Tensor(test_inputs))
@@ -368,7 +377,7 @@ def main():
     console.print("  • Pattern: (0,0)→0, (0,1)→1, (1,0)→1, (1,1)→0")
     console.print("  • Challenge: [bold red]NOT linearly separable![/bold red]")
 
-    console.print("\n" + "─" * 70 + "\n")
+    press_enter_to_continue()
 
     # ═══════════════════════════════════════════════════════════════════════
     # ACT 2: THE SETUP 🏗️
@@ -396,7 +405,7 @@ def main():
     console.print("  • Epochs: 500")
     console.print("  • Optimizer: SGD with backprop through hidden layer")
 
-    console.print("\n" + "─" * 70 + "\n")
+    press_enter_to_continue()
 
     # ═══════════════════════════════════════════════════════════════════════
     # ACT 3: THE EXPERIMENT 🔬
@@ -414,12 +423,14 @@ def main():
     console.print("  XOR is impossible for single-layer networks!")
     console.print("  Let's see if hidden layers change the game...")
 
-    console.print("\n[bold]🔥 Training in Progress...[/bold]")
+    press_enter_to_continue()
+
+    console.print("[bold]🔥 Training in Progress...[/bold]")
     console.print("[dim](This will work - hidden layers solve XOR!)[/dim]\n")
 
     history = train_network(model, X, y, epochs=500, lr=0.5)
 
-    console.print("\n[green]✅ Training Complete - XOR Solved![/green]")
+    #console.print("\n[green]✅ Training Complete - XOR Solved![/green]")
 
     console.print("\n" + "─" * 70 + "\n")
 
@@ -429,7 +440,7 @@ def main():
 
     evaluate_and_celebrate(model, X, y, history)
 
-    console.print("\n" + "─" * 70 + "\n")
+    press_enter_to_continue()
 
     # ═══════════════════════════════════════════════════════════════════════
     # ACT 5: THE REFLECTION 🌟
@@ -437,7 +448,6 @@ def main():
 
     final_acc = history["accuracy"][-1]
 
-    console.print("")
     console.print(Panel.fit(
         "[bold green]🎉 Success! You Ended the AI Winter![/bold green]\n\n"
 
@@ -482,6 +492,7 @@ def main():
         box=box.DOUBLE
     ))
 
+    press_enter_to_continue()
 
 if __name__ == "__main__":
     main()

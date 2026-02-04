@@ -187,6 +187,13 @@ def describe_decision_boundary(w1, w2, b):
     intercept = -b/w2
     return f"Line: x2 = {slope:.2f}*x1 + {intercept:.2f}"
 
+def press_enter_to_continue() :
+    if sys.stdin.isatty() and sys.stdout.isatty() :
+        try :
+            console.input("\n[yellow]Press Enter to continue...[/yellow] ")
+        except EOFError :
+            pass
+        console.print()
 
 # ============================================================================
 # DEMONSTRATION
@@ -201,6 +208,7 @@ def demonstrate_crisis():
         "[dim]Let's verify this by trying MANY different weight configurations.[/dim]",
         border_style="red"
     ))
+    press_enter_to_continue()
 
     # Show the XOR problem
     console.print("\n[bold]The XOR Truth Table:[/bold]")
@@ -215,11 +223,13 @@ def demonstrate_crisis():
     table.add_row("1", "0", "1", "Bottom-right")
     table.add_row("1", "1", "0", "Top-right")
     console.print(table)
+    press_enter_to_continue()
 
-    console.print("\n[bold yellow]The Challenge:[/bold yellow]")
+    console.print("[bold yellow]The Challenge:[/bold yellow]")
     console.print("  Separate (0,0) and (1,1) from (0,1) and (1,0)")
     console.print("  Using only a SINGLE STRAIGHT LINE")
-    console.print("  [red]Spoiler: It's impossible![/red]\n")
+    console.print("  [red]Spoiler: It's impossible![/red]")
+    press_enter_to_continue()
 
     # Try various weight configurations
     console.print("[bold cyan]Testing Different Weight Configurations...[/bold cyan]\n")
@@ -280,9 +290,10 @@ def demonstrate_crisis():
             best_config = (w1, w2, b, description)
 
     console.print(results_table)
+    press_enter_to_continue()
 
     # Also try random configurations
-    console.print("\n[bold cyan]Trying 100 Random Configurations...[/bold cyan]")
+    console.print("[bold cyan]Trying 100 Random Configurations...[/bold cyan]")
 
     random_best = 0
     for _ in range(100):
@@ -298,9 +309,9 @@ def demonstrate_crisis():
                 best_config = (w1, w2, b, "Random")
 
     console.print(f"  Best from random search: [yellow]{random_best:.0%}[/yellow]")
+    press_enter_to_continue()
 
     # Show the conclusion
-    console.print("\n")
     if best_accuracy < 1.0:
         console.print(Panel(
             f"[bold red]CONFIRMED: XOR is UNSOLVABLE![/bold red]\n\n"
@@ -319,9 +330,10 @@ def demonstrate_crisis():
             "This shouldn't happen with standard XOR.",
             border_style="yellow"
         ))
+    press_enter_to_continue()
 
     # Visual explanation
-    console.print("\n[bold]Why No Line Works:[/bold]")
+    console.print("[bold]Why No Line Works:[/bold]")
     console.print("""
     The XOR pattern:          Any line fails:
 
@@ -338,6 +350,7 @@ def demonstrate_crisis():
 
     No matter how you draw a single line, at least one point is wrong.
     """)
+    press_enter_to_continue()
 
     # Historical context
     console.print(Panel(
@@ -352,6 +365,7 @@ def demonstrate_crisis():
         title="The Path Forward",
         border_style="blue"
     ))
+    console.print()    
 
     return 0
 

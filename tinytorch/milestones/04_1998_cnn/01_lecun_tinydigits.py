@@ -298,6 +298,13 @@ def evaluate_accuracy(model, images, labels):
     avg_loss = np.mean((predictions - labels.data) ** 2)
     return accuracy, avg_loss
 
+def press_enter_to_continue() :
+    if sys.stdin.isatty() and sys.stdout.isatty() :
+        try :
+            console.input("\n[yellow]Press Enter to continue...[/yellow] ")
+        except EOFError :
+            pass
+        console.print()
 
 # ============================================================================
 # 🎬 MAIN MILESTONE DEMONSTRATION
@@ -327,8 +334,10 @@ def train_cnn():
         box=box.DOUBLE
     ))
 
+    press_enter_to_continue()
+
     # Load data
-    console.print("\n[bold]📊 Loading Handwritten Digits Dataset...[/bold]")
+    console.print("[bold]📊 Loading Handwritten Digits Dataset...[/bold]")
     train_images, train_labels, test_images, test_labels = load_digits_dataset()
 
     console.print(f"  Training samples: [cyan]{len(train_images.data)}[/cyan]")
@@ -342,7 +351,7 @@ def train_cnn():
     for row in sample:
         console.print(f"    {' '.join(f'{val:.2f}' for val in row)}")
 
-    console.print("\n" + "─" * 70 + "\n")
+    press_enter_to_continue()
 
     # ═══════════════════════════════════════════════════════════════════════
     # ACT 2: THE SETUP 🏗️
@@ -401,7 +410,7 @@ def train_cnn():
     train_dataset = TensorDataset(train_images, train_labels)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-    console.print("\n" + "─" * 70 + "\n")
+    press_enter_to_continue()
 
     # ═══════════════════════════════════════════════════════════════════════
     # ACT 3: THE EXPERIMENT 🔬
@@ -454,7 +463,7 @@ def train_cnn():
 
     training_time = time.time() - start_time
 
-    console.print("\n" + "─" * 70 + "\n")
+    press_enter_to_continue()
 
     # ═══════════════════════════════════════════════════════════════════════
     # ACT 4: THE DIAGNOSIS 📊
@@ -495,8 +504,10 @@ def train_cnn():
 
     console.print(table)
 
+    press_enter_to_continue()
+
     # Sample predictions
-    console.print("\n[bold]🔍 Sample Predictions:[/bold]")
+    console.print("[bold]🔍 Sample Predictions:[/bold]")
     sample_images = Tensor(test_images.data[:10])  # First 10 test samples
     logits = model(sample_images)
     predictions = np.argmax(logits.data, axis=1)
@@ -522,13 +533,12 @@ def train_cnn():
     console.print(f"  • Pooling provides translation invariance")
     console.print(f"  • {total_params} params vs ~5,000 for MLP with similar accuracy!")
 
-    console.print("\n" + "─" * 70 + "\n")
+    press_enter_to_continue()
 
     # ═══════════════════════════════════════════════════════════════════════
     # ACT 5: THE REFLECTION 🌟
     # ═══════════════════════════════════════════════════════════════════════
 
-    console.print("")
     console.print(Panel.fit(
         "[bold green]🎉 Success! Your CNN Learned to Recognize Digits![/bold green]\n\n"
 
@@ -578,6 +588,7 @@ def train_cnn():
         box=box.DOUBLE
     ))
 
+    press_enter_to_continue()
 
 if __name__ == "__main__":
     train_cnn()
