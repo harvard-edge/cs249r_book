@@ -1,8 +1,15 @@
-import os, json
+import os, sys, json
 from pathlib import Path
 
 DEFAULT_VENV = ".venv"
 CONFIG_FILE = ".tinyrc"
+
+
+def get_venv_bin_dir(venv_path: Path) -> Path:
+    """Return the bin directory for a venv (Scripts/ on Windows, bin/ on Unix)."""
+    if sys.platform == "win32" or os.name == "nt":
+        return venv_path / "Scripts"
+    return venv_path / "bin"
 
 
 def get_venv_path() -> Path:

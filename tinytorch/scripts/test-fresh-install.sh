@@ -71,7 +71,12 @@ echo ""
 echo "▶ Step 1: Running install script (branch: $BRANCH)..."
 export TINYTORCH_BRANCH="$BRANCH"
 export TINYTORCH_NON_INTERACTIVE=1
-curl -sSL "https://raw.githubusercontent.com/harvard-edge/cs249r_book/${BRANCH}/tinytorch/site/extra/install.sh" -o /tmp/install.sh
+curl -fsSL "https://raw.githubusercontent.com/harvard-edge/cs249r_book/${BRANCH}/tinytorch/site/extra/install.sh" -o /tmp/install.sh || {
+    echo "✗ Failed to download install script for branch: $BRANCH"
+    echo "  URL: https://raw.githubusercontent.com/harvard-edge/cs249r_book/${BRANCH}/tinytorch/site/extra/install.sh"
+    echo "  Hint: Does the branch '${BRANCH}' exist and contain tinytorch/site/extra/install.sh?"
+    exit 1
+}
 bash /tmp/install.sh
 
 cd tinytorch

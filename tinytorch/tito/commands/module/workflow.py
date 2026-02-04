@@ -1111,20 +1111,39 @@ class ModuleWorkflowCommand(BaseCommand):
             
             # Run nbdev_export using Python API directly (more reliable than subprocess)
             from nbdev.export import nb_export
-            
+
             self.console.print(f"[dim]📦 Exporting {notebook_path.name} → tinytorch/core/...[/dim]")
-            
+
             lib_path = Path.cwd() / "tinytorch"
             nb_export(notebook_path, lib_path=lib_path)
-            
+
+            # Verify the export actually produced a file
+            if export_target != "unknown":
+                target_file = lib_path / (export_target.replace(".", "/") + ".py")
+                if not target_file.exists():
+                    self.console.print(f"[red]❌ Export verification failed: {target_file} was not created[/red]")
+                    self.console.print(f"[dim]   Expected from #| default_exp: {export_target}[/dim]")
+                    self.console.print("[yellow]   Check that your notebook has #| export cells with code[/yellow]")
+                    return 1
+
+                # Verify the file has actual content (not empty)
+                content = target_file.read_text(encoding="utf-8")
+                code_lines = [l for l in content.split('\n')
+                              if l.strip() and not l.strip().startswith('#')]
+                if len(code_lines) < 2:
+                    self.console.print(f"[red]❌ Export verification failed: {target_file} is empty[/red]")
+                    self.console.print("[yellow]   Your notebook's #| export cells may not contain code[/yellow]")
+                    return 1
+
             self.console.print(f"[dim]✅ Your code is now part of the tinytorch package![/dim]")
             return 0
-                
+
         except ImportError:
-            self.console.print("[red]❌ nbdev not found. Is your environment set up?[/red]")
+            self.console.print("[red]❌ nbdev not found — cannot export module[/red]")
+            self.console.print("[yellow]   Fix: pip install nbdev[/yellow]")
             return 1
         except Exception as e:
-            self.console.print(f"[red]Error exporting module: {e}[/red]")
+            self.console.print(f"[red]❌ Export failed: {e}[/red]")
             return 1
 
     def get_progress_data(self) -> dict:
