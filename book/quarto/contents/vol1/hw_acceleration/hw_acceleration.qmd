@@ -137,13 +137,35 @@ Amdahl's Law is not merely theoretical: it explains *why* many GPU upgrades disa
 
 import sys
 import os
-import matplotlib.pyplot as plt
-# Ensure physx directory is in path
+import numpy as np
+import matplotlib.colors as mcolors
+
 sys.path.append(os.path.abspath("physx"))
 from physx import viz
 
-viz.set_book_style()
-viz.plot_iron_law_heatmap()
+fig, ax, COLORS = viz.setup_plot()
+
+# =============================================================================
+# PLOT: The Iron Law Heatmap
+# =============================================================================
+S_vals = np.logspace(0, 3, 100)
+P_vals = np.linspace(0.8, 0.999, 100)
+S_grid, P_grid = np.meshgrid(S_vals, P_vals)
+Speedup = 1 / ((1 - P_grid) + (P_grid / S_grid))
+
+levels = [1, 2, 5, 10, 20, 50, 100, 200, 500]
+norm = mcolors.LogNorm(vmin=1, vmax=500)
+
+cf = ax.contourf(S_grid, P_grid, Speedup, levels=levels, cmap='RdYlBu_r', norm=norm, alpha=0.8)
+cs = ax.contour(S_grid, P_grid, Speedup, levels=levels, colors='white', linewidths=0.8, alpha=0.6)
+ax.clabel(cs, inline=1, fontsize=8, fmt='%gx', colors='black')
+
+ax.set_xscale('log')
+ax.set_xlabel('Accelerator Raw Speedup (S)')
+ax.set_ylabel('Parallelizable Fraction (P)')
+
+ax.text(100, 0.98, "Compute Bound", color='black', ha='center', va='top', fontweight='bold', fontsize=9)
+ax.text(100, 0.82, "Serial Bound", color='white', ha='center', va='bottom', fontweight='bold', fontsize=9)
 plt.show()
 ```
 
@@ -352,13 +374,54 @@ These diverse acceleration patterns converged in a broader architectural shift. 
 
 import sys
 import os
-import matplotlib.pyplot as plt
-# Ensure physx directory is in path
+import numpy as np
+
 sys.path.append(os.path.abspath("physx"))
 from physx import viz
 
-viz.set_book_style()
-viz.plot_systems_gap()
+fig, ax, COLORS = viz.setup_plot()
+
+# =============================================================================
+# PLOT: The Systems Gap
+# =============================================================================
+years = np.linspace(2012, 2024.5, 100)
+
+# Growth rates (log10 per year)
+cpu_slope = np.log10(19) / 10  # Moore's Law
+gpu_slope = np.log10(250) / 10  # Huang's Law
+demand_slope = np.log10(4.6e8) / 11  # Model demand
+
+moore = 1.0 * 10**(cpu_slope * (years - 2012))
+huang = 1.0 * 10**(gpu_slope * (years - 2012))
+demand = 1.0 * 10**(demand_slope * (years - 2012))
+
+ax.plot(years, moore, ':', color=COLORS['grid'], label="CPU Performance Trend", linewidth=2)
+ax.plot(years, huang, '--', color=COLORS['BlueLine'], label="GPU Peak (Huang's Law)", linewidth=2.5)
+ax.plot(years, demand, '-', color=COLORS['RedLine'], label="Model Demand (Scaling Laws)", linewidth=3)
+
+ax.fill_between(years, huang, demand, where=(demand > huang), color=COLORS['VioletL'], alpha=0.3)
+
+ax.set_yscale('log')
+ax.set_xlabel('Year')
+ax.set_ylabel('Relative Growth (2012 = 1.0)')
+ax.set_xlim(2012, 2024.5)
+ax.set_ylim(0.5, 1e10)
+
+gap_x = 2020.0
+h_val = 10**(gpu_slope * (gap_x - 2012))
+d_val = 10**(demand_slope * (gap_x - 2012))
+gap_y = np.sqrt(h_val * d_val)
+
+ax.text(gap_x, gap_y, "THE SYSTEMS GAP\n(Closed by Parallelism,\nArchitecture & Co-design)", 
+        ha='center', va='center', fontweight='bold', color=COLORS['VioletLine'], fontsize=8,
+        bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=2))
+
+# Model milestones
+for y, v, l in [(2012, 1.0, "AlexNet"), (2017, 10**(demand_slope*5), "Transformer"), (2020, 10**(demand_slope*8), "GPT-3"), (2023, 10**(demand_slope*11), "GPT-4")]:
+    ax.scatter(y, v, color=COLORS['RedLine'], s=25, zorder=5, edgecolors='white')
+    ax.annotate(l, (y, v), xytext=(0, 8), textcoords='offset points', fontsize=8, ha='center', color=COLORS['RedLine'], fontweight='bold')
+
+ax.legend(loc='lower right', fontsize=8)
 plt.show()
 ```
 
@@ -1934,13 +1997,44 @@ The underlying cause of this wall is physical: moving data costs orders of magni
 
 import sys
 import os
-import matplotlib.pyplot as plt
-# Ensure physx directory is in path
+import numpy as np
+
 sys.path.append(os.path.abspath("physx"))
 from physx import viz
 
-viz.set_book_style()
-viz.plot_energy_hierarchy()
+fig, ax, COLORS = viz.setup_plot()
+
+# =============================================================================
+# DATA: Horowitz Numbers
+# =============================================================================
+ENERGY_DATA = [
+    {'Operation': 'INT8 Add', 'Energy_pJ': 0.03},
+    {'Operation': 'FP32 Add', 'Energy_pJ': 0.9},
+    {'Operation': 'FP32 Mult', 'Energy_pJ': 3.7},
+    {'Operation': 'SRAM Read (8KB)', 'Energy_pJ': 5.0},
+    {'Operation': 'DRAM Read', 'Energy_pJ': 640.0}
+]
+ops = [d['Operation'] for d in ENERGY_DATA]
+energy = [d['Energy_pJ'] for d in ENERGY_DATA]
+
+# =============================================================================
+# PLOT: The Energy Hierarchy
+# =============================================================================
+colors = [COLORS['GreenLine'], COLORS['BlueLine'], COLORS['BlueLine'], COLORS['OrangeLine'], COLORS['RedLine']]
+y_pos = np.arange(len(ops))
+
+ax.barh(y_pos, energy, color=colors, alpha=0.8)
+ax.set_yticks(y_pos)
+ax.set_yticklabels(ops)
+ax.set_xscale('log')
+ax.set_xlabel('Energy per Operation (picojoules) [Log Scale]')
+
+for i, v in enumerate(energy):
+    ax.text(v * 1.1, i, f"{v} pJ", va='center', fontsize=9, fontweight='bold', color=COLORS['primary'])
+
+ax.annotate("", xy=(640, 3), xytext=(5, 3), 
+            arrowprops=dict(arrowstyle="->", color=COLORS['RedLine'], lw=1.5))
+ax.text(50, 3.2, "~128x Cost\n(The Memory Wall)", color=COLORS['RedLine'], ha='center', fontsize=9)
 plt.show()
 ```
 
@@ -1960,11 +2054,36 @@ The memory wall manifests through three critical constraints.[^fn-bw-analogy] Fi
 #| fig-cap: "**The Compute-Bandwidth Divergence**: Computational capability and memory bandwidth plotted on a log scale (2000–2025). While arithmetic throughput (FLOPs) has grown exponentially, memory bandwidth has improved at a significantly slower linear rate. This widening 'Systems Gap' defines the AI Memory Wall, forcing architects to design systems that minimize data movement to avoid idling powerful compute units."
 #| fig-alt: "Line graph comparing compute performance and memory bandwidth from 2000 to 2025 on log scale. Compute grows exponentially; bandwidth grows linearly. Shaded gap labeled Memory Wall widens over time."
 
-from physx import viz
-import matplotlib.pyplot as plt
+import sys
+import os
 
-viz.set_book_style()
-viz.plot_compute_memory_imbalance()
+sys.path.append(os.path.abspath("physx"))
+from physx import viz
+
+fig, ax, COLORS = viz.setup_plot()
+
+# =============================================================================
+# DATA
+# =============================================================================
+years = [2000, 2005, 2010, 2015, 2020, 2025]
+compute_performance = [1e3, 1e5, 1e7, 1e9, 1e12, 1e15]
+memory_bandwidth = [1, 10, 50, 100, 500, 1000]
+
+# =============================================================================
+# PLOT: The Compute-Bandwidth Divergence
+# =============================================================================
+ax.fill_between(years, memory_bandwidth, compute_performance, color=COLORS['grid'], alpha=0.3)
+ax.plot(years, compute_performance, 'o-', color=COLORS['BlueLine'], linewidth=1.5, markersize=6, label='Compute Performance')
+ax.plot(years, memory_bandwidth, 's-', color=COLORS['OrangeLine'], linewidth=1.5, markersize=6, label='Memory Bandwidth')
+
+ax.annotate('', xy=(2023, 1e13), xytext=(2023, 1e4),
+            arrowprops=dict(arrowstyle='<->', color=COLORS['primary'], lw=1.5))
+ax.text(2022, 3e6, 'Memory Wall', rotation=90, va='bottom', fontsize=10, color=COLORS['primary'], fontweight='bold')
+
+ax.set_yscale('log')
+ax.set_xlabel('Year')
+ax.set_ylabel('Performance (Log Scale)')
+ax.legend(loc='upper left', frameon=True, edgecolor=COLORS['grid'])
 plt.show()
 ```
 
@@ -1978,13 +2097,39 @@ As visualized in @fig-rising-ridge, which shows how the hardware's "Ridge Point"
 
 import sys
 import os
-import matplotlib.pyplot as plt
-# Ensure physx directory is in path
+
 sys.path.append(os.path.abspath("physx"))
 from physx import viz
 
-viz.set_book_style()
-viz.plot_rising_ridge()
+fig, ax, COLORS = viz.setup_plot()
+
+# =============================================================================
+# DATA: Ridge Points (Peak FLOPS / Memory Bandwidth)
+# =============================================================================
+years = [2017, 2020, 2022, 2024]
+chips = ['V100', 'A100', 'H100', 'B200']
+ridges = [139, 153, 295, 562]
+
+# =============================================================================
+# PLOT: The Rising Ridge
+# =============================================================================
+ax.plot(years, ridges, 'o-', color=COLORS['RedLine'], linewidth=2.5, markersize=8, label='Hardware Ridge Point')
+
+for y, r, c in zip(years, ridges, chips):
+    ax.annotate(c, (y, r), xytext=(0, 12), textcoords='offset points', 
+                ha='center', fontweight='bold', color=COLORS['RedLine'], fontsize=9)
+    ax.annotate(f"{r:.0f}", (y, r), xytext=(0, -18), textcoords='offset points', 
+                ha='center', fontsize=8, color=COLORS['primary'])
+
+ax.axhspan(0, 100, color=COLORS['BlueL'], alpha=0.2)
+ax.text(2019, 50, "Memory-Rich Zone\n(Legacy Ops Safe)", color=COLORS['BlueLine'], ha='center', va='center', fontsize=9, fontweight='bold')
+ax.axhspan(100, 600, color=COLORS['OrangeL'], alpha=0.1)
+ax.text(2019, 350, "Compute-Dense Zone\n(Transformers Required)", color=COLORS['OrangeLine'], ha='center', va='center', fontsize=9, fontweight='bold')
+
+ax.set_xlabel('Release Year')
+ax.set_ylabel('Arithmetic Intensity (FLOPs/Byte)')
+ax.set_ylim(0, 650)
+ax.set_xticks(years)
 plt.show()
 ```
 
@@ -2051,11 +2196,56 @@ Unlike traditional computing workloads, where memory access follows well-structu
 #| fig-alt: "Scatter plot with trend lines comparing AI model parameters (red) and hardware bandwidth (blue) from 2012 to 2024. Models grow from AlexNet to Gemini 1. Shaded gap shows widening memory wall."
 #| echo: false
 
-from physx import viz
-import matplotlib.pyplot as plt
+import sys
+import os
+import numpy as np
 
-viz.set_book_style()
-viz.plot_model_vs_bandwidth()
+sys.path.append(os.path.abspath("physx"))
+from physx import viz
+
+fig, ax, COLORS = viz.setup_plot(figsize=(10, 6))
+
+# =============================================================================
+# DATA
+# =============================================================================
+proc_names = ["NVIDIA Tesla K80", "Google TPU v2", "NVIDIA Tesla V100", "NVIDIA A100", "Google TPU v4", "NVIDIA H100", "Google TPU v6e"]
+proc_years = [2014, 2017, 2017, 2020, 2021, 2022, 2024]
+proc_bw = [480, 600, 900, 2000, 1200, 3000, 1640]
+proc_log_bw = np.log10(proc_bw)
+
+model_names = ["AlexNet", "VGG-16", "ResNet-50", "BERT Large", "GPT-3", "PaLM", "GPT-4", "Gemini 1"]
+model_years = [2012, 2014, 2015, 2018, 2020, 2022, 2023, 2024]
+model_params = [60, 138, 25.6, 340, 175000, 540000, 1000000, 1500000]
+model_log_params = np.log10(model_params)
+
+# =============================================================================
+# PLOT: Model Size vs Hardware Bandwidth
+# =============================================================================
+proc_fit = np.polyfit(proc_years, proc_log_bw, 1)
+model_fit = np.polyfit(model_years, model_log_params, 1)
+years_range = np.arange(2012, 2025)
+proc_trend = np.polyval(proc_fit, years_range)
+model_trend = np.polyval(model_fit, years_range)
+
+mask = years_range >= 2016
+ax.fill_between(years_range[mask], proc_trend[mask], model_trend[mask], color=COLORS['grid'], alpha=0.2)
+
+ax.plot(years_range, proc_trend, '--', color=COLORS['BlueLine'], linewidth=1)
+ax.plot(years_range, model_trend, '--', color=COLORS['RedLine'], linewidth=1)
+ax.scatter(proc_years, proc_log_bw, color=COLORS['BlueLine'], s=50, zorder=3, edgecolors='white')
+ax.scatter(model_years, model_log_params, color=COLORS['RedLine'], s=50, zorder=3, edgecolors='white')
+
+for name, year, val in zip(proc_names[:3], proc_years[:3], proc_log_bw[:3]):
+    ax.annotate(name, (year, val), textcoords='offset points', xytext=(0, 10), fontsize=7, color=COLORS['BlueLine'], ha='center')
+for name, year, val in zip(model_names[-4:], model_years[-4:], model_log_params[-4:]):
+    ax.annotate(name, (year, val), textcoords='offset points', xytext=(0, 8), fontsize=7, color=COLORS['RedLine'], ha='center')
+
+mid_y = (np.polyval(proc_fit, 2020) + np.polyval(model_fit, 2020)) / 2
+ax.text(2020, mid_y, 'AI Memory Wall', fontsize=10, fontweight='bold', ha='center', color=COLORS['primary'])
+
+ax.set_xlabel('Year')
+ax.set_ylabel('Log Scale (Base 10)')
+ax.set_xlim(2011, 2025)
 plt.show()
 ```
 
