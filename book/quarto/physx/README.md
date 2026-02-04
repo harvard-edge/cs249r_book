@@ -78,9 +78,9 @@ Add a short comment in the calc block:
 ```
 This creates a traceable link from computation → narrative.
 
-### 5) Use a consistent block structure (PIPO)
-**PIPO** = **Purpose → Input → Process → Output**. This is the canonical flow.
-```python
+### 5) Use a consistent block structure (PIPO+)
+**PIPO+** = **Purpose → Input → Process → Output**, with optional **Context** and **Checks** for clarity and auditability.
+````markdown
 ```{python}
 #| label: <calc-id>
 #| echo: false
@@ -88,11 +88,17 @@ This creates a traceable link from computation → narrative.
 # =============================================================================
 # PURPOSE
 # =============================================================================
-# Purpose: One-line description of the calculation
-# Used in: Section/Table/Figure reference
+# Purpose: One-line description of the calculation.
+# Used in: Section/Table/Figure reference.
+# Context: (Optional) One sentence on why this matters.
 
 # =============================================================================
-# INPUT
+# INPUT (SOURCES)
+# =============================================================================
+# from physx.constants import ...
+
+# =============================================================================
+# INPUT (ASSUMPTIONS)
 # =============================================================================
 # a_value = 1.6  # x/year
 # b_value = 1.2  # x/year
@@ -103,8 +109,15 @@ This creates a traceable link from computation → narrative.
 # ratio_value = a_value / b_value  # 1.6 / 1.2 = 1.33...
 
 # =============================================================================
+# CHECKS
+# =============================================================================
+# assert a_value > 0
+# assert 0 < ratio_value < 10
+
+# =============================================================================
 # OUTPUT
 # =============================================================================
+# ratio_value = ratio_value  # keep raw numeric for auditability
 # a_str = f"{a_value:.1f}"
 # b_str = f"{b_value:.1f}"
 # ratio_str = f"{ratio_value:.2f}"
@@ -113,11 +126,14 @@ This creates a traceable link from computation → narrative.
 # from physx.formatting import md_math
 # ratio_math = md_math(rf"\frac{{{a_str}}}{{{b_str}}} \approx {ratio_str}")
 ```
-```
+````
+
+**Formatting note:** The separator line should be followed immediately by the header (no blank line between `# =============================================================================` and the next header).
 
 ### 6) Use display strings in text blocks
 Inline prose should use `{python} <name>_str` or `{python} <name>_math`.
 Do not hardcode derived numbers in prose.
+Prefer `physx.formatting` helpers (`fmt`, `display_value`, `md_math`, `md_frac`) over inline f-strings.
 
 ### 6a) Use `Markdown()` for LaTeX output
 If the output contains LaTeX (fractions, `\times`, exponents), return a `Markdown()` object (via `md_math`, `md_frac`, `md_sci`) and reference it inline:
@@ -131,17 +147,57 @@ Then in prose:
 ```
 
 ### 7) Name by meaning, not formatting
-Use `latency_value` for values, `latency_str` for display.
+Use explicit raw values (`latency_ms_value`) alongside display strings (`latency_ms_str`) for auditability.
 
 ### 7a) Make representation explicit in Markdown
 Only reference explicit representation variables in prose/tables:
-- `*_value` — raw numeric (rare in prose)
+- `*_value` — raw numeric (keep for auditability; avoid inline use)
 - `*_str` — plain text / formatted numbers
 - `*_math` or `*_frac` — LaTeX via `Markdown()`
 This makes the output type obvious at a glance.
 
 ### 8) Prefer one block per narrative chunk
 Avoid mixing unrelated calculations into a single Python block.
+
+### 9) Figures/Plots (PIPO + SETUP/DATA/PLOT)
+Figure blocks can use `SETUP/DATA/PLOT`, but should still start with a PURPOSE header.
+````markdown
+```{python}
+#| label: fig-<name>
+#| echo: false
+#| fig-cap: "<caption>"
+#| fig-alt: "<alt>"
+
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: One-line description of the figure.
+# Used in: Figure "<caption short name>".
+
+# =============================================================================
+# SETUP
+# =============================================================================
+# imports, viz setup
+
+# =============================================================================
+# DATA
+# =============================================================================
+# data tables or arrays
+
+# =============================================================================
+# PLOT
+# =============================================================================
+# plotting code
+```
+````
+
+## Checklist
+
+- Use the PIPO+ template exactly (Purpose, Input, Process, Output; optional Context/Checks).
+- Keep one calc block per narrative chunk.
+- Name outputs with explicit suffixes: `*_value`, `*_str`, `*_math`.
+- Use `physx.formatting` helpers instead of inline f-strings.
+- Inline prose should reference only `*_str` or `*_math`.
 
 ## 📌 Where should the code live?
 
