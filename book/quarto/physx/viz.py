@@ -66,11 +66,12 @@ def set_book_style():
 def setup_plot(figsize=None):
     """
     One-line plot setup for QMD blocks.
-    Returns (fig, ax, COLORS) after applying book style.
+    Returns (fig, ax, COLORS, plt) after applying book style.
+    The plt is returned so code blocks don't need separate matplotlib import.
     """
     set_book_style()
     fig, ax = plt.subplots(figsize=figsize)
-    return fig, ax, COLORS
+    return fig, ax, COLORS, plt
 
 # --- Data Dictionaries (Single Source of Truth) ---
 
