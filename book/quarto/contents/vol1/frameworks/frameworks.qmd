@@ -2177,9 +2177,9 @@ The cost of moving data between devices varies by orders of magnitude depending 
 | **Interconnect** |          **Bandwidth** | **Transfer Time** | **Relative to Compute**     |
 |:---------------|---------------------:|----------------:|:--------------------------|
 | **PCIe 3.0 x16** |                16 GB/s |           0.25 ms | 10x slower than GPU compute |
-| **PCIe 4.0 x16** |                32 GB/s |          0.125 ms | 5x slower than GPU compute  |
-| **NVLink 3.0**   | 600 GB/s bidirectional |          0.007 ms | Comparable to GPU compute   |
-| **GPU Memory**   |              2000 GB/s |          0.002 ms | Optimal                     |
+| **PCIe 4.0 x16** |                `{python} pcie4_gbs_str` GB/s |          `{python} pcie4_4mb_ms_str` ms | 5x slower than GPU compute  |
+| **NVLink 3.0**   | `{python} nvlink_a100_gbs_str` GB/s bidirectional |          `{python} nvlink_4mb_ms_str` ms | Comparable to GPU compute   |
+| **GPU Memory**   |              `{python} a100_bw_gbs_str` GB/s |          `{python} hbm_4mb_ms_str` ms | Optimal                     |
 
 : **Device Transfer Overhead.** Transfer time for a 4 MB tensor across different interconnects. PCIe bandwidth shown is unidirectional (typical for GPU transfers), with full-duplex operation providing 2x total bandwidth. NVLink bandwidth is bidirectional (300 GB/s per direction). Transfer times dominate for small operations, making device placement critical for performance. {#tbl-device-transfer-overhead}
 
@@ -3506,15 +3506,17 @@ mnist_t_memory_us_str = fmt(mnist_t_memory_us_value, precision=1, commas=False)
 mnist_t_overhead_us_str = fmt(mnist_t_overhead_us_value, precision=0, commas=False)
 mnist_total_flops_str = f"{mnist_total_flops_value/1e6:.0f}M"
 mnist_mem_traffic_str = f"{mnist_mem_traffic_bytes_value/1e6:.0f}MB"
+mnist_n_ops_str = fmt(mnist_n_ops_value, precision=0, commas=False)
+mnist_us_per_op_str = fmt(mnist_us_per_op_value, precision=0, commas=False)
 a100_peak_tflops_str = fmt(a100_peak_tflops_value/1e12, precision=0, commas=False)
 a100_mem_bw_tbs_str = fmt(a100_mem_bw_bytes_value/1e12, precision=0, commas=False)
 ```
 
 Total: ~`{python} mnist_total_flops_str` FLOPs, ~`{python} mnist_mem_traffic_str` memory traffic. On an A100:
 
-- Tcompute ≈ 40M / `{python} a100_peak_tflops_str` T ≈ `{python} mnist_t_compute_us_str`µs
-- Tmemory ≈ 5MB / `{python} a100_mem_bw_tbs_str` TB/s ≈ `{python} mnist_t_memory_us_str`µs
-- Toverhead ≈ 6 ops × 5 μs ≈ `{python} mnist_t_overhead_us_str` μs
+- Tcompute ≈ `{python} mnist_total_flops_str` / `{python} a100_peak_tflops_str` TFLOPS ≈ `{python} mnist_t_compute_us_str`µs
+- Tmemory ≈ `{python} mnist_mem_traffic_str` / `{python} a100_mem_bw_tbs_str` TB/s ≈ `{python} mnist_t_memory_us_str`µs
+- Toverhead ≈ `{python} mnist_n_ops_str` ops × `{python} mnist_us_per_op_str` μs ≈ `{python} mnist_t_overhead_us_str` μs
 
 **The training step is overhead-bound!**\index{Overhead-bound!small model training} For small models, Python dispatch and kernel launch dominate. This explains why:
 
@@ -3579,17 +3581,21 @@ memory_ratio_value = pytorch_mobile_mb_value * 1024 / tflite_micro_kb_value
 # =============================================================================
 # OUTPUT
 # =============================================================================
+pytorch_ms_str = fmt(pytorch_ms_value, precision=0, commas=False)
+tensorrt_ms_str = fmt(tensorrt_ms_value, precision=0, commas=False)
+pytorch_mobile_mb_str = fmt(pytorch_mobile_mb_value, precision=0, commas=False)
+tflite_micro_kb_str = fmt(tflite_micro_kb_value, precision=0, commas=False)
 perf_gap_str = fmt(perf_gap_value, precision=0, commas=False)
 memory_ratio_str = fmt(memory_ratio_value, precision=0, commas=False)
 ```
 
 ##### Fallacy: *"All frameworks provide equivalent performance for the same model architecture."* {.unnumbered}
 
-This assumption fails empirically. Engineers reason that since ResNet-50 is mathematically identical across frameworks, performance must be equivalent. @tbl-framework-efficiency-matrix disproves this: PyTorch achieves 52ms inference at 32% hardware utilization, while TensorRT delivers 3ms at 88% utilization, a **`{python} perf_gap_str` x performance gap** on identical hardware. The difference arises from kernel fusion, graph optimization depth, and memory access patterns. Organizations assuming framework equivalence routinely miss production targets by 5-10×.
+This assumption fails empirically. Engineers reason that since ResNet-50 is mathematically identical across frameworks, performance must be equivalent. @tbl-framework-efficiency-matrix disproves this: PyTorch achieves `{python} pytorch_ms_str`ms inference at 32% hardware utilization, while TensorRT delivers `{python} tensorrt_ms_str`ms at 88% utilization, a **`{python} perf_gap_str` x performance gap** on identical hardware. The difference arises from kernel fusion, graph optimization depth, and memory access patterns. Organizations assuming framework equivalence routinely miss production targets by 5-10×.
 
 ##### Pitfall: *Choosing frameworks based on popularity rather than project requirements.* {.unnumbered}
 
-This approach ignores deployment constraints. @tbl-framework-efficiency-matrix shows the deployment spectrum: PyTorch Mobile requires 220MB memory, TensorFlow Lite needs 180MB, and TensorFlow Lite Micro runs in 32KB, a **`{python} memory_ratio_str` x difference**. Teams building edge applications with PyTorch face either massive memory overhead or costly framework migration. Match framework capabilities to deployment constraints *before* development begins.
+This approach ignores deployment constraints. @tbl-framework-efficiency-matrix shows the deployment spectrum: PyTorch Mobile requires `{python} pytorch_mobile_mb_str`MB memory, TensorFlow Lite needs 180MB, and TensorFlow Lite Micro runs in `{python} tflite_micro_kb_str`KB, a **`{python} memory_ratio_str` x difference**. Teams building edge applications with PyTorch face either massive memory overhead or costly framework migration. Match framework capabilities to deployment constraints *before* development begins.
 
 ##### Fallacy: *"Framework abstractions eliminate the need for systems knowledge."* {.unnumbered}
 
@@ -3641,14 +3647,19 @@ compiled_total_value = n_images_value / compiled_throughput_value + n_recompilat
 # =============================================================================
 # OUTPUT
 # =============================================================================
+n_images_str = f"{n_images_value:,}"
+n_recompilations_str = fmt(n_recompilations_value, precision=0, commas=False)
+eager_throughput_str = f"{eager_throughput_value:,}"
+compiled_throughput_str = f"{compiled_throughput_value:,}"
+compilation_time_s_str = fmt(compilation_time_s_value, precision=0, commas=False)
 eager_total_str = fmt(eager_total_value, precision=1, commas=False)
 compiled_total_str = fmt(compiled_total_value, precision=1, commas=False)
 ```
 
-@tbl-training-benchmark shows torch.compile achieves 48% higher ResNet-50 throughput than eager PyTorch, but incurs 15-60 seconds compilation overhead. For a 10,000-image experiment requiring 10 recompilations due to code changes:
+@tbl-training-benchmark shows torch.compile achieves 48% higher ResNet-50 throughput than eager PyTorch, but incurs 15-60 seconds compilation overhead. For a `{python} n_images_str`-image experiment requiring `{python} n_recompilations_str` recompilations due to code changes:
 
-- Eager: 10,000 / 1,450 = `{python} eager_total_str` seconds
-- Compiled: 10,000 / 2,150 + 10 × 30 = `{python} compiled_total_str` seconds
+- Eager: `{python} n_images_str` / `{python} eager_throughput_str` = `{python} eager_total_str` seconds
+- Compiled: `{python} n_images_str` / `{python} compiled_throughput_str` + `{python} n_recompilations_str` × `{python} compilation_time_s_str` = `{python} compiled_total_str` seconds
 
 Compilation pays off only when amortized over long training runs. For rapid prototyping with frequent changes, eager execution is often faster *end-to-end*.
 

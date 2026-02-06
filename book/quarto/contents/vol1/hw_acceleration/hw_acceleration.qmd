@@ -226,6 +226,8 @@ p_resnet_pct_str = fmt(p_resnet_value*100, precision=0, commas=False)
 serial_resnet_pct_str = fmt(serial_resnet_value*100, precision=0, commas=False)
 amdahl_resnet_round_str = fmt(amdahl_resnet_value, precision=0, commas=False)
 serial_gpt2_pct_str = fmt((1 - p_gpt2_value)*100, precision=0, commas=False)
+p_resnet_per_s_str = fmt(p_resnet_value / hw_speedup_value, precision=4, commas=False)
+p_gpt2_per_s_str = fmt(p_gpt2_value / hw_speedup_value, precision=4, commas=False)
 ```
 
 ::: {.callout-lighthouse #lighthouse-amdahl-h100 title="Amdahl's Law on H100"}
@@ -235,7 +237,7 @@ serial_gpt2_pct_str = fmt((1 - p_gpt2_value)*100, precision=0, commas=False)
 - H100 delivers S = `{python} hw_speedup_str`× speedup over CPU for matrix multiply (`{python} h100_tflops_int8` TOPS INT8 vs. ~8 TOPS on baseline CPU without AMX extensions)
 - Typical inference has P = `{python} p_resnet_str` (`{python} p_resnet_pct_str`% parallelizable, `{python} serial_resnet_pct_str`% serial: data loading, preprocessing, postprocessing)
 
-Speedup = 1 / ((1-`{python} p_resnet_str`) + `{python} p_resnet_str` / `{python} hw_speedup_str`) = 1 / (`{python} serial_resnet_str` + 0.0019) ≈ `{python} amdahl_resnet_str`×
+Speedup = 1 / ((1-`{python} p_resnet_str`) + `{python} p_resnet_str` / `{python} hw_speedup_str`) = 1 / (`{python} serial_resnet_str` + `{python} p_resnet_per_s_str`) ≈ `{python} amdahl_resnet_str`×
 
 Despite a `{python} hw_speedup_str`× hardware advantage, total system speedup is only **`{python} amdahl_resnet_round_str`×**. The `{python} serial_resnet_pct_str`% serial fraction caps practical gains.
 
@@ -243,7 +245,7 @@ Despite a `{python} hw_speedup_str`× hardware advantage, total system speedup i
 
 - Same H100, but GPT-2 token generation has P = `{python} p_gpt2_str` (`{python} serial_gpt2_pct_str`% serial: KV-cache updates, sampling, Python overhead)
 
-Speedup = 1 / ((1-`{python} p_gpt2_str`) + `{python} p_gpt2_str` / `{python} hw_speedup_str`) = 1 / (`{python} serial_gpt2_str` + 0.0016) ≈ `{python} amdahl_gpt2_str`×
+Speedup = 1 / ((1-`{python} p_gpt2_str`) + `{python} p_gpt2_str` / `{python} hw_speedup_str`) = 1 / (`{python} serial_gpt2_str` + `{python} p_gpt2_per_s_str`) ≈ `{python} amdahl_gpt2_str`×
 
 The **Bandwidth Hog** archetype suffers more from serial bottlenecks. Even infinite accelerator speed yields only $1/(1-p)$ = `{python} amdahl_gpt2_ceil_str`× maximum speedup. This is *why* LLM inference optimization focuses on reducing the serial fraction (batching, speculative decoding) rather than raw hardware speed.
 :::
@@ -937,9 +939,11 @@ wm_params_value = wm_in_value * wm_out_value
 # OUTPUT
 # =============================================================================
 wm_params_str = f"{wm_params_value:,}"
+wm_out_str = fmt(wm_out_value, precision=0, commas=False)
+wm_in_str = fmt(wm_in_value, precision=0, commas=False)
 ```
 
-This computation demonstrates the scale of matrix operations in neural networks. Each output neuron (512 total) must process all input features (256 total) for every sample in the batch (32 samples). The weight matrix alone contains 256 × 512 = `{python} wm_params_str` parameters that define these transformations, illustrating why efficient matrix multiplication dominates performance considerations.
+This computation demonstrates the scale of matrix operations in neural networks. Each output neuron (`{python} wm_out_str` total) must process all input features (`{python} wm_in_str` total) for every sample in the batch (32 samples). The weight matrix alone contains `{python} wm_in_str` × `{python} wm_out_str` = `{python} wm_params_str` parameters that define these transformations, illustrating why efficient matrix multiplication dominates performance considerations.
 
 Neural networks employ matrix operations across diverse architectural patterns beyond simple linear layers.
 
@@ -1818,6 +1822,7 @@ systolic_ops_value = systolic_dim_value * systolic_dim_value
 # =============================================================================
 # OUTPUT
 # =============================================================================
+systolic_dim_str = fmt(systolic_dim_value, precision=0, commas=False)
 systolic_ops_str = f"{systolic_ops_value:,}"
 
 # Tensor life: KWS audio
@@ -1827,7 +1832,7 @@ kws_tensor_kb_value = kws_samples_value * kws_bytes_fp16_value / 1024
 kws_tensor_str = fmt(kws_tensor_kb_value, precision=0, commas=False)
 ```
 
-A 128×128 systolic array capable of `{python} systolic_ops_str` operations per cycle requires continuous data feed to maintain utilization. Each cycle demands fresh input activations and weight parameters that must traverse from off-chip memory through on-chip buffers to the array edges. The TPU's 1,200 GB/s on-chip bandwidth enables high utilization, but even this substantial bandwidth becomes limiting when processing large transformer models where memory requirements exceed on-chip capacity.
+A `{python} systolic_dim_str`×`{python} systolic_dim_str` systolic array capable of `{python} systolic_ops_str` operations per cycle requires continuous data feed to maintain utilization. Each cycle demands fresh input activations and weight parameters that must traverse from off-chip memory through on-chip buffers to the array edges. The TPU's 1,200 GB/s on-chip bandwidth enables high utilization, but even this substantial bandwidth becomes limiting when processing large transformer models where memory requirements exceed on-chip capacity.
 
 Recall from @sec-model-compression that quantization reduces model memory footprint by converting FP32 weights to INT8 representations. This optimization directly addresses the memory bandwidth constraints identified here. Converting 32-bit floating-point weights to 8-bit integers reduces memory traffic by 4×, transforming bandwidth-bound operations into compute-bound workloads where systolic arrays can achieve higher utilization. Similarly, structured pruning removes entire rows or columns of weight matrices, reducing both the data volume that must traverse memory hierarchies and the computation required. These algorithmic optimizations prove valuable precisely because they target the memory bottleneck that limits accelerator performance in practice.
 
@@ -1930,6 +1935,7 @@ tpu_ratio = price_tpu / tpu_tf
 
 # Gaudi 2 (Static spec for now as not in constants)
 gaudi_tf = 200
+gaudi_bw_value = 800
 gaudi_ratio = price_gaudi / gaudi_tf
 
 # Format strings
@@ -1943,6 +1949,8 @@ v100_pp_str = f"${v100_ratio:.0f}/TFLOP"
 a100_pp_str = f"${a100_ratio:.0f}/TFLOP"
 h100_pp_str = f"~${h100_ratio:.0f}/TFLOP"
 tpu_pp_str = f"~${tpu_ratio:.0f}/TFLOP"
+gaudi_tflops = f"{gaudi_tf}"
+gaudi_bw = f"{gaudi_bw_value}"
 gaudi_pp_str = f"${gaudi_ratio:.0f}/TFLOP"
 ```
 
@@ -1954,7 +1962,7 @@ gaudi_pp_str = f"${gaudi_ratio:.0f}/TFLOP"
 | **NVIDIA A100**\index{NVIDIA!A100} | `{python} a100_price_str`  |        `{python} a100_tflops_fp16` TFLOPS |  `{python} a100_bw` GB/s | `{python} a100_pp_str`  |
 | **NVIDIA H100**                    | `{python} h100_price_str`  | `{python} h100_tflops_tf32` TFLOPS (TF32) |  `{python} h100_bw` GB/s | `{python} h100_pp_str`  |
 | **Google TPUv4**                   | `{python} tpu_price_str`   |     `{python} tpuv4_tflops` TFLOPS (BF16) | `{python} tpuv4_bw` GB/s | `{python} tpu_pp_str`   |
-| **Intel Gaudi 2**                  | `{python} gaudi_price_str` |                         200 TFLOPS (INT8) |                 800 GB/s | `{python} gaudi_pp_str` |
+| **Intel Gaudi 2**                  | `{python} gaudi_price_str` |                         `{python} gaudi_tflops` TFLOPS (INT8) |                 `{python} gaudi_bw` GB/s | `{python} gaudi_pp_str` |
 
 : **Accelerator Cost-Performance Comparison.** Hardware costs evaluated against computational capabilities for optimal deployment strategy selection. Newer accelerators offer better price-performance ratios, though total cost of ownership includes power consumption, cooling requirements, and infrastructure costs. Prices are approximate list prices and vary by region and volume; TPU pricing estimated from cloud rates. {#tbl-accelerator-economics}
 

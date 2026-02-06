@@ -425,6 +425,10 @@ bert_b32_flops_eq_str = f"{bert_flops_b_value} × 10⁹ × {batch32_value}"
 
 bert_perf_b32_str = fmt(bert_perf_b32_value, precision=0, commas=False)
 
+batch32_str = str(batch32_value)
+utilization_peak_str = f"{utilization_peak_value}"
+utilization_peak_pct_str = fmt(utilization_peak_value * 100, precision=0, commas=False)
+
 ```
 
 ::: {.callout-notebook title="Roofline Analysis for BERT Inference"}
@@ -450,25 +454,25 @@ Any workload with arithmetic intensity below `{python} a100_ridge_str` FLOPs/byt
 
 Since `{python} bert_ai_b1_str` < `{python} a100_ridge_str`, BERT at batch=1 is **memory-bound**:
 
-Achievable perf = `{python} bert_ai_b1_str` FLOPs/byte × 2.0 TB/s = **`{python} bert_perf_b1_str` TFLOPS**
+Achievable perf = `{python} bert_ai_b1_str` FLOPs/byte × `{python} a100_bw_tbs_str` TB/s = **`{python} bert_perf_b1_str` TFLOPS**
 
 GPU utilization = `{python} bert_perf_b1_str` ÷ `{python} a100_tflops_fp16_str` = **`{python} bert_util_b1_str`%**
 
 #### Step 4: Optimization via Batching {.unnumbered}
 
-Increase batch size to 32:
+Increase batch size to `{python} batch32_str`:
 
-- Same `{python} bert_weight_mb_str` MB of weights, but 32× more compute
+- Same `{python} bert_weight_mb_str` MB of weights, but `{python} batch32_str`× more compute
 - New FLOPs: `{python} bert_b32_flops_eq_str` = `{python} bert_batch32_flops_str` × 10⁹
 - New intensity: `{python} bert_batch32_flops_str` × 10⁹ ÷ `{python} bert_weight_mb_str` × 10⁶ = `{python} bert_ai_b32_str` FLOPs/byte
 
 Since `{python} bert_ai_b32_str` > `{python} a100_ridge_str`, batch=32 is **compute-bound**:
 
-Achievable perf ≈ 0.85 × `{python} a100_tflops_fp16_str` = **`{python} bert_perf_b32_str` TFLOPS**
+Achievable perf ≈ `{python} utilization_peak_str` × `{python} a100_tflops_fp16_str` = **`{python} bert_perf_b32_str` TFLOPS**
 
 $$\text{GPU utilization} \approx 85\%$$
 
-**The Systems Insight**: Batch size transforms memory-bound inference (32% utilization) into compute-bound inference (85% utilization). Batching, however, increases latency because you must wait to accumulate requests. This is the fundamental throughput-latency tradeoff that MLPerf scenarios capture: SingleStream (batch=1, latency-optimized) versus Offline (maximum batch, throughput-optimized).
+**The Systems Insight**: Batch size transforms memory-bound inference (`{python} bert_util_b1_str`% utilization) into compute-bound inference (`{python} utilization_peak_pct_str`% utilization). Batching, however, increases latency because you must wait to accumulate requests. This is the fundamental throughput-latency tradeoff that MLPerf scenarios capture: SingleStream (batch=1, latency-optimized) versus Offline (maximum batch, throughput-optimized).
 :::
 
 System benchmarks evaluate performance across scales, ranging from single-chip configurations to large distributed systems, and AI workloads including both training and inference tasks. This evaluation approach ensures that benchmarks accurately reflect real-world deployment scenarios and deliver insights that inform both hardware selection decisions and system architecture design. @fig-imagenet-gpus reveals the striking correlation between GPU adoption and ImageNet classification error rates from 2010 to 2014: as GPU entries surged from 0 to 110, error rates plummeted from 28.2% to 7.3%, demonstrating how hardware capabilities and algorithmic advances drive progress in tandem.
@@ -1662,11 +1666,11 @@ Where $T(1)$ is single-GPU time, $T(N)$ is N-GPU time, and $N$ is GPU count.
 
 `{python} scaling_eq_str` = `{python} t1_hours_str`/`{python} eff_denom_str` = **`{python} eff_str`%**
 
-With perfect scaling, 8 GPUs would complete in `{python} ideal_str` hours (24/8). The actual 4 hours represents `{python} eff_str`% efficiency.
+With perfect scaling, `{python} n_gpus_str` GPUs would complete in `{python} ideal_str` hours (`{python} t1_hours_str`/`{python} n_gpus_str`). The actual `{python} tn_hours_str` hours represents `{python} eff_str`% efficiency.
 
 #### Step 3: Account for the `{python} loss_str`% Loss {.unnumbered}
 
-The "missing" 25% decomposes into measurable overhead:
+The "missing" `{python} loss_str`% decomposes into measurable overhead:
 
 | **Source**                   | **Typical Contribution** | **Measurement**                     |
 |:---------------------------|-----------------------:|:----------------------------------|
@@ -3417,9 +3421,12 @@ fast_sec_value = response_tokens_value / fast_toks_value
 # =============================================================================
 slow_str = fmt(slow_sec_value, precision=0, commas=False)
 fast_str = fmt(fast_sec_value, precision=1, commas=False)
+response_tokens_str = fmt(response_tokens_value, precision=0, commas=False)
+slow_toks_str = fmt(slow_toks_value, precision=0, commas=False)
+fast_toks_str = fmt(fast_toks_value, precision=0, commas=False)
 ```
 
-- **Tokens per second** measures generation throughput. Modern LLMs achieve 20-100 tokens/second depending on model size and hardware. For a 500-word response (~750 tokens), 25 vs 100 tokens/second means `{python} slow_str` seconds vs `{python} fast_str` seconds.
+- **Tokens per second** measures generation throughput. Modern LLMs achieve 20-100 tokens/second depending on model size and hardware. For a 500-word response (~`{python} response_tokens_str` tokens), `{python} slow_toks_str` vs `{python} fast_toks_str` tokens/second means `{python} slow_str` seconds vs `{python} fast_str` seconds.
 - **Time-to-first-token vs inter-token latency** jointly capture different bottlenecks requiring different optimizations. Batching improves throughput but typically increases first-token latency, a trade-off invisible if only one metric is measured.
 
 **Benchmark contamination** is a unique LLM failure mode. Models trained on web-scale corpora may encounter benchmark questions during pretraining, inflating scores through memorization rather than capability [@xu2024benchmarking]. Studies estimate 4-15% contamination rates for popular benchmarks, with contaminated examples showing 10-20% higher accuracy. Mitigation strategies include temporal holdouts (benchmarks from content published after training cutoff), dynamic benchmarks (continuously generated evaluation instances), and contamination detection (testing whether models recall exact benchmark phrasing).
