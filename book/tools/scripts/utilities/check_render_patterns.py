@@ -34,7 +34,8 @@ class Issue:
 # Pattern definitions
 PATTERNS = {
     'latex_inline_python': {
-        'regex': re.compile(r'\$[^$]*`\{python\}[^`]+`[^$]*\$'),
+        # Match $ followed by {python} then $, but not when $ is escaped (\$)
+        'regex': re.compile(r'(?<!\\)\$\s*`\{python\}[^`]+`|`\{python\}[^`]+`\s*(?<!\\)\$'),
         'severity': 'error',
         'message': 'Inline Python inside LaTeX math - will not render correctly',
         'fix_hint': 'Move Python outside $ delimiters: `{python} var` instead of $`{python} var`$'

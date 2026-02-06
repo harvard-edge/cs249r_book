@@ -18,7 +18,7 @@ from collections import defaultdict
 ALL_LABEL_TYPES = {
     "Figure":   r'(?:\{#|#\|\s*label:\s*|%%\|\s*label:\s*)(fig-[\w-]+)',
     "Table":    r'\{#(tbl-[\w-]+)',
-    "Section":  r'\{#(sec-[\w-]+)',
+    "Section":  r'(?:\{#|^id:\s*)(sec-[\w-]+)',  # Match both {#sec-*} and YAML id: sec-*
     "Equation": r'\{#(eq-[\w-]+)',
     "Listing":  r'\{[^}]*#(lst-[\w-]+)',
 }

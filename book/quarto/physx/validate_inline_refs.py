@@ -35,8 +35,10 @@ CELL_END = re.compile(r'^```\s*$')
 ASSIGNMENT = re.compile(r'^(\w+)\s*=')
 
 # Problematic patterns that cause rendering issues
-# Pattern 1: Inline Python inside LaTeX math: $..`{python}`..$ 
-LATEX_INLINE_PYTHON = re.compile(r'\$[^$]*`\{python\}[^`]+`[^$]*\$')
+# Pattern 1: Inline Python directly inside LaTeX math: $`{python}`$ or $..`{python}`$
+# Only matches when $ is immediately followed by backtick-python (within short distance)
+# This avoids false positives from {python} appearing between two separate $...$ pairs
+LATEX_INLINE_PYTHON = re.compile(r'(?<!\\)\$\s*`\{python\}[^`]+`|`\{python\}[^`]+`\s*(?<!\\)\$')
 
 # Pattern 2: Inline Python adjacent to LaTeX symbols (will strip decimals)
 LATEX_ADJACENT = re.compile(r'`\{python\}[^`]+`\s*\$\\(times|approx|ll|gg|mu)\$')

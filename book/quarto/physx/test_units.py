@@ -106,7 +106,7 @@ def test_flop_units():
 
     # Model FLOPs
     ok &= check("ResNet 4.1 GFLOPs", RESNET50_FLOPs.to(GFLOPs).magnitude, 4.1)
-    ok &= check("YOLO 3.2 GFLOPs", YOLOV8_NANO_FLOPs.to(GFLOPs).magnitude, 3.2)
+    ok &= check("YOLOv8-nano 8.7 GFLOPs", YOLOV8_NANO_FLOPs.to(GFLOPs).magnitude, 8.7)
     return ok
 
 
@@ -242,9 +242,9 @@ def test_extended_gpu_specs():
     ok &= check("A100 INT8", A100_FLOPS_INT8.to(TFLOPs / second).magnitude, 624.0)
     ok &= check("A100 TDP", A100_TDP.to(watt).magnitude, 400.0)
 
-    # H100 full spec sheet
-    ok &= check("H100 TF32", H100_FLOPS_TF32.to(TFLOPs / second).magnitude, 756.0)
-    ok &= check("H100 INT8", H100_FLOPS_INT8.to(TFLOPs / second).magnitude, 3958.0)
+    # H100 full spec sheet (Dense values; Sparse is 2x)
+    ok &= check("H100 TF32", H100_FLOPS_TF32.to(TFLOPs / second).magnitude, 494.0)
+    ok &= check("H100 INT8", H100_FLOPS_INT8.to(TFLOPs / second).magnitude, 1979.0)
     ok &= check("H100 TDP", H100_TDP.to(watt).magnitude, 700.0)
 
     # V100
