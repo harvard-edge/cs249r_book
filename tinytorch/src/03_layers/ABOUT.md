@@ -433,7 +433,7 @@ Linear (fully connected) layer implementing `y = xW + b`.
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `forward` | `forward(x) -> Tensor` | Apply linear transformation `y = xW + b` |
+| `forward` | `forward(x) -> Tensor` | Applies linear transformation `y = xW + b` |
 | `parameters` | `parameters() -> List[Tensor]` | Returns `[weight, bias]` or `[weight]` |
 
 ### Dropout Layer
@@ -449,7 +449,7 @@ Dropout layer for regularization. During training, randomly zeros elements with 
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `forward` | `forward(x, training=True) -> Tensor` | Apply dropout during training, passthrough during inference |
+| `forward` | `forward(x, training=True) -> Tensor` | Applies dropout during training, passthrough during inference |
 | `parameters` | `parameters() -> List[Tensor]` | Returns empty list (no trainable parameters) |
 
 ### Sequential Container
