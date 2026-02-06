@@ -50,6 +50,7 @@ The process that gives models their capabilities—training—is extraordinarily
 # =============================================================================
 from physx.constants import *
 from physx.formatting import fmt, sci
+from physx.formulas import model_memory
 
 # GPU constants from physx.constants
 v100_flops_fp16_tensor_value = V100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
@@ -121,11 +122,11 @@ a100_tdp_value = a100_tdp_value
 # Model calculations
 gpt2_params_b_value = gpt2_params_value / 1000
 gpt2_layers_value = gpt2_layers_value
-gpt2_params_gb_fp32_value = GPT2_PARAMS.magnitude * BYTES_FP32.to(byte).magnitude / 1e9
-gpt2_adam_gb_value = GPT2_PARAMS.magnitude * BYTES_ADAM_STATE.to(byte).magnitude / 1e9
+gpt2_params_gb_fp32_value = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
+gpt2_adam_gb_value = model_memory(GPT2_PARAMS, BYTES_ADAM_STATE, GB)
 gpt3_params_b_value = gpt3_params_value / 1000
 resnet50_params_m_value = resnet50_params_value
-resnet50_params_gb_value = RESNET50_PARAMS.magnitude * BYTES_FP32.to(byte).magnitude / 1e9
+resnet50_params_gb_value = model_memory(RESNET50_PARAMS, BYTES_FP32, GB)
 
 # =============================================================================
 # OUTPUT
@@ -221,13 +222,13 @@ where $O$ (**Total Operations**) is the FLOPs required for one epoch times the n
 
 This equation reveals three levers for improvement: reduce total operations through algorithmic innovation, increase peak throughput through hardware utilization, or improve utilization through better pipeline orchestration. Each optimization technique in this chapter pulls one or more of these levers, as summarized in @tbl-iron-law-mapping.
 
-| **Technique**                   | **Term Affected**                | **Mechanism**                                                                     |
-|:------------------------------|:-------------------------------|:--------------------------------------------------------------------------------|
-| **Mixed Precision (FP16/BF16)** | Peak Throughput ↑                | Tensor Cores operate at up to 16× higher FLOP/s                                   |
-| **Data Prefetching**            | Utilization ↑                    | Reduces GPU idle time waiting for data                                            |
-| **Gradient Checkpointing**      | Total Operations ↑               | Adds recomputation, but enables larger models                                     |
-| **Gradient Accumulation**       | Utilization ↑                    | Maintains high batch parallelism efficiency                                       |
-| **Operator Fusion**             | Utilization ↑                    | Reduces memory bandwidth bottlenecks                                              |
+| **Technique**                   | **Term Affected**                 | **Mechanism**                                                                      |
+|:------------------------------|:--------------------------------|:---------------------------------------------------------------------------------|
+| **Mixed Precision (FP16/BF16)** | Peak Throughput ↑                 | Tensor Cores operate at up to 16× higher FLOP/s                                    |
+| **Data Prefetching**            | Utilization ↑                     | Reduces GPU idle time waiting for data                                             |
+| **Gradient Checkpointing**      | Total Operations ↑                | Adds recomputation, but enables larger models                                      |
+| **Gradient Accumulation**       | Utilization ↑                     | Maintains high batch parallelism efficiency                                        |
+| **Operator Fusion**             | Utilization ↑                     | Reduces memory bandwidth bottlenecks                                               |
 | **FlashAttention**              | Total Operations ↓; Utilization ↑ | Algorithmic improvement reduces FLOP count; Tiling improves memory access patterns |
 
 : **Iron Law Optimization Mapping.** Optimization techniques mapped to Iron Law terms. Understanding which term a technique affects guides optimization strategy selection. {#tbl-iron-law-mapping}
@@ -1810,7 +1811,8 @@ network_bw_gbs_value = 12.5  # 100 Gbps = 12.5 GB/s
 # =============================================================================
 # PROCESS
 # =============================================================================
-gradient_size_gb_value = model_params_b_value * 1e9 * bytes_per_param_fp16_value / 1e9
+# Gradient size: params × bytes (1e9 factors cancel out)
+gradient_size_gb_value = model_params_b_value * bytes_per_param_fp16_value
 allreduce_total_gb_value = ALLREDUCE_FACTOR * gradient_size_gb_value  # Ring AllReduce sends ~2× gradients
 network_time_s_value = allreduce_total_gb_value / network_bw_gbs_value
 
@@ -1996,8 +1998,9 @@ where $B$ represents the batch size, $L$ is the number of layers, and $A_l$ repr
 #| label: resnet-memory-scaling-calc
 #| echo: false
 
-from physx.constants import RESNET50_PARAMS, Mparam
+from physx.constants import RESNET50_PARAMS, Mparam, BYTES_FP32, byte, GB, MiB
 from physx.formatting import fmt
+from physx.formulas import model_memory
 
 # ResNet-50 activation memory scaling (batch=32)
 first_conv_h, first_conv_w, first_conv_c = 112, 112, 64
@@ -2006,7 +2009,7 @@ first_conv_mb = first_conv_h * first_conv_w * first_conv_c * bytes_fp32 / (1024*
 
 # ResNet-50 parameters: 25.6M params × 4 bytes ≈ 100MB
 resnet_params_m = RESNET50_PARAMS.to(Mparam).magnitude  # 25.6M
-resnet_param_gb = resnet_params_m * 1e6 * bytes_fp32 / 1e9  # ~0.1 GB
+resnet_param_gb = model_memory(RESNET50_PARAMS, BYTES_FP32, GB)  # ~0.1 GB
 
 # Approximate totals for batch=32 (activations dominate)
 act_gb_b32 = 8
@@ -2324,10 +2327,10 @@ The first step in diagnosis is establishing a meaningful measure of training eff
 Training bottlenecks fall into three categories, which map directly to the **D·A·M taxonomy** (Data, Algorithm, Machine; see @sec-appendix-dam for the full diagnostic framework, troubleshooting matrix, and D·A·M Scorecard). @tbl-dam-training-bottlenecks connects each D·A·M axis to the corresponding training bottleneck, its observable symptoms, and the optimization techniques that address it.
 
 | **D·A·M Axis** | **Bottleneck** | **Symptoms**                                                                                                      | **Primary Solutions**                                                  |
-|:----------------|:-------------|:----------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------|
-| **Algorithm**     | Compute-bound  | GPU utilization >90%; low memory bandwidth usage; arithmetic units are the limiting factor                        | FlashAttention, mixed precision, faster hardware                       |
-| **Machine**       | Memory-bound   | GPU utilization 50-80%; high memory bandwidth usage; arithmetic units idle waiting for data from memory           | Operator fusion, memory-efficient attention, reduced precision formats |
-| **Data**          | Data-bound     | Periodic GPU utilization drops to near-zero; CPU fully utilized during gaps; pipeline cannot feed GPU fast enough | Prefetching, pipeline overlap, faster storage, DataLoader parallelism  |
+|:-------------|:-------------|:----------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------|
+| **Algorithm**  | Compute-bound  | GPU utilization >90%; low memory bandwidth usage; arithmetic units are the limiting factor                        | FlashAttention, mixed precision, faster hardware                       |
+| **Machine**    | Memory-bound   | GPU utilization 50-80%; high memory bandwidth usage; arithmetic units idle waiting for data from memory           | Operator fusion, memory-efficient attention, reduced precision formats |
+| **Data**       | Data-bound     | Periodic GPU utilization drops to near-zero; CPU fully utilized during gaps; pipeline cannot feed GPU fast enough | Prefetching, pipeline overlap, faster storage, DataLoader parallelism  |
 
 : **D·A·M Taxonomy Applied to Training Bottlenecks.** Each axis of the D·A·M taxonomy (Data, Algorithm, Machine) maps to a distinct training bottleneck with characteristic symptoms. Profiling reveals which axis is the limiting factor, guiding practitioners to the appropriate optimization technique. {#tbl-dam-training-bottlenecks}
 
@@ -2656,12 +2659,12 @@ A neural network trained in FP32 requires 4 bytes per parameter, while both FP16
 
 The numerical precision differences between these formats shape their use cases. @tbl-precision-comparison reveals that BF16's 8-bit exponent matches FP32's dynamic range ($10^{-45}$ minimum representable), while FP16's 5-bit exponent limits its range to $6 \times 10^{-8}$, explaining why gradients below this threshold underflow to zero without loss scaling. FP32 represents numbers from approximately $\pm1.18 \times 10^{-38}$ to $\pm3.4 \times 10^{38}$ with 7 decimal digits of precision. FP16 ranges from $\pm6.10 \times 10^{-5}$ to $\pm65,504$ with 3-4 decimal digits of precision. Bfloat16, developed by Google Brain, maintains the same dynamic range as FP32 ($\pm1.18 \times 10^{-38}$ to $\pm3.4 \times 10^{38}$) but with reduced precision (3-4 decimal digits). This range preservation makes bfloat16 particularly suited for deep learning training, as it handles large and small gradients more effectively than FP16.
 
-| **Property**            | **FP32** |    **FP16** | **BF16** |
-|:----------------------|-------:|----------:|-------:|
-| **Exponent bits**       |        8 |           5 |        8 |
-| **Mantissa bits**       |       23 |          10 |        7 |
-| **Min normal value**    |   $10^{-38}$ | $6.1 \times 10^{-5}$ |   $10^{-38}$ |
-| **Tensor Core speedup** |       1× |         16× |      16× |
+| **Property**            |   **FP32** |             **FP16** |   **BF16** |
+|:----------------------|---------:|-------------------:|---------:|
+| **Exponent bits**       |          8 |                    5 |          8 |
+| **Mantissa bits**       |         23 |                   10 |          7 |
+| **Min normal value**    | $10^{-38}$ | $6.1 \times 10^{-5}$ | $10^{-38}$ |
+| **Tensor Core speedup** |         1× |                  16× |        16× |
 
 : **Precision Format Comparison.** The choice between FP16 and BF16 depends on whether dynamic range (BF16's strength) or precision (FP16's advantage) matters more for the specific workload. Minimum normal values shown are the practical thresholds for training, as subnormal values may flush to zero on many GPUs. {#tbl-precision-comparison}
 
@@ -3086,11 +3089,12 @@ Flash Attention achieves asymptotic improvements in both memory footprint and me
 #| label: flash-attention-calc
 #| echo: false
 from physx.formatting import fmt
+from physx.constants import BYTES_FP32
 
 # Flash Attention memory comparison
 fa_n = 4096          # sequence length
 fa_d = 64            # head dimension
-fa_bytes_per_elem = 4  # FP32
+fa_bytes_per_elem = BYTES_FP32.magnitude
 
 # Standard attention: n^2 attention matrix
 fa_standard_bytes = fa_n**2 * fa_bytes_per_elem

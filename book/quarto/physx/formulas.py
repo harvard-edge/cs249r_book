@@ -77,3 +77,33 @@ def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
         "intensity": intensity.magnitude
     }
 
+def model_memory(params, bytes_per_param, unit=MB):
+    """
+    Calculate model memory footprint.
+
+    Args:
+        params: Number of parameters (pint Quantity with param unit, or raw number)
+        bytes_per_param: Bytes per parameter (pint Quantity with byte unit, or raw number)
+        unit: Target unit for output (default: MB)
+
+    Returns:
+        Memory footprint as float in the specified unit
+
+    Example:
+        >>> model_memory(RESNET50_PARAMS, BYTES_FP32)  # Returns ~102 (MB)
+        >>> model_memory(GPT3_PARAMS, BYTES_FP16, GB)  # Returns ~350 (GB)
+    """
+    # Extract magnitudes to avoid param*byte dimension issues
+    if hasattr(params, 'magnitude'):
+        param_count = params.magnitude
+    else:
+        param_count = params
+
+    if hasattr(bytes_per_param, 'magnitude'):
+        bpp = bytes_per_param.magnitude
+    else:
+        bpp = bytes_per_param
+
+    total_bytes = param_count * bpp * ureg.byte
+    return total_bytes.to(unit).magnitude
+

@@ -42,6 +42,7 @@ When you select a neural network architecture, you are not making a modeling dec
 
 from physx.constants import *
 from physx.formatting import fmt, sci
+from physx.formulas import model_memory
 
 # =============================================================================
 # PURPOSE
@@ -67,29 +68,29 @@ a100_mem_value = A100_MEM_CAPACITY.to(GiB).magnitude
 # ResNet-50 specs
 resnet_params_m_value = RESNET50_PARAMS.to(Mparam).magnitude
 resnet_gflops_value = RESNET50_FLOPs.to(GFLOPs).magnitude
-resnet_fp32_mb_value = (RESNET50_PARAMS.magnitude * 4 / 1e6)
+resnet_fp32_mb_value = model_memory(RESNET50_PARAMS, BYTES_FP32, MB)
 
 # GPT-2 XL specs (1.5B params)
 gpt2_params_b_value = GPT2_PARAMS.magnitude / 1e9
-gpt2_fp32_gb_value = (GPT2_PARAMS.magnitude * 4 / 1e9)
-gpt2_fp16_gb_value = (GPT2_PARAMS.magnitude * 2 / 1e9)
+gpt2_fp32_gb_value = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
+gpt2_fp16_gb_value = model_memory(GPT2_PARAMS, BYTES_FP16, GB)
 
 # GPT-3 specs (175B params)
 gpt3_params_b_value = GPT3_PARAMS.to(Mparam).magnitude / 1000
-gpt3_fp32_gb_value = (GPT3_PARAMS.magnitude * 4 / 1e9)
-gpt3_fp16_gb_value = (GPT3_PARAMS.magnitude * 2 / 1e9)
+gpt3_fp32_gb_value = model_memory(GPT3_PARAMS, BYTES_FP32, GB)
+gpt3_fp16_gb_value = model_memory(GPT3_PARAMS, BYTES_FP16, GB)
 
 # MobileNetV2 specs
 mobilenet_params_m_value = MOBILENETV2_PARAMS.to(Mparam).magnitude
 mobilenet_mflops_value = MOBILENETV2_FLOPs.magnitude / 1e6
-mobilenet_fp32_mb_value = (MOBILENETV2_PARAMS.magnitude * 4 / 1e6)
+mobilenet_fp32_mb_value = model_memory(MOBILENETV2_PARAMS, BYTES_FP32, MB)
 mobilenet_size_ratio_value = RESNET50_PARAMS.magnitude / MOBILENETV2_PARAMS.magnitude
 mobilenet_flops_ratio_value = RESNET50_FLOPs.magnitude / MOBILENETV2_FLOPs.magnitude
 
 # KWS DS-CNN specs
 kws_params_k_value = KWS_DSCNN_PARAMS.magnitude / 1e3
 kws_mflops_value = KWS_DSCNN_FLOPs.magnitude / 1e6
-kws_fp32_kb_value = (KWS_DSCNN_PARAMS.magnitude * 4 / 1e3)
+kws_fp32_kb_value = model_memory(KWS_DSCNN_PARAMS, BYTES_FP32, KB)
 
 # DLRM specs
 dlrm_entries_b_value = DLRM_EMBEDDING_ENTRIES / 1e9
@@ -1990,6 +1991,7 @@ Attention mechanisms require storage for attention weights, key-query-value proj
 #| label: attention-quadratic-bottleneck
 #| echo: false
 from physx.formatting import fmt
+from physx.constants import BYTES_FP16
 
 # =============================================================================
 # PURPOSE
@@ -2001,7 +2003,7 @@ from physx.formatting import fmt
 # INPUT
 # =============================================================================
 seq_len_value = 100_000
-bytes_per_element_value = 2  # FP16
+bytes_per_element_value = BYTES_FP16.magnitude
 num_layers_value = 32
 
 # =============================================================================
@@ -2322,6 +2324,7 @@ The **DLRM** architecture [@naumov2019deep] standardizes this pattern, combining
 #| label: dlrm-embedding-size
 #| echo: false
 from physx.formatting import fmt
+from physx.constants import BYTES_FP32
 
 # =============================================================================
 # PURPOSE
@@ -2334,7 +2337,7 @@ from physx.formatting import fmt
 # =============================================================================
 num_users_value = 1_000_000_000
 embed_dim_value = 128
-bytes_per_param_value = 4  # FP32
+bytes_per_param_value = BYTES_FP32.magnitude
 
 # =============================================================================
 # PROCESS
@@ -2873,12 +2876,12 @@ Random access poses the greatest challenge for system efficiency. In a Transform
 
 @tbl-arch-complexity quantifies how these different memory access patterns contribute to the overall memory requirements of each architecture, comparing MLPs, CNNs, RNNs, and Transformers across parameter storage, activation storage, and scaling behavior.
 
-| **Architecture** | **Input Dependency** | **Parameter Storage** | **Activation Storage**                              | **Scaling Behavior** |
-|:---------------|:-------------------|:--------------------|:--------------------------------------------------|:-------------------|
-| **MLP**          | Linear               | $O(N \times W)$       | $O(B \times W)$                                     | Predictable          |
-| **CNN**          | Constant w.r.t. resolution | $O(K \times C)$ | $O(B \times H_{\text{img}} \times W_{\text{img}})$  | Efficient            |
-| **RNN**          | Linear               | $O(h^2)$              | $O(B \times T \times h)$                            | Challenging          |
-| **Transformer**  | Quadratic            | $O(N \times d)$       | $O(B \times N^2)$                                   | Problematic          |
+| **Architecture** | **Input Dependency**       | **Parameter Storage** | **Activation Storage**                             | **Scaling Behavior** |
+|:---------------|:-------------------------|:--------------------|:-------------------------------------------------|:-------------------|
+| **MLP**          | Linear                     | $O(N \times W)$       | $O(B \times W)$                                    | Predictable          |
+| **CNN**          | Constant w.r.t. resolution | $O(K \times C)$       | $O(B \times H_{\text{img}} \times W_{\text{img}})$ | Efficient            |
+| **RNN**          | Linear                     | $O(h^2)$              | $O(B \times T \times h)$                           | Challenging          |
+| **Transformer**  | Quadratic                  | $O(N \times d)$       | $O(B \times N^2)$                                  | Problematic          |
 
 : **Memory Access Complexity**: Different neural network architectures exhibit varying memory access patterns and storage requirements, impacting system performance and scalability. Parameter storage scales with input dependency and model size, while activation storage represents a significant runtime cost, particularly for sequence-based models where RNNs offer a parameter efficiency advantage when sequence length exceeds hidden state size ($n > h$). {#tbl-arch-complexity}
 
@@ -2897,12 +2900,12 @@ Where:
 
 These memory access patterns complement the computational scaling behaviors summarized in @tbl-computational-complexity, completing the picture of each architecture's resource requirements.
 
-| **Architecture** | **Parameters**                                                  | **Forward Pass**                                                        | **Memory**                                                 | **Parallelization**                     | **Bottleneck**   |
-|:---------------|:--------------------------------------------------------------|:----------------------------------------------------------------------|:---------------------------------------------------------|:--------------------------------------|:---------------|
-| **MLPs**         | $O(d_{\text{in}} \times d_{\text{out}})$ per layer              | $O(d_{\text{in}} \times d_{\text{out}})$ per layer                      | $O(d^2)$ weights $O(d\times b)$ activations                | Excellent Matrix ops parallel           | Memory bandwidth |
-| **CNNs**         | $O(k^2 \times c_{\text{in}} \times c_{\text{out}})$ per layer   | $O(H \times W \times k^2 \times c_{\text{in}} \times c_{\text{out}})$   | $O(H\times W\times c)$ features $O(k^2\times c^2)$ weights | Good Spatial independence               | Memory bandwidth |
-| **RNNs**         | $O(h^2+h\times d)$ total                                        | $O(T\times h^2)$ for $T$ time steps                                     | $O(h)$ hidden state (constant)                             | Poor Sequential deps                    | Sequential deps  |
-| **Transformers** | $O(d^2)$ projections $O(d^2\times h)$ multi-head                | $O(n^2 \times d + n \times d^2)$ per layer                              | $O(n^2)$ attention $O(n\times d)$ sequences                | Excellent (positions) Limited by memory | Memory ($n^2$)   |
+| **Architecture** | **Parameters**                                                | **Forward Pass**                                                      | **Memory**                                                 | **Parallelization**                     | **Bottleneck**   |
+|:---------------|:------------------------------------------------------------|:--------------------------------------------------------------------|:---------------------------------------------------------|:--------------------------------------|:---------------|
+| **MLPs**         | $O(d_{\text{in}} \times d_{\text{out}})$ per layer            | $O(d_{\text{in}} \times d_{\text{out}})$ per layer                    | $O(d^2)$ weights $O(d\times b)$ activations                | Excellent Matrix ops parallel           | Memory bandwidth |
+| **CNNs**         | $O(k^2 \times c_{\text{in}} \times c_{\text{out}})$ per layer | $O(H \times W \times k^2 \times c_{\text{in}} \times c_{\text{out}})$ | $O(H\times W\times c)$ features $O(k^2\times c^2)$ weights | Good Spatial independence               | Memory bandwidth |
+| **RNNs**         | $O(h^2+h\times d)$ total                                      | $O(T\times h^2)$ for $T$ time steps                                   | $O(h)$ hidden state (constant)                             | Poor Sequential deps                    | Sequential deps  |
+| **Transformers** | $O(d^2)$ projections $O(d^2\times h)$ multi-head              | $O(n^2 \times d + n \times d^2)$ per layer                            | $O(n^2)$ attention $O(n\times d)$ sequences                | Excellent (positions) Limited by memory | Memory ($n^2$)   |
 
 : **Computational Complexity Comparison**: Scaling behaviors and resource requirements for major neural network architectures. Variables: $d$ = dimension, $h$ = hidden size, $k$ = kernel size, $c$ = channels, $H,W$ = spatial dimensions, $T$ = time steps, $n$ = sequence length, $b$ = batch size. The bottleneck column identifies the primary performance-limiting factor in typical deployments. {#tbl-computational-complexity}
 
@@ -3356,6 +3359,7 @@ With this theoretical foundation established, we can now demonstrate how to appl
 #| label: capacity-wall-calc
 #| echo: false
 from physx.formatting import fmt
+from physx.constants import BYTES_FP32
 
 # =============================================================================
 # PURPOSE
@@ -3368,7 +3372,7 @@ from physx.formatting import fmt
 # =============================================================================
 cw_num_items_value = 100_000_000
 cw_embed_dim_value = 128
-cw_bytes_per_param_value = 4  # FP32
+cw_bytes_per_param_value = BYTES_FP32.magnitude
 
 # =============================================================================
 # PROCESS

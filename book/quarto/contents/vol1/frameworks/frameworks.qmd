@@ -49,6 +49,7 @@ Neural networks are defined by mathematics—matrix multiplications, gradient co
 # =============================================================================
 from physx.constants import *
 from physx.formatting import fmt, sci
+from physx.formulas import model_memory
 
 # =============================================================================
 # PROCESS
@@ -68,13 +69,14 @@ gpt3_params_b_value = GPT3_PARAMS.to(Mparam).magnitude / 1000
 # Extract ResNet-50 FLOPs (in GFLOPs)
 resnet_gflops_value = RESNET50_FLOPs.to(GFLOPs).magnitude
 
-# Derived: model memory footprints
-gpt3_fp16_gb_value = (GPT3_PARAMS.magnitude * BYTES_FP16.magnitude) / 1e9
-resnet_fp32_mb_value = (RESNET50_PARAMS.magnitude * BYTES_FP32.magnitude) / 1e6
+# Derived: model memory footprints (using model_memory helper for unit safety)
+gpt3_fp16_gb_value = model_memory(GPT3_PARAMS, BYTES_FP16, GB)
+resnet_fp32_mb_value = model_memory(RESNET50_PARAMS, BYTES_FP32, MB)
+resnet_adam_mb_value = model_memory(RESNET50_PARAMS, BYTES_ADAM_STATE, MB)
 # Derived: 7B model reference (used repeatedly for examples)
 model_7b_params = 7e9
-model_7b_fp16_gb_value = (model_7b_params * BYTES_FP16.magnitude) / 1e9
-model_7b_adam_gb_value = (model_7b_params * BYTES_ADAM_STATE.magnitude) / 1e9
+model_7b_fp16_gb_value = model_memory(model_7b_params, BYTES_FP16, GB)
+model_7b_adam_gb_value = model_memory(model_7b_params, BYTES_ADAM_STATE, GB)
 model_7b_total_gb_value = model_7b_fp16_gb_value + model_7b_adam_gb_value
 # Derived: interconnect bandwidths
 pcie4_gbs_value = PCIE_GEN4_BW.to(GB/second).magnitude
@@ -88,6 +90,16 @@ hbm_4mb_ms_value = (tensor_4mb / (A100_MEM_BW.to(byte/second).magnitude)) * 1e3
 # Derived: 1 GB transfer over PCIe 4.0
 pcie4_1gb_ms_value = (1e9 / (PCIE_GEN4_BW.to(byte/second).magnitude)) * 1e3
 pcie4_1gb_equiv_ops_value = (pcie4_1gb_ms_value / 1e3) * A100_FLOPS_FP16_TENSOR.to(flop/second).magnitude
+# Derived: DataLoader throughput calculations
+img_per_sec = 1000
+img_res = 224
+img_channels = 3
+dataloader_mbs_value = img_per_sec * img_res * img_res * img_channels / 1e6
+# Batch of 64 images at 224x224x3 in FP32
+batch_size = 64
+batch_bytes = batch_size * img_res * img_res * img_channels * BYTES_FP32.magnitude
+batch_mb_value = batch_bytes / 1e6
+batch_transfer_ms_value = batch_bytes / (PCIE_GEN4_BW.to(byte/second).magnitude) * 1e3
 
 # =============================================================================
 # OUTPUT
@@ -99,19 +111,25 @@ a100_tflops_fp16_str = fmt(a100_tflops_fp16_value, precision=0, commas=False)
 a100_tflops_sparse_str = fmt(a100_tflops_sparse_value, precision=0, commas=False)
 resnet_params_m_str = fmt(resnet_params_m_value, precision=1, commas=False)
 resnet_fp32_mb_str = fmt(resnet_fp32_mb_value, precision=0, commas=False)
+resnet_adam_mb_str = fmt(resnet_adam_mb_value, precision=0, commas=False)
 resnet_gflops_str = fmt(resnet_gflops_value, precision=1, commas=False)
 gpt3_params_b_str = fmt(gpt3_params_b_value, precision=0, commas=False)
 gpt3_fp16_gb_str = fmt(gpt3_fp16_gb_value, precision=0, commas=False)
 model_7b_fp16_gb_str = fmt(model_7b_fp16_gb_value, precision=0, commas=False)
 model_7b_adam_gb_str = fmt(model_7b_adam_gb_value, precision=0, commas=False)
 model_7b_total_gb_str = fmt(model_7b_total_gb_value, precision=0, commas=False)
+a100_remaining_7b_gb_str = fmt(a100_mem_value - model_7b_fp16_gb_value, precision=0, commas=False)
 pcie4_gbs_str = fmt(pcie4_gbs_value, precision=0, commas=False)
+pcie4_bidir_gbs_str = fmt(pcie4_gbs_value * 2, precision=0, commas=False)
 nvlink_a100_gbs_str = fmt(nvlink_a100_gbs_value, precision=0, commas=False)
 pcie4_4mb_ms_str = fmt(pcie4_4mb_ms_value, precision=3, commas=False)
 nvlink_4mb_ms_str = fmt(nvlink_4mb_ms_value, precision=3, commas=False)
 hbm_4mb_ms_str = fmt(hbm_4mb_ms_value, precision=3, commas=False)
 pcie4_1gb_ms_str = fmt(pcie4_1gb_ms_value, precision=0, commas=False)
 pcie4_1gb_equiv_ops_str = fmt(pcie4_1gb_equiv_ops_value / 1e12, precision=1, commas=False)
+dataloader_mbs_str = fmt(dataloader_mbs_value, precision=0, commas=False)
+batch_mb_str = fmt(batch_mb_value, precision=0, commas=False)
+batch_transfer_ms_str = fmt(batch_transfer_ms_value, precision=1, commas=False)
 ```
 
 ## The Three Problems Every Framework Must Solve {#sec-ai-frameworks-three-problems-every-framework-must-solve-317d}
@@ -1587,7 +1605,7 @@ For a network with $L$ layers, the system must save approximately $L$ activation
 
 - **Forward activations**: ~8-12 GB (varies by implementation and checkpointing)
 - **Parameter gradients**: ~`{python} resnet_fp32_mb_str` MB (same size as parameters)
-- **Optimizer state (Adam)**: ~`{python} fmt(RESNET50_PARAMS.magnitude * BYTES_ADAM_STATE.magnitude / 1e6, precision=0, commas=False)` MB (two momentum buffers per parameter)
+- **Optimizer state (Adam)**: ~`{python} resnet_adam_mb_str` MB (two momentum buffers per parameter)
 - **Total training footprint**: ~10–15 GB versus ~`{python} resnet_fp32_mb_str` MB for inference
 
 This 100x ratio between training and inference memory quantifies why the Data Movement ($D_{vol}$) term dominates training latency in the **Iron Law**. During training, the framework must write all activations to memory during the forward pass and read them back during the backward pass, doubling the memory traffic compared to inference alone.
@@ -2172,14 +2190,14 @@ Three systems principles govern effective device and memory management: understa
 
 The cost of moving data between devices varies by orders of magnitude depending on the interconnect.[^fn-nvlink] Before examining optimization strategies, we need to understand these costs quantitatively. @tbl-device-transfer-overhead shows transfer times for a 1000x1000 float32 tensor (4 MB)—roughly the size of a typical activation tensor in a moderately sized model. The numbers reveal why careless device placement can erase any speedup from GPU acceleration:
 
-[^fn-nvlink]: **NVLink**: NVIDIA's high-bandwidth interconnect for GPU-to-GPU communication, providing `{python} nvlink_a100_gbs_str` GB/s bidirectional bandwidth (NVLink 3.0 on A100) compared to `{python} fmt(pcie4_gbs_value * 2, precision=0, commas=False)` GB/s bidirectional for PCIe 4.0 x16. Critical for multi-GPU training where gradient synchronization requires moving gigabytes per iteration. NVSwitch extends NVLink to connect 8 GPUs in a fully-connected topology (DGX systems), enabling all-to-all communication without bottlenecks. The ~10× bandwidth advantage over PCIe determines whether tensor parallelism is practical for a given model size.
+[^fn-nvlink]: **NVLink**: NVIDIA's high-bandwidth interconnect for GPU-to-GPU communication, providing `{python} nvlink_a100_gbs_str` GB/s bidirectional bandwidth (NVLink 3.0 on A100) compared to `{python} pcie4_bidir_gbs_str` GB/s bidirectional for PCIe 4.0 x16. Critical for multi-GPU training where gradient synchronization requires moving gigabytes per iteration. NVSwitch extends NVLink to connect 8 GPUs in a fully-connected topology (DGX systems), enabling all-to-all communication without bottlenecks. The ~10× bandwidth advantage over PCIe determines whether tensor parallelism is practical for a given model size.
 
-| **Interconnect** |          **Bandwidth** | **Transfer Time** | **Relative to Compute**     |
-|:---------------|---------------------:|----------------:|:--------------------------|
-| **PCIe 3.0 x16** |                16 GB/s |           0.25 ms | 10x slower than GPU compute |
-| **PCIe 4.0 x16** |                `{python} pcie4_gbs_str` GB/s |          `{python} pcie4_4mb_ms_str` ms | 5x slower than GPU compute  |
-| **NVLink 3.0**   | `{python} nvlink_a100_gbs_str` GB/s bidirectional |          `{python} nvlink_4mb_ms_str` ms | Comparable to GPU compute   |
-| **GPU Memory**   |              `{python} a100_bw_gbs_str` GB/s |          `{python} hbm_4mb_ms_str` ms | Optimal                     |
+| **Interconnect** |                                     **Bandwidth** |               **Transfer Time** | **Relative to Compute**     |
+|:---------------|------------------------------------------------:|------------------------------:|:--------------------------|
+| **PCIe 3.0 x16** |                                           16 GB/s |                         0.25 ms | 10x slower than GPU compute |
+| **PCIe 4.0 x16** |                     `{python} pcie4_gbs_str` GB/s |  `{python} pcie4_4mb_ms_str` ms | 5x slower than GPU compute  |
+| **NVLink 3.0**   | `{python} nvlink_a100_gbs_str` GB/s bidirectional | `{python} nvlink_4mb_ms_str` ms | Comparable to GPU compute   |
+| **GPU Memory**   |                   `{python} a100_bw_gbs_str` GB/s |    `{python} hbm_4mb_ms_str` ms | Optimal                     |
 
 : **Device Transfer Overhead.** Transfer time for a 4 MB tensor across different interconnects. PCIe bandwidth shown is unidirectional (typical for GPU transfers), with full-duplex operation providing 2x total bandwidth. NVLink bandwidth is bidirectional (300 GB/s per direction). Transfer times dominate for small operations, making device placement critical for performance. {#tbl-device-transfer-overhead}
 
@@ -2477,13 +2495,13 @@ ncu --target-processes all \
 #### Domain-Specific Data Organizations {#sec-ai-frameworks-domainspecific-data-organizations-48d9}
 
 \index{DataLoader!throughput optimization}
-The device bandwidth hierarchy and overlap techniques above govern how tensors move between devices. With these hardware-level constraints in place, we turn to the higher-level structures that organize data for machine learning workflows. The core systems principle is straightforward: the data pipeline must sustain the accelerator's consumption rate. A GPU processing 1,000 images per second at 224×224 resolution requires approximately `{python} fmt(1000 * 224 * 224 * 3 / 1e6, precision=0, commas=False)` MB/s of sustained data throughput. If the pipeline cannot maintain this rate, the accelerator idles and the effective utilization term in the **Iron Law** drops below 1.
+The device bandwidth hierarchy and overlap techniques above govern how tensors move between devices. With these hardware-level constraints in place, we turn to the higher-level structures that organize data for machine learning workflows. The core systems principle is straightforward: the data pipeline must sustain the accelerator's consumption rate. A GPU processing 1,000 images per second at `{python} img_res`×`{python} img_res` resolution requires approximately `{python} dataloader_mbs_str` MB/s of sustained data throughput. If the pipeline cannot maintain this rate, the accelerator idles and the effective utilization term in the **Iron Law** drops below 1.
 
 Frameworks address this throughput requirement through three mechanisms. The first is *parallel worker processes*: the DataLoader spawns multiple CPU processes, each independently loading and preprocessing samples. Because data loading involves disk I/O and CPU-bound transformations (decoding, augmentation, normalization), a single process cannot saturate a modern GPU. Multiple workers overlap I/O wait times with preprocessing computation, collectively sustaining throughput that no single process could achieve. When `num_workers > 0`, the DataLoader distributes sample indices across workers through a shared queue, and workers push completed samples to a data queue that the main process assembles into batches.
 
 The second mechanism is *prefetching*. The `prefetch_factor` parameter (default 2) controls how many batches each worker prepares in advance. With 4 workers and `prefetch_factor=2`, the pipeline maintains 8 batches in flight, ensuring the GPU never stalls waiting for data. While the model processes batch $N$ on the GPU, workers simultaneously load and preprocess batch $N+1$ through $N+8$ on CPUs, effectively hiding data loading latency behind computation. The cost is memory consumption proportional to batch size times prefetch depth.
 
-The third mechanism is *pinned memory for DMA transfers*\index{DataLoader!pin\_memory option}. The `pin_memory=True` option allocates batch data in page-locked (pinned) host memory rather than pageable memory. Pageable memory can be swapped to disk by the operating system, forcing the CUDA runtime to first copy data to a temporary pinned buffer before initiating the GPU transfer. Pinned memory bypasses this intermediate copy, enabling direct memory access (DMA) transfers where the GPU's memory controller reads directly from host memory while the CPU continues other work. For a batch of 64 images at 224×224×3 in FP32 (`{python} fmt(64 * 224 * 224 * 3 * 4 / 1e6, precision=0, commas=False)` MB), pinned memory transfer takes approximately `{python} fmt(64 * 224 * 224 * 3 * 4 / (PCIE_GEN4_BW.to(byte/second).magnitude) * 1e3, precision=1, commas=False)` ms over PCIe 4.0 x16 (`{python} pcie4_gbs_str` GB/s) compared to ~3.0 ms with pageable memory, a 2–3× speedup. The cost is reduced available system memory, as pinned pages cannot be swapped.
+The third mechanism is *pinned memory for DMA transfers*\index{DataLoader!pin\_memory option}. The `pin_memory=True` option allocates batch data in page-locked (pinned) host memory rather than pageable memory. Pageable memory can be swapped to disk by the operating system, forcing the CUDA runtime to first copy data to a temporary pinned buffer before initiating the GPU transfer. Pinned memory bypasses this intermediate copy, enabling direct memory access (DMA) transfers where the GPU's memory controller reads directly from host memory while the CPU continues other work. For a batch of 64 images at 224×224×3 in FP32 (`{python} batch_mb_str` MB), pinned memory transfer takes approximately `{python} batch_transfer_ms_str` ms over PCIe 4.0 x16 (`{python} pcie4_gbs_str` GB/s) compared to ~3.0 ms with pageable memory, a 2–3× speedup. The cost is reduced available system memory, as pinned pages cannot be swapped.
 
 These three mechanisms appear together in the DataLoader configuration. Understanding how each parameter connects to the underlying systems principle helps practitioners diagnose data pipeline bottlenecks. @lst-dataloader-throughput shows a typical setup where `num_workers` enables parallel loading, `prefetch_factor` controls pipeline depth, and `pin_memory` enables DMA transfers:
 
@@ -3611,7 +3629,7 @@ This mistake surfaces late in the development cycle. Framework-infrastructure mi
 
 ##### Fallacy: *"Increasing batch size is a free throughput optimization within framework memory limits."* {.unnumbered}
 
-The Dispatch Overhead Equation (@eq-dispatch-overhead) reveals hidden costs that framework memory reporting obscures. A 7B parameter model in FP16 consumes `{python} model_7b_fp16_gb_str` GB, leaving `{python} fmt(a100_mem_value - model_7b_fp16_gb_value, precision=0, commas=False)` GB on an A100-`{python} a100_mem_str` GB. Frameworks report sufficient free memory for batch size 32, but increasing from 8 to 32 quadruples activation memory for transformers (due to attention's $O(S^2)$ scaling), potentially triggering memory-saving recomputation strategies (trading extra computation to reduce memory usage) that **reduce throughput by 20-30%** despite the larger batch. Eager-mode frameworks compound this with per-operation allocation overhead that scales with batch size, while graph-mode frameworks may silently insert memory-management operations that add latency. The optimal batch size balances compute saturation (70-80% utilization), activation memory, and framework allocator overhead. Blindly maximizing batch size based on reported memory availability often achieves *lower* throughput than smaller batches that avoid triggering these framework-level memory management pathways.
+The Dispatch Overhead Equation (@eq-dispatch-overhead) reveals hidden costs that framework memory reporting obscures. A 7B parameter model in FP16 consumes `{python} model_7b_fp16_gb_str` GB, leaving `{python} a100_remaining_7b_gb_str` GB on an A100-`{python} a100_mem_str` GB. Frameworks report sufficient free memory for batch size 32, but increasing from 8 to 32 quadruples activation memory for transformers (due to attention's $O(S^2)$ scaling), potentially triggering memory-saving recomputation strategies (trading extra computation to reduce memory usage) that **reduce throughput by 20-30%** despite the larger batch. Eager-mode frameworks compound this with per-operation allocation overhead that scales with batch size, while graph-mode frameworks may silently insert memory-management operations that add latency. The optimal batch size balances compute saturation (70-80% utilization), activation memory, and framework allocator overhead. Blindly maximizing batch size based on reported memory availability often achieves *lower* throughput than smaller batches that avoid triggering these framework-level memory management pathways.
 
 ##### Pitfall: *Treating compilation overhead as negligible.* {.unnumbered}
 
