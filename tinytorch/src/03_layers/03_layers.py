@@ -68,7 +68,9 @@ from tinytorch.core.tensor import Tensor
 from tinytorch.core.activations import ReLU, Sigmoid
 
 # Constants for weight initialization
-XAVIER_SCALE_FACTOR = 1.0  # Xavier/Glorot initialization uses sqrt(1/fan_in)
+# Note: True Xavier/Glorot uses sqrt(2/(fan_in+fan_out)), but we use the simpler
+# LeCun-style sqrt(1/fan_in) for pedagogical clarity. Both achieve stable gradients.
+INIT_SCALE_FACTOR = 1.0  # LeCun-style initialization: sqrt(1/fan_in)
 HE_SCALE_FACTOR = 2.0  # He initialization uses sqrt(2/fan_in) for ReLU
 
 # Constants for dropout
@@ -135,10 +137,13 @@ Input x (batch_size, in_features)  @  Weight W (in_features, out_features)  +  B
 
 ### Weight Initialization
 Random initialization is crucial for breaking symmetry:
-- **Xavier/Glorot**: Scale by sqrt(1/fan_in) for stable gradients
-- **He**: Scale by sqrt(2/fan_in) for ReLU activation
+- **LeCun**: Scale by sqrt(1/fan_in) for stable gradients (simple, effective)
+- **Xavier/Glorot**: Scale by sqrt(2/(fan_in+fan_out)) considers both dimensions
+- **He**: Scale by sqrt(2/fan_in) optimized for ReLU activation
 - **Too small**: Gradients vanish, learning is slow
 - **Too large**: Gradients explode, training unstable
+
+We use LeCun-style initialization for simplicity—it works well in practice.
 
 ### Parameter Counting
 ```
@@ -285,10 +290,10 @@ class Linear(Layer):
         """
         Initialize linear layer with proper weight initialization.
 
-        TODO: Initialize weights and bias with Xavier initialization
+        TODO: Initialize weights and bias with proper scaling
 
         APPROACH:
-        1. Create weight matrix (in_features, out_features) with Xavier scaling
+        1. Create weight matrix (in_features, out_features) with LeCun scaling
         2. Create bias vector (out_features,) initialized to zeros if bias=True
         3. Store as Tensor objects for use in forward pass
 
@@ -300,7 +305,7 @@ class Linear(Layer):
         (10,)
 
         HINTS:
-        - Xavier init: scale = sqrt(1/in_features)
+        - LeCun-style init: scale = sqrt(1/in_features)
         - Use np.random.randn() for normal distribution
         - bias=None when bias=False
         """
@@ -308,8 +313,8 @@ class Linear(Layer):
         self.in_features = in_features
         self.out_features = out_features
 
-        # Xavier/Glorot initialization for stable gradients
-        scale = np.sqrt(XAVIER_SCALE_FACTOR / in_features)
+        # LeCun-style initialization for stable gradients
+        scale = np.sqrt(INIT_SCALE_FACTOR / in_features)
         weight_data = np.random.randn(in_features, out_features) * scale
         self.weight = Tensor(weight_data)
 
@@ -400,7 +405,7 @@ This test validates our Linear layer implementation works correctly.
 
 **What we're testing**: Weight initialization, forward pass, parameter management
 **Why it matters**: Foundation for all neural network architectures
-**Expected**: Proper shapes, Xavier scaling, parameter counting
+**Expected**: Proper shapes, LeCun-style scaling, parameter counting
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-linear", "locked": true, "points": 15}
@@ -415,10 +420,10 @@ def test_unit_linear_layer():
     assert layer.weight.shape == (784, 256)
     assert layer.bias.shape == (256,)
 
-    # Test Xavier initialization (weights should be reasonably scaled)
+    # Test LeCun-style initialization (weights should be reasonably scaled)
     weight_std = np.std(layer.weight.data)
-    expected_std = np.sqrt(XAVIER_SCALE_FACTOR / 784)
-    assert 0.5 * expected_std < weight_std < 2.0 * expected_std, f"Weight std {weight_std} not close to Xavier {expected_std}"
+    expected_std = np.sqrt(INIT_SCALE_FACTOR / 784)
+    assert 0.5 * expected_std < weight_std < 2.0 * expected_std, f"Weight std {weight_std} not close to expected {expected_std}"
 
     # Test bias initialization (should be zeros)
     assert np.allclose(layer.bias.data, 0), "Bias should be initialized to zeros"
@@ -1152,8 +1157,8 @@ Answer these to deepen your understanding of layer operations and their systems 
 
 ---
 
-### 3. Xavier Initialization Trade-offs
-**Question**: We initialize weights with scale = sqrt(1/in_features). For Linear(1000, 10), how does this compare to Linear(10, 1000)?
+### 3. Weight Initialization Trade-offs
+**Question**: We initialize weights with scale = sqrt(1/in_features) (LeCun-style). For Linear(1000, 10), how does this compare to Linear(10, 1000)?
 
 **Calculate**:
 - Linear(1000, 10): scale = sqrt(1/1000) = ___________
@@ -1256,7 +1261,7 @@ if __name__ == "__main__":
 Congratulations! You've built the fundamental building blocks that make neural networks possible!
 
 ### Key Accomplishments
-- Built Linear layers with proper Xavier initialization and parameter management
+- Built Linear layers with proper weight initialization and parameter management
 - Created Dropout layers for regularization with training/inference mode handling
 - Demonstrated manual layer composition for building neural networks
 - Analyzed memory scaling and computational complexity of layer operations
